@@ -1,8 +1,15 @@
 import dotenv from 'dotenv'
 import path from 'path'
 
-// Load .env from monorepo root (CWD is monorepo root when run via npm scripts)
-dotenv.config({ path: path.resolve(process.cwd(), '.env') })
+// Load .env from monorepo root — try CWD first, then two levels up from this file
+const envPaths = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(import.meta.dirname ?? __dirname, '../../..', '.env'),
+]
+for (const p of envPaths) {
+  const result = dotenv.config({ path: p })
+  if (!result.error) break
+}
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'

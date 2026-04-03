@@ -15,6 +15,7 @@ export interface User {
   email: string
   wallet_address: string | null
   safe_address: string | null
+  currency_preference?: 'USD' | 'EUR'
   created_at?: string
 }
 

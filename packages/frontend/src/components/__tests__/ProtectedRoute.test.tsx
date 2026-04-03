@@ -30,7 +30,7 @@ describe('ProtectedRoute', () => {
 
   it('renders children when user is authenticated', () => {
     mockUseAuth.mockReturnValue({
-      user: { id: '1', email: 'test@example.com', wallet_address: null, safe_address: null },
+      user: { id: '1', email: 'test@example.com', wallet_address: '0x1234567890abcdef1234567890abcdef12345678', safe_address: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd' },
       loading: false,
     })
 

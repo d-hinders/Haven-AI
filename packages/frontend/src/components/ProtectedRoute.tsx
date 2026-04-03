@@ -18,6 +18,12 @@ export default function ProtectedRoute({
     }
   }, [loading, user, router])
 
+  useEffect(() => {
+    if (!loading && user && !user.safe_address) {
+      router.replace('/onboarding')
+    }
+  }, [loading, user, router])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
@@ -29,7 +35,7 @@ export default function ProtectedRoute({
     )
   }
 
-  if (!user) return null
+  if (!user || !user.safe_address) return null
 
   return <>{children}</>
 }

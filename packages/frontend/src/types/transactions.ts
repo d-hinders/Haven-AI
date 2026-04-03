@@ -34,3 +34,24 @@ export interface BalanceItem {
 export interface BalancesResponse {
   balances: BalanceItem[]
 }
+
+export interface PortfolioBreakdown {
+  symbol: string
+  balance: string
+  formatted: string
+  usdValue: number
+  eurValue: number
+}
+
+export interface PortfolioResponse {
+  totalUsd: number
+  totalEur: number
+  breakdown: PortfolioBreakdown[]
+}
+
+export interface SafeDetails {
+  address: string
+  owners: string[]
+  threshold: number
+  nonce: number
+}

@@ -4,7 +4,11 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
+import { useBalances } from '@/hooks/useBalances'
+import { useTransactions } from '@/hooks/useTransactions'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
+import BalanceCards from '@/components/BalanceCards'
+import TransactionList from '@/components/TransactionList'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -13,6 +17,24 @@ function truncate(addr: string) {
 export default function DashboardClient() {
   const { user, loading, logout } = useAuth()
   const router = useRouter()
+
+  const {
+    balances,
+    loading: balancesLoading,
+    error: balancesError,
+    refetch: refetchBalances,
+  } = useBalances(user?.safe_address ?? null)
+
+  const {
+    transactions,
+    loading: txLoading,
+    error: txError,
+    page,
+    pages,
+    total,
+    setPage,
+    refetch: refetchTx,
+  } = useTransactions(user?.safe_address ?? null)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -129,13 +151,29 @@ export default function DashboardClient() {
           </div>
         </div>
 
-        {/* Placeholder sections */}
+        {/* Token Balances */}
+        <div className="mb-2">
+          <div className="flex items-baseline gap-3 mb-4">
+            <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
+              01
+            </span>
+            <h2 className="text-sm font-semibold">Balances</h2>
+          </div>
+        </div>
+        <BalanceCards
+          balances={balances}
+          loading={balancesLoading}
+          error={balancesError}
+          onRefresh={refetchBalances}
+        />
+
+        {/* Main sections */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/[0.06] rounded-lg overflow-hidden">
           {/* Agents */}
           <div className="bg-[#0a0a0a] p-8">
             <div className="flex items-baseline gap-3 mb-4">
               <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
-                01
+                02
               </span>
               <h2 className="text-sm font-semibold">Agents</h2>
             </div>
@@ -148,13 +186,20 @@ export default function DashboardClient() {
           <div className="bg-[#0a0a0a] p-8">
             <div className="flex items-baseline gap-3 mb-4">
               <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
-                02
+                03
               </span>
               <h2 className="text-sm font-semibold">Transactions</h2>
             </div>
-            <div className="flex items-center justify-center h-32 rounded-md border border-dashed border-white/[0.06]">
-              <span className="text-sm text-zinc-600">Coming soon</span>
-            </div>
+            <TransactionList
+              transactions={transactions}
+              loading={txLoading}
+              error={txError}
+              page={page}
+              pages={pages}
+              total={total}
+              onPageChange={setPage}
+              onRefresh={refetchTx}
+            />
           </div>
         </div>
       </main>

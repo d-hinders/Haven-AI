@@ -9,6 +9,8 @@ import fastifyJwt from '@fastify/jwt'
 import { runMigrations } from './db/migrate.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
+import balanceRoutes from './routes/balances.js'
+import transactionRoutes from './routes/transactions.js'
 
 const app = Fastify({ logger: true })
 
@@ -28,6 +30,8 @@ app.get('/health', async () => {
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })
+await app.register(balanceRoutes, { prefix: '/balances' })
+await app.register(transactionRoutes, { prefix: '/transactions' })
 
 // --- Start ---
 const start = async () => {

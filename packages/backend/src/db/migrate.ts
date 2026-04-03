@@ -13,5 +13,7 @@ export async function runMigrations(): Promise<void> {
     );
 
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS currency_preference VARCHAR(3) DEFAULT 'USD';
   `)
 }

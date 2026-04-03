@@ -12,6 +12,10 @@ interface SafeBody {
   safe_address: string
 }
 
+interface PreferencesBody {
+  currency_preference: string
+}
+
 export default async function userRoutes(app: FastifyInstance): Promise<void> {
   // All routes in this plugin require auth
   app.addHook('onRequest', authMiddleware)
@@ -52,5 +56,36 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     )
 
     return result.rows[0]
+  })
+
+  // GET /user/preferences
+  app.get('/preferences', async (request) => {
+    const { sub } = request.user as { sub: string }
+
+    const result = await pool.query(
+      'SELECT currency_preference FROM users WHERE id = $1',
+      [sub],
+    )
+
+    return { currency_preference: result.rows[0]?.currency_preference ?? 'USD' }
+  })
+
+  // PUT /user/preferences
+  app.put<{ Body: PreferencesBody }>('/preferences', async (request, reply) => {
+    const { currency_preference } = request.body
+    const { sub } = request.user as { sub: string }
+
+    if (!currency_preference || !['USD', 'EUR'].includes(currency_preference)) {
+      return reply.code(400).send({ error: 'Invalid currency. Must be USD or EUR.' })
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET currency_preference = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING currency_preference`,
+      [currency_preference, sub],
+    )
+
+    return { currency_preference: result.rows[0].currency_preference }
   })
 }

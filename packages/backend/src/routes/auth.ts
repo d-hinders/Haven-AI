@@ -57,7 +57,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const result = await pool.query(
-      'SELECT id, email, password_hash, wallet_address, safe_address FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, wallet_address, safe_address, currency_preference FROM users WHERE email = $1',
       [email.toLowerCase()],
     )
 
@@ -84,6 +84,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
         email: user.email,
         wallet_address: user.wallet_address,
         safe_address: user.safe_address,
+        currency_preference: user.currency_preference ?? 'USD',
       },
     }
   })
@@ -93,7 +94,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     const { sub } = request.user as { sub: string }
 
     const result = await pool.query(
-      'SELECT id, email, wallet_address, safe_address, created_at FROM users WHERE id = $1',
+      'SELECT id, email, wallet_address, safe_address, currency_preference, created_at FROM users WHERE id = $1',
       [sub],
     )
 

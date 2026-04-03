@@ -18,6 +18,8 @@ import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
 import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
+import portfolioRoutes from './routes/portfolio.js'
+import safeDetailRoutes from './routes/safe-details.js'
 
 const app = Fastify({ logger: true })
 
@@ -39,6 +41,8 @@ await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })
 await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
+await app.register(portfolioRoutes, { prefix: '/portfolio' })
+await app.register(safeDetailRoutes, { prefix: '/safe' })
 
 // --- Start ---
 const start = async () => {

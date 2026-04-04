@@ -6,7 +6,7 @@ import { useAccount } from 'wagmi'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
 import { TOKENS, type SendParams } from '@/lib/safe-tx'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
-import { useContacts } from '@/hooks/useContacts'
+import type { Contact } from '@/hooks/useContacts'
 
 // ── Helpers ──────────────────────────────────────────────────────────
 function truncate(addr: string) {
@@ -31,6 +31,8 @@ interface SendModalProps {
   safeDetails: SafeDetails | null
   balances: BalanceItem[]
   onSuccess?: () => void
+  contacts?: Contact[]
+  resolveAddress?: (address: string) => string | null
 }
 
 // ── Component ────────────────────────────────────────────────────────
@@ -41,10 +43,11 @@ export default function SendModal({
   safeDetails,
   balances,
   onSuccess,
+  contacts = [],
+  resolveAddress,
 }: SendModalProps) {
   const { address: connectedAddress } = useAccount()
   const { status, txHash, error, send, reset } = useSendTransaction()
-  const { contacts, resolveAddress } = useContacts()
 
   // Form state
   const [selectedToken, setSelectedToken] = useState<string>('xDAI')
@@ -377,7 +380,7 @@ export default function SendModal({
                   value={recipient}
                   onChange={(e) => {
                     setRecipient(e.target.value)
-                    setSelectedContactName(resolveAddress(e.target.value))
+                    setSelectedContactName(resolveAddress?.(e.target.value) ?? null)
                     setFormError('')
                   }}
                   placeholder="0x..."

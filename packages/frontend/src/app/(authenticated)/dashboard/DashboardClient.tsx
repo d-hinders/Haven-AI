@@ -19,7 +19,7 @@ export default function DashboardClient() {
   const { currency } = usePreferences()
 
   const { details: safeDetails } = useSafeDetails(safeAddress)
-  const { resolveAddress } = useContacts()
+  const { contacts, resolveAddress } = useContacts()
 
   const {
     totalUsd,
@@ -66,6 +66,8 @@ export default function DashboardClient() {
             safeDetails={safeDetails}
             balances={balances}
             onSuccess={handleSendSuccess}
+            contacts={contacts}
+            resolveAddress={resolveAddress}
           />
         )}
       </div>

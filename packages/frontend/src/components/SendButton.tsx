@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import SendModal from './SendModal'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
+import type { Contact } from '@/hooks/useContacts'
 
 interface SendButtonProps {
   safeAddress: string
@@ -11,6 +12,8 @@ interface SendButtonProps {
   onSuccess?: () => void
   /** Visual variant */
   variant?: 'primary' | 'compact'
+  contacts?: Contact[]
+  resolveAddress?: (address: string) => string | null
 }
 
 export default function SendButton({
@@ -19,6 +22,8 @@ export default function SendButton({
   balances,
   onSuccess,
   variant = 'primary',
+  contacts,
+  resolveAddress,
 }: SendButtonProps) {
   const [open, setOpen] = useState(false)
 
@@ -53,6 +58,8 @@ export default function SendButton({
         safeDetails={safeDetails}
         balances={balances}
         onSuccess={onSuccess}
+        contacts={contacts}
+        resolveAddress={resolveAddress}
       />
     </>
   )

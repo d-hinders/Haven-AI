@@ -25,11 +25,19 @@ export function useContacts(): UseContactsReturn {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api
-      .get<{ contacts: Contact[] }>('/contacts')
-      .then((res) => setContacts(res.contacts))
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await api.get<{ contacts: Contact[] }>('/contacts')
+        if (!cancelled) setContacts(res.contacts)
+      } catch {
+        // silently ignore — contacts are non-critical
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
   }, [])
 
   const addContact = useCallback(async (name: string, address: string): Promise<Contact> => {

@@ -190,14 +190,33 @@ export async function signSafeTx(
   })
 }
 
-/** Fix EIP-712 signature v value (Safe expects 31/32 instead of 27/28) */
+/**
+ * Fix EIP-712 signature v value for Safe.
+ *
+ * Safe v1.3.0 expects v = 31 or 32 for EIP-712 typed data signatures
+ * (to distinguish from eth_sign which uses 27/28 + 4 = 31/32 differently).
+ *
+ * Wallets may return v as:
+ *  - 27 / 28  (standard Ethereum recovery id)
+ *  - 0 / 1    (raw recovery id, e.g. some versions of MetaMask / Ledger)
+ *
+ * We normalise to 27/28 first, then add 4 to get 31/32.
+ */
 function adjustSignatureV(sig: `0x${string}`): `0x${string}` {
   const raw = sig.slice(2)
-  const v = parseInt(raw.slice(128, 130), 16)
+  let v = parseInt(raw.slice(128, 130), 16)
+
+  // Normalise: raw 0/1 → 27/28
+  if (v === 0 || v === 1) {
+    v += 27
+  }
+
+  // EIP-712 adjustment for Safe: 27/28 → 31/32
   if (v === 27 || v === 28) {
     const adjusted = (v + 4).toString(16).padStart(2, '0')
     return `0x${raw.slice(0, 128)}${adjusted}` as `0x${string}`
   }
+
   return sig
 }
 

@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { type Address } from 'viem'
 import { useAccount } from 'wagmi'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
 import { TOKENS, type SendParams } from '@/lib/safe-tx'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
+import { useContacts } from '@/hooks/useContacts'
 
 // ── Helpers ──────────────────────────────────────────────────────────
 function truncate(addr: string) {
@@ -43,13 +44,36 @@ export default function SendModal({
 }: SendModalProps) {
   const { address: connectedAddress } = useAccount()
   const { status, txHash, error, send, reset } = useSendTransaction()
+  const { contacts, resolveAddress } = useContacts()
 
   // Form state
   const [selectedToken, setSelectedToken] = useState<string>('xDAI')
   const [amount, setAmount] = useState('')
   const [recipient, setRecipient] = useState('')
+  const [selectedContactName, setSelectedContactName] = useState<string | null>(null)
   const [formError, setFormError] = useState('')
   const [step, setStep] = useState<'form' | 'review' | 'executing' | 'result'>('form')
+  const [showContactPicker, setShowContactPicker] = useState(false)
+  const [contactSearch, setContactSearch] = useState('')
+  const pickerRef = useRef<HTMLDivElement>(null)
+
+  const filteredContacts = contacts.filter(
+    (c) =>
+      c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+      c.address.toLowerCase().includes(contactSearch.toLowerCase()),
+  )
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!showContactPicker) return
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowContactPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showContactPicker])
 
   // Get balance for selected token
   const tokenBalance = balances.find(
@@ -65,8 +89,11 @@ export default function SendModal({
       setSelectedToken('xDAI')
       setAmount('')
       setRecipient('')
+      setSelectedContactName(null)
       setFormError('')
       setStep('form')
+      setShowContactPicker(false)
+      setContactSearch('')
       reset()
     }
   }, [open, reset])
@@ -258,14 +285,105 @@ export default function SendModal({
 
             {/* Recipient */}
             <div>
-              <label className="block text-xs text-zinc-400 mb-2">Recipient</label>
-              <input
-                type="text"
-                value={recipient}
-                onChange={(e) => { setRecipient(e.target.value); setFormError('') }}
-                placeholder="0x..."
-                className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
-              />
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs text-zinc-400">Recipient</label>
+                {contacts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { setShowContactPicker((v) => !v); setContactSearch('') }}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+                    </svg>
+                    Contacts
+                  </button>
+                )}
+              </div>
+
+              <div className="relative" ref={pickerRef}>
+                {/* Contact picker dropdown */}
+                {showContactPicker && (
+                  <div className="absolute bottom-full mb-1 left-0 right-0 bg-[#0e0e10] border border-white/[0.10] rounded-lg shadow-xl z-10 overflow-hidden">
+                    <div className="p-2 border-b border-white/[0.06]">
+                      <input
+                        type="text"
+                        autoFocus
+                        value={contactSearch}
+                        onChange={(e) => setContactSearch(e.target.value)}
+                        placeholder="Search contacts..."
+                        className="w-full px-3 py-1.5 bg-white/[0.04] border border-white/[0.06] rounded-md text-xs text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/40"
+                      />
+                    </div>
+                    <div className="max-h-44 overflow-y-auto">
+                      {filteredContacts.length === 0 ? (
+                        <p className="text-xs text-zinc-600 text-center py-3">No contacts found</p>
+                      ) : (
+                        filteredContacts.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setRecipient(c.address)
+                              setSelectedContactName(c.name)
+                              setShowContactPicker(false)
+                              setFormError('')
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors text-left"
+                          >
+                            <div className="w-6 h-6 rounded-full bg-indigo-500/15 flex items-center justify-center flex-shrink-0">
+                              <span className="text-[10px] font-semibold text-indigo-300">
+                                {c.name.slice(0, 2).toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-[#ededed] truncate">{c.name}</p>
+                              <p className="text-[10px] text-zinc-500 font-mono">
+                                {c.address.slice(0, 6)}...{c.address.slice(-4)}
+                              </p>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Selected contact badge */}
+                {selectedContactName && (
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-md">
+                      <div className="w-4 h-4 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                        <span className="text-[9px] font-semibold text-indigo-300">
+                          {selectedContactName.slice(0, 2).toUpperCase()}
+                        </span>
+                      </div>
+                      <span className="text-xs text-indigo-300">{selectedContactName}</span>
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedContactName(null); setRecipient('') }}
+                        className="text-indigo-400/60 hover:text-indigo-300 ml-0.5"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={recipient}
+                  onChange={(e) => {
+                    setRecipient(e.target.value)
+                    setSelectedContactName(resolveAddress(e.target.value))
+                    setFormError('')
+                  }}
+                  placeholder="0x..."
+                  className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
+                />
+              </div>
             </div>
 
             {/* Error */}
@@ -307,17 +425,22 @@ export default function SendModal({
               <div className="h-px bg-white/[0.06]" />
               <div className="flex justify-between items-start">
                 <span className="text-xs text-zinc-500">To</span>
-                <span className="text-sm text-zinc-300 font-mono text-right">
-                  {truncate(recipient)}
-                  <button
-                    onClick={() => navigator.clipboard.writeText(recipient)}
-                    className="ml-2 text-zinc-600 hover:text-zinc-400 transition-colors inline"
-                  >
-                    <svg className="w-3 h-3 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                    </svg>
-                  </button>
-                </span>
+                <div className="text-right">
+                  {selectedContactName && (
+                    <p className="text-sm font-medium text-zinc-200 mb-0.5">{selectedContactName}</p>
+                  )}
+                  <span className="text-sm text-zinc-400 font-mono">
+                    {truncate(recipient)}
+                    <button
+                      onClick={() => navigator.clipboard.writeText(recipient)}
+                      className="ml-2 text-zinc-600 hover:text-zinc-400 transition-colors inline"
+                    >
+                      <svg className="w-3 h-3 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                      </svg>
+                    </button>
+                  </span>
+                </div>
               </div>
               <div className="h-px bg-white/[0.06]" />
               <div className="flex justify-between items-center">
@@ -390,7 +513,7 @@ export default function SendModal({
                 </div>
                 <p className="text-base font-semibold text-zinc-200 mb-1">Transaction confirmed</p>
                 <p className="text-xs text-zinc-500 mb-5">
-                  {amount} {selectedToken} sent to {truncate(recipient)}
+                  {amount} {selectedToken} sent to {selectedContactName ?? truncate(recipient)}
                 </p>
                 {txHash && (
                   <a
@@ -423,7 +546,7 @@ export default function SendModal({
                 </div>
                 <p className="text-base font-semibold text-zinc-200 mb-1">Transaction proposed</p>
                 <p className="text-xs text-zinc-500 mb-2 text-center">
-                  {amount} {selectedToken} to {truncate(recipient)}
+                  {amount} {selectedToken} to {selectedContactName ?? truncate(recipient)}
                 </p>
                 <p className="text-xs text-zinc-500 mb-5 text-center">
                   Waiting for {threshold - 1} more signature{threshold - 1 !== 1 ? 's' : ''} to execute.

@@ -33,5 +33,17 @@ export async function runMigrations(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id);
     CREATE INDEX IF NOT EXISTS idx_agents_api_key ON agents(api_key);
+
+    CREATE TABLE IF NOT EXISTS contacts (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name       VARCHAR(255) NOT NULL,
+      address    VARCHAR(42) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id);
   `)
 }

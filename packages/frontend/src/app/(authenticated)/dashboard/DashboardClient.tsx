@@ -5,15 +5,19 @@ import { useAuth } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
 import { useTransactions } from '@/hooks/useTransactions'
 import { usePortfolio } from '@/hooks/usePortfolio'
+import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { usePreferences } from '@/hooks/usePreferences'
 import PortfolioHero from '@/components/PortfolioHero'
 import BalanceCards from '@/components/BalanceCards'
 import TransactionList from '@/components/TransactionList'
+import SendButton from '@/components/SendButton'
 
 export default function DashboardClient() {
   const { user } = useAuth()
   const safeAddress = user?.safe_address ?? null
   const { currency } = usePreferences()
+
+  const { details: safeDetails } = useSafeDetails(safeAddress)
 
   const {
     totalUsd,
@@ -41,12 +45,27 @@ export default function DashboardClient() {
 
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
 
+  const handleSendSuccess = () => {
+    refetchBalances()
+    refetchTx()
+  }
+
   return (
     <div className="max-w-5xl">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight mb-1">Dashboard</h1>
-        <p className="text-sm text-zinc-500">Your Safe overview</p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight mb-1">Dashboard</h1>
+          <p className="text-sm text-zinc-500">Your Safe overview</p>
+        </div>
+        {safeAddress && (
+          <SendButton
+            safeAddress={safeAddress}
+            safeDetails={safeDetails}
+            balances={balances}
+            onSuccess={handleSendSuccess}
+          />
+        )}
       </div>
 
       {/* Portfolio total */}

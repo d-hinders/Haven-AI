@@ -7,6 +7,7 @@ import { useTransactions } from '@/hooks/useTransactions'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { usePreferences } from '@/hooks/usePreferences'
+import { useContacts } from '@/hooks/useContacts'
 import PortfolioHero from '@/components/PortfolioHero'
 import BalanceCards from '@/components/BalanceCards'
 import TransactionList from '@/components/TransactionList'
@@ -18,6 +19,7 @@ export default function DashboardClient() {
   const { currency } = usePreferences()
 
   const { details: safeDetails } = useSafeDetails(safeAddress)
+  const { resolveAddress } = useContacts()
 
   const {
     totalUsd,
@@ -113,6 +115,7 @@ export default function DashboardClient() {
           total={total}
           onPageChange={setPage}
           onRefresh={refetchTx}
+          resolveAddress={resolveAddress}
         />
       </div>
 

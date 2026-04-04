@@ -1,7 +1,6 @@
 'use client'
 
 import type { Transaction } from '@/types/transactions'
-import { useContacts } from '@/hooks/useContacts'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -31,6 +30,7 @@ interface TransactionListProps {
   total: number
   onPageChange: (page: number) => void
   onRefresh: () => void
+  resolveAddress?: (address: string) => string | null
 }
 
 export default function TransactionList({
@@ -42,8 +42,8 @@ export default function TransactionList({
   total,
   onPageChange,
   onRefresh,
+  resolveAddress,
 }: TransactionListProps) {
-  const { resolveAddress } = useContacts()
   // Loading skeleton
   if (loading && transactions.length === 0) {
     return (
@@ -137,7 +137,7 @@ export default function TransactionList({
                   {tx.direction === 'in' ? 'From' : 'To'}{' '}
                   {(() => {
                     const addr = tx.direction === 'in' ? tx.from : tx.to
-                    const name = resolveAddress(addr)
+                    const name = resolveAddress?.(addr)
                     return name ? (
                       <span className="text-zinc-300" title={addr}>{name}</span>
                     ) : (

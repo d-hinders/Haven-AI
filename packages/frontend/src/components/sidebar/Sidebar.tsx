@@ -51,7 +51,7 @@ const mainNav: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: icons.dashboard },
   { label: 'Account', href: '/account', icon: icons.account },
   { label: 'Agents', href: '/agents', icon: icons.agents },
-  { label: 'Contacts', href: '/contacts', icon: icons.contacts, badge: 'Soon' },
+  { label: 'Contacts', href: '/contacts', icon: icons.contacts },
 ]
 
 export default function Sidebar() {

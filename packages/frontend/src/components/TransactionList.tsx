@@ -1,6 +1,7 @@
 'use client'
 
 import type { Transaction } from '@/types/transactions'
+import { useContacts } from '@/hooks/useContacts'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -42,6 +43,7 @@ export default function TransactionList({
   onPageChange,
   onRefresh,
 }: TransactionListProps) {
+  const { resolveAddress } = useContacts()
   // Loading skeleton
   if (loading && transactions.length === 0) {
     return (
@@ -133,9 +135,15 @@ export default function TransactionList({
               <div className="flex items-center gap-2">
                 <span className="text-sm text-[#ededed] truncate">
                   {tx.direction === 'in' ? 'From' : 'To'}{' '}
-                  <span className="font-mono text-zinc-400">
-                    {truncate(tx.direction === 'in' ? tx.from : tx.to)}
-                  </span>
+                  {(() => {
+                    const addr = tx.direction === 'in' ? tx.from : tx.to
+                    const name = resolveAddress(addr)
+                    return name ? (
+                      <span className="text-zinc-300" title={addr}>{name}</span>
+                    ) : (
+                      <span className="font-mono text-zinc-400">{truncate(addr)}</span>
+                    )
+                  })()}
                 </span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-white/[0.04] text-zinc-600 flex-shrink-0">
                   {TYPE_LABELS[tx.type] ?? tx.type}

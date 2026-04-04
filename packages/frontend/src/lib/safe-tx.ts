@@ -191,29 +191,25 @@ export async function signSafeTx(
 }
 
 /**
- * Fix EIP-712 signature v value for Safe.
+ * Normalise the signature v value to 27/28.
  *
- * Safe v1.3.0 expects v = 31 or 32 for EIP-712 typed data signatures
- * (to distinguish from eth_sign which uses 27/28 + 4 = 31/32 differently).
+ * Safe v1.3.0 checkSignatures interprets v values as:
+ *   v = 0, 1   → contract signature (special encoding)
+ *   v = 27, 28 → ECDSA signature verified with ecrecover(hash, v, r, s)
+ *   v = 31, 32 → eth_sign signature (wraps hash with "\x19Ethereum..." prefix)
  *
- * Wallets may return v as:
- *  - 27 / 28  (standard Ethereum recovery id)
- *  - 0 / 1    (raw recovery id, e.g. some versions of MetaMask / Ledger)
+ * Since we use signTypedData (EIP-712), the wallet signs the raw hash.
+ * Safe should verify it with plain ecrecover → v must be 27 or 28.
  *
- * We normalise to 27/28 first, then add 4 to get 31/32.
+ * Some wallets return v as 0/1 instead of 27/28, so we normalise.
  */
-function adjustSignatureV(sig: `0x${string}`): `0x${string}` {
+function normaliseSignatureV(sig: `0x${string}`): `0x${string}` {
   const raw = sig.slice(2)
-  let v = parseInt(raw.slice(128, 130), 16)
+  const v = parseInt(raw.slice(128, 130), 16)
 
   // Normalise: raw 0/1 → 27/28
   if (v === 0 || v === 1) {
-    v += 27
-  }
-
-  // EIP-712 adjustment for Safe: 27/28 → 31/32
-  if (v === 27 || v === 28) {
-    const adjusted = (v + 4).toString(16).padStart(2, '0')
+    const adjusted = (v + 27).toString(16).padStart(2, '0')
     return `0x${raw.slice(0, 128)}${adjusted}` as `0x${string}`
   }
 
@@ -229,7 +225,7 @@ export async function executeSafeTx(
   signature: `0x${string}`,
   sender: Address,
 ): Promise<{ txHash: Hash }> {
-  const adjustedSig = adjustSignatureV(signature)
+  const adjustedSig = normaliseSignatureV(signature)
 
   const txHash = await walletClient.writeContract({
     address: safeAddress,
@@ -265,7 +261,7 @@ export async function proposeSafeTx(
   signature: `0x${string}`,
   sender: Address,
 ): Promise<void> {
-  const adjustedSig = adjustSignatureV(signature)
+  const adjustedSig = normaliseSignatureV(signature)
 
   const url = `https://safe-transaction-gnosis-chain.safe.global/api/v1/safes/${safeAddress}/multisig-transactions/`
 

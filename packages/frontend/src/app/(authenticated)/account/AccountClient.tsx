@@ -9,6 +9,7 @@ import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { usePreferences } from '@/hooks/usePreferences'
 import BalanceCards from '@/components/BalanceCards'
 import TransactionList from '@/components/TransactionList'
+import SendButton from '@/components/SendButton'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -74,14 +75,29 @@ export default function AccountClient() {
 
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
 
+  const handleSendSuccess = () => {
+    refetchBalances()
+    refetchTx()
+  }
+
   return (
     <div className="max-w-5xl">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight mb-1">Account</h1>
-        <p className="text-sm text-zinc-500">
-          Safe details, balances, and transaction history
-        </p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight mb-1">Account</h1>
+          <p className="text-sm text-zinc-500">
+            Safe details, balances, and transaction history
+          </p>
+        </div>
+        {safeAddress && (
+          <SendButton
+            safeAddress={safeAddress}
+            safeDetails={details}
+            balances={balances}
+            onSuccess={handleSendSuccess}
+          />
+        )}
       </div>
 
       {/* Safe info */}

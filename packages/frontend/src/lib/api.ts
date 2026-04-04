@@ -57,6 +57,10 @@ class ApiClient {
       body: body ? JSON.stringify(body) : undefined,
     })
   }
+
+  delete<T>(path: string): Promise<T> {
+    return this.request<T>(path, { method: 'DELETE' })
+  }
 }
 
 export class ApiRequestError extends Error {

@@ -15,6 +15,7 @@ import {
 } from '@/lib/allowance-module'
 import { getSafeNonce, signSafeTx, executeSafeTx, proposeSafeTx, TOKENS } from '@/lib/safe-tx'
 import CreateAgentModal from './CreateAgentModal'
+import HowItWorksModal from './HowItWorksModal'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -336,6 +337,7 @@ export default function AgentPanel() {
   const { data: walletClient } = useWalletClient({ chainId: gnosis.id })
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [howItWorksOpen, setHowItWorksOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
 
   // On-chain allowance data keyed by delegate address
@@ -499,16 +501,29 @@ export default function AgentPanel() {
             {agents.filter((a) => a.status === 'active').length !== 1 ? 's' : ''}
           </p>
         </div>
-        <button
-          onClick={() => setCreateOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Create Agent
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setHowItWorksOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-sm font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all duration-200"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            How it works
+          </button>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Create Agent
+          </button>
+        </div>
       </div>
 
       {/* Loading */}
@@ -583,6 +598,12 @@ export default function AgentPanel() {
           // Refresh on-chain data after a short delay
           setTimeout(fetchOnChainData, 2000)
         }}
+      />
+
+      {/* How it works modal */}
+      <HowItWorksModal
+        open={howItWorksOpen}
+        onClose={() => setHowItWorksOpen(false)}
       />
     </div>
   )

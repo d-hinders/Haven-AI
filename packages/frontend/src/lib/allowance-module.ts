@@ -11,8 +11,9 @@
 
 import {
   encodeFunctionData,
-  encodePacked,
   concat,
+  pad,
+  numberToHex,
   type Address,
   type PublicClient,
 } from 'viem'
@@ -244,17 +245,27 @@ export async function getAllAllowances(
 
 /**
  * Encode a single inner transaction for MultiSend.
- * Format: uint8 operation + address to + uint256 value + uint256 dataLength + bytes data
+ *
+ * Binary layout (tightly packed, no ABI padding):
+ *   uint8  operation   (1 byte)   — 0 = CALL
+ *   address to         (20 bytes)
+ *   uint256 value      (32 bytes)
+ *   uint256 dataLength (32 bytes)
+ *   bytes   data       (dataLength bytes)
+ *
+ * We build this manually to avoid any ambiguity with encodePacked.
  */
 function encodeInnerTx(
   to: Address,
   data: `0x${string}`,
 ): `0x${string}` {
-  const dataLength = data === '0x' ? 0n : BigInt((data.length - 2) / 2)
-  return encodePacked(
-    ['uint8', 'address', 'uint256', 'uint256', 'bytes'],
-    [0, to, 0n, dataLength, data],
-  )
+  const operation = '0x00' as `0x${string}`                             // 1 byte
+  const toBytes = to.toLowerCase().slice(2) as string                   // 20 bytes (no 0x)
+  const value = pad(numberToHex(0), { size: 32 })                      // 32 bytes
+  const dataSize = data === '0x' ? 0 : (data.length - 2) / 2
+  const length = pad(numberToHex(dataSize), { size: 32 })              // 32 bytes
+  const rawData = data === '0x' ? '' : data.slice(2)                   // N bytes (no 0x)
+  return `0x${operation.slice(2)}${toBytes}${value.slice(2)}${length.slice(2)}${rawData}` as `0x${string}`
 }
 
 // ── Transaction builders ───────────────────────────────────────────

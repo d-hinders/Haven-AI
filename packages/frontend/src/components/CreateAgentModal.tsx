@@ -330,7 +330,12 @@ export default function CreateAgentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-[#0e0e0e] border border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+      {/* Backdrop click to close (disabled during execution) */}
+      <div
+        className="absolute inset-0"
+        onClick={step !== 'executing' ? handleClose : undefined}
+      />
+      <div className="relative bg-[#0e0e0e] border border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
           <div>
@@ -343,17 +348,16 @@ export default function CreateAgentModal({
               {step === 'done' && 'Agent created'}
             </p>
           </div>
-          {step !== 'executing' && (
-            <button
-              onClick={handleClose}
-              className="text-zinc-700 hover:text-zinc-400 transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          )}
+          <button
+            onClick={handleClose}
+            disabled={step === 'executing' && execStatus !== 'error'}
+            className="text-zinc-700 hover:text-zinc-400 disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 -mr-1"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
 
         {/* Step indicators */}

@@ -3,130 +3,190 @@ import crypto from 'crypto'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 
+// ── Types ──────────────────────────────────────────────────────────
+
 interface CreateAgentBody {
   name: string
-  type: string
-  monthly_limit: number
-  per_tx_limit: number
-  allowed_assets: string[]
-  recipient_address?: string
+  description?: string
+  delegate_address: string
+  allowances?: {
+    token_address: string
+    token_symbol: string
+    allowance_amount: string
+    reset_period_min: number
+  }[]
 }
 
 interface UpdateAgentBody {
   name?: string
-  monthly_limit?: number
-  per_tx_limit?: number
-  recipient_address?: string | null
+  description?: string
 }
 
-interface Agent {
+interface AgentRow {
   id: string
   user_id: string
   name: string
-  type: string
-  monthly_limit: string
-  per_tx_limit: string
-  allowed_assets: string[]
-  recipient_address: string | null
+  description: string | null
+  delegate_address: string | null
   api_key: string
   status: string
   created_at: string
 }
 
+interface AllowanceRow {
+  id: string
+  agent_id: string
+  token_address: string
+  token_symbol: string
+  allowance_amount: string
+  reset_period_min: number
+}
+
+function isValidAddress(addr: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(addr)
+}
+
+// ── Routes ─────────────────────────────────────────────────────────
+
 export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /agents
+  // GET /agents — list agents with their allowances
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
-    const result = await pool.query<Agent>(
-      `SELECT id, name, type, monthly_limit, per_tx_limit, allowed_assets,
-              recipient_address, api_key, status, created_at
+
+    const agentResult = await pool.query<AgentRow>(
+      `SELECT id, name, description, delegate_address, api_key, status, created_at
        FROM agents WHERE user_id = $1 ORDER BY created_at DESC`,
       [sub],
     )
-    return { agents: result.rows }
+
+    if (agentResult.rows.length === 0) {
+      return { agents: [] }
+    }
+
+    // Fetch allowances for all agents in one query
+    const agentIds = agentResult.rows.map((a) => a.id)
+    const allowanceResult = await pool.query<AllowanceRow>(
+      `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
+       FROM agent_allowances WHERE agent_id = ANY($1) ORDER BY created_at ASC`,
+      [agentIds],
+    )
+
+    const allowancesByAgent = new Map<string, AllowanceRow[]>()
+    for (const row of allowanceResult.rows) {
+      const existing = allowancesByAgent.get(row.agent_id) ?? []
+      existing.push(row)
+      allowancesByAgent.set(row.agent_id, existing)
+    }
+
+    const agents = agentResult.rows.map((agent) => ({
+      ...agent,
+      allowances: allowancesByAgent.get(agent.id) ?? [],
+    }))
+
+    return { agents }
   })
 
-  // POST /agents
+  // POST /agents — create agent with delegate address and allowances
   app.post<{ Body: CreateAgentBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { name, type, monthly_limit, per_tx_limit, allowed_assets, recipient_address } = request.body
+    const { name, description, delegate_address, allowances } = request.body
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return reply.code(400).send({ error: 'Name is required' })
     }
-    if (typeof monthly_limit !== 'number' || monthly_limit <= 0) {
-      return reply.code(400).send({ error: 'monthly_limit must be a positive number' })
+    if (!delegate_address || !isValidAddress(delegate_address)) {
+      return reply.code(400).send({ error: 'Valid delegate address is required' })
     }
-    if (typeof per_tx_limit !== 'number' || per_tx_limit <= 0) {
-      return reply.code(400).send({ error: 'per_tx_limit must be a positive number' })
-    }
-    if (per_tx_limit > monthly_limit) {
-      return reply.code(400).send({ error: 'per_tx_limit cannot exceed monthly_limit' })
+
+    // Check for duplicate delegate address
+    const existing = await pool.query(
+      'SELECT id FROM agents WHERE user_id = $1 AND delegate_address = $2 AND status != $3',
+      [sub, delegate_address.toLowerCase(), 'revoked'],
+    )
+    if (existing.rows.length > 0) {
+      return reply
+        .code(409)
+        .send({ error: 'An active agent with this delegate address already exists' })
     }
 
     const apiKey = `sk_agent_${crypto.randomBytes(24).toString('hex')}`
 
-    const result = await pool.query<Agent>(
-      `INSERT INTO agents (user_id, name, type, monthly_limit, per_tx_limit, allowed_assets, recipient_address, api_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, name, type, monthly_limit, per_tx_limit, allowed_assets,
-                 recipient_address, api_key, status, created_at`,
-      [
-        sub,
-        name.trim(),
-        type ?? 'custom',
-        monthly_limit,
-        per_tx_limit,
-        allowed_assets ?? ['USDC'],
-        recipient_address ?? null,
-        apiKey,
-      ],
-    )
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
 
-    return reply.code(201).send(result.rows[0])
+      const agentResult = await client.query<AgentRow>(
+        `INSERT INTO agents (user_id, name, description, delegate_address, api_key)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, name, description, delegate_address, api_key, status, created_at`,
+        [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKey],
+      )
+      const agent = agentResult.rows[0]
+
+      // Insert allowance records
+      const savedAllowances: AllowanceRow[] = []
+      if (allowances && allowances.length > 0) {
+        for (const a of allowances) {
+          const res = await client.query<AllowanceRow>(
+            `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
+            [
+              agent.id,
+              a.token_address.toLowerCase(),
+              a.token_symbol,
+              a.allowance_amount,
+              a.reset_period_min,
+            ],
+          )
+          savedAllowances.push(res.rows[0])
+        }
+      }
+
+      await client.query('COMMIT')
+      return reply.code(201).send({ ...agent, allowances: savedAllowances })
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
   })
 
-  // PUT /agents/:id
-  app.put<{ Params: { id: string }; Body: UpdateAgentBody }>('/:id', async (request, reply) => {
-    const { sub } = request.user as { sub: string }
-    const { id } = request.params
-    const { name, monthly_limit, per_tx_limit, recipient_address } = request.body
+  // PUT /agents/:id — update agent metadata
+  app.put<{ Params: { id: string }; Body: UpdateAgentBody }>(
+    '/:id',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id } = request.params
+      const { name, description } = request.body
 
-    if (monthly_limit !== undefined && monthly_limit <= 0) {
-      return reply.code(400).send({ error: 'monthly_limit must be a positive number' })
-    }
-    if (per_tx_limit !== undefined && per_tx_limit <= 0) {
-      return reply.code(400).send({ error: 'per_tx_limit must be a positive number' })
-    }
+      const result = await pool.query<AgentRow>(
+        `UPDATE agents
+         SET name        = COALESCE($3, name),
+             description = COALESCE($4, description),
+             updated_at  = NOW()
+         WHERE id = $1 AND user_id = $2
+         RETURNING id, name, description, delegate_address, api_key, status, created_at`,
+        [id, sub, name?.trim() ?? null, description?.trim() ?? null],
+      )
 
-    const result = await pool.query<Agent>(
-      `UPDATE agents
-       SET name              = COALESCE($3, name),
-           monthly_limit     = COALESCE($4, monthly_limit),
-           per_tx_limit      = COALESCE($5, per_tx_limit),
-           recipient_address = CASE WHEN $6::text IS DISTINCT FROM 'UNCHANGED' THEN $6::varchar ELSE recipient_address END,
-           updated_at        = NOW()
-       WHERE id = $1 AND user_id = $2
-       RETURNING id, name, type, monthly_limit, per_tx_limit, allowed_assets,
-                 recipient_address, api_key, status, created_at`,
-      [
-        id,
-        sub,
-        name?.trim() ?? null,
-        monthly_limit ?? null,
-        per_tx_limit ?? null,
-        recipient_address !== undefined ? (recipient_address ?? null) : 'UNCHANGED',
-      ],
-    )
+      if (result.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' })
+      }
 
-    if (result.rows.length === 0) {
-      return reply.code(404).send({ error: 'Agent not found' })
-    }
+      // Also fetch allowances
+      const allowanceResult = await pool.query<AllowanceRow>(
+        `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
+         FROM agent_allowances WHERE agent_id = $1`,
+        [id],
+      )
 
-    return result.rows[0]
-  })
+      return { ...result.rows[0], allowances: allowanceResult.rows }
+    },
+  )
 
   // DELETE /agents/:id
   app.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
@@ -145,22 +205,92 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     return { success: true }
   })
 
-  // POST /agents/:id/revoke
-  app.post<{ Params: { id: string } }>('/:id/revoke', async (request, reply) => {
+  // POST /agents/:id/revoke — revoke an agent
+  app.post<{ Params: { id: string } }>(
+    '/:id/revoke',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id } = request.params
+
+      const result = await pool.query(
+        `UPDATE agents SET status = 'revoked', updated_at = NOW()
+         WHERE id = $1 AND user_id = $2 AND status = 'active'
+         RETURNING id`,
+        [id, sub],
+      )
+
+      if (result.rows.length === 0) {
+        return reply
+          .code(404)
+          .send({ error: 'Agent not found or already revoked' })
+      }
+
+      return { success: true }
+    },
+  )
+
+  // POST /agents/:id/allowances — add/update an allowance record
+  app.post<{
+    Params: { id: string }
+    Body: {
+      token_address: string
+      token_symbol: string
+      allowance_amount: string
+      reset_period_min: number
+    }
+  }>('/:id/allowances', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
+    const { token_address, token_symbol, allowance_amount, reset_period_min } =
+      request.body
 
-    const result = await pool.query(
-      `UPDATE agents SET status = 'revoked', updated_at = NOW()
-       WHERE id = $1 AND user_id = $2 AND status = 'active'
-       RETURNING id`,
+    // Verify agent belongs to user
+    const agentCheck = await pool.query(
+      'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
       [id, sub],
     )
-
-    if (result.rows.length === 0) {
-      return reply.code(404).send({ error: 'Agent not found or already revoked' })
+    if (agentCheck.rows.length === 0) {
+      return reply.code(404).send({ error: 'Agent not found' })
     }
 
-    return { success: true }
+    const result = await pool.query<AllowanceRow>(
+      `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (agent_id, token_address)
+       DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, updated_at = NOW()
+       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
+      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min],
+    )
+
+    return result.rows[0]
   })
+
+  // DELETE /agents/:id/allowances/:tokenAddress — remove an allowance record
+  app.delete<{ Params: { id: string; tokenAddress: string } }>(
+    '/:id/allowances/:tokenAddress',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id, tokenAddress } = request.params
+
+      // Verify agent belongs to user
+      const agentCheck = await pool.query(
+        'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
+        [id, sub],
+      )
+      if (agentCheck.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' })
+      }
+
+      const result = await pool.query(
+        'DELETE FROM agent_allowances WHERE agent_id = $1 AND token_address = $2 RETURNING id',
+        [id, tokenAddress.toLowerCase()],
+      )
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({ error: 'Allowance not found' })
+      }
+
+      return { success: true }
+    },
+  )
 }

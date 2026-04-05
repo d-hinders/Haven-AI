@@ -31,6 +31,8 @@ interface TransactionListProps {
   onPageChange: (page: number) => void
   onRefresh: () => void
   resolveAddress?: (address: string) => string | null
+  /** Map of delegate address (lowercase) → agent name, for tx attribution */
+  agentsByDelegate?: Map<string, string>
 }
 
 export default function TransactionList({
@@ -43,6 +45,7 @@ export default function TransactionList({
   onPageChange,
   onRefresh,
   resolveAddress,
+  agentsByDelegate,
 }: TransactionListProps) {
   // Loading skeleton
   if (loading && transactions.length === 0) {
@@ -148,6 +151,14 @@ export default function TransactionList({
                 <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-white/[0.04] text-zinc-600 flex-shrink-0">
                   {TYPE_LABELS[tx.type] ?? tx.type}
                 </span>
+                {(() => {
+                  const agentName = agentsByDelegate?.get(tx.from.toLowerCase())
+                  return agentName ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-indigo-400 flex-shrink-0" title={`Agent: ${agentName}`}>
+                      {agentName}
+                    </span>
+                  ) : null
+                })()}
                 {tx.isError && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-red-500/10 text-red-400 flex-shrink-0">
                     Failed

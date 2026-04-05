@@ -21,8 +21,8 @@ export async function runMigrations(): Promise<void> {
       user_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       name              VARCHAR(255) NOT NULL,
       type              VARCHAR(50) NOT NULL DEFAULT 'custom',
-      monthly_limit     NUMERIC(20,6) NOT NULL,
-      per_tx_limit      NUMERIC(20,6) NOT NULL,
+      monthly_limit     NUMERIC(20,6),
+      per_tx_limit      NUMERIC(20,6),
       allowed_assets    TEXT[] NOT NULL DEFAULT '{USDC}',
       recipient_address VARCHAR(42),
       api_key           VARCHAR(64) UNIQUE NOT NULL,
@@ -33,6 +33,30 @@ export async function runMigrations(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id);
     CREATE INDEX IF NOT EXISTS idx_agents_api_key ON agents(api_key);
+
+    -- New columns for AllowanceModule-based agents
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS description TEXT;
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS delegate_address VARCHAR(42);
+
+    -- Make legacy columns nullable for new-style agents
+    ALTER TABLE agents ALTER COLUMN monthly_limit DROP NOT NULL;
+    ALTER TABLE agents ALTER COLUMN per_tx_limit DROP NOT NULL;
+    ALTER TABLE agents ALTER COLUMN type DROP NOT NULL;
+
+    -- Agent allowances: records of on-chain spending limits
+    CREATE TABLE IF NOT EXISTS agent_allowances (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      agent_id         UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      token_address    VARCHAR(42) NOT NULL,
+      token_symbol     VARCHAR(20) NOT NULL,
+      allowance_amount VARCHAR(78) NOT NULL,
+      reset_period_min INTEGER NOT NULL DEFAULT 0,
+      created_at       TIMESTAMPTZ DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(agent_id, token_address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_allowances_agent_id ON agent_allowances(agent_id);
 
     CREATE TABLE IF NOT EXISTS contacts (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),

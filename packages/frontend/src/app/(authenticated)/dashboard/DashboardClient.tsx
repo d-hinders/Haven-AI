@@ -8,6 +8,7 @@ import { usePortfolio } from '@/hooks/usePortfolio'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
+import { useAgents } from '@/hooks/useAgents'
 import PortfolioHero from '@/components/PortfolioHero'
 import BalanceCards from '@/components/BalanceCards'
 import TransactionList from '@/components/TransactionList'
@@ -20,6 +21,15 @@ export default function DashboardClient() {
 
   const { details: safeDetails } = useSafeDetails(safeAddress)
   const { contacts, resolveAddress } = useContacts()
+  const { agents } = useAgents()
+
+  // Build a lookup map: delegate address → agent name
+  const agentsByDelegate = new Map<string, string>()
+  for (const agent of agents) {
+    if (agent.delegate_address && agent.status === 'active') {
+      agentsByDelegate.set(agent.delegate_address.toLowerCase(), agent.name)
+    }
+  }
 
   const {
     totalUsd,
@@ -118,6 +128,7 @@ export default function DashboardClient() {
           onPageChange={setPage}
           onRefresh={refetchTx}
           resolveAddress={resolveAddress}
+          agentsByDelegate={agentsByDelegate}
         />
       </div>
 

@@ -79,7 +79,7 @@ export interface SafeTxParams {
   to: Address
   value: bigint
   data: `0x${string}`
-  operation: 0 // Call
+  operation: 0 | 1 // 0 = Call, 1 = DelegateCall
   safeTxGas: bigint
   baseGas: bigint
   gasPrice: bigint

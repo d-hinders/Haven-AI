@@ -11,4 +11,7 @@ export function getPool(): pg.Pool {
   return pool
 }
 
-export default { query: (...args: Parameters<pg.Pool['query']>) => getPool().query(...args) }
+export default {
+  query: (...args: Parameters<pg.Pool['query']>) => getPool().query(...args),
+  connect: () => getPool().connect(),
+}

@@ -259,13 +259,13 @@ function encodeInnerTx(
   to: Address,
   data: `0x${string}`,
 ): `0x${string}` {
-  const operation = '0x00' as `0x${string}`                             // 1 byte
-  const toBytes = to.toLowerCase().slice(2) as string                   // 20 bytes (no 0x)
-  const value = pad(numberToHex(0), { size: 32 })                      // 32 bytes
+  const operation = '00'                                                              // 1 byte
+  const toBytes = to.toLowerCase().slice(2)                                           // 20 bytes
+  const value = pad(numberToHex(0), { size: 32, dir: 'left' }).slice(2)              // 32 bytes, LEFT-padded
   const dataSize = data === '0x' ? 0 : (data.length - 2) / 2
-  const length = pad(numberToHex(dataSize), { size: 32 })              // 32 bytes
-  const rawData = data === '0x' ? '' : data.slice(2)                   // N bytes (no 0x)
-  return `0x${operation.slice(2)}${toBytes}${value.slice(2)}${length.slice(2)}${rawData}` as `0x${string}`
+  const length = pad(numberToHex(dataSize), { size: 32, dir: 'left' }).slice(2)      // 32 bytes, LEFT-padded
+  const rawData = data === '0x' ? '' : data.slice(2)                                  // N bytes
+  return `0x${operation}${toBytes}${value}${length}${rawData}` as `0x${string}`
 }
 
 // ── Transaction builders ───────────────────────────────────────────

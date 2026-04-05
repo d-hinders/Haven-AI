@@ -304,17 +304,27 @@ export default function CreateAgentModal({
       setStep('done')
       onCreated(agent)
     } catch (err: unknown) {
-      if (
-        err instanceof Error &&
-        (err.message.includes('User rejected') ||
-          err.message.includes('user rejected') ||
-          err.message.includes('User denied'))
-      ) {
+      console.error('[Haven] Agent setup error:', err)
+
+      // Extract the most useful error message from viem's nested error chain
+      let message = 'Setup failed'
+      if (err instanceof Error) {
+        message = err.message
+        // viem wraps contract errors — dig into the cause chain
+        let cause = (err as { cause?: unknown }).cause
+        while (cause instanceof Error) {
+          if (cause.message) message = cause.message
+          cause = (cause as { cause?: unknown }).cause
+        }
+        // Also check for shortMessage (viem-specific)
+        const short = (err as { shortMessage?: string }).shortMessage
+        if (short) message = short
+      }
+
+      if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
         setExecError('Transaction rejected in wallet')
       } else {
-        setExecError(
-          err instanceof Error ? err.message : 'Setup failed',
-        )
+        setExecError(message)
       }
       setExecStatus('error')
     }

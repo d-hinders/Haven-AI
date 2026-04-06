@@ -1,15 +1,16 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
 import { type Address, hashTypedData } from 'viem'
 import { gnosis } from 'viem/chains'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type Agent } from '@/hooks/useAgents'
+import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import {
-  getAllAllowances,
   buildAgentRevokeTx,
+  computeEffectiveAllowance,
   RESET_PERIODS,
   type AllowanceInfo,
 } from '@/lib/allowance-module'
@@ -57,6 +58,18 @@ function formatAmount(raw: bigint, decimals: number): string {
   return `${intPart}.${trimmed}`
 }
 
+/** Format relative time until a date */
+function timeUntil(date: Date): string {
+  const diffMs = date.getTime() - Date.now()
+  if (diffMs <= 0) return 'now'
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ${mins % 60}m`
+  const days = Math.floor(hours / 24)
+  return `${days}d ${hours % 24}h`
+}
+
 // ── Icons ──────────────────────────────────────────────────────────
 
 function BotIcon({ size = 15 }: { size?: number }) {
@@ -69,29 +82,20 @@ function BotIcon({ size = 15 }: { size?: number }) {
   )
 }
 
-// ── Allowance bar ──────────────────────────────────────────────────
+// ── Allowance bar (on-chain primary) ──────────────────────────────
 
 function AllowanceBar({
   info,
-  configuredSymbol,
+  loading,
 }: {
-  info: AllowanceInfo | null
-  configuredSymbol: string
+  info: AllowanceInfo
+  loading?: boolean
 }) {
-  if (!info) {
-    // Show configured data only (no on-chain data yet)
-    return (
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-zinc-500">{configuredSymbol}</span>
-        <div className="flex-1 h-[3px] bg-white/[0.05] rounded-full" />
-        <span className="text-zinc-700">loading...</span>
-      </div>
-    )
-  }
-
   const decimals = tokenDecimals(info.token)
+  const effective = computeEffectiveAllowance(info)
   const total = info.amount
-  const spent = info.spent
+  const spent = effective.effectiveSpent
+  const remaining = effective.remaining
   const pct = total > 0n ? Number((spent * 100n) / total) : 0
   const color =
     pct < 40
@@ -105,9 +109,12 @@ function AllowanceBar({
       <div className="flex items-center justify-between text-xs">
         <span className="text-zinc-400 font-medium">
           {tokenSymbol(info.token)}
+          {loading && (
+            <span className="ml-1 text-zinc-700 animate-pulse">...</span>
+          )}
         </span>
         <span className="text-zinc-600">
-          {formatAmount(spent, decimals)} / {formatAmount(total, decimals)}
+          {formatAmount(remaining, decimals)} / {formatAmount(total, decimals)} remaining
           {info.resetTimeMin > 0 && (
             <span className="text-zinc-700 ml-1">
               per {resetLabel(info.resetTimeMin).toLowerCase()}
@@ -121,6 +128,32 @@ function AllowanceBar({
           style={{ width: `${Math.min(pct, 100)}%` }}
         />
       </div>
+      {/* Reset info */}
+      {effective.isResetPending && (
+        <p className="text-[10px] text-emerald-500/70">
+          Reset pending — full allowance available
+        </p>
+      )}
+      {!effective.isResetPending && effective.nextResetTime && (
+        <p className="text-[10px] text-zinc-700">
+          Resets in {timeUntil(effective.nextResetTime)}
+        </p>
+      )}
+      {remaining === 0n && total > 0n && !effective.isResetPending && (
+        <p className="text-[10px] text-red-400/70">
+          Fully spent{info.resetTimeMin > 0 ? ' — resets ' + (effective.nextResetTime ? 'in ' + timeUntil(effective.nextResetTime) : 'next period') : ''}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="text-zinc-500">{symbol}</span>
+      <div className="flex-1 h-[3px] bg-white/[0.05] rounded-full" />
+      <span className="text-zinc-700 animate-pulse">loading...</span>
     </div>
   )
 }
@@ -130,12 +163,14 @@ function AllowanceBar({
 function AgentCard({
   agent,
   onChainAllowances,
+  onChainLoading,
   onRevoke,
   onDelete,
   revoking,
 }: {
   agent: Agent
   onChainAllowances: AllowanceInfo[] | null
+  onChainLoading: boolean
   onRevoke: (agent: Agent) => void
   onDelete: (agent: Agent) => void
   revoking: boolean
@@ -152,6 +187,29 @@ function AgentCard({
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
+
+  // Merge on-chain + DB allowance data: on-chain is primary, DB fills gaps
+  const displayAllowances = useMemo(() => {
+    if (onChainAllowances && onChainAllowances.length > 0) {
+      return onChainAllowances
+    }
+    // No on-chain data yet — nothing to show
+    return null
+  }, [onChainAllowances])
+
+  // Tokens from DB that we haven't seen on-chain yet (shown as skeleton)
+  const pendingDbTokens = useMemo(() => {
+    if (!onChainLoading) return [] // done loading, trust on-chain
+    if (!onChainAllowances) {
+      // Still loading — show all DB tokens as skeleton
+      return agent.allowances.map((a) => a.token_symbol)
+    }
+    // Show DB tokens not yet in on-chain results
+    const onChainAddrs = new Set(onChainAllowances.map((a) => a.token.toLowerCase()))
+    return agent.allowances
+      .filter((a) => !onChainAddrs.has(a.token_address.toLowerCase()))
+      .map((a) => a.token_symbol)
+  }, [onChainAllowances, onChainLoading, agent.allowances])
 
   return (
     <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 hover:border-white/[0.1] transition-all">
@@ -215,28 +273,27 @@ function AgentCard({
         </div>
       )}
 
-      {/* Allowance bars */}
+      {/* Allowance bars — on-chain primary */}
       {isActive && (
         <div className="space-y-2 mb-4">
           <p className="text-[10px] text-zinc-700 uppercase tracking-wide">
             Spending limits
+            <span className="text-zinc-800 ml-1 normal-case">(on-chain)</span>
           </p>
-          {agent.allowances.length > 0 ? (
-            agent.allowances.map((a) => {
-              const chainInfo = onChainAllowances?.find(
-                (oc) => oc.token.toLowerCase() === a.token_address.toLowerCase(),
-              )
-              return (
-                <AllowanceBar
-                  key={a.token_address}
-                  info={chainInfo ?? null}
-                  configuredSymbol={a.token_symbol}
-                />
-              )
-            })
-          ) : (
-            <p className="text-xs text-zinc-700">No allowances configured</p>
-          )}
+
+          {/* On-chain allowances */}
+          {displayAllowances && displayAllowances.length > 0 ? (
+            displayAllowances.map((info) => (
+              <AllowanceBar key={info.token} info={info} />
+            ))
+          ) : !onChainLoading && (!displayAllowances || displayAllowances.length === 0) ? (
+            <p className="text-xs text-zinc-700">No on-chain allowances found</p>
+          ) : null}
+
+          {/* DB tokens still loading from chain */}
+          {pendingDbTokens.map((symbol) => (
+            <AllowanceBarSkeleton key={symbol} symbol={symbol} />
+          ))}
         </div>
       )}
 
@@ -325,6 +382,77 @@ function AgentCard({
   )
 }
 
+// ── Unmanaged delegate card ───────────────────────────────────────
+
+function UnmanagedDelegateCard({
+  delegate,
+  allowances,
+}: {
+  delegate: string
+  allowances: AllowanceInfo[]
+}) {
+  return (
+    <div className="bg-white/[0.02] border border-dashed border-amber-500/20 rounded-xl p-5">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 9v4M12 17h.01" />
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            </svg>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-zinc-200">
+                Unmanaged Delegate
+              </h3>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-500/10 text-amber-400">
+                on-chain only
+              </span>
+            </div>
+            <p className="text-xs text-zinc-600 mt-0.5">
+              This delegate was set up outside Haven
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Delegate address */}
+      <div className="mb-4">
+        <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
+          Delegate
+        </p>
+        <p className="text-xs font-mono text-zinc-500">
+          {truncate(delegate)}
+          <button
+            onClick={() => navigator.clipboard.writeText(delegate)}
+            className="ml-2 text-zinc-700 hover:text-zinc-400 transition-colors"
+            title="Copy address"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          </button>
+        </p>
+      </div>
+
+      {/* On-chain allowances */}
+      {allowances.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-zinc-700 uppercase tracking-wide">
+            Spending limits
+            <span className="text-zinc-800 ml-1 normal-case">(on-chain)</span>
+          </p>
+          {allowances.map((info) => (
+            <AllowanceBar key={info.token} info={info} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main panel ─────────────────────────────────────────────────────
 
 export default function AgentPanel() {
@@ -340,41 +468,34 @@ export default function AgentPanel() {
   const [howItWorksOpen, setHowItWorksOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
 
-  // On-chain allowance data keyed by delegate address
-  const [onChainData, setOnChainData] = useState<
-    Map<string, AllowanceInfo[]>
-  >(new Map())
+  // Collect managed delegate addresses from DB agents
+  const managedDelegates = useMemo(
+    () =>
+      agents
+        .filter((a) => a.status === 'active' && a.delegate_address)
+        .map((a) => a.delegate_address!),
+    [agents],
+  )
 
-  // Fetch on-chain allowances for all active agents
-  const fetchOnChainData = useCallback(async () => {
-    if (!publicClient || !safeAddress) return
+  // On-chain allowance data — discovers ALL delegates, not just DB agents
+  const {
+    data: onChainData,
+    loading: onChainLoading,
+    onChainDelegates,
+    refetch: refetchOnChain,
+  } = useOnChainAllowances(safeAddress, managedDelegates)
 
-    const activeAgents = agents.filter(
-      (a) => a.status === 'active' && a.delegate_address,
-    )
-    if (activeAgents.length === 0) return
-
-    const results = new Map<string, AllowanceInfo[]>()
-    await Promise.all(
-      activeAgents.map(async (agent) => {
-        try {
-          const allowances = await getAllAllowances(
-            publicClient,
-            safeAddress as Address,
-            agent.delegate_address as Address,
-          )
-          results.set(agent.delegate_address!.toLowerCase(), allowances)
-        } catch {
-          // Agent might not be set up on-chain yet
-        }
-      }),
-    )
-    setOnChainData(results)
-  }, [publicClient, safeAddress, agents])
-
-  useEffect(() => {
-    fetchOnChainData()
-  }, [fetchOnChainData])
+  // Find delegates that exist on-chain but not in Haven DB
+  const unmanagedDelegates = useMemo(() => {
+    const managedSet = new Set(managedDelegates.map((a) => a.toLowerCase()))
+    return onChainDelegates
+      .filter((d) => !managedSet.has(d.toLowerCase()))
+      .map((d) => ({
+        address: d,
+        allowances: onChainData.get(d.toLowerCase())?.allowances ?? [],
+      }))
+      .filter((d) => d.allowances.length > 0) // only show if they have allowances
+  }, [onChainDelegates, managedDelegates, onChainData])
 
   // ── Revoke handler ─────────────────────────────────────
 
@@ -455,7 +576,7 @@ export default function AgentPanel() {
 
       // Update in Haven backend
       await revokeAgent(agent.id)
-      fetchOnChainData()
+      refetchOnChain()
     } catch (err) {
       // If user rejected, just ignore
       if (
@@ -499,6 +620,11 @@ export default function AgentPanel() {
           <p className="text-xs text-zinc-600">
             {agents.filter((a) => a.status === 'active').length} active agent
             {agents.filter((a) => a.status === 'active').length !== 1 ? 's' : ''}
+            {unmanagedDelegates.length > 0 && (
+              <span className="text-amber-500/60 ml-1">
+                + {unmanagedDelegates.length} unmanaged
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -548,7 +674,7 @@ export default function AgentPanel() {
       )}
 
       {/* Empty state */}
-      {!loading && agents.length === 0 && (
+      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
         <div className="flex flex-col items-center justify-center h-64 rounded-xl border border-dashed border-white/[0.06]">
           <div className="w-12 h-12 rounded-xl bg-white/[0.04] flex items-center justify-center mb-3">
             <BotIcon size={24} />
@@ -567,20 +693,34 @@ export default function AgentPanel() {
       )}
 
       {/* Agent list */}
-      {agents.length > 0 && (
+      {(agents.length > 0 || unmanagedDelegates.length > 0) && (
         <div className="space-y-3">
-          {agents.map((agent) => (
-            <AgentCard
-              key={agent.id}
-              agent={agent}
-              onChainAllowances={
-                agent.delegate_address
-                  ? onChainData.get(agent.delegate_address.toLowerCase()) ?? null
-                  : null
-              }
-              onRevoke={handleRevoke}
-              onDelete={handleDelete}
-              revoking={revoking}
+          {/* Managed agents */}
+          {agents.map((agent) => {
+            const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
+            const chainData = delegateKey
+              ? onChainData.get(delegateKey)?.allowances ?? null
+              : null
+
+            return (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                onChainAllowances={chainData}
+                onChainLoading={onChainLoading}
+                onRevoke={handleRevoke}
+                onDelete={handleDelete}
+                revoking={revoking}
+              />
+            )
+          })}
+
+          {/* Unmanaged on-chain delegates */}
+          {unmanagedDelegates.map((d) => (
+            <UnmanagedDelegateCard
+              key={d.address}
+              delegate={d.address}
+              allowances={d.allowances}
             />
           ))}
         </div>
@@ -595,8 +735,8 @@ export default function AgentPanel() {
         onCreated={() => {
           refetch()
           setCreateOpen(false)
-          // Refresh on-chain data after a short delay
-          setTimeout(fetchOnChainData, 2000)
+          // Refresh on-chain data after a short delay for tx confirmation
+          setTimeout(refetchOnChain, 2000)
         }}
       />
 

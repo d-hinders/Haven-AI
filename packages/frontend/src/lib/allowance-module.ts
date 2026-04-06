@@ -147,6 +147,45 @@ export interface AllowanceInfo {
   nonce: number
 }
 
+export interface EffectiveAllowance {
+  remaining: bigint
+  effectiveSpent: bigint
+  nextResetTime: Date | null
+  isResetPending: boolean
+}
+
+/**
+ * Compute effective remaining allowance accounting for reset logic.
+ *
+ * The AllowanceModule resets `spent` to 0 when resetTimeMin > 0 and enough time
+ * has passed since lastResetMin. However this reset only materialises on-chain
+ * when the next executeAllowanceTransfer happens.  This helper mirrors the
+ * contract's arithmetic so the UI shows accurate "remaining" even before the
+ * on-chain state is poked.
+ */
+export function computeEffectiveAllowance(info: AllowanceInfo): EffectiveAllowance {
+  if (info.resetTimeMin === 0) {
+    // One-time allowance — no reset
+    const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
+    return { remaining, effectiveSpent: info.spent, nextResetTime: null, isResetPending: false }
+  }
+
+  const lastResetSec = info.lastResetMin * 60
+  const resetPeriodSec = info.resetTimeMin * 60
+  const nowSec = Math.floor(Date.now() / 1000)
+
+  if (nowSec >= lastResetSec + resetPeriodSec) {
+    // Reset period has elapsed — spent is effectively 0 even though
+    // the chain hasn't been poked yet
+    const nextResetTime = new Date((lastResetSec + resetPeriodSec * 2) * 1000)
+    return { remaining: info.amount, effectiveSpent: 0n, nextResetTime, isResetPending: true }
+  }
+
+  const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
+  const nextResetTime = new Date((lastResetSec + resetPeriodSec) * 1000)
+  return { remaining, effectiveSpent: info.spent, nextResetTime, isResetPending: false }
+}
+
 export interface AllowanceSetup {
   token: Address
   tokenSymbol: string
@@ -259,13 +298,13 @@ function encodeInnerTx(
   to: Address,
   data: `0x${string}`,
 ): `0x${string}` {
-  const operation = '0x00' as `0x${string}`                             // 1 byte
-  const toBytes = to.toLowerCase().slice(2) as string                   // 20 bytes (no 0x)
-  const value = pad(numberToHex(0), { size: 32 })                      // 32 bytes
+  const operation = '00'                                                              // 1 byte
+  const toBytes = to.toLowerCase().slice(2)                                           // 20 bytes
+  const value = pad(numberToHex(0), { size: 32, dir: 'left' }).slice(2)              // 32 bytes, LEFT-padded
   const dataSize = data === '0x' ? 0 : (data.length - 2) / 2
-  const length = pad(numberToHex(dataSize), { size: 32 })              // 32 bytes
-  const rawData = data === '0x' ? '' : data.slice(2)                   // N bytes (no 0x)
-  return `0x${operation.slice(2)}${toBytes}${value.slice(2)}${length.slice(2)}${rawData}` as `0x${string}`
+  const length = pad(numberToHex(dataSize), { size: 32, dir: 'left' }).slice(2)      // 32 bytes, LEFT-padded
+  const rawData = data === '0x' ? '' : data.slice(2)                                  // N bytes
+  return `0x${operation}${toBytes}${value}${length}${rawData}` as `0x${string}`
 }
 
 // ── Transaction builders ───────────────────────────────────────────

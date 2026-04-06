@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { ApiRequestError } from '@/lib/api'
+import ContactsInfo from '@/components/ContactsInfo'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -277,6 +278,7 @@ export default function ContactsPage() {
   const [showAdd, setShowAdd] = useState(false)
   const [editTarget, setEditTarget] = useState<Contact | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null)
+  const [infoOpen, setInfoOpen] = useState(false)
 
   const filtered = contacts.filter(
     (c) =>
@@ -291,15 +293,28 @@ export default function ContactsPage() {
           <h1 className="text-2xl font-bold tracking-tight mb-1">Contacts</h1>
           <p className="text-sm text-zinc-500">Save and label frequently used addresses</p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Add contact
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setInfoOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-sm font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all duration-200"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            How it works
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add contact
+          </button>
+        </div>
       </div>
 
       {contacts.length > 0 && (
@@ -415,6 +430,8 @@ export default function ContactsPage() {
           onClose={() => setDeleteTarget(null)}
         />
       )}
+
+      <ContactsInfo open={infoOpen} onClose={() => setInfoOpen(false)} />
     </div>
   )
 }

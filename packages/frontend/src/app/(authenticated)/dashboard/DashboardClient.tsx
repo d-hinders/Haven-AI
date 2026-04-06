@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
@@ -13,6 +14,7 @@ import PortfolioHero from '@/components/PortfolioHero'
 import BalanceCards from '@/components/BalanceCards'
 import TransactionList from '@/components/TransactionList'
 import SendButton from '@/components/SendButton'
+import DashboardInfo from '@/components/DashboardInfo'
 
 export default function DashboardClient() {
   const { user } = useAuth()
@@ -57,6 +59,8 @@ export default function DashboardClient() {
 
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
 
+  const [infoOpen, setInfoOpen] = useState(false)
+
   const handleSendSuccess = () => {
     refetchBalances()
     refetchTx()
@@ -70,16 +74,29 @@ export default function DashboardClient() {
           <h1 className="text-2xl font-bold tracking-tight mb-1">Dashboard</h1>
           <p className="text-sm text-zinc-500">Your Safe overview</p>
         </div>
-        {safeAddress && (
-          <SendButton
-            safeAddress={safeAddress}
-            safeDetails={safeDetails}
-            balances={balances}
-            onSuccess={handleSendSuccess}
-            contacts={contacts}
-            resolveAddress={resolveAddress}
-          />
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setInfoOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-sm font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all duration-200"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            How it works
+          </button>
+          {safeAddress && (
+            <SendButton
+              safeAddress={safeAddress}
+              safeDetails={safeDetails}
+              balances={balances}
+              onSuccess={handleSendSuccess}
+              contacts={contacts}
+              resolveAddress={resolveAddress}
+            />
+          )}
+        </div>
       </div>
 
       {/* Portfolio total */}
@@ -150,6 +167,7 @@ export default function DashboardClient() {
         </Link>
       </div>
 
+      <DashboardInfo open={infoOpen} onClose={() => setInfoOpen(false)} />
     </div>
   )
 }

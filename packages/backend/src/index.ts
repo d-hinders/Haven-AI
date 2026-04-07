@@ -22,6 +22,7 @@ import portfolioRoutes from './routes/portfolio.js'
 import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
 import contactRoutes from './routes/contacts.js'
+import paymentRoutes from './routes/payments.js'
 
 const app = Fastify({ logger: true })
 
@@ -47,6 +48,7 @@ await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(contactRoutes, { prefix: '/contacts' })
+await app.register(paymentRoutes, { prefix: '/payments' })
 
 // --- Start ---
 const start = async () => {

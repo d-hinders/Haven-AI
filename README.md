@@ -23,6 +23,7 @@ This is a TypeScript monorepo:
 |---|---|
 | `packages/backend` | Fastify API — auth, agents, payments, Safe integration |
 | `packages/frontend` | Next.js dashboard — wallet connect, Safe deploy, agent management |
+| `packages/sdk` | `@haven-fi/sdk` — TypeScript SDK for agent payment integration |
 
 ## Prerequisites
 
@@ -105,6 +106,64 @@ npm run dev
 5. Add spending limits (token, amount, reset period)
 6. Click **Deploy Agent** and confirm in your wallet
 7. Save the **API key** and **delegate private key** from the success screen
+
+## SDK — Agent Integration
+
+The `@haven-fi/sdk` package wraps the 3-step payment API into a single function call. This is what developers use to give their agents payment capabilities.
+
+### Install
+
+```bash
+npm install @haven-fi/sdk
+```
+
+### One-liner payment
+
+```typescript
+import { HavenClient } from '@haven-fi/sdk'
+
+const haven = new HavenClient({
+  apiKey: 'sk_agent_xxx',          // from Haven dashboard
+  delegateKey: '0x...',             // agent's delegate private key
+  baseUrl: 'http://localhost:3001',
+})
+
+const result = await haven.pay({
+  token: 'EURe',
+  amount: '5.00',
+  to: '0xrecipient...',
+})
+
+console.log(result.txHash)      // 0x...
+console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x...
+```
+
+### AI agent integration
+
+The SDK ships with pre-built tool definitions for Claude and OpenAI:
+
+```typescript
+import { HavenClient, havenTools } from '@haven-fi/sdk'
+import Anthropic from '@anthropic-ai/sdk'
+
+const haven = new HavenClient({ apiKey, delegateKey })
+const anthropic = new Anthropic()
+
+const response = await anthropic.messages.create({
+  model: 'claude-sonnet-4-20250514',
+  tools: havenTools.claude(),  // ready-made tool schemas
+  messages: [{ role: 'user', content: 'Pay 5 EURe to 0xabc for API access' }],
+})
+
+// Handle tool calls — one line per tool
+for (const block of response.content) {
+  if (block.type === 'tool_use') {
+    const result = await haven.executeTool(block.name, block.input)
+  }
+}
+```
+
+See [`packages/sdk/README.md`](packages/sdk/README.md) for the full API reference (step-by-step flow, error handling, configuration options).
 
 ## Testing the Payment Flow
 
@@ -320,6 +379,15 @@ Haven/
 │   │   └── scripts/
 │   │       ├── test-payment-flow.ts    # Payment simulation script
 │   │       └── agent-payment-demo.ts   # Claude AI agent demo
+│   ├── sdk/
+│   │   ├── src/
+│   │   │   ├── index.ts           # Public exports
+│   │   │   ├── client.ts          # HavenClient — .pay(), .sign(), .executeTool()
+│   │   │   ├── signer.ts          # Raw ECDSA signing (AllowanceModule-compatible)
+│   │   │   ├── types.ts           # TypeScript types + error classes
+│   │   │   └── tools.ts           # Pre-built tool defs for Claude & OpenAI
+│   │   ├── package.json           # @haven-fi/sdk (publishable to npm)
+│   │   └── README.md              # SDK documentation
 │   └── frontend/
 │       └── src/
 │           ├── app/                    # Next.js pages

@@ -5,6 +5,8 @@
  * Claude receives a task, reasons about it, and autonomously calls
  * Haven's payment API when it decides a payment is needed.
  *
+ * This demo uses @haven-fi/sdk to handle the entire payment flow.
+ *
  * Usage:
  *   cd packages/backend
  *   npm run agent:demo
@@ -21,7 +23,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import { ethers } from 'ethers'
+import { HavenClient, havenTools } from '@haven-fi/sdk'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -80,156 +82,13 @@ function preflight(): void {
   }
 }
 
-// ── Haven Payment Functions ───────────────────────────────────────
+// ── Haven Client (SDK) ───────────────────────────────────────────
 
-async function havenApi<T>(
-  method: 'GET' | 'POST',
-  path: string,
-  body?: Record<string, unknown>,
-): Promise<{ ok: boolean; status: number; data: T }> {
-  const res = await fetch(`${CONFIG.havenUrl}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${CONFIG.agentApiKey}`,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  const data = await res.json() as T
-  return { ok: res.ok, status: res.status, data }
-}
-
-function signHash(privateKey: string, hash: string): string {
-  const signingKey = new ethers.SigningKey(privateKey)
-  const sig = signingKey.sign(hash)
-  return sig.serialized
-}
-
-interface PaymentResult {
-  success: boolean
-  payment_id?: string
-  tx_hash?: string
-  status?: string
-  token?: string
-  amount?: string
-  to?: string
-  error?: string
-  gnosisscan_url?: string
-}
-
-async function executePayment(
-  token: string,
-  amount: string,
-  to: string,
-): Promise<PaymentResult> {
-  // Step 1: Create payment intent
-  const createRes = await havenApi<{
-    payment_id?: string
-    sign_data?: { hash: string }
-    error?: string
-  }>('POST', '/payments', { token, amount, to })
-
-  if (!createRes.ok || !createRes.data.payment_id) {
-    return {
-      success: false,
-      error: createRes.data.error ?? `Failed to create payment intent (HTTP ${createRes.status})`,
-    }
-  }
-
-  const { payment_id, sign_data } = createRes.data as {
-    payment_id: string
-    sign_data: { hash: string }
-  }
-
-  // Step 2: Sign
-  const signature = signHash(CONFIG.delegateKey, sign_data.hash)
-
-  // Step 3: Submit signature
-  const signRes = await havenApi<{
-    status?: string
-    tx_hash?: string
-    error?: string
-    details?: string
-  }>('POST', `/payments/${payment_id}/sign`, { signature })
-
-  if (!signRes.ok) {
-    return {
-      success: false,
-      payment_id,
-      error: signRes.data.error ?? signRes.data.details ?? `Submission failed (HTTP ${signRes.status})`,
-    }
-  }
-
-  // Step 4: Poll for confirmation
-  const deadline = Date.now() + 90_000
-  while (Date.now() < deadline) {
-    const poll = await havenApi<{
-      status: string
-      tx_hash?: string
-      error_message?: string
-    }>('GET', `/payments/${payment_id}`)
-
-    if (poll.ok) {
-      const d = poll.data
-      if (d.status === 'confirmed') {
-        return {
-          success: true,
-          payment_id,
-          tx_hash: d.tx_hash,
-          status: 'confirmed',
-          token,
-          amount,
-          to,
-          gnosisscan_url: d.tx_hash ? `https://gnosisscan.io/tx/${d.tx_hash}` : undefined,
-        }
-      }
-      if (d.status === 'failed') {
-        return {
-          success: false,
-          payment_id,
-          error: d.error_message ?? 'Transaction failed on-chain',
-        }
-      }
-    }
-    await new Promise((r) => setTimeout(r, 3000))
-  }
-
-  return { success: false, payment_id, error: 'Timed out waiting for confirmation' }
-}
-
-// ── Tool Definitions ──────────────────────────────────────────────
-
-const tools: Anthropic.Tool[] = [
-  {
-    name: 'make_payment',
-    description:
-      'Send a payment from the Haven-managed Safe wallet. ' +
-      'The payment will be validated against the agent\'s on-chain spending policy. ' +
-      'Supported tokens: EURe, USDC.e, xDAI. All on Gnosis Chain.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        token: {
-          type: 'string',
-          description: 'Token to send. One of: EURe, USDC.e, xDAI',
-        },
-        amount: {
-          type: 'string',
-          description: 'Amount to send as a decimal string, e.g. "0.01"',
-        },
-        to: {
-          type: 'string',
-          description: 'Recipient Ethereum address (0x...)',
-        },
-        reason: {
-          type: 'string',
-          description: 'Brief reason for this payment (for audit trail)',
-        },
-      },
-      required: ['token', 'amount', 'to', 'reason'],
-    },
-  },
-]
+const haven = new HavenClient({
+  apiKey: CONFIG.agentApiKey,
+  delegateKey: CONFIG.delegateKey,
+  baseUrl: CONFIG.havenUrl,
+})
 
 // ── Agent Loop ────────────────────────────────────────────────────
 
@@ -246,6 +105,9 @@ async function runAgent(taskPrompt: string): Promise<void> {
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: taskPrompt },
   ]
+
+  // Use pre-built tool definitions from the SDK
+  const tools = havenTools.claude() as Anthropic.Tool[]
 
   console.log(`\n${c.dim}Claude is thinking...${c.reset}\n`)
 
@@ -269,28 +131,23 @@ async function runAgent(taskPrompt: string): Promise<void> {
 
       if (block.type === 'tool_use') {
         hasToolUse = true
-        const input = block.input as {
-          token: string
-          amount: string
-          to: string
-          reason: string
+        const input = block.input as Record<string, unknown>
+
+        console.log(`${c.magenta}${c.bold}  → Tool call:${c.reset} ${block.name}`)
+        for (const [key, val] of Object.entries(input)) {
+          console.log(`${c.dim}    ${key.padEnd(8)} ${val}${c.reset}`)
         }
+        console.log()
 
-        console.log(`${c.magenta}${c.bold}  → Tool call:${c.reset} make_payment`)
-        console.log(`${c.dim}    Token:  ${input.token}`)
-        console.log(`    Amount: ${input.amount}`)
-        console.log(`    To:     ${input.to}`)
-        console.log(`    Reason: ${input.reason}${c.reset}\n`)
-
-        // Execute the payment
-        console.log(`${c.dim}  Executing payment via Haven...${c.reset}`)
-        const result = await executePayment(input.token, input.amount, input.to)
+        // Execute using SDK — one line handles the entire 3-step flow
+        console.log(`${c.dim}  Executing via Haven SDK...${c.reset}`)
+        const result = await haven.executeTool(block.name, input)
 
         if (result.success) {
           console.log(`${c.green}${c.bold}  ✓ Payment confirmed!${c.reset}`)
           console.log(`${c.dim}    Tx: ${result.tx_hash}${c.reset}`)
-          if (result.gnosisscan_url) {
-            console.log(`${c.blue}    → ${result.gnosisscan_url}${c.reset}`)
+          if (result.explorer_url) {
+            console.log(`${c.blue}    → ${result.explorer_url}${c.reset}`)
           }
           console.log()
         } else {
@@ -322,14 +179,13 @@ async function runAgent(taskPrompt: string): Promise<void> {
 // ── Main ──────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log(`\n${c.bold}${c.white}Haven Agent Demo${c.reset}`)
+  console.log(`\n${c.bold}${c.white}Haven Agent Demo${c.reset} ${c.dim}(powered by @haven-fi/sdk)${c.reset}`)
   console.log('  ' + '─'.repeat(40))
 
   preflight()
 
-  const wallet = new ethers.Wallet(CONFIG.delegateKey)
   console.log(`${c.dim}  Agent API:   ${CONFIG.agentApiKey.slice(0, 20)}...`)
-  console.log(`  Delegate:    ${wallet.address}`)
+  console.log(`  Delegate:    ${haven.delegateAddress}`)
   console.log(`  Haven:       ${CONFIG.havenUrl}${c.reset}`)
 
   // Task from CLI args or default demo

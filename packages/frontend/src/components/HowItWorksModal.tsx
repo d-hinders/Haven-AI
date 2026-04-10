@@ -151,9 +151,11 @@ const PAGES: InfoPage[] = [
               <span className="text-xs text-zinc-200 font-medium">Agent delegate key (EOA)</span>
             </div>
             <p className="text-[11px] text-zinc-600 leading-relaxed">
-              A separate EOA wallet you create outside Haven. You paste the <span className="text-zinc-400">public address</span> into
-              Haven during agent setup, and give the <span className="text-zinc-400">private key</span> to your agent
-              (via env vars, config file, etc.). Haven only ever sees the public address.
+              When creating an agent, you can <span className="text-zinc-400">generate a new keypair</span> directly
+              in the browser, or <span className="text-zinc-400">provide an existing wallet address</span>.
+              Either way, the private key is shown once for you to save and give to your agent
+              (via env vars, secret manager, etc.). Haven only stores the public address &mdash;
+              the private key never leaves your browser.
             </p>
           </div>
 

@@ -16,6 +16,7 @@ import {
 } from '@/lib/allowance-module'
 import { getSafeNonce, signSafeTx, executeSafeTx, proposeSafeTx, TOKENS } from '@/lib/safe-tx'
 import CreateAgentModal from './CreateAgentModal'
+import EditAgentModal from './EditAgentModal'
 import HowItWorksModal from './HowItWorksModal'
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -164,6 +165,7 @@ function AgentCard({
   agent,
   onChainAllowances,
   onChainLoading,
+  onEdit,
   onRevoke,
   onDelete,
   revoking,
@@ -171,6 +173,7 @@ function AgentCard({
   agent: Agent
   onChainAllowances: AllowanceInfo[] | null
   onChainLoading: boolean
+  onEdit: (agent: Agent) => void
   onRevoke: (agent: Agent) => void
   onDelete: (agent: Agent) => void
   revoking: boolean
@@ -326,6 +329,13 @@ function AgentCard({
       {/* Actions */}
       {isActive && (
         <div className="flex items-center gap-2 pt-3 border-t border-white/[0.05]">
+          <button
+            onClick={() => onEdit(agent)}
+            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+          >
+            Edit
+          </button>
+          <span className="text-zinc-800">|</span>
           {confirmRevoke ? (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-zinc-500">Revoke on-chain?</span>
@@ -465,6 +475,7 @@ export default function AgentPanel() {
   const { data: walletClient } = useWalletClient({ chainId: gnosis.id })
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [howItWorksOpen, setHowItWorksOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
 
@@ -708,6 +719,7 @@ export default function AgentPanel() {
                 agent={agent}
                 onChainAllowances={chainData}
                 onChainLoading={onChainLoading}
+                onEdit={setEditAgent}
                 onRevoke={handleRevoke}
                 onDelete={handleDelete}
                 revoking={revoking}
@@ -739,6 +751,25 @@ export default function AgentPanel() {
           setTimeout(refetchOnChain, 2000)
         }}
       />
+
+      {/* Edit agent modal */}
+      {editAgent && (
+        <EditAgentModal
+          open={!!editAgent}
+          onClose={() => setEditAgent(null)}
+          agent={editAgent}
+          safeAddress={safeAddress}
+          safeDetails={safeDetails}
+          existingOnChainAllowances={
+            onChainData.get(editAgent.delegate_address?.toLowerCase() ?? '')?.allowances ?? null
+          }
+          onUpdated={() => {
+            refetch()
+            setEditAgent(null)
+            setTimeout(refetchOnChain, 2000)
+          }}
+        />
+      )}
 
       {/* How it works modal */}
       <HowItWorksModal

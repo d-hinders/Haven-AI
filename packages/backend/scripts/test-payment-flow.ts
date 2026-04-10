@@ -30,9 +30,16 @@ import * as fs from 'fs'
 
 // ── Load .env ─────────────────────────────────────────────────────
 
-const envPath = path.resolve(process.cwd(), '.env')
-if (fs.existsSync(envPath)) {
-  dotenv.config({ path: envPath })
+const envCandidates = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), '../..', '.env'),
+  path.resolve(import.meta.dirname, '../../..', '.env'),
+]
+for (const p of envCandidates) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p })
+    break
+  }
 }
 
 // ── Config ────────────────────────────────────────────────────────

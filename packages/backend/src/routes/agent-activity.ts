@@ -11,6 +11,8 @@ interface PaymentRow {
   to_address: string
   status: string
   tx_hash: string | null
+  source: string | null
+  x402_resource_url: string | null
   created_at: string
   confirmed_at: string | null
 }
@@ -63,7 +65,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Fetch payments
     const payments = await pool.query<PaymentRow>(
-      `SELECT id, token_symbol, amount_human, to_address, status, tx_hash, created_at, confirmed_at
+      `SELECT id, token_symbol, amount_human, to_address, status, tx_hash, source, x402_resource_url, created_at, confirmed_at
        FROM payment_intents
        WHERE agent_id = $1
        ORDER BY created_at DESC
@@ -91,6 +93,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         to: p.to_address,
         status: p.status,
         tx_hash: p.tx_hash,
+        source: p.source ?? 'direct',
+        x402_resource_url: p.x402_resource_url,
         explorer_url: p.tx_hash ? `https://gnosisscan.io/tx/${p.tx_hash}` : null,
         created_at: p.created_at,
       })),
@@ -103,6 +107,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         reason: a.reason,
         status: a.status,
         tx_hash: a.tx_hash,
+        source: 'direct' as const,
+        x402_resource_url: null,
         explorer_url: a.tx_hash ? `https://gnosisscan.io/tx/${a.tx_hash}` : null,
         created_at: a.created_at,
       })),
@@ -212,7 +218,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Recent payments across all agents
     const payments = await pool.query<PaymentRow & { agent_id: string }>(
-      `SELECT id, agent_id, token_symbol, amount_human, to_address, status, tx_hash, created_at, confirmed_at
+      `SELECT id, agent_id, token_symbol, amount_human, to_address, status, tx_hash, source, x402_resource_url, created_at, confirmed_at
        FROM payment_intents
        WHERE agent_id = ANY($1)
        ORDER BY created_at DESC
@@ -242,6 +248,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         to: p.to_address,
         status: p.status,
         tx_hash: p.tx_hash,
+        source: p.source ?? 'direct',
+        x402_resource_url: p.x402_resource_url,
         explorer_url: p.tx_hash ? `https://gnosisscan.io/tx/${p.tx_hash}` : null,
         created_at: p.created_at,
       })),
@@ -256,6 +264,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         reason: a.reason,
         status: a.status,
         tx_hash: a.tx_hash,
+        source: 'direct' as const,
+        x402_resource_url: null,
         explorer_url: a.tx_hash ? `https://gnosisscan.io/tx/${a.tx_hash}` : null,
         created_at: a.created_at,
       })),

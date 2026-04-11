@@ -137,5 +137,11 @@ export async function runMigrations(): Promise<void> {
     );
 
     CREATE INDEX IF NOT EXISTS idx_agent_allowed_recipients_agent_id ON agent_allowed_recipients(agent_id);
+
+    -- x402 protocol support
+    ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'direct';
+    ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS x402_resource_url TEXT;
+    ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS x402_category VARCHAR(50);
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS max_x402_per_hour INTEGER DEFAULT 100;
   `)
 }

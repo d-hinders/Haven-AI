@@ -14,6 +14,8 @@ export interface ActivityItem {
   reason?: string | null
   status: string
   tx_hash: string | null
+  source?: string
+  x402_resource_url?: string | null
   explorer_url: string | null
   created_at: string
 }

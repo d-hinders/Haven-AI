@@ -9,12 +9,20 @@ import type {
   RawCreateResponse,
   RawSignResponse,
   RawStatusResponse,
+  X402PaymentRequired,
+  X402Receipt,
+  RawX402AuthorizeResponse,
 } from './types.js'
 import {
   HavenApiError,
   HavenSigningError,
   HavenTimeoutError,
 } from './types.js'
+import {
+  parsePaymentRequired,
+  selectPaymentOption,
+  encodePaymentProof,
+} from './x402.js'
 
 const DEFAULT_BASE_URL = 'http://localhost:3001'
 const DEFAULT_REQUEST_TIMEOUT = 30_000
@@ -169,6 +177,133 @@ export class HavenClient {
     throw new HavenTimeoutError(paymentId)
   }
 
+  // ── x402 Protocol Support ────────────────────────────────────────
+
+  /**
+   * Authorize an x402 payment.
+   *
+   * Takes the parsed PaymentRequired from a 402 response, selects a
+   * compatible payment option, signs and executes the payment through Haven.
+   *
+   * Requires `delegateKey` to be set in the client config.
+   */
+  async authorizeX402(paymentRequired: X402PaymentRequired): Promise<X402Receipt> {
+    if (!this.delegateKey) {
+      throw new HavenSigningError(
+        'delegateKey is required for x402 payments. Pass it in the HavenClient config.',
+      )
+    }
+
+    // 1. Select best payment option
+    const option = selectPaymentOption(paymentRequired.accepts)
+    if (!option) {
+      throw new HavenApiError(
+        'No compatible payment option found in x402 requirements. ' +
+        'Haven currently supports Gnosis Chain (eip155:100) with xDAI, EURe, and USDC.e.',
+        400,
+      )
+    }
+
+    // 2. Create intent via x402/authorize (without signature first to get hash)
+    const raw = await this.post<RawX402AuthorizeResponse>('/x402', {
+      url: paymentRequired.resource.url,
+      payTo: option.payTo,
+      amount: option.amount,
+      asset: option.asset,
+      network: option.network,
+      description: paymentRequired.resource.description,
+    })
+
+    // If the backend already executed (shouldn't happen without sig), return
+    if (raw.success && raw.tx_hash) {
+      return {
+        success: true,
+        paymentId: raw.payment_id,
+        txHash: raw.tx_hash,
+        token: raw.token ?? '',
+        amount: raw.amount ?? '',
+        to: raw.to ?? '',
+        resourceUrl: paymentRequired.resource.url,
+        explorerUrl: raw.explorer_url ?? `https://gnosisscan.io/tx/${raw.tx_hash}`,
+      }
+    }
+
+    // 3. Sign the hash
+    if (!raw.sign_data?.hash) {
+      throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
+    }
+    const sig = signHash(this.delegateKey, raw.sign_data.hash)
+
+    // 4. Submit signature (reuse existing payments/:id/sign endpoint)
+    const execResult = await this.post<RawSignResponse>(
+      `/payments/${raw.payment_id}/sign`,
+      { signature: sig },
+    )
+
+    if (execResult.status !== 'confirmed') {
+      throw new HavenApiError(
+        execResult.error ?? `x402 payment ${execResult.status}`,
+        502,
+        execResult,
+      )
+    }
+
+    return {
+      success: true,
+      paymentId: raw.payment_id,
+      txHash: execResult.tx_hash ?? '',
+      token: execResult.token ?? raw.token ?? '',
+      amount: execResult.amount ?? raw.amount ?? '',
+      to: execResult.to ?? raw.to ?? '',
+      resourceUrl: paymentRequired.resource.url,
+      explorerUrl: execResult.tx_hash
+        ? `https://gnosisscan.io/tx/${execResult.tx_hash}`
+        : '',
+    }
+  }
+
+  /**
+   * Fetch wrapper that automatically handles HTTP 402 responses.
+   *
+   * Works like the standard `fetch()` but intercepts 402 responses,
+   * pays via x402 through Haven, and retries the request.
+   *
+   * ```ts
+   * const response = await haven.fetch('https://paid-api.com/data')
+   * const data = await response.json()
+   * ```
+   *
+   * Requires `delegateKey` to be set in the client config.
+   */
+  async fetch(url: string, init?: RequestInit): Promise<Response> {
+    // 1. Make the original request
+    const response = await globalThis.fetch(url, init)
+
+    // 2. Not a 402 — return as-is
+    if (response.status !== 402) return response
+
+    // 3. Parse x402 payment requirements
+    let paymentRequired: X402PaymentRequired
+    try {
+      paymentRequired = parsePaymentRequired(response)
+    } catch {
+      // Not an x402 402 — return original response
+      return response
+    }
+
+    // 4. Pay through Haven
+    const receipt = await this.authorizeX402(paymentRequired)
+
+    // 5. Retry with payment proof
+    const retryHeaders = new Headers(init?.headers)
+    retryHeaders.set('PAYMENT-SIGNATURE', encodePaymentProof(receipt))
+
+    return globalThis.fetch(url, {
+      ...init,
+      headers: retryHeaders,
+    })
+  }
+
   // ── Tool Execution (for agent frameworks) ────────────────────────
 
   /**
@@ -206,6 +341,49 @@ export class HavenClient {
           to: result.to,
           explorer_url: result.explorerUrl,
           error: result.errorMessage,
+        }
+      } catch (err) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        }
+      }
+    }
+
+    if (toolName === 'authorize_x402_payment') {
+      const { url, payTo, amount, asset, network, description } = input as {
+        url: string
+        payTo: string
+        amount: string
+        asset: string
+        network: string
+        description?: string
+      }
+
+      try {
+        const receipt = await this.authorizeX402({
+          x402Version: 2,
+          resource: { url, description },
+          accepts: [
+            {
+              scheme: 'exact',
+              network,
+              amount,
+              asset,
+              payTo,
+              maxTimeoutSeconds: 30,
+            },
+          ],
+        })
+        return {
+          success: true,
+          payment_id: receipt.paymentId,
+          tx_hash: receipt.txHash,
+          token: receipt.token,
+          amount: receipt.amount,
+          to: receipt.to,
+          resource_url: receipt.resourceUrl,
+          explorer_url: receipt.explorerUrl,
         }
       } catch (err) {
         return {

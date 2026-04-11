@@ -25,6 +25,7 @@ import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
 import approvalRoutes from './routes/approvals.js'
 import agentActivityRoutes from './routes/agent-activity.js'
+import x402Routes from './routes/x402.js'
 
 const app = Fastify({ logger: true })
 
@@ -53,6 +54,7 @@ await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })
 await app.register(approvalRoutes, { prefix: '/approvals' })
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
+await app.register(x402Routes, { prefix: '/x402' })
 
 // --- Start ---
 const start = async () => {

@@ -53,6 +53,37 @@ const getPaymentStatusSchema = {
   required: ['payment_id'] as const,
 }
 
+const authorizeX402Schema = {
+  type: 'object' as const,
+  properties: {
+    url: {
+      type: 'string' as const,
+      description: 'The URL that returned HTTP 402',
+    },
+    payTo: {
+      type: 'string' as const,
+      description: 'Payment recipient address from the 402 response',
+    },
+    amount: {
+      type: 'string' as const,
+      description: 'Payment amount in atomic units (e.g. "1000000" for 1 USDC)',
+    },
+    asset: {
+      type: 'string' as const,
+      description: 'Token contract address from the 402 response',
+    },
+    network: {
+      type: 'string' as const,
+      description: 'CAIP-2 chain ID (e.g. "eip155:100" for Gnosis Chain)',
+    },
+    description: {
+      type: 'string' as const,
+      description: 'Description of the resource being paid for',
+    },
+  },
+  required: ['url', 'payTo', 'amount', 'asset', 'network'] as const,
+}
+
 const MAKE_PAYMENT_DESCRIPTION =
   'Send a payment from the Haven-managed Safe wallet. ' +
   "The payment will be validated against the agent's on-chain spending policy. " +
@@ -61,6 +92,11 @@ const MAKE_PAYMENT_DESCRIPTION =
 const GET_STATUS_DESCRIPTION =
   'Check the status of a previously initiated payment. ' +
   'Returns the current status, transaction hash (if confirmed), and payment details.'
+
+const AUTHORIZE_X402_DESCRIPTION =
+  'Authorize payment for an HTTP 402 (Payment Required) response. ' +
+  'When a paid API returns 402 with x402 payment requirements, use this tool to pay and get access. ' +
+  'Haven evaluates the payment against policy and executes from the Safe wallet.'
 
 // ── Claude (Anthropic) format ────────────────────────────────────
 
@@ -85,6 +121,11 @@ function claudeTools(): ClaudeTool[] {
       name: 'get_payment_status',
       description: GET_STATUS_DESCRIPTION,
       input_schema: getPaymentStatusSchema,
+    },
+    {
+      name: 'authorize_x402_payment',
+      description: AUTHORIZE_X402_DESCRIPTION,
+      input_schema: authorizeX402Schema,
     },
   ]
 }
@@ -120,6 +161,14 @@ function openaiTools(): OpenAITool[] {
         name: 'get_payment_status',
         description: GET_STATUS_DESCRIPTION,
         parameters: getPaymentStatusSchema,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'authorize_x402_payment',
+        description: AUTHORIZE_X402_DESCRIPTION,
+        parameters: authorizeX402Schema,
       },
     },
   ]

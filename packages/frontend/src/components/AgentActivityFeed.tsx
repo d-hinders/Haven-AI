@@ -169,9 +169,20 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
                             approval
                           </span>
                         )}
+                        {item.source === 'x402' && (
+                          <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/10 text-violet-400">
+                            x402
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1 text-[10px] text-zinc-700">
                         <span>to {truncate(item.to)}</span>
+                        {item.x402_resource_url && (
+                          <>
+                            <span className="text-zinc-800">·</span>
+                            <span className="max-w-[150px] truncate text-violet-400/60">{item.x402_resource_url}</span>
+                          </>
+                        )}
                         {item.reason && (
                           <>
                             <span className="text-zinc-800">·</span>

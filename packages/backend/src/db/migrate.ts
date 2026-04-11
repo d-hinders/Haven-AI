@@ -123,5 +123,19 @@ export async function runMigrations(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_approval_requests_user_status ON approval_requests(user_id, status);
     CREATE INDEX IF NOT EXISTS idx_approval_requests_agent_id ON approval_requests(agent_id);
+
+    -- Recipient allowlists: optional restriction on who agents can pay
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS restrict_recipients BOOLEAN NOT NULL DEFAULT false;
+
+    CREATE TABLE IF NOT EXISTS agent_allowed_recipients (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      agent_id   UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      address    VARCHAR(42) NOT NULL,
+      label      VARCHAR(255),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(agent_id, address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_allowed_recipients_agent_id ON agent_allowed_recipients(agent_id);
   `)
 }

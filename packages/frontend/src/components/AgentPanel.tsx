@@ -281,6 +281,19 @@ function AgentCard({
         </div>
       )}
 
+      {/* Recipient restriction indicator */}
+      {isActive && agent.restrict_recipients && (
+        <div className="mb-4 flex items-center gap-2 px-2.5 py-1.5 bg-indigo-500/5 border border-indigo-500/10 rounded-lg">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-indigo-400 flex-shrink-0">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span className="text-[10px] text-indigo-400">
+            Restricted to {agent.allowed_recipients?.length ?? 0} allowed recipient{(agent.allowed_recipients?.length ?? 0) !== 1 ? 's' : ''}
+          </span>
+        </div>
+      )}
+
       {/* Allowance bars — on-chain primary */}
       {isActive && (
         <div className="space-y-2 mb-4">

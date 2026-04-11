@@ -9,6 +9,7 @@ import {
   RESET_PERIODS,
   type AllowanceInfo,
 } from '@/lib/allowance-module'
+import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 import {
   getSafeNonce,
   signSafeTx,
@@ -65,6 +66,14 @@ export default function EditAgentModal({
   const [resetTimeMin, setResetTimeMin] = useState(1440)
   const [approvalThreshold, setApprovalThreshold] = useState('')
 
+  // Recipient allowlist state
+  const [restrictRecipients, setRestrictRecipients] = useState(agent.restrict_recipients ?? false)
+  const [allowedRecipients, setAllowedRecipients] = useState<RecipientEntry[]>(
+    (agent.allowed_recipients ?? []).map((r) => ({ address: r.address, label: r.label ?? undefined })),
+  )
+  const [recipientsSaving, setRecipientsSaving] = useState(false)
+  const [recipientsSaved, setRecipientsSaved] = useState(false)
+
   // Execution
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('signing')
   const [execError, setExecError] = useState<string | null>(null)
@@ -105,6 +114,12 @@ export default function EditAgentModal({
     setAmount('')
     setResetTimeMin(1440)
     setApprovalThreshold('')
+    setRestrictRecipients(agent.restrict_recipients ?? false)
+    setAllowedRecipients(
+      (agent.allowed_recipients ?? []).map((r) => ({ address: r.address, label: r.label ?? undefined })),
+    )
+    setRecipientsSaving(false)
+    setRecipientsSaved(false)
     setExecStatus('signing')
     setExecError(null)
     setTxHash(null)
@@ -381,6 +396,50 @@ export default function EditAgentModal({
                   <p className="text-[10px] text-zinc-700 mt-1">
                     Payments above this amount require your approval in the dashboard.
                     Leave empty for no approval requirement.
+                  </p>
+                </div>
+              </div>
+
+              {/* Recipient allowlist */}
+              <div className="p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
+                <RecipientAllowlistEditor
+                  enabled={restrictRecipients}
+                  onToggle={setRestrictRecipients}
+                  recipients={allowedRecipients}
+                  onChange={setAllowedRecipients}
+                />
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      setRecipientsSaving(true)
+                      setRecipientsSaved(false)
+                      try {
+                        await fetch(`/api/agents/${agent.id}`, {
+                          method: 'PUT',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${localStorage.getItem('haven_token')}`,
+                          },
+                          body: JSON.stringify({
+                            restrict_recipients: restrictRecipients,
+                            allowed_recipients: restrictRecipients ? allowedRecipients : [],
+                          }),
+                        })
+                        setRecipientsSaved(true)
+                        setTimeout(() => setRecipientsSaved(false), 2000)
+                      } catch {
+                        // ignore
+                      } finally {
+                        setRecipientsSaving(false)
+                      }
+                    }}
+                    disabled={recipientsSaving}
+                    className="text-xs font-medium text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors"
+                  >
+                    {recipientsSaving ? 'Saving...' : recipientsSaved ? 'Saved!' : 'Save recipients'}
+                  </button>
+                  <p className="text-[10px] text-zinc-700">
+                    Recipients are saved to Haven (no on-chain tx needed)
                   </p>
                 </div>
               </div>

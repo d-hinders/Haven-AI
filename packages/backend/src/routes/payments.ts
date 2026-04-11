@@ -131,6 +131,24 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       })
     }
 
+    // 4a. Recipient allowlist check
+    const agentRestriction = await pool.query<{ restrict_recipients: boolean }>(
+      `SELECT restrict_recipients FROM agents WHERE id = $1`,
+      [agent.id],
+    )
+    if (agentRestriction.rows[0]?.restrict_recipients) {
+      const recipientCheck = await pool.query(
+        `SELECT id FROM agent_allowed_recipients
+         WHERE agent_id = $1 AND LOWER(address) = LOWER($2)`,
+        [agent.id, to],
+      )
+      if (recipientCheck.rows.length === 0) {
+        return reply.code(403).send({
+          error: `Recipient ${to} is not in the allowed recipients list for this agent`,
+        })
+      }
+    }
+
     const approvalThreshold = dbAllowance.rows[0].approval_threshold
       ? BigInt(dbAllowance.rows[0].approval_threshold)
       : null

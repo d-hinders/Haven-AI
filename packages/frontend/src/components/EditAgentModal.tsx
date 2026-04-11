@@ -63,6 +63,7 @@ export default function EditAgentModal({
   const [selectedToken, setSelectedToken] = useState<string>('EURe')
   const [amount, setAmount] = useState('')
   const [resetTimeMin, setResetTimeMin] = useState(1440)
+  const [approvalThreshold, setApprovalThreshold] = useState('')
 
   // Execution
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('signing')
@@ -103,6 +104,7 @@ export default function EditAgentModal({
     setSelectedToken('EURe')
     setAmount('')
     setResetTimeMin(1440)
+    setApprovalThreshold('')
     setExecStatus('signing')
     setExecError(null)
     setTxHash(null)
@@ -216,6 +218,9 @@ export default function EditAgentModal({
           token_symbol: selectedTokenConfig.symbol,
           allowance_amount: rawAmount.toString(),
           reset_period_min: resetTimeMin,
+          approval_threshold: approvalThreshold && Number(approvalThreshold) > 0
+            ? parseUnits(approvalThreshold, selectedTokenConfig.decimals).toString()
+            : null,
         }),
       })
 
@@ -355,6 +360,29 @@ export default function EditAgentModal({
                     This will replace the existing {selectedToken} allowance on-chain
                   </p>
                 )}
+
+                {/* Approval threshold */}
+                <div className="pt-2 border-t border-white/[0.06]">
+                  <label className="block text-[11px] text-zinc-500 mb-1.5">
+                    Approval threshold (optional)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={approvalThreshold}
+                      onChange={(e) => setApprovalThreshold(e.target.value)}
+                      placeholder={`e.g. 10`}
+                      className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
+                    />
+                    <span className="text-xs text-zinc-600">{selectedToken}</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-700 mt-1">
+                    Payments above this amount require your approval in the dashboard.
+                    Leave empty for no approval requirement.
+                  </p>
+                </div>
               </div>
 
               <div className="flex gap-3">

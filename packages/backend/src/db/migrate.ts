@@ -97,5 +97,31 @@ export async function runMigrations(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_payment_intents_agent_id ON payment_intents(agent_id);
     CREATE INDEX IF NOT EXISTS idx_payment_intents_status ON payment_intents(status);
+    CREATE INDEX IF NOT EXISTS idx_payment_intents_agent_created ON payment_intents(agent_id, created_at DESC);
+
+    -- Approval threshold per allowance (amount above which human approval is needed)
+    ALTER TABLE agent_allowances ADD COLUMN IF NOT EXISTS approval_threshold VARCHAR(78);
+
+    -- Approval requests: queued payments awaiting human approval
+    CREATE TABLE IF NOT EXISTS approval_requests (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      agent_id         UUID NOT NULL REFERENCES agents(id),
+      user_id          UUID NOT NULL REFERENCES users(id),
+      safe_address     VARCHAR(42) NOT NULL,
+      token_symbol     VARCHAR(20) NOT NULL,
+      token_address    VARCHAR(42) NOT NULL,
+      to_address       VARCHAR(42) NOT NULL,
+      amount_raw       VARCHAR(78) NOT NULL,
+      amount_human     VARCHAR(78) NOT NULL,
+      reason           TEXT,
+      status           VARCHAR(20) NOT NULL DEFAULT 'pending',
+      tx_hash          VARCHAR(66),
+      reviewed_at      TIMESTAMPTZ,
+      created_at       TIMESTAMPTZ DEFAULT NOW(),
+      expires_at       TIMESTAMPTZ NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_approval_requests_user_status ON approval_requests(user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_approval_requests_agent_id ON approval_requests(agent_id);
   `)
 }

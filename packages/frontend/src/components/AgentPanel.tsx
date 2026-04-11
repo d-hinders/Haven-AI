@@ -18,6 +18,9 @@ import { getSafeNonce, signSafeTx, executeSafeTx, proposeSafeTx, TOKENS } from '
 import CreateAgentModal from './CreateAgentModal'
 import EditAgentModal from './EditAgentModal'
 import HowItWorksModal from './HowItWorksModal'
+import ApprovalQueue from './ApprovalQueue'
+import AgentActivityFeed from './AgentActivityFeed'
+import { useApprovals } from '@/hooks/useApprovals'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -166,6 +169,7 @@ function AgentCard({
   onChainAllowances,
   onChainLoading,
   onEdit,
+  onViewActivity,
   onRevoke,
   onDelete,
   revoking,
@@ -174,6 +178,7 @@ function AgentCard({
   onChainAllowances: AllowanceInfo[] | null
   onChainLoading: boolean
   onEdit: (agent: Agent) => void
+  onViewActivity: (agent: Agent) => void
   onRevoke: (agent: Agent) => void
   onDelete: (agent: Agent) => void
   revoking: boolean
@@ -330,6 +335,13 @@ function AgentCard({
       {isActive && (
         <div className="flex items-center gap-2 pt-3 border-t border-white/[0.05]">
           <button
+            onClick={() => onViewActivity(agent)}
+            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+          >
+            Activity
+          </button>
+          <span className="text-zinc-800">|</span>
+          <button
             onClick={() => onEdit(agent)}
             className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
           >
@@ -478,6 +490,11 @@ export default function AgentPanel() {
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [howItWorksOpen, setHowItWorksOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
+  const [activeView, setActiveView] = useState<'agents' | 'approvals' | 'activity'>(
+    'agents',
+  )
+  const [activityAgent, setActivityAgent] = useState<Agent | null>(null)
+  const { pendingCount: pendingApprovals } = useApprovals()
 
   // Collect managed delegate addresses from DB agents
   const managedDelegates = useMemo(
@@ -610,6 +627,11 @@ export default function AgentPanel() {
     }
   }
 
+  function handleViewActivity(agent: Agent) {
+    setActivityAgent(agent)
+    setActiveView('activity')
+  }
+
   // ── Render ─────────────────────────────────────────────
 
   if (!safeAddress) {
@@ -626,17 +648,36 @@ export default function AgentPanel() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <p className="text-xs text-zinc-600">
-            {agents.filter((a) => a.status === 'active').length} active agent
-            {agents.filter((a) => a.status === 'active').length !== 1 ? 's' : ''}
-            {unmanagedDelegates.length > 0 && (
-              <span className="text-amber-500/60 ml-1">
-                + {unmanagedDelegates.length} unmanaged
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => { setActiveView('agents'); setActivityAgent(null) }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeView === 'agents'
+                ? 'bg-white/[0.06] text-zinc-200'
+                : 'text-zinc-600 hover:text-zinc-400'
+            }`}
+          >
+            Agents
+            <span className="ml-1 text-zinc-700">
+              {agents.filter((a) => a.status === 'active').length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveView('approvals')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all relative ${
+              activeView === 'approvals'
+                ? 'bg-white/[0.06] text-zinc-200'
+                : 'text-zinc-600 hover:text-zinc-400'
+            }`}
+          >
+            Approvals
+            {pendingApprovals > 0 && (
+              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400">
+                {pendingApprovals}
               </span>
             )}
-          </p>
+          </button>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -663,8 +704,20 @@ export default function AgentPanel() {
         </div>
       </div>
 
-      {/* Loading */}
-      {loading && agents.length === 0 && (
+      {/* Approvals view */}
+      {activeView === 'approvals' && <ApprovalQueue />}
+
+      {/* Activity view */}
+      {activeView === 'activity' && activityAgent && (
+        <AgentActivityFeed
+          agentId={activityAgent.id}
+          agentName={activityAgent.name}
+          onClose={() => { setActiveView('agents'); setActivityAgent(null) }}
+        />
+      )}
+
+      {/* Agents view */}
+      {activeView === 'agents' && loading && agents.length === 0 && (
         <div className="space-y-3">
           {[0, 1].map((i) => (
             <div
@@ -685,7 +738,7 @@ export default function AgentPanel() {
       )}
 
       {/* Empty state */}
-      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
+      {activeView === 'agents' && !loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
         <div className="flex flex-col items-center justify-center h-64 rounded-xl border border-dashed border-white/[0.06]">
           <div className="w-12 h-12 rounded-xl bg-white/[0.04] flex items-center justify-center mb-3">
             <BotIcon size={24} />
@@ -704,7 +757,7 @@ export default function AgentPanel() {
       )}
 
       {/* Agent list */}
-      {(agents.length > 0 || unmanagedDelegates.length > 0) && (
+      {activeView === 'agents' && (agents.length > 0 || unmanagedDelegates.length > 0) && (
         <div className="space-y-3">
           {/* Managed agents */}
           {agents.map((agent) => {
@@ -720,6 +773,7 @@ export default function AgentPanel() {
                 onChainAllowances={chainData}
                 onChainLoading={onChainLoading}
                 onEdit={setEditAgent}
+                onViewActivity={handleViewActivity}
                 onRevoke={handleRevoke}
                 onDelete={handleDelete}
                 revoking={revoking}

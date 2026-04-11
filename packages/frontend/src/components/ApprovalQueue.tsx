@@ -1,0 +1,386 @@
+'use client'
+
+import { useState } from 'react'
+import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
+import { type Address, hashTypedData } from 'viem'
+import { gnosis } from 'viem/chains'
+import { useAuth } from '@/context/AuthContext'
+import { useApprovals, type ApprovalRequest } from '@/hooks/useApprovals'
+import {
+  getSafeNonce,
+  buildSafeTx,
+  signSafeTx,
+  executeSafeTx,
+  proposeSafeTx,
+  TOKENS,
+  type SendParams,
+} from '@/lib/safe-tx'
+import { useSafeDetails } from '@/hooks/useSafeDetails'
+
+// ── Helpers ──────────────────────────────────────────────────────
+
+function truncate(addr: string) {
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+function timeUntil(dateStr: string): string {
+  const diff = new Date(dateStr).getTime() - Date.now()
+  if (diff <= 0) return 'expired'
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  return `${hours}h ${mins % 60}m`
+}
+
+function resolveTokenSymbol(address: string): string {
+  const lower = address.toLowerCase()
+  if (lower === '0x0000000000000000000000000000000000000000') return 'xDAI'
+  for (const [symbol, cfg] of Object.entries(TOKENS)) {
+    if (cfg.address && cfg.address.toLowerCase() === lower) return symbol
+  }
+  return 'Unknown'
+}
+
+// ── Status badge ─────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    pending: 'bg-amber-500/10 text-amber-400',
+    approved: 'bg-blue-500/10 text-blue-400',
+    rejected: 'bg-red-500/10 text-red-400',
+    executed: 'bg-emerald-500/10 text-emerald-400',
+    expired: 'bg-zinc-500/10 text-zinc-500',
+  }
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${styles[status] ?? styles.expired}`}>
+      {status}
+    </span>
+  )
+}
+
+// ── Single approval card ─────────────────────────────────────────
+
+function ApprovalCard({
+  approval,
+  onApproveAndExecute,
+  onReject,
+  executing,
+}: {
+  approval: ApprovalRequest
+  onApproveAndExecute: (approval: ApprovalRequest) => void
+  onReject: (id: string) => void
+  executing: boolean
+}) {
+  const isPending = approval.status === 'pending'
+
+  return (
+    <div className={`p-4 rounded-xl border transition-all ${
+      isPending
+        ? 'bg-amber-500/[0.02] border-amber-500/20 hover:border-amber-500/30'
+        : 'bg-white/[0.02] border-white/[0.06]'
+    }`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+            isPending ? 'bg-amber-500/10 text-amber-400' : 'bg-white/[0.04] text-zinc-500'
+          }`}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v4M12 16h.01" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-zinc-200">{approval.agent_name}</p>
+            <p className="text-[10px] text-zinc-600">{timeAgo(approval.created_at)}</p>
+          </div>
+        </div>
+        <StatusBadge status={approval.status} />
+      </div>
+
+      {/* Payment details */}
+      <div className="bg-black/20 rounded-lg p-3 mb-3 space-y-1.5">
+        <div className="flex justify-between text-xs">
+          <span className="text-zinc-500">Amount</span>
+          <span className="text-zinc-200 font-medium">
+            {approval.amount_human} {approval.token_symbol}
+          </span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-zinc-500">To</span>
+          <span className="text-zinc-400 font-mono">{truncate(approval.to_address)}</span>
+        </div>
+        {approval.reason && (
+          <div className="flex justify-between text-xs">
+            <span className="text-zinc-500">Reason</span>
+            <span className="text-zinc-400 max-w-[200px] truncate">{approval.reason}</span>
+          </div>
+        )}
+        {isPending && (
+          <div className="flex justify-between text-xs">
+            <span className="text-zinc-500">Expires</span>
+            <span className="text-zinc-600">{timeUntil(approval.expires_at)}</span>
+          </div>
+        )}
+        {approval.tx_hash && (
+          <div className="flex justify-between text-xs">
+            <span className="text-zinc-500">Tx</span>
+            <a
+              href={`https://gnosisscan.io/tx/${approval.tx_hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-400 hover:text-indigo-300 font-mono"
+            >
+              {truncate(approval.tx_hash)}
+            </a>
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      {isPending && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onApproveAndExecute(approval)}
+            disabled={executing}
+            className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50"
+          >
+            {executing ? 'Executing...' : 'Approve & Sign'}
+          </button>
+          <button
+            onClick={() => onReject(approval.id)}
+            disabled={executing}
+            className="px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-400 text-xs font-medium hover:bg-white/[0.04] hover:text-red-400 transition-all disabled:opacity-50"
+          >
+            Reject
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main component ───────────────────────────────────────────────
+
+export default function ApprovalQueue() {
+  const { user } = useAuth()
+  const safeAddress = user?.safe_address ?? null
+  const { details: safeDetails } = useSafeDetails(safeAddress)
+  const { approvals, pendingCount, loading, approve, reject, markExecuted, refetch } = useApprovals()
+  const { address: connectedAddress } = useAccount()
+  const publicClient = usePublicClient({ chainId: gnosis.id })
+  const { data: walletClient } = useWalletClient({ chainId: gnosis.id })
+
+  const [executing, setExecuting] = useState(false)
+
+  const pendingApprovals = approvals.filter((a) => a.status === 'pending')
+  const pastApprovals = approvals.filter((a) => a.status !== 'pending')
+
+  async function handleApproveAndExecute(approval: ApprovalRequest) {
+    if (!publicClient || !walletClient || !connectedAddress || !safeAddress || !safeDetails) return
+
+    setExecuting(true)
+    try {
+      // 1. Mark as approved in backend
+      await approve(approval.id)
+
+      // 2. Build and sign Safe transaction
+      const tokenSymbol = resolveTokenSymbol(approval.token_address) as 'xDAI' | 'EURe' | 'USDC.e'
+      const tokenConfig = TOKENS[tokenSymbol]
+      if (!tokenConfig) throw new Error(`Unknown token: ${approval.token_symbol}`)
+
+      const sendParams: SendParams = {
+        token: tokenSymbol,
+        tokenAddress: tokenConfig.address,
+        decimals: tokenConfig.decimals,
+        amount: approval.amount_human,
+        recipient: approval.to_address as Address,
+      }
+
+      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
+      const safeTx = buildSafeTx(sendParams, nonce)
+      const signature = await signSafeTx(
+        walletClient,
+        safeAddress as Address,
+        safeTx,
+        connectedAddress,
+      )
+
+      // 3. Execute or propose
+      const threshold = safeDetails.threshold ?? 1
+      let txHash: string | undefined
+
+      if (threshold <= 1) {
+        const result = await executeSafeTx(
+          walletClient,
+          publicClient,
+          safeAddress as Address,
+          safeTx,
+          signature,
+          connectedAddress,
+        )
+        txHash = result.txHash
+      } else {
+        const safeTxHash = hashTypedData({
+          domain: { chainId: gnosis.id, verifyingContract: safeAddress as Address },
+          types: {
+            SafeTx: [
+              { name: 'to', type: 'address' },
+              { name: 'value', type: 'uint256' },
+              { name: 'data', type: 'bytes' },
+              { name: 'operation', type: 'uint8' },
+              { name: 'safeTxGas', type: 'uint256' },
+              { name: 'baseGas', type: 'uint256' },
+              { name: 'gasPrice', type: 'uint256' },
+              { name: 'gasToken', type: 'address' },
+              { name: 'refundReceiver', type: 'address' },
+              { name: 'nonce', type: 'uint256' },
+            ],
+          },
+          primaryType: 'SafeTx',
+          message: {
+            to: safeTx.to,
+            value: safeTx.value,
+            data: safeTx.data,
+            operation: safeTx.operation,
+            safeTxGas: safeTx.safeTxGas,
+            baseGas: safeTx.baseGas,
+            gasPrice: safeTx.gasPrice,
+            gasToken: safeTx.gasToken,
+            refundReceiver: safeTx.refundReceiver,
+            nonce: safeTx.nonce,
+          },
+        })
+        await proposeSafeTx(
+          safeAddress as Address,
+          safeTx,
+          safeTxHash,
+          signature,
+          connectedAddress,
+        )
+      }
+
+      // 4. Record execution
+      if (txHash) {
+        await markExecuted(approval.id, txHash)
+      }
+
+      refetch()
+    } catch (err) {
+      if (err instanceof Error && !err.message.includes('rejected') && !err.message.includes('denied')) {
+        console.error('Approval execution failed:', err)
+      }
+    } finally {
+      setExecuting(false)
+    }
+  }
+
+  async function handleReject(id: string) {
+    try {
+      await reject(id)
+    } catch (err) {
+      console.error('Reject failed:', err)
+    }
+  }
+
+  if (!safeAddress) return null
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-zinc-200">Pending Approvals</h2>
+          {pendingCount > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400">
+              {pendingCount}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Loading */}
+      {loading && (
+        <div className="space-y-3">
+          {[0, 1].map((i) => (
+            <div key={i} className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-7 h-7 rounded-lg bg-white/[0.04] animate-pulse" />
+                <div className="h-3 w-24 bg-white/[0.06] rounded animate-pulse" />
+              </div>
+              <div className="h-16 bg-white/[0.02] rounded-lg animate-pulse" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && pendingApprovals.length === 0 && (
+        <div className="text-center py-8 rounded-xl border border-dashed border-white/[0.06]">
+          <div className="w-10 h-10 rounded-xl bg-white/[0.04] flex items-center justify-center mx-auto mb-3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zinc-600">
+              <path d="M9 12l2 2 4-4" />
+              <circle cx="12" cy="12" r="10" />
+            </svg>
+          </div>
+          <p className="text-xs text-zinc-600">No pending approvals</p>
+          <p className="text-[10px] text-zinc-700 mt-1">
+            Payments above threshold will appear here for review
+          </p>
+        </div>
+      )}
+
+      {/* Pending */}
+      {pendingApprovals.length > 0 && (
+        <div className="space-y-3 mb-6">
+          {pendingApprovals.map((a) => (
+            <ApprovalCard
+              key={a.id}
+              approval={a}
+              onApproveAndExecute={handleApproveAndExecute}
+              onReject={handleReject}
+              executing={executing}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Past approvals */}
+      {pastApprovals.length > 0 && (
+        <div>
+          <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-3">History</p>
+          <div className="space-y-2">
+            {pastApprovals.slice(0, 10).map((a) => (
+              <div
+                key={a.id}
+                className="flex items-center justify-between p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]"
+              >
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={a.status} />
+                  <span className="text-xs text-zinc-400">
+                    {a.amount_human} {a.token_symbol}
+                  </span>
+                  <span className="text-xs text-zinc-700">to {truncate(a.to_address)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-zinc-700">{a.agent_name}</span>
+                  <span className="text-[10px] text-zinc-800">{timeAgo(a.created_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

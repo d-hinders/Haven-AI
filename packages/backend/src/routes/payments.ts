@@ -117,14 +117,55 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     }
 
     // 4. Policy check: verify agent has this token in their DB allowances
-    const dbAllowance = await pool.query(
-      `SELECT allowance_amount FROM agent_allowances
+    const dbAllowance = await pool.query<{
+      allowance_amount: string
+      approval_threshold: string | null
+    }>(
+      `SELECT allowance_amount, approval_threshold FROM agent_allowances
        WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
       [agent.id, tokenAddress],
     )
     if (dbAllowance.rows.length === 0) {
       return reply.code(403).send({
         error: `Agent is not configured for ${tokenConfig.symbol} payments`,
+      })
+    }
+
+    const approvalThreshold = dbAllowance.rows[0].approval_threshold
+      ? BigInt(dbAllowance.rows[0].approval_threshold)
+      : null
+
+    // 4b. Check if this payment needs human approval
+    if (approvalThreshold !== null && amountRaw > approvalThreshold) {
+      // Queue for human approval instead of executing
+      const reason = (request.body as Record<string, unknown>).reason as string | undefined
+      const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
+        `INSERT INTO approval_requests (
+          agent_id, user_id, safe_address, token_symbol, token_address,
+          to_address, amount_raw, amount_human, reason, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending',
+          NOW() + interval '24 hours')
+        RETURNING id, status, expires_at`,
+        [
+          agent.id,
+          agent.user_id,
+          agent.safe_address,
+          tokenConfig.symbol,
+          tokenAddress,
+          to.toLowerCase(),
+          amountRaw.toString(),
+          amount,
+          reason ?? null,
+        ],
+      )
+
+      const approval = approvalResult.rows[0]
+      return reply.code(202).send({
+        payment_id: approval.id,
+        status: 'pending_approval',
+        message: `Payment of ${amount} ${tokenConfig.symbol} exceeds approval threshold. Queued for human approval.`,
+        approval_threshold: ethers.formatUnits(approvalThreshold, tokenConfig.decimals),
+        expires_at: approval.expires_at,
       })
     }
 

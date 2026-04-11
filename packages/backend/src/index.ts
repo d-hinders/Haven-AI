@@ -23,6 +23,8 @@ import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
+import approvalRoutes from './routes/approvals.js'
+import agentActivityRoutes from './routes/agent-activity.js'
 
 const app = Fastify({ logger: true })
 
@@ -49,6 +51,8 @@ await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })
+await app.register(approvalRoutes, { prefix: '/approvals' })
+await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 
 // --- Start ---
 const start = async () => {

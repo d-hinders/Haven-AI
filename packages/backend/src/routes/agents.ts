@@ -237,11 +237,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       token_symbol: string
       allowance_amount: string
       reset_period_min: number
+      approval_threshold?: string | null
     }
   }>('/:id/allowances', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
-    const { token_address, token_symbol, allowance_amount, reset_period_min } =
+    const { token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold } =
       request.body
 
     // Verify agent belongs to user
@@ -253,13 +254,13 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: 'Agent not found' })
     }
 
-    const result = await pool.query<AllowanceRow>(
-      `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
-       VALUES ($1, $2, $3, $4, $5)
+    const result = await pool.query<AllowanceRow & { approval_threshold: string | null }>(
+      `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (agent_id, token_address)
-       DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, updated_at = NOW()
-       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
-      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min],
+       DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, approval_threshold = $6, updated_at = NOW()
+       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold`,
+      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min, approval_threshold ?? null],
     )
 
     return result.rows[0]

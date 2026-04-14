@@ -5,12 +5,18 @@ import { useRouter } from 'next/navigation'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import { useAgents } from '@/hooks/useAgents'
+import { deploySafe } from '@/lib/safe'
+import { ConnectButton } from '@rainbow-me/rainbowkit'
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
 // ── Add Safe Modal ──────────────────────────────────────────────────
+
+type AddMode = 'choose' | 'deploy' | 'import'
+type DeployStep = 'name' | 'wallet' | 'deploying' | 'done'
 
 function AddSafeModal({
   open,
@@ -23,80 +29,365 @@ function AddSafeModal({
   onAdd: (address: string, name: string) => Promise<void>
   loading: boolean
 }) {
-  const [address, setAddress] = useState('')
+  const [mode, setMode] = useState<AddMode>('choose')
   const [name, setName] = useState('')
   const [error, setError] = useState('')
 
+  // Import state
+  const [importAddress, setImportAddress] = useState('')
+
+  // Deploy state
+  const [deployStep, setDeployStep] = useState<DeployStep>('name')
+  const [deploying, setDeploying] = useState(false)
+  const [deployedAddress, setDeployedAddress] = useState('')
+  const [deployTxHash, setDeployTxHash] = useState('')
+
+  const { address: walletAddress, isConnected, chain } = useAccount()
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
+  const wrongNetwork = isConnected && chain?.id !== 100
+
+  const resetState = () => {
+    setMode('choose')
+    setName('')
+    setError('')
+    setImportAddress('')
+    setDeployStep('name')
+    setDeploying(false)
+    setDeployedAddress('')
+    setDeployTxHash('')
+  }
+
+  const handleClose = () => {
+    resetState()
+    onClose()
+  }
+
   if (!open) return null
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // ── Import flow ──
+  const handleImport = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
-    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(importAddress)) {
       setError('Invalid Ethereum address')
       return
     }
 
     try {
-      await onAdd(address, name || 'My Safe')
-      setAddress('')
-      setName('')
+      await onAdd(importAddress, name || 'My Safe')
+      resetState()
       onClose()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to add Safe')
     }
   }
 
+  // ── Deploy flow ──
+  const handleDeploy = async () => {
+    if (!walletClient || !publicClient || !walletAddress) return
+
+    setDeploying(true)
+    setDeployStep('deploying')
+    setError('')
+
+    try {
+      const result = await deploySafe(walletClient, publicClient, walletAddress)
+      setDeployedAddress(result.safeAddress)
+      setDeployTxHash(result.txHash)
+
+      // Register in Haven
+      await onAdd(result.safeAddress, name || 'My Safe')
+      setDeployStep('done')
+    } catch (err: unknown) {
+      setDeployStep('wallet')
+      if (err instanceof Error) {
+        if (err.message.includes('User rejected') || err.message.includes('denied')) {
+          setError('Transaction was rejected in your wallet.')
+        } else {
+          setError(err.message.length > 200 ? 'Deployment failed. Please try again.' : err.message)
+        }
+      } else {
+        setError('Deployment failed. Please try again.')
+      }
+    } finally {
+      setDeploying(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-[#111] border border-white/[0.08] rounded-xl p-6 w-full max-w-md shadow-2xl">
-        <h2 className="text-lg font-semibold text-zinc-200 mb-4">Add Account</h2>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Business, Personal"
-              className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50"
-            />
+      <div className="absolute inset-0 bg-black/60" onClick={handleClose} />
+      <div className="relative bg-[#111] border border-white/[0.08] rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 pt-6 pb-0">
+          <div className="flex items-center gap-2">
+            {mode !== 'choose' && deployStep !== 'done' && (
+              <button
+                onClick={() => { setMode('choose'); setError(''); setDeployStep('name') }}
+                className="p-1 -ml-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+              </button>
+            )}
+            <h2 className="text-lg font-semibold text-zinc-200">
+              {mode === 'choose' && 'Add Account'}
+              {mode === 'deploy' && deployStep === 'done' && 'Account Created'}
+              {mode === 'deploy' && deployStep !== 'done' && 'Deploy New Safe'}
+              {mode === 'import' && 'Import Existing Safe'}
+            </h2>
           </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Safe Address</label>
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="0x..."
-              className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50"
-            />
-          </div>
+          <button
+            onClick={handleClose}
+            className="p-1 rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
 
-          {error && (
-            <p className="text-xs text-red-400">{error}</p>
+        <div className="p-6">
+          {/* ── Choose mode ── */}
+          {mode === 'choose' && (
+            <div className="space-y-3">
+              <p className="text-sm text-zinc-500 mb-4">
+                Deploy a new Safe smart account or import one you already own.
+              </p>
+              <button
+                onClick={() => setMode('deploy')}
+                className="w-full flex items-center gap-4 p-4 rounded-lg border border-white/[0.06] bg-white/[0.02] hover:border-indigo-500/30 hover:bg-indigo-500/[0.03] transition-all group text-left"
+              >
+                <div className="w-10 h-10 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-500/15 transition-colors">
+                  <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="block text-sm font-medium text-zinc-200 group-hover:text-white transition-colors">Deploy New Safe</span>
+                  <span className="block text-xs text-zinc-500 mt-0.5">Create a new Safe smart account on Gnosis Chain</span>
+                </div>
+                <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setMode('import')}
+                className="w-full flex items-center gap-4 p-4 rounded-lg border border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.03] transition-all group text-left"
+              >
+                <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] flex items-center justify-center flex-shrink-0 group-hover:bg-white/[0.06] transition-colors">
+                  <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.07-9.07l-1.757 1.757a4.5 4.5 0 010 6.364l-4.5 4.5" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="block text-sm font-medium text-zinc-200 group-hover:text-white transition-colors">Import Existing Safe</span>
+                  <span className="block text-xs text-zinc-500 mt-0.5">Link a Safe you already own by its address</span>
+                </div>
+                <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                </svg>
+              </button>
+            </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-            >
-              {loading ? 'Adding...' : 'Add Account'}
-            </button>
-          </div>
-        </form>
+          {/* ── Deploy flow ── */}
+          {mode === 'deploy' && deployStep === 'name' && (
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-500">
+                Give your new account a name. You can change this later.
+              </p>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Account Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Business, Personal, Treasury"
+                  autoFocus
+                  className="w-full px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                />
+              </div>
+              <button
+                onClick={() => setDeployStep('wallet')}
+                className="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 transition-colors"
+              >
+                Continue
+              </button>
+            </div>
+          )}
+
+          {mode === 'deploy' && deployStep === 'wallet' && (
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-500">
+                Your connected wallet will be the owner of this Safe. Haven never holds signing authority.
+              </p>
+
+              {/* Wallet connection */}
+              {!isConnected ? (
+                <div className="flex flex-col items-center gap-3 p-4 rounded-lg border border-dashed border-white/[0.08]">
+                  <p className="text-xs text-zinc-500">Connect a wallet to deploy</p>
+                  <ConnectButton />
+                </div>
+              ) : (
+                <div className="p-4 rounded-lg border border-white/[0.06] bg-white/[0.02]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="block text-xs text-zinc-500 mb-1">Connected wallet</span>
+                      <span className="text-sm font-mono text-zinc-300">
+                        {walletAddress?.slice(0, 6)}...{walletAddress?.slice(-4)}
+                      </span>
+                    </div>
+                    <ConnectButton.Custom>
+                      {({ openAccountModal }) => (
+                        <button
+                          onClick={openAccountModal}
+                          className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                          Change
+                        </button>
+                      )}
+                    </ConnectButton.Custom>
+                  </div>
+                </div>
+              )}
+
+              {/* Account name preview */}
+              {name && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                  <span className="text-xs text-zinc-500">Name:</span>
+                  <span className="text-xs text-zinc-300 font-medium">{name}</span>
+                </div>
+              )}
+
+              {wrongNetwork && (
+                <div className="text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-4 py-3">
+                  Please switch to Gnosis Chain (chain ID 100) in your wallet.
+                </div>
+              )}
+
+              {error && (
+                <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
+                  {error}
+                </div>
+              )}
+
+              <button
+                onClick={handleDeploy}
+                disabled={!isConnected || wrongNetwork || deploying}
+                className="w-full py-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Deploy Safe
+              </button>
+              <p className="text-[11px] text-zinc-600 text-center">
+                This will submit a transaction on Gnosis Chain. Gas fees are minimal.
+              </p>
+            </div>
+          )}
+
+          {mode === 'deploy' && deployStep === 'deploying' && (
+            <div className="flex flex-col items-center py-8">
+              <div className="w-12 h-12 rounded-full border-2 border-indigo-500/30 border-t-indigo-500 animate-spin mb-6" />
+              <h3 className="text-sm font-medium text-zinc-200 mb-2">Deploying your Safe</h3>
+              <p className="text-xs text-zinc-500 text-center max-w-xs">
+                Confirm the transaction in your wallet. Your Safe smart account is being deployed on Gnosis Chain.
+              </p>
+            </div>
+          )}
+
+          {mode === 'deploy' && deployStep === 'done' && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-zinc-200">{name || 'My Safe'}</p>
+                  <p className="text-xs text-zinc-500">Successfully deployed on Gnosis Chain</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="p-3 rounded-lg border border-white/[0.06] bg-white/[0.02]">
+                  <span className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Safe Address</span>
+                  <a
+                    href={`https://gnosisscan.io/address/${deployedAddress}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all"
+                  >
+                    {deployedAddress}
+                  </a>
+                </div>
+                <div className="p-3 rounded-lg border border-white/[0.06] bg-white/[0.02]">
+                  <span className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Transaction</span>
+                  <a
+                    href={`https://gnosisscan.io/tx/${deployTxHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all"
+                  >
+                    {deployTxHash.slice(0, 22)}...{deployTxHash.slice(-8)}
+                  </a>
+                </div>
+              </div>
+
+              <button
+                onClick={handleClose}
+                className="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          )}
+
+          {/* ── Import flow ── */}
+          {mode === 'import' && (
+            <form onSubmit={handleImport} className="space-y-4">
+              <p className="text-sm text-zinc-500">
+                Enter the address of a Safe you already own on Gnosis Chain.
+              </p>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Account Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Business, Personal"
+                  className="w-full px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Safe Address</label>
+                <input
+                  type="text"
+                  value={importAddress}
+                  onChange={(e) => setImportAddress(e.target.value)}
+                  placeholder="0x..."
+                  autoFocus
+                  className="w-full px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                />
+              </div>
+
+              {error && (
+                <p className="text-xs text-red-400">{error}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+              >
+                {loading ? 'Adding...' : 'Import Account'}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   )

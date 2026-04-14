@@ -4,7 +4,6 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
-import SafeSwitcher from './SafeSwitcher'
 
 interface NavItem {
   label: string
@@ -84,7 +83,7 @@ export default function Sidebar() {
       )}
 
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-[240px] bg-[#0a0a0a] border-r border-white/[0.06] flex flex-col transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-[240px] h-screen lg:h-full bg-[#0a0a0a] border-r border-white/[0.06] flex flex-col flex-shrink-0 transition-transform duration-200 ${
           collapsed ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'
         }`}
       >
@@ -124,9 +123,6 @@ export default function Sidebar() {
             )
           })}
         </nav>
-
-        {/* Safe switcher */}
-        <SafeSwitcher />
 
         {/* Bottom section */}
         <div className="flex-shrink-0 border-t border-white/[0.06]">

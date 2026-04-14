@@ -73,16 +73,28 @@ export default function SettingsClient() {
           </div>
 
           <div>
-            <p className="text-xs text-zinc-500 mb-1">Safe Address</p>
-            {user?.safe_address ? (
-              <a
-                href={`https://gnosisscan.io/address/${user.safe_address}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors"
-              >
-                {truncate(user.safe_address)}
-              </a>
+            <p className="text-xs text-zinc-500 mb-1">Safe Accounts</p>
+            {user?.safes && user.safes.length > 0 ? (
+              <div className="space-y-1">
+                {user.safes.map((safe) => (
+                  <div key={safe.id} className="flex items-center gap-2">
+                    <a
+                      href={`https://gnosisscan.io/address/${safe.safe_address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                      {truncate(safe.safe_address)}
+                    </a>
+                    <span className="text-xs text-zinc-600">{safe.name}</span>
+                    {safe.is_default && (
+                      <span className="text-[9px] px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-400">
+                        default
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             ) : (
               <p className="text-sm text-zinc-600">Not deployed</p>
             )}

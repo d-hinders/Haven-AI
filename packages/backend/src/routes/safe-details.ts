@@ -30,9 +30,9 @@ export default async function safeDetailRoutes(
         return reply.code(400).send({ error: 'Invalid address' })
       }
 
-      // Verify ownership
+      // Verify ownership (multi-Safe)
       const userResult = await pool.query(
-        'SELECT id FROM users WHERE id = $1 AND LOWER(safe_address) = LOWER($2)',
+        'SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
         [sub, safeAddress],
       )
       if (userResult.rows.length === 0) {

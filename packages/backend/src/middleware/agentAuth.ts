@@ -53,7 +53,7 @@ export async function agentAuthMiddleware(
     return reply.code(401).send({ error: 'Missing or invalid API key' })
   }
 
-  // Look up agent + user's safe address
+  // Look up agent + its linked Safe address (multi-Safe via user_safes)
   const result = await pool.query<{
     id: string
     user_id: string
@@ -61,9 +61,11 @@ export async function agentAuthMiddleware(
     delegate_address: string | null
     safe_address: string | null
   }>(
-    `SELECT a.id, a.user_id, a.name, a.delegate_address, u.safe_address
+    `SELECT a.id, a.user_id, a.name, a.delegate_address,
+            COALESCE(us.safe_address, u.safe_address) as safe_address
      FROM agents a
      JOIN users u ON a.user_id = u.id
+     LEFT JOIN user_safes us ON a.safe_id = us.id
      WHERE a.api_key = $1 AND a.status = 'active'`,
     [apiKey],
   )

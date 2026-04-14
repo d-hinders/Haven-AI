@@ -143,5 +143,40 @@ export async function runMigrations(): Promise<void> {
     ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS x402_resource_url TEXT;
     ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS x402_category VARCHAR(50);
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS max_x402_per_hour INTEGER DEFAULT 100;
+
+    -- Multi-Safe wallet support
+    CREATE TABLE IF NOT EXISTS user_safes (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      safe_address VARCHAR(42) NOT NULL,
+      name         VARCHAR(100) NOT NULL DEFAULT 'My Safe',
+      is_default   BOOLEAN NOT NULL DEFAULT false,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, safe_address)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_safes_user_id ON user_safes(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_safes_address ON user_safes(safe_address);
+
+    -- Link agents to specific Safes
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS safe_id UUID;
+
+    -- Backfill: migrate existing single-safe users into user_safes
+    INSERT INTO user_safes (user_id, safe_address, name, is_default)
+    SELECT id, safe_address, 'My Safe', true
+    FROM users
+    WHERE safe_address IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM user_safes WHERE user_id = users.id AND safe_address = users.safe_address
+      );
+
+    -- Backfill: link existing agents to their user's default Safe
+    UPDATE agents a
+    SET safe_id = us.id
+    FROM user_safes us
+    WHERE a.user_id = us.user_id
+      AND a.safe_id IS NULL
+      AND us.is_default = true;
   `)
 }

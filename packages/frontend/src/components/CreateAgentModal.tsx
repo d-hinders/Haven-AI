@@ -64,6 +64,7 @@ interface Props {
   open: boolean
   onClose: () => void
   safeAddress: string
+  safeId?: string | null
   safeDetails: SafeDetails | null
   onCreated: (agent: {
     id: string
@@ -79,6 +80,7 @@ export default function CreateAgentModal({
   open,
   onClose,
   safeAddress,
+  safeId,
   safeDetails,
   onCreated,
 }: Props) {
@@ -331,6 +333,7 @@ export default function CreateAgentModal({
           name: name.trim(),
           description: description.trim() || undefined,
           delegate_address: delegateAddress,
+          safe_id: safeId || undefined,
           restrict_recipients: restrictRecipients,
           allowed_recipients: restrictRecipients ? allowedRecipients : [],
           allowances: allowances.map((a) => ({

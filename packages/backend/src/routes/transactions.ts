@@ -53,9 +53,9 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid address' })
     }
 
-    // Verify ownership
+    // Verify ownership (multi-Safe)
     const userResult = await pool.query(
-      'SELECT id FROM users WHERE id = $1 AND LOWER(safe_address) = LOWER($2)',
+      'SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
       [sub, safeAddress],
     )
     if (userResult.rows.length === 0) {
@@ -169,8 +169,35 @@ export default async function transactionRoutes(
     const start = (page - 1) * limit
     const paginated = allTransactions.slice(start, start + limit)
 
+    // Enrich with agent info from payment_intents
+    const txHashes = paginated.map((tx) => tx.hash.toLowerCase())
+    let agentByTxHash = new Map<string, string>()
+
+    if (txHashes.length > 0) {
+      try {
+        const piResult = await pool.query<{ tx_hash: string; agent_name: string }>(
+          `SELECT LOWER(pi.tx_hash) as tx_hash, a.name as agent_name
+           FROM payment_intents pi
+           JOIN agents a ON a.id = pi.agent_id
+           WHERE LOWER(pi.tx_hash) = ANY($1)
+             AND pi.status = 'confirmed'`,
+          [txHashes],
+        )
+        for (const row of piResult.rows) {
+          agentByTxHash.set(row.tx_hash, row.agent_name)
+        }
+      } catch {
+        // Non-critical — just skip agent enrichment
+      }
+    }
+
+    const enriched = paginated.map((tx) => ({
+      ...tx,
+      agentName: agentByTxHash.get(tx.hash.toLowerCase()) ?? undefined,
+    }))
+
     return {
-      transactions: paginated,
+      transactions: enriched,
       total,
       page,
       limit,

@@ -250,6 +250,11 @@ function AgentCard({
                 {agent.status}
               </span>
             </div>
+            {agent.safe_name && (
+              <p className="text-xs text-zinc-500 mt-0.5">
+                <span className="text-zinc-600">Account:</span> {agent.safe_name}
+              </p>
+            )}
             {agent.description && (
               <p className="text-xs text-zinc-600 mt-0.5">
                 {agent.description}
@@ -491,8 +496,8 @@ function UnmanagedDelegateCard({
 // ── Main panel ─────────────────────────────────────────────────────
 
 export default function AgentPanel() {
-  const { user } = useAuth()
-  const safeAddress = user?.safe_address ?? null
+  const { user, activeSafe } = useAuth()
+  const safeAddress = activeSafe?.safe_address ?? null
   const { details: safeDetails } = useSafeDetails(safeAddress)
   const { agents, loading, revokeAgent, deleteAgent, refetch } = useAgents()
   const { address: connectedAddress } = useAccount()
@@ -810,6 +815,7 @@ export default function AgentPanel() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         safeAddress={safeAddress}
+        safeId={activeSafe?.id}
         safeDetails={safeDetails}
         onCreated={() => {
           refetch()

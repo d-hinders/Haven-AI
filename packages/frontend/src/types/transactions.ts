@@ -13,6 +13,7 @@ export interface Transaction {
   isError: boolean
   tokenAddress?: string
   tokenSymbol?: string
+  agentName?: string
 }
 
 export interface TransactionsResponse {

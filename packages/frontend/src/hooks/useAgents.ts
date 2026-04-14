@@ -26,6 +26,9 @@ export interface Agent {
   description: string | null
   delegate_address: string | null
   restrict_recipients: boolean
+  safe_id: string | null
+  safe_address: string | null
+  safe_name: string | null
   api_key: string
   status: string
   created_at: string
@@ -37,6 +40,7 @@ interface CreateAgentParams {
   name: string
   description?: string
   delegate_address: string
+  safe_id?: string
   restrict_recipients?: boolean
   allowed_recipients?: { address: string; label?: string }[]
   allowances?: {

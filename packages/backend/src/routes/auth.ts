@@ -77,6 +77,13 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       { expiresIn: '7d' },
     )
 
+    // Fetch user's Safes
+    const safesResult = await pool.query(
+      `SELECT id, safe_address, name, is_default, created_at
+       FROM user_safes WHERE user_id = $1 ORDER BY created_at ASC`,
+      [user.id],
+    )
+
     return {
       token,
       user: {
@@ -85,6 +92,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
         wallet_address: user.wallet_address,
         safe_address: user.safe_address,
         currency_preference: user.currency_preference ?? 'USD',
+        safes: safesResult.rows,
       },
     }
   })
@@ -102,6 +110,16 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       throw { statusCode: 404, message: 'User not found' }
     }
 
-    return result.rows[0]
+    // Fetch user's Safes
+    const safesResult = await pool.query(
+      `SELECT id, safe_address, name, is_default, created_at
+       FROM user_safes WHERE user_id = $1 ORDER BY created_at ASC`,
+      [sub],
+    )
+
+    return {
+      ...result.rows[0],
+      safes: safesResult.rows,
+    }
   })
 }

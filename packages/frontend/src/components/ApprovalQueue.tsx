@@ -173,8 +173,8 @@ function ApprovalCard({
 // ── Main component ───────────────────────────────────────────────
 
 export default function ApprovalQueue() {
-  const { user } = useAuth()
-  const safeAddress = user?.safe_address ?? null
+  const { user, activeSafe } = useAuth()
+  const safeAddress = activeSafe?.safe_address ?? null
   const { details: safeDetails } = useSafeDetails(safeAddress)
   const { approvals, pendingCount, loading, approve, reject, markExecuted, refetch } = useApprovals()
   const { address: connectedAddress } = useAccount()

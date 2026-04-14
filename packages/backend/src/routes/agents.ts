@@ -9,6 +9,7 @@ interface CreateAgentBody {
   name: string
   description?: string
   delegate_address: string
+  safe_id?: string
   restrict_recipients?: boolean
   allowed_recipients?: { address: string; label?: string }[]
   allowances?: {
@@ -33,6 +34,9 @@ interface AgentRow {
   description: string | null
   delegate_address: string | null
   restrict_recipients: boolean
+  safe_id: string | null
+  safe_address: string | null
+  safe_name: string | null
   api_key: string
   status: string
   created_at: string
@@ -69,8 +73,13 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { sub } = request.user as { sub: string }
 
     const agentResult = await pool.query<AgentRow>(
-      `SELECT id, name, description, delegate_address, restrict_recipients, api_key, status, created_at
-       FROM agents WHERE user_id = $1 ORDER BY created_at DESC`,
+      `SELECT a.id, a.name, a.description, a.delegate_address, a.restrict_recipients,
+              a.safe_id, us.safe_address, us.name as safe_name,
+              a.api_key, a.status, a.created_at
+       FROM agents a
+       LEFT JOIN user_safes us ON a.safe_id = us.id
+       WHERE a.user_id = $1
+       ORDER BY a.created_at DESC`,
       [sub],
     )
 
@@ -120,13 +129,35 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   // POST /agents — create agent with delegate address, allowances, and optional recipient restrictions
   app.post<{ Body: CreateAgentBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { name, description, delegate_address, allowances, restrict_recipients, allowed_recipients } = request.body
+    const { name, description, delegate_address, safe_id, allowances, restrict_recipients, allowed_recipients } = request.body
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return reply.code(400).send({ error: 'Name is required' })
     }
     if (!delegate_address || !isValidAddress(delegate_address)) {
       return reply.code(400).send({ error: 'Valid delegate address is required' })
+    }
+
+    // Validate safe_id belongs to the user (if provided)
+    let resolvedSafeId: string | null = null
+    if (safe_id) {
+      const safeCheck = await pool.query(
+        'SELECT id FROM user_safes WHERE id = $1 AND user_id = $2',
+        [safe_id, sub],
+      )
+      if (safeCheck.rows.length === 0) {
+        return reply.code(400).send({ error: 'Invalid Safe — not found or not yours' })
+      }
+      resolvedSafeId = safe_id
+    } else {
+      // Default to user's default Safe
+      const defaultSafe = await pool.query(
+        'SELECT id FROM user_safes WHERE user_id = $1 AND is_default = true LIMIT 1',
+        [sub],
+      )
+      if (defaultSafe.rows.length > 0) {
+        resolvedSafeId = defaultSafe.rows[0].id
+      }
     }
 
     // Check for duplicate delegate address
@@ -147,10 +178,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       await client.query('BEGIN')
 
       const agentResult = await client.query<AgentRow>(
-        `INSERT INTO agents (user_id, name, description, delegate_address, api_key, restrict_recipients)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, name, description, delegate_address, restrict_recipients, api_key, status, created_at`,
-        [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKey, restrict_recipients ?? false],
+        `INSERT INTO agents (user_id, name, description, delegate_address, api_key, restrict_recipients, safe_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, name, description, delegate_address, restrict_recipients, safe_id, api_key, status, created_at`,
+        [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKey, restrict_recipients ?? false, resolvedSafeId],
       )
       const agent = agentResult.rows[0]
 

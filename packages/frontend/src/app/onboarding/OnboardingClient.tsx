@@ -35,7 +35,7 @@ export default function OnboardingClient() {
 
   // Redirect if user already has a Safe
   useEffect(() => {
-    if (!loading && user?.safe_address) {
+    if (!loading && user && (user.safes?.length > 0 || user.safe_address)) {
       router.replace('/dashboard')
     }
   }, [loading, user, router])

@@ -20,7 +20,7 @@ function LoginForm() {
   // Redirect if already logged in
   useEffect(() => {
     if (!loading && user) {
-      if (user.safe_address) {
+      if (user.safes?.length > 0 || user.safe_address) {
         router.replace('/dashboard')
       } else {
         router.replace('/onboarding')

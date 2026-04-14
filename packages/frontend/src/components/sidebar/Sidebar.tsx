@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import SafeSwitcher from './SafeSwitcher'
 
 interface NavItem {
   label: string
@@ -49,7 +50,7 @@ const icons = {
 
 const mainNav: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: icons.dashboard },
-  { label: 'Account', href: '/account', icon: icons.account },
+  { label: 'Accounts', href: '/accounts', icon: icons.account },
   { label: 'Agents', href: '/agents', icon: icons.agents },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
 ]
@@ -123,6 +124,9 @@ export default function Sidebar() {
             )
           })}
         </nav>
+
+        {/* Safe switcher */}
+        <SafeSwitcher />
 
         {/* Bottom section */}
         <div className="flex-shrink-0 border-t border-white/[0.06]">

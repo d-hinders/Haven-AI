@@ -9,6 +9,7 @@ import {
   RESET_PERIODS,
   type AllowanceInfo,
 } from '@/lib/allowance-module'
+import { api } from '@/lib/api'
 import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 import {
   getSafeNonce,
@@ -222,13 +223,7 @@ export default function EditAgentModal({
 
       // Save to Haven backend
       setExecStatus('saving')
-      const response = await fetch(`/api/agents/${agent.id}/allowances`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('haven_token')}`,
-        },
-        body: JSON.stringify({
+      await api.post(`/agents/${agent.id}/allowances`, {
           token_address: tokenAddress,
           token_symbol: selectedTokenConfig.symbol,
           allowance_amount: rawAmount.toString(),
@@ -236,13 +231,7 @@ export default function EditAgentModal({
           approval_threshold: approvalThreshold && Number(approvalThreshold) > 0
             ? parseUnits(approvalThreshold, selectedTokenConfig.decimals).toString()
             : null,
-        }),
-      })
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: 'Failed to save allowance' }))
-        throw new Error(body.error ?? 'Failed to save allowance')
-      }
+        })
 
       setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
       setStep('done')
@@ -414,17 +403,10 @@ export default function EditAgentModal({
                       setRecipientsSaving(true)
                       setRecipientsSaved(false)
                       try {
-                        await fetch(`/api/agents/${agent.id}`, {
-                          method: 'PUT',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${localStorage.getItem('haven_token')}`,
-                          },
-                          body: JSON.stringify({
+                        await api.put(`/agents/${agent.id}`, {
                             restrict_recipients: restrictRecipients,
                             allowed_recipients: restrictRecipients ? allowedRecipients : [],
-                          }),
-                        })
+                          })
                         setRecipientsSaved(true)
                         setTimeout(() => setRecipientsSaved(false), 2000)
                       } catch {

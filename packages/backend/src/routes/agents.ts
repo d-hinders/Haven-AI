@@ -37,7 +37,7 @@ interface AgentRow {
   safe_id: string | null
   safe_address: string | null
   safe_name: string | null
-  api_key: string
+  api_key_prefix: string | null
   status: string
   created_at: string
 }
@@ -75,7 +75,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const agentResult = await pool.query<AgentRow>(
       `SELECT a.id, a.name, a.description, a.delegate_address, a.restrict_recipients,
               a.safe_id, us.safe_address, us.name as safe_name,
-              a.api_key, a.status, a.created_at
+              a.api_key_prefix, a.status, a.created_at
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1
@@ -172,16 +172,18 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const apiKey = `sk_agent_${crypto.randomBytes(24).toString('hex')}`
+    const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest('hex')
+    const apiKeyPrefix = apiKey.slice(0, 12)
 
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
 
       const agentResult = await client.query<AgentRow>(
-        `INSERT INTO agents (user_id, name, description, delegate_address, api_key, restrict_recipients, safe_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, name, description, delegate_address, restrict_recipients, safe_id, api_key, status, created_at`,
-        [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKey, restrict_recipients ?? false, resolvedSafeId],
+        `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, restrict_recipients, safe_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, name, description, delegate_address, restrict_recipients, safe_id, api_key_prefix, status, created_at`,
+        [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKeyHash, apiKeyPrefix, restrict_recipients ?? false, resolvedSafeId],
       )
       const agent = agentResult.rows[0]
 
@@ -224,6 +226,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       await client.query('COMMIT')
       return reply.code(201).send({
         ...agent,
+        api_key: apiKey, // Return plaintext key only on creation — it's not stored
         allowances: savedAllowances,
         allowed_recipients: savedRecipients,
       })
@@ -254,7 +257,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
                restrict_recipients = COALESCE($5, restrict_recipients),
                updated_at          = NOW()
            WHERE id = $1 AND user_id = $2
-           RETURNING id, name, description, delegate_address, restrict_recipients, api_key, status, created_at`,
+           RETURNING id, name, description, delegate_address, restrict_recipients, api_key_prefix, status, created_at`,
           [id, sub, name?.trim() ?? null, description?.trim() ?? null, restrict_recipients ?? null],
         )
 

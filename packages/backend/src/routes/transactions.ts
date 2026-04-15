@@ -70,13 +70,11 @@ export default async function transactionRoutes(
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
       allTransactions = cached.data as Transaction[]
     } else {
-      // Fetch all three types in parallel
+      // Fetch sequentially to avoid gnosisscan rate limits
       const addrLower = safeAddress.toLowerCase()
-      const [normalTxs, internalTxs, erc20Txs] = await Promise.all([
-        fetchNormalTransactions(safeAddress).catch(() => []),
-        fetchInternalTransactions(safeAddress).catch(() => []),
-        fetchERC20Transfers(safeAddress).catch(() => []),
-      ])
+      const normalTxs = await fetchNormalTransactions(safeAddress).catch(() => [])
+      const internalTxs = await fetchInternalTransactions(safeAddress).catch(() => [])
+      const erc20Txs = await fetchERC20Transfers(safeAddress).catch(() => [])
 
       const transactions: Transaction[] = []
 

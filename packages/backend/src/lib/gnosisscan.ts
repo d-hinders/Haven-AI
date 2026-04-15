@@ -53,6 +53,7 @@ export interface RawERC20Transfer {
 
 async function fetchFromGnosisscan<T>(
   params: Record<string, string>,
+  retries = 2,
 ): Promise<T[]> {
   const url = new URL(BASE_URL)
   url.searchParams.set('chainid', String(CHAIN_ID))
@@ -62,20 +63,33 @@ async function fetchFromGnosisscan<T>(
     url.searchParams.set(key, value)
   }
 
-  const response = await fetch(url.toString())
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url.toString())
 
-  if (!response.ok) {
-    throw new Error(`Gnosisscan API error: ${response.status}`)
+    if (!response.ok) {
+      // Retry on rate limit (429) or server errors (5xx)
+      if (attempt < retries && (response.status === 429 || response.status >= 500)) {
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+        continue
+      }
+      throw new Error(`Gnosisscan API error: ${response.status}`)
+    }
+
+    const data = (await response.json()) as GnosisscanResponse<T[] | string>
+
+    // Gnosisscan returns rate limit messages as string results too
+    if (typeof data.result === 'string') {
+      if (attempt < retries && data.result.toLowerCase().includes('rate limit')) {
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+        continue
+      }
+      return []
+    }
+
+    return data.result
   }
 
-  const data = (await response.json()) as GnosisscanResponse<T[] | string>
-
-  // Gnosisscan returns "No transactions found" as a string result
-  if (typeof data.result === 'string') {
-    return []
-  }
-
-  return data.result
+  return []
 }
 
 export async function fetchNormalTransactions(

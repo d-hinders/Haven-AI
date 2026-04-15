@@ -187,7 +187,6 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
     if (addrs.length === 0) return
 
     try {
-      setLoading(true)
       setError(null)
 
       const results = await Promise.all(
@@ -208,9 +207,9 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
       for (const r of results) {
         totalCount += r.total
         for (const tx of r.transactions) {
-          const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}`
-          if (!seen.has(key)) {
-            seen.add(key)
+          const txKey = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}`
+          if (!seen.has(txKey)) {
+            seen.add(txKey)
             all.push(tx)
           }
         }
@@ -228,11 +227,17 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
   }, [limit])
 
   useEffect(() => {
-    if (addresses.length === 0) return
+    if (!key) {
+      setLoading(false)
+      return
+    }
 
     setLoading(true)
     fetchAll()
-  }, [key, fetchAll]) // eslint-disable-line react-hooks/exhaustive-deps
+    // Poll every 60s like the other aggregated hooks
+    const interval = setInterval(fetchAll, 60_000)
+    return () => clearInterval(interval)
+  }, [key, fetchAll])
 
   return { transactions, loading, error, total, refetch: fetchAll }
 }

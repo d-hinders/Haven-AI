@@ -1,15 +1,6 @@
-import dotenv from 'dotenv'
-import path from 'path'
+// config.ts loads dotenv and validates required env vars — import first
+import { config } from './config.js'
 
-// Load .env from monorepo root — try CWD first, then two levels up from this file
-const envPaths = [
-  path.resolve(process.cwd(), '.env'),
-  path.resolve(import.meta.dirname ?? __dirname, '../../..', '.env'),
-]
-for (const p of envPaths) {
-  const result = dotenv.config({ path: p })
-  if (!result.error) break
-}
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
@@ -28,15 +19,45 @@ import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
 
-const app = Fastify({ logger: true })
+const app = Fastify({
+  logger: {
+    level: config.logLevel,
+  },
+})
+
+// --- Global error handler ---
+app.setErrorHandler((error, request, reply) => {
+  const statusCode = error.statusCode ?? 500
+
+  if (statusCode >= 500) {
+    request.log.error({ err: error, reqId: request.id }, 'Unhandled server error')
+  } else {
+    request.log.warn({ err: error, reqId: request.id }, 'Client error')
+  }
+
+  reply.status(statusCode).send({
+    error: statusCode >= 500 ? 'Internal server error' : error.message,
+    statusCode,
+  })
+})
+
+// --- Process-level error handlers ---
+process.on('unhandledRejection', (reason) => {
+  app.log.error({ err: reason }, 'Unhandled promise rejection')
+})
+
+process.on('uncaughtException', (error) => {
+  app.log.fatal({ err: error }, 'Uncaught exception — shutting down')
+  process.exit(1)
+})
 
 // --- Plugins ---
 await app.register(cors, {
-  origin: process.env.FRONTEND_URL ?? 'http://localhost:3000',
+  origin: config.frontendUrl,
 })
 
 await app.register(fastifyJwt, {
-  secret: process.env.JWT_SECRET ?? 'change_me_in_production',
+  secret: config.jwtSecret,
 })
 
 // --- Routes ---
@@ -64,9 +85,8 @@ const start = async () => {
     await runMigrations()
     app.log.info('Database migrations complete')
 
-    const port = Number(process.env.PORT) || 3001
-    await app.listen({ port, host: '0.0.0.0' })
-    app.log.info(`Haven backend running on port ${port}`)
+    await app.listen({ port: config.port, host: '0.0.0.0' })
+    app.log.info(`Haven backend running on port ${config.port}`)
   } catch (err) {
     app.log.error(err)
     process.exit(1)

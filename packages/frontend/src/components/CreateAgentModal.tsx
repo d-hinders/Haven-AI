@@ -11,6 +11,7 @@ import {
   RESET_PERIODS,
   type AllowanceSetup,
 } from '@/lib/allowance-module'
+import { api } from '@/lib/api'
 import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 import {
   getSafeNonce,
@@ -323,13 +324,7 @@ export default function CreateAgentModal({
 
       // 5. Save agent to Haven backend
       setExecStatus('saving')
-      const response = await fetch('/api/agents', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('haven_token')}`,
-        },
-        body: JSON.stringify({
+      const agent = await api.post<{ id: string; name: string; api_key: string; delegate_address: string }>('/agents', {
           name: name.trim(),
           description: description.trim() || undefined,
           delegate_address: delegateAddress,
@@ -343,15 +338,7 @@ export default function CreateAgentModal({
             allowance_amount: parseUnits(a.amount, a.decimals).toString(),
             reset_period_min: a.resetTimeMin,
           })),
-        }),
-      })
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: 'Failed to save agent' }))
-        throw new Error(body.error ?? 'Failed to save agent')
-      }
-
-      const agent = await response.json()
+        })
       setCreatedApiKey(agent.api_key)
       setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
       setStep('done')

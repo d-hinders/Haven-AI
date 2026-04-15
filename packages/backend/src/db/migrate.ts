@@ -178,5 +178,26 @@ export async function runMigrations(): Promise<void> {
     WHERE a.user_id = us.user_id
       AND a.safe_id IS NULL
       AND us.is_default = true;
+
+    -- API key hashing: add columns for hash-based lookup
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR(64);
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR(12);
+    ALTER TABLE agents ALTER COLUMN api_key DROP NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_agents_api_key_hash ON agents(api_key_hash);
   `)
+
+  // Backfill: hash any existing plaintext API keys
+  const { createHash } = await import('crypto')
+  const unhashed = await pool.query<{ id: string; api_key: string }>(
+    `SELECT id, api_key FROM agents WHERE api_key IS NOT NULL AND api_key_hash IS NULL`,
+  )
+  for (const row of unhashed.rows) {
+    const hash = createHash('sha256').update(row.api_key).digest('hex')
+    const prefix = row.api_key.slice(0, 12)
+    await pool.query(
+      `UPDATE agents SET api_key_hash = $1, api_key_prefix = $2, api_key = NULL WHERE id = $3`,
+      [hash, prefix, row.id],
+    )
+  }
 }

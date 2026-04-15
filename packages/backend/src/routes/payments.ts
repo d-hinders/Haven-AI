@@ -14,8 +14,6 @@ import {
 // ── Constants ─────────────────────────────────────────────────────
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-const INTENT_EXPIRY_MINUTES = 10
-
 // ── Types ─────────────────────────────────────────────────────────
 
 interface CreatePaymentBody {
@@ -238,7 +236,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         to_address, amount_raw, amount_human, delegate_address,
         allowance_nonce, sign_hash, status, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending_signature',
-        NOW() + interval '${INTENT_EXPIRY_MINUTES} minutes')
+        NOW() + interval '10 minutes')
       RETURNING *`,
       [
         agent.id,

@@ -14,7 +14,6 @@ import {
 // ── Constants ─────────────────────────────────────────────────────
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-const INTENT_EXPIRY_MINUTES = 10
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -239,7 +238,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
         expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending_signature',
-        'x402', $12, $13, NOW() + interval '${INTENT_EXPIRY_MINUTES} minutes')
+        'x402', $12, $13, NOW() + interval '10 minutes')
       RETURNING *`,
       [
         agent.id, agent.user_id, agent.safe_address,

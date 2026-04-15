@@ -1,4 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify'
+import { createHash } from 'crypto'
 import pool from '../db.js'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -66,8 +67,8 @@ export async function agentAuthMiddleware(
      FROM agents a
      JOIN users u ON a.user_id = u.id
      LEFT JOIN user_safes us ON a.safe_id = us.id
-     WHERE a.api_key = $1 AND a.status = 'active'`,
-    [apiKey],
+     WHERE a.api_key_hash = $1 AND a.status = 'active'`,
+    [createHash('sha256').update(apiKey).digest('hex')],
   )
 
   if (result.rows.length === 0) {

@@ -1,9 +1,11 @@
+import { config } from '../config.js'
+
 // Etherscan V2 API (unified endpoint for all chains)
 const BASE_URL = 'https://api.etherscan.io/v2/api'
 const CHAIN_ID = 100 // Gnosis Chain
 
 function getApiKey(): string {
-  return process.env.GNOSISSCAN_API_KEY ?? ''
+  return config.gnosisscanApiKey
 }
 
 interface GnosisscanResponse<T> {

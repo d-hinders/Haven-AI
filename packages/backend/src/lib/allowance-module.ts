@@ -6,6 +6,7 @@
  */
 
 import { ethers } from 'ethers'
+import { config } from '../config.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -44,9 +45,7 @@ let _relayerWallet: ethers.Wallet | null = null
 
 export function getProvider(): ethers.JsonRpcProvider {
   if (!_provider) {
-    _provider = new ethers.JsonRpcProvider(
-      process.env.RPC_URL ?? 'https://rpc.gnosischain.com',
-    )
+    _provider = new ethers.JsonRpcProvider(config.rpcUrl)
   }
   return _provider
 }

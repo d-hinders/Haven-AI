@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
+import { config } from '../config.js'
 import { SUPPORTED_TOKENS, formatTokenValue } from '../lib/tokens.js'
 import { fetchTokenPrices } from '../lib/prices.js'
 
@@ -43,8 +44,7 @@ export default async function portfolioRoutes(
         return cached.data
       }
 
-      const rpcUrl = process.env.RPC_URL ?? 'https://rpc.gnosischain.com'
-      const provider = new ethers.JsonRpcProvider(rpcUrl)
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl)
 
       // Fetch balances + prices in parallel
       const erc20Tokens = Object.values(SUPPORTED_TOKENS).filter(

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
+import { config } from '../config.js'
 import { SUPPORTED_TOKENS, formatTokenValue } from '../lib/tokens.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
@@ -52,8 +53,7 @@ export default async function balanceRoutes(
         return cached.data
       }
 
-      const rpcUrl = process.env.RPC_URL ?? 'https://rpc.gnosischain.com'
-      const provider = new ethers.JsonRpcProvider(rpcUrl)
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl)
 
       const balances: BalanceItem[] = []
 

@@ -185,6 +185,27 @@ export async function runMigrations(): Promise<void> {
     ALTER TABLE agents ALTER COLUMN api_key DROP NOT NULL;
 
     CREATE INDEX IF NOT EXISTS idx_agents_api_key_hash ON agents(api_key_hash);
+
+    -- Multi-chain support: add chain_id to chain-specific tables
+    -- Default 100 (Gnosis) backfills all existing data correctly
+    ALTER TABLE user_safes ADD COLUMN IF NOT EXISTS chain_id INTEGER NOT NULL DEFAULT 100;
+    ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS chain_id INTEGER NOT NULL DEFAULT 100;
+    ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS chain_id INTEGER NOT NULL DEFAULT 100;
+
+    -- Update unique constraint: same address on different chains are different Safes
+    -- Drop old constraint if it exists, then create the new one
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'user_safes_user_id_safe_address_key'
+      ) THEN
+        ALTER TABLE user_safes DROP CONSTRAINT user_safes_user_id_safe_address_key;
+      END IF;
+    END $$;
+    ALTER TABLE user_safes ADD CONSTRAINT user_safes_user_id_safe_address_chain_id_key
+      UNIQUE (user_id, safe_address, chain_id);
+
+    CREATE INDEX IF NOT EXISTS idx_user_safes_chain_id ON user_safes(chain_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_intents_chain_id ON payment_intents(chain_id);
   `)
 
   // Backfill: hash any existing plaintext API keys

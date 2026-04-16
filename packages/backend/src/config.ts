@@ -42,8 +42,12 @@ export const config = {
   rpcUrl: optionalEnv('RPC_URL', 'https://rpc.gnosischain.com'),
   logLevel: optionalEnv('LOG_LEVEL', 'info'),
 
+  // Chain-specific RPC URLs
+  rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
+
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',
+  basescanApiKey: process.env.BASESCAN_API_KEY ?? '',
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
 

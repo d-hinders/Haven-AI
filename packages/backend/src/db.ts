@@ -20,6 +20,11 @@ export function getPool(): pg.Pool {
 }
 
 export default {
-  query: (...args: Parameters<pg.Pool['query']>) => getPool().query(...args),
+  query<R extends pg.QueryResultRow = pg.QueryResultRow>(
+    queryTextOrConfig: string | pg.QueryConfig,
+    values?: unknown[],
+  ): Promise<pg.QueryResult<R>> {
+    return getPool().query<R>(queryTextOrConfig as string, values)
+  },
   connect: () => getPool().connect(),
 }

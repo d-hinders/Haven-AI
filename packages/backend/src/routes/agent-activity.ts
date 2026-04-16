@@ -1,11 +1,13 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { getExplorerUrl } from '../lib/chains.js'
 
 // ── Types ─────────────────────────────────────────────────────────
 
 interface PaymentRow {
   id: string
+  chain_id: number
   token_symbol: string
   amount_human: string
   to_address: string
@@ -19,6 +21,7 @@ interface PaymentRow {
 
 interface ApprovalRow {
   id: string
+  chain_id: number
   token_symbol: string
   amount_human: string
   to_address: string
@@ -65,7 +68,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Fetch payments
     const payments = await pool.query<PaymentRow>(
-      `SELECT id, token_symbol, amount_human, to_address, status, tx_hash, source, x402_resource_url, created_at, confirmed_at
+      `SELECT id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, status, tx_hash, source, x402_resource_url, created_at, confirmed_at
        FROM payment_intents
        WHERE agent_id = $1
        ORDER BY created_at DESC
@@ -75,7 +78,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Fetch approval requests
     const approvals = await pool.query<ApprovalRow>(
-      `SELECT id, token_symbol, amount_human, to_address, reason, status, tx_hash, created_at
+      `SELECT id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason, status, tx_hash, created_at
        FROM approval_requests
        WHERE agent_id = $1
        ORDER BY created_at DESC
@@ -95,7 +98,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         tx_hash: p.tx_hash,
         source: p.source ?? 'direct',
         x402_resource_url: p.x402_resource_url,
-        explorer_url: p.tx_hash ? `https://gnosisscan.io/tx/${p.tx_hash}` : null,
+        explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
         created_at: p.created_at,
       })),
       ...approvals.rows.map((a) => ({
@@ -109,7 +112,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         tx_hash: a.tx_hash,
         source: 'direct' as const,
         x402_resource_url: null,
-        explorer_url: a.tx_hash ? `https://gnosisscan.io/tx/${a.tx_hash}` : null,
+        explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
         created_at: a.created_at,
       })),
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -218,7 +221,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Recent payments across all agents
     const payments = await pool.query<PaymentRow & { agent_id: string }>(
-      `SELECT id, agent_id, token_symbol, amount_human, to_address, status, tx_hash, source, x402_resource_url, created_at, confirmed_at
+      `SELECT id, agent_id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, status, tx_hash, source, x402_resource_url, created_at, confirmed_at
        FROM payment_intents
        WHERE agent_id = ANY($1)
        ORDER BY created_at DESC
@@ -228,7 +231,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Recent approval requests
     const approvals = await pool.query<ApprovalRow & { agent_id: string }>(
-      `SELECT id, agent_id, token_symbol, amount_human, to_address, reason, status, tx_hash, created_at
+      `SELECT id, agent_id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason, status, tx_hash, created_at
        FROM approval_requests
        WHERE agent_id = ANY($1)
        ORDER BY created_at DESC
@@ -250,7 +253,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         tx_hash: p.tx_hash,
         source: p.source ?? 'direct',
         x402_resource_url: p.x402_resource_url,
-        explorer_url: p.tx_hash ? `https://gnosisscan.io/tx/${p.tx_hash}` : null,
+        explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
         created_at: p.created_at,
       })),
       ...approvals.rows.map((a) => ({
@@ -266,7 +269,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         tx_hash: a.tx_hash,
         source: 'direct' as const,
         x402_resource_url: null,
-        explorer_url: a.tx_hash ? `https://gnosisscan.io/tx/${a.tx_hash}` : null,
+        explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
         created_at: a.created_at,
       })),
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())

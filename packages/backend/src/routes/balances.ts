@@ -2,8 +2,9 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
-import { config } from '../config.js'
-import { SUPPORTED_TOKENS, formatTokenValue } from '../lib/tokens.js'
+import { getChain } from '../lib/chains.js'
+import { getProvider } from '../lib/allowance-module.js'
+import { formatTokenValue } from '../lib/tokens.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -37,62 +38,57 @@ export default async function balanceRoutes(
         return reply.code(400).send({ error: 'Invalid address' })
       }
 
-      // Verify ownership (multi-Safe)
-      const userResult = await pool.query(
-        'SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
+      // Verify ownership and get chain_id
+      const userResult = await pool.query<{ id: string; chain_id: number }>(
+        'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
         [sub, safeAddress],
       )
       if (userResult.rows.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
 
+      const chainId = userResult.rows[0].chain_id
+      const chain = getChain(chainId)
+
       // Check cache
-      const cacheKey = `bal:${safeAddress.toLowerCase()}`
+      const cacheKey = `bal:${chainId}:${safeAddress.toLowerCase()}`
       const cached = cache.get(cacheKey)
       if (cached && Date.now() - cached.ts < CACHE_TTL) {
         return cached.data
       }
 
-      const provider = new ethers.JsonRpcProvider(config.rpcUrl)
+      const provider = getProvider(chainId)
+      const tokens = Object.values(chain.tokens)
+      const nativeToken = tokens.find((t) => t.address === null)!
+      const erc20Tokens = tokens.filter((t) => t.address !== null)
 
       const balances: BalanceItem[] = []
 
       // Fetch all balances in parallel
       const results = await Promise.allSettled([
-        // xDAI (native)
         provider.getBalance(safeAddress),
-        // ERC-20 tokens
-        ...Object.values(SUPPORTED_TOKENS)
-          .filter((t) => t.address !== null)
-          .map((token) => {
-            const contract = new ethers.Contract(
-              token.address!,
-              ERC20_ABI,
-              provider,
-            )
-            return contract.balanceOf(safeAddress) as Promise<bigint>
-          }),
+        ...erc20Tokens.map((token) => {
+          const contract = new ethers.Contract(token.address!, ERC20_ABI, provider)
+          return contract.balanceOf(safeAddress) as Promise<bigint>
+        }),
       ])
 
-      // Process xDAI
-      const xdaiResult = results[0]
-      const xdaiBalance =
-        xdaiResult.status === 'fulfilled' ? xdaiResult.value.toString() : '0'
+      // Process native token
+      const nativeResult = results[0]
+      const nativeBalance =
+        nativeResult.status === 'fulfilled' ? nativeResult.value.toString() : '0'
       balances.push({
-        symbol: SUPPORTED_TOKENS.XDAI.symbol,
+        symbol: nativeToken.symbol,
         address: null,
-        balance: xdaiBalance,
-        formatted: formatTokenValue(xdaiBalance, 18),
-        decimals: 18,
+        balance: nativeBalance,
+        formatted: formatTokenValue(nativeBalance, nativeToken.decimals),
+        decimals: nativeToken.decimals,
       })
 
       // Process ERC-20 tokens
-      const erc20Tokens = Object.values(SUPPORTED_TOKENS).filter(
-        (t) => t.address !== null,
-      )
       for (let i = 0; i < erc20Tokens.length; i++) {
         const token = erc20Tokens[i]
-        const result = results[i + 1] // +1 because index 0 is xDAI
+        const result = results[i + 1]
         const rawBalance =
           result.status === 'fulfilled' ? result.value.toString() : '0'
         balances.push({
@@ -105,8 +101,6 @@ export default async function balanceRoutes(
       }
 
       const responseData = { balances }
-
-      // Update cache
       cache.set(cacheKey, { data: responseData, ts: Date.now() })
 
       return responseData

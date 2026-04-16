@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { isSupportedChain } from '../lib/chains.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -10,6 +11,7 @@ interface UserSafeRow {
   id: string
   user_id: string
   safe_address: string
+  chain_id: number
   name: string
   is_default: boolean
   created_at: string
@@ -18,6 +20,7 @@ interface UserSafeRow {
 
 interface AddSafeBody {
   safe_address: string
+  chain_id?: number
   name?: string
 }
 
@@ -35,7 +38,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
     const { sub } = request.user as { sub: string }
 
     const result = await pool.query<UserSafeRow>(
-      `SELECT id, safe_address, name, is_default, created_at
+      `SELECT id, safe_address, chain_id, name, is_default, created_at
        FROM user_safes
        WHERE user_id = $1
        ORDER BY created_at ASC`,
@@ -48,16 +51,20 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   // POST /user/safes — add (import) an existing Safe
   app.post<{ Body: AddSafeBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { safe_address, name } = request.body
+    const { safe_address, chain_id = 100, name } = request.body
 
     if (!safe_address || !ETH_ADDRESS_RE.test(safe_address)) {
       return reply.code(400).send({ error: 'Invalid Ethereum address' })
     }
 
-    // Check if already added
+    if (!isSupportedChain(chain_id)) {
+      return reply.code(400).send({ error: `Unsupported chain: ${chain_id}` })
+    }
+
+    // Check if already added (same address + chain)
     const existing = await pool.query(
-      `SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)`,
-      [sub, safe_address],
+      `SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`,
+      [sub, safe_address, chain_id],
     )
     if (existing.rows.length > 0) {
       return reply.code(409).send({ error: 'This Safe is already linked to your account' })
@@ -71,10 +78,10 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
     const isFirst = Number(countResult.rows[0].count) === 0
 
     const result = await pool.query<UserSafeRow>(
-      `INSERT INTO user_safes (user_id, safe_address, name, is_default)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, safe_address, name, is_default, created_at`,
-      [sub, safe_address, name?.trim() || 'My Safe', isFirst],
+      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, safe_address, chain_id, name, is_default, created_at`,
+      [sub, safe_address, chain_id, name?.trim() || 'My Safe', isFirst],
     )
 
     // Also update legacy users.safe_address if this is the first Safe
@@ -103,7 +110,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
       const result = await pool.query<UserSafeRow>(
         `UPDATE user_safes SET name = $1, updated_at = NOW()
          WHERE id = $2 AND user_id = $3
-         RETURNING id, safe_address, name, is_default, created_at`,
+         RETURNING id, safe_address, chain_id, name, is_default, created_at`,
         [name.trim(), safeId, sub],
       )
 

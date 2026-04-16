@@ -5,12 +5,9 @@ import {
   fetchNormalTransactions,
   fetchInternalTransactions,
   fetchERC20Transfers,
-} from '../lib/gnosisscan.js'
-import {
-  TOKEN_BY_ADDRESS,
-  SUPPORTED_TOKENS,
-  formatTokenValue,
-} from '../lib/tokens.js'
+} from '../lib/explorer-api.js'
+import { getChain } from '../lib/chains.js'
+import { formatTokenValue } from '../lib/tokens.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -53,34 +50,36 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid address' })
     }
 
-    // Verify ownership (multi-Safe)
-    const userResult = await pool.query(
-      'SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
+    // Verify ownership and get chain_id
+    const userResult = await pool.query<{ id: string; chain_id: number }>(
+      'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
       [sub, safeAddress],
     )
     if (userResult.rows.length === 0) {
       return reply.code(403).send({ error: 'Not your Safe' })
     }
 
+    const chainId = userResult.rows[0].chain_id
+    const chain = getChain(chainId)
+    const nativeToken = Object.values(chain.tokens).find((t) => t.address === null)!
+
     // Check cache
-    const cacheKey = `tx:${safeAddress.toLowerCase()}`
+    const cacheKey = `tx:${chainId}:${safeAddress.toLowerCase()}`
     const cached = cache.get(cacheKey)
     let allTransactions: Transaction[]
 
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
       allTransactions = cached.data as Transaction[]
     } else {
-      // Fetch sequentially to avoid gnosisscan rate limits
+      // Fetch sequentially to avoid rate limits
       const addrLower = safeAddress.toLowerCase()
-      const normalTxs = await fetchNormalTransactions(safeAddress).catch(() => [])
-      const internalTxs = await fetchInternalTransactions(safeAddress).catch(() => [])
-      const erc20Txs = await fetchERC20Transfers(safeAddress).catch(() => [])
+      const normalTxs = await fetchNormalTransactions(chainId, safeAddress).catch(() => [])
+      const internalTxs = await fetchInternalTransactions(chainId, safeAddress).catch(() => [])
+      const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(() => [])
 
       const transactions: Transaction[] = []
 
-      // Normalize native transactions
       for (const tx of normalTxs) {
-        // Skip zero-value contract calls (these are just function calls, not transfers)
         if (tx.value === '0' && tx.functionName) continue
 
         transactions.push({
@@ -89,9 +88,9 @@ export default async function transactionRoutes(
           from: tx.from,
           to: tx.to,
           value: tx.value,
-          valueFormatted: formatTokenValue(tx.value, 18),
-          asset: SUPPORTED_TOKENS.XDAI.symbol,
-          decimals: 18,
+          valueFormatted: formatTokenValue(tx.value, nativeToken.decimals),
+          asset: nativeToken.symbol,
+          decimals: nativeToken.decimals,
           direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
           timestamp: parseInt(tx.timeStamp, 10),
           blockNumber: parseInt(tx.blockNumber, 10),
@@ -99,7 +98,6 @@ export default async function transactionRoutes(
         })
       }
 
-      // Normalize internal transactions
       for (const tx of internalTxs) {
         if (tx.value === '0') continue
 
@@ -109,9 +107,9 @@ export default async function transactionRoutes(
           from: tx.from,
           to: tx.to,
           value: tx.value,
-          valueFormatted: formatTokenValue(tx.value, 18),
-          asset: SUPPORTED_TOKENS.XDAI.symbol,
-          decimals: 18,
+          valueFormatted: formatTokenValue(tx.value, nativeToken.decimals),
+          asset: nativeToken.symbol,
+          decimals: nativeToken.decimals,
           direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
           timestamp: parseInt(tx.timeStamp, 10),
           blockNumber: parseInt(tx.blockNumber, 10),
@@ -119,14 +117,10 @@ export default async function transactionRoutes(
         })
       }
 
-      // Normalize ERC-20 transfers
       for (const tx of erc20Txs) {
-        const knownToken =
-          TOKEN_BY_ADDRESS[tx.contractAddress.toLowerCase()]
-        const symbol =
-          knownToken?.symbol ?? tx.tokenSymbol ?? tx.contractAddress
-        const decimals =
-          knownToken?.decimals ?? (parseInt(tx.tokenDecimal, 10) || 18)
+        const knownToken = chain.tokenByAddress[tx.contractAddress.toLowerCase()]
+        const symbol = knownToken?.symbol ?? tx.tokenSymbol ?? tx.contractAddress
+        const decimals = knownToken?.decimals ?? (parseInt(tx.tokenDecimal, 10) || 18)
 
         transactions.push({
           hash: tx.hash,
@@ -146,10 +140,8 @@ export default async function transactionRoutes(
         })
       }
 
-      // Sort by timestamp descending (most recent first)
       transactions.sort((a, b) => b.timestamp - a.timestamp)
 
-      // Deduplicate: a hash+type pair should be unique
       const seen = new Set<string>()
       allTransactions = transactions.filter((tx) => {
         const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}`
@@ -158,7 +150,6 @@ export default async function transactionRoutes(
         return true
       })
 
-      // Update cache
       cache.set(cacheKey, { data: allTransactions, ts: Date.now() })
     }
 

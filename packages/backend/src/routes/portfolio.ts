@@ -2,8 +2,9 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
-import { config } from '../config.js'
-import { SUPPORTED_TOKENS, formatTokenValue } from '../lib/tokens.js'
+import { getChain } from '../lib/chains.js'
+import { getProvider } from '../lib/allowance-module.js'
+import { formatTokenValue } from '../lib/tokens.js'
 import { fetchTokenPrices } from '../lib/prices.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
@@ -28,39 +29,37 @@ export default async function portfolioRoutes(
         return reply.code(400).send({ error: 'Invalid address' })
       }
 
-      // Verify ownership (multi-Safe)
-      const userResult = await pool.query(
-        'SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
+      // Verify ownership and get chain_id
+      const userResult = await pool.query<{ id: string; chain_id: number }>(
+        'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
         [sub, safeAddress],
       )
       if (userResult.rows.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
 
+      const chainId = userResult.rows[0].chain_id
+      const chain = getChain(chainId)
+
       // Check cache
-      const cacheKey = `portfolio:${safeAddress.toLowerCase()}`
+      const cacheKey = `portfolio:${chainId}:${safeAddress.toLowerCase()}`
       const cached = cache.get(cacheKey)
       if (cached && Date.now() - cached.ts < CACHE_TTL) {
         return cached.data
       }
 
-      const provider = new ethers.JsonRpcProvider(config.rpcUrl)
+      const provider = getProvider(chainId)
+      const tokens = Object.values(chain.tokens)
+      const nativeToken = tokens.find((t) => t.address === null)!
+      const erc20Tokens = tokens.filter((t) => t.address !== null)
 
       // Fetch balances + prices in parallel
-      const erc20Tokens = Object.values(SUPPORTED_TOKENS).filter(
-        (t) => t.address !== null,
-      )
-
       const [pricesResult, nativeResult, ...erc20Results] =
         await Promise.allSettled([
           fetchTokenPrices(),
           provider.getBalance(safeAddress),
           ...erc20Tokens.map((token) => {
-            const contract = new ethers.Contract(
-              token.address!,
-              ERC20_ABI,
-              provider,
-            )
+            const contract = new ethers.Contract(token.address!, ERC20_ABI, provider)
             return contract.balanceOf(safeAddress) as Promise<bigint>
           }),
         ])
@@ -68,7 +67,6 @@ export default async function portfolioRoutes(
       const prices =
         pricesResult.status === 'fulfilled' ? pricesResult.value : {}
 
-      // Build breakdown
       const breakdown: {
         symbol: string
         balance: string
@@ -77,19 +75,19 @@ export default async function portfolioRoutes(
         eurValue: number
       }[] = []
 
-      // Native xDAI
-      const xdaiRaw =
+      // Native token
+      const nativeRaw =
         nativeResult.status === 'fulfilled'
           ? nativeResult.value.toString()
           : '0'
-      const xdaiFormatted = formatTokenValue(xdaiRaw, 18)
-      const xdaiNum = parseFloat(xdaiFormatted)
+      const nativeFormatted = formatTokenValue(nativeRaw, nativeToken.decimals)
+      const nativeNum = parseFloat(nativeFormatted)
       breakdown.push({
-        symbol: 'xDAI',
-        balance: xdaiRaw,
-        formatted: xdaiFormatted,
-        usdValue: xdaiNum * (prices['xDAI']?.usd ?? 0),
-        eurValue: xdaiNum * (prices['xDAI']?.eur ?? 0),
+        symbol: nativeToken.symbol,
+        balance: nativeRaw,
+        formatted: nativeFormatted,
+        usdValue: nativeNum * (prices[nativeToken.symbol]?.usd ?? 0),
+        eurValue: nativeNum * (prices[nativeToken.symbol]?.eur ?? 0),
       })
 
       // ERC-20 tokens

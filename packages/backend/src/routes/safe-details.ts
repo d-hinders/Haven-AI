@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
-import { config } from '../config.js'
+import { getProvider } from '../lib/allowance-module.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -31,23 +31,25 @@ export default async function safeDetailRoutes(
         return reply.code(400).send({ error: 'Invalid address' })
       }
 
-      // Verify ownership (multi-Safe)
-      const userResult = await pool.query(
-        'SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
+      // Verify ownership and get chain_id
+      const userResult = await pool.query<{ id: string; chain_id: number }>(
+        'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
         [sub, safeAddress],
       )
       if (userResult.rows.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
 
+      const chainId = userResult.rows[0].chain_id
+
       // Check cache
-      const cacheKey = `safe-details:${safeAddress.toLowerCase()}`
+      const cacheKey = `safe-details:${chainId}:${safeAddress.toLowerCase()}`
       const cached = cache.get(cacheKey)
       if (cached && Date.now() - cached.ts < CACHE_TTL) {
         return cached.data
       }
 
-      const provider = new ethers.JsonRpcProvider(config.rpcUrl)
+      const provider = getProvider(chainId)
       const safeContract = new ethers.Contract(safeAddress, SAFE_ABI, provider)
 
       const [owners, threshold, nonce] = await Promise.all([

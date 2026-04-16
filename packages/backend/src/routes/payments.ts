@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
-import { SUPPORTED_TOKENS } from '../lib/tokens.js'
+import { getChain } from '../lib/chains.js'
 import {
   getTokenAllowance,
   computeEffectiveAllowance,
@@ -31,6 +31,7 @@ interface PaymentIntentRow {
   agent_id: string
   user_id: string
   safe_address: string
+  chain_id: number
   token_symbol: string
   token_address: string
   to_address: string
@@ -56,13 +57,13 @@ function isValidAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
-/** Resolve a token symbol to its config. Case-insensitive matching. */
-function resolveToken(symbol: string) {
+/** Resolve a token symbol to its config for a specific chain. */
+function resolveToken(chainId: number, symbol: string) {
+  const chain = getChain(chainId)
+  const tokens = chain.tokens
   const upper = symbol.toUpperCase().replace('.', '')
-  // Try direct match: USDCE, EURE, XDAI
-  if (SUPPORTED_TOKENS[upper]) return SUPPORTED_TOKENS[upper]
-  // Try by display symbol: USDC.e, EURe, xDAI
-  for (const cfg of Object.values(SUPPORTED_TOKENS)) {
+  if (tokens[upper]) return tokens[upper]
+  for (const cfg of Object.values(tokens)) {
     if (cfg.symbol.toLowerCase() === symbol.toLowerCase()) return cfg
   }
   return null
@@ -90,12 +91,13 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       return reply.code(400).send({ error: 'Valid recipient address is required' })
     }
 
-    // 2. Resolve token
-    const tokenConfig = resolveToken(token)
+    // 2. Resolve token for agent's chain
+    const chain = getChain(agent.chain_id)
+    const tokenConfig = resolveToken(agent.chain_id, token)
     if (!tokenConfig) {
       return reply.code(400).send({
         error: `Unsupported token: ${token}`,
-        supported: Object.values(SUPPORTED_TOKENS).map((t) => t.symbol),
+        supported: Object.values(chain.tokens).map((t) => t.symbol),
       })
     }
 
@@ -154,18 +156,19 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // 4b. Check if this payment needs human approval
     if (approvalThreshold !== null && amountRaw > approvalThreshold) {
       // Queue for human approval instead of executing
-      const reason = (request.body as Record<string, unknown>).reason as string | undefined
+      const reason = (request.body as unknown as Record<string, unknown>).reason as string | undefined
       const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
         `INSERT INTO approval_requests (
-          agent_id, user_id, safe_address, token_symbol, token_address,
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
           to_address, amount_raw, amount_human, reason, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending',
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
           NOW() + interval '24 hours')
         RETURNING id, status, expires_at`,
         [
           agent.id,
           agent.user_id,
           agent.safe_address,
+          agent.chain_id,
           tokenConfig.symbol,
           tokenAddress,
           to.toLowerCase(),
@@ -189,6 +192,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     let onChainAllowance
     try {
       onChainAllowance = await getTokenAllowance(
+        agent.chain_id,
         agent.safe_address,
         agent.delegate_address,
         tokenAddress,
@@ -214,6 +218,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     let signHash: string
     try {
       signHash = await generateTransferHash(
+        agent.chain_id,
         agent.safe_address,
         tokenAddress,
         to,
@@ -232,16 +237,17 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // 7. Store the intent
     const result = await pool.query<PaymentIntentRow>(
       `INSERT INTO payment_intents (
-        agent_id, user_id, safe_address, token_symbol, token_address,
+        agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
         to_address, amount_raw, amount_human, delegate_address,
         allowance_nonce, sign_hash, status, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending_signature',
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
         NOW() + interval '10 minutes')
       RETURNING *`,
       [
         agent.id,
         agent.user_id,
         agent.safe_address,
+        agent.chain_id,
         tokenConfig.symbol,
         tokenAddress,
         to.toLowerCase(),
@@ -347,6 +353,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // 4. Execute on-chain
       try {
         const { txHash } = await executeAllowanceTransfer(
+          intent.chain_id,
           intent.safe_address,
           intent.token_address,
           intent.to_address,

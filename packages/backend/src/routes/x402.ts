@@ -2,7 +2,8 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
-import { SUPPORTED_TOKENS, TOKEN_BY_ADDRESS, formatTokenValue } from '../lib/tokens.js'
+import { getChain, getExplorerUrl } from '../lib/chains.js'
+import { formatTokenValue } from '../lib/tokens.js'
 import {
   getTokenAllowance,
   computeEffectiveAllowance,
@@ -35,14 +36,14 @@ function isValidAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
-/** Resolve a token from its contract address. */
-function resolveTokenByAddress(address: string) {
+/** Resolve a token from its contract address for a specific chain. */
+function resolveTokenByAddress(chainId: number, address: string) {
   const lower = address.toLowerCase()
-  // Native token (xDAI)
+  const chain = getChain(chainId)
   if (lower === ZERO_ADDRESS) {
-    return SUPPORTED_TOKENS['XDAI']
+    return Object.values(chain.tokens).find((t) => t.address === null) ?? null
   }
-  return TOKEN_BY_ADDRESS[lower] ?? null
+  return chain.tokenByAddress[lower] ?? null
 }
 
 // ── Routes ────────────────────────────────────────────────────────
@@ -79,11 +80,12 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     }
 
     // 2. Resolve token from asset address
-    const tokenConfig = resolveTokenByAddress(asset)
+    const chain = getChain(agent.chain_id)
+    const tokenConfig = resolveTokenByAddress(agent.chain_id, asset)
     if (!tokenConfig) {
       return reply.code(400).send({
         error: `Unsupported token asset: ${asset}`,
-        supported: Object.values(SUPPORTED_TOKENS).map((t) => ({
+        supported: Object.values(chain.tokens).map((t) => ({
           symbol: t.symbol,
           address: t.address ?? ZERO_ADDRESS,
         })),
@@ -127,13 +129,13 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     if (approvalThreshold !== null && amountRaw > approvalThreshold) {
       const approvalResult = await pool.query(
         `INSERT INTO approval_requests (
-          agent_id, user_id, safe_address, token_symbol, token_address,
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
           to_address, amount_raw, amount_human, reason, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending',
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
           NOW() + interval '24 hours')
         RETURNING id, status, expires_at`,
         [
-          agent.id, agent.user_id, agent.safe_address,
+          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
           tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
           amountRaw.toString(), amountHuman,
           `x402 payment for ${url}${category ? ` (${category})` : ''}`,
@@ -190,6 +192,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     let onChainAllowance
     try {
       onChainAllowance = await getTokenAllowance(
+        agent.chain_id,
         agent.safe_address,
         agent.delegate_address,
         tokenAddress,
@@ -215,6 +218,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     let signHash: string
     try {
       signHash = await generateTransferHash(
+        agent.chain_id,
         agent.safe_address,
         tokenAddress,
         payTo,
@@ -233,15 +237,15 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     // 10. Store intent with x402 metadata
     const intentResult = await pool.query(
       `INSERT INTO payment_intents (
-        agent_id, user_id, safe_address, token_symbol, token_address,
+        agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
         to_address, amount_raw, amount_human, delegate_address,
         allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
         expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending_signature',
-        'x402', $12, $13, NOW() + interval '10 minutes')
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
+        'x402', $13, $14, NOW() + interval '10 minutes')
       RETURNING *`,
       [
-        agent.id, agent.user_id, agent.safe_address,
+        agent.id, agent.user_id, agent.safe_address, agent.chain_id,
         tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
         amountRaw.toString(), amountHuman, agent.delegate_address,
         onChainAllowance.nonce, signHash,
@@ -280,6 +284,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       // Execute on-chain
       try {
         const { txHash } = await executeAllowanceTransfer(
+          agent.chain_id,
           agent.safe_address,
           tokenAddress,
           payTo.toLowerCase(),
@@ -304,7 +309,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           amount: amountHuman,
           to: payTo.toLowerCase(),
           resource_url: url,
-          explorer_url: `https://gnosisscan.io/tx/${txHash}`,
+          explorer_url: getExplorerUrl(agent.chain_id, 'tx', txHash),
         })
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err)

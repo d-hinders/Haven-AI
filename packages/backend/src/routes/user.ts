@@ -10,6 +10,7 @@ interface WalletBody {
 
 interface SafeBody {
   safe_address: string
+  chain_id?: number
 }
 
 interface PreferencesBody {
@@ -41,7 +42,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
   // PUT /user/safe
   app.put<{ Body: SafeBody }>('/safe', async (request, reply) => {
-    const { safe_address } = request.body
+    const { safe_address, chain_id = 100 } = request.body
     const { sub } = request.user as { sub: string }
 
     if (!safe_address || !ETH_ADDRESS_RE.test(safe_address)) {
@@ -57,10 +58,10 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
     // Also insert into user_safes (multi-Safe support)
     await pool.query(
-      `INSERT INTO user_safes (user_id, safe_address, name, is_default)
-       VALUES ($1, $2, 'My Safe', true)
-       ON CONFLICT (user_id, safe_address) DO NOTHING`,
-      [sub, safe_address],
+      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
+       VALUES ($1, $2, $3, 'My Safe', true)
+       ON CONFLICT (user_id, safe_address, chain_id) DO NOTHING`,
+      [sub, safe_address, chain_id],
     )
 
     return result.rows[0]

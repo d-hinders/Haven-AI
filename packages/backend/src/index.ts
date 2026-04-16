@@ -1,7 +1,7 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
 
-import Fastify from 'fastify'
+import Fastify, { type FastifyError } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import { runMigrations } from './db/migrate.js'
@@ -26,7 +26,7 @@ const app = Fastify({
 })
 
 // --- Global error handler ---
-app.setErrorHandler((error, request, reply) => {
+app.setErrorHandler((error: FastifyError, request, reply) => {
   const statusCode = error.statusCode ?? 500
 
   if (statusCode >= 500) {

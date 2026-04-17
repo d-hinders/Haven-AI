@@ -24,7 +24,7 @@ const makePaymentSchema = {
   properties: {
     token: {
       type: 'string' as const,
-      description: 'Token to send. One of: EURe, USDC.e, xDAI',
+      description: 'Token to send. Gnosis Chain: EURe, USDC.e, xDAI. Base: USDC, ETH.',
     },
     amount: {
       type: 'string' as const,
@@ -74,7 +74,7 @@ const authorizeX402Schema = {
     },
     network: {
       type: 'string' as const,
-      description: 'CAIP-2 chain ID (e.g. "eip155:100" for Gnosis Chain)',
+      description: 'CAIP-2 chain ID. "eip155:100" for Gnosis Chain, "eip155:8453" for Base.',
     },
     description: {
       type: 'string' as const,
@@ -87,7 +87,7 @@ const authorizeX402Schema = {
 const MAKE_PAYMENT_DESCRIPTION =
   'Send a payment from the Haven-managed Safe wallet. ' +
   "The payment will be validated against the agent's on-chain spending policy. " +
-  'Supported tokens: EURe, USDC.e, xDAI. All on Gnosis Chain.'
+  'Gnosis Chain tokens: EURe, USDC.e, xDAI. Base tokens: USDC, ETH.'
 
 const GET_STATUS_DESCRIPTION =
   'Check the status of a previously initiated payment. ' +

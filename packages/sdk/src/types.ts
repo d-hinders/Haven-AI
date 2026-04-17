@@ -95,7 +95,7 @@ export interface PaymentResult {
   /** Error message (present when failed) */
   errorMessage: string | null
 
-  /** Gnosisscan URL for the transaction */
+  /** Block explorer URL for the transaction (chain-dependent) */
   explorerUrl: string | null
 
   /** ISO 8601 timestamps */
@@ -149,6 +149,7 @@ export interface RawX402AuthorizeResponse {
   payment_id: string
   status: string
   tx_hash?: string
+  chain_id?: number
   token?: string
   amount?: string
   to?: string
@@ -203,6 +204,8 @@ export interface RawSignResponse {
   token?: string
   amount?: string
   to?: string
+  explorer_url?: string
+  chain_id?: number
   error?: string
   details?: string
 }
@@ -215,6 +218,8 @@ export interface RawStatusResponse {
   amount: string
   to: string
   tx_hash: string | null
+  explorer_url?: string | null
+  chain_id?: number
   error_message: string | null
   created_at: string
   signed_at: string | null

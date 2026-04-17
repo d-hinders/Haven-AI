@@ -25,6 +25,16 @@ import {
 } from './x402.js'
 
 const DEFAULT_BASE_URL = 'http://localhost:3001'
+
+const CHAIN_EXPLORER_TX: Record<number, string> = {
+  100:  'https://gnosisscan.io/tx',
+  8453: 'https://basescan.org/tx',
+}
+
+function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
+  const base = CHAIN_EXPLORER_TX[chainId ?? 100] ?? CHAIN_EXPLORER_TX[100]
+  return `${base}/${txHash}`
+}
 const DEFAULT_REQUEST_TIMEOUT = 30_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
@@ -199,7 +209,7 @@ export class HavenClient {
     if (!option) {
       throw new HavenApiError(
         'No compatible payment option found in x402 requirements. ' +
-        'Haven currently supports Gnosis Chain (eip155:100) with xDAI, EURe, and USDC.e.',
+        'Haven supports Gnosis Chain (eip155:100) and Base (eip155:8453).',
         400,
       )
     }
@@ -224,7 +234,7 @@ export class HavenClient {
         amount: raw.amount ?? '',
         to: raw.to ?? '',
         resourceUrl: paymentRequired.resource.url,
-        explorerUrl: raw.explorer_url ?? `https://gnosisscan.io/tx/${raw.tx_hash}`,
+        explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) : ''),
       }
     }
 
@@ -256,9 +266,7 @@ export class HavenClient {
       amount: execResult.amount ?? raw.amount ?? '',
       to: execResult.to ?? raw.to ?? '',
       resourceUrl: paymentRequired.resource.url,
-      explorerUrl: execResult.tx_hash
-        ? `https://gnosisscan.io/tx/${execResult.tx_hash}`
-        : '',
+      explorerUrl: execResult.explorer_url ?? (execResult.tx_hash ? buildExplorerUrl(execResult.chain_id, execResult.tx_hash) : ''),
     }
   }
 
@@ -476,7 +484,7 @@ export class HavenClient {
       to: raw.to,
       txHash: raw.tx_hash,
       errorMessage: raw.error_message,
-      explorerUrl: raw.tx_hash ? `https://gnosisscan.io/tx/${raw.tx_hash}` : null,
+      explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) : null),
       createdAt: raw.created_at,
       signedAt: raw.signed_at,
       submittedAt: raw.submitted_at,

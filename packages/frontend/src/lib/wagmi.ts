@@ -1,5 +1,5 @@
 import { createConfig, http } from 'wagmi'
-import { gnosis } from 'wagmi/chains'
+import { gnosis, base } from 'wagmi/chains'
 import { injected, walletConnect, coinbaseWallet } from 'wagmi/connectors'
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
@@ -14,10 +14,11 @@ const connectors = [
 ]
 
 export const config = createConfig({
-  chains: [gnosis],
+  chains: [gnosis, base],
   connectors,
   transports: {
     [gnosis.id]: http(),
+    [base.id]: http(),
   },
   ssr: true,
 })

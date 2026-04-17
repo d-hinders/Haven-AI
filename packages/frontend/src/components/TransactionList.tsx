@@ -1,6 +1,7 @@
 'use client'
 
 import type { Transaction } from '@/types/transactions'
+import { getExplorerUrl } from '@/lib/chains'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -33,6 +34,7 @@ interface TransactionListProps {
   resolveAddress?: (address: string) => string | null
   /** Map of delegate address (lowercase) → agent name, for tx attribution */
   agentsByDelegate?: Map<string, string>
+  chainId?: number
 }
 
 export default function TransactionList({
@@ -46,6 +48,7 @@ export default function TransactionList({
   onRefresh,
   resolveAddress,
   agentsByDelegate,
+  chainId = 100,
 }: TransactionListProps) {
   // Loading skeleton
   if (loading && transactions.length === 0) {
@@ -117,7 +120,7 @@ export default function TransactionList({
         {transactions.map((tx, i) => (
           <a
             key={`${tx.hash}-${tx.type}-${i}`}
-            href={`https://gnosisscan.io/tx/${tx.hash}`}
+            href={getExplorerUrl(chainId, 'tx', tx.hash)}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 p-3 rounded-md hover:bg-white/[0.03] transition-colors group"

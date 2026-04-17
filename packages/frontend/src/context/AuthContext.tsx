@@ -13,6 +13,7 @@ import { api, ApiRequestError } from '@/lib/api'
 export interface UserSafe {
   id: string
   safe_address: string
+  chain_id: number
   name: string
   is_default: boolean
   created_at: string

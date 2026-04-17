@@ -3,7 +3,6 @@
 import { useState, useMemo } from 'react'
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
 import { type Address, hashTypedData } from 'viem'
-import { gnosis } from 'viem/chains'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
@@ -14,7 +13,7 @@ import {
   RESET_PERIODS,
   type AllowanceInfo,
 } from '@/lib/allowance-module'
-import { getSafeNonce, signSafeTx, executeSafeTx, proposeSafeTx, TOKENS } from '@/lib/safe-tx'
+import { getSafeNonce, signSafeTx, executeSafeTx, proposeSafeTx, getChainTokens } from '@/lib/safe-tx'
 import CreateAgentModal from './CreateAgentModal'
 import EditAgentModal from './EditAgentModal'
 import HowItWorksModal from './HowItWorksModal'
@@ -32,21 +31,25 @@ function resetLabel(mins: number) {
   return RESET_PERIODS.find((p) => p.value === mins)?.label ?? `${mins}m`
 }
 
-/** Resolve token address to symbol */
-function tokenSymbol(addr: string): string {
+/** Resolve token address to symbol (chain-aware) */
+function tokenSymbol(addr: string, chainId: number): string {
   const lower = addr.toLowerCase()
-  if (lower === '0x0000000000000000000000000000000000000000') return 'xDAI'
-  for (const [symbol, cfg] of Object.entries(TOKENS)) {
+  const tokens = getChainTokens(chainId)
+  if (lower === '0x0000000000000000000000000000000000000000') {
+    return Object.entries(tokens).find(([, cfg]) => cfg.address === null)?.[0] ?? 'Native'
+  }
+  for (const [symbol, cfg] of Object.entries(tokens)) {
     if (cfg.address && cfg.address.toLowerCase() === lower) return symbol
   }
   return truncate(addr)
 }
 
-/** Resolve token address to decimals */
-function tokenDecimals(addr: string): number {
+/** Resolve token address to decimals (chain-aware) */
+function tokenDecimals(addr: string, chainId: number): number {
   const lower = addr.toLowerCase()
+  const tokens = getChainTokens(chainId)
   if (lower === '0x0000000000000000000000000000000000000000') return 18
-  for (const cfg of Object.values(TOKENS)) {
+  for (const cfg of Object.values(tokens)) {
     if (cfg.address && cfg.address.toLowerCase() === lower) return cfg.decimals
   }
   return 18
@@ -91,11 +94,13 @@ function BotIcon({ size = 15 }: { size?: number }) {
 function AllowanceBar({
   info,
   loading,
+  chainId = 100,
 }: {
   info: AllowanceInfo
   loading?: boolean
+  chainId?: number
 }) {
-  const decimals = tokenDecimals(info.token)
+  const decimals = tokenDecimals(info.token, chainId)
   const effective = computeEffectiveAllowance(info)
   const total = info.amount
   const spent = effective.effectiveSpent
@@ -112,7 +117,7 @@ function AllowanceBar({
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
         <span className="text-zinc-400 font-medium">
-          {tokenSymbol(info.token)}
+          {tokenSymbol(info.token, chainId)}
           {loading && (
             <span className="ml-1 text-zinc-700 animate-pulse">...</span>
           )}
@@ -173,6 +178,7 @@ function AgentCard({
   onRevoke,
   onDelete,
   revoking,
+  chainId = 100,
 }: {
   agent: Agent
   onChainAllowances: AllowanceInfo[] | null
@@ -182,6 +188,7 @@ function AgentCard({
   onRevoke: (agent: Agent) => void
   onDelete: (agent: Agent) => void
   revoking: boolean
+  chainId?: number
 }) {
   const [showKey, setShowKey] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -310,7 +317,7 @@ function AgentCard({
           {/* On-chain allowances */}
           {displayAllowances && displayAllowances.length > 0 ? (
             displayAllowances.map((info) => (
-              <AllowanceBar key={info.token} info={info} />
+              <AllowanceBar key={info.token} info={info} chainId={chainId} />
             ))
           ) : !onChainLoading && (!displayAllowances || displayAllowances.length === 0) ? (
             <p className="text-xs text-zinc-700">No on-chain allowances found</p>
@@ -427,9 +434,11 @@ function AgentCard({
 function UnmanagedDelegateCard({
   delegate,
   allowances,
+  chainId = 100,
 }: {
   delegate: string
   allowances: AllowanceInfo[]
+  chainId?: number
 }) {
   return (
     <div className="bg-white/[0.02] border border-dashed border-amber-500/20 rounded-xl p-5">
@@ -485,7 +494,7 @@ function UnmanagedDelegateCard({
             <span className="text-zinc-800 ml-1 normal-case">(on-chain)</span>
           </p>
           {allowances.map((info) => (
-            <AllowanceBar key={info.token} info={info} />
+            <AllowanceBar key={info.token} info={info} chainId={chainId} />
           ))}
         </div>
       )}
@@ -498,11 +507,12 @@ function UnmanagedDelegateCard({
 export default function AgentPanel() {
   const { user, activeSafe } = useAuth()
   const safeAddress = activeSafe?.safe_address ?? null
+  const chainId = activeSafe?.chain_id ?? 100
   const { details: safeDetails } = useSafeDetails(safeAddress)
   const { agents, loading, revokeAgent, deleteAgent, refetch } = useAgents()
   const { address: connectedAddress } = useAccount()
-  const publicClient = usePublicClient({ chainId: gnosis.id })
-  const { data: walletClient } = useWalletClient({ chainId: gnosis.id })
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
 
   const [createOpen, setCreateOpen] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
@@ -529,7 +539,7 @@ export default function AgentPanel() {
     loading: onChainLoading,
     onChainDelegates,
     refetch: refetchOnChain,
-  } = useOnChainAllowances(safeAddress, managedDelegates)
+  } = useOnChainAllowances(safeAddress, managedDelegates, chainId)
 
   // Find delegates that exist on-chain but not in Haven DB
   const unmanagedDelegates = useMemo(() => {
@@ -565,6 +575,7 @@ export default function AgentPanel() {
         safeAddress as Address,
         safeTx,
         connectedAddress,
+        chainId,
       )
 
       const threshold = safeDetails.threshold ?? 1
@@ -576,11 +587,12 @@ export default function AgentPanel() {
           safeTx,
           signature,
           connectedAddress,
+          chainId,
         )
       } else {
         const safeTxHash = hashTypedData({
           domain: {
-            chainId: gnosis.id,
+            chainId,
             verifyingContract: safeAddress as Address,
           },
           types: {
@@ -617,6 +629,7 @@ export default function AgentPanel() {
           safeTxHash,
           signature,
           connectedAddress,
+          chainId,
         )
       }
 
@@ -795,6 +808,7 @@ export default function AgentPanel() {
                 onRevoke={handleRevoke}
                 onDelete={handleDelete}
                 revoking={revoking}
+                chainId={chainId}
               />
             )
           })}
@@ -805,6 +819,7 @@ export default function AgentPanel() {
               key={d.address}
               delegate={d.address}
               allowances={d.allowances}
+              chainId={chainId}
             />
           ))}
         </div>

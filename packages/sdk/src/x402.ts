@@ -15,16 +15,35 @@ import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 
 /** CAIP-2 chain IDs that Haven supports for x402 payments. */
 export const SUPPORTED_X402_NETWORKS: Record<string, string> = {
-  'eip155:100': 'Gnosis Chain',
+  'eip155:100':  'Gnosis Chain',
+  'eip155:8453': 'Base',
 }
 
-// ── Token address map (Gnosis Chain) ─────────────────────────────
+// ── Token address maps ────────────────────────────────────────────
 
-/** Map token addresses to symbols on Gnosis Chain. */
+/** Known tokens on Gnosis Chain (chainId 100). */
 const GNOSIS_TOKENS: Record<string, { symbol: string; decimals: number }> = {
-  '0x0000000000000000000000000000000000000000': { symbol: 'xDAI', decimals: 18 },
-  '0xcb444e90d8198415266c6a2724b7900fb12fc56e': { symbol: 'EURe', decimals: 18 },
-  '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0': { symbol: 'USDC.e', decimals: 6 },
+  '0x0000000000000000000000000000000000000000': { symbol: 'xDAI',   decimals: 18 },
+  '0xcb444e90d8198415266c6a2724b7900fb12fc56e': { symbol: 'EURe',   decimals: 18 },
+  '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0': { symbol: 'USDC.e', decimals: 6  },
+}
+
+/** Known tokens on Base (chainId 8453). */
+const BASE_TOKENS: Record<string, { symbol: string; decimals: number }> = {
+  '0x0000000000000000000000000000000000000000': { symbol: 'ETH',  decimals: 18 },
+  '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC', decimals: 6  },
+}
+
+/** All known tokens across all supported chains (for display / resolution). */
+const ALL_TOKENS: Record<string, { symbol: string; decimals: number }> = {
+  ...GNOSIS_TOKENS,
+  ...BASE_TOKENS,
+}
+
+/** Maps CAIP-2 network ID → token address map. */
+const NETWORK_TOKENS: Record<string, Record<string, { symbol: string; decimals: number }>> = {
+  'eip155:100':  GNOSIS_TOKENS,
+  'eip155:8453': BASE_TOKENS,
 }
 
 // ── Parser ───────────────────────────────────────────────────────
@@ -66,23 +85,25 @@ export function parsePaymentRequired(response: Response): X402PaymentRequired {
 /**
  * Select the best payment option from the x402 accepts array.
  *
- * Preference: Gnosis Chain tokens that Haven supports.
- * Falls back to the first option if no Haven-supported match.
+ * Preference order:
+ * 1. Option on a Haven-supported network with a known token
+ * 2. Any option on a Haven-supported network
+ * 3. null — no compatible option
  */
 export function selectPaymentOption(
   accepts: X402PaymentOption[],
 ): X402PaymentOption | null {
   if (!accepts || accepts.length === 0) return null
 
-  // First pass: find a Gnosis Chain option with a supported token
+  // First pass: find a supported network with a known token
   for (const opt of accepts) {
     if (opt.network in SUPPORTED_X402_NETWORKS) {
-      const tokenInfo = GNOSIS_TOKENS[opt.asset.toLowerCase()]
-      if (tokenInfo) return opt
+      const networkTokens = NETWORK_TOKENS[opt.network]
+      if (networkTokens?.[opt.asset.toLowerCase()]) return opt
     }
   }
 
-  // Second pass: any Gnosis Chain option
+  // Second pass: any supported network
   for (const opt of accepts) {
     if (opt.network in SUPPORTED_X402_NETWORKS) {
       return opt
@@ -118,8 +139,20 @@ export function encodePaymentProof(receipt: {
 }
 
 /**
- * Resolve a token symbol from a contract address on Gnosis Chain.
+ * Resolve a token symbol from a contract address.
+ *
+ * Checks all supported chains. For chain-specific resolution,
+ * pass the optional `network` CAIP-2 string (e.g. "eip155:100").
  */
-export function resolveTokenFromAddress(address: string): { symbol: string; decimals: number } | null {
-  return GNOSIS_TOKENS[address.toLowerCase()] ?? null
+export function resolveTokenFromAddress(
+  address: string,
+  network?: string,
+): { symbol: string; decimals: number } | null {
+  const lower = address.toLowerCase()
+
+  if (network && network in NETWORK_TOKENS) {
+    return NETWORK_TOKENS[network][lower] ?? null
+  }
+
+  return ALL_TOKENS[lower] ?? null
 }

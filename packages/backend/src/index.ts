@@ -18,6 +18,7 @@ import approvalRoutes from './routes/approvals.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
+import pool from './db.js'
 
 const app = Fastify({
   logger: {
@@ -61,8 +62,24 @@ await app.register(fastifyJwt, {
 })
 
 // --- Routes ---
-app.get('/health', async () => {
-  return { status: 'ok', timestamp: new Date().toISOString() }
+app.get('/health', async (_request, reply) => {
+  const start = Date.now()
+  try {
+    await pool.query('SELECT 1')
+    const dbLatencyMs = Date.now() - start
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      db: { status: 'ok', latencyMs: dbLatencyMs },
+    }
+  } catch (err) {
+    reply.status(503)
+    return {
+      status: 'degraded',
+      timestamp: new Date().toISOString(),
+      db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
+    }
+  }
 })
 
 await app.register(authRoutes, { prefix: '/auth' })

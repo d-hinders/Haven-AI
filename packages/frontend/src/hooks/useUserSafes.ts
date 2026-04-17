@@ -11,12 +11,13 @@ export function useUserSafes() {
   const safes = user?.safes ?? []
 
   const addSafe = useCallback(
-    async (safe_address: string, name?: string): Promise<UserSafe> => {
+    async (safe_address: string, name?: string, chain_id?: number): Promise<UserSafe> => {
       setLoading(true)
       try {
         const result = await api.post<UserSafe>('/user/safes', {
           safe_address,
           name,
+          chain_id,
         })
         await refreshUser()
         return result

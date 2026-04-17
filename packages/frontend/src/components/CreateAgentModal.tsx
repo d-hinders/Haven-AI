@@ -4,7 +4,6 @@ import { useState, useCallback } from 'react'
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
 import { type Address, parseUnits, hashTypedData } from 'viem'
 import { generatePrivateKey, privateKeyToAddress } from 'viem/accounts'
-import { gnosis } from 'viem/chains'
 import {
   buildAgentSetupTx,
   isModuleEnabled,
@@ -12,13 +11,15 @@ import {
   type AllowanceSetup,
 } from '@/lib/allowance-module'
 import { api } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
+import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 import {
   getSafeNonce,
   signSafeTx,
   executeSafeTx,
   proposeSafeTx,
-  TOKENS,
+  getChainTokens,
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
 
@@ -32,11 +33,6 @@ function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
-const TOKEN_OPTIONS = [
-  { symbol: 'xDAI', label: 'xDAI', sub: 'Native', address: TOKENS['xDAI'].address, decimals: TOKENS['xDAI'].decimals },
-  { symbol: 'EURe', label: 'EURe', sub: 'Monerium', address: TOKENS['EURe'].address, decimals: TOKENS['EURe'].decimals },
-  { symbol: 'USDC.e', label: 'USDC.e', sub: 'Bridged USDC', address: TOKENS['USDC.e'].address, decimals: TOKENS['USDC.e'].decimals },
-] as const
 
 interface AllowanceEntry {
   tokenSymbol: string
@@ -85,6 +81,17 @@ export default function CreateAgentModal({
   safeDetails,
   onCreated,
 }: Props) {
+  const { activeSafe } = useAuth()
+  const chainId = activeSafe?.chain_id ?? 100
+  const chainTokens = getChainTokens(chainId)
+  const tokenOptions = Object.entries(chainTokens).map(([symbol, cfg]) => ({
+    symbol,
+    label: symbol,
+    sub: cfg.address === null ? 'Native' : symbol,
+    address: cfg.address as Address | null,
+    decimals: cfg.decimals,
+  }))
+
   // Step state
   const [step, setStep] = useState<Step>('details')
 
@@ -102,7 +109,7 @@ export default function CreateAgentModal({
 
   // Form: allowances
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
-  const [addToken, setAddToken] = useState<string>(TOKEN_OPTIONS[1].symbol) // default EURe
+  const [addToken, setAddToken] = useState<string>(tokenOptions[0]?.symbol ?? '')
   const [addAmount, setAddAmount] = useState('')
   const [addReset, setAddReset] = useState(1440) // daily
 
@@ -122,8 +129,8 @@ export default function CreateAgentModal({
 
   // Wagmi
   const { address: connectedAddress } = useAccount()
-  const publicClient = usePublicClient({ chainId: gnosis.id })
-  const { data: walletClient } = useWalletClient({ chainId: gnosis.id })
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
 
   // ── Reset ──────────────────────────────────────────────
 
@@ -138,7 +145,7 @@ export default function CreateAgentModal({
     setShowPrivateKey(false)
     setCopiedPrivateKey(false)
     setAllowances([])
-    setAddToken(TOKEN_OPTIONS[1].symbol)
+    setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
     setAddReset(1440)
     setRestrictRecipients(false)
@@ -191,7 +198,7 @@ export default function CreateAgentModal({
   // ── Step: Allowances ───────────────────────────────────
 
   function handleAddAllowance() {
-    const tokenOpt = TOKEN_OPTIONS.find((t) => t.symbol === addToken)
+    const tokenOpt = tokenOptions.find((t) => t.symbol === addToken)
     if (!tokenOpt || !addAmount || Number(addAmount) <= 0) return
 
     // Don't add duplicate tokens
@@ -260,6 +267,7 @@ export default function CreateAgentModal({
         safeAddress as Address,
         safeTx,
         connectedAddress,
+        chainId,
       )
 
       const threshold = safeDetails.threshold ?? 1
@@ -274,6 +282,7 @@ export default function CreateAgentModal({
           safeTx,
           signature,
           connectedAddress,
+          chainId,
         )
         setTxHash(result.txHash)
       } else {
@@ -281,7 +290,7 @@ export default function CreateAgentModal({
         setExecStatus('executing')
         const safeTxHash = hashTypedData({
           domain: {
-            chainId: gnosis.id,
+            chainId,
             verifyingContract: safeAddress as Address,
           },
           types: {
@@ -318,6 +327,7 @@ export default function CreateAgentModal({
           safeTxHash,
           signature,
           connectedAddress,
+          chainId,
         )
         setTxHash(safeTxHash)
       }
@@ -388,7 +398,7 @@ export default function CreateAgentModal({
     setTimeout(handleGenerateKey, 0)
   }
 
-  const availableTokens = TOKEN_OPTIONS.filter(
+  const availableTokens = tokenOptions.filter(
     (t) => !allowances.some((a) => a.tokenSymbol === t.symbol),
   )
 
@@ -982,8 +992,8 @@ export default function CreateAgentModal({
                   <a
                     href={
                       execStatus === 'confirmed'
-                        ? `https://gnosisscan.io/tx/${txHash}`
-                        : `https://app.safe.global/transactions/tx?safe=gno:${safeAddress}&id=${txHash}`
+                        ? getExplorerUrl(chainId, 'tx', txHash)
+                        : `https://app.safe.global/transactions/tx?safe=${getChainConfig(chainId).shortName}:${safeAddress}&id=${txHash}`
                     }
                     target="_blank"
                     rel="noopener noreferrer"

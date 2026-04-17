@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
-import { getChain } from '../lib/chains.js'
+import { getChain, getExplorerUrl } from '../lib/chains.js'
 import {
   getTokenAllowance,
   computeEffectiveAllowance,
@@ -374,6 +374,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           payment_id: id,
           status: 'confirmed',
           tx_hash: txHash,
+          chain_id: intent.chain_id,
+          explorer_url: getExplorerUrl(intent.chain_id, 'tx', txHash),
           token: intent.token_symbol,
           amount: intent.amount_human,
           to: intent.to_address,
@@ -416,10 +418,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     return {
       payment_id: intent.id,
       status: intent.status,
+      chain_id: intent.chain_id,
       token: intent.token_symbol,
       amount: intent.amount_human,
       to: intent.to_address,
       tx_hash: intent.tx_hash,
+      explorer_url: intent.tx_hash ? getExplorerUrl(intent.chain_id, 'tx', intent.tx_hash) : null,
       error_message: intent.error_message,
       created_at: intent.created_at,
       signed_at: intent.signed_at,

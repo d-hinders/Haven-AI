@@ -11,6 +11,7 @@ import BalanceCards from '@/components/BalanceCards'
 import TransactionList from '@/components/TransactionList'
 import SendButton from '@/components/SendButton'
 import AccountInfo from '@/components/AccountInfo'
+import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -43,8 +44,9 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export default function AccountClient() {
-  const { user } = useAuth()
+  const { user, activeSafe } = useAuth()
   const safeAddress = user?.safe_address ?? null
+  const chainId = activeSafe?.chain_id ?? 100
   const { currency } = usePreferences()
 
   const { details, loading: detailsLoading } = useSafeDetails(safeAddress)
@@ -133,7 +135,7 @@ export default function AccountClient() {
               {safeAddress && <CopyButton text={safeAddress} />}
               {safeAddress && (
                 <a
-                  href={`https://gnosisscan.io/address/${safeAddress}`}
+                  href={getExplorerUrl(chainId, 'address', safeAddress!)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -176,7 +178,7 @@ export default function AccountClient() {
           {/* Network */}
           <div>
             <p className="text-xs text-zinc-500 mb-1">Network</p>
-            <span className="text-sm text-zinc-300">Gnosis Chain</span>
+            <span className="text-sm text-zinc-300">{getChainConfig(chainId).name}</span>
           </div>
         </div>
 
@@ -198,7 +200,7 @@ export default function AccountClient() {
                     </span>
                     <CopyButton text={owner} />
                     <a
-                      href={`https://gnosisscan.io/address/${owner}`}
+                      href={getExplorerUrl(chainId, 'address', owner)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-zinc-600 hover:text-zinc-400 transition-colors"

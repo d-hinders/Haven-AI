@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
 import { type Address, hashTypedData } from 'viem'
-import { gnosis } from 'viem/chains'
 import { useAuth } from '@/context/AuthContext'
 import { useApprovals, type ApprovalRequest } from '@/hooks/useApprovals'
 import {
@@ -12,9 +11,10 @@ import {
   signSafeTx,
   executeSafeTx,
   proposeSafeTx,
-  TOKENS,
+  getChainTokens,
   type SendParams,
 } from '@/lib/safe-tx'
+import { getExplorerUrl } from '@/lib/chains'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -43,10 +43,13 @@ function timeUntil(dateStr: string): string {
   return `${hours}h ${mins % 60}m`
 }
 
-function resolveTokenSymbol(address: string): string {
+function resolveTokenSymbol(address: string, chainId: number): string {
   const lower = address.toLowerCase()
-  if (lower === '0x0000000000000000000000000000000000000000') return 'xDAI'
-  for (const [symbol, cfg] of Object.entries(TOKENS)) {
+  const tokens = getChainTokens(chainId)
+  if (lower === '0x0000000000000000000000000000000000000000') {
+    return Object.entries(tokens).find(([, cfg]) => cfg.address === null)?.[0] ?? 'Native'
+  }
+  for (const [symbol, cfg] of Object.entries(tokens)) {
     if (cfg.address && cfg.address.toLowerCase() === lower) return symbol
   }
   return 'Unknown'
@@ -76,11 +79,13 @@ function ApprovalCard({
   onApproveAndExecute,
   onReject,
   executing,
+  chainId = 100,
 }: {
   approval: ApprovalRequest
   onApproveAndExecute: (approval: ApprovalRequest) => void
   onReject: (id: string) => void
   executing: boolean
+  chainId?: number
 }) {
   const isPending = approval.status === 'pending'
 
@@ -136,7 +141,7 @@ function ApprovalCard({
           <div className="flex justify-between text-xs">
             <span className="text-zinc-500">Tx</span>
             <a
-              href={`https://gnosisscan.io/tx/${approval.tx_hash}`}
+              href={getExplorerUrl(chainId, 'tx', approval.tx_hash!)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-indigo-400 hover:text-indigo-300 font-mono"
@@ -175,11 +180,12 @@ function ApprovalCard({
 export default function ApprovalQueue() {
   const { user, activeSafe } = useAuth()
   const safeAddress = activeSafe?.safe_address ?? null
+  const chainId = activeSafe?.chain_id ?? 100
   const { details: safeDetails } = useSafeDetails(safeAddress)
   const { approvals, pendingCount, loading, approve, reject, markExecuted, refetch } = useApprovals()
   const { address: connectedAddress } = useAccount()
-  const publicClient = usePublicClient({ chainId: gnosis.id })
-  const { data: walletClient } = useWalletClient({ chainId: gnosis.id })
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
 
   const [executing, setExecuting] = useState(false)
 
@@ -195,13 +201,14 @@ export default function ApprovalQueue() {
       await approve(approval.id)
 
       // 2. Build and sign Safe transaction
-      const tokenSymbol = resolveTokenSymbol(approval.token_address) as 'xDAI' | 'EURe' | 'USDC.e'
-      const tokenConfig = TOKENS[tokenSymbol]
+      const chainTokens = getChainTokens(chainId)
+      const tokenSymbol = resolveTokenSymbol(approval.token_address, chainId)
+      const tokenConfig = chainTokens[tokenSymbol]
       if (!tokenConfig) throw new Error(`Unknown token: ${approval.token_symbol}`)
 
       const sendParams: SendParams = {
         token: tokenSymbol,
-        tokenAddress: tokenConfig.address,
+        tokenAddress: tokenConfig.address as Address | null,
         decimals: tokenConfig.decimals,
         amount: approval.amount_human,
         recipient: approval.to_address as Address,
@@ -214,6 +221,7 @@ export default function ApprovalQueue() {
         safeAddress as Address,
         safeTx,
         connectedAddress,
+        chainId,
       )
 
       // 3. Execute or propose
@@ -228,11 +236,12 @@ export default function ApprovalQueue() {
           safeTx,
           signature,
           connectedAddress,
+          chainId,
         )
         txHash = result.txHash
       } else {
         const safeTxHash = hashTypedData({
-          domain: { chainId: gnosis.id, verifyingContract: safeAddress as Address },
+          domain: { chainId, verifyingContract: safeAddress as Address },
           types: {
             SafeTx: [
               { name: 'to', type: 'address' },
@@ -267,6 +276,7 @@ export default function ApprovalQueue() {
           safeTxHash,
           signature,
           connectedAddress,
+          chainId,
         )
       }
 
@@ -350,6 +360,7 @@ export default function ApprovalQueue() {
               onApproveAndExecute={handleApproveAndExecute}
               onReject={handleReject}
               executing={executing}
+              chainId={chainId}
             />
           ))}
         </div>

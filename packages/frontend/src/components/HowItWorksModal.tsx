@@ -25,7 +25,7 @@ const PAGES: InfoPage[] = [
 
         {/* Architecture diagram */}
         <div className="flex flex-col items-center gap-1 py-2">
-          <DiagramBox label="Your Safe" sub="Holds funds on Gnosis Chain" />
+          <DiagramBox label="Your Safe" sub="Holds funds on-chain" />
           <Arrow />
           <DiagramBox label="AllowanceModule" sub="On-chain spending limits" accent />
           <Arrow />

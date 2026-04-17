@@ -15,6 +15,7 @@ import BalanceCards from '@/components/BalanceCards'
 import TransactionList from '@/components/TransactionList'
 import SendButton from '@/components/SendButton'
 import AccountInfo from '@/components/AccountInfo'
+import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -59,6 +60,7 @@ export default function AccountDetailClient() {
   // Find this Safe from user's list
   const safe = user?.safes?.find((s) => s.id === safeId)
   const safeAddress = safe?.safe_address ?? null
+  const chainId = safe?.chain_id ?? 100
 
   // Set as active safe when viewing
   if (safe && activeSafe?.id !== safe.id) {
@@ -192,7 +194,7 @@ export default function AccountDetailClient() {
               {safeAddress && <CopyButton text={safeAddress} />}
               {safeAddress && (
                 <a
-                  href={`https://gnosisscan.io/address/${safeAddress}`}
+                  href={getExplorerUrl(chainId, 'address', safeAddress!)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -235,7 +237,7 @@ export default function AccountDetailClient() {
           {/* Network */}
           <div>
             <p className="text-xs text-zinc-500 mb-1">Network</p>
-            <span className="text-sm text-zinc-300">Gnosis Chain</span>
+            <span className="text-sm text-zinc-300">{getChainConfig(chainId).name}</span>
           </div>
         </div>
 
@@ -257,7 +259,7 @@ export default function AccountDetailClient() {
                     </span>
                     <CopyButton text={owner} />
                     <a
-                      href={`https://gnosisscan.io/address/${owner}`}
+                      href={getExplorerUrl(chainId, 'address', owner)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -378,6 +380,7 @@ export default function AccountDetailClient() {
           onRefresh={refetchTx}
           resolveAddress={resolveAddress}
           agentsByDelegate={agentsByDelegate}
+          chainId={chainId}
         />
       </div>
 

@@ -6,7 +6,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from 'viem'
-import { gnosis } from 'viem/chains'
+import { getChainConfig } from './chains'
 
 // ── Constants ────────────────────────────────────────────────────────
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address
@@ -89,18 +89,28 @@ export interface SafeTxParams {
 }
 
 export interface SendParams {
-  token: 'xDAI' | 'EURe' | 'USDC.e'
+  token: string
   tokenAddress: Address | null  // null = native
   decimals: number
   amount: string               // human-readable (e.g. "10.5")
   recipient: Address
 }
 
-// ── Token config (mirrors backend) ───────────────────────────────────
+// ── Token config (Gnosis Chain — kept for backwards compat) ──────────
 export const TOKENS: Record<string, { address: Address | null; decimals: number }> = {
   'xDAI': { address: null, decimals: 18 },
   'EURe': { address: '0xcB444e90D8198415266c6a2724b7900fb12FC56E' as Address, decimals: 18 },
   'USDC.e': { address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0' as Address, decimals: 6 },
+}
+
+/** Get token config map for a specific chain (address -> symbol, decimals). */
+export function getChainTokens(chainId: number): Record<string, { address: Address | null; decimals: number }> {
+  const tokens = getChainConfig(chainId).tokens
+  const result: Record<string, { address: Address | null; decimals: number }> = {}
+  for (const [key, cfg] of Object.entries(tokens)) {
+    result[key] = { address: cfg.address as Address | null, decimals: cfg.decimals }
+  }
+  return result
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -166,11 +176,12 @@ export async function signSafeTx(
   safeAddress: Address,
   tx: SafeTxParams,
   signer: Address,
+  chainId: number = 100,
 ): Promise<`0x${string}`> {
   return walletClient.signTypedData({
     account: signer,
     domain: {
-      chainId: gnosis.id,
+      chainId,
       verifyingContract: safeAddress,
     },
     types: SAFE_TX_TYPEHASH,
@@ -224,8 +235,10 @@ export async function executeSafeTx(
   tx: SafeTxParams,
   signature: `0x${string}`,
   sender: Address,
+  chainId: number = 100,
 ): Promise<{ txHash: Hash }> {
   const adjustedSig = normaliseSignatureV(signature)
+  const { viemChain } = getChainConfig(chainId)
 
   const txHash = await walletClient.writeContract({
     address: safeAddress,
@@ -243,7 +256,7 @@ export async function executeSafeTx(
       tx.refundReceiver,
       adjustedSig,
     ],
-    chain: gnosis,
+    chain: viemChain,
     account: sender,
   })
 
@@ -260,10 +273,11 @@ export async function proposeSafeTx(
   safeTxHash: string,
   signature: `0x${string}`,
   sender: Address,
+  chainId: number = 100,
 ): Promise<void> {
   const adjustedSig = normaliseSignatureV(signature)
-
-  const url = `https://safe-transaction-gnosis-chain.safe.global/api/v1/safes/${safeAddress}/multisig-transactions/`
+  const { safeTxServiceUrl } = getChainConfig(chainId)
+  const url = `${safeTxServiceUrl}/api/v1/safes/${safeAddress}/multisig-transactions/`
 
   const response = await fetch(url, {
     method: 'POST',

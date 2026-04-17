@@ -8,6 +8,7 @@ import { api } from '@/lib/api'
 import { deploySafe } from '@/lib/safe'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
+import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import type { User } from '@/context/AuthContext'
 
 type Step = 'connect' | 'deploy' | 'done'
@@ -25,6 +26,7 @@ export default function OnboardingClient() {
   const [error, setError] = useState('')
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
+  const [selectedChainId, setSelectedChainId] = useState(100)
 
   // Redirect if not logged in
   useEffect(() => {
@@ -56,7 +58,7 @@ export default function OnboardingClient() {
     }
   }, [isConnected, address, user, step, updateUser])
 
-  const wrongNetwork = isConnected && chain?.id !== 100
+  const wrongNetwork = isConnected && chain?.id !== selectedChainId
 
   const handleDeploy = async () => {
     if (!walletClient || !publicClient || !address) return
@@ -65,12 +67,12 @@ export default function OnboardingClient() {
     setError('')
 
     try {
-      const result = await deploySafe(walletClient, publicClient, address)
+      const result = await deploySafe(walletClient, publicClient, address, selectedChainId)
       setTxHash(result.txHash)
       setSafeAddress(result.safeAddress)
 
       // Save to backend
-      await api.put<User>('/user/safe', { safe_address: result.safeAddress })
+      await api.put<User>('/user/safe', { safe_address: result.safeAddress, chain_id: selectedChainId })
       updateUser({ safe_address: result.safeAddress, wallet_address: address })
 
       setStep('done')
@@ -179,12 +181,12 @@ export default function OnboardingClient() {
                 Deploy your Safe
               </h1>
               <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
-                Deploy a Safe smart account on Gnosis Chain. Your connected wallet will be the sole
-                owner with full control. Haven never holds signing authority.
+                Deploy a Safe smart account on your chosen network. Your connected wallet will be
+                the sole owner with full control. Haven never holds signing authority.
               </p>
 
               {/* Connected wallet info */}
-              <div className="mb-6 p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
+              <div className="mb-4 p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="block text-xs text-zinc-500 mb-1">Connected wallet</span>
@@ -205,10 +207,26 @@ export default function OnboardingClient() {
                 </div>
               </div>
 
+              {/* Chain selector */}
+              <div className="mb-6 p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
+                <span className="block text-xs text-zinc-500 mb-2">Network</span>
+                <select
+                  value={selectedChainId}
+                  onChange={(e) => setSelectedChainId(Number(e.target.value))}
+                  className="w-full bg-transparent text-sm text-zinc-200 outline-none cursor-pointer"
+                >
+                  {SUPPORTED_CHAINS.map((c) => (
+                    <option key={c.chainId} value={c.chainId} className="bg-[#0a0a0a]">
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Wrong network warning */}
               {wrongNetwork && (
                 <div className="mb-6 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-md px-4 py-3">
-                  Please switch to Gnosis Chain (chain ID 100) in your wallet to continue.
+                  Please switch to {getChainConfig(selectedChainId).name} in your wallet to continue.
                 </div>
               )}
 
@@ -235,8 +253,8 @@ export default function OnboardingClient() {
 
               {deploying && (
                 <p className="mt-4 text-xs text-zinc-500 text-center">
-                  Confirm the transaction in your wallet. This deploys a Safe smart account on
-                  Gnosis Chain.
+                  Confirm the transaction in your wallet. This deploys a Safe smart account on{' '}
+                  {getChainConfig(selectedChainId).name}.
                 </p>
               )}
             </div>
@@ -252,7 +270,7 @@ export default function OnboardingClient() {
                 Safe deployed
               </h1>
               <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
-                Your non-custodial smart account is live on Gnosis Chain. You can now create agents
+                Your non-custodial smart account is live on {getChainConfig(selectedChainId).name}. You can now create agents
                 with spending policies and start transacting.
               </p>
 
@@ -261,7 +279,7 @@ export default function OnboardingClient() {
                 <div className="p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
                   <span className="block text-xs text-zinc-500 mb-1">Safe address</span>
                   <a
-                    href={`https://gnosisscan.io/address/${safeAddress}`}
+                    href={getExplorerUrl(selectedChainId, 'address', safeAddress)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all"
@@ -272,7 +290,7 @@ export default function OnboardingClient() {
                 <div className="p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
                   <span className="block text-xs text-zinc-500 mb-1">Transaction</span>
                   <a
-                    href={`https://gnosisscan.io/tx/${txHash}`}
+                    href={getExplorerUrl(selectedChainId, 'tx', txHash)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all"

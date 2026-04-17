@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
+import { getExplorerUrl } from '@/lib/chains'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -79,7 +80,7 @@ export default function SettingsClient() {
                 {user.safes.map((safe) => (
                   <div key={safe.id} className="flex items-center gap-2">
                     <a
-                      href={`https://gnosisscan.io/address/${safe.safe_address}`}
+                      href={getExplorerUrl(safe.chain_id ?? 100, 'address', safe.safe_address)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors"

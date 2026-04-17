@@ -12,11 +12,8 @@ import {
   pad,
   toHex,
 } from 'viem'
+import { getChainConfig } from './chains'
 
-// ── Safe v1.3.0 contract addresses on Gnosis Chain ──────────────────
-const SAFE_PROXY_FACTORY = '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2' as Address
-const SAFE_SINGLETON_L2 = '0x3E5c63644E683549055b9Be8653de26E0B4CD36E' as Address
-const FALLBACK_HANDLER = '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4' as Address
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
 // ── ABIs (only the functions we need) ────────────────────────────────
@@ -62,7 +59,7 @@ const PROXY_FACTORY_ABI = [
 ] as const
 
 /**
- * Deploy a new Safe on Gnosis Chain.
+ * Deploy a new Safe on the specified chain (default: Gnosis Chain).
  *
  * The connected wallet becomes the sole owner with a threshold of 1.
  * Returns the deployed Safe address.
@@ -71,7 +68,13 @@ export async function deploySafe(
   walletClient: WalletClient,
   publicClient: PublicClient,
   owner: Address,
+  chainId: number = 100,
 ): Promise<{ safeAddress: Address; txHash: Hash }> {
+  const chainCfg = getChainConfig(chainId)
+  const SAFE_PROXY_FACTORY = chainCfg.contracts.safeProxyFactory
+  const SAFE_SINGLETON_L2 = chainCfg.contracts.safeSingletonL2
+  const FALLBACK_HANDLER = chainCfg.contracts.fallbackHandler
+
   // 1. Encode the Safe.setup() initializer
   const initializer = encodeFunctionData({
     abi: SAFE_SETUP_ABI,
@@ -97,7 +100,7 @@ export async function deploySafe(
     abi: PROXY_FACTORY_ABI,
     functionName: 'createProxyWithNonce',
     args: [SAFE_SINGLETON_L2, initializer, saltNonce],
-    chain: walletClient.chain,
+    chain: chainCfg.viemChain,
     account: owner,
   })
 

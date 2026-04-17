@@ -8,6 +8,7 @@ import { useAgents } from '@/hooks/useAgents'
 import { deploySafe } from '@/lib/safe'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
+import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 
 function truncate(addr: string) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
@@ -26,7 +27,7 @@ function AddSafeModal({
 }: {
   open: boolean
   onClose: () => void
-  onAdd: (address: string, name: string) => Promise<void>
+  onAdd: (address: string, name: string, chainId: number) => Promise<void>
   loading: boolean
 }) {
   const [mode, setMode] = useState<AddMode>('choose')
@@ -35,27 +36,31 @@ function AddSafeModal({
 
   // Import state
   const [importAddress, setImportAddress] = useState('')
+  const [importChainId, setImportChainId] = useState(100)
 
   // Deploy state
   const [deployStep, setDeployStep] = useState<DeployStep>('name')
   const [deploying, setDeploying] = useState(false)
   const [deployedAddress, setDeployedAddress] = useState('')
   const [deployTxHash, setDeployTxHash] = useState('')
+  const [deployChainId, setDeployChainId] = useState(100)
 
   const { address: walletAddress, isConnected, chain } = useAccount()
   const publicClient = usePublicClient()
   const { data: walletClient } = useWalletClient()
-  const wrongNetwork = isConnected && chain?.id !== 100
+  const wrongNetwork = isConnected && chain?.id !== deployChainId
 
   const resetState = () => {
     setMode('choose')
     setName('')
     setError('')
     setImportAddress('')
+    setImportChainId(100)
     setDeployStep('name')
     setDeploying(false)
     setDeployedAddress('')
     setDeployTxHash('')
+    setDeployChainId(100)
   }
 
   const handleClose = () => {
@@ -76,7 +81,7 @@ function AddSafeModal({
     }
 
     try {
-      await onAdd(importAddress, name || 'My Safe')
+      await onAdd(importAddress, name || 'My Safe', importChainId)
       resetState()
       onClose()
     } catch (err: unknown) {
@@ -93,12 +98,12 @@ function AddSafeModal({
     setError('')
 
     try {
-      const result = await deploySafe(walletClient, publicClient, walletAddress)
+      const result = await deploySafe(walletClient, publicClient, walletAddress, deployChainId)
       setDeployedAddress(result.safeAddress)
       setDeployTxHash(result.txHash)
 
       // Register in Haven
-      await onAdd(result.safeAddress, name || 'My Safe')
+      await onAdd(result.safeAddress, name || 'My Safe', deployChainId)
       setDeployStep('done')
     } catch (err: unknown) {
       setDeployStep('wallet')
@@ -168,7 +173,7 @@ function AddSafeModal({
                 </div>
                 <div className="flex-1 min-w-0">
                   <span className="block text-sm font-medium text-zinc-200 group-hover:text-white transition-colors">Deploy New Safe</span>
-                  <span className="block text-xs text-zinc-500 mt-0.5">Create a new Safe smart account on Gnosis Chain</span>
+                  <span className="block text-xs text-zinc-500 mt-0.5">Create a new Safe smart account on Gnosis Chain or Base</span>
                 </div>
                 <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -198,7 +203,7 @@ function AddSafeModal({
           {mode === 'deploy' && deployStep === 'name' && (
             <div className="space-y-4">
               <p className="text-sm text-zinc-500">
-                Give your new account a name. You can change this later.
+                Give your new account a name and choose a network.
               </p>
               <div>
                 <label className="block text-xs text-zinc-500 mb-1">Account Name</label>
@@ -210,6 +215,18 @@ function AddSafeModal({
                   autoFocus
                   className="w-full px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
                 />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Network</label>
+                <select
+                  value={deployChainId}
+                  onChange={(e) => setDeployChainId(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                >
+                  {SUPPORTED_CHAINS.map((c) => (
+                    <option key={c.chainId} value={c.chainId}>{c.name}</option>
+                  ))}
+                </select>
               </div>
               <button
                 onClick={() => setDeployStep('wallet')}
@@ -265,7 +282,7 @@ function AddSafeModal({
 
               {wrongNetwork && (
                 <div className="text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-4 py-3">
-                  Please switch to Gnosis Chain (chain ID 100) in your wallet.
+                  Please switch to {getChainConfig(deployChainId).name} (chain ID {deployChainId}) in your wallet.
                 </div>
               )}
 
@@ -283,7 +300,7 @@ function AddSafeModal({
                 Deploy Safe
               </button>
               <p className="text-[11px] text-zinc-600 text-center">
-                This will submit a transaction on Gnosis Chain. Gas fees are minimal.
+                This will submit a transaction on {getChainConfig(deployChainId).name}. Gas fees are minimal.
               </p>
             </div>
           )}
@@ -293,7 +310,7 @@ function AddSafeModal({
               <div className="w-12 h-12 rounded-full border-2 border-indigo-500/30 border-t-indigo-500 animate-spin mb-6" />
               <h3 className="text-sm font-medium text-zinc-200 mb-2">Deploying your Safe</h3>
               <p className="text-xs text-zinc-500 text-center max-w-xs">
-                Confirm the transaction in your wallet. Your Safe smart account is being deployed on Gnosis Chain.
+                Confirm the transaction in your wallet. Your Safe smart account is being deployed on {getChainConfig(deployChainId).name}.
               </p>
             </div>
           )}
@@ -308,7 +325,7 @@ function AddSafeModal({
                 </div>
                 <div>
                   <p className="text-sm font-medium text-zinc-200">{name || 'My Safe'}</p>
-                  <p className="text-xs text-zinc-500">Successfully deployed on Gnosis Chain</p>
+                  <p className="text-xs text-zinc-500">Successfully deployed on {getChainConfig(deployChainId).name}</p>
                 </div>
               </div>
 
@@ -316,7 +333,7 @@ function AddSafeModal({
                 <div className="p-3 rounded-lg border border-white/[0.06] bg-white/[0.02]">
                   <span className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Safe Address</span>
                   <a
-                    href={`https://gnosisscan.io/address/${deployedAddress}`}
+                    href={getExplorerUrl(deployChainId, 'address', deployedAddress)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all"
@@ -327,7 +344,7 @@ function AddSafeModal({
                 <div className="p-3 rounded-lg border border-white/[0.06] bg-white/[0.02]">
                   <span className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Transaction</span>
                   <a
-                    href={`https://gnosisscan.io/tx/${deployTxHash}`}
+                    href={getExplorerUrl(deployChainId, 'tx', deployTxHash)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all"
@@ -350,7 +367,7 @@ function AddSafeModal({
           {mode === 'import' && (
             <form onSubmit={handleImport} className="space-y-4">
               <p className="text-sm text-zinc-500">
-                Enter the address of a Safe you already own on Gnosis Chain.
+                Link an existing Safe by its address and network.
               </p>
               <div>
                 <label className="block text-xs text-zinc-500 mb-1">Account Name</label>
@@ -361,6 +378,18 @@ function AddSafeModal({
                   placeholder="e.g. Business, Personal"
                   className="w-full px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
                 />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Network</label>
+                <select
+                  value={importChainId}
+                  onChange={(e) => setImportChainId(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                >
+                  {SUPPORTED_CHAINS.map((c) => (
+                    <option key={c.chainId} value={c.chainId}>{c.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs text-zinc-500 mb-1">Safe Address</label>
@@ -609,7 +638,7 @@ export default function AccountsOverviewClient() {
                     {agentCount} agent{agentCount !== 1 ? 's' : ''}
                   </span>
                   <span className="flex items-center gap-1">
-                    Gnosis Chain
+                    {getChainConfig(safe.chain_id ?? 100).name}
                   </span>
                 </div>
               </div>
@@ -622,8 +651,8 @@ export default function AccountsOverviewClient() {
       <AddSafeModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
-        onAdd={async (address, name) => {
-          await addSafe(address, name)
+        onAdd={async (address, name, chainId) => {
+          await addSafe(address, name, chainId)
         }}
         loading={loading}
       />

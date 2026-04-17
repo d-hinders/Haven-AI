@@ -71,11 +71,20 @@ export default async function transactionRoutes(
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
       allTransactions = cached.data as Transaction[]
     } else {
-      // Fetch sequentially to avoid rate limits
+      // Fetch sequentially to avoid rate limits. Each call is independent —
+      // log and fall back to [] so a single failing endpoint doesn't blank
+      // the whole response, but the operator can see what broke.
       const addrLower = safeAddress.toLowerCase()
-      const normalTxs = await fetchNormalTransactions(chainId, safeAddress).catch(() => [])
-      const internalTxs = await fetchInternalTransactions(chainId, safeAddress).catch(() => [])
-      const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(() => [])
+      const logFail = (kind: string) => (err: unknown) => {
+        request.log.warn(
+          { err, chainId, safeAddress, kind },
+          'Explorer API fetch failed',
+        )
+        return []
+      }
+      const normalTxs = await fetchNormalTransactions(chainId, safeAddress).catch(logFail('normal'))
+      const internalTxs = await fetchInternalTransactions(chainId, safeAddress).catch(logFail('internal'))
+      const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(logFail('erc20'))
 
       const transactions: Transaction[] = []
 

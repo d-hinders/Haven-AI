@@ -201,8 +201,14 @@ export async function runMigrations(): Promise<void> {
         ALTER TABLE user_safes DROP CONSTRAINT user_safes_user_id_safe_address_key;
       END IF;
     END $$;
-    ALTER TABLE user_safes ADD CONSTRAINT user_safes_user_id_safe_address_chain_id_key
-      UNIQUE (user_id, safe_address, chain_id);
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'user_safes_user_id_safe_address_chain_id_key'
+      ) THEN
+        ALTER TABLE user_safes ADD CONSTRAINT user_safes_user_id_safe_address_chain_id_key
+          UNIQUE (user_id, safe_address, chain_id);
+      END IF;
+    END $$;
 
     CREATE INDEX IF NOT EXISTS idx_user_safes_chain_id ON user_safes(chain_id);
     CREATE INDEX IF NOT EXISTS idx_payment_intents_chain_id ON payment_intents(chain_id);

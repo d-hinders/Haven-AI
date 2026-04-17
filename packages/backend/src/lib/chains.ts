@@ -15,6 +15,8 @@ export interface TokenConfig {
   coingeckoId: string
 }
 
+export type ExplorerApiProvider = 'etherscan-v2' | 'blockscout-v1' | 'blockscout-v2'
+
 export interface ChainConfig {
   chainId: number
   name: string
@@ -23,7 +25,8 @@ export interface ChainConfig {
   rpcUrl: string
   explorerUrl: string        // e.g. https://gnosisscan.io
   explorerApiUrl: string     // e.g. https://api.etherscan.io/v2/api
-  explorerApiKey: string
+  explorerApiKey: string     // empty allowed for Blockscout
+  explorerApiProvider: ExplorerApiProvider
   safeTxServiceUrl: string   // e.g. https://safe-transaction-gnosis-chain.safe.global
   contracts: {
     safeProxyFactory: string
@@ -69,6 +72,7 @@ const GNOSIS: ChainConfig = {
   explorerUrl: 'https://gnosisscan.io',
   explorerApiUrl: 'https://api.etherscan.io/v2/api',
   explorerApiKey: config.gnosisscanApiKey,
+  explorerApiProvider: 'etherscan-v2',
   safeTxServiceUrl: 'https://safe-transaction-gnosis-chain.safe.global',
   contracts: {
     safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
@@ -105,8 +109,12 @@ const BASE: ChainConfig = {
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrl: config.rpcUrlBase,
   explorerUrl: 'https://basescan.org',
-  explorerApiUrl: 'https://api.etherscan.io/v2/api',
-  explorerApiKey: config.basescanApiKey || config.gnosisscanApiKey,
+  // Blockscout v2 is used for Base: the v1 tokentx endpoint consistently
+  // times out (HTTP 524) on Base, and Etherscan V2 requires a paid plan.
+  // v2 uses per-endpoint REST URLs built from this base.
+  explorerApiUrl: 'https://base.blockscout.com/api/v2',
+  explorerApiKey: '',
+  explorerApiProvider: 'blockscout-v2',
   safeTxServiceUrl: 'https://safe-transaction-base.safe.global',
   contracts: {
     // Base uses EIP-155 variant addresses for Safe v1.3.0

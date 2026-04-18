@@ -8,6 +8,7 @@ import {
 } from '../lib/explorer-api.js'
 import { getChain } from '../lib/chains.js'
 import { formatTokenValue } from '../lib/tokens.js'
+import { createCache } from '../lib/cache.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -28,9 +29,7 @@ export interface Transaction {
   tokenSymbol?: string
 }
 
-// Simple in-memory cache
-const cache = new Map<string, { data: unknown; ts: number }>()
-const CACHE_TTL = 30_000 // 30 seconds
+const txCache = createCache<Transaction[]>(30_000)
 
 export default async function transactionRoutes(
   app: FastifyInstance,
@@ -63,17 +62,10 @@ export default async function transactionRoutes(
     const chain = getChain(chainId)
     const nativeToken = Object.values(chain.tokens).find((t) => t.address === null)!
 
-    // Check cache
     const cacheKey = `tx:${chainId}:${safeAddress.toLowerCase()}`
-    const cached = cache.get(cacheKey)
-    let allTransactions: Transaction[]
-
-    if (cached && Date.now() - cached.ts < CACHE_TTL) {
-      allTransactions = cached.data as Transaction[]
-    } else {
-      // Fetch sequentially to avoid rate limits. Each call is independent —
-      // log and fall back to [] so a single failing endpoint doesn't blank
-      // the whole response, but the operator can see what broke.
+    const allTransactions = await txCache.getOrFetch(cacheKey, async () => {
+      // Each explorer call is independent — log and fall back to [] so a
+      // single failing endpoint doesn't blank the whole response.
       const addrLower = safeAddress.toLowerCase()
       const logFail = (kind: string) => (err: unknown) => {
         request.log.warn(
@@ -152,15 +144,13 @@ export default async function transactionRoutes(
       transactions.sort((a, b) => b.timestamp - a.timestamp)
 
       const seen = new Set<string>()
-      allTransactions = transactions.filter((tx) => {
+      return transactions.filter((tx) => {
         const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}`
         if (seen.has(key)) return false
         seen.add(key)
         return true
       })
-
-      cache.set(cacheKey, { data: allTransactions, ts: Date.now() })
-    }
+    })
 
     // Paginate
     const total = allTransactions.length

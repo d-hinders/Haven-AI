@@ -3,6 +3,7 @@ import { ethers } from 'ethers'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
 import { getProvider } from '../lib/allowance-module.js'
+import { createCache } from '../lib/cache.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -13,8 +14,14 @@ const SAFE_ABI = [
   'function nonce() view returns (uint256)',
 ]
 
-const cache = new Map<string, { data: unknown; ts: number }>()
-const CACHE_TTL = 30_000 // 30 seconds
+interface SafeDetails {
+  address: string
+  owners: string[]
+  threshold: number
+  nonce: number
+}
+
+const safeDetailsCache = createCache<SafeDetails>(30_000)
 
 export default async function safeDetailRoutes(
   app: FastifyInstance,
@@ -41,32 +48,25 @@ export default async function safeDetailRoutes(
       }
 
       const chainId = userResult.rows[0].chain_id
-
-      // Check cache
       const cacheKey = `safe-details:${chainId}:${safeAddress.toLowerCase()}`
-      const cached = cache.get(cacheKey)
-      if (cached && Date.now() - cached.ts < CACHE_TTL) {
-        return cached.data
-      }
 
-      const provider = getProvider(chainId)
-      const safeContract = new ethers.Contract(safeAddress, SAFE_ABI, provider)
+      return safeDetailsCache.getOrFetch(cacheKey, async () => {
+        const provider = getProvider(chainId)
+        const safeContract = new ethers.Contract(safeAddress, SAFE_ABI, provider)
 
-      const [owners, threshold, nonce] = await Promise.all([
-        safeContract.getOwners() as Promise<string[]>,
-        safeContract.getThreshold() as Promise<bigint>,
-        safeContract.nonce() as Promise<bigint>,
-      ])
+        const [owners, threshold, nonce] = await Promise.all([
+          safeContract.getOwners() as Promise<string[]>,
+          safeContract.getThreshold() as Promise<bigint>,
+          safeContract.nonce() as Promise<bigint>,
+        ])
 
-      const responseData = {
-        address: safeAddress,
-        owners: owners.map((o: string) => o),
-        threshold: Number(threshold),
-        nonce: Number(nonce),
-      }
-
-      cache.set(cacheKey, { data: responseData, ts: Date.now() })
-      return responseData
+        return {
+          address: safeAddress,
+          owners: owners.map((o: string) => o),
+          threshold: Number(threshold),
+          nonce: Number(nonce),
+        }
+      })
     },
   )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
 import { type Address, parseUnits, hashTypedData } from 'viem'
 import { generatePrivateKey, privateKeyToAddress } from 'viem/accounts'
@@ -63,6 +63,7 @@ interface Props {
   safeAddress: string
   safeId?: string | null
   safeDetails: SafeDetails | null
+  preset?: 'demo' | null
   onCreated: (agent: {
     id: string
     name: string
@@ -79,6 +80,7 @@ export default function CreateAgentModal({
   safeAddress,
   safeId,
   safeDetails,
+  preset = null,
   onCreated,
 }: Props) {
   const { activeSafe } = useAuth()
@@ -162,6 +164,38 @@ export default function CreateAgentModal({
     resetForm()
     onClose()
   }, [onClose, resetForm])
+
+  // Apply demo preset when the modal opens with preset='demo'
+  useEffect(() => {
+    if (!open || preset !== 'demo') return
+    // Pick a USDC-flavored token if available, else first non-native
+    const usdc =
+      tokenOptions.find((t) => t.symbol.toUpperCase().startsWith('USDC')) ??
+      tokenOptions.find((t) => t.address !== null) ??
+      tokenOptions[0]
+    if (!usdc) return
+
+    const privateKey = generatePrivateKey()
+    const address = privateKeyToAddress(privateKey)
+    setName('Demo Research Agent')
+    setDescription('Pre-configured for x402 API access — 10 USDC/day')
+    setKeyMode('generate')
+    setGeneratedPrivateKey(privateKey)
+    setDelegateAddress(address)
+    setKeySaved(true)
+    setAllowances([
+      {
+        tokenSymbol: usdc.symbol,
+        tokenAddress: usdc.address,
+        decimals: usdc.decimals,
+        amount: '10',
+        resetTimeMin: 1440,
+      },
+    ])
+    setStep('review')
+    // Intentionally only reruns when open/preset change; tokenOptions is derived from chainId.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, preset])
 
   // ── Key Generation ─────────────────────────────────────
 

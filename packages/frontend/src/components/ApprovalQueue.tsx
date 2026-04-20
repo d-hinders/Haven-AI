@@ -65,8 +65,16 @@ function StatusBadge({ status }: { status: string }) {
     executed: 'bg-emerald-500/10 text-emerald-400',
     expired: 'bg-zinc-500/10 text-zinc-500',
   }
+  const isPending = status === 'pending' || status === 'approved'
+  const dotColor = status === 'pending' ? 'bg-amber-400' : 'bg-blue-400'
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${styles[status] ?? styles.expired}`}>
+    <span className={`inline-flex items-center gap-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${styles[status] ?? styles.expired}`}>
+      {isPending && (
+        <span className="relative inline-flex w-1.5 h-1.5">
+          <span className={`absolute inset-0 rounded-full ${dotColor} opacity-60 animate-ping`} />
+          <span className={`relative inline-block w-1.5 h-1.5 rounded-full ${dotColor}`} />
+        </span>
+      )}
       {status}
     </span>
   )

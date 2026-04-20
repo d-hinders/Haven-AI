@@ -33,8 +33,18 @@ function StatusDot({ status }: { status: string }) {
     rejected: 'bg-red-400',
     executed: 'bg-emerald-400',
   }
+  const isPending = status === 'pending' || status === 'pending_signature' || status === 'submitted' || status === 'approved'
+  const dot = color[status] ?? 'bg-zinc-600'
+  if (isPending) {
+    return (
+      <span className="relative inline-flex w-1.5 h-1.5">
+        <span className={`absolute inset-0 rounded-full ${dot} opacity-60 animate-ping`} />
+        <span className={`relative inline-block w-1.5 h-1.5 rounded-full ${dot}`} />
+      </span>
+    )
+  }
   return (
-    <span className={`inline-block w-1.5 h-1.5 rounded-full ${color[status] ?? 'bg-zinc-600'}`} />
+    <span className={`inline-block w-1.5 h-1.5 rounded-full ${dot}`} />
   )
 }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
 import { type Address, hashTypedData } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -113,6 +113,13 @@ function AllowanceBar({
         ? 'from-amber-500 to-orange-500'
         : 'from-red-500 to-rose-500'
 
+  // Animate bar width from 0 to target on mount
+  const [displayPct, setDisplayPct] = useState(0)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setDisplayPct(Math.min(pct, 100)))
+    return () => cancelAnimationFrame(frame)
+  }, [pct])
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
@@ -133,8 +140,8 @@ function AllowanceBar({
       </div>
       <div className="w-full h-[3px] bg-white/[0.05] rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full bg-gradient-to-r ${color} transition-all`}
-          style={{ width: `${Math.min(pct, 100)}%` }}
+          className={`h-full rounded-full bg-gradient-to-r ${color} allowance-fill`}
+          style={{ width: `${displayPct}%` }}
         />
       </div>
       {/* Reset info */}
@@ -350,7 +357,16 @@ function AgentCard({
               onClick={copyKey}
               className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
             >
-              {copied ? 'Copied!' : 'Copy'}
+              {copied ? (
+                <span className="inline-flex items-center gap-1 text-emerald-400 animate-check-pop">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Copied
+                </span>
+              ) : (
+                'Copy'
+              )}
             </button>
           </div>
         </div>
@@ -515,6 +531,7 @@ export default function AgentPanel() {
   const { data: walletClient } = useWalletClient()
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [createPreset, setCreatePreset] = useState<'demo' | null>(null)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [howItWorksOpen, setHowItWorksOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
@@ -770,20 +787,34 @@ export default function AgentPanel() {
 
       {/* Empty state */}
       {activeView === 'agents' && !loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-64 rounded-xl border border-dashed border-white/[0.06]">
+        <div className="flex flex-col items-center justify-center h-72 rounded-xl border border-dashed border-white/[0.06] px-6">
           <div className="w-12 h-12 rounded-xl bg-white/[0.04] flex items-center justify-center mb-3">
             <BotIcon size={24} />
           </div>
-          <p className="text-sm text-zinc-500 mb-1">No agents yet</p>
-          <p className="text-xs text-zinc-700 mb-4 max-w-xs text-center">
+          <p className="text-sm text-zinc-300 mb-1">No agents yet</p>
+          <p className="text-xs text-zinc-500 mb-5 max-w-xs text-center leading-relaxed">
             Create an agent to give it constrained spending authority on your Safe
           </p>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-          >
-            + Create your first agent
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setCreatePreset('demo'); setCreateOpen(true) }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+              Spin up a demo agent
+            </button>
+            <button
+              onClick={() => { setCreatePreset(null); setCreateOpen(true) }}
+              className="px-4 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-xs font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all"
+            >
+              Configure from scratch
+            </button>
+          </div>
+          <p className="text-[10px] text-zinc-700 mt-3 max-w-xs text-center">
+            Demo agent: 10 USDC/day allowance, auto-generated delegate key, ready for x402 APIs.
+          </p>
         </div>
       )}
 
@@ -828,13 +859,15 @@ export default function AgentPanel() {
       {/* Create modal */}
       <CreateAgentModal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => { setCreateOpen(false); setCreatePreset(null) }}
         safeAddress={safeAddress}
         safeId={activeSafe?.id}
         safeDetails={safeDetails}
+        preset={createPreset}
         onCreated={() => {
           refetch()
           setCreateOpen(false)
+          setCreatePreset(null)
           // Refresh on-chain data after a short delay for tx confirmation
           setTimeout(refetchOnChain, 2000)
         }}

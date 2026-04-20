@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { api } from '@/lib/api'
-import { deploySafe } from '@/lib/safe'
+import { deploySafe, type DeployStage } from '@/lib/safe'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
 import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
@@ -23,6 +23,7 @@ export default function OnboardingClient() {
 
   const [step, setStep] = useState<Step>('connect')
   const [deploying, setDeploying] = useState(false)
+  const [deployStage, setDeployStage] = useState<DeployStage | null>(null)
   const [error, setError] = useState('')
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
@@ -64,14 +65,25 @@ export default function OnboardingClient() {
     if (!walletClient || !publicClient || !address) return
 
     setDeploying(true)
+    setDeployStage('signing')
     setError('')
 
     try {
-      const result = await deploySafe(walletClient, publicClient, address, selectedChainId)
+      const result = await deploySafe(
+        walletClient,
+        publicClient,
+        address,
+        selectedChainId,
+        (stage, data) => {
+          setDeployStage(stage)
+          if (data?.txHash) setTxHash(data.txHash)
+        },
+      )
       setTxHash(result.txHash)
       setSafeAddress(result.safeAddress)
 
       // Save to backend
+      setDeployStage('registering')
       await api.put<User>('/user/safe', { safe_address: result.safeAddress, chain_id: selectedChainId })
       updateUser({ safe_address: result.safeAddress, wallet_address: address })
 
@@ -89,6 +101,7 @@ export default function OnboardingClient() {
       }
     } finally {
       setDeploying(false)
+      setDeployStage(null)
     }
   }
 
@@ -244,7 +257,10 @@ export default function OnboardingClient() {
                 {deploying ? (
                   <span className="flex items-center justify-center gap-2">
                     <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Deploying Safe...
+                    {deployStage === 'signing' && 'Waiting for signature...'}
+                    {deployStage === 'confirming' && 'Confirming on-chain...'}
+                    {deployStage === 'registering' && 'Finalizing...'}
+                    {!deployStage && 'Deploying Safe...'}
                   </span>
                 ) : (
                   'Deploy Safe'
@@ -252,10 +268,65 @@ export default function OnboardingClient() {
               </button>
 
               {deploying && (
-                <p className="mt-4 text-xs text-zinc-500 text-center">
-                  Confirm the transaction in your wallet. This deploys a Safe smart account on{' '}
-                  {getChainConfig(selectedChainId).name}.
-                </p>
+                <div className="mt-6 space-y-2">
+                  {(
+                    [
+                      { id: 'signing', label: 'Sign in wallet', hint: 'Confirm the transaction in your wallet' },
+                      { id: 'confirming', label: 'Confirming on-chain', hint: 'Waiting for block inclusion' },
+                      { id: 'registering', label: 'Registering with Haven', hint: 'Linking Safe to your account' },
+                    ] as const
+                  ).map((s, i) => {
+                    const order: DeployStage[] = ['signing', 'confirming', 'registering']
+                    const currentIdx = deployStage ? order.indexOf(deployStage) : 0
+                    const isActive = deployStage === s.id
+                    const isDone = currentIdx > i
+                    return (
+                      <div
+                        key={s.id}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-md border transition-colors duration-300 ${
+                          isActive
+                            ? 'border-indigo-500/40 bg-indigo-500/[0.06]'
+                            : isDone
+                              ? 'border-emerald-500/20 bg-emerald-500/[0.04]'
+                              : 'border-white/[0.05] bg-white/[0.01]'
+                        }`}
+                      >
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium shrink-0 ${
+                            isActive
+                              ? 'bg-indigo-500/20 text-indigo-300'
+                              : isDone
+                                ? 'bg-emerald-500/15 text-emerald-400'
+                                : 'bg-white/[0.04] text-zinc-600'
+                          }`}
+                        >
+                          {isDone ? (
+                            '✓'
+                          ) : isActive ? (
+                            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                          ) : (
+                            i + 1
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div
+                            className={`text-xs font-medium ${
+                              isActive ? 'text-indigo-200' : isDone ? 'text-emerald-300/80' : 'text-zinc-500'
+                            }`}
+                          >
+                            {s.label}
+                          </div>
+                          {isActive && (
+                            <div className="text-[11px] text-zinc-500 mt-0.5">{s.hint}</div>
+                          )}
+                        </div>
+                        {isActive && (
+                          <div className="w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin shrink-0" />
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               )}
             </div>
           )}

@@ -58,6 +58,8 @@ const PROXY_FACTORY_ABI = [
   },
 ] as const
 
+export type DeployStage = 'signing' | 'confirming' | 'registering'
+
 /**
  * Deploy a new Safe on the specified chain (default: Gnosis Chain).
  *
@@ -69,6 +71,7 @@ export async function deploySafe(
   publicClient: PublicClient,
   owner: Address,
   chainId: number = 100,
+  onProgress?: (stage: DeployStage, data?: { txHash?: Hash }) => void,
 ): Promise<{ safeAddress: Address; txHash: Hash }> {
   const chainCfg = getChainConfig(chainId)
   const SAFE_PROXY_FACTORY = chainCfg.contracts.safeProxyFactory
@@ -95,6 +98,7 @@ export async function deploySafe(
   const saltNonce = BigInt(Math.floor(Math.random() * 1_000_000_000))
 
   // 3. Call ProxyFactory.createProxyWithNonce()
+  onProgress?.('signing')
   const txHash = await walletClient.writeContract({
     address: SAFE_PROXY_FACTORY,
     abi: PROXY_FACTORY_ABI,
@@ -105,6 +109,7 @@ export async function deploySafe(
   })
 
   // 4. Wait for the tx to be mined and extract the deployed proxy address
+  onProgress?.('confirming', { txHash })
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
 
   // Find the ProxyCreation event
@@ -127,5 +132,6 @@ export async function deploySafe(
   // Decode the proxy address from event data (first 32 bytes = address)
   const safeAddress = ('0x' + creationLog.data.slice(26, 66)) as Address
 
+  onProgress?.('registering', { txHash })
   return { safeAddress, txHash }
 }

@@ -1,5 +1,6 @@
 const NAV_LINKS = [
   { label: 'Product', href: '#' },
+  { label: 'Live demo', href: '/demo/x402' },
   { label: 'Docs', href: '#' },
   { label: 'GitHub', href: '#' },
 ]
@@ -168,10 +169,11 @@ export default function Home() {
               Get Early Access
             </a>
             <a
-              href="#"
-              className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md"
+              href="/demo/x402"
+              className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2"
             >
-              Read the Docs
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              Watch the live demo
             </a>
           </div>
 

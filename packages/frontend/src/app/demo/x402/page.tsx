@@ -15,9 +15,9 @@ type Phase =
   | 'delivered'
 
 interface TimelineEvent {
+  step: number
   label: string
   detail?: string
-  elapsedMs: number
   phase: Phase
 }
 
@@ -45,6 +45,9 @@ const DEMO = {
     dailySpent: '3.25',
     dailyLimitNum: 50,
   },
+  server: {
+    host: 'api.research.example',
+  },
   signHash:
     '0x8b2f4e93a6c1ffde7019a2c5d8b4f16e0a39c7f82bc5d138e40b79aa2c6d4e8f',
   txHash:
@@ -62,6 +65,13 @@ const DEMO = {
     { phase: 'delivered', label: 'Data delivered' },
   ] as const,
 }
+
+const POLICY_CHECKS: string[] = [
+  'Within per-tx limit (1 USDC)',
+  'Below approval threshold',
+  `Network ${'Base'} allowed`,
+  'On-chain allowance sufficient',
+]
 
 function shortHex(s: string, head = 6, tail = 4) {
   return s.length > head + tail + 2 ? `${s.slice(0, head)}…${s.slice(-tail)}` : s
@@ -85,10 +95,15 @@ function reached(current: Phase, target: Phase) {
   return phaseIndex(current) >= phaseIndex(target)
 }
 
+function phaseStep(p: Phase): number {
+  const i = DEMO.steps.findIndex((s) => s.phase === p)
+  return i < 0 ? 0 : i + 1
+}
+
 export default function X402DemoPage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
-  const startRef = useRef<number>(0)
+  const [policyProgress, setPolicyProgress] = useState<number>(0)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
 
   const clearTimers = () => {
@@ -102,16 +117,13 @@ export default function X402DemoPage() {
     clearTimers()
     setTimeline([])
     setPhase('idle')
-    startRef.current = Date.now()
+    setPolicyProgress(0)
 
     const schedule = (delay: number, fn: () => void) => {
       timers.current.push(setTimeout(fn, delay))
     }
-    const push = (ev: Omit<TimelineEvent, 'elapsedMs'>) => {
-      setTimeline((prev) => [
-        ...prev,
-        { ...ev, elapsedMs: Date.now() - startRef.current },
-      ])
+    const push = (ev: Omit<TimelineEvent, 'step'>) => {
+      setTimeline((prev) => [...prev, { ...ev, step: phaseStep(ev.phase) }])
     }
 
     let t = 0
@@ -149,9 +161,9 @@ export default function X402DemoPage() {
       })
     })
 
-    // 4. Haven policy engine evaluates
-    t += 400
-    schedule(t, () => {
+    // 4. Haven policy engine evaluates — staggered ticks
+    const policyStart = t + 300
+    schedule(policyStart, () => {
       setPhase('policy')
       push({
         phase: 'policy',
@@ -159,9 +171,15 @@ export default function X402DemoPage() {
         detail: 'Per-tx limit, approval threshold, network allowlist, on-chain allowance',
       })
     })
+    // Stagger 4 checks across ~1000ms
+    for (let i = 1; i <= POLICY_CHECKS.length; i++) {
+      schedule(policyStart + i * 220, () => setPolicyProgress(i))
+    }
 
-    // 5. Policy cleared — move to signing
-    t += 900
+    // Policy + ticks total ~300 + 220*4 = 1180ms
+    t += 300 + 220 * POLICY_CHECKS.length + 120
+
+    // 5. Sign
     schedule(t, () => {
       setPhase('sign')
       push({
@@ -194,7 +212,7 @@ export default function X402DemoPage() {
     })
 
     // 8. Agent retries with proof, server delivers data
-    t += 500
+    t += 700
     schedule(t, () => {
       setPhase('delivered')
       push({
@@ -271,10 +289,13 @@ export default function X402DemoPage() {
       {/* Stage */}
       <section className="relative max-w-6xl mx-auto px-6 pb-6 z-10">
         {/* Step ribbon */}
-        <div className="mb-5 flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+        <div className="mb-6 flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
           {DEMO.steps.map((s, i) => {
-            const stepReached = reached(phase, s.phase as Phase)
-            const isCurrent = i === currentStep
+            const stepPhase = s.phase as Phase
+            const isFinal = i === DEMO.steps.length - 1
+            const stepReached = reached(phase, stepPhase)
+            // Treat the final step as "complete" (green) once delivered fires
+            const isCurrent = i === currentStep && !(isDone && isFinal)
             return (
               <div key={s.phase} className="flex items-center gap-1.5">
                 <span
@@ -282,64 +303,120 @@ export default function X402DemoPage() {
                     isCurrent
                       ? 'border-indigo-400/60 bg-indigo-500/10 text-indigo-200'
                       : stepReached
-                      ? 'border-emerald-500/30 bg-emerald-500/[0.04] text-emerald-300/70'
+                      ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300/80'
                       : 'border-white/[0.06] text-zinc-600'
                   }`}
                 >
                   <span className="tabular-nums">{i + 1}.</span> {s.label}
                 </span>
                 {i < DEMO.steps.length - 1 && (
-                  <span className={stepReached ? 'text-indigo-400/60' : 'text-zinc-700'}>›</span>
+                  <span className={stepReached ? 'text-emerald-400/50' : 'text-zinc-700'}>›</span>
                 )}
               </div>
             )
           })}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto_1fr] items-stretch gap-4 md:gap-0">
-          {/* Column: Agent / Client */}
-          <StageColumn
-            kind="agent"
-            phase={phase}
-            active={
-              phase === 'requesting' ||
-              phase === 'challenged' ||
-              phase === 'authorize' ||
-              phase === 'delivered'
-            }
-          />
+        {/* 2x2 actor grid with 3 arrows */}
+        <div
+          className="grid gap-0"
+          style={{
+            gridTemplateColumns: '1fr 72px 1fr',
+            gridTemplateRows: 'auto 72px auto',
+          }}
+        >
+          {/* Row 1: Agent — [H arrow] — Server */}
+          <div className="row-start-1 col-start-1">
+            <StageColumn
+              kind="agent"
+              phase={phase}
+              active={
+                phase === 'requesting' ||
+                phase === 'challenged' ||
+                phase === 'authorize' ||
+                phase === 'delivered'
+              }
+            />
+          </div>
+          <div className="row-start-1 col-start-2 flex items-center justify-center">
+            <FlowArrow
+              orientation="horizontal"
+              reverse={phase === 'challenged' || phase === 'delivered'}
+              active={
+                phase === 'requesting' ||
+                phase === 'challenged' ||
+                phase === 'delivered'
+              }
+              done={reached(phase, 'challenged')}
+              color={phase === 'delivered' ? 'emerald' : 'indigo'}
+              label={
+                phase === 'requesting'
+                  ? 'GET'
+                  : phase === 'challenged'
+                  ? '402'
+                  : phase === 'delivered'
+                  ? '200 OK'
+                  : undefined
+              }
+            />
+          </div>
+          <div className="row-start-1 col-start-3">
+            <StageColumn
+              kind="server"
+              phase={phase}
+              active={
+                phase === 'requesting' ||
+                phase === 'challenged' ||
+                phase === 'delivered'
+              }
+              policyProgress={policyProgress}
+            />
+          </div>
 
-          {/* Arrow: agent → haven */}
-          <FlowArrow
-            direction="right"
-            active={phase === 'authorize'}
-            done={reached(phase, 'policy')}
-          />
+          {/* Row 2: [V arrow] — empty — empty */}
+          <div className="row-start-2 col-start-1 flex items-center justify-center">
+            <FlowArrow
+              orientation="vertical"
+              reverse={false}
+              active={phase === 'authorize'}
+              done={reached(phase, 'policy')}
+              color="indigo"
+              label={phase === 'authorize' ? 'authorize' : undefined}
+            />
+          </div>
+          <div className="row-start-2 col-start-2" />
+          <div className="row-start-2 col-start-3" />
 
-          {/* Column: Haven */}
-          <StageColumn
-            kind="haven"
-            phase={phase}
-            active={phase === 'policy' || phase === 'sign'}
-          />
-
-          {/* Arrow: haven → chain */}
-          <FlowArrow
-            direction="right"
-            active={phase === 'broadcast'}
-            done={reached(phase, 'confirmed')}
-          />
-
-          {/* Column: Blockchain */}
-          <StageColumn
-            kind="chain"
-            phase={phase}
-            active={
-              phase === 'broadcast' ||
-              phase === 'confirmed' ||
-              phase === 'delivered'
-            }
-          />
+          {/* Row 3: Haven — [H arrow] — Chain */}
+          <div className="row-start-3 col-start-1">
+            <StageColumn
+              kind="haven"
+              phase={phase}
+              active={phase === 'policy' || phase === 'sign'}
+              policyProgress={policyProgress}
+            />
+          </div>
+          <div className="row-start-3 col-start-2 flex items-center justify-center">
+            <FlowArrow
+              orientation="horizontal"
+              reverse={false}
+              active={phase === 'broadcast'}
+              done={reached(phase, 'confirmed')}
+              color="indigo"
+              label={phase === 'broadcast' ? 'submit tx' : undefined}
+            />
+          </div>
+          <div className="row-start-3 col-start-3">
+            <StageColumn
+              kind="chain"
+              phase={phase}
+              active={
+                phase === 'broadcast' ||
+                phase === 'confirmed' ||
+                phase === 'delivered'
+              }
+            />
+          </div>
         </div>
 
         {/* Controls */}
@@ -375,13 +452,6 @@ export default function X402DemoPage() {
               Run again
             </button>
           )}
-          <span className="ml-auto text-xs text-zinc-600 font-mono">
-            {phase === 'idle'
-              ? 'Ready'
-              : isDone
-              ? `Settled in ${(timeline[timeline.length - 1]?.elapsedMs ?? 0) / 1000}s`
-              : 'Running…'}
-          </span>
         </div>
       </section>
 
@@ -407,8 +477,8 @@ export default function X402DemoPage() {
                 key={i}
                 className="flex items-start gap-4 px-5 py-3.5 font-mono text-sm animate-[fadeInUp_0.25s_ease-out]"
               >
-                <span className="text-zinc-600 shrink-0 w-16 tabular-nums">
-                  {(ev.elapsedMs / 1000).toFixed(2)}s
+                <span className="text-zinc-500 shrink-0 w-10 tabular-nums">
+                  {ev.step.toString().padStart(2, '0')}.
                 </span>
                 <span
                   className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${phaseDotColor(ev.phase)}`}
@@ -462,8 +532,7 @@ Content-Type: application/json
   "token":        "${DEMO.token}",
   "amount":       "${DEMO.amount}",
   "to":           "${DEMO.payTo.toLowerCase()}",
-  "resource_url": "${DEMO.resourceUrl}",
-  "explorer_url": "basescan.org/tx/${shortHex(DEMO.txHash, 6, 4)}"
+  "resource_url": "${DEMO.resourceUrl}"
 }`}
           </pre>
         </div>
@@ -505,11 +574,17 @@ Content-Type: application/json
           0%, 100% { transform: translateY(0); opacity: 0.4; }
           50% { transform: translateY(-2px); opacity: 1; }
         }
-        @keyframes flowDot {
+        @keyframes flowDotH {
           0% { left: 0; opacity: 0; }
           10% { opacity: 1; }
           90% { opacity: 1; }
           100% { left: calc(100% - 0.5rem); opacity: 0; }
+        }
+        @keyframes flowDotV {
+          0% { top: 0; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { top: calc(100% - 0.5rem); opacity: 0; }
         }
       `}</style>
     </div>
@@ -522,15 +597,17 @@ function StageColumn({
   kind,
   phase,
   active,
+  policyProgress = 0,
 }: {
-  kind: 'agent' | 'haven' | 'chain'
+  kind: 'agent' | 'haven' | 'chain' | 'server'
   phase: Phase
   active: boolean
+  policyProgress?: number
 }) {
   const config = COLUMN_CONFIG[kind]
   return (
     <div
-      className={`relative bg-[#0b0b0f] border border-white/[0.06] rounded-md p-5 transition-all duration-300 ${
+      className={`relative bg-[#0b0b0f] border border-white/[0.06] rounded-md p-5 h-full transition-all duration-300 ${
         active
           ? 'border-indigo-500/50 shadow-[0_0_40px_-8px_rgba(99,102,241,0.4)]'
           : ''
@@ -556,7 +633,8 @@ function StageColumn({
       </div>
 
       {kind === 'agent' && <AgentContent phase={phase} />}
-      {kind === 'haven' && <HavenContent phase={phase} />}
+      {kind === 'server' && <ServerContent phase={phase} />}
+      {kind === 'haven' && <HavenContent phase={phase} policyProgress={policyProgress} />}
       {kind === 'chain' && <ChainContent phase={phase} />}
     </div>
   )
@@ -570,6 +648,16 @@ const COLUMN_CONFIG = {
     icon: (
       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+      </svg>
+    ),
+  },
+  server: {
+    kicker: 'Resource server',
+    title: DEMO.server.host,
+    iconGradient: 'from-amber-500 to-orange-600',
+    icon: (
+      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
       </svg>
     ),
   },
@@ -605,20 +693,21 @@ function AgentContent({ phase }: { phase: Phase }) {
     phase === 'idle'
       ? 'Ready to request premium research data.'
       : !hasChallenge
-      ? 'Requesting paid API resource…'
+      ? 'Sending request to paid API…'
       : isDelivered
       ? 'Got the data after payment was confirmed.'
-      : 'Received 402 — asking Haven to settle.'
+      : isWaiting
+      ? 'Received 402 — asked Haven to settle.'
+      : 'Received 402 — forwarding to Haven.'
 
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">{subtext}</div>
 
-      {/* Outbound request */}
       {hasRequest && (
         <div className="rounded border border-white/[0.06] bg-black/30 p-3 font-mono text-[11px]">
           <div className="flex items-center gap-2">
-            <span className="text-zinc-500">→</span>
+            <span className="text-zinc-500 shrink-0">→</span>
             <span className="text-zinc-400 truncate">GET /query?q=sector+analysis</span>
             {!hasChallenge && (
               <span className="ml-auto inline-flex gap-1">
@@ -631,17 +720,6 @@ function AgentContent({ phase }: { phase: Phase }) {
         </div>
       )}
 
-      {/* 402 response (appears on challenged) */}
-      {hasChallenge && !isDelivered && (
-        <div className="rounded border border-amber-500/30 bg-amber-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
-          <div className="text-amber-300">← 402 Payment Required</div>
-          <div className="text-zinc-500 mt-1">
-            {DEMO.amount} {DEMO.token} • {DEMO.network}
-          </div>
-        </div>
-      )}
-
-      {/* Successful delivery */}
       {isDelivered && (
         <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
           <div className="flex items-center gap-2 text-emerald-300">
@@ -668,62 +746,115 @@ function AgentContent({ phase }: { phase: Phase }) {
   )
 }
 
-function HavenContent({ phase }: { phase: Phase }) {
-  const policyChecks: { label: string; status: 'pass' | 'pending' | 'idle' }[] = [
-    {
-      label: `Within per-tx limit (${DEMO.agent.policy.perTxLimit})`,
-      status: reached(phase, 'policy')
-        ? reached(phase, 'sign')
-          ? 'pass'
-          : 'pending'
-        : 'idle',
-    },
-    {
-      label: `Below approval threshold`,
-      status: reached(phase, 'policy')
-        ? reached(phase, 'sign')
-          ? 'pass'
-          : 'pending'
-        : 'idle',
-    },
-    {
-      label: `Network ${DEMO.network} allowed`,
-      status: reached(phase, 'policy')
-        ? reached(phase, 'sign')
-          ? 'pass'
-          : 'pending'
-        : 'idle',
-    },
-    {
-      label: `On-chain allowance sufficient`,
-      status: reached(phase, 'sign') ? 'pass' : reached(phase, 'policy') ? 'pending' : 'idle',
-    },
-  ]
+function ServerContent({ phase }: { phase: Phase }) {
+  const hasIncoming = reached(phase, 'requesting')
+  const hasChallenge = reached(phase, 'challenged')
+  const isDelivered = reached(phase, 'delivered')
+  const awaitingProof =
+    reached(phase, 'authorize') && !isDelivered
+
+  const subtext =
+    phase === 'idle'
+      ? 'Paid API endpoint — serves on proof of payment.'
+      : !hasChallenge
+      ? 'Receiving request from agent…'
+      : isDelivered
+      ? 'Payment verified — content delivered.'
+      : awaitingProof
+      ? 'Awaiting payment proof…'
+      : 'Returned 402 Payment Required.'
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs text-zinc-500 leading-relaxed">{subtext}</div>
+
+      {hasIncoming && !hasChallenge && (
+        <div className="rounded border border-white/[0.06] bg-black/30 p-3 font-mono text-[11px]">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+            <span className="text-zinc-400">processing /query…</span>
+          </div>
+        </div>
+      )}
+
+      {hasChallenge && !isDelivered && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
+          <div className="text-amber-300">→ 402 Payment Required</div>
+          <div className="text-zinc-500 mt-1">
+            pay {DEMO.amount} {DEMO.token} → {shortHex(DEMO.payTo)}
+          </div>
+          <div className="text-zinc-600 mt-0.5">network: {DEMO.network}</div>
+        </div>
+      )}
+
+      {isDelivered && (
+        <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
+          <div className="flex items-center gap-2 text-emerald-300">
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
+            </svg>
+            → 200 OK • research.json
+          </div>
+          <div className="text-zinc-500 mt-1">{DEMO.resourceLabel}</div>
+        </div>
+      )}
+
+      <div className="text-[11px] text-zinc-600">
+        price <span className="text-zinc-400 font-mono">{DEMO.amount} {DEMO.token} / call</span>
+      </div>
+    </div>
+  )
+}
+
+function HavenContent({
+  phase,
+  policyProgress,
+}: {
+  phase: Phase
+  policyProgress: number
+}) {
+  const inPolicy = phase === 'policy'
+  const afterPolicy = reached(phase, 'sign')
+
+  function checkStatus(i: number): 'pass' | 'pending' | 'idle' {
+    if (afterPolicy) return 'pass'
+    if (!inPolicy) return 'idle'
+    if (policyProgress > i) return 'pass'
+    if (policyProgress === i) return 'pending'
+    return 'idle'
+  }
+
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">
         Evaluating intent against the agent policy.
       </div>
       <ul className="space-y-1.5">
-        {policyChecks.map((c) => (
-          <li key={c.label} className="flex items-center gap-2 text-[11px]">
-            <PolicyDot status={c.status} />
-            <span
-              className={
-                c.status === 'pass'
-                  ? 'text-zinc-300'
-                  : c.status === 'pending'
-                  ? 'text-zinc-400'
-                  : 'text-zinc-600'
-              }
+        {POLICY_CHECKS.map((label, i) => {
+          const status = checkStatus(i)
+          return (
+            <li
+              key={label}
+              className="flex items-center gap-2 text-[11px] transition-colors duration-200"
             >
-              {c.label}
-            </span>
-          </li>
-        ))}
+              <PolicyDot status={status} />
+              <span
+                className={
+                  status === 'pass'
+                    ? 'text-zinc-300'
+                    : status === 'pending'
+                    ? 'text-zinc-400'
+                    : 'text-zinc-600'
+                }
+              >
+                {label}
+              </span>
+            </li>
+          )
+        })}
       </ul>
-      {reached(phase, 'sign') && (
-        <div className="rounded border border-indigo-500/30 bg-indigo-500/[0.06] p-2.5 font-mono text-[11px] text-indigo-200">
+      {afterPolicy && (
+        <div className="rounded border border-indigo-500/30 bg-indigo-500/[0.06] p-2.5 font-mono text-[11px] text-indigo-200 animate-[fadeInUp_0.3s_ease-out]">
           sign_hash {shortHex(DEMO.signHash, 8, 6)}
         </div>
       )}
@@ -752,7 +883,7 @@ function ChainContent({ phase }: { phase: Phase }) {
         </div>
       )}
       {reached(phase, 'confirmed') && (
-        <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] text-emerald-200">
+        <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] text-emerald-200 animate-[fadeInUp_0.3s_ease-out]">
           <div className="flex items-center gap-2">
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
@@ -772,7 +903,7 @@ function ChainContent({ phase }: { phase: Phase }) {
 function PolicyDot({ status }: { status: 'pass' | 'pending' | 'idle' }) {
   if (status === 'pass') {
     return (
-      <svg className="w-3 h-3 text-emerald-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+      <svg className="w-3 h-3 text-emerald-400 shrink-0 animate-[fadeInUp_0.2s_ease-out]" fill="currentColor" viewBox="0 0 20 20">
         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
       </svg>
     )
@@ -808,33 +939,85 @@ function phaseDotColor(p: Phase) {
 // ─── Flow arrow ───────────────────────────────────────────────────
 
 function FlowArrow({
+  orientation,
+  reverse,
   active,
   done,
+  color = 'indigo',
+  label,
 }: {
-  direction: 'right'
+  orientation: 'horizontal' | 'vertical'
+  reverse: boolean
   active: boolean
   done: boolean
+  color?: 'indigo' | 'emerald'
+  label?: string
 }) {
+  const isH = orientation === 'horizontal'
+  const palette =
+    color === 'emerald'
+      ? {
+          line: 'bg-gradient-to-r from-emerald-500/30 via-emerald-400 to-emerald-500/30',
+          lineV: 'bg-gradient-to-b from-emerald-500/30 via-emerald-400 to-emerald-500/30',
+          dot: 'bg-emerald-400',
+          shadow: 'shadow-[0_0_12px_rgba(52,211,153,0.8)]',
+          label: 'text-emerald-300',
+        }
+      : {
+          line: 'bg-gradient-to-r from-indigo-500/30 via-indigo-400 to-indigo-500/30',
+          lineV: 'bg-gradient-to-b from-indigo-500/30 via-indigo-400 to-indigo-500/30',
+          dot: 'bg-indigo-400',
+          shadow: 'shadow-[0_0_12px_rgba(99,102,241,0.8)]',
+          label: 'text-indigo-300',
+        }
+
   return (
-    <div className="relative flex items-center justify-center px-2 md:px-3 min-h-[1.5rem] min-w-[2rem] rotate-90 md:rotate-0">
+    <div
+      className={`relative flex items-center justify-center ${
+        isH ? 'w-full h-12' : 'h-full w-12'
+      }`}
+    >
+      {/* Static line */}
       <div
-        className={`h-px w-full transition-colors duration-300 ${
-          done ? 'bg-gradient-to-r from-indigo-500/40 via-indigo-400 to-indigo-500/40' : 'bg-white/[0.08]'
-        }`}
+        className={`${
+          isH
+            ? `h-px w-full ${done ? palette.line : 'bg-white/[0.08]'}`
+            : `w-px h-full ${done ? palette.lineV : 'bg-white/[0.08]'}`
+        } transition-colors duration-300`}
       />
+
+      {/* Moving dot */}
       {active && (
         <span
-          className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.8)]"
-          style={{ animation: 'flowDot 1s ease-in-out infinite' }}
+          className={`absolute w-2 h-2 rounded-full ${palette.dot} ${palette.shadow}`}
+          style={
+            isH
+              ? {
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  animation: 'flowDotH 0.9s ease-in-out infinite',
+                  animationDirection: reverse ? 'reverse' : 'normal',
+                }
+              : {
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  animation: 'flowDotV 0.9s ease-in-out infinite',
+                  animationDirection: reverse ? 'reverse' : 'normal',
+                }
+          }
         />
       )}
-      <svg
-        className={`absolute right-0 w-2.5 h-2.5 ${done ? 'text-indigo-400' : 'text-white/[0.14]'}`}
-        fill="currentColor"
-        viewBox="0 0 10 10"
-      >
-        <path d="M0 0 L10 5 L0 10 Z" />
-      </svg>
+
+      {/* Optional label */}
+      {label && active && (
+        <span
+          className={`absolute ${
+            isH ? 'top-full mt-1' : 'left-full ml-2'
+          } text-[10px] font-mono ${palette.label} whitespace-nowrap animate-[fadeInUp_0.25s_ease-out]`}
+        >
+          {label}
+        </span>
+      )}
     </div>
   )
 }

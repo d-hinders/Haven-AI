@@ -104,6 +104,7 @@ export default function X402DemoPage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [policyProgress, setPolicyProgress] = useState<number>(0)
+  const [settled, setSettled] = useState<boolean>(false)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
 
   const clearTimers = () => {
@@ -118,6 +119,7 @@ export default function X402DemoPage() {
     setTimeline([])
     setPhase('idle')
     setPolicyProgress(0)
+    setSettled(false)
 
     const schedule = (delay: number, fn: () => void) => {
       timers.current.push(setTimeout(fn, delay))
@@ -129,7 +131,7 @@ export default function X402DemoPage() {
     let t = 0
 
     // 1. Agent sends GET to paywalled API
-    t += 200
+    t += 400
     schedule(t, () => {
       setPhase('requesting')
       push({
@@ -140,7 +142,7 @@ export default function X402DemoPage() {
     })
 
     // 2. Server responds with 402
-    t += 700
+    t += 1100
     schedule(t, () => {
       setPhase('challenged')
       push({
@@ -151,7 +153,7 @@ export default function X402DemoPage() {
     })
 
     // 3. Agent forwards challenge to Haven
-    t += 600
+    t += 1100
     schedule(t, () => {
       setPhase('authorize')
       push({
@@ -162,7 +164,7 @@ export default function X402DemoPage() {
     })
 
     // 4. Haven policy engine evaluates — staggered ticks
-    const policyStart = t + 300
+    const policyStart = t + 500
     schedule(policyStart, () => {
       setPhase('policy')
       push({
@@ -171,13 +173,13 @@ export default function X402DemoPage() {
         detail: 'Per-tx limit, approval threshold, network allowlist, on-chain allowance',
       })
     })
-    // Stagger 4 checks across ~1000ms
+    // Stagger 4 checks across ~1200ms (300ms per check)
     for (let i = 1; i <= POLICY_CHECKS.length; i++) {
-      schedule(policyStart + i * 220, () => setPolicyProgress(i))
+      schedule(policyStart + i * 300, () => setPolicyProgress(i))
     }
 
-    // Policy + ticks total ~300 + 220*4 = 1180ms
-    t += 300 + 220 * POLICY_CHECKS.length + 120
+    // Policy + ticks total ~500 + 300*4 + 300 = 2000ms
+    t += 500 + 300 * POLICY_CHECKS.length + 300
 
     // 5. Sign
     schedule(t, () => {
@@ -190,7 +192,7 @@ export default function X402DemoPage() {
     })
 
     // 6. Broadcast
-    t += 500
+    t += 900
     schedule(t, () => {
       setPhase('broadcast')
       push({
@@ -201,7 +203,7 @@ export default function X402DemoPage() {
     })
 
     // 7. Confirmed on Base
-    t += 1200
+    t += 1600
     schedule(t, () => {
       setPhase('confirmed')
       push({
@@ -212,7 +214,7 @@ export default function X402DemoPage() {
     })
 
     // 8. Agent retries with proof, server delivers data
-    t += 700
+    t += 1100
     schedule(t, () => {
       setPhase('delivered')
       push({
@@ -221,6 +223,10 @@ export default function X402DemoPage() {
         detail: `200 OK • ${DEMO.resourceLabel}`,
       })
     })
+
+    // 9. Settle — stop the delivery arrow from pulsing
+    t += 1200
+    schedule(t, () => setSettled(true))
   }, [])
 
   const isRunning = phase !== 'idle' && phase !== 'delivered'
@@ -299,14 +305,20 @@ export default function X402DemoPage() {
             return (
               <div key={s.phase} className="flex items-center gap-1.5">
                 <span
-                  className={`px-2 py-1 rounded border transition-colors duration-200 ${
+                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border transition-all duration-200 ${
                     isCurrent
-                      ? 'border-indigo-400/60 bg-indigo-500/10 text-indigo-200'
+                      ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100 shadow-[0_0_20px_-4px_rgba(99,102,241,0.6)] ring-1 ring-indigo-400/40'
                       : stepReached
                       ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300/80'
                       : 'border-white/[0.06] text-zinc-600'
                   }`}
                 >
+                  {isCurrent && (
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
+                    </span>
+                  )}
                   <span className="tabular-nums">{i + 1}.</span> {s.label}
                 </span>
                 {i < DEMO.steps.length - 1 && (
@@ -334,7 +346,7 @@ export default function X402DemoPage() {
                 phase === 'requesting' ||
                 phase === 'challenged' ||
                 phase === 'authorize' ||
-                phase === 'delivered'
+                (phase === 'delivered' && !settled)
               }
             />
           </div>
@@ -345,16 +357,16 @@ export default function X402DemoPage() {
               active={
                 phase === 'requesting' ||
                 phase === 'challenged' ||
-                phase === 'delivered'
+                (phase === 'delivered' && !settled)
               }
               done={reached(phase, 'challenged')}
-              color={phase === 'delivered' ? 'emerald' : 'indigo'}
+              color={reached(phase, 'delivered') ? 'emerald' : 'indigo'}
               label={
                 phase === 'requesting'
                   ? 'GET'
                   : phase === 'challenged'
                   ? '402'
-                  : phase === 'delivered'
+                  : phase === 'delivered' && !settled
                   ? '200 OK'
                   : undefined
               }
@@ -367,7 +379,7 @@ export default function X402DemoPage() {
               active={
                 phase === 'requesting' ||
                 phase === 'challenged' ||
-                phase === 'delivered'
+                (phase === 'delivered' && !settled)
               }
               policyProgress={policyProgress}
             />
@@ -410,11 +422,7 @@ export default function X402DemoPage() {
             <StageColumn
               kind="chain"
               phase={phase}
-              active={
-                phase === 'broadcast' ||
-                phase === 'confirmed' ||
-                phase === 'delivered'
-              }
+              active={phase === 'broadcast' || phase === 'confirmed'}
             />
           </div>
         </div>
@@ -586,6 +594,10 @@ Content-Type: application/json
           90% { opacity: 1; }
           100% { top: calc(100% - 0.5rem); opacity: 0; }
         }
+        @keyframes cardPulse {
+          0%, 100% { box-shadow: inset 0 0 0 1px rgba(99,102,241,0.25); }
+          50% { box-shadow: inset 0 0 0 1px rgba(99,102,241,0.55); }
+        }
       `}</style>
     </div>
   )
@@ -607,14 +619,27 @@ function StageColumn({
   const config = COLUMN_CONFIG[kind]
   return (
     <div
-      className={`relative bg-[#0b0b0f] border border-white/[0.06] rounded-md p-5 h-full transition-all duration-300 ${
+      className={`relative bg-[#0b0b0f] border rounded-md p-5 h-full transition-all duration-300 ${
         active
-          ? 'border-indigo-500/50 shadow-[0_0_40px_-8px_rgba(99,102,241,0.4)]'
-          : ''
+          ? 'border-indigo-400/70 shadow-[0_0_60px_-6px_rgba(99,102,241,0.55)] ring-1 ring-indigo-400/30'
+          : 'border-white/[0.06]'
       }`}
     >
       {active && (
-        <div className="absolute -top-px inset-x-4 h-px bg-gradient-to-r from-transparent via-indigo-400 to-transparent" />
+        <>
+          <div className="absolute -top-px inset-x-4 h-px bg-gradient-to-r from-transparent via-indigo-400 to-transparent" />
+          <div
+            className="pointer-events-none absolute inset-0 rounded-md"
+            style={{ animation: 'cardPulse 2s ease-in-out infinite' }}
+          />
+          <div className="absolute top-3 right-3 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-indigo-300 z-10">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+            </span>
+            active
+          </div>
+        </>
       )}
       <div className="flex items-center gap-2 mb-4">
         <div

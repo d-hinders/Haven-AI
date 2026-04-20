@@ -5,11 +5,14 @@ import Link from 'next/link'
 
 type Phase =
   | 'idle'
-  | 'request'
+  | 'requesting'
+  | 'challenged'
+  | 'authorize'
   | 'policy'
   | 'sign'
   | 'broadcast'
   | 'confirmed'
+  | 'delivered'
 
 interface TimelineEvent {
   label: string
@@ -48,24 +51,33 @@ const DEMO = {
     '0x7a9e3b1d2c8f4a60bd5e97c1a4f3b6d29e8c05f14a7b89f3d2c1e4a5b6c7d8e9',
   blockNumber: 14_892_103,
   gasUsed: '41,228',
-  latencies: {
-    request: 180,
-    policy: 340,
-    sign: 70,
-    broadcast: 1100,
-    confirmed: 2600,
-  },
-}
-
-function explorerTxUrl(hash: string) {
-  return `https://basescan.org/tx/${hash}`
+  steps: [
+    { phase: 'requesting', label: 'Agent requests data' },
+    { phase: 'challenged', label: 'Server returns 402' },
+    { phase: 'authorize', label: 'Forward to Haven' },
+    { phase: 'policy', label: 'Policy evaluation' },
+    { phase: 'sign', label: 'Safe signs transfer' },
+    { phase: 'broadcast', label: 'Broadcast to Base' },
+    { phase: 'confirmed', label: 'On-chain confirmation' },
+    { phase: 'delivered', label: 'Data delivered' },
+  ] as const,
 }
 
 function shortHex(s: string, head = 6, tail = 4) {
   return s.length > head + tail + 2 ? `${s.slice(0, head)}…${s.slice(-tail)}` : s
 }
 
-const phaseOrder: Phase[] = ['idle', 'request', 'policy', 'sign', 'broadcast', 'confirmed']
+const phaseOrder: Phase[] = [
+  'idle',
+  'requesting',
+  'challenged',
+  'authorize',
+  'policy',
+  'sign',
+  'broadcast',
+  'confirmed',
+  'delivered',
+]
 function phaseIndex(p: Phase) {
   return phaseOrder.indexOf(p)
 }
@@ -102,49 +114,66 @@ export default function X402DemoPage() {
       ])
     }
 
-    // t=0 — agent hits a paywall
-    schedule(60, () => {
-      setPhase('request')
+    let t = 0
+
+    // 1. Agent sends GET to paywalled API
+    t += 200
+    schedule(t, () => {
+      setPhase('requesting')
       push({
-        phase: 'request',
-        label: 'Agent received HTTP 402 Payment Required',
-        detail: `${DEMO.resourceLabel} • ${DEMO.amount} ${DEMO.token} on ${DEMO.network}`,
+        phase: 'requesting',
+        label: 'Agent requested premium research data',
+        detail: `GET ${DEMO.resourceUrl}`,
       })
     })
 
-    // authorize request reaches Haven
-    schedule(60 + DEMO.latencies.request, () => {
+    // 2. Server responds with 402
+    t += 700
+    schedule(t, () => {
+      setPhase('challenged')
+      push({
+        phase: 'challenged',
+        label: 'Server responded 402 Payment Required',
+        detail: `${DEMO.amount} ${DEMO.token} on ${DEMO.network} → ${shortHex(DEMO.payTo)}`,
+      })
+    })
+
+    // 3. Agent forwards challenge to Haven
+    t += 600
+    schedule(t, () => {
+      setPhase('authorize')
+      push({
+        phase: 'authorize',
+        label: 'Agent forwarded challenge to Haven',
+        detail: `POST /x402/authorize • ${DEMO.agent.apiKeyPreview}`,
+      })
+    })
+
+    // 4. Haven policy engine evaluates
+    t += 400
+    schedule(t, () => {
       setPhase('policy')
       push({
         phase: 'policy',
-        label: 'POST /x402/authorize — policy engine evaluating',
-        detail: `Agent: ${DEMO.agent.name} • key ${DEMO.agent.apiKeyPreview}`,
+        label: 'Policy engine evaluating intent',
+        detail: 'Per-tx limit, approval threshold, network allowlist, on-chain allowance',
       })
     })
 
-    // policy checks complete
-    schedule(60 + DEMO.latencies.request + DEMO.latencies.policy, () => {
-      push({
-        phase: 'policy',
-        label: 'Policy cleared: within per-tx limit, below approval threshold',
-        detail: `Remaining today: ${(DEMO.agent.dailyLimitNum - parseFloat(DEMO.agent.dailySpent) - parseFloat(DEMO.amount)).toFixed(2)} ${DEMO.token}`,
-      })
-    })
-
-    // sign
-    const tSign = 60 + DEMO.latencies.request + DEMO.latencies.policy + 40
-    schedule(tSign, () => {
+    // 5. Policy cleared — move to signing
+    t += 900
+    schedule(t, () => {
       setPhase('sign')
       push({
         phase: 'sign',
-        label: 'Delegate signed transfer hash',
-        detail: shortHex(DEMO.signHash, 10, 8),
+        label: 'Policy cleared — delegate signed transfer hash',
+        detail: `Remaining today: ${(DEMO.agent.dailyLimitNum - parseFloat(DEMO.agent.dailySpent) - parseFloat(DEMO.amount)).toFixed(2)} ${DEMO.token} • ${shortHex(DEMO.signHash, 8, 6)}`,
       })
     })
 
-    // broadcast
-    const tBroadcast = tSign + DEMO.latencies.sign
-    schedule(tBroadcast, () => {
+    // 6. Broadcast
+    t += 500
+    schedule(t, () => {
       setPhase('broadcast')
       push({
         phase: 'broadcast',
@@ -153,9 +182,9 @@ export default function X402DemoPage() {
       })
     })
 
-    // confirmed
-    const tConfirmed = tBroadcast + DEMO.latencies.broadcast
-    schedule(tConfirmed, () => {
+    // 7. Confirmed on Base
+    t += 1200
+    schedule(t, () => {
       setPhase('confirmed')
       push({
         phase: 'confirmed',
@@ -163,16 +192,22 @@ export default function X402DemoPage() {
         detail: `tx ${shortHex(DEMO.txHash, 10, 8)} • gas ${DEMO.gasUsed}`,
       })
     })
+
+    // 8. Agent retries with proof, server delivers data
+    t += 500
+    schedule(t, () => {
+      setPhase('delivered')
+      push({
+        phase: 'delivered',
+        label: 'Agent retried with proof — data delivered',
+        detail: `200 OK • ${DEMO.resourceLabel}`,
+      })
+    })
   }, [])
 
-  const reset = useCallback(() => {
-    clearTimers()
-    setPhase('idle')
-    setTimeline([])
-  }, [])
-
-  const isRunning = phase !== 'idle' && phase !== 'confirmed'
-  const isDone = phase === 'confirmed'
+  const isRunning = phase !== 'idle' && phase !== 'delivered'
+  const isDone = phase === 'delivered'
+  const currentStep = DEMO.steps.findIndex((s) => s.phase === phase)
 
   return (
     <div className="bg-[#0a0a0a] text-[#ededed] min-h-screen overflow-x-hidden">
@@ -235,18 +270,49 @@ export default function X402DemoPage() {
 
       {/* Stage */}
       <section className="relative max-w-6xl mx-auto px-6 pb-6 z-10">
+        {/* Step ribbon */}
+        <div className="mb-5 flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+          {DEMO.steps.map((s, i) => {
+            const stepReached = reached(phase, s.phase as Phase)
+            const isCurrent = i === currentStep
+            return (
+              <div key={s.phase} className="flex items-center gap-1.5">
+                <span
+                  className={`px-2 py-1 rounded border transition-colors duration-200 ${
+                    isCurrent
+                      ? 'border-indigo-400/60 bg-indigo-500/10 text-indigo-200'
+                      : stepReached
+                      ? 'border-emerald-500/30 bg-emerald-500/[0.04] text-emerald-300/70'
+                      : 'border-white/[0.06] text-zinc-600'
+                  }`}
+                >
+                  <span className="tabular-nums">{i + 1}.</span> {s.label}
+                </span>
+                {i < DEMO.steps.length - 1 && (
+                  <span className={stepReached ? 'text-indigo-400/60' : 'text-zinc-700'}>›</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto_1fr] items-stretch gap-4 md:gap-0">
           {/* Column: Agent / Client */}
           <StageColumn
             kind="agent"
             phase={phase}
-            active={reached(phase, 'request') && !reached(phase, 'policy')}
+            active={
+              phase === 'requesting' ||
+              phase === 'challenged' ||
+              phase === 'authorize' ||
+              phase === 'delivered'
+            }
           />
 
           {/* Arrow: agent → haven */}
           <FlowArrow
             direction="right"
-            active={phase === 'request'}
+            active={phase === 'authorize'}
             done={reached(phase, 'policy')}
           />
 
@@ -268,7 +334,11 @@ export default function X402DemoPage() {
           <StageColumn
             kind="chain"
             phase={phase}
-            active={phase === 'broadcast' || phase === 'confirmed'}
+            active={
+              phase === 'broadcast' ||
+              phase === 'confirmed' ||
+              phase === 'delivered'
+            }
           />
         </div>
 
@@ -295,25 +365,15 @@ export default function X402DemoPage() {
             </button>
           )}
           {isDone && (
-            <>
-              <a
-                href={explorerTxUrl(DEMO.txHash)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-5 py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all shadow-lg shadow-indigo-500/25 inline-flex items-center gap-2"
-              >
-                View on BaseScan
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                </svg>
-              </a>
-              <button
-                onClick={reset}
-                className="px-5 py-2.5 rounded-md border border-white/[0.14] text-sm text-zinc-300 hover:border-white/[0.28] hover:bg-white/[0.03] transition-all"
-              >
-                Run again
-              </button>
-            </>
+            <button
+              onClick={run}
+              className="px-5 py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all shadow-lg shadow-indigo-500/25 inline-flex items-center gap-2"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+              Run again
+            </button>
           )}
           <span className="ml-auto text-xs text-zinc-600 font-mono">
             {phase === 'idle'
@@ -436,10 +496,20 @@ Content-Type: application/json
         </div>
       </section>
 
-      <style jsx>{`
+      <style jsx global>{`
         @keyframes fadeInUp {
           from { opacity: 0; transform: translateY(4px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); opacity: 0.4; }
+          50% { transform: translateY(-2px); opacity: 1; }
+        }
+        @keyframes flowDot {
+          0% { left: 0; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { left: calc(100% - 0.5rem); opacity: 0; }
         }
       `}</style>
     </div>
@@ -526,22 +596,71 @@ const COLUMN_CONFIG = {
 } as const
 
 function AgentContent({ phase }: { phase: Phase }) {
+  const hasRequest = reached(phase, 'requesting')
+  const hasChallenge = reached(phase, 'challenged')
+  const isDelivered = reached(phase, 'delivered')
+  const isWaiting = reached(phase, 'authorize') && !isDelivered
+
+  const subtext =
+    phase === 'idle'
+      ? 'Ready to request premium research data.'
+      : !hasChallenge
+      ? 'Requesting paid API resource…'
+      : isDelivered
+      ? 'Got the data after payment was confirmed.'
+      : 'Received 402 — asking Haven to settle.'
+
   return (
     <div className="space-y-3">
-      <div className="text-xs text-zinc-500 leading-relaxed">
-        Hit a paywalled endpoint. Forwarded the 402 challenge to Haven.
-      </div>
-      <div
-        className={`rounded border border-white/[0.06] p-3 font-mono text-[11px] ${
-          reached(phase, 'request') ? 'bg-amber-500/[0.05] border-amber-500/20' : 'bg-black/30'
-        }`}
-      >
-        <div className="text-zinc-600">GET {DEMO.resourceLabel}</div>
-        <div className="text-amber-300 mt-1">← 402 Payment Required</div>
-        <div className="text-zinc-500 mt-1">
-          {DEMO.amount} {DEMO.token} • {DEMO.network}
+      <div className="text-xs text-zinc-500 leading-relaxed">{subtext}</div>
+
+      {/* Outbound request */}
+      {hasRequest && (
+        <div className="rounded border border-white/[0.06] bg-black/30 p-3 font-mono text-[11px]">
+          <div className="flex items-center gap-2">
+            <span className="text-zinc-500">→</span>
+            <span className="text-zinc-400 truncate">GET /query?q=sector+analysis</span>
+            {!hasChallenge && (
+              <span className="ml-auto inline-flex gap-1">
+                <span className="w-1 h-1 rounded-full bg-zinc-500" style={{ animation: 'bounce 1s ease-in-out infinite' }} />
+                <span className="w-1 h-1 rounded-full bg-zinc-500" style={{ animation: 'bounce 1s ease-in-out 0.15s infinite' }} />
+                <span className="w-1 h-1 rounded-full bg-zinc-500" style={{ animation: 'bounce 1s ease-in-out 0.3s infinite' }} />
+              </span>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* 402 response (appears on challenged) */}
+      {hasChallenge && !isDelivered && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
+          <div className="text-amber-300">← 402 Payment Required</div>
+          <div className="text-zinc-500 mt-1">
+            {DEMO.amount} {DEMO.token} • {DEMO.network}
+          </div>
+        </div>
+      )}
+
+      {/* Successful delivery */}
+      {isDelivered && (
+        <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
+          <div className="flex items-center gap-2 text-emerald-300">
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
+            </svg>
+            ← 200 OK • research.json
+          </div>
+          <div className="text-zinc-500 mt-1">Sector analysis 2026 delivered</div>
+        </div>
+      )}
+
+      {isWaiting && (
+        <div className="text-[11px] text-zinc-500 font-mono flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+          waiting for Haven to settle…
+        </div>
+      )}
+
       <div className="text-[11px] text-zinc-600">
         API key <span className="text-zinc-400 font-mono">{DEMO.agent.apiKeyPreview}</span>
       </div>
@@ -668,14 +787,18 @@ function PolicyDot({ status }: { status: 'pass' | 'pending' | 'idle' }) {
 
 function phaseDotColor(p: Phase) {
   switch (p) {
-    case 'request':
+    case 'requesting':
+      return 'bg-sky-400'
+    case 'challenged':
       return 'bg-amber-400'
+    case 'authorize':
     case 'policy':
     case 'sign':
       return 'bg-indigo-400'
     case 'broadcast':
       return 'bg-sky-400'
     case 'confirmed':
+    case 'delivered':
       return 'bg-emerald-400'
     default:
       return 'bg-zinc-600'
@@ -712,14 +835,6 @@ function FlowArrow({
       >
         <path d="M0 0 L10 5 L0 10 Z" />
       </svg>
-      <style jsx>{`
-        @keyframes flowDot {
-          0% { left: 0; opacity: 0; }
-          10% { opacity: 1; }
-          90% { opacity: 1; }
-          100% { left: calc(100% - 0.5rem); opacity: 0; }
-        }
-      `}</style>
     </div>
   )
 }

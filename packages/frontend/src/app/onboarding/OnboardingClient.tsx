@@ -14,7 +14,7 @@ import type { User } from '@/context/AuthContext'
 type Step = 'connect' | 'deploy' | 'done'
 
 export default function OnboardingClient() {
-  const { user, loading, updateUser } = useAuth()
+  const { user, loading, updateUser, refreshUser } = useAuth()
   const router = useRouter()
 
   const { address, isConnected, chain } = useAccount()
@@ -86,6 +86,7 @@ export default function OnboardingClient() {
       setDeployStage('registering')
       await api.put<User>('/user/safe', { safe_address: result.safeAddress, chain_id: selectedChainId })
       updateUser({ safe_address: result.safeAddress, wallet_address: address })
+      await refreshUser()
 
       setStep('done')
     } catch (err: unknown) {

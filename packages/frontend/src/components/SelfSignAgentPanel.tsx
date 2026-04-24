@@ -885,7 +885,7 @@ export default function SelfSignAgentPanel() {
       {showCreate && (
         <CreateSelfSignModal
           onClose={() => setShowCreate(false)}
-          onCreate={createAgent}
+          onCreate={async (data) => { await createAgent(data) }}
         />
       )}
     </div>

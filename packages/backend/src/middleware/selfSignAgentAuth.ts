@@ -98,8 +98,8 @@ export async function selfSignAgentAuthMiddleware(
     return reply.code(401).send({ error: 'X-Agent-Timestamp expired or invalid' })
   }
 
-  // Build canonical message
-  const rawBody = request.rawBody ?? ''
+  // Build canonical message — stringify body the same way the agent client should
+  const rawBody = request.body != null ? JSON.stringify(request.body) : ''
   const bodyHash = createHash('sha256').update(rawBody).digest('hex')
   const message = [
     'Haven-AI Agent Request',

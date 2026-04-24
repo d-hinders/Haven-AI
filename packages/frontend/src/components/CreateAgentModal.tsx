@@ -24,6 +24,8 @@ import {
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
 import { truncate, isValidAddress } from '@/lib/format'
+import { buildHandoff, buildDotenv, type HandoffInput } from '@/lib/agent-handoff'
+import { buildSkillBundle } from '@/lib/agent-skill-bundle'
 
 
 interface AllowanceEntry {
@@ -118,8 +120,12 @@ export default function CreateAgentModal({
 
   // Result
   const [createdApiKey, setCreatedApiKey] = useState<string | null>(null)
+  const [createdAgentId, setCreatedAgentId] = useState<string | null>(null)
   const [copiedApiKey, setCopiedApiKey] = useState(false)
   const [copiedDoneKey, setCopiedDoneKey] = useState(false)
+  const [copiedEnv, setCopiedEnv] = useState(false)
+  const [showRawCreds, setShowRawCreds] = useState(false)
+  const [bundleBusy, setBundleBusy] = useState(false)
 
   // Wagmi
   const { address: connectedAddress } = useAccount()
@@ -148,8 +154,12 @@ export default function CreateAgentModal({
     setExecError(null)
     setTxHash(null)
     setCreatedApiKey(null)
+    setCreatedAgentId(null)
     setCopiedApiKey(false)
     setCopiedDoneKey(false)
+    setCopiedEnv(false)
+    setShowRawCreds(false)
+    setBundleBusy(false)
   }, [])
 
   const handleClose = useCallback(() => {
@@ -382,6 +392,7 @@ export default function CreateAgentModal({
           })),
         })
       setCreatedApiKey(agent.api_key)
+      setCreatedAgentId(agent.id)
       setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
       setStep('done')
       onCreated(agent)
@@ -418,6 +429,83 @@ export default function CreateAgentModal({
     navigator.clipboard.writeText(text)
     setter(true)
     setTimeout(() => setter(false), 2000)
+  }
+
+  // ── Handoff artefact helpers ──────────────────────────
+  //
+  // Assembled lazily on-click from the form state + the values that came back
+  // with the `/agents` response. Nothing persists — reload and it's gone,
+  // same one-time-view guarantee as the raw credential copy buttons.
+
+  function getHandoffInput(): HandoffInput | null {
+    if (!createdApiKey || !createdAgentId) return null
+    return {
+      agent: {
+        id: createdAgentId,
+        name: name.trim(),
+        description: description.trim() || undefined,
+        delegateAddress: delegateAddress,
+        safeAddress: safeAddress,
+        safeName: activeSafe?.name,
+        chainId,
+      },
+      policy: {
+        allowances: allowances.map((a) => ({
+          tokenSymbol: a.tokenSymbol,
+          amount: a.amount,
+          resetPeriodMin: a.resetTimeMin,
+        })),
+        restrictRecipients,
+        allowedRecipients: restrictRecipients
+          ? allowedRecipients.map((r) => ({ address: r.address, label: r.label }))
+          : [],
+      },
+      credentials: {
+        apiKey: createdApiKey,
+        delegatePrivateKey: generatedPrivateKey,
+      },
+    }
+  }
+
+  function triggerDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    // Release the object URL on the next tick so the click handler has fired.
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
+  function handleDownloadHandoff() {
+    const input = getHandoffInput()
+    if (!input) return
+    const { markdown, filename } = buildHandoff(input)
+    triggerDownload(
+      new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
+      filename,
+    )
+  }
+
+  function handleCopyEnv() {
+    const input = getHandoffInput()
+    if (!input) return
+    const dotenv = buildDotenv(input)
+    copyToClipboard(dotenv, setCopiedEnv)
+  }
+
+  async function handleDownloadSkillBundle() {
+    const input = getHandoffInput()
+    if (!input || bundleBusy) return
+    setBundleBusy(true)
+    try {
+      const { blob, filename } = await buildSkillBundle(input)
+      triggerDownload(blob, filename)
+    } finally {
+      setBundleBusy(false)
+    }
   }
 
   // Generate key on first open if in generate mode and no key yet
@@ -1040,77 +1128,119 @@ export default function CreateAgentModal({
                 )}
               </div>
 
-              {/* Agent credentials — combined section */}
-              <div className="bg-amber-400/5 border border-amber-400/15 rounded-xl p-4 space-y-4">
-                <div className="flex items-center gap-2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400 flex-shrink-0">
+              {/* Handoff card — one artefact, everything the dev needs */}
+              <div className="bg-amber-400/5 border border-amber-400/15 rounded-xl p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400 flex-shrink-0 mt-0.5">
                     <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                     <line x1="12" y1="9" x2="12" y2="13" />
                     <line x1="12" y1="17" x2="12.01" y2="17" />
                   </svg>
-                  <p className="text-[11px] text-amber-400 uppercase tracking-wide font-medium">
-                    Agent credentials — save {generatedPrivateKey ? 'both' : 'this'} now
-                  </p>
+                  <div>
+                    <p className="text-[11px] text-amber-400 uppercase tracking-wide font-medium">
+                      Agent handoff — save this now
+                    </p>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed mt-0.5">
+                      One file with credentials, Safe address, policy, and SDK quickstart.
+                      {generatedPrivateKey ? ' Secrets cannot be shown again.' : ''}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-[11px] text-zinc-500 leading-relaxed">
-                  Your agent needs {generatedPrivateKey ? 'both of these credentials' : 'this API key'} to operate through Haven.
-                  {generatedPrivateKey ? ' Neither' : ' This key'} will be shown again.
-                </p>
 
-                {/* API Key */}
-                {createdApiKey && (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] text-zinc-600 uppercase tracking-wide">
-                      API Key
-                      <span className="normal-case text-zinc-700 ml-1">— authenticates with Haven</span>
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all">
-                        {createdApiKey}
-                      </code>
-                      <button
-                        onClick={() => copyToClipboard(createdApiKey, setCopiedApiKey)}
-                        className="flex-shrink-0 text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-2"
-                      >
-                        {copiedApiKey ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {/* Primary: download the markdown handoff */}
+                <button
+                  onClick={handleDownloadHandoff}
+                  className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download handoff file (.md)
+                </button>
 
-                {/* Delegate Private Key (only if generated) */}
-                {generatedPrivateKey && (
-                  <div className="space-y-1.5 pt-2 border-t border-amber-400/10">
-                    <p className="text-[10px] text-zinc-600 uppercase tracking-wide">
-                      Delegate Private Key
-                      <span className="normal-case text-zinc-700 ml-1">— signs transactions</span>
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all">
-                        {generatedPrivateKey}
-                      </code>
-                      <button
-                        onClick={() => copyToClipboard(generatedPrivateKey, setCopiedDoneKey)}
-                        className="flex-shrink-0 text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-2"
-                      >
-                        {copiedDoneKey ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
+                {/* Secondary: skill bundle + copy .env */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={handleDownloadSkillBundle}
+                    disabled={bundleBusy}
+                    className="flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-60 disabled:cursor-wait border border-white/[0.06] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                    title="Zipped skill folder with SKILL.md, pay.ts, and .env for drop-in integration"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <path d="M9 3v18M3 9h18" />
+                    </svg>
+                    {bundleBusy ? 'Zipping...' : 'Skill bundle (.zip)'}
+                  </button>
+                  <button
+                    onClick={handleCopyEnv}
+                    className="flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                    title="Copy just the environment variables for pasting into .env"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                    {copiedEnv ? 'Copied!' : 'Copy as .env'}
+                  </button>
+                </div>
+
+                {/* Tertiary: raw credentials disclosure (collapsed by default) */}
+                <details
+                  className="group"
+                  open={showRawCreds}
+                  onToggle={(e) => setShowRawCreds((e.currentTarget as HTMLDetailsElement).open)}
+                >
+                  <summary className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 rounded">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="transition-transform group-open:rotate-90">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                    Show raw credentials
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {createdApiKey && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] text-zinc-600 uppercase tracking-wide">
+                          API Key
+                          <span className="normal-case text-zinc-700 ml-1">— authenticates with Haven</span>
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all">
+                            {createdApiKey}
+                          </code>
+                          <button
+                            onClick={() => copyToClipboard(createdApiKey, setCopiedApiKey)}
+                            className="flex-shrink-0 text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-2"
+                          >
+                            {copiedApiKey ? 'Copied!' : 'Copy'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {generatedPrivateKey && (
+                      <div className="space-y-1.5 pt-2 border-t border-amber-400/10">
+                        <p className="text-[10px] text-zinc-600 uppercase tracking-wide">
+                          Delegate Private Key
+                          <span className="normal-case text-zinc-700 ml-1">— signs transactions</span>
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all">
+                            {generatedPrivateKey}
+                          </code>
+                          <button
+                            onClick={() => copyToClipboard(generatedPrivateKey, setCopiedDoneKey)}
+                            className="flex-shrink-0 text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-2"
+                          >
+                            {copiedDoneKey ? 'Copied!' : 'Copy'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
+                </details>
               </div>
-
-              {/* Usage hint */}
-              {generatedPrivateKey && (
-                <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5">
-                  <p className="text-[11px] text-zinc-600 leading-relaxed">
-                    <span className="text-zinc-500 font-medium">Next step:</span> Add both credentials
-                    to your agent&apos;s environment variables. The API key goes in{' '}
-                    <code className="text-zinc-500">AGENT_API_KEY</code> and the private key in{' '}
-                    <code className="text-zinc-500">DELEGATE_PRIVATE_KEY</code>.
-                  </p>
-                </div>
-              )}
 
               <button
                 onClick={handleClose}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { useSelfSignAgents, type SelfSignAgent } from '@/hooks/useSelfSignAgents'
 import { truncate } from '@/lib/format'
 
@@ -59,19 +60,42 @@ function CreateSelfSignModal({
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [mode, setMode] = useState<'generate' | 'existing'>('generate')
   const [delegateAddress, setDelegateAddress] = useState('')
+  const [generatedKey, setGeneratedKey] = useState<{ privateKey: string; address: string } | null>(null)
+  const [keyCopied, setKeyCopied] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const isValidAddress = /^0x[0-9a-fA-F]{40}$/.test(delegateAddress)
+  const effectiveAddress = mode === 'generate' ? (generatedKey?.address ?? '') : delegateAddress
+  const canSubmit = name.trim() && (mode === 'generate' ? !!generatedKey : isValidAddress)
+
+  function handleGenerate() {
+    const pk = generatePrivateKey()
+    const account = privateKeyToAccount(pk)
+    setGeneratedKey({ privateKey: pk, address: account.address })
+    setKeyCopied(false)
+  }
+
+  function copyKey() {
+    if (!generatedKey) return
+    navigator.clipboard.writeText(generatedKey.privateKey)
+    setKeyCopied(true)
+    setTimeout(() => setKeyCopied(false), 2000)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!name.trim() || !isValidAddress) return
+    if (!canSubmit) return
     setLoading(true)
     setError(null)
     try {
-      await onCreate({ name: name.trim(), description: description.trim() || undefined, delegate_address: delegateAddress })
+      await onCreate({
+        name: name.trim(),
+        description: description.trim() || undefined,
+        delegate_address: effectiveAddress,
+      })
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create agent')
@@ -86,11 +110,6 @@ function CreateSelfSignModal({
         <div className="flex items-center gap-2 mb-5">
           <ShieldIcon size={18} />
           <h2 className="text-base font-semibold">New Self-Sign Agent</h2>
-        </div>
-
-        <div className="mb-4 p-3 bg-zinc-800/60 rounded-lg border border-zinc-700 text-xs text-zinc-400 leading-relaxed">
-          A self-sign agent authenticates using its Ethereum private key — no API key required.
-          The agent signs each request with the wallet at the delegate address below.
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -115,24 +134,82 @@ function CreateSelfSignModal({
             />
           </div>
 
+          {/* Mode toggle */}
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Delegate Address</label>
-            <input
-              className={`w-full bg-zinc-800 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-zinc-500 ${
-                delegateAddress && !isValidAddress ? 'border-red-500' : 'border-zinc-700'
-              }`}
-              placeholder="0x..."
-              value={delegateAddress}
-              onChange={(e) => setDelegateAddress(e.target.value)}
-              required
-            />
-            {delegateAddress && !isValidAddress && (
-              <p className="text-red-400 text-xs mt-1">Invalid Ethereum address</p>
-            )}
-            <p className="text-zinc-500 text-xs mt-1">
-              The Ethereum address whose private key will sign requests.
-            </p>
+            <label className="block text-xs text-zinc-400 mb-2">Delegate Wallet</label>
+            <div className="flex rounded-lg border border-zinc-700 overflow-hidden text-sm">
+              <button
+                type="button"
+                onClick={() => { setMode('generate'); setGeneratedKey(null) }}
+                className={`flex-1 px-3 py-2 transition-colors ${mode === 'generate' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                Generate new wallet
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('existing')}
+                className={`flex-1 px-3 py-2 transition-colors ${mode === 'existing' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                Use existing address
+              </button>
+            </div>
           </div>
+
+          {mode === 'generate' ? (
+            <div className="space-y-2">
+              {!generatedKey ? (
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  className="w-full px-4 py-2 text-sm border border-zinc-700 rounded-lg hover:bg-zinc-800 transition-colors text-zinc-300"
+                >
+                  Generate keypair
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <div className="bg-zinc-800/60 rounded-lg p-3 border border-zinc-700">
+                    <p className="text-xs text-zinc-500 mb-1">Address</p>
+                    <p className="font-mono text-xs text-zinc-200 break-all">{generatedKey.address}</p>
+                  </div>
+                  <div className="bg-amber-900/20 rounded-lg p-3 border border-amber-700/40">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs text-amber-400 font-medium">⚠ Private key — save this now</p>
+                      <button type="button" onClick={copyKey} className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1">
+                        <CopyIcon size={11} />
+                        {keyCopied ? 'Copied!' : 'Copy'}
+                      </button>
+                    </div>
+                    <p className="font-mono text-xs text-amber-200/80 break-all">{generatedKey.privateKey}</p>
+                    <p className="text-xs text-zinc-500 mt-2">This key will not be shown again. Store it securely.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGenerate}
+                    className="text-xs text-zinc-500 hover:text-zinc-300 underline"
+                  >
+                    Regenerate
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <input
+                className={`w-full bg-zinc-800 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-zinc-500 ${
+                  delegateAddress && !isValidAddress ? 'border-red-500' : 'border-zinc-700'
+                }`}
+                placeholder="0x..."
+                value={delegateAddress}
+                onChange={(e) => setDelegateAddress(e.target.value)}
+              />
+              {delegateAddress && !isValidAddress && (
+                <p className="text-red-400 text-xs mt-1">Invalid Ethereum address</p>
+              )}
+              <p className="text-zinc-500 text-xs mt-1">
+                The Ethereum address whose private key will sign requests.
+              </p>
+            </div>
+          )}
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
 
@@ -146,7 +223,7 @@ function CreateSelfSignModal({
             </button>
             <button
               type="submit"
-              disabled={loading || !name.trim() || !isValidAddress}
+              disabled={loading || !canSubmit}
               className="flex-1 px-4 py-2 text-sm bg-white text-black rounded-lg font-medium hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Creating…' : 'Create Agent'}

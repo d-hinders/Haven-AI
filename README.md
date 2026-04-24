@@ -36,8 +36,8 @@ This is a TypeScript monorepo:
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/d-hinders/Haven.git
-cd Haven
+git clone https://github.com/d-hinders/Haven-AI.git
+cd Haven-AI
 npm install
 ```
 
@@ -150,7 +150,7 @@ const haven = new HavenClient({ apiKey, delegateKey })
 const anthropic = new Anthropic()
 
 const response = await anthropic.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   tools: havenTools.claude(),  // ready-made tool schemas
   messages: [{ role: 'user', content: 'Pay 5 EURe to 0xabc for API access' }],
 })
@@ -355,7 +355,7 @@ From `packages/backend/`:
 ## Project Structure
 
 ```
-Haven/
+Haven-AI/
 ├── .env.example               # Environment variable template
 ├── docker-compose.yml         # PostgreSQL for local dev
 ├── packages/

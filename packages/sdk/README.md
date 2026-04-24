@@ -1,6 +1,6 @@
 # @haven-fi/sdk
 
-TypeScript SDK for [Haven](https://github.com/d-hinders/Haven) — agent wallet infrastructure for the autonomous economy.
+TypeScript SDK for [Haven](https://github.com/d-hinders/Haven-AI) — agent wallet infrastructure for the autonomous economy.
 
 Haven gives AI agents the ability to hold, send, and receive money within strict, user-defined guardrails. This SDK makes it trivial to integrate Haven payments into any agent.
 
@@ -68,7 +68,7 @@ const haven = new HavenClient({ apiKey, delegateKey })
 const anthropic = new Anthropic()
 
 const response = await anthropic.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   tools: havenTools.claude(),  // or havenTools.openai() for OpenAI
   messages: [{ role: 'user', content: 'Pay 5 EURe to 0xabc for API access' }],
 })

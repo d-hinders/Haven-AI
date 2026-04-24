@@ -114,7 +114,7 @@ async function runAgent(taskPrompt: string): Promise<void> {
   // Conversation loop — handle tool calls until Claude gives a final response
   while (true) {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: systemPrompt,
       tools,

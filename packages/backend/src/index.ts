@@ -18,6 +18,7 @@ import approvalRoutes from './routes/approvals.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
+import selfSignAgentRoutes from './routes/self-sign-agents.js'
 import pool from './db.js'
 
 const app = Fastify({
@@ -95,6 +96,7 @@ await app.register(approvalRoutes, { prefix: '/approvals' })
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
+await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
 
 // --- Start ---
 const start = async () => {

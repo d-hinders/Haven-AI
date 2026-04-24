@@ -2,10 +2,22 @@
 
 import type { BalanceItem } from '@/types/transactions'
 
+/**
+ * Gradient palette for token chips. Keyed by token symbol. A token registry
+ * would be the more durable home for this, but it's only presentational.
+ */
 const TOKEN_COLORS: Record<string, string> = {
+  // Gnosis Chain
   xDAI: 'from-emerald-400 to-teal-500',
   EURe: 'from-blue-400 to-cyan-500',
   'USDC.e': 'from-indigo-400 to-violet-500',
+  // Base
+  ETH: 'from-sky-400 to-indigo-500',
+  USDC: 'from-indigo-400 to-violet-500',
+  // Common fallbacks across chains
+  DAI: 'from-amber-400 to-yellow-500',
+  USDT: 'from-emerald-400 to-green-500',
+  WETH: 'from-sky-400 to-indigo-500',
 }
 
 interface BalanceCardsProps {

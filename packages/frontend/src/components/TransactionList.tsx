@@ -2,18 +2,11 @@
 
 import type { Transaction } from '@/types/transactions'
 import { getExplorerUrl } from '@/lib/chains'
+import { truncate, timeAgo as relativeTime } from '@/lib/format'
 
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
+// Transactions store timestamps as unix seconds; convert to ms for timeAgo.
 function timeAgo(timestamp: number): string {
-  const seconds = Math.floor(Date.now() / 1000 - timestamp)
-  if (seconds < 60) return 'just now'
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
-  if (seconds < 2592000) return `${Math.floor(seconds / 86400)}d ago`
-  return new Date(timestamp * 1000).toLocaleDateString()
+  return relativeTime(timestamp * 1000)
 }
 
 const TYPE_LABELS: Record<string, string> = {

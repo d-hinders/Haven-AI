@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
@@ -16,10 +16,8 @@ import TransactionList from '@/components/TransactionList'
 import SendButton from '@/components/SendButton'
 import AccountInfo from '@/components/AccountInfo'
 import { getExplorerUrl, getChainConfig } from '@/lib/chains'
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
+import { truncate } from '@/lib/format'
+import NetworkPill from '@/components/NetworkPill'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -49,10 +47,9 @@ function CopyButton({ text }: { text: string }) {
 
 export default function AccountDetailClient() {
   const params = useParams()
-  const router = useRouter()
   const safeId = params.safeId as string
 
-  const { user, activeSafe, setActiveSafe } = useAuth()
+  const { user, activeSafe, setActiveSafe, loading: authLoading } = useAuth()
   const { currency } = usePreferences()
   const { contacts, resolveAddress } = useContacts()
   const { agents } = useAgents()
@@ -62,10 +59,13 @@ export default function AccountDetailClient() {
   const safeAddress = safe?.safe_address ?? null
   const chainId = safe?.chain_id ?? 100
 
-  // Set as active safe when viewing
-  if (safe && activeSafe?.id !== safe.id) {
-    setActiveSafe(safe)
-  }
+  // Keep the active Safe in sync with the route. Runs as an effect so we
+  // never call setState during render.
+  useEffect(() => {
+    if (safe && activeSafe?.id !== safe.id) {
+      setActiveSafe(safe)
+    }
+  }, [safe, activeSafe, setActiveSafe])
 
   // Build agent lookup
   const agentsByDelegate = new Map<string, string>()
@@ -112,6 +112,17 @@ export default function AccountDetailClient() {
     refetchTx()
   }
 
+  // While auth context is still hydrating `user.safes`, avoid flashing
+  // "Account not found" — the safe lookup will resolve once safes load.
+  if (authLoading || !user) {
+    return (
+      <div className="max-w-5xl py-16 flex items-center justify-center gap-2">
+        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+        <span className="text-xs text-zinc-600">Loading account...</span>
+      </div>
+    )
+  }
+
   if (!safe) {
     return (
       <div className="max-w-5xl py-16 text-center">
@@ -139,17 +150,15 @@ export default function AccountDetailClient() {
             </Link>
           )}
           <div>
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h1 className="text-2xl font-bold tracking-tight">{safe.name}</h1>
-              {safe.is_default && (
+              <NetworkPill chainId={chainId} size="md" />
+              {safe.is_default && (user?.safes?.length ?? 0) > 1 && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 font-medium">
                   default
                 </span>
               )}
             </div>
-            <p className="text-sm text-zinc-500">
-              Safe details, balances, and transaction history
-            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">

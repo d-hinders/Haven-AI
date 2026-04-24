@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
 // ── Shared visual components ──────────────────────────────────────
 
@@ -87,6 +88,8 @@ export default function InfoModal({ open, onClose, pages }: Props) {
     if (open) setPage(0)
   }, [open])
 
+  useEscapeToClose(open, handleClose)
+
   if (!open || pages.length === 0) return null
 
   const current = pages[page]
@@ -104,7 +107,8 @@ export default function InfoModal({ open, onClose, pages }: Props) {
           </div>
           <button
             onClick={handleClose}
-            className="text-zinc-700 hover:text-zinc-400 transition-colors"
+            aria-label="Close"
+            className="p-1 -mr-1 rounded-md text-zinc-700 hover:text-zinc-400 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />

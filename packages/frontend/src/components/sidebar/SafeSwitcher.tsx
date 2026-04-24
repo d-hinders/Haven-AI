@@ -2,10 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
+import { truncate } from '@/lib/format'
 
 export default function SafeSwitcher() {
   const { user, activeSafe, setActiveSafe } = useAuth()

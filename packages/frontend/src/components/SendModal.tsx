@@ -4,19 +4,12 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { type Address } from 'viem'
 import { useAccount } from 'wagmi'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainTokens, type SendParams } from '@/lib/safe-tx'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { truncate, isValidAddress } from '@/lib/format'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
-
-// ── Helpers ──────────────────────────────────────────────────────────
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
 
 
 // ── Props ────────────────────────────────────────────────────────────
@@ -48,6 +41,7 @@ export default function SendModal({
   const { status, txHash, error, send, reset } = useSendTransaction()
 
   // Build token list from chain config
+  const chainConfig = getChainConfig(chainId)
   const chainTokens = getChainTokens(chainId)
   const tokenList = Object.entries(chainTokens).map(([symbol, cfg]) => ({
     symbol,
@@ -55,6 +49,9 @@ export default function SendModal({
     sub: cfg.address === null ? 'Native' : symbol,
   }))
   const defaultToken = tokenList[0]?.symbol ?? ''
+  // Native gas token (symbol of the token with null address) for the gas-payer label.
+  const gasTokenSymbol =
+    Object.entries(chainTokens).find(([, cfg]) => cfg.address === null)?.[0] ?? ''
 
   // Form state
   const [selectedToken, setSelectedToken] = useState<string>(defaultToken)
@@ -66,6 +63,10 @@ export default function SendModal({
   const [showContactPicker, setShowContactPicker] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
   const pickerRef = useRef<HTMLDivElement>(null)
+
+  // Escape-to-close (disabled during execution so the user can't abandon a
+  // signing flow by tapping a key).
+  useEscapeToClose(open, onClose, { enabled: step !== 'executing' })
 
   const filteredContacts = contacts.filter(
     (c) =>
@@ -215,7 +216,8 @@ export default function SendModal({
           {step !== 'executing' && (
             <button
               onClick={onClose}
-              className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              aria-label="Close"
+              className="p-1 -mr-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -467,7 +469,9 @@ export default function SendModal({
               <div className="h-px bg-white/[0.06]" />
               <div className="flex justify-between items-center">
                 <span className="text-xs text-zinc-500">Gas paid by</span>
-                <span className="text-sm text-zinc-400">Your wallet (xDAI)</span>
+                <span className="text-sm text-zinc-400">
+                  Your signing wallet{gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}
+                </span>
               </div>
             </div>
 
@@ -562,7 +566,7 @@ export default function SendModal({
                   Waiting for {threshold - 1} more signature{threshold - 1 !== 1 ? 's' : ''} to execute.
                 </p>
                 <a
-                  href={`https://app.safe.global/transactions/queue?safe=gno:${safeAddress}`}
+                  href={`https://app.safe.global/transactions/queue?safe=${chainConfig.shortName}:${safeAddress}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors mb-6 flex items-center gap-1"

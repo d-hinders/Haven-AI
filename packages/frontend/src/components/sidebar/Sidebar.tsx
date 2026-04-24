@@ -67,7 +67,8 @@ export default function Sidebar() {
       {/* Mobile toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="lg:hidden fixed top-4 left-4 z-[60] w-8 h-8 flex items-center justify-center rounded-md bg-[#111] border border-white/[0.08] text-zinc-400"
+        aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
+        className="lg:hidden fixed top-4 left-4 z-[60] w-8 h-8 flex items-center justify-center rounded-md bg-[#111] border border-white/[0.08] text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -150,15 +151,20 @@ export default function Sidebar() {
                 {userInitial}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-zinc-300 truncate">{user?.email}</p>
+                <p
+                  className="text-sm text-zinc-300 truncate"
+                  title={user?.email ?? undefined}
+                >
+                  {user?.email}
+                </p>
               </div>
               <button
                 onClick={() => {
                   logout()
                   router.push('/')
                 }}
-                className="text-zinc-600 hover:text-zinc-400 transition-colors flex-shrink-0"
-                title="Log out"
+                aria-label="Log out"
+                className="p-1 rounded-md text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.04] transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
               >
                 {icons.logout}
               </button>

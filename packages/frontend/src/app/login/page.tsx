@@ -41,10 +41,12 @@ function LoginForm() {
         router.push('/onboarding')
       }
     } catch (err) {
-      if (err instanceof ApiRequestError) {
-        setError(err.message)
+      // Generic message — don't surface raw backend errors here (prevents
+      // account-enumeration: "user not found" vs "wrong password").
+      if (err instanceof ApiRequestError && err.status >= 500) {
+        setError('Something went wrong on our end. Please try again.')
       } else {
-        setError('Something went wrong. Please try again.')
+        setError('Invalid email or password.')
       }
     } finally {
       setSubmitting(false)
@@ -82,6 +84,7 @@ function LoginForm() {
             id="email"
             type="email"
             required
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
@@ -100,10 +103,10 @@ function LoginForm() {
             id="password"
             type="password"
             required
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
-            placeholder="Your password"
           />
         </div>
 

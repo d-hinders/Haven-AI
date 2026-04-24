@@ -16,32 +16,9 @@ import {
 } from '@/lib/safe-tx'
 import { getExplorerUrl } from '@/lib/chains'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
+import { truncate, timeAgo, timeUntil } from '@/lib/format'
 
 // ── Helpers ──────────────────────────────────────────────────────
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
-function timeUntil(dateStr: string): string {
-  const diff = new Date(dateStr).getTime() - Date.now()
-  if (diff <= 0) return 'expired'
-  const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m`
-  const hours = Math.floor(mins / 60)
-  return `${hours}h ${mins % 60}m`
-}
 
 function resolveTokenSymbol(address: string, chainId: number): string {
   const lower = address.toLowerCase()
@@ -96,6 +73,7 @@ function ApprovalCard({
   chainId?: number
 }) {
   const isPending = approval.status === 'pending'
+  const [confirmReject, setConfirmReject] = useState(false)
 
   return (
     <div className={`p-4 rounded-xl border transition-all ${
@@ -115,7 +93,12 @@ function ApprovalCard({
           </div>
           <div>
             <p className="text-xs font-medium text-zinc-200">{approval.agent_name}</p>
-            <p className="text-[10px] text-zinc-600">{timeAgo(approval.created_at)}</p>
+            <p
+              className="text-[10px] text-zinc-600"
+              title={new Date(approval.created_at).toLocaleString()}
+            >
+              {timeAgo(approval.created_at)}
+            </p>
           </div>
         </div>
         <StatusBadge status={approval.status} />
@@ -134,9 +117,14 @@ function ApprovalCard({
           <span className="text-zinc-400 font-mono">{truncate(approval.to_address)}</span>
         </div>
         {approval.reason && (
-          <div className="flex justify-between text-xs">
-            <span className="text-zinc-500">Reason</span>
-            <span className="text-zinc-400 max-w-[200px] truncate">{approval.reason}</span>
+          <div className="flex justify-between text-xs gap-3">
+            <span className="text-zinc-500 flex-shrink-0">Reason</span>
+            <span
+              className="text-zinc-400 max-w-[240px] truncate"
+              title={approval.reason}
+            >
+              {approval.reason}
+            </span>
           </div>
         )}
         {isPending && (
@@ -162,22 +150,44 @@ function ApprovalCard({
 
       {/* Actions */}
       {isPending && (
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onApproveAndExecute(approval)}
-            disabled={executing}
-            className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50"
-          >
-            {executing ? 'Executing...' : 'Approve & Sign'}
-          </button>
-          <button
-            onClick={() => onReject(approval.id)}
-            disabled={executing}
-            className="px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-400 text-xs font-medium hover:bg-white/[0.04] hover:text-red-400 transition-all disabled:opacity-50"
-          >
-            Reject
-          </button>
-        </div>
+        confirmReject ? (
+          <div className="flex items-center gap-2 bg-red-500/[0.04] border border-red-500/20 rounded-lg px-3 py-2">
+            <span className="flex-1 text-xs text-zinc-300">
+              Reject this payment? The agent will be notified.
+            </span>
+            <button
+              onClick={() => { onReject(approval.id); setConfirmReject(false) }}
+              disabled={executing}
+              className="px-3 py-1.5 rounded-md bg-red-500 hover:bg-red-400 text-white text-xs font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+            >
+              Reject
+            </button>
+            <button
+              onClick={() => setConfirmReject(false)}
+              disabled={executing}
+              className="px-3 py-1.5 rounded-md text-zinc-400 text-xs font-medium hover:bg-white/[0.04] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onApproveAndExecute(approval)}
+              disabled={executing}
+              className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+            >
+              {executing ? 'Executing...' : 'Approve & Execute'}
+            </button>
+            <button
+              onClick={() => setConfirmReject(true)}
+              disabled={executing}
+              className="px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-400 text-xs font-medium hover:bg-white/[0.04] hover:text-red-400 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+            >
+              Reject
+            </button>
+          </div>
+        )
       )}
     </div>
   )
@@ -345,15 +355,15 @@ export default function ApprovalQueue() {
       {/* Empty state */}
       {!loading && pendingApprovals.length === 0 && (
         <div className="text-center py-8 rounded-xl border border-dashed border-white/[0.06]">
-          <div className="w-10 h-10 rounded-xl bg-white/[0.04] flex items-center justify-center mx-auto mb-3">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zinc-600">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-emerald-400">
               <path d="M9 12l2 2 4-4" />
               <circle cx="12" cy="12" r="10" />
             </svg>
           </div>
-          <p className="text-xs text-zinc-600">No pending approvals</p>
-          <p className="text-[10px] text-zinc-700 mt-1">
-            Payments above threshold will appear here for review
+          <p className="text-xs text-zinc-400">You&apos;re all caught up</p>
+          <p className="text-[10px] text-zinc-600 mt-1">
+            Agent payments that need approval will appear here.
           </p>
         </div>
       )}
@@ -393,7 +403,12 @@ export default function ApprovalQueue() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-zinc-700">{a.agent_name}</span>
-                  <span className="text-[10px] text-zinc-800">{timeAgo(a.created_at)}</span>
+                  <span
+                    className="text-[10px] text-zinc-800"
+                    title={new Date(a.created_at).toLocaleString()}
+                  >
+                    {timeAgo(a.created_at)}
+                  </span>
                 </div>
               </div>
             ))}

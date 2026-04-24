@@ -12,6 +12,7 @@ import {
 } from '@/lib/allowance-module'
 import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 import {
@@ -22,16 +23,7 @@ import {
   getChainTokens,
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
+import { truncate, isValidAddress } from '@/lib/format'
 
 
 interface AllowanceEntry {
@@ -164,6 +156,12 @@ export default function CreateAgentModal({
     resetForm()
     onClose()
   }, [onClose, resetForm])
+
+  // Escape-to-close — allow closing in all steps except while an on-chain
+  // action is actively in flight (mirrors the backdrop-click behaviour).
+  useEscapeToClose(open, handleClose, {
+    enabled: !(step === 'executing' && execStatus !== 'error'),
+  })
 
   // Apply demo preset when the modal opens with preset='demo'
   useEffect(() => {
@@ -422,15 +420,18 @@ export default function CreateAgentModal({
     setTimeout(() => setter(false), 2000)
   }
 
+  // Generate key on first open if in generate mode and no key yet
+  useEffect(() => {
+    if (open && keyMode === 'generate' && !generatedPrivateKey && step === 'details') {
+      handleGenerateKey()
+    }
+    // handleGenerateKey is stable (no deps); we intentionally only react to modal open/mode changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, keyMode, generatedPrivateKey, step])
+
   // ── Render ─────────────────────────────────────────────
 
   if (!open) return null
-
-  // Generate key on first open if in generate mode and no key yet
-  if (keyMode === 'generate' && !generatedPrivateKey && step === 'details') {
-    // Use a timeout to avoid setState during render
-    setTimeout(handleGenerateKey, 0)
-  }
 
   const availableTokens = tokenOptions.filter(
     (t) => !allowances.some((a) => a.tokenSymbol === t.symbol),
@@ -459,7 +460,8 @@ export default function CreateAgentModal({
           <button
             onClick={handleClose}
             disabled={step === 'executing' && execStatus !== 'error'}
-            className="text-zinc-700 hover:text-zinc-400 disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 -mr-1"
+            aria-label="Close"
+            className="p-1 -mr-1 rounded-md text-zinc-700 hover:text-zinc-400 hover:bg-white/[0.04] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -1033,7 +1035,7 @@ export default function CreateAgentModal({
                     rel="noopener noreferrer"
                     className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-2 mt-1 inline-block"
                   >
-                    {execStatus === 'confirmed' ? 'View on Gnosisscan' : 'View in Safe{Wallet}'}
+                    {execStatus === 'confirmed' ? `View on ${getChainConfig(chainId).name} Explorer` : 'View in Safe{Wallet}'}
                   </a>
                 )}
               </div>

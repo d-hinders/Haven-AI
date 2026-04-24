@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
+import { truncate, isValidAddress } from '@/lib/format'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -15,16 +16,6 @@ interface Props {
   onToggle: (enabled: boolean) => void
   recipients: RecipientEntry[]
   onChange: (recipients: RecipientEntry[]) => void
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
 // ── Component ───────────────────────────────────────────────────────

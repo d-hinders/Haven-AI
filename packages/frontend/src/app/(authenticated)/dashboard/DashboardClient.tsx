@@ -120,6 +120,11 @@ export default function DashboardClient() {
   const activeAgents = agents.filter((a) => a.status === 'active')
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
 
+  // Empty-portfolio CTA — a Safe exists but hasn't been funded. Deep-link to
+  // the default (or first) Safe so the user sees the copy-address UI directly.
+  const showFundCta = safes.length > 0 && !portfolioLoading && totalFiat < 1
+  const fundTarget = `/accounts/${(safes.find((s) => s.is_default) ?? safes[0])?.id ?? ''}`
+
   const [infoOpen, setInfoOpen] = useState(false)
 
   return (
@@ -170,6 +175,34 @@ export default function DashboardClient() {
         agentCount={activeAgents.length}
         loading={portfolioLoading}
       />
+
+      {/* Fund-your-account CTA — only when at least one Safe exists but it's empty. */}
+      {showFundCta && (
+        <div className="flex items-start gap-3 p-4 mb-6 rounded-lg bg-gradient-to-br from-indigo-500/[0.08] to-violet-500/[0.06] border border-indigo-500/20">
+          <div className="w-8 h-8 rounded-lg bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center flex-shrink-0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-indigo-300">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m0 0l-6-6m6 6l6-6" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-zinc-100 mb-0.5">
+              Fund your account to get started
+            </p>
+            <p className="text-xs text-zinc-400 mb-2.5">
+              Send a stablecoin to your Safe address, then create an agent with a spending policy.
+            </p>
+            <Link
+              href={fundTarget}
+              className="inline-flex items-center gap-1 text-xs font-medium text-indigo-300 hover:text-indigo-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 rounded"
+            >
+              Show deposit address
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M5 12h14M13 5l7 7-7 7" />
+              </svg>
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Two-column layout: Balances + Accounts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -282,12 +315,23 @@ export default function DashboardClient() {
             </span>
           )}
         </h2>
-        <Link
-          href="/accounts"
-          className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-        >
-          View all
-        </Link>
+        {(() => {
+          // When the user has a single account, "View all" should deep-link to
+          // that account's detail page (which has a real transactions list),
+          // not the accounts overview.
+          const target =
+            safes.length === 1
+              ? `/accounts/${safes[0].id}`
+              : `/accounts/${(safes.find((s) => s.is_default) ?? safes[0])?.id ?? ''}`
+          return target ? (
+            <Link
+              href={target}
+              className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 rounded"
+            >
+              View all
+            </Link>
+          ) : null
+        })()}
       </div>
       <div className="rounded-lg border border-white/[0.06] bg-white/[0.01] p-4">
         <TransactionList

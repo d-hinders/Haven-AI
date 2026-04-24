@@ -1,23 +1,7 @@
 'use client'
 
 import { useAgentActivity, type AgentStats } from '@/hooks/useAgentActivity'
-
-// ── Helpers ──────────────────────────────────────────────────────
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
+import { truncate, timeAgo } from '@/lib/format'
 
 // ── Status indicator ─────────────────────────────────────────────
 
@@ -158,7 +142,10 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
 
           {activity.length === 0 ? (
             <div className="text-center py-6 rounded-lg border border-dashed border-white/[0.06]">
-              <p className="text-xs text-zinc-700">No activity yet</p>
+              <p className="text-xs text-zinc-500">No activity yet</p>
+              <p className="text-[10px] text-zinc-700 mt-1">
+                Your agent&apos;s payments will appear here.
+              </p>
             </div>
           ) : (
             <div className="space-y-1">
@@ -213,7 +200,10 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
                         tx
                       </a>
                     )}
-                    <span className="text-[10px] text-zinc-800">
+                    <span
+                      className="text-[10px] text-zinc-800"
+                      title={new Date(item.created_at).toLocaleString()}
+                    >
                       {timeAgo(item.created_at)}
                     </span>
                   </div>

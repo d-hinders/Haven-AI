@@ -10,6 +10,7 @@ import {
 } from '@/lib/allowance-module'
 import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 import {
@@ -21,13 +22,7 @@ import {
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
 import type { Agent } from '@/hooks/useAgents'
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
+import { truncate } from '@/lib/format'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -138,6 +133,9 @@ export default function EditAgentModal({
     resetForm()
     onClose()
   }, [onClose, resetForm])
+
+  // Escape-to-close — mirror backdrop behaviour (disabled during execution).
+  useEscapeToClose(open, handleClose, { enabled: step !== 'executing' })
 
   // ── Execute ────────────────────────────────────────────
 

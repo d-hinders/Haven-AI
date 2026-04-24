@@ -20,12 +20,9 @@ import HowItWorksModal from './HowItWorksModal'
 import ApprovalQueue from './ApprovalQueue'
 import AgentActivityFeed from './AgentActivityFeed'
 import { useApprovals } from '@/hooks/useApprovals'
+import { truncate } from '@/lib/format'
 
 // ── Helpers ────────────────────────────────────────────────────────
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
 
 function resetLabel(mins: number) {
   return RESET_PERIODS.find((p) => p.value === mins)?.label ?? `${mins}m`
@@ -106,6 +103,7 @@ function AllowanceBar({
   const spent = effective.effectiveSpent
   const remaining = effective.remaining
   const pct = total > 0n ? Number((spent * 100n) / total) : 0
+  const nearLimit = pct >= 90 && remaining > 0n
   const color =
     pct < 40
       ? 'from-indigo-500 to-violet-500'
@@ -123,8 +121,17 @@ function AllowanceBar({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-zinc-400 font-medium">
+        <span className="text-zinc-400 font-medium flex items-center gap-1.5">
           {tokenSymbol(info.token, chainId)}
+          {nearLimit && (
+            <span
+              className="inline-flex items-center gap-1 text-[9px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 font-semibold uppercase tracking-wide animate-pulse"
+              title={`${pct}% of allowance spent`}
+            >
+              <span className="w-1 h-1 rounded-full bg-red-400" />
+              near limit
+            </span>
+          )}
           {loading && (
             <span className="ml-1 text-zinc-700 animate-pulse">...</span>
           )}
@@ -138,9 +145,15 @@ function AllowanceBar({
           )}
         </span>
       </div>
-      <div className="w-full h-[3px] bg-white/[0.05] rounded-full overflow-hidden">
+      <div
+        className={`w-full h-[3px] bg-white/[0.05] rounded-full overflow-hidden ${
+          nearLimit ? 'ring-1 ring-red-500/30 ring-offset-0' : ''
+        }`}
+      >
         <div
-          className={`h-full rounded-full bg-gradient-to-r ${color} allowance-fill`}
+          className={`h-full rounded-full bg-gradient-to-r ${color} allowance-fill ${
+            nearLimit ? 'animate-pulse' : ''
+          }`}
           style={{ width: `${displayPct}%` }}
         />
       </div>

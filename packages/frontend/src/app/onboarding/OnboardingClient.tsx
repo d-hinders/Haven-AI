@@ -43,7 +43,10 @@ export default function OnboardingClient() {
     }
   }, [loading, user, router])
 
-  // When wallet connects, save the address and advance to deploy step
+  // When wallet connects, save the address and advance to deploy step.
+  // If the save fails we still advance (the address will be re-saved during
+  // /user/safe), but we log the error and surface a non-blocking warning so
+  // nothing fails silently.
   useEffect(() => {
     if (isConnected && address && user && step === 'connect') {
       api
@@ -52,8 +55,13 @@ export default function OnboardingClient() {
           updateUser(updated)
           setStep('deploy')
         })
-        .catch(() => {
-          // Non-critical — address will be saved during deploy
+        .catch((err: unknown) => {
+          console.warn('[Haven] Failed to persist wallet address before deploy:', err)
+          // Address will be saved during deploy via /user/safe. Advance so
+          // the user isn't stuck, but keep the warning visible.
+          setError(
+            'We couldn\u2019t save your wallet address just now. You can continue \u2014 we\u2019ll save it when you deploy.',
+          )
           setStep('deploy')
         })
     }

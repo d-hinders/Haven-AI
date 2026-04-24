@@ -878,9 +878,10 @@ export default function AgentPanel() {
         safeDetails={safeDetails}
         preset={createPreset}
         onCreated={() => {
+          // Don't close the modal here — the Done step shows the one-time
+          // handoff file / skill bundle / raw credentials. User dismisses via
+          // the Done button, which fires onClose.
           refetch()
-          setCreateOpen(false)
-          setCreatePreset(null)
           // Refresh on-chain data after a short delay for tx confirmation
           setTimeout(refetchOnChain, 2000)
         }}

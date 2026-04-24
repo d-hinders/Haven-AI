@@ -99,9 +99,9 @@ export default function CreateAgentModal({
   // Delegate key generation
   const [keyMode, setKeyMode] = useState<KeyMode>('generate')
   const [generatedPrivateKey, setGeneratedPrivateKey] = useState<string | null>(null)
-  const [keySaved, setKeySaved] = useState(false)
-  const [showPrivateKey, setShowPrivateKey] = useState(false)
-  const [copiedPrivateKey, setCopiedPrivateKey] = useState(false)
+  // Note: the generated private key is no longer revealed on step 1 — it's
+  // bundled into the handoff file shown on the Done step. So no per-step
+  // save gate, show/hide, or copy-state here.
 
   // Form: allowances
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
@@ -141,9 +141,6 @@ export default function CreateAgentModal({
     setDelegateAddress('')
     setKeyMode('generate')
     setGeneratedPrivateKey(null)
-    setKeySaved(false)
-    setShowPrivateKey(false)
-    setCopiedPrivateKey(false)
     setAllowances([])
     setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
@@ -190,7 +187,6 @@ export default function CreateAgentModal({
     setKeyMode('generate')
     setGeneratedPrivateKey(privateKey)
     setDelegateAddress(address)
-    setKeySaved(true)
     setAllowances([
       {
         tokenSymbol: usdc.symbol,
@@ -212,17 +208,12 @@ export default function CreateAgentModal({
     const address = privateKeyToAddress(privateKey)
     setGeneratedPrivateKey(privateKey)
     setDelegateAddress(address)
-    setKeySaved(false)
-    setShowPrivateKey(false)
   }
 
   function handleSwitchKeyMode(mode: KeyMode) {
     setKeyMode(mode)
     setDelegateAddress('')
     setGeneratedPrivateKey(null)
-    setKeySaved(false)
-    setShowPrivateKey(false)
-    setCopiedPrivateKey(false)
     if (mode === 'generate') {
       handleGenerateKey()
     }
@@ -233,8 +224,26 @@ export default function CreateAgentModal({
   function canProceedDetails() {
     if (!name.trim()) return false
     if (!isValidAddress(delegateAddress)) return false
-    if (keyMode === 'generate' && !keySaved) return false
+    // keyMode === 'generate': no save-gate on step 1 — the key is delivered
+    // in the handoff file on the Done step. The user can't accidentally lose
+    // it because nothing is committed on-chain until step 3.
     return true
+  }
+
+  // ── Step: Review ──────────────────────────────────────
+  //
+  // Reasons the Deploy button cannot fire. Used to disable the button AND
+  // surface the concrete blocker so the user isn't staring at a dead control.
+  // (Silent guard in handleExecute was masking backend/wallet outages — this
+  // moves the visibility forward.)
+
+  function deployBlockReason(): string | null {
+    if (!connectedAddress) return 'Connect a wallet to sign the Safe transaction.'
+    if (!walletClient) return 'Waiting for wallet client — check that your wallet is unlocked.'
+    if (!publicClient) return 'No RPC client for this chain. Refresh the page.'
+    if (!safeDetails)
+      return 'Safe details are still loading — or the Haven backend is unreachable. Make sure it is running on port 3001.'
+    return null
   }
 
   // ── Step: Allowances ───────────────────────────────────
@@ -698,66 +707,20 @@ export default function CreateAgentModal({
                     </div>
                   </div>
 
-                  {/* Private key — critical save area */}
-                  <div className="bg-amber-400/5 border border-amber-400/15 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400 flex-shrink-0">
-                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                        <line x1="12" y1="9" x2="12" y2="13" />
-                        <line x1="12" y1="17" x2="12.01" y2="17" />
-                      </svg>
-                      <p className="text-[11px] text-amber-400 uppercase tracking-wide font-medium">
-                        Private key — save this now
-                      </p>
-                    </div>
+                  {/* Private key reveal moved to the Done step — it ships
+                      as part of the handoff file alongside the API key, env
+                      vars, and SDK quickstart. Here we just reassure the
+                      user that a fresh key was generated client-side. */}
+                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 flex items-start gap-2">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500 flex-shrink-0 mt-0.5">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="16" x2="12" y2="12" />
+                      <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
                     <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      This key is generated in your browser and will never be stored by Haven.
-                      Your agent needs this key to sign transactions. If you lose it, you&apos;ll need to
-                      revoke this agent and create a new one.
+                      A fresh keypair was generated in your browser. Haven never sees the private key —
+                      you&apos;ll download it with the rest of the agent&apos;s credentials on the last step.
                     </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all select-all">
-                        {showPrivateKey
-                          ? generatedPrivateKey
-                          : `${generatedPrivateKey.slice(0, 10)}${'•'.repeat(32)}${generatedPrivateKey.slice(-6)}`}
-                      </code>
-                      <div className="flex flex-col gap-1 flex-shrink-0">
-                        <button
-                          onClick={() => setShowPrivateKey(!showPrivateKey)}
-                          className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors px-2 py-1"
-                        >
-                          {showPrivateKey ? 'Hide' : 'Show'}
-                        </button>
-                        <button
-                          onClick={() => copyToClipboard(generatedPrivateKey, setCopiedPrivateKey)}
-                          className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-1"
-                        >
-                          {copiedPrivateKey ? 'Copied!' : 'Copy'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Save confirmation checkbox */}
-                    <label className="flex items-start gap-2.5 cursor-pointer group pt-1">
-                      <div className="relative mt-0.5 flex-shrink-0">
-                        <input
-                          type="checkbox"
-                          checked={keySaved}
-                          onChange={(e) => setKeySaved(e.target.checked)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-4 h-4 rounded border-2 border-zinc-700 peer-checked:border-indigo-500 peer-checked:bg-indigo-500 transition-all flex items-center justify-center">
-                          {keySaved && (
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                          )}
-                        </div>
-                      </div>
-                      <span className="text-[11px] text-zinc-400 group-hover:text-zinc-300 transition-colors leading-relaxed">
-                        I have securely saved this private key and understand it cannot be recovered
-                      </span>
-                    </label>
                   </div>
 
                   {/* Regenerate button */}
@@ -1026,6 +989,12 @@ export default function CreateAgentModal({
                 </div>
               )}
 
+              {deployBlockReason() && (
+                <div className="text-xs text-red-400/90 bg-red-500/5 border border-red-500/20 rounded-lg px-3 py-2">
+                  {deployBlockReason()}
+                </div>
+              )}
+
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('allowances')}
@@ -1035,7 +1004,9 @@ export default function CreateAgentModal({
                 </button>
                 <button
                   onClick={handleExecute}
-                  className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20"
+                  disabled={!!deployBlockReason()}
+                  title={deployBlockReason() ?? undefined}
+                  className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
                 >
                   Deploy Agent
                 </button>

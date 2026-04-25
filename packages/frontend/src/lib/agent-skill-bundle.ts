@@ -9,7 +9,7 @@
  *   SKILL.md           — tool description / when-to-use rules
  *   README.md          — the same handoff document (duplicated for humans)
  *   .env.example       — env vars with values pre-filled
- *   pay.ts             — minimal reference implementation using @haven-fi/sdk
+ *   pay.ts             — minimal reference implementation using @haven_ai/sdk
  *   package.json       — dependencies so the example runs standalone
  *
  * The zip is built client-side with JSZip. No backend calls.
@@ -120,7 +120,7 @@ function buildPayTs(): string {
  * it so the rest of your agent code can just \`import { haven } from './pay'\`.
  */
 
-import { HavenClient } from '@haven-fi/sdk'
+import { HavenClient } from '@haven_ai/sdk'
 
 const apiKey = process.env.HAVEN_API_KEY
 const delegateKey = process.env.HAVEN_DELEGATE_KEY
@@ -159,7 +159,7 @@ function buildPackageJson(input: HandoffInput): string {
         type: 'module',
         private: true,
         dependencies: {
-          '@haven-fi/sdk': '^0.1.0',
+          '@haven_ai/sdk': '^0.1.0',
         },
       },
       null,

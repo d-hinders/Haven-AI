@@ -23,7 +23,7 @@ This is a TypeScript monorepo:
 |---|---|
 | `packages/backend` | Fastify API — auth, agents, payments, Safe integration |
 | `packages/frontend` | Next.js dashboard — wallet connect, Safe deploy, agent management |
-| `packages/sdk` | `@haven-fi/sdk` — TypeScript SDK for agent payment integration |
+| `packages/sdk` | `@haven_ai/sdk` — TypeScript SDK for agent payment integration |
 
 ## Prerequisites
 
@@ -115,18 +115,18 @@ npm run dev
 
 ## SDK — Agent Integration
 
-The `@haven-fi/sdk` package wraps the 3-step payment API into a single function call. This is what developers use to give their agents payment capabilities.
+The `@haven_ai/sdk` package wraps the 3-step payment API into a single function call. This is what developers use to give their agents payment capabilities.
 
 ### Install
 
 ```bash
-npm install @haven-fi/sdk
+npm install @haven_ai/sdk
 ```
 
 ### One-liner payment
 
 ```typescript
-import { HavenClient } from '@haven-fi/sdk'
+import { HavenClient } from '@haven_ai/sdk'
 
 const haven = new HavenClient({
   apiKey: 'sk_agent_xxx',          // from Haven dashboard
@@ -149,7 +149,7 @@ console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x... (or basescan.o
 The SDK ships with pre-built tool definitions for Claude and OpenAI:
 
 ```typescript
-import { HavenClient, havenTools } from '@haven-fi/sdk'
+import { HavenClient, havenTools } from '@haven_ai/sdk'
 import Anthropic from '@anthropic-ai/sdk'
 
 const haven = new HavenClient({ apiKey, delegateKey })
@@ -394,7 +394,7 @@ Haven/
 │   │   │   ├── signer.ts          # Raw ECDSA signing (AllowanceModule-compatible)
 │   │   │   ├── types.ts           # TypeScript types + error classes
 │   │   │   └── tools.ts           # Pre-built tool defs for Claude & OpenAI
-│   │   ├── package.json           # @haven-fi/sdk (publishable to npm)
+│   │   ├── package.json           # @haven_ai/sdk (publishable to npm)
 │   │   └── README.md              # SDK documentation
 │   └── frontend/
 │       └── src/

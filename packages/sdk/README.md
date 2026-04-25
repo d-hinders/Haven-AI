@@ -1,4 +1,4 @@
-# @haven-fi/sdk
+# @haven_ai/sdk
 
 TypeScript SDK for [Haven](https://github.com/d-hinders/Haven) — agent wallet infrastructure for the autonomous economy.
 
@@ -7,13 +7,13 @@ Haven gives AI agents the ability to hold, send, and receive money within strict
 ## Install
 
 ```bash
-npm install @haven-fi/sdk
+npm install @haven_ai/sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { HavenClient } from '@haven-fi/sdk'
+import { HavenClient } from '@haven_ai/sdk'
 
 const haven = new HavenClient({
   apiKey: 'sk_agent_xxx',          // from Haven dashboard
@@ -71,7 +71,7 @@ const response = await haven.fetch('https://paid-api.example.com/data')
 const data = await response.json()
 
 // Manual — parse and authorize the 402 yourself
-import { parsePaymentRequired } from '@haven-fi/sdk'
+import { parsePaymentRequired } from '@haven_ai/sdk'
 
 const apiResponse = await fetch('https://paid-api.example.com/data')
 if (apiResponse.status === 402) {
@@ -90,7 +90,7 @@ Supported x402 networks: `eip155:100` (Gnosis Chain) and `eip155:8453` (Base).
 The SDK ships with ready-made tool schemas for Claude and OpenAI:
 
 ```typescript
-import { HavenClient, havenTools } from '@haven-fi/sdk'
+import { HavenClient, havenTools } from '@haven_ai/sdk'
 import Anthropic from '@anthropic-ai/sdk'
 
 const haven = new HavenClient({ apiKey, delegateKey })
@@ -135,7 +135,7 @@ const haven = new HavenClient({
 ## Error Handling
 
 ```typescript
-import { HavenApiError, HavenSigningError, HavenTimeoutError } from '@haven-fi/sdk'
+import { HavenApiError, HavenSigningError, HavenTimeoutError } from '@haven_ai/sdk'
 
 try {
   await haven.pay({ token: 'EURe', amount: '5.00', to: '0xabc...' })

@@ -118,7 +118,7 @@ function buildSdkExample(hasDelegateKey: boolean): string {
   if (!hasDelegateKey) {
     // User brought their own delegate key — we can't assume how they load it.
     return [
-      `import { HavenClient } from '@haven-fi/sdk'`,
+      `import { HavenClient } from '@haven_ai/sdk'`,
       ``,
       `const haven = new HavenClient({`,
       `  apiKey: process.env.HAVEN_API_KEY!,`,
@@ -137,7 +137,7 @@ function buildSdkExample(hasDelegateKey: boolean): string {
     ].join('\n')
   }
   return [
-    `import { HavenClient } from '@haven-fi/sdk'`,
+    `import { HavenClient } from '@haven_ai/sdk'`,
     ``,
     `const haven = new HavenClient({`,
     `  apiKey: process.env.HAVEN_API_KEY!,`,
@@ -265,7 +265,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `Install the SDK:`,
     ``,
     '```bash',
-    `npm install @haven-fi/sdk`,
+    `npm install @haven_ai/sdk`,
     '```',
     ``,
     `Make a payment:`,
@@ -280,7 +280,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `(replace the recipient with an address you control):`,
     ``,
     '```bash',
-    `node --input-type=module -e "import('@haven-fi/sdk').then(async ({HavenClient})=>{`,
+    `node --input-type=module -e "import('@haven_ai/sdk').then(async ({HavenClient})=>{`,
     `  const h = new HavenClient({apiKey:process.env.HAVEN_API_KEY, delegateKey:process.env.HAVEN_DELEGATE_KEY, baseUrl:process.env.HAVEN_API_URL});`,
     `  const r = await h.pay({to:'0xRecipient', amount:'0.01', token:'USDC'});`,
     `  console.log(r.txHash);`,

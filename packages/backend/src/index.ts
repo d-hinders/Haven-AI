@@ -55,8 +55,20 @@ process.on('uncaughtException', (error) => {
 })
 
 // --- Plugins ---
+// CORS:
+//   - Browser dashboard: served from `config.frontendUrl`. CORS protects it
+//     from other websites making authenticated requests on the user's behalf.
+//   - Agent SDK clients: hit `/agents/...` and `/payments/...` from arbitrary
+//     hosts (any agent runtime — Claude console, custom servers, MCP, etc.).
+//     They authenticate with `Authorization: Bearer sk_agent_*` — that's the
+//     real security boundary, not the Origin header.
+//
+// Reflecting the request origin (or accepting requests with no Origin, which
+// is what server-side fetch sends) gives us both: dashboard credential flow
+// keeps working, agents from anywhere can authenticate.
 await app.register(cors, {
-  origin: config.frontendUrl,
+  origin: true,
+  credentials: true,
 })
 
 await app.register(fastifyJwt, {

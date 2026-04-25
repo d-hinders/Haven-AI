@@ -4,7 +4,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Install dependencies for the whole monorepo (needed for workspace resolution)
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/backend/package.json ./packages/backend/
 

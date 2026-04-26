@@ -1,6 +1,6 @@
 const NAV_LINKS = [
   { label: 'Product', href: '#' },
-  { label: 'How x402 works', href: '/demo/x402' },
+  { label: 'How it works', href: '/how-it-works' },
   { label: 'Docs', href: '#' },
   { label: 'GitHub', href: '#' },
 ]
@@ -169,10 +169,10 @@ export default function Home() {
               Get Early Access
             </a>
             <a
-              href="/demo/x402"
+              href="/how-it-works"
               className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2"
             >
-              How x402 works
+              See how it works
             </a>
           </div>
 
@@ -279,6 +279,9 @@ export default function Home() {
             <p className="text-sm text-zinc-500 leading-relaxed">
               When an agent encounters an HTTP 402 response, Haven acts as the policy-aware wallet backend. It evaluates the payment against the agent's active policy, signs from the Safe if approved, and returns the proof — without the agent ever handling keys or understanding blockchain mechanics.
             </p>
+            <a href="/demo/x402" className="inline-flex items-center gap-1 mt-4 text-xs text-indigo-300 hover:text-indigo-200 transition-colors duration-200">
+              Watch the x402 flow →
+            </a>
           </div>
           <div className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300">
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-violet-500/40 to-indigo-500/40 opacity-40" />

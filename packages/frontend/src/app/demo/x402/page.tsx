@@ -273,8 +273,7 @@ export default function X402DemoPage() {
       {/* Hero */}
       <section className="relative max-w-6xl mx-auto px-6 pt-16 pb-10 z-10">
         <div className="inline-flex items-center gap-2 mb-6 px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-medium">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-          Live x402 payment demo
+          How x402 works
         </div>
         <h1 className="text-3xl md:text-5xl font-bold tracking-tight leading-[1.05] mb-4 max-w-3xl">
           <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">

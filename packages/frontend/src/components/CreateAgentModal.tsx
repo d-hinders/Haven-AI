@@ -556,11 +556,11 @@ export default function CreateAgentModal({
           <div>
             <h2 className="text-sm font-semibold">Create Agent</h2>
             <p className="text-xs text-zinc-600 mt-0.5">
-              {step === 'details' && 'Agent identity and delegate key'}
+              {step === 'details' && 'Name your agent and set up its signing key'}
               {step === 'allowances' && 'Configure spending limits'}
               {step === 'review' && 'Review and deploy on-chain'}
               {step === 'executing' && 'Deploying on-chain...'}
-              {step === 'done' && 'Agent created'}
+              {step === 'done' && 'Credentials ready to hand off'}
             </p>
           </div>
           <button
@@ -604,6 +604,11 @@ export default function CreateAgentModal({
           {/* ── STEP: Details ─────────────────────────────── */}
           {step === 'details' && (
             <div className="space-y-5">
+              <div className="bg-indigo-500/[0.06] border border-indigo-500/20 rounded-lg px-3 py-2.5">
+                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                  You&apos;re setting up the payment capability for an agent — an API key, a signing key, and on-chain spending limits. Name this entry after the actual agent you&apos;ll give these credentials to.
+                </p>
+              </div>
               <div>
                 <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
                   Agent name
@@ -614,6 +619,9 @@ export default function CreateAgentModal({
                   placeholder="e.g. Research Agent"
                   className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
                 />
+                <p className="text-[10px] text-zinc-600 mt-1.5">
+                  Use the name of the agent you&apos;ll hand these credentials to (e.g. your Claude assistant, a scraping bot).
+                </p>
               </div>
               <div>
                 <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">

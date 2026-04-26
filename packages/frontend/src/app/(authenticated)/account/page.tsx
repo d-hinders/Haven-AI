@@ -1,17 +1,6 @@
-'use client'
+import { redirect } from 'next/navigation'
 
-import dynamic from 'next/dynamic'
-
-const AccountClient = dynamic(() => import('./AccountClient'), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center gap-3 p-8">
-      <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-      <span className="text-sm text-zinc-500">Loading...</span>
-    </div>
-  ),
-})
-
-export default function AccountPage() {
-  return <AccountClient />
+export default function AccountRedirectPage() {
+  // Legacy single-Safe route. The product is multi-Safe now — always send to /accounts.
+  redirect('/accounts')
 }

@@ -3,15 +3,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { ApiRequestError } from '@/lib/api'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import ContactsInfo from '@/components/ContactsInfo'
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
+import { truncate, isValidAddress } from '@/lib/format'
 
 function Initials({ name }: { name: string }) {
   const parts = name.trim().split(/\s+/)
@@ -29,20 +23,30 @@ function Initials({ name }: { name: string }) {
 interface ContactModalProps {
   mode: 'add' | 'edit'
   initial?: { id: string; name: string; address: string }
+  existingContacts?: Contact[]
   onSave: (name: string, address: string) => Promise<void>
   onClose: () => void
 }
 
-function ContactModal({ mode, initial, onSave, onClose }: ContactModalProps) {
+function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }: ContactModalProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [address, setAddress] = useState(initial?.address ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  useEscapeToClose(true, onClose, { enabled: !saving })
   const nameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     nameRef.current?.focus()
   }, [])
+
+  // When adding, surface if the address is already saved under another name.
+  const duplicateContact = (() => {
+    if (mode !== 'add') return null
+    if (!isValidAddress(address)) return null
+    const normalized = address.toLowerCase()
+    return existingContacts.find((c) => c.address.toLowerCase() === normalized) ?? null
+  })()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -75,7 +79,8 @@ function ContactModal({ mode, initial, onSave, onClose }: ContactModalProps) {
           </h2>
           <button
             onClick={onClose}
-            className="text-zinc-500 hover:text-zinc-300 transition-colors"
+            aria-label="Close"
+            className="p-1 -mr-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -121,6 +126,14 @@ function ContactModal({ mode, initial, onSave, onClose }: ContactModalProps) {
           {error && (
             <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2.5">
               {error}
+            </div>
+          )}
+
+          {duplicateContact && !error && (
+            <div className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2.5">
+              This address is already saved as{' '}
+              <span className="font-medium">&ldquo;{duplicateContact.name}&rdquo;</span>.
+              Saving will create a second entry.
             </div>
           )}
 
@@ -178,7 +191,7 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
           className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
         >
           {copied ? (
-            <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4 text-emerald-400 animate-check-pop" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
             </svg>
           ) : (
@@ -220,6 +233,7 @@ interface DeleteConfirmProps {
 
 function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
   const [deleting, setDeleting] = useState(false)
+  useEscapeToClose(true, onClose, { enabled: !deleting })
 
   const handleDelete = async () => {
     setDeleting(true)
@@ -409,6 +423,7 @@ export default function ContactsPage() {
       {showAdd && (
         <ContactModal
           mode="add"
+          existingContacts={contacts}
           onSave={async (name, address) => { await addContact(name, address) }}
           onClose={() => setShowAdd(false)}
         />

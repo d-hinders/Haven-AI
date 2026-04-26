@@ -95,7 +95,7 @@ export interface PaymentResult {
   /** Error message (present when failed) */
   errorMessage: string | null
 
-  /** Gnosisscan URL for the transaction */
+  /** Block explorer URL for the transaction (chain-dependent) */
   explorerUrl: string | null
 
   /** ISO 8601 timestamps */
@@ -104,6 +104,72 @@ export interface PaymentResult {
   submittedAt: string | null
   confirmedAt: string | null
   expiresAt: string
+}
+
+// ── x402 Types ──────────────────────────────────────────────────
+
+/** Payment requirements from an HTTP 402 response (x402 protocol). */
+export interface X402PaymentRequired {
+  x402Version: number
+  resource: {
+    url: string
+    description?: string
+    mimeType?: string
+  }
+  accepts: X402PaymentOption[]
+  error?: string
+}
+
+/** A single payment option from x402 PaymentRequired. */
+export interface X402PaymentOption {
+  scheme: string             // "exact"
+  network: string            // CAIP-2 chain ID, e.g. "eip155:100"
+  amount: string             // Atomic units
+  asset: string              // Token contract address
+  payTo: string              // Recipient address
+  maxTimeoutSeconds: number
+  extra?: Record<string, unknown>
+}
+
+/** Receipt returned after a successful x402 payment. */
+export interface X402Receipt {
+  success: boolean
+  paymentId: string
+  txHash: string
+  token: string
+  amount: string
+  to: string
+  resourceUrl: string
+  explorerUrl: string
+}
+
+/** @internal */
+export interface RawX402AuthorizeResponse {
+  success?: boolean
+  payment_id: string
+  status: string
+  tx_hash?: string
+  chain_id?: number
+  token?: string
+  amount?: string
+  to?: string
+  resource_url?: string
+  explorer_url?: string
+  expires_at?: string
+  sign_data?: {
+    hash: string
+    components: {
+      safe: string
+      token: string
+      to: string
+      amount: string
+      payment_token: string
+      payment: string
+      nonce: number
+    }
+    instructions: string
+  }
+  error?: string
 }
 
 // ── API Response Shapes (raw, snake_case from server) ────────────
@@ -138,6 +204,8 @@ export interface RawSignResponse {
   token?: string
   amount?: string
   to?: string
+  explorer_url?: string
+  chain_id?: number
   error?: string
   details?: string
 }
@@ -150,6 +218,8 @@ export interface RawStatusResponse {
   amount: string
   to: string
   tx_hash: string | null
+  explorer_url?: string | null
+  chain_id?: number
   error_message: string | null
   created_at: string
   signed_at: string | null

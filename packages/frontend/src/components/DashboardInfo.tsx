@@ -34,8 +34,8 @@ const PAGES: InfoPage[] = [
             <div>
               <p className="text-xs text-zinc-200 font-medium">Token balances</p>
               <p className="text-[11px] text-zinc-600 mt-0.5 leading-relaxed">
-                Individual balances for xDAI (native), USDC.e, and EURe. Each is read
-                directly from the Gnosis Chain RPC &mdash; not a database snapshot.
+                Individual balances for all supported tokens (xDAI, USDC.e, EURe on Gnosis;
+                ETH, USDC on Base). Each is read directly from the chain RPC &mdash; not a database snapshot.
               </p>
             </div>
           </div>
@@ -63,7 +63,7 @@ const PAGES: InfoPage[] = [
     content: (
       <div className="space-y-5">
         <p className="text-sm text-zinc-400 leading-relaxed">
-          Your funds live in a <span className="text-zinc-200">Safe smart account</span> on Gnosis Chain &mdash; a battle-tested
+          Your funds live in a <span className="text-zinc-200">Safe smart account</span> on Gnosis Chain or Base &mdash; a battle-tested
           multi-signature contract wallet used by DAOs, protocols, and individuals holding billions
           in assets.
         </p>
@@ -73,7 +73,7 @@ const PAGES: InfoPage[] = [
           <Arrow />
           <DiagramBox label="Safe smart account" sub="Holds all funds on-chain" accent />
           <Arrow />
-          <DiagramBox label="Gnosis Chain" sub="Low-cost EVM network" />
+          <DiagramBox label="Gnosis Chain / Base" sub="Low-cost EVM networks" />
         </div>
 
         <div className="space-y-3 text-xs text-zinc-500 leading-relaxed">
@@ -145,8 +145,8 @@ const PAGES: InfoPage[] = [
         </div>
 
         <div className="text-[11px] text-zinc-600 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2 leading-relaxed">
-          <span className="text-zinc-400">Gnosis Chain</span> has ~5s block times and
-          transaction fees under $0.01, making it ideal for frequent payments.
+          <span className="text-zinc-400">Gnosis Chain</span> has ~5s block times and fees under $0.01.
+          <span className="text-zinc-400"> Base</span> offers fast finality and broad USDC liquidity.
         </div>
       </div>
     ),

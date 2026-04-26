@@ -9,6 +9,9 @@ export type {
   PaymentResult,
   PaymentStatus,
   SignData,
+  X402PaymentRequired,
+  X402PaymentOption,
+  X402Receipt,
 } from './types.js'
 
 export type { ClaudeTool, OpenAITool } from './tools.js'
@@ -19,3 +22,9 @@ export {
   HavenSigningError,
   HavenTimeoutError,
 } from './types.js'
+
+export {
+  parsePaymentRequired,
+  selectPaymentOption,
+  encodePaymentProof,
+} from './x402.js'

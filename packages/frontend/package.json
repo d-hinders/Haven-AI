@@ -14,6 +14,7 @@
     "@rainbow-me/rainbowkit": "^2.2.10",
     "@tanstack/react-query": "^5.96.1",
     "autoprefixer": "^10.4.27",
+    "jszip": "^3.10.1",
     "next": "^15.2.0",
     "postcss": "^8.5.8",
     "react": "^19.0.0",

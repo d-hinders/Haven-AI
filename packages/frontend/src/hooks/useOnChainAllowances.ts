@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
-import { gnosis } from 'viem/chains'
 import {
   getDelegates,
   getAllAllowances,
@@ -43,8 +42,9 @@ interface UseOnChainAllowancesResult {
 export function useOnChainAllowances(
   safeAddress: string | null,
   managedDelegates: string[],
+  chainId: number = 100,
 ): UseOnChainAllowancesResult {
-  const publicClient = usePublicClient({ chainId: gnosis.id })
+  const publicClient = usePublicClient({ chainId })
 
   const [data, setData] = useState<Map<string, OnChainDelegateData>>(new Map())
   const [loading, setLoading] = useState(true)

@@ -23,13 +23,13 @@ This is a TypeScript monorepo:
 |---|---|
 | `packages/backend` | Fastify API — auth, agents, payments, Safe integration |
 | `packages/frontend` | Next.js dashboard — wallet connect, Safe deploy, agent management |
-| `packages/sdk` | `@haven-fi/sdk` — TypeScript SDK for agent payment integration |
+| `packages/sdk` | `@haven_ai/sdk` — TypeScript SDK for agent payment integration |
 
 ## Prerequisites
 
 - **Node.js** v18+ — [nodejs.org](https://nodejs.org)
 - **Docker Desktop** — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-- **A browser wallet** (MetaMask, Rabby, etc.) with Gnosis Chain configured
+- **A browser wallet** (MetaMask, Rabby, etc.) with Gnosis Chain or Base configured
 
 ## Getting Started
 
@@ -53,9 +53,10 @@ Edit `.env` and fill in the required values:
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string (default works with Docker) |
 | `JWT_SECRET` | Yes | Secret for auth tokens — use a long random string in production |
-| `RPC_URL` | Yes | Gnosis Chain RPC (default: `https://rpc.gnosischain.com`) |
+| `GNOSIS_RPC_URL` | No | Gnosis Chain RPC (default: `https://rpc.gnosischain.com`) |
+| `BASE_RPC_URL` | No | Base RPC (default: `https://mainnet.base.org`) |
 | `RELAYER_PRIVATE_KEY` | Yes | Private key of EOA that pays gas for agent payments (see below) |
-| `GNOSISSCAN_API_KEY` | No | For transaction display — get from [gnosisscan.io](https://gnosisscan.io/apis) |
+| `ETHERSCAN_API_KEY` | No | For transaction display on both Gnosis and Base — get from [etherscan.io](https://etherscan.io/apis) |
 | `COINGECKO_API_KEY` | No | For token prices — get from [coingecko.com](https://www.coingecko.com/en/api) |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | WalletConnect — MetaMask works without it |
 | `ANTHROPIC_API_KEY` | No | Only for Claude agent demo (`npm run agent:demo`) |
@@ -68,7 +69,11 @@ The relayer is a throwaway EOA that pays gas for on-chain agent payments. It nev
 node -e "const{ethers}=require('ethers');const w=ethers.Wallet.createRandom();console.log('Address:',w.address);console.log('Key:',w.privateKey)"
 ```
 
-Send 0.01 xDAI to the printed address (enough for thousands of transactions on Gnosis Chain), then put the private key in `RELAYER_PRIVATE_KEY`.
+Fund the relayer with the native token for each chain you plan to use:
+- **Gnosis Chain:** 0.01 xDAI (enough for thousands of transactions)
+- **Base:** 0.001 ETH
+
+Put the private key in `RELAYER_PRIVATE_KEY`.
 
 ### 3. Start PostgreSQL
 
@@ -91,11 +96,12 @@ npm run dev
 
 1. Go to [http://localhost:3000](http://localhost:3000)
 2. Click **Get Early Access** → create an account
-3. Log in and connect your browser wallet (switch to Gnosis Chain if prompted)
-4. Deploy a Safe — confirm the transaction in your wallet
-5. You'll land on the dashboard with your Safe address
+3. Log in and connect your browser wallet
+4. Select your target network (Gnosis Chain or Base) in the deploy modal
+5. Deploy a Safe — confirm the transaction in your wallet
+6. You'll land on the dashboard with your Safe address
 
-> **Note:** Deploying a Safe requires a small amount of xDAI for gas. You can bridge DAI from Ethereum or use the [Gnosis Chain faucet](https://gnosisfaucet.com).
+> **Note:** Deploying a Safe requires native gas tokens. For Gnosis Chain, use [gnosisfaucet.com](https://gnosisfaucet.com). For Base, bridge ETH via [bridge.base.org](https://bridge.base.org).
 
 ### 6. Create an agent
 
@@ -109,18 +115,18 @@ npm run dev
 
 ## SDK — Agent Integration
 
-The `@haven-fi/sdk` package wraps the 3-step payment API into a single function call. This is what developers use to give their agents payment capabilities.
+The `@haven_ai/sdk` package wraps the 3-step payment API into a single function call. This is what developers use to give their agents payment capabilities.
 
 ### Install
 
 ```bash
-npm install @haven-fi/sdk
+npm install @haven_ai/sdk
 ```
 
 ### One-liner payment
 
 ```typescript
-import { HavenClient } from '@haven-fi/sdk'
+import { HavenClient } from '@haven_ai/sdk'
 
 const haven = new HavenClient({
   apiKey: 'sk_agent_xxx',          // from Haven dashboard
@@ -135,7 +141,7 @@ const result = await haven.pay({
 })
 
 console.log(result.txHash)      // 0x...
-console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x...
+console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x... (or basescan.org for Base)
 ```
 
 ### AI agent integration
@@ -143,14 +149,14 @@ console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x...
 The SDK ships with pre-built tool definitions for Claude and OpenAI:
 
 ```typescript
-import { HavenClient, havenTools } from '@haven-fi/sdk'
+import { HavenClient, havenTools } from '@haven_ai/sdk'
 import Anthropic from '@anthropic-ai/sdk'
 
 const haven = new HavenClient({ apiKey, delegateKey })
 const anthropic = new Anthropic()
 
 const response = await anthropic.messages.create({
-  model: 'claude-sonnet-4-6',
+  model: 'claude-opus-4-7',
   tools: havenTools.claude(),  // ready-made tool schemas
   messages: [{ role: 'user', content: 'Pay 5 EURe to 0xabc for API access' }],
 })
@@ -331,7 +337,9 @@ Response on success:
 {
   "payment_id": "uuid",
   "status": "confirmed",
-  "tx_hash": "0x..."
+  "tx_hash": "0x...",
+  "chain_id": 100,
+  "explorer_url": "https://gnosisscan.io/tx/0x..."
 }
 ```
 
@@ -386,7 +394,7 @@ Haven-AI/
 │   │   │   ├── signer.ts          # Raw ECDSA signing (AllowanceModule-compatible)
 │   │   │   ├── types.ts           # TypeScript types + error classes
 │   │   │   └── tools.ts           # Pre-built tool defs for Claude & OpenAI
-│   │   ├── package.json           # @haven-fi/sdk (publishable to npm)
+│   │   ├── package.json           # @haven_ai/sdk (publishable to npm)
 │   │   └── README.md              # SDK documentation
 │   └── frontend/
 │       └── src/
@@ -404,13 +412,22 @@ Haven-AI/
 │               └── safe-tx.ts          # Safe transaction building + signing
 ```
 
-## Supported Tokens (Gnosis Chain)
+## Supported Networks & Tokens
+
+**Gnosis Chain** (`chainId: 100`)
 
 | Token | Symbol | Decimals | Address |
 |---|---|---|---|
 | xDAI | xDAI | 18 | Native |
 | EURe | EURe | 18 | `0xcB444e90D8198415266c6a2724b7900fb12FC56E` |
 | USDC.e | USDC.e | 6 | `0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0` |
+
+**Base** (`chainId: 8453`)
+
+| Token | Symbol | Decimals | Address |
+|---|---|---|---|
+| ETH | ETH | 18 | Native |
+| USDC | USDC | 6 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
 
 ## Tech Stack
 
@@ -422,7 +439,7 @@ Haven-AI/
 - **wagmi + viem** — wallet connection + blockchain interaction
 - **ethers v6** — backend blockchain operations
 - **Tailwind CSS** — styling
-- **Gnosis Chain** — target network (low gas, EVM-compatible)
+- **Gnosis Chain + Base** — supported EVM networks
 - **Anthropic SDK** — Claude agent demo
 
 ## License

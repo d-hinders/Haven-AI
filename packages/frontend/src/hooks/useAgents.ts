@@ -12,21 +12,37 @@ export interface AgentAllowance {
   reset_period_min: number
 }
 
+export interface AgentRecipient {
+  id: string
+  agent_id: string
+  address: string
+  label: string | null
+  created_at: string
+}
+
 export interface Agent {
   id: string
   name: string
   description: string | null
   delegate_address: string | null
+  restrict_recipients: boolean
+  safe_id: string | null
+  safe_address: string | null
+  safe_name: string | null
   api_key: string
   status: string
   created_at: string
   allowances: AgentAllowance[]
+  allowed_recipients: AgentRecipient[]
 }
 
 interface CreateAgentParams {
   name: string
   description?: string
   delegate_address: string
+  safe_id?: string
+  restrict_recipients?: boolean
+  allowed_recipients?: { address: string; label?: string }[]
   allowances?: {
     token_address: string
     token_symbol: string
@@ -66,7 +82,12 @@ export function useAgents() {
   const updateAgent = useCallback(
     async (
       id: string,
-      params: { name?: string; description?: string },
+      params: {
+        name?: string
+        description?: string
+        restrict_recipients?: boolean
+        allowed_recipients?: { address: string; label?: string }[]
+      },
     ): Promise<Agent> => {
       const agent = await api.put<Agent>(`/agents/${id}`, params)
       setAgents((prev) => prev.map((a) => (a.id === id ? agent : a)))

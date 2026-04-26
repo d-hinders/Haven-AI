@@ -3,13 +3,15 @@
  *
  * Provides on-chain reads (allowance state, transfer hash generation),
  * signature verification, and transaction execution via relayer.
+ *
+ * All functions accept a chainId to select the correct RPC and contract addresses.
  */
 
 import { ethers } from 'ethers'
+import { config } from '../config.js'
+import { getChain } from './chains.js'
 
 // ── Constants ─────────────────────────────────────────────────────
-
-export const ALLOWANCE_MODULE_ADDRESS = '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -37,36 +39,40 @@ export interface EffectiveAllowance {
   isResetPending: boolean
 }
 
-// ── Provider / Relayer Setup ──────────────────────────────────────
+// ── Provider / Relayer Setup (per-chain, cached) ──────────────────
 
-let _provider: ethers.JsonRpcProvider | null = null
-let _relayerWallet: ethers.Wallet | null = null
+const providers = new Map<number, ethers.JsonRpcProvider>()
+const relayerWallets = new Map<number, ethers.Wallet>()
 
-export function getProvider(): ethers.JsonRpcProvider {
-  if (!_provider) {
-    _provider = new ethers.JsonRpcProvider(
-      process.env.RPC_URL ?? 'https://rpc.gnosischain.com',
-    )
+export function getProvider(chainId: number): ethers.JsonRpcProvider {
+  let provider = providers.get(chainId)
+  if (!provider) {
+    const chain = getChain(chainId)
+    provider = new ethers.JsonRpcProvider(chain.rpcUrl)
+    providers.set(chainId, provider)
   }
-  return _provider
+  return provider
 }
 
-export function getRelayerWallet(): ethers.Wallet {
-  if (!_relayerWallet) {
-    const key = process.env.RELAYER_PRIVATE_KEY
+export function getRelayerWallet(chainId: number): ethers.Wallet {
+  let wallet = relayerWallets.get(chainId)
+  if (!wallet) {
+    const key = config.relayerPrivateKey
     if (!key) {
       throw new Error('RELAYER_PRIVATE_KEY environment variable is not set')
     }
-    _relayerWallet = new ethers.Wallet(key, getProvider())
+    wallet = new ethers.Wallet(key, getProvider(chainId))
+    relayerWallets.set(chainId, wallet)
   }
-  return _relayerWallet
+  return wallet
 }
 
-function getContract(signerOrProvider?: ethers.Signer | ethers.Provider) {
+function getContract(chainId: number, signerOrProvider?: ethers.Signer | ethers.Provider) {
+  const chain = getChain(chainId)
   return new ethers.Contract(
-    ALLOWANCE_MODULE_ADDRESS,
+    chain.contracts.allowanceModule,
     ALLOWANCE_MODULE_ABI,
-    signerOrProvider ?? getProvider(),
+    signerOrProvider ?? getProvider(chainId),
   )
 }
 
@@ -77,12 +83,12 @@ function getContract(signerOrProvider?: ethers.Signer | ethers.Provider) {
  * Returns: [amount, spent, resetTimeMin, lastResetMin, nonce]
  */
 export async function getTokenAllowance(
+  chainId: number,
   safe: string,
   delegate: string,
   token: string,
 ): Promise<AllowanceInfo> {
-  const contract = getContract()
-  // Token address for native (xDAI) is the zero address
+  const contract = getContract(chainId)
   const tokenAddr = token || ZERO_ADDRESS
   const result: bigint[] = await contract.getTokenAllowance(safe, delegate, tokenAddr)
   return {
@@ -96,7 +102,6 @@ export async function getTokenAllowance(
 
 /**
  * Compute effective remaining allowance accounting for reset logic.
- * Mirrors the frontend's computeEffectiveAllowance.
  */
 export function computeEffectiveAllowance(info: AllowanceInfo): EffectiveAllowance {
   if (info.resetTimeMin === 0) {
@@ -109,7 +114,6 @@ export function computeEffectiveAllowance(info: AllowanceInfo): EffectiveAllowan
   const nowSec = Math.floor(Date.now() / 1000)
 
   if (nowSec >= lastResetSec + resetPeriodSec) {
-    // Reset period has elapsed — spent is effectively 0
     return { remaining: info.amount, effectiveSpent: 0n, isResetPending: true }
   }
 
@@ -121,9 +125,9 @@ export function computeEffectiveAllowance(info: AllowanceInfo): EffectiveAllowan
 
 /**
  * Call the on-chain generateTransferHash view function.
- * This returns the exact hash the delegate must sign.
  */
 export async function generateTransferHash(
+  chainId: number,
   safe: string,
   token: string,
   to: string,
@@ -132,7 +136,7 @@ export async function generateTransferHash(
   payment: bigint,
   nonce: number,
 ): Promise<string> {
-  const contract = getContract()
+  const contract = getContract(chainId)
   return contract.generateTransferHash(
     safe,
     token,
@@ -146,8 +150,6 @@ export async function generateTransferHash(
 
 /**
  * Recover the signer address from a raw ECDSA signature over a hash.
- * The AllowanceModule's checkSignature uses ecrecover(hash, v, r, s)
- * directly (no Ethereum signed message prefix).
  */
 export function recoverSigner(hash: string, signature: string): string {
   return ethers.recoverAddress(hash, signature)
@@ -160,6 +162,7 @@ export function recoverSigner(hash: string, signature: string): string {
  * The relayer pays gas; the delegate's signature authorises the transfer.
  */
 export async function executeAllowanceTransfer(
+  chainId: number,
   safe: string,
   token: string,
   to: string,
@@ -169,8 +172,8 @@ export async function executeAllowanceTransfer(
   delegate: string,
   signature: string,
 ): Promise<{ txHash: string }> {
-  const relayer = getRelayerWallet()
-  const contract = getContract(relayer)
+  const relayer = getRelayerWallet(chainId)
+  const contract = getContract(chainId, relayer)
 
   const tx = await contract.executeAllowanceTransfer(
     safe,

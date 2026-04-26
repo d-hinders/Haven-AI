@@ -3,33 +3,26 @@
 import { useState, useCallback, useMemo } from 'react'
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
 import { type Address, parseUnits, hashTypedData } from 'viem'
-import { gnosis } from 'viem/chains'
 import {
   buildSetAllowanceTx,
   RESET_PERIODS,
   type AllowanceInfo,
 } from '@/lib/allowance-module'
+import { api } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 import {
   getSafeNonce,
   signSafeTx,
   executeSafeTx,
   proposeSafeTx,
-  TOKENS,
+  getChainTokens,
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
 import type { Agent } from '@/hooks/useAgents'
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
-const TOKEN_OPTIONS = [
-  { symbol: 'xDAI', label: 'xDAI', sub: 'Native', address: TOKENS['xDAI'].address, decimals: TOKENS['xDAI'].decimals },
-  { symbol: 'EURe', label: 'EURe', sub: 'Monerium', address: TOKENS['EURe'].address, decimals: TOKENS['EURe'].decimals },
-  { symbol: 'USDC.e', label: 'USDC.e', sub: 'Bridged USDC', address: TOKENS['USDC.e'].address, decimals: TOKENS['USDC.e'].decimals },
-] as const
+import { truncate } from '@/lib/format'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -57,12 +50,33 @@ export default function EditAgentModal({
   existingOnChainAllowances,
   onUpdated,
 }: Props) {
+  const { activeSafe } = useAuth()
+  const chainId = activeSafe?.chain_id ?? 100
+  const chainTokens = getChainTokens(chainId)
+  const tokenOptions = Object.entries(chainTokens).map(([symbol, cfg]) => ({
+    symbol,
+    label: symbol,
+    sub: cfg.address === null ? 'Native' : symbol,
+    address: cfg.address as Address | null,
+    decimals: cfg.decimals,
+  }))
+  const defaultToken = tokenOptions[0]?.symbol ?? ''
+
   const [step, setStep] = useState<Step>('form')
 
   // Form state
-  const [selectedToken, setSelectedToken] = useState<string>('EURe')
+  const [selectedToken, setSelectedToken] = useState<string>(defaultToken)
   const [amount, setAmount] = useState('')
   const [resetTimeMin, setResetTimeMin] = useState(1440)
+  const [approvalThreshold, setApprovalThreshold] = useState('')
+
+  // Recipient allowlist state
+  const [restrictRecipients, setRestrictRecipients] = useState(agent.restrict_recipients ?? false)
+  const [allowedRecipients, setAllowedRecipients] = useState<RecipientEntry[]>(
+    (agent.allowed_recipients ?? []).map((r) => ({ address: r.address, label: r.label ?? undefined })),
+  )
+  const [recipientsSaving, setRecipientsSaving] = useState(false)
+  const [recipientsSaved, setRecipientsSaved] = useState(false)
 
   // Execution
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('signing')
@@ -71,8 +85,8 @@ export default function EditAgentModal({
 
   // Wagmi
   const { address: connectedAddress } = useAccount()
-  const publicClient = usePublicClient({ chainId: gnosis.id })
-  const { data: walletClient } = useWalletClient({ chainId: gnosis.id })
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
 
   // Tokens already configured on-chain for this delegate
   const existingTokenAddrs = useMemo(() => {
@@ -90,9 +104,9 @@ export default function EditAgentModal({
   }, [existingOnChainAllowances, agent.allowances])
 
   // Available tokens = all tokens (can add new or update existing)
-  const availableTokens = TOKEN_OPTIONS
+  const availableTokens = tokenOptions
 
-  const selectedTokenConfig = TOKEN_OPTIONS.find((t) => t.symbol === selectedToken)
+  const selectedTokenConfig = tokenOptions.find((t) => t.symbol === selectedToken)
   const tokenAddress = selectedTokenConfig?.address ?? '0x0000000000000000000000000000000000000000'
   const isExistingToken = existingTokenAddrs.has(tokenAddress.toLowerCase())
 
@@ -100,9 +114,16 @@ export default function EditAgentModal({
 
   const resetForm = useCallback(() => {
     setStep('form')
-    setSelectedToken('EURe')
+    setSelectedToken(defaultToken)
     setAmount('')
     setResetTimeMin(1440)
+    setApprovalThreshold('')
+    setRestrictRecipients(agent.restrict_recipients ?? false)
+    setAllowedRecipients(
+      (agent.allowed_recipients ?? []).map((r) => ({ address: r.address, label: r.label ?? undefined })),
+    )
+    setRecipientsSaving(false)
+    setRecipientsSaved(false)
     setExecStatus('signing')
     setExecError(null)
     setTxHash(null)
@@ -112,6 +133,9 @@ export default function EditAgentModal({
     resetForm()
     onClose()
   }, [onClose, resetForm])
+
+  // Escape-to-close — mirror backdrop behaviour (disabled during execution).
+  useEscapeToClose(open, handleClose, { enabled: step !== 'executing' })
 
   // ── Execute ────────────────────────────────────────────
 
@@ -143,6 +167,7 @@ export default function EditAgentModal({
         safeAddress as Address,
         safeTx,
         connectedAddress,
+        chainId,
       )
 
       const threshold = safeDetails.threshold ?? 1
@@ -156,13 +181,14 @@ export default function EditAgentModal({
           safeTx,
           signature,
           connectedAddress,
+          chainId,
         )
         setTxHash(result.txHash)
       } else {
         setExecStatus('executing')
         const safeTxHash = hashTypedData({
           domain: {
-            chainId: gnosis.id,
+            chainId,
             verifyingContract: safeAddress as Address,
           },
           types: {
@@ -199,30 +225,22 @@ export default function EditAgentModal({
           safeTxHash,
           signature,
           connectedAddress,
+          chainId,
         )
         setTxHash(safeTxHash)
       }
 
       // Save to Haven backend
       setExecStatus('saving')
-      const response = await fetch(`/api/agents/${agent.id}/allowances`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('haven_token')}`,
-        },
-        body: JSON.stringify({
+      await api.post(`/agents/${agent.id}/allowances`, {
           token_address: tokenAddress,
           token_symbol: selectedTokenConfig.symbol,
           allowance_amount: rawAmount.toString(),
           reset_period_min: resetTimeMin,
-        }),
-      })
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: 'Failed to save allowance' }))
-        throw new Error(body.error ?? 'Failed to save allowance')
-      }
+          approval_threshold: approvalThreshold && Number(approvalThreshold) > 0
+            ? parseUnits(approvalThreshold, selectedTokenConfig.decimals).toString()
+            : null,
+        })
 
       setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
       setStep('done')
@@ -299,8 +317,8 @@ export default function EditAgentModal({
                   </p>
                   <div className="space-y-1">
                     {existingOnChainAllowances.map((a) => {
-                      const sym = tokenSymbolFromAddr(a.token)
-                      const dec = tokenDecimalsFromAddr(a.token)
+                      const sym = tokenSymbolFromAddr(a.token, chainId)
+                      const dec = tokenDecimalsFromAddr(a.token, chainId)
                       return (
                         <div key={a.token} className="flex items-center justify-between text-xs p-2 bg-white/[0.03] rounded-lg border border-white/[0.06]">
                           <span className="text-zinc-300 font-medium">{sym}</span>
@@ -355,6 +373,66 @@ export default function EditAgentModal({
                     This will replace the existing {selectedToken} allowance on-chain
                   </p>
                 )}
+
+                {/* Approval threshold */}
+                <div className="pt-2 border-t border-white/[0.06]">
+                  <label className="block text-[11px] text-zinc-500 mb-1.5">
+                    Approval threshold (optional)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={approvalThreshold}
+                      onChange={(e) => setApprovalThreshold(e.target.value)}
+                      placeholder={`e.g. 10`}
+                      className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
+                    />
+                    <span className="text-xs text-zinc-600">{selectedToken}</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-700 mt-1">
+                    Payments above this amount require your approval in the dashboard.
+                    Leave empty for no approval requirement.
+                  </p>
+                </div>
+              </div>
+
+              {/* Recipient allowlist */}
+              <div className="p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
+                <RecipientAllowlistEditor
+                  enabled={restrictRecipients}
+                  onToggle={setRestrictRecipients}
+                  recipients={allowedRecipients}
+                  onChange={setAllowedRecipients}
+                />
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      setRecipientsSaving(true)
+                      setRecipientsSaved(false)
+                      try {
+                        await api.put(`/agents/${agent.id}`, {
+                            restrict_recipients: restrictRecipients,
+                            allowed_recipients: restrictRecipients ? allowedRecipients : [],
+                          })
+                        setRecipientsSaved(true)
+                        setTimeout(() => setRecipientsSaved(false), 2000)
+                      } catch {
+                        // ignore
+                      } finally {
+                        setRecipientsSaving(false)
+                      }
+                    }}
+                    disabled={recipientsSaving}
+                    className="text-xs font-medium text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors"
+                  >
+                    {recipientsSaving ? 'Saving...' : recipientsSaved ? 'Saved!' : 'Save recipients'}
+                  </button>
+                  <p className="text-[10px] text-zinc-700">
+                    Recipients are saved to Haven (no on-chain tx needed)
+                  </p>
+                </div>
               </div>
 
               <div className="flex gap-3">
@@ -500,14 +578,14 @@ export default function EditAgentModal({
                   <a
                     href={
                       execStatus === 'confirmed'
-                        ? `https://gnosisscan.io/tx/${txHash}`
-                        : `https://app.safe.global/transactions/tx?safe=gno:${safeAddress}&id=${txHash}`
+                        ? getExplorerUrl(chainId, 'tx', txHash)
+                        : `https://app.safe.global/transactions/tx?safe=${getChainConfig(chainId).shortName}:${safeAddress}&id=${txHash}`
                     }
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-2 mt-1 inline-block"
                   >
-                    {execStatus === 'confirmed' ? 'View on Gnosisscan' : 'View in Safe{Wallet}'}
+                    {execStatus === 'confirmed' ? 'View on Explorer' : 'View in Safe{Wallet}'}
                   </a>
                 )}
               </div>
@@ -527,19 +605,23 @@ export default function EditAgentModal({
 
 // ── Token helpers (local) ─────────────────────────────────────────
 
-function tokenSymbolFromAddr(addr: string): string {
+function tokenSymbolFromAddr(addr: string, cId: number): string {
   const lower = addr.toLowerCase()
-  if (lower === '0x0000000000000000000000000000000000000000') return 'xDAI'
-  for (const [symbol, cfg] of Object.entries(TOKENS)) {
+  const tokens = getChainTokens(cId)
+  if (lower === '0x0000000000000000000000000000000000000000') {
+    return Object.entries(tokens).find(([, cfg]) => cfg.address === null)?.[0] ?? 'Native'
+  }
+  for (const [symbol, cfg] of Object.entries(tokens)) {
     if (cfg.address && cfg.address.toLowerCase() === lower) return symbol
   }
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
-function tokenDecimalsFromAddr(addr: string): number {
+function tokenDecimalsFromAddr(addr: string, cId: number): number {
   const lower = addr.toLowerCase()
+  const tokens = getChainTokens(cId)
   if (lower === '0x0000000000000000000000000000000000000000') return 18
-  for (const cfg of Object.values(TOKENS)) {
+  for (const cfg of Object.values(tokens)) {
     if (cfg.address && cfg.address.toLowerCase() === lower) return cfg.decimals
   }
   return 18

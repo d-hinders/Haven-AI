@@ -4,24 +4,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { type Address } from 'viem'
 import { useAccount } from 'wagmi'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
-import { TOKENS, type SendParams } from '@/lib/safe-tx'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { getChainTokens, type SendParams } from '@/lib/safe-tx'
+import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { truncate, isValidAddress } from '@/lib/format'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
 
-// ── Helpers ──────────────────────────────────────────────────────────
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
-
-const TOKEN_LIST = [
-  { symbol: 'xDAI', label: 'xDAI', sub: 'Native' },
-  { symbol: 'EURe', label: 'EURe', sub: 'Monerium' },
-  { symbol: 'USDC.e', label: 'USDC.e', sub: 'Bridged USDC' },
-] as const
 
 // ── Props ────────────────────────────────────────────────────────────
 interface SendModalProps {
@@ -33,6 +22,7 @@ interface SendModalProps {
   onSuccess?: () => void
   contacts?: Contact[]
   resolveAddress?: (address: string) => string | null
+  chainId?: number
 }
 
 // ── Component ────────────────────────────────────────────────────────
@@ -45,12 +35,26 @@ export default function SendModal({
   onSuccess,
   contacts = [],
   resolveAddress,
+  chainId = 100,
 }: SendModalProps) {
   const { address: connectedAddress } = useAccount()
   const { status, txHash, error, send, reset } = useSendTransaction()
 
+  // Build token list from chain config
+  const chainConfig = getChainConfig(chainId)
+  const chainTokens = getChainTokens(chainId)
+  const tokenList = Object.entries(chainTokens).map(([symbol, cfg]) => ({
+    symbol,
+    label: symbol,
+    sub: cfg.address === null ? 'Native' : symbol,
+  }))
+  const defaultToken = tokenList[0]?.symbol ?? ''
+  // Native gas token (symbol of the token with null address) for the gas-payer label.
+  const gasTokenSymbol =
+    Object.entries(chainTokens).find(([, cfg]) => cfg.address === null)?.[0] ?? ''
+
   // Form state
-  const [selectedToken, setSelectedToken] = useState<string>('xDAI')
+  const [selectedToken, setSelectedToken] = useState<string>(defaultToken)
   const [amount, setAmount] = useState('')
   const [recipient, setRecipient] = useState('')
   const [selectedContactName, setSelectedContactName] = useState<string | null>(null)
@@ -59,6 +63,10 @@ export default function SendModal({
   const [showContactPicker, setShowContactPicker] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
   const pickerRef = useRef<HTMLDivElement>(null)
+
+  // Escape-to-close (disabled during execution so the user can't abandon a
+  // signing flow by tapping a key).
+  useEscapeToClose(open, onClose, { enabled: step !== 'executing' })
 
   const filteredContacts = contacts.filter(
     (c) =>
@@ -82,14 +90,14 @@ export default function SendModal({
   const tokenBalance = balances.find(
     (b) => b.symbol.toLowerCase() === selectedToken.toLowerCase(),
   )
-  const tokenConfig = TOKENS[selectedToken]
+  const tokenConfig = chainTokens[selectedToken]
   const threshold = safeDetails?.threshold ?? 1
   const isMultiSig = threshold > 1
 
   // Reset everything when modal opens/closes
   useEffect(() => {
     if (open) {
-      setSelectedToken('xDAI')
+      setSelectedToken(defaultToken)
       setAmount('')
       setRecipient('')
       setSelectedContactName(null)
@@ -158,14 +166,14 @@ export default function SendModal({
     setStep('executing')
 
     const params: SendParams = {
-      token: selectedToken as SendParams['token'],
+      token: selectedToken,
       tokenAddress: tokenConfig.address as Address | null,
       decimals: tokenConfig.decimals,
       amount,
       recipient: recipient as Address,
     }
 
-    await send(params, safeAddress as Address, threshold, connectedAddress)
+    await send(params, safeAddress as Address, threshold, connectedAddress, chainId)
   }
 
   const handleDone = () => {
@@ -181,7 +189,7 @@ export default function SendModal({
     idle: '',
     building: 'Preparing transaction...',
     signing: 'Waiting for wallet signature...',
-    executing: isMultiSig ? 'Submitting proposal...' : 'Confirming on Gnosis Chain...',
+    executing: isMultiSig ? 'Submitting proposal...' : `Confirming on ${getChainConfig(chainId).name}...`,
     confirmed: 'Transaction confirmed!',
     proposed: 'Transaction proposed!',
     error: 'Transaction failed',
@@ -208,7 +216,8 @@ export default function SendModal({
           {step !== 'executing' && (
             <button
               onClick={onClose}
-              className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              aria-label="Close"
+              className="p-1 -mr-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -224,7 +233,7 @@ export default function SendModal({
             <div>
               <label className="block text-xs text-zinc-400 mb-2">Token</label>
               <div className="grid grid-cols-3 gap-2">
-                {TOKEN_LIST.map((t) => {
+                {tokenList.map((t) => {
                   const bal = balances.find(
                     (b) => b.symbol.toLowerCase() === t.symbol.toLowerCase(),
                   )
@@ -455,12 +464,14 @@ export default function SendModal({
               <div className="h-px bg-white/[0.06]" />
               <div className="flex justify-between items-center">
                 <span className="text-xs text-zinc-500">Network</span>
-                <span className="text-sm text-zinc-400">Gnosis Chain</span>
+                <span className="text-sm text-zinc-400">{getChainConfig(chainId).name}</span>
               </div>
               <div className="h-px bg-white/[0.06]" />
               <div className="flex justify-between items-center">
                 <span className="text-xs text-zinc-500">Gas paid by</span>
-                <span className="text-sm text-zinc-400">Your wallet (xDAI)</span>
+                <span className="text-sm text-zinc-400">
+                  Your signing wallet{gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}
+                </span>
               </div>
             </div>
 
@@ -520,12 +531,12 @@ export default function SendModal({
                 </p>
                 {txHash && (
                   <a
-                    href={`https://gnosisscan.io/tx/${txHash}`}
+                    href={getExplorerUrl(chainId, 'tx', txHash)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors mb-6 flex items-center gap-1"
                   >
-                    View on Gnosisscan
+                    View on {getChainConfig(chainId).name} Explorer
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                     </svg>
@@ -555,7 +566,7 @@ export default function SendModal({
                   Waiting for {threshold - 1} more signature{threshold - 1 !== 1 ? 's' : ''} to execute.
                 </p>
                 <a
-                  href={`https://app.safe.global/transactions/queue?safe=gno:${safeAddress}`}
+                  href={`https://app.safe.global/transactions/queue?safe=${chainConfig.shortName}:${safeAddress}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors mb-6 flex items-center gap-1"

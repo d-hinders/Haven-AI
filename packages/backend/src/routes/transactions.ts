@@ -5,12 +5,10 @@ import {
   fetchNormalTransactions,
   fetchInternalTransactions,
   fetchERC20Transfers,
-} from '../lib/gnosisscan.js'
-import {
-  TOKEN_BY_ADDRESS,
-  SUPPORTED_TOKENS,
-  formatTokenValue,
-} from '../lib/tokens.js'
+} from '../lib/explorer-api.js'
+import { getChain } from '../lib/chains.js'
+import { formatTokenValue } from '../lib/tokens.js'
+import { createCache } from '../lib/cache.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -31,9 +29,7 @@ export interface Transaction {
   tokenSymbol?: string
 }
 
-// Simple in-memory cache
-const cache = new Map<string, { data: unknown; ts: number }>()
-const CACHE_TTL = 30_000 // 30 seconds
+const txCache = createCache<Transaction[]>(30_000)
 
 export default async function transactionRoutes(
   app: FastifyInstance,
@@ -53,36 +49,38 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid address' })
     }
 
-    // Verify ownership
-    const userResult = await pool.query(
-      'SELECT id FROM users WHERE id = $1 AND LOWER(safe_address) = LOWER($2)',
+    // Verify ownership and get chain_id
+    const userResult = await pool.query<{ id: string; chain_id: number }>(
+      'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
       [sub, safeAddress],
     )
     if (userResult.rows.length === 0) {
       return reply.code(403).send({ error: 'Not your Safe' })
     }
 
-    // Check cache
-    const cacheKey = `tx:${safeAddress.toLowerCase()}`
-    const cached = cache.get(cacheKey)
-    let allTransactions: Transaction[]
+    const chainId = userResult.rows[0].chain_id
+    const chain = getChain(chainId)
+    const nativeToken = Object.values(chain.tokens).find((t) => t.address === null)!
 
-    if (cached && Date.now() - cached.ts < CACHE_TTL) {
-      allTransactions = cached.data as Transaction[]
-    } else {
-      // Fetch all three types in parallel
+    const cacheKey = `tx:${chainId}:${safeAddress.toLowerCase()}`
+    const allTransactions = await txCache.getOrFetch(cacheKey, async () => {
+      // Each explorer call is independent — log and fall back to [] so a
+      // single failing endpoint doesn't blank the whole response.
       const addrLower = safeAddress.toLowerCase()
-      const [normalTxs, internalTxs, erc20Txs] = await Promise.all([
-        fetchNormalTransactions(safeAddress).catch(() => []),
-        fetchInternalTransactions(safeAddress).catch(() => []),
-        fetchERC20Transfers(safeAddress).catch(() => []),
-      ])
+      const logFail = (kind: string) => (err: unknown) => {
+        request.log.warn(
+          { err, chainId, safeAddress, kind },
+          'Explorer API fetch failed',
+        )
+        return []
+      }
+      const normalTxs = await fetchNormalTransactions(chainId, safeAddress).catch(logFail('normal'))
+      const internalTxs = await fetchInternalTransactions(chainId, safeAddress).catch(logFail('internal'))
+      const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(logFail('erc20'))
 
       const transactions: Transaction[] = []
 
-      // Normalize native transactions
       for (const tx of normalTxs) {
-        // Skip zero-value contract calls (these are just function calls, not transfers)
         if (tx.value === '0' && tx.functionName) continue
 
         transactions.push({
@@ -91,9 +89,9 @@ export default async function transactionRoutes(
           from: tx.from,
           to: tx.to,
           value: tx.value,
-          valueFormatted: formatTokenValue(tx.value, 18),
-          asset: SUPPORTED_TOKENS.XDAI.symbol,
-          decimals: 18,
+          valueFormatted: formatTokenValue(tx.value, nativeToken.decimals),
+          asset: nativeToken.symbol,
+          decimals: nativeToken.decimals,
           direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
           timestamp: parseInt(tx.timeStamp, 10),
           blockNumber: parseInt(tx.blockNumber, 10),
@@ -101,7 +99,6 @@ export default async function transactionRoutes(
         })
       }
 
-      // Normalize internal transactions
       for (const tx of internalTxs) {
         if (tx.value === '0') continue
 
@@ -111,9 +108,9 @@ export default async function transactionRoutes(
           from: tx.from,
           to: tx.to,
           value: tx.value,
-          valueFormatted: formatTokenValue(tx.value, 18),
-          asset: SUPPORTED_TOKENS.XDAI.symbol,
-          decimals: 18,
+          valueFormatted: formatTokenValue(tx.value, nativeToken.decimals),
+          asset: nativeToken.symbol,
+          decimals: nativeToken.decimals,
           direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
           timestamp: parseInt(tx.timeStamp, 10),
           blockNumber: parseInt(tx.blockNumber, 10),
@@ -121,14 +118,10 @@ export default async function transactionRoutes(
         })
       }
 
-      // Normalize ERC-20 transfers
       for (const tx of erc20Txs) {
-        const knownToken =
-          TOKEN_BY_ADDRESS[tx.contractAddress.toLowerCase()]
-        const symbol =
-          knownToken?.symbol ?? tx.tokenSymbol ?? tx.contractAddress
-        const decimals =
-          knownToken?.decimals ?? (parseInt(tx.tokenDecimal, 10) || 18)
+        const knownToken = chain.tokenByAddress[tx.contractAddress.toLowerCase()]
+        const symbol = knownToken?.symbol ?? tx.tokenSymbol ?? tx.contractAddress
+        const decimals = knownToken?.decimals ?? (parseInt(tx.tokenDecimal, 10) || 18)
 
         transactions.push({
           hash: tx.hash,
@@ -148,29 +141,51 @@ export default async function transactionRoutes(
         })
       }
 
-      // Sort by timestamp descending (most recent first)
       transactions.sort((a, b) => b.timestamp - a.timestamp)
 
-      // Deduplicate: a hash+type pair should be unique
       const seen = new Set<string>()
-      allTransactions = transactions.filter((tx) => {
+      return transactions.filter((tx) => {
         const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}`
         if (seen.has(key)) return false
         seen.add(key)
         return true
       })
-
-      // Update cache
-      cache.set(cacheKey, { data: allTransactions, ts: Date.now() })
-    }
+    })
 
     // Paginate
     const total = allTransactions.length
     const start = (page - 1) * limit
     const paginated = allTransactions.slice(start, start + limit)
 
+    // Enrich with agent info from payment_intents
+    const txHashes = paginated.map((tx) => tx.hash.toLowerCase())
+    let agentByTxHash = new Map<string, string>()
+
+    if (txHashes.length > 0) {
+      try {
+        const piResult = await pool.query<{ tx_hash: string; agent_name: string }>(
+          `SELECT LOWER(pi.tx_hash) as tx_hash, a.name as agent_name
+           FROM payment_intents pi
+           JOIN agents a ON a.id = pi.agent_id
+           WHERE LOWER(pi.tx_hash) = ANY($1)
+             AND pi.status = 'confirmed'`,
+          [txHashes],
+        )
+        for (const row of piResult.rows) {
+          agentByTxHash.set(row.tx_hash, row.agent_name)
+        }
+      } catch {
+        // Non-critical — just skip agent enrichment
+      }
+    }
+
+    const enriched = paginated.map((tx) => ({
+      ...tx,
+      agentName: agentByTxHash.get(tx.hash.toLowerCase()) ?? undefined,
+    }))
+
     return {
-      transactions: paginated,
+      transactions: enriched,
       total,
       page,
       limit,

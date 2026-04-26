@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Lint, Type-check & Build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: haven
+          POSTGRES_PASSWORD: haven
+          POSTGRES_DB: haven
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U haven"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://haven:haven@localhost:5432/haven
+      JWT_SECRET: ci-test-secret-not-for-production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check SDK
+        run: npm run build -w packages/sdk
+
+      - name: Type-check backend
+        run: npx tsc --noEmit
+        working-directory: packages/backend
+
+      - name: Type-check frontend
+        run: npx tsc --noEmit
+        working-directory: packages/frontend
+
+      - name: Build backend
+        run: npm run build -w packages/backend
+
+      - name: Build frontend
+        run: npm run build -w packages/frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder

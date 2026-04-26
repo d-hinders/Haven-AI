@@ -2,10 +2,8 @@
 
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
+import { getExplorerUrl } from '@/lib/chains'
+import { truncate } from '@/lib/format'
 
 export default function SettingsClient() {
   const { user } = useAuth()
@@ -73,16 +71,28 @@ export default function SettingsClient() {
           </div>
 
           <div>
-            <p className="text-xs text-zinc-500 mb-1">Safe Address</p>
-            {user?.safe_address ? (
-              <a
-                href={`https://gnosisscan.io/address/${user.safe_address}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors"
-              >
-                {truncate(user.safe_address)}
-              </a>
+            <p className="text-xs text-zinc-500 mb-1">Safe Accounts</p>
+            {user?.safes && user.safes.length > 0 ? (
+              <div className="space-y-1">
+                {user.safes.map((safe) => (
+                  <div key={safe.id} className="flex items-center gap-2">
+                    <a
+                      href={getExplorerUrl(safe.chain_id ?? 100, 'address', safe.safe_address)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                      {truncate(safe.safe_address)}
+                    </a>
+                    <span className="text-xs text-zinc-600">{safe.name}</span>
+                    {safe.is_default && (
+                      <span className="text-[9px] px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-400">
+                        default
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             ) : (
               <p className="text-sm text-zinc-600">Not deployed</p>
             )}
@@ -103,38 +113,6 @@ export default function SettingsClient() {
         </div>
       </div>
 
-      {/* Security (placeholder) */}
-      <div className="rounded-lg border border-white/[0.06] bg-white/[0.01] p-6">
-        <h2 className="text-sm font-semibold text-zinc-200 mb-5">Security</h2>
-
-        <div className="space-y-3">
-          <div className="flex items-center justify-between py-2">
-            <div>
-              <p className="text-sm text-zinc-300">Change password</p>
-              <p className="text-xs text-zinc-600">
-                Update your account password
-              </p>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-indigo-400 font-medium">
-              Soon
-            </span>
-          </div>
-
-          <div className="border-t border-white/[0.06]" />
-
-          <div className="flex items-center justify-between py-2">
-            <div>
-              <p className="text-sm text-zinc-300">Active sessions</p>
-              <p className="text-xs text-zinc-600">
-                Manage your logged-in devices
-              </p>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-indigo-400 font-medium">
-              Soon
-            </span>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

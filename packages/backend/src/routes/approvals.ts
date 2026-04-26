@@ -1,0 +1,190 @@
+import { FastifyInstance } from 'fastify'
+import pool from '../db.js'
+import { authMiddleware } from '../middleware/auth.js'
+
+// ── Types ─────────────────────────────────────────────────────────
+
+interface ApprovalRow {
+  id: string
+  agent_id: string
+  user_id: string
+  safe_address: string
+  token_symbol: string
+  token_address: string
+  to_address: string
+  amount_raw: string
+  amount_human: string
+  reason: string | null
+  status: string
+  tx_hash: string | null
+  reviewed_at: string | null
+  created_at: string
+  expires_at: string
+}
+
+interface AgentName {
+  id: string
+  name: string
+}
+
+// ── Routes ────────────────────────────────────────────────────────
+
+export default async function approvalRoutes(app: FastifyInstance): Promise<void> {
+  app.addHook('onRequest', authMiddleware)
+
+  // GET / — list approval requests for the logged-in user
+  app.get<{
+    Querystring: { status?: string; limit?: string; offset?: string }
+  }>('/', async (request) => {
+    const { sub } = request.user as { sub: string }
+    const status = (request.query as Record<string, string>).status ?? 'pending'
+    const limit = Math.min(Number((request.query as Record<string, string>).limit) || 50, 100)
+    const offset = Number((request.query as Record<string, string>).offset) || 0
+
+    // Expire stale pending requests
+    await pool.query(
+      `UPDATE approval_requests SET status = 'expired'
+       WHERE user_id = $1 AND status = 'pending' AND expires_at < NOW()`,
+      [sub],
+    )
+
+    const result = await pool.query<ApprovalRow>(
+      `SELECT * FROM approval_requests
+       WHERE user_id = $1 AND ($2 = 'all' OR status = $2)
+       ORDER BY created_at DESC
+       LIMIT $3 OFFSET $4`,
+      [sub, status, limit, offset],
+    )
+
+    // Fetch agent names
+    const agentIds = [...new Set(result.rows.map((r) => r.agent_id))]
+    let agentNames = new Map<string, string>()
+    if (agentIds.length > 0) {
+      const agents = await pool.query<AgentName>(
+        `SELECT id, name FROM agents WHERE id = ANY($1)`,
+        [agentIds],
+      )
+      agentNames = new Map(agents.rows.map((a) => [a.id, a.name]))
+    }
+
+    // Count pending
+    const countResult = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM approval_requests
+       WHERE user_id = $1 AND status = 'pending'`,
+      [sub],
+    )
+
+    return {
+      approvals: result.rows.map((row) => ({
+        id: row.id,
+        agent_id: row.agent_id,
+        agent_name: agentNames.get(row.agent_id) ?? 'Unknown Agent',
+        safe_address: row.safe_address,
+        token_symbol: row.token_symbol,
+        token_address: row.token_address,
+        to_address: row.to_address,
+        amount_raw: row.amount_raw,
+        amount_human: row.amount_human,
+        reason: row.reason,
+        status: row.status,
+        tx_hash: row.tx_hash,
+        reviewed_at: row.reviewed_at,
+        created_at: row.created_at,
+        expires_at: row.expires_at,
+      })),
+      pending_count: Number(countResult.rows[0].count),
+    }
+  })
+
+  // POST /:id/approve — mark an approval request as approved
+  app.post<{ Params: { id: string } }>(
+    '/:id/approve',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id } = request.params
+
+      const result = await pool.query<ApprovalRow>(
+        `UPDATE approval_requests
+         SET status = 'approved', reviewed_at = NOW()
+         WHERE id = $1 AND user_id = $2 AND status = 'pending'
+         RETURNING *`,
+        [id, sub],
+      )
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({
+          error: 'Approval request not found or not pending',
+        })
+      }
+
+      return {
+        id: result.rows[0].id,
+        status: 'approved',
+        message: 'Approved. Sign and execute the Safe transaction to complete the payment.',
+        payment: {
+          token_symbol: result.rows[0].token_symbol,
+          token_address: result.rows[0].token_address,
+          to_address: result.rows[0].to_address,
+          amount_raw: result.rows[0].amount_raw,
+          amount_human: result.rows[0].amount_human,
+          safe_address: result.rows[0].safe_address,
+        },
+      }
+    },
+  )
+
+  // POST /:id/reject — reject an approval request
+  app.post<{ Params: { id: string } }>(
+    '/:id/reject',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id } = request.params
+
+      const result = await pool.query<ApprovalRow>(
+        `UPDATE approval_requests
+         SET status = 'rejected', reviewed_at = NOW()
+         WHERE id = $1 AND user_id = $2 AND status = 'pending'
+         RETURNING id`,
+        [id, sub],
+      )
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({
+          error: 'Approval request not found or not pending',
+        })
+      }
+
+      return { id, status: 'rejected' }
+    },
+  )
+
+  // POST /:id/executed — record tx hash after frontend executes the Safe tx
+  app.post<{ Params: { id: string }; Body: { tx_hash: string } }>(
+    '/:id/executed',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id } = request.params
+      const { tx_hash } = request.body
+
+      if (!tx_hash || typeof tx_hash !== 'string' || !tx_hash.startsWith('0x')) {
+        return reply.code(400).send({ error: 'Valid tx_hash is required' })
+      }
+
+      const result = await pool.query<ApprovalRow>(
+        `UPDATE approval_requests
+         SET status = 'executed', tx_hash = $3
+         WHERE id = $1 AND user_id = $2 AND status = 'approved'
+         RETURNING id`,
+        [id, sub, tx_hash],
+      )
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({
+          error: 'Approval request not found or not approved',
+        })
+      }
+
+      return { id, status: 'executed', tx_hash }
+    },
+  )
+}

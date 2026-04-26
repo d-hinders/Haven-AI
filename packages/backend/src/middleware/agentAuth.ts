@@ -1,4 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify'
+import { createHash } from 'crypto'
 import pool from '../db.js'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -9,6 +10,7 @@ export interface AgentContext {
   name: string
   delegate_address: string
   safe_address: string
+  chain_id: number
 }
 
 // Extend Fastify request
@@ -53,19 +55,23 @@ export async function agentAuthMiddleware(
     return reply.code(401).send({ error: 'Missing or invalid API key' })
   }
 
-  // Look up agent + user's safe address
+  // Look up agent + its linked Safe address (multi-Safe via user_safes)
   const result = await pool.query<{
     id: string
     user_id: string
     name: string
     delegate_address: string | null
     safe_address: string | null
+    chain_id: number
   }>(
-    `SELECT a.id, a.user_id, a.name, a.delegate_address, u.safe_address
+    `SELECT a.id, a.user_id, a.name, a.delegate_address,
+            COALESCE(us.safe_address, u.safe_address) as safe_address,
+            COALESCE(us.chain_id, 100) as chain_id
      FROM agents a
      JOIN users u ON a.user_id = u.id
-     WHERE a.api_key = $1 AND a.status = 'active'`,
-    [apiKey],
+     LEFT JOIN user_safes us ON a.safe_id = us.id
+     WHERE a.api_key_hash = $1 AND a.status = 'active'`,
+    [createHash('sha256').update(apiKey).digest('hex')],
   )
 
   if (result.rows.length === 0) {
@@ -88,5 +94,6 @@ export async function agentAuthMiddleware(
     name: row.name,
     delegate_address: row.delegate_address,
     safe_address: row.safe_address,
+    chain_id: row.chain_id,
   }
 }

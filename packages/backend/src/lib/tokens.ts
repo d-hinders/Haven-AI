@@ -1,30 +1,34 @@
-export interface TokenConfig {
-  symbol: string
-  decimals: number
-  address: string | null // null = native token
+/**
+ * Token configuration — delegates to the chain registry.
+ *
+ * The per-chain token data lives in chains.ts. This module provides
+ * chain-aware lookups and the formatTokenValue utility.
+ */
+import { getChain, type TokenConfig } from './chains.js'
+
+export type { TokenConfig }
+
+/** Get the supported tokens for a specific chain */
+export function getSupportedTokens(chainId: number): Record<string, TokenConfig> {
+  return getChain(chainId).tokens
 }
 
-export const SUPPORTED_TOKENS: Record<string, TokenConfig> = {
-  XDAI: { symbol: 'xDAI', decimals: 18, address: null },
-  EURE: {
-    symbol: 'EURe',
-    decimals: 18,
-    address: '0xcB444e90D8198415266c6a2724b7900fb12FC56E',
-  },
-  USDCE: {
-    symbol: 'USDC.e',
-    decimals: 6,
-    address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0',
-  },
+/** Reverse lookup: contract address → token config for a given chain */
+export function getTokenByAddress(chainId: number, address: string): TokenConfig | undefined {
+  return getChain(chainId).tokenByAddress[address.toLowerCase()]
 }
 
-// Reverse lookup: contract address → token config
-export const TOKEN_BY_ADDRESS: Record<string, TokenConfig> = {}
-for (const token of Object.values(SUPPORTED_TOKENS)) {
-  if (token.address) {
-    TOKEN_BY_ADDRESS[token.address.toLowerCase()] = token
-  }
+/** Get the native token config for a chain */
+export function getNativeToken(chainId: number): TokenConfig {
+  const chain = getChain(chainId)
+  const native = Object.values(chain.tokens).find((t) => t.address === null)
+  if (!native) throw new Error(`No native token configured for chain ${chainId}`)
+  return native
 }
+
+// Legacy exports for Gnosis-only callers (will be removed as routes are updated)
+export const SUPPORTED_TOKENS = getSupportedTokens(100)
+export const TOKEN_BY_ADDRESS: Record<string, TokenConfig> = getChain(100).tokenByAddress
 
 export function formatTokenValue(
   rawValue: string,

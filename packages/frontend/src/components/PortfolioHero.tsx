@@ -1,11 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-
 interface PortfolioHeroProps {
   totalFiat: number
   currency: 'USD' | 'EUR'
-  safeAddress: string
+  accountCount: number
+  agentCount: number
   loading: boolean
 }
 
@@ -18,24 +17,13 @@ function formatCurrency(value: number, currency: 'USD' | 'EUR'): string {
   }).format(value)
 }
 
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
 export default function PortfolioHero({
   totalFiat,
   currency,
-  safeAddress,
+  accountCount,
+  agentCount,
   loading,
 }: PortfolioHeroProps) {
-  const [copied, setCopied] = useState(false)
-
-  const copyAddress = async () => {
-    await navigator.clipboard.writeText(safeAddress)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
   return (
     <div className="relative rounded-xl border border-white/[0.06] overflow-hidden mb-8">
       {/* Gradient background */}
@@ -62,42 +50,21 @@ export default function PortfolioHero({
             )}
           </div>
 
-          {/* Safe address */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06]">
-              <svg className="w-3.5 h-3.5 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-              </svg>
-              <span className="text-xs font-mono text-zinc-400">
-                {truncate(safeAddress)}
-              </span>
-              <button
-                onClick={copyAddress}
-                className="text-zinc-600 hover:text-zinc-400 transition-colors"
-                title="Copy address"
-              >
-                {copied ? (
-                  <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                ) : (
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                  </svg>
-                )}
-              </button>
-            </div>
-            <a
-              href={`https://gnosisscan.io/address/${safeAddress}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 rounded-md text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03] transition-colors"
-              title="View on Gnosisscan"
-            >
+          {/* Summary stats */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
               </svg>
-            </a>
+              <span>{accountCount} account{accountCount !== 1 ? 's' : ''}</span>
+            </div>
+            <div className="w-px h-3 bg-white/[0.08]" />
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
+              </svg>
+              <span>{agentCount} agent{agentCount !== 1 ? 's' : ''}</span>
+            </div>
           </div>
         </div>
       </div>

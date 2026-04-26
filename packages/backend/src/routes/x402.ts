@@ -1,0 +1,357 @@
+import { FastifyInstance } from 'fastify'
+import { ethers } from 'ethers'
+import pool from '../db.js'
+import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
+import { getChain, getExplorerUrl } from '../lib/chains.js'
+import { formatTokenValue } from '../lib/tokens.js'
+import {
+  getTokenAllowance,
+  computeEffectiveAllowance,
+  generateTransferHash,
+  recoverSigner,
+  executeAllowanceTransfer,
+} from '../lib/allowance-module.js'
+
+// ── Constants ─────────────────────────────────────────────────────
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+// ── Types ─────────────────────────────────────────────────────────
+
+interface X402AuthorizeBody {
+  url: string
+  payTo: string
+  amount: string          // atomic units
+  asset: string           // token contract address
+  network: string         // CAIP-2 chain ID
+  description?: string
+  maxTimeoutSeconds?: number
+  category?: string       // api_access, data, compute
+  signature?: string      // delegate signature (optional — enables one-shot authorize+execute)
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+
+function isValidAddress(addr: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(addr)
+}
+
+/** Resolve a token from its contract address for a specific chain. */
+function resolveTokenByAddress(chainId: number, address: string) {
+  const lower = address.toLowerCase()
+  const chain = getChain(chainId)
+  if (lower === ZERO_ADDRESS) {
+    return Object.values(chain.tokens).find((t) => t.address === null) ?? null
+  }
+  return chain.tokenByAddress[lower] ?? null
+}
+
+// ── Routes ────────────────────────────────────────────────────────
+
+export default async function x402Routes(app: FastifyInstance): Promise<void> {
+  app.addHook('onRequest', agentAuthMiddleware)
+
+  /**
+   * POST /x402/authorize — Authorize an x402 payment
+   *
+   * Two modes:
+   * 1. Without `signature`: creates a payment intent, returns sign_hash (agent signs, then calls POST /payments/:id/sign)
+   * 2. With `signature`: creates intent AND executes in one shot (for SDK convenience)
+   */
+  app.post<{ Body: X402AuthorizeBody }>('/', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const { url, payTo, amount, asset, network, description, category, signature } = request.body
+
+    // 1. Validate inputs
+    if (!url || typeof url !== 'string') {
+      return reply.code(400).send({ error: 'Resource URL is required' })
+    }
+    if (!payTo || !isValidAddress(payTo)) {
+      return reply.code(400).send({ error: 'Valid payTo address is required' })
+    }
+    if (!amount || typeof amount !== 'string') {
+      return reply.code(400).send({ error: 'Amount (atomic units) is required' })
+    }
+    if (!asset || typeof asset !== 'string') {
+      return reply.code(400).send({ error: 'Asset (token address) is required' })
+    }
+    if (!network || typeof network !== 'string') {
+      return reply.code(400).send({ error: 'Network (CAIP-2 chain ID) is required' })
+    }
+
+    // 2. Resolve token from asset address
+    const chain = getChain(agent.chain_id)
+    const tokenConfig = resolveTokenByAddress(agent.chain_id, asset)
+    if (!tokenConfig) {
+      return reply.code(400).send({
+        error: `Unsupported token asset: ${asset}`,
+        supported: Object.values(chain.tokens).map((t) => ({
+          symbol: t.symbol,
+          address: t.address ?? ZERO_ADDRESS,
+        })),
+      })
+    }
+
+    // Token address for AllowanceModule
+    const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
+
+    // 3. Parse amount (already in atomic units from x402)
+    let amountRaw: bigint
+    try {
+      amountRaw = BigInt(amount)
+    } catch {
+      return reply.code(400).send({ error: 'Invalid amount — must be integer atomic units' })
+    }
+    if (amountRaw <= 0n) {
+      return reply.code(400).send({ error: 'Amount must be greater than zero' })
+    }
+
+    // Human-readable amount for storage
+    const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
+
+    // 4. Policy check: DB allowance
+    const dbAllowance = await pool.query(
+      `SELECT allowance_amount, approval_threshold FROM agent_allowances
+       WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
+      [agent.id, tokenAddress],
+    )
+    if (dbAllowance.rows.length === 0) {
+      return reply.code(403).send({
+        error: `Agent is not configured for ${tokenConfig.symbol} payments`,
+      })
+    }
+
+    // 5. Approval threshold check
+    const approvalThreshold = dbAllowance.rows[0].approval_threshold
+      ? BigInt(dbAllowance.rows[0].approval_threshold)
+      : null
+
+    if (approvalThreshold !== null && amountRaw > approvalThreshold) {
+      const approvalResult = await pool.query(
+        `INSERT INTO approval_requests (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, reason, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
+          NOW() + interval '24 hours')
+        RETURNING id, status, expires_at`,
+        [
+          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+          tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
+          amountRaw.toString(), amountHuman,
+          `x402 payment for ${url}${category ? ` (${category})` : ''}`,
+        ],
+      )
+      const approval = approvalResult.rows[0]
+      return reply.code(202).send({
+        payment_id: approval.id,
+        status: 'pending_approval',
+        message: `Payment of ${amountHuman} ${tokenConfig.symbol} exceeds approval threshold. Queued for human approval.`,
+        approval_threshold: ethers.formatUnits(approvalThreshold, tokenConfig.decimals),
+        expires_at: approval.expires_at,
+      })
+    }
+
+    // 6. Recipient allowlist check
+    const agentRestriction = await pool.query(
+      `SELECT restrict_recipients FROM agents WHERE id = $1`,
+      [agent.id],
+    )
+    if (agentRestriction.rows[0]?.restrict_recipients) {
+      const recipientCheck = await pool.query(
+        `SELECT id FROM agent_allowed_recipients
+         WHERE agent_id = $1 AND LOWER(address) = LOWER($2)`,
+        [agent.id, payTo],
+      )
+      if (recipientCheck.rows.length === 0) {
+        return reply.code(403).send({
+          error: `Recipient ${payTo} is not in the allowed recipients list for this agent`,
+        })
+      }
+    }
+
+    // 7. Rate limiting: max x402 payments per hour
+    const agentConfig = await pool.query(
+      `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
+      [agent.id],
+    )
+    const maxPerHour = agentConfig.rows[0]?.max_x402_per_hour ?? 100
+
+    const recentCount = await pool.query(
+      `SELECT COUNT(*) as cnt FROM payment_intents
+       WHERE agent_id = $1 AND source = 'x402' AND created_at > NOW() - interval '1 hour'`,
+      [agent.id],
+    )
+    if (Number(recentCount.rows[0].cnt) >= maxPerHour) {
+      return reply.code(429).send({
+        error: `Rate limit exceeded: max ${maxPerHour} x402 payments per hour`,
+        retry_after_seconds: 60,
+      })
+    }
+
+    // 8. On-chain allowance check
+    let onChainAllowance
+    try {
+      onChainAllowance = await getTokenAllowance(
+        agent.chain_id,
+        agent.safe_address,
+        agent.delegate_address,
+        tokenAddress,
+      )
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to read on-chain allowance',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    const effective = computeEffectiveAllowance(onChainAllowance)
+    if (amountRaw > effective.remaining) {
+      return reply.code(403).send({
+        error: 'Amount exceeds remaining on-chain allowance',
+        remaining: effective.remaining.toString(),
+        requested: amountRaw.toString(),
+        token: tokenConfig.symbol,
+      })
+    }
+
+    // 9. Generate transfer hash on-chain
+    let signHash: string
+    try {
+      signHash = await generateTransferHash(
+        agent.chain_id,
+        agent.safe_address,
+        tokenAddress,
+        payTo,
+        amountRaw,
+        ZERO_ADDRESS,
+        0n,
+        onChainAllowance.nonce,
+      )
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to generate transfer hash',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    // 10. Store intent with x402 metadata
+    const intentResult = await pool.query(
+      `INSERT INTO payment_intents (
+        agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+        to_address, amount_raw, amount_human, delegate_address,
+        allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
+        expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
+        'x402', $13, $14, NOW() + interval '10 minutes')
+      RETURNING *`,
+      [
+        agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+        tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
+        amountRaw.toString(), amountHuman, agent.delegate_address,
+        onChainAllowance.nonce, signHash,
+        url, category ?? null,
+      ],
+    )
+    const intent = intentResult.rows[0]
+
+    // 11. If signature provided, execute immediately (one-shot mode)
+    if (signature) {
+      // Verify signature
+      let recoveredAddress: string
+      try {
+        recoveredAddress = recoverSigner(signHash, signature)
+      } catch (err) {
+        return reply.code(400).send({
+          error: 'Invalid signature format',
+          details: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      if (recoveredAddress.toLowerCase() !== agent.delegate_address.toLowerCase()) {
+        return reply.code(403).send({
+          error: 'Signature does not match delegate address',
+          expected: agent.delegate_address,
+          recovered: recoveredAddress,
+        })
+      }
+
+      // Update intent with signature
+      await pool.query(
+        `UPDATE payment_intents SET signature = $1, signed_at = NOW(), status = 'submitted', submitted_at = NOW() WHERE id = $2`,
+        [signature, intent.id],
+      )
+
+      // Execute on-chain
+      try {
+        const { txHash } = await executeAllowanceTransfer(
+          agent.chain_id,
+          agent.safe_address,
+          tokenAddress,
+          payTo.toLowerCase(),
+          amountRaw,
+          ZERO_ADDRESS,
+          0n,
+          agent.delegate_address,
+          signature,
+        )
+
+        await pool.query(
+          `UPDATE payment_intents SET status = 'confirmed', tx_hash = $1, confirmed_at = NOW() WHERE id = $2`,
+          [txHash, intent.id],
+        )
+
+        return reply.code(201).send({
+          success: true,
+          payment_id: intent.id,
+          status: 'confirmed',
+          tx_hash: txHash,
+          token: tokenConfig.symbol,
+          amount: amountHuman,
+          to: payTo.toLowerCase(),
+          resource_url: url,
+          explorer_url: getExplorerUrl(agent.chain_id, 'tx', txHash),
+        })
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        await pool.query(
+          `UPDATE payment_intents SET status = 'failed', error_message = $1 WHERE id = $2`,
+          [errorMsg, intent.id],
+        )
+        return reply.code(502).send({
+          success: false,
+          payment_id: intent.id,
+          status: 'failed',
+          error: 'On-chain execution failed',
+          details: errorMsg,
+        })
+      }
+    }
+
+    // 12. No signature — return intent for client-side signing
+    return reply.code(201).send({
+      payment_id: intent.id,
+      status: 'pending_signature',
+      expires_at: intent.expires_at,
+      token: tokenConfig.symbol,
+      amount: amountHuman,
+      to: payTo.toLowerCase(),
+      resource_url: url,
+      sign_data: {
+        hash: signHash,
+        components: {
+          safe: agent.safe_address,
+          token: tokenAddress,
+          to: payTo.toLowerCase(),
+          amount: amountRaw.toString(),
+          payment_token: ZERO_ADDRESS,
+          payment: '0',
+          nonce: onChainAllowance.nonce,
+        },
+        instructions:
+          'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
+          'Then POST /payments/' + intent.id + '/sign with { signature } to execute, ' +
+          'or re-call POST /x402/authorize with the signature field included for one-shot execution.',
+      },
+    })
+  })
+}

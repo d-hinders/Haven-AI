@@ -1,11 +1,11 @@
 /**
  * Haven Agent Payment Demo
  *
- * A real Claude-powered agent that makes payments through Haven.
- * Claude receives a task, reasons about it, and autonomously calls
- * Haven's payment API when it decides a payment is needed.
+ * An interactive Claude-powered agent that proposes payments and
+ * waits for human approval before executing. Shows the agent → human
+ * → Haven flow that makes it clear an AI is initiating transactions.
  *
- * This demo uses @haven-fi/sdk to handle the entire payment flow.
+ * This demo uses @haven_ai/sdk to handle the entire payment flow.
  *
  * Usage:
  *   cd packages/backend
@@ -23,10 +23,11 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import { HavenClient, havenTools } from '@haven-fi/sdk'
+import { HavenClient, havenTools } from '@haven_ai/sdk'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
 import * as fs from 'fs'
+import * as readline from 'readline'
 
 // ── Load .env ─────────────────────────────────────────────────────
 
@@ -67,6 +68,21 @@ const c = {
   magenta: '\x1b[35m',
 }
 
+// ── User Input ───────────────────────────────────────────────────
+
+function askUser(prompt: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
+  return new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      rl.close()
+      resolve(answer.trim())
+    })
+  })
+}
+
 // ── Preflight ─────────────────────────────────────────────────────
 
 function preflight(): void {
@@ -99,7 +115,9 @@ async function runAgent(taskPrompt: string): Promise<void> {
     `You are a payment agent operating through Haven, a self-custodial wallet infrastructure. ` +
     `You can make payments using the make_payment tool. ` +
     `You have a budget managed by on-chain spending policies — if a payment exceeds your allowance, it will be rejected. ` +
-    `Always confirm the payment details before calling the tool. ` +
+    `IMPORTANT: Before making any payment, you MUST first describe the payment you want to make ` +
+    `(token, amount, recipient, reason) and ask the user for explicit approval. ` +
+    `Only call the make_payment tool AFTER the user confirms. ` +
     `After a successful payment, report the transaction hash and Gnosisscan link.`
 
   const messages: Anthropic.MessageParam[] = [
@@ -109,9 +127,9 @@ async function runAgent(taskPrompt: string): Promise<void> {
   // Use pre-built tool definitions from the SDK
   const tools = havenTools.claude() as Anthropic.Tool[]
 
-  console.log(`\n${c.dim}Claude is thinking...${c.reset}\n`)
+  console.log(`\n${c.dim}Agent is thinking...${c.reset}\n`)
 
-  // Conversation loop — handle tool calls until Claude gives a final response
+  // Conversation loop
   while (true) {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
@@ -126,52 +144,114 @@ async function runAgent(taskPrompt: string): Promise<void> {
 
     for (const block of response.content) {
       if (block.type === 'text') {
-        console.log(`${c.cyan}${c.bold}Claude:${c.reset} ${block.text}\n`)
+        console.log(`${c.cyan}${c.bold}Agent:${c.reset} ${block.text}\n`)
       }
 
       if (block.type === 'tool_use') {
         hasToolUse = true
         const input = block.input as Record<string, unknown>
 
-        console.log(`${c.magenta}${c.bold}  → Tool call:${c.reset} ${block.name}`)
+        // Show the payment the agent wants to make
+        console.log(`${c.yellow}${c.bold}  ┌─ Agent wants to execute:${c.reset}`)
+        console.log(`${c.yellow}  │  Tool:   ${block.name}${c.reset}`)
         for (const [key, val] of Object.entries(input)) {
-          console.log(`${c.dim}    ${key.padEnd(8)} ${val}${c.reset}`)
+          console.log(`${c.yellow}  │  ${key.padEnd(8)} ${val}${c.reset}`)
         }
-        console.log()
+        console.log(`${c.yellow}  └─${c.reset}\n`)
 
-        // Execute using SDK — one line handles the entire 3-step flow
-        console.log(`${c.dim}  Executing via Haven SDK...${c.reset}`)
-        const result = await haven.executeTool(block.name, input)
+        // Ask the user for approval
+        const answer = await askUser(
+          `${c.bold}${c.white}  Approve this payment? (yes/no): ${c.reset}`,
+        )
 
-        if (result.success) {
-          console.log(`${c.green}${c.bold}  ✓ Payment confirmed!${c.reset}`)
-          console.log(`${c.dim}    Tx: ${result.tx_hash}${c.reset}`)
-          if (result.explorer_url) {
-            console.log(`${c.blue}    → ${result.explorer_url}${c.reset}`)
+        const approved = ['yes', 'y', 'approve', 'ok', 'go'].includes(
+          answer.toLowerCase(),
+        )
+
+        if (approved) {
+          console.log(`\n${c.dim}  Executing via Haven SDK...${c.reset}`)
+          const result = await haven.executeTool(block.name, input)
+
+          if (result.success) {
+            console.log(`${c.green}${c.bold}  ✓ Payment confirmed!${c.reset}`)
+            console.log(`${c.dim}    Tx: ${result.tx_hash}${c.reset}`)
+            if (result.explorer_url) {
+              console.log(`${c.blue}    → ${result.explorer_url}${c.reset}`)
+            }
+            console.log()
+          } else {
+            console.log(`${c.red}  ✗ Payment failed: ${result.error}${c.reset}\n`)
           }
-          console.log()
-        } else {
-          console.log(`${c.red}  ✗ Payment failed: ${result.error}${c.reset}\n`)
-        }
 
-        // Send tool result back to Claude
-        messages.push({ role: 'assistant', content: response.content })
-        messages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: block.id,
-              content: JSON.stringify(result),
-            },
-          ],
-        })
+          // Send tool result back to Claude
+          messages.push({ role: 'assistant', content: response.content })
+          messages.push({
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: JSON.stringify(result),
+              },
+            ],
+          })
+        } else {
+          console.log(`\n${c.yellow}  Payment declined by user.${c.reset}\n`)
+
+          // Tell Claude the user rejected it
+          messages.push({ role: 'assistant', content: response.content })
+          messages.push({
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: JSON.stringify({
+                  success: false,
+                  error: 'Payment declined by user.',
+                }),
+              },
+            ],
+          })
+        }
       }
     }
 
-    // If no tool use, Claude gave a final response — we're done
-    if (!hasToolUse || response.stop_reason === 'end_turn') {
-      break
+    // If no tool use, check if Claude is asking a question (waiting for user input)
+    if (!hasToolUse) {
+      if (response.stop_reason === 'end_turn') {
+        // Check if the agent is asking something — prompt for user reply
+        const lastText = response.content
+          .filter((b) => b.type === 'text')
+          .map((b) => {
+            if (b.type === 'text') return b.text
+            return ''
+          })
+          .join('')
+
+        // If the message contains a question mark, wait for user input
+        if (lastText.includes('?')) {
+          const userReply = await askUser(
+            `${c.bold}${c.white}  You: ${c.reset}`,
+          )
+
+          if (
+            ['quit', 'exit', 'done', 'bye'].includes(
+              userReply.toLowerCase(),
+            )
+          ) {
+            break
+          }
+
+          messages.push({ role: 'assistant', content: response.content })
+          messages.push({ role: 'user', content: userReply })
+          console.log()
+          continue
+        }
+
+        // No question — final response, we're done
+        break
+      }
     }
   }
 }
@@ -179,7 +259,7 @@ async function runAgent(taskPrompt: string): Promise<void> {
 // ── Main ──────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log(`\n${c.bold}${c.white}Haven Agent Demo${c.reset} ${c.dim}(powered by @haven-fi/sdk)${c.reset}`)
+  console.log(`\n${c.bold}${c.white}Haven Agent Demo${c.reset} ${c.dim}(powered by @haven_ai/sdk)${c.reset}`)
   console.log('  ' + '─'.repeat(40))
 
   preflight()

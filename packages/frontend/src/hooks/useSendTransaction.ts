@@ -3,7 +3,6 @@
 import { useState, useCallback } from 'react'
 import { usePublicClient, useWalletClient } from 'wagmi'
 import { type Address, hashTypedData } from 'viem'
-import { gnosis } from 'viem/chains'
 import {
   buildSafeTx,
   signSafeTx,
@@ -26,7 +25,7 @@ interface UseSendTransactionReturn {
   status: SendStatus
   txHash: string | null
   error: string | null
-  send: (params: SendParams, safeAddress: Address, threshold: number, signer: Address) => Promise<void>
+  send: (params: SendParams, safeAddress: Address, threshold: number, signer: Address, chainId?: number) => Promise<void>
   reset: () => void
 }
 
@@ -35,8 +34,8 @@ export function useSendTransaction(): UseSendTransactionReturn {
   const [txHash, setTxHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const publicClient = usePublicClient({ chainId: gnosis.id })
-  const { data: walletClient } = useWalletClient({ chainId: gnosis.id })
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
 
   const reset = useCallback(() => {
     setStatus('idle')
@@ -50,6 +49,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
       safeAddress: Address,
       threshold: number,
       signer: Address,
+      chainId: number = 100,
     ) => {
       if (!walletClient || !publicClient) {
         setError('Wallet not connected')
@@ -68,7 +68,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
 
         // Sign
         setStatus('signing')
-        const signature = await signSafeTx(walletClient, safeAddress, safeTx, signer)
+        const signature = await signSafeTx(walletClient, safeAddress, safeTx, signer, chainId)
 
         if (threshold <= 1) {
           // Single-owner: execute directly
@@ -80,6 +80,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
             safeTx,
             signature,
             signer,
+            chainId,
           )
           setTxHash(result.txHash)
           setStatus('confirmed')
@@ -90,7 +91,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
           // Compute the safeTxHash for the proposal
           const safeTxHash = hashTypedData({
             domain: {
-              chainId: gnosis.id,
+              chainId,
               verifyingContract: safeAddress,
             },
             types: {
@@ -122,7 +123,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
             },
           })
 
-          await proposeSafeTx(safeAddress, safeTx, safeTxHash, signature, signer)
+          await proposeSafeTx(safeAddress, safeTx, safeTxHash, signature, signer, chainId)
           setTxHash(safeTxHash)
           setStatus('proposed')
         }

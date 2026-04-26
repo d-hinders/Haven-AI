@@ -14,7 +14,7 @@ export default function AgentsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight mb-1">Agents</h1>
         <p className="text-sm text-zinc-500">
-          Manage autonomous agents with spending policies
+          Give your agents payment capabilities. Each agent below is a set of credentials and on-chain spending limits you hand off to your real agent.
         </p>
       </div>
 

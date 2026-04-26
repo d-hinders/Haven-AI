@@ -806,7 +806,7 @@ export default function AgentPanel() {
           </div>
           <p className="text-sm text-zinc-300 mb-1">No agents yet</p>
           <p className="text-xs text-zinc-500 mb-5 max-w-xs text-center leading-relaxed">
-            Create an agent to give it constrained spending authority on your Safe
+            Set up payment credentials and on-chain spending limits, then hand them off to your agent so it can spend from your Safe within your rules.
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -826,7 +826,7 @@ export default function AgentPanel() {
             </button>
           </div>
           <p className="text-[10px] text-zinc-700 mt-3 max-w-xs text-center">
-            Demo agent: 10 USDC/day allowance, auto-generated delegate key, ready for x402 APIs.
+            Demo agent: 10 USDC/day on-chain allowance, auto-generated signing key, ready to drop into an x402-enabled agent.
           </p>
         </div>
       )}

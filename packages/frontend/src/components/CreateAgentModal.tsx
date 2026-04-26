@@ -448,6 +448,13 @@ export default function CreateAgentModal({
 
   function getHandoffInput(): HandoffInput | null {
     if (!createdApiKey || !createdAgentId) return null
+    // Embed the deployed API + app URLs in the handoff so the external agent
+    // talks to the right host. Without this, the SDK falls back to localhost.
+    const apiBaseUrl =
+      process.env.NEXT_PUBLIC_API_URL ||
+      (typeof window !== 'undefined' ? window.location.origin : undefined)
+    const appBaseUrl =
+      typeof window !== 'undefined' ? window.location.origin : undefined
     return {
       agent: {
         id: createdAgentId,
@@ -473,6 +480,8 @@ export default function CreateAgentModal({
         apiKey: createdApiKey,
         delegatePrivateKey: generatedPrivateKey,
       },
+      apiBaseUrl,
+      appBaseUrl,
     }
   }
 

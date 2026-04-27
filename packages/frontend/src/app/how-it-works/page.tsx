@@ -26,8 +26,8 @@ type Step = {
 const STEPS: Step[] = [
   {
     step: '01',
-    title: 'Create your account',
-    body: 'Sign up with your email in about thirty seconds. No credit card, no setup call. You land in a clean dashboard ready to wire up your first agent.',
+    title: 'Create your Haven account',
+    body: 'Sign up with your email, no credit card, no setup call.',
     visual: 'account',
   },
   {
@@ -38,20 +38,20 @@ const STEPS: Step[] = [
   },
   {
     step: '03',
-    title: 'Create your Haven vault',
-    body: 'We deploy a smart wallet — your vault — that holds the funds your agents will spend. You stay in control. Haven can never move money on its own.',
+    title: 'Create your Haven wallet',
+    body: 'We deploy a smart wallet — your wallet — that holds the funds your agents will spend. You stay in control. Haven can never move money on its own.',
     visual: 'vault',
   },
   {
     step: '04',
-    title: 'Fund your vault',
-    body: 'Send USDC, EURe, or any supported asset to your vault address. Balances appear instantly. Withdraw or top up whenever you want.',
+    title: 'Fund your wallet',
+    body: 'Send USDC, EURe, or any supported asset to your wallet address. Balances appear instantly. Withdraw or top up whenever you want.',
     visual: 'fund',
   },
   {
     step: '05',
     title: 'Create agent credentials',
-    body: 'Set the rules — daily limit, allowed recipients, what kinds of things the agent can pay for. Generate a credential. No private keys ever leave Haven.',
+    body: 'Set the rules — daily limit, allowed recipients, what kinds of things the agent can pay for. Generate credentials.',
     visual: 'credentials',
   },
   {
@@ -123,16 +123,20 @@ function VisualVault() {
 
 function VisualFund() {
   return (
-    <div className="relative h-44 flex items-center justify-center overflow-hidden">
-      <div className="relative w-36 h-24 rounded-xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/10 to-violet-600/10 flex flex-col items-center justify-center shadow-[0_0_40px_-10px_rgba(99,102,241,0.4)]">
-        <span className="text-[10px] uppercase tracking-widest text-zinc-500">Balance</span>
-        <span className="text-lg font-semibold bg-gradient-to-br from-white to-indigo-200 bg-clip-text text-transparent animate-[hwTick_2.4s_ease-out_0.6s_both]">
-          1,250 USDC
-        </span>
+    <div className="relative h-44 flex items-center justify-center">
+      <div className="relative flex flex-col items-center gap-5">
+        <div className="flex items-center gap-3">
+          <span className="hw-anim w-7 h-7 rounded-full bg-gradient-to-br from-amber-300/80 to-amber-500/80 text-[#0a0a0a] text-[11px] font-semibold flex items-center justify-center shadow-md" style={{ animation: 'hwFadeUp 0.6s ease-out 0.1s both' }}>$</span>
+          <span className="hw-anim w-7 h-7 rounded-full bg-gradient-to-br from-sky-300/80 to-indigo-400/80 text-[#0a0a0a] text-[11px] font-semibold flex items-center justify-center shadow-md" style={{ animation: 'hwFadeUp 0.6s ease-out 0.2s both' }}>€</span>
+          <span className="hw-anim w-7 h-7 rounded-full bg-gradient-to-br from-emerald-300/80 to-emerald-500/80 text-[#0a0a0a] text-[11px] font-semibold flex items-center justify-center shadow-md" style={{ animation: 'hwFadeUp 0.6s ease-out 0.3s both' }}>◈</span>
+        </div>
+        <div className="relative w-40 h-24 rounded-xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/10 to-violet-600/10 flex flex-col items-center justify-center animate-[hwPulseGlow_3.2s_ease-in-out_infinite]">
+          <span className="text-[10px] uppercase tracking-widest text-zinc-500">Balance</span>
+          <span className="text-lg font-semibold bg-gradient-to-br from-white to-indigo-200 bg-clip-text text-transparent animate-[hwTick_0.7s_ease-out_0.5s_both]">
+            1,250 USDC
+          </span>
+        </div>
       </div>
-      <span className="absolute left-[28%] -top-2 w-6 h-6 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 text-[#0a0a0a] text-[10px] font-bold flex items-center justify-center shadow-lg animate-[hwDrop_1.6s_ease-in_0s_infinite]">$</span>
-      <span className="absolute left-[50%] -top-2 w-6 h-6 rounded-full bg-gradient-to-br from-sky-300 to-indigo-400 text-[#0a0a0a] text-[10px] font-bold flex items-center justify-center shadow-lg animate-[hwDrop_1.6s_ease-in_0.4s_infinite]">€</span>
-      <span className="absolute left-[72%] -top-2 w-6 h-6 rounded-full bg-gradient-to-br from-emerald-300 to-emerald-500 text-[#0a0a0a] text-[10px] font-bold flex items-center justify-center shadow-lg animate-[hwDrop_1.6s_ease-in_0.8s_infinite]">◈</span>
     </div>
   )
 }
@@ -256,16 +260,16 @@ export default function HowItWorksPage() {
 
           <h1 className="text-4xl md:text-6xl font-bold tracking-tight leading-[1.05] mb-6 hw-anim" style={{ animation: 'hwFadeUp 0.7s ease-out 0.05s' }}>
             <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">
-              From signup to your
+              Empower your agent
             </span>
             <br />
             <span className="bg-gradient-to-br from-white via-indigo-100 to-violet-300 bg-clip-text text-transparent">
-              first autonomous payment.
+              with payment functionality
             </span>
           </h1>
 
           <p className="text-lg md:text-xl text-zinc-400 leading-relaxed mb-10 max-w-2xl hw-anim" style={{ animation: 'hwFadeUp 0.7s ease-out 0.15s' }}>
-            Six steps. No private keys to manage. Your agent pays for things on its own — and you stay in control of every dollar.
+            Your agent pays for things on its own — and you stay in control of every dollar.
           </p>
 
           <div className="flex flex-wrap gap-3 hw-anim" style={{ animation: 'hwFadeUp 0.7s ease-out 0.25s' }}>
@@ -321,8 +325,7 @@ export default function HowItWorksPage() {
 
       {/* Step rows */}
       <section className="relative max-w-6xl mx-auto px-6 py-16 md:py-24 z-10">
-        <div className="flex items-baseline gap-4 mb-12">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">[01]</span>
+        <div className="mb-12">
           <h2 className="text-xs text-zinc-500 uppercase tracking-widest">The Six Steps</h2>
         </div>
 
@@ -358,8 +361,7 @@ export default function HowItWorksPage() {
 
       {/* Promises band */}
       <section className="relative max-w-6xl mx-auto px-6 py-16 md:py-20 z-10">
-        <div className="flex items-baseline gap-4 mb-10">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">[02]</span>
+        <div className="mb-10">
           <h2 className="text-xs text-zinc-500 uppercase tracking-widest">What You Get</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-white/[0.06]">
@@ -381,7 +383,6 @@ export default function HowItWorksPage() {
       <section className="relative max-w-6xl mx-auto px-6 py-24 md:py-32 text-center z-10 overflow-hidden">
         <div className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-[400px]" style={{ background: 'radial-gradient(ellipse 60% 80% at 50% 50%, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.06) 40%, transparent 70%)' }} />
         <div className="relative">
-          <span className="block text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent mb-8">[03]</span>
           <h2 className="text-3xl md:text-5xl font-bold tracking-tight leading-[1.05] mb-4">
             <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">
               Ready to set up

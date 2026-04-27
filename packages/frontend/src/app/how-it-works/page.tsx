@@ -7,15 +7,6 @@ const NAV_LINKS = [
   { label: 'GitHub', href: '#' },
 ]
 
-const JOURNEY_NODES = [
-  'Account',
-  'Wallet',
-  'Vault',
-  'Fund',
-  'Credentials',
-  'Agent',
-]
-
 type Step = {
   step: string
   title: string
@@ -279,44 +270,6 @@ export default function HowItWorksPage() {
             <a href="/demo/x402" className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2">
               See how x402 works
             </a>
-          </div>
-        </div>
-      </section>
-
-      {/* Journey diagram */}
-      <section className="relative max-w-6xl mx-auto px-6 pb-12 z-10">
-        <div className="relative rounded-xl border border-white/[0.06] bg-white/[0.015] p-6 md:p-10 overflow-hidden">
-          <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 50%, rgba(99,102,241,0.06) 0%, transparent 70%)' }} />
-          <div className="relative hidden md:block">
-            <div className="absolute left-[6%] right-[6%] top-1/2 -translate-y-1/2 h-px bg-gradient-to-r from-indigo-500/0 via-indigo-400/50 to-violet-500/0 overflow-hidden">
-              <span className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-indigo-300 shadow-[0_0_12px_3px_rgba(129,140,248,0.6)] animate-[hwFlow_3.4s_linear_infinite]" />
-            </div>
-            <div className="relative grid grid-cols-6 gap-2">
-              {JOURNEY_NODES.map((node, i) => (
-                <div
-                  key={node}
-                  className="hw-anim flex flex-col items-center gap-2 group cursor-default transition-transform duration-200 hover:-translate-y-0.5"
-                  style={{ animation: `hwFadeUp 0.6s ease-out ${0.1 + i * 0.07}s` }}
-                >
-                  <div className="relative w-12 h-12 rounded-full border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 to-violet-600/15 flex items-center justify-center font-mono text-xs text-indigo-200 group-hover:animate-[hwNodePulse_1.6s_ease-in-out_infinite]">
-                    {String(i + 1).padStart(2, '0')}
-                  </div>
-                  <span className="text-xs text-zinc-400 group-hover:text-[#ededed] transition-colors">{node}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Mobile: vertical stack */}
-          <div className="md:hidden grid grid-cols-3 gap-3">
-            {JOURNEY_NODES.map((node, i) => (
-              <div key={node} className="hw-anim flex flex-col items-center gap-1.5" style={{ animation: `hwFadeUp 0.5s ease-out ${0.05 + i * 0.05}s` }}>
-                <div className="w-10 h-10 rounded-full border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 to-violet-600/15 flex items-center justify-center font-mono text-[10px] text-indigo-200">
-                  {String(i + 1).padStart(2, '0')}
-                </div>
-                <span className="text-[11px] text-zinc-400">{node}</span>
-              </div>
-            ))}
           </div>
         </div>
       </section>

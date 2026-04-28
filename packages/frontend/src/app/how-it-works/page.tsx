@@ -41,7 +41,7 @@ const STEPS: Step[] = [
   },
   {
     step: '05',
-    title: 'Create agent credentials',
+    title: 'Add an agent',
     body: 'Set the rules — daily limit, allowed recipients, what kinds of things the agent can pay for. Generate credentials.',
     visual: 'credentials',
   },

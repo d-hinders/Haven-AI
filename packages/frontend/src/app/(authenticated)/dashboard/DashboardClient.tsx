@@ -122,14 +122,28 @@ export default function DashboardClient() {
   const activeAgents = agents.filter((a) => a.status === 'active')
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
 
-  // Onboarding guide state — show fund step when there's a Safe but no balance,
-  // add-agent step when funded but no agent, hidden once both milestones are met.
+  // Onboarding guide state.
+  // - Fund step shows only when *every* Safe is empty across *every* token.
+  //   We check raw balances rather than fiat — fiat < 1 misclassifies wallets
+  //   that hold tokens without a price feed (e.g. xDAI on Gnosis at < $1).
+  // - Add-agent step shows when the wallet has any balance but the user
+  //   hasn't added an agent yet (counts revoked agents too — once added,
+  //   the user has been through the flow).
+  const hasAnyBalance = balances.some((b) => {
+    try {
+      return BigInt(b.balance) > 0n
+    } catch {
+      return false
+    }
+  })
   const onboardingStage: 'fund' | 'add-agent' | null =
-    safes.length > 0 && !portfolioLoading && totalFiat < 1
-      ? 'fund'
-      : safes.length > 0 && !portfolioLoading && totalFiat >= 1 && activeAgents.length === 0
-        ? 'add-agent'
-        : null
+    safes.length === 0 || balancesLoading
+      ? null
+      : !hasAnyBalance
+        ? 'fund'
+        : agents.length === 0
+          ? 'add-agent'
+          : null
 
   // Track which Safe the user wants to deposit into; default to default-or-first
   // so the QR/address loads immediately on mount.

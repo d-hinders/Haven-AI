@@ -285,9 +285,9 @@ export default function X402DemoPage() {
           </span>
         </h1>
         <p className="text-base md:text-lg text-zinc-400 leading-relaxed max-w-2xl">
-          An agent encounters an HTTP 402. Haven evaluates the payment against its
-          policy, signs from the Safe, and settles on Base — all before the agent's
-          retry finishes.
+          An agent hits a paywall. Just seconds later it has the data — no card,
+          no human, no key. Press play to see one HTTP 402 become a settled
+          transaction on Base.
         </p>
       </section>
 

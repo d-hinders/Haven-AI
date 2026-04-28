@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
@@ -16,6 +16,8 @@ import PortfolioHero from '@/components/PortfolioHero'
 import BalanceCards from '@/components/BalanceCards'
 import TransactionList from '@/components/TransactionList'
 import DashboardInfo from '@/components/DashboardInfo'
+import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import CreateAgentModal from '@/components/CreateAgentModal'
 
 // ── Status dot ───────────────────────────────────────────────────────
 
@@ -101,11 +103,11 @@ export default function DashboardClient() {
   const { currency } = usePreferences()
 
   const { resolveAddress } = useContacts()
-  const { agents } = useAgents()
+  const { agents, refetch: refetchAgents } = useAgents()
   const { pendingApprovals } = useActivityFeed()
 
   // Aggregated data across all Safes
-  const { totalUsd, totalEur, loading: portfolioLoading } = useAggregatedPortfolio()
+  const { totalUsd, totalEur, loading: portfolioLoading, refetch: refetchPortfolio } = useAggregatedPortfolio()
   const { balances, loading: balancesLoading, error: balancesError, refetch: refetchBalances } = useAggregatedBalances()
   const { transactions, loading: txLoading, error: txError, total: txTotal, refetch: refetchTx } = useAggregatedTransactions(5)
 
@@ -120,12 +122,40 @@ export default function DashboardClient() {
   const activeAgents = agents.filter((a) => a.status === 'active')
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
 
-  // Empty-portfolio CTA — a Safe exists but hasn't been funded. Deep-link to
-  // the default (or first) Safe so the user sees the copy-address UI directly.
-  const showFundCta = safes.length > 0 && !portfolioLoading && totalFiat < 1
-  const fundTarget = `/accounts/${(safes.find((s) => s.is_default) ?? safes[0])?.id ?? ''}`
+  // Onboarding guide state.
+  // - Fund step shows only when *every* Safe is empty across *every* token.
+  //   We check raw balances rather than fiat — fiat < 1 misclassifies wallets
+  //   that hold tokens without a price feed (e.g. xDAI on Gnosis at < $1).
+  // - Add-agent step shows when the wallet has any balance but the user
+  //   hasn't added an agent yet (counts revoked agents too — once added,
+  //   the user has been through the flow).
+  const hasAnyBalance = balances.some((b) => {
+    try {
+      return BigInt(b.balance) > 0n
+    } catch {
+      return false
+    }
+  })
+  const onboardingStage: 'fund' | 'add-agent' | null =
+    safes.length === 0 || balancesLoading
+      ? null
+      : !hasAnyBalance
+        ? 'fund'
+        : agents.length === 0
+          ? 'add-agent'
+          : null
+
+  // Track which Safe the user wants to deposit into; default to default-or-first
+  // so the QR/address loads immediately on mount.
+  const [guideSafeId, setGuideSafeId] = useState<string | null>(null)
+  useEffect(() => {
+    if (guideSafeId && safes.some((s) => s.id === guideSafeId)) return
+    setGuideSafeId((safes.find((s) => s.is_default) ?? safes[0])?.id ?? null)
+  }, [safes, guideSafeId])
 
   const [infoOpen, setInfoOpen] = useState(false)
+  const [createAgentOpen, setCreateAgentOpen] = useState(false)
+  const [createAgentPreset, setCreateAgentPreset] = useState<'demo' | null>(null)
 
   return (
     <div className="max-w-5xl">
@@ -176,32 +206,23 @@ export default function DashboardClient() {
         loading={portfolioLoading}
       />
 
-      {/* Fund-your-account CTA — only when at least one Safe exists but it's empty. */}
-      {showFundCta && (
-        <div className="flex items-start gap-3 p-4 mb-6 rounded-lg bg-gradient-to-br from-indigo-500/[0.08] to-violet-500/[0.06] border border-indigo-500/20">
-          <div className="w-8 h-8 rounded-lg bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center flex-shrink-0">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-indigo-300">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m0 0l-6-6m6 6l6-6" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-zinc-100 mb-0.5">
-              Fund your account to get started
-            </p>
-            <p className="text-xs text-zinc-400 mb-2.5">
-              Send a stablecoin to your Safe address, then create an agent with a spending policy.
-            </p>
-            <Link
-              href={fundTarget}
-              className="inline-flex items-center gap-1 text-xs font-medium text-indigo-300 hover:text-indigo-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 rounded"
-            >
-              Show deposit address
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M5 12h14M13 5l7 7-7 7" />
-              </svg>
-            </Link>
-          </div>
-        </div>
+      {/* Stage-aware onboarding guide — fund first, then add an agent. Hides
+          itself once both milestones are met. */}
+      {onboardingStage && (
+        <DashboardOnboardingGuide
+          stage={onboardingStage}
+          safes={safes}
+          selectedSafeId={guideSafeId}
+          onSelectSafe={setGuideSafeId}
+          onAddAgent={() => {
+            setCreateAgentPreset(null)
+            setCreateAgentOpen(true)
+          }}
+          onAddDemoAgent={() => {
+            setCreateAgentPreset('demo')
+            setCreateAgentOpen(true)
+          }}
+        />
       )}
 
       {/* Two-column layout: Balances + Accounts */}
@@ -275,17 +296,14 @@ export default function DashboardClient() {
       </div>
 
       {activeAgents.length === 0 ? (
+        // The dashboard onboarding guide above handles the "no agents" state
+        // when the wallet is funded. Render a quiet placeholder otherwise so
+        // the layout doesn't jump.
         <div className="rounded-lg border border-dashed border-white/[0.08] p-6 mb-8 text-center">
           <svg className="w-8 h-8 mx-auto mb-2 text-zinc-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
           </svg>
-          <p className="text-xs text-zinc-600 mb-2">No agents yet</p>
-          <Link
-            href="/agents"
-            className="text-xs text-indigo-400 hover:text-indigo-300"
-          >
-            Create your first agent
-          </Link>
+          <p className="text-xs text-zinc-600">No agents yet</p>
         </div>
       ) : (
         <div className="mb-8">
@@ -349,6 +367,26 @@ export default function DashboardClient() {
       </div>
 
       <DashboardInfo open={infoOpen} onClose={() => setInfoOpen(false)} />
+
+      {/* Agent modal mounted at the dashboard so the onboarding guide can open
+          it in-place. The modal carries its own Safe picker, so we don't need
+          to preselect one — letting it default to activeSafe / default Safe. */}
+      <CreateAgentModal
+        open={createAgentOpen}
+        onClose={() => {
+          setCreateAgentOpen(false)
+          setCreateAgentPreset(null)
+        }}
+        safeId={guideSafeId}
+        preset={createAgentPreset}
+        onCreated={() => {
+          // Refresh agents and portfolio so the guide flips to "done" the
+          // moment the agent comes back. Don't close here — the modal's Done
+          // step shows the one-time handoff file.
+          refetchAgents()
+          refetchPortfolio()
+        }}
+      />
     </div>
   )
 }

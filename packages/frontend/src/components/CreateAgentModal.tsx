@@ -22,10 +22,9 @@ import {
   proposeSafeTx,
   getChainTokens,
 } from '@/lib/safe-tx'
-import type { SafeDetails } from '@/types/transactions'
 import { truncate, isValidAddress } from '@/lib/format'
 import { buildHandoff, buildDotenv, type HandoffInput } from '@/lib/agent-handoff'
-import { buildSkillBundle } from '@/lib/agent-skill-bundle'
+import { useSafeDetails } from '@/hooks/useSafeDetails'
 
 
 interface AllowanceEntry {
@@ -38,7 +37,7 @@ interface AllowanceEntry {
 
 // ── Types ──────────────────────────────────────────────────────────
 
-type Step = 'details' | 'allowances' | 'review' | 'executing' | 'done'
+type Step = 'details' | 'policy' | 'key' | 'review' | 'executing' | 'done'
 
 type ExecutionStatus =
   | 'checking'
@@ -54,9 +53,13 @@ type KeyMode = 'generate' | 'existing'
 interface Props {
   open: boolean
   onClose: () => void
-  safeAddress: string
+  /**
+   * Initial Safe selection. May be omitted when the modal is opened from a
+   * surface that isn't bound to a single Safe (e.g. the dashboard guide). In
+   * that case we fall back to activeSafe → default Safe → first Safe.
+   */
+  safeAddress?: string
   safeId?: string | null
-  safeDetails: SafeDetails | null
   preset?: 'demo' | null
   onCreated: (agent: {
     id: string
@@ -71,14 +74,44 @@ interface Props {
 export default function CreateAgentModal({
   open,
   onClose,
-  safeAddress,
-  safeId,
-  safeDetails,
+  safeAddress: propSafeAddress,
+  safeId: propSafeId,
   preset = null,
   onCreated,
 }: Props) {
-  const { activeSafe } = useAuth()
-  const chainId = activeSafe?.chain_id ?? 100
+  const { user, activeSafe } = useAuth()
+  const userSafes = user?.safes ?? []
+
+  // Resolve the initial selection. Prop > activeSafe > default > first.
+  const initialSafeId =
+    propSafeId ??
+    userSafes.find((s) => s.safe_address.toLowerCase() === propSafeAddress?.toLowerCase())?.id ??
+    activeSafe?.id ??
+    userSafes.find((s) => s.is_default)?.id ??
+    userSafes[0]?.id ??
+    null
+
+  const [selectedSafeId, setSelectedSafeId] = useState<string | null>(initialSafeId)
+
+  // Keep the selection in sync if the modal is reopened with a different prop.
+  useEffect(() => {
+    if (!open) return
+    setSelectedSafeId(initialSafeId)
+    // Only when the modal opens or the initial id changes — derived from props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialSafeId])
+
+  const selectedSafe =
+    userSafes.find((s) => s.id === selectedSafeId) ?? null
+  const safeAddress = selectedSafe?.safe_address ?? propSafeAddress ?? ''
+  const safeId = selectedSafe?.id ?? propSafeId ?? null
+  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? 100
+
+  // Self-fetch Safe details from the selected Safe so the modal owns its
+  // execution context — caller doesn't need to refetch when the user picks a
+  // different Safe.
+  const { details: safeDetails } = useSafeDetails(safeAddress || null)
+
   const chainTokens = getChainTokens(chainId)
   const tokenOptions = Object.entries(chainTokens).map(([symbol, cfg]) => ({
     symbol,
@@ -125,7 +158,6 @@ export default function CreateAgentModal({
   const [copiedDoneKey, setCopiedDoneKey] = useState(false)
   const [copiedEnv, setCopiedEnv] = useState(false)
   const [showRawCreds, setShowRawCreds] = useState(false)
-  const [bundleBusy, setBundleBusy] = useState(false)
 
   // Wagmi
   const { address: connectedAddress } = useAccount()
@@ -156,7 +188,6 @@ export default function CreateAgentModal({
     setCopiedDoneKey(false)
     setCopiedEnv(false)
     setShowRawCreds(false)
-    setBundleBusy(false)
   }, [])
 
   const handleClose = useCallback(() => {
@@ -222,12 +253,11 @@ export default function CreateAgentModal({
   // ── Step: Details ──────────────────────────────────────
 
   function canProceedDetails() {
-    if (!name.trim()) return false
-    if (!isValidAddress(delegateAddress)) return false
-    // keyMode === 'generate': no save-gate on step 1 — the key is delivered
-    // in the handoff file on the Done step. The user can't accidentally lose
-    // it because nothing is committed on-chain until step 3.
-    return true
+    return name.trim().length > 0
+  }
+
+  function canProceedKey() {
+    return isValidAddress(delegateAddress)
   }
 
   // ── Step: Review ──────────────────────────────────────
@@ -514,26 +544,33 @@ export default function CreateAgentModal({
     copyToClipboard(dotenv, setCopiedEnv)
   }
 
-  async function handleDownloadSkillBundle() {
-    const input = getHandoffInput()
-    if (!input || bundleBusy) return
-    setBundleBusy(true)
-    try {
-      const { blob, filename } = await buildSkillBundle(input)
-      triggerDownload(blob, filename)
-    } finally {
-      setBundleBusy(false)
-    }
-  }
-
-  // Generate key on first open if in generate mode and no key yet
+  // Generate a key the first time the user reaches the Key step in 'generate'
+  // mode. We don't pre-generate on open anymore — the key isn't asked for
+  // until step 3, so doing it earlier just creates noise the user might never
+  // need (they could pick 'existing' first).
   useEffect(() => {
-    if (open && keyMode === 'generate' && !generatedPrivateKey && step === 'details') {
+    if (open && keyMode === 'generate' && !generatedPrivateKey && step === 'key') {
       handleGenerateKey()
     }
     // handleGenerateKey is stable (no deps); we intentionally only react to modal open/mode changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, keyMode, generatedPrivateKey, step])
+
+  // When the user picks a different Safe in step 2, the chain may change, so
+  // the supported-token list changes too. Reset the in-progress add-token to
+  // a valid option and drop any allowances that reference tokens not on the
+  // new chain (rare in practice, but cleaner than letting them silently fail
+  // at execute time).
+  useEffect(() => {
+    if (!open) return
+    const validSymbols = new Set(tokenOptions.map((t) => t.symbol))
+    if (!validSymbols.has(addToken)) {
+      setAddToken(tokenOptions[0]?.symbol ?? '')
+    }
+    setAllowances((prev) => prev.filter((a) => validSymbols.has(a.tokenSymbol)))
+    // chainId changes when selectedSafeId changes — that's our trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, chainId])
 
   // ── Render ─────────────────────────────────────────────
 
@@ -554,12 +591,13 @@ export default function CreateAgentModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
           <div>
-            <h2 className="text-sm font-semibold">Create Agent</h2>
+            <h2 className="text-sm font-semibold">Add agent</h2>
             <p className="text-xs text-zinc-600 mt-0.5">
-              {step === 'details' && 'Name your agent and set up its signing key'}
-              {step === 'allowances' && 'Configure spending limits'}
-              {step === 'review' && 'Review and deploy on-chain'}
-              {step === 'executing' && 'Deploying on-chain...'}
+              {step === 'details' && "Name the agent you'll hand these credentials to"}
+              {step === 'policy' && 'Set spending limits and (optionally) restrict recipients'}
+              {step === 'key' && 'Choose the signing key the agent will use'}
+              {step === 'review' && 'Review and add the agent'}
+              {step === 'executing' && 'Adding agent...'}
               {step === 'done' && 'Credentials ready to hand off'}
             </p>
           </div>
@@ -579,20 +617,20 @@ export default function CreateAgentModal({
         {/* Step indicators */}
         {step !== 'executing' && step !== 'done' && (
           <div className="flex items-center gap-2 px-6 py-3 border-b border-white/[0.04]">
-            {(['details', 'allowances', 'review'] as const).map((s, i) => (
+            {(['details', 'policy', 'key', 'review'] as const).map((s, i, arr) => (
               <div key={s} className="flex items-center gap-2">
                 <div
                   className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
                     s === step
                       ? 'bg-indigo-500 text-white'
-                      : ['details', 'allowances', 'review'].indexOf(step) > i
+                      : arr.indexOf(step as typeof arr[number]) > i
                         ? 'bg-indigo-500/20 text-indigo-400'
                         : 'bg-white/[0.04] text-zinc-600'
                   }`}
                 >
                   {i + 1}
                 </div>
-                {i < 2 && (
+                {i < arr.length - 1 && (
                   <div className="w-8 h-px bg-white/[0.06]" />
                 )}
               </div>
@@ -604,11 +642,6 @@ export default function CreateAgentModal({
           {/* ── STEP: Details ─────────────────────────────── */}
           {step === 'details' && (
             <div className="space-y-5">
-              <div className="bg-indigo-500/[0.06] border border-indigo-500/20 rounded-lg px-3 py-2.5">
-                <p className="text-[11px] text-zinc-300 leading-relaxed">
-                  You&apos;re setting up the payment capability for an agent — an API key, a signing key, and on-chain spending limits. Name this entry after the actual agent you&apos;ll give these credentials to.
-                </p>
-              </div>
               <div>
                 <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
                   Agent name
@@ -636,157 +669,42 @@ export default function CreateAgentModal({
                 />
               </div>
 
-              {/* ── Delegate key mode selector ──────────── */}
-              <div>
-                <label className="block text-[11px] text-zinc-500 mb-2 uppercase tracking-wide">
-                  Delegate key
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchKeyMode('generate')}
-                    className={`relative p-3 rounded-xl border text-left transition-all ${
-                      keyMode === 'generate'
-                        ? 'border-indigo-500/50 bg-indigo-500/5'
-                        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                        keyMode === 'generate' ? 'border-indigo-400' : 'border-zinc-700'
-                      }`}>
-                        {keyMode === 'generate' && (
-                          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                        )}
-                      </div>
-                      <span className={`text-xs font-medium ${
-                        keyMode === 'generate' ? 'text-zinc-200' : 'text-zinc-400'
-                      }`}>
-                        Generate new
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
-                      Haven creates a keypair for you
-                    </p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchKeyMode('existing')}
-                    className={`relative p-3 rounded-xl border text-left transition-all ${
-                      keyMode === 'existing'
-                        ? 'border-indigo-500/50 bg-indigo-500/5'
-                        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                        keyMode === 'existing' ? 'border-indigo-400' : 'border-zinc-700'
-                      }`}>
-                        {keyMode === 'existing' && (
-                          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                        )}
-                      </div>
-                      <span className={`text-xs font-medium ${
-                        keyMode === 'existing' ? 'text-zinc-200' : 'text-zinc-400'
-                      }`}>
-                        Use existing
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
-                      Provide your own wallet address
-                    </p>
-                  </button>
-                </div>
-              </div>
-
-              {/* ── Generate mode ───────────────────────── */}
-              {keyMode === 'generate' && generatedPrivateKey && (
-                <div className="space-y-3">
-                  {/* Generated address */}
-                  <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                      Delegate address
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs font-mono text-zinc-400 bg-white/[0.03] rounded-lg px-3 py-2 truncate">
-                        {delegateAddress}
-                      </code>
-                      <button
-                        onClick={() => copyToClipboard(delegateAddress, () => {})}
-                        className="flex-shrink-0 text-zinc-700 hover:text-zinc-400 transition-colors p-1"
-                        title="Copy address"
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="9" y="9" width="13" height="13" rx="2" />
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Private key reveal moved to the Done step — it ships
-                      as part of the handoff file alongside the API key, env
-                      vars, and SDK quickstart. Here we just reassure the
-                      user that a fresh key was generated client-side. */}
-                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 flex items-start gap-2">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500 flex-shrink-0 mt-0.5">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="12" y1="16" x2="12" y2="12" />
-                      <line x1="12" y1="8" x2="12.01" y2="8" />
-                    </svg>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      A fresh keypair was generated in your browser. Haven never sees the private key —
-                      you&apos;ll download it with the rest of the agent&apos;s credentials on the last step.
-                    </p>
-                  </div>
-
-                  {/* Regenerate button */}
-                  <button
-                    onClick={handleGenerateKey}
-                    className="text-[11px] text-zinc-700 hover:text-zinc-400 transition-colors"
-                  >
-                    Generate a different key
-                  </button>
-                </div>
-              )}
-
-              {/* ── Existing mode ──────────────────────── */}
-              {keyMode === 'existing' && (
-                <div className="space-y-2">
-                  <input
-                    value={delegateAddress}
-                    onChange={(e) => setDelegateAddress(e.target.value)}
-                    placeholder="0x..."
-                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
-                  />
-                  {delegateAddress && !isValidAddress(delegateAddress) && (
-                    <p className="text-[11px] text-red-400">
-                      Invalid Ethereum address
-                    </p>
-                  )}
-                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5">
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      Enter the public address of the wallet your agent will use for signing.
-                      Make sure your agent has access to this wallet&apos;s private key — Haven will
-                      never ask for it or store it.
-                    </p>
-                  </div>
-                </div>
-              )}
-
               <button
-                onClick={() => setStep('allowances')}
+                onClick={() => setStep('policy')}
                 disabled={!canProceedDetails()}
                 className="w-full text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
               >
-                Next: Spending Limits
+                Next: Policy
               </button>
             </div>
           )}
 
-          {/* ── STEP: Allowances ──────────────────────────── */}
-          {step === 'allowances' && (
+          {/* ── STEP: Policy ──────────────────────────────── */}
+          {step === 'policy' && (
             <div className="space-y-5">
+              {/* Safe picker — only when the user has more than one Safe */}
+              {userSafes.length > 1 && (
+                <div>
+                  <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
+                    Spends from
+                  </label>
+                  <select
+                    value={selectedSafeId ?? ''}
+                    onChange={(e) => setSelectedSafeId(e.target.value)}
+                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
+                  >
+                    {userSafes.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} — {truncate(s.safe_address)} ({getChainConfig(s.chain_id).name})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-zinc-600 mt-1.5">
+                    The agent will only be able to spend from this account.
+                  </p>
+                </div>
+              )}
+
               {/* Current allowances */}
               {allowances.length > 0 && (
                 <div className="space-y-2">
@@ -896,8 +814,161 @@ export default function CreateAgentModal({
                   Back
                 </button>
                 <button
-                  onClick={() => setStep('review')}
+                  onClick={() => setStep('key')}
                   disabled={allowances.length === 0}
+                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                >
+                  Next: Delegate key
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP: Key ─────────────────────────────────── */}
+          {step === 'key' && (
+            <div className="space-y-5">
+              {/* ── Delegate key mode selector ──────────── */}
+              <div>
+                <label className="block text-[11px] text-zinc-500 mb-2 uppercase tracking-wide">
+                  Delegate key
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchKeyMode('generate')}
+                    className={`relative p-3 rounded-xl border text-left transition-all ${
+                      keyMode === 'generate'
+                        ? 'border-indigo-500/50 bg-indigo-500/5'
+                        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                        keyMode === 'generate' ? 'border-indigo-400' : 'border-zinc-700'
+                      }`}>
+                        {keyMode === 'generate' && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                        )}
+                      </div>
+                      <span className={`text-xs font-medium ${
+                        keyMode === 'generate' ? 'text-zinc-200' : 'text-zinc-400'
+                      }`}>
+                        Generate new
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
+                      Haven creates a keypair for you
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchKeyMode('existing')}
+                    className={`relative p-3 rounded-xl border text-left transition-all ${
+                      keyMode === 'existing'
+                        ? 'border-indigo-500/50 bg-indigo-500/5'
+                        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                        keyMode === 'existing' ? 'border-indigo-400' : 'border-zinc-700'
+                      }`}>
+                        {keyMode === 'existing' && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                        )}
+                      </div>
+                      <span className={`text-xs font-medium ${
+                        keyMode === 'existing' ? 'text-zinc-200' : 'text-zinc-400'
+                      }`}>
+                        Use existing
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
+                      Provide your own wallet address
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* ── Generate mode ───────────────────────── */}
+              {keyMode === 'generate' && generatedPrivateKey && (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
+                      Delegate address
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs font-mono text-zinc-400 bg-white/[0.03] rounded-lg px-3 py-2 truncate">
+                        {delegateAddress}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(delegateAddress, () => {})}
+                        className="flex-shrink-0 text-zinc-700 hover:text-zinc-400 transition-colors p-1"
+                        title="Copy address"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 flex items-start gap-2">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500 flex-shrink-0 mt-0.5">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="16" x2="12" y2="12" />
+                      <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      A fresh keypair was generated in your browser. Haven never sees the private key —
+                      you&apos;ll download it with the rest of the agent&apos;s credentials on the last step.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleGenerateKey}
+                    className="text-[11px] text-zinc-700 hover:text-zinc-400 transition-colors"
+                  >
+                    Generate a different key
+                  </button>
+                </div>
+              )}
+
+              {/* ── Existing mode ──────────────────────── */}
+              {keyMode === 'existing' && (
+                <div className="space-y-2">
+                  <input
+                    value={delegateAddress}
+                    onChange={(e) => setDelegateAddress(e.target.value)}
+                    placeholder="0x..."
+                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
+                  />
+                  {delegateAddress && !isValidAddress(delegateAddress) && (
+                    <p className="text-[11px] text-red-400">
+                      Invalid Ethereum address
+                    </p>
+                  )}
+                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5">
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      Enter the public address of the wallet your agent will use for signing.
+                      Make sure your agent has access to this wallet&apos;s private key — Haven will
+                      never ask for it or store it.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setStep('policy')}
+                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={() => setStep('review')}
+                  disabled={!canProceedKey()}
                   className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   Next: Review
@@ -920,6 +991,22 @@ export default function CreateAgentModal({
                     <p className="text-xs text-zinc-500 mt-0.5">{description}</p>
                   )}
                 </div>
+                {userSafes.length > 1 && selectedSafe && (
+                  <div>
+                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
+                      Spends from
+                    </p>
+                    <p className="text-sm text-zinc-200">
+                      {selectedSafe.name}
+                      <span className="text-xs font-mono text-zinc-500 ml-2">
+                        {truncate(selectedSafe.safe_address)}
+                      </span>
+                      <span className="text-[10px] text-zinc-600 ml-2">
+                        {getChainConfig(selectedSafe.chain_id).name}
+                      </span>
+                    </p>
+                  </div>
+                )}
                 <div>
                   <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
                     Delegate
@@ -1014,7 +1101,7 @@ export default function CreateAgentModal({
 
               <div className="flex gap-3">
                 <button
-                  onClick={() => setStep('allowances')}
+                  onClick={() => setStep('key')}
                   className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
                 >
                   Back
@@ -1025,7 +1112,7 @@ export default function CreateAgentModal({
                   title={deployBlockReason() ?? undefined}
                   className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
                 >
-                  Deploy Agent
+                  Add agent
                 </button>
               </div>
             </div>
@@ -1041,7 +1128,7 @@ export default function CreateAgentModal({
                     <p className="text-sm text-zinc-200 font-medium">
                       {execStatus === 'checking' && 'Checking module status...'}
                       {execStatus === 'signing' && 'Sign in your wallet...'}
-                      {execStatus === 'executing' && 'Executing on-chain...'}
+                      {execStatus === 'executing' && 'Submitting to chain...'}
                       {execStatus === 'saving' && 'Saving agent...'}
                     </p>
                     <p className="text-xs text-zinc-600 mt-1">
@@ -1097,8 +1184,8 @@ export default function CreateAgentModal({
                 </div>
                 <p className="text-sm font-medium text-zinc-200">
                   {execStatus === 'confirmed'
-                    ? 'Agent deployed successfully'
-                    : 'Agent proposed for approval'}
+                    ? 'Agent added'
+                    : 'Agent pending co-signer approval'}
                 </p>
                 {txHash && (
                   <a
@@ -1148,32 +1235,18 @@ export default function CreateAgentModal({
                   Download handoff file (.md)
                 </button>
 
-                {/* Secondary: skill bundle + copy .env */}
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={handleDownloadSkillBundle}
-                    disabled={bundleBusy}
-                    className="flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-60 disabled:cursor-wait border border-white/[0.06] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
-                    title="Zipped skill folder with SKILL.md, pay.ts, and .env for drop-in integration"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <path d="M9 3v18M3 9h18" />
-                    </svg>
-                    {bundleBusy ? 'Zipping...' : 'Skill bundle (.zip)'}
-                  </button>
-                  <button
-                    onClick={handleCopyEnv}
-                    className="flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
-                    title="Copy just the environment variables for pasting into .env"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="9" y="9" width="13" height="13" rx="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
-                    {copiedEnv ? 'Copied!' : 'Copy as .env'}
-                  </button>
-                </div>
+                {/* Secondary: copy as .env */}
+                <button
+                  onClick={handleCopyEnv}
+                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                  title="Copy just the environment variables for pasting into .env"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  {copiedEnv ? 'Copied!' : 'Copy as .env'}
+                </button>
 
                 {/* Tertiary: raw credentials disclosure (collapsed by default) */}
                 <details

@@ -45,7 +45,23 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     )
 
     const user = result.rows[0]
-    return reply.code(201).send({ id: user.id, email: user.email })
+
+    const token = app.jwt.sign(
+      { sub: user.id, email: user.email },
+      { expiresIn: '7d' },
+    )
+
+    return reply.code(201).send({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        wallet_address: null,
+        safe_address: null,
+        currency_preference: 'USD',
+        safes: [],
+      },
+    })
   })
 
   // POST /auth/login

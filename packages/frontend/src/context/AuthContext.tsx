@@ -29,14 +29,9 @@ export interface User {
   created_at?: string
 }
 
-interface LoginResponse {
+interface AuthResponse {
   token: string
   user: User
-}
-
-interface SignupResponse {
-  id: string
-  email: string
 }
 
 interface AuthState {
@@ -45,7 +40,7 @@ interface AuthState {
   loading: boolean
   activeSafe: UserSafe | null
   setActiveSafe: (safe: UserSafe) => void
-  signup: (email: string, password: string) => Promise<SignupResponse>
+  signup: (email: string, password: string) => Promise<User>
   login: (email: string, password: string) => Promise<User>
   logout: () => void
   updateUser: (partial: Partial<User>) => void
@@ -127,15 +122,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [syncActiveSafe])
 
   const signup = useCallback(
-    async (email: string, password: string): Promise<SignupResponse> => {
-      return api.post<SignupResponse>('/auth/signup', { email, password })
+    async (email: string, password: string): Promise<User> => {
+      const res = await api.post<AuthResponse>('/auth/signup', {
+        email,
+        password,
+      })
+      localStorage.setItem('haven_token', res.token)
+      setToken(res.token)
+      setUser(res.user)
+      syncActiveSafe(res.user)
+      return res.user
     },
-    [],
+    [syncActiveSafe],
   )
 
   const login = useCallback(
     async (email: string, password: string): Promise<User> => {
-      const res = await api.post<LoginResponse>('/auth/login', {
+      const res = await api.post<AuthResponse>('/auth/login', {
         email,
         password,
       })

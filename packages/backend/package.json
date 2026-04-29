@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:payment": "tsx scripts/test-payment-flow.ts",
-    "agent:demo": "tsx scripts/agent-payment-demo.ts"
+    "agent:demo": "tsx scripts/agent-payment-demo.ts",
+    "demo:x402": "tsx scripts/x402-live-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.87.0",

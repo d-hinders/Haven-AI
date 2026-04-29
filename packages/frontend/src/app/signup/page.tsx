@@ -31,8 +31,12 @@ export default function SignupPage() {
 
     setSubmitting(true)
     try {
-      await signup(email, password)
-      router.push('/login?registered=1')
+      const u = await signup(email, password)
+      if (u.safe_address) {
+        router.push('/dashboard')
+      } else {
+        router.push('/onboarding')
+      }
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message)

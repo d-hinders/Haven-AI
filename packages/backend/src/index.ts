@@ -20,6 +20,7 @@ import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
 import selfSignAgentRoutes from './routes/self-sign-agents.js'
 import selfSignPaymentRoutes from './routes/self-sign-payments.js'
+import x402ResourceRoutes from './routes/x402-resources.js'
 import pool from './db.js'
 
 const app = Fastify({
@@ -111,6 +112,7 @@ await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
 await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
 await app.register(selfSignPaymentRoutes, { prefix: '/self-sign-payments' })
+await app.register(x402ResourceRoutes, { prefix: '/x402' })
 
 // --- Start ---
 const start = async () => {

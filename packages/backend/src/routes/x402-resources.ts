@@ -488,7 +488,7 @@ async function _verifyTx(
       return { valid: false, reason: 'Transaction is not an executeAllowanceTransfer call' }
     }
 
-    const [safe, token, to, amount] = parsed.args as [string, string, string, bigint]
+    const [safe, token, to, amount] = parsed.args as unknown as [string, string, string, bigint]
 
     // 'to' in executeAllowanceTransfer is the recipient of the funds (the Safe owner's Safe)
     if (to.toLowerCase() !== expectedSafe.toLowerCase()) {

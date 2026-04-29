@@ -471,7 +471,7 @@ async function _verifyTx(
     if (receipt.status !== 1) return { valid: false, reason: 'Transaction reverted' }
 
     // Check tx was to the AllowanceModule
-    const moduleAddress = chain.allowanceModule?.toLowerCase()
+    const moduleAddress = chain.contracts.allowanceModule?.toLowerCase()
     if (moduleAddress && tx.to?.toLowerCase() !== moduleAddress) {
       return { valid: false, reason: 'Transaction was not sent to the AllowanceModule contract' }
     }

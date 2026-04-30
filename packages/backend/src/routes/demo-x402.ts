@@ -22,7 +22,7 @@ import { getExplorerUrl } from '../lib/chains.js'
 // ── Config ────────────────────────────────────────────────────────
 
 const PAY_TO =
-  process.env.DEMO_X402_PAY_TO ?? '0x3230Fc37bB2A81De452e55F923b949f0a7004306'
+  process.env.DEMO_X402_PAY_TO ?? '0x3230fC37BB2A81de452E55F923B949F0A7004306'
 const AMOUNT =
   process.env.DEMO_X402_AMOUNT ?? '10000000000000000'   // 0.01 EURe (18 decimals)
 const ASSET =

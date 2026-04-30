@@ -170,7 +170,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
   }
 
   const hasDelegateKey = !!credentials.delegatePrivateKey
-  const revokeUrl = `${(appBaseUrl ?? 'https://app.haven.xyz').replace(/\/+$/, '')}/agents`
+  const revokeUrl = `${(appBaseUrl ?? 'https://haven-ai-frontend.vercel.app').replace(/\/+$/, '')}/agents`
 
   const policyLines: string[] = []
   if (policy.allowances.length === 0) {

@@ -1,6 +1,6 @@
 'use client'
 
-import { ConnectButton } from '@rainbow-me/rainbowkit'
+import WalletButton from './WalletButton'
 
 interface TopBarProps {
   title?: string
@@ -16,11 +16,7 @@ export default function TopBar({ title }: TopBarProps) {
           <h1 className="text-sm font-medium text-zinc-400">{title}</h1>
         )}
       </div>
-      <ConnectButton
-        accountStatus="avatar"
-        chainStatus="icon"
-        showBalance={false}
-      />
+      <WalletButton />
     </header>
   )
 }

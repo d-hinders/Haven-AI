@@ -15,7 +15,12 @@ interface PopoverProps {
   chainName: string | undefined
   open: boolean
   onClose: () => void
-  onSwitchWallet: () => void
+  /**
+   * Opens RainbowKit's connector picker so the user can pick a different
+   * wallet. The popover disconnects the current wallet first — RainbowKit
+   * won't show the picker while a connection is active.
+   */
+  openConnectModal: () => void
   anchorRef: React.RefObject<HTMLButtonElement | null>
 }
 
@@ -24,12 +29,13 @@ function WalletPopover({
   chainName,
   open,
   onClose,
-  onSwitchWallet,
+  openConnectModal,
   anchorRef,
 }: PopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null)
-  const { disconnect } = useDisconnect()
+  const { disconnectAsync } = useDisconnect()
   const [copied, setCopied] = useState(false)
+  const [switching, setSwitching] = useState(false)
 
   useEscapeToClose(open, onClose)
 
@@ -96,21 +102,38 @@ function WalletPopover({
       <div className="p-2">
         <button
           type="button"
-          onClick={() => {
-            onClose()
-            onSwitchWallet()
+          disabled={switching}
+          onClick={async () => {
+            // Disconnect first so RainbowKit's connect modal lets the user
+            // pick a different wallet (the modal is suppressed while a
+            // connector is active). Then open the picker.
+            setSwitching(true)
+            try {
+              await disconnectAsync()
+              onClose()
+              openConnectModal()
+            } catch {
+              /* user declined; stay connected */
+            } finally {
+              setSwitching(false)
+            }
           }}
-          className="w-full text-left px-3 py-2 rounded-md text-sm text-zinc-200 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+          className="w-full text-left px-3 py-2 rounded-md text-sm text-zinc-200 hover:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
         >
-          Switch wallet
+          {switching ? 'Disconnecting…' : 'Switch wallet'}
         </button>
         <button
           type="button"
-          onClick={() => {
+          disabled={switching}
+          onClick={async () => {
             onClose()
-            disconnect()
+            try {
+              await disconnectAsync()
+            } catch {
+              /* ignore */
+            }
           }}
-          className="w-full text-left px-3 py-2 rounded-md text-sm text-red-400 hover:bg-red-500/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+          className="w-full text-left px-3 py-2 rounded-md text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
         >
           Disconnect
         </button>
@@ -135,7 +158,6 @@ export default function WalletButton() {
         account,
         chain,
         openConnectModal,
-        openAccountModal,
         openChainModal,
         mounted,
         authenticationStatus,
@@ -217,7 +239,7 @@ export default function WalletButton() {
               chainName={chain.name}
               open={popoverOpen}
               onClose={() => setPopoverOpen(false)}
-              onSwitchWallet={openAccountModal}
+              openConnectModal={openConnectModal}
               anchorRef={triggerRef}
             />
           </div>

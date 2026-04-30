@@ -13,6 +13,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
+import NetworkGate from './NetworkGate'
 import {
   getSafeNonce,
   signSafeTx,
@@ -497,12 +498,16 @@ export default function EditAgentModal({
                 >
                   Back
                 </button>
-                <button
-                  onClick={handleExecute}
-                  className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20"
-                >
-                  {isExistingToken ? 'Update Allowance' : 'Add Allowance'}
-                </button>
+                <div className="flex-1">
+                  <NetworkGate requiredChainId={chainId}>
+                    <button
+                      onClick={handleExecute}
+                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20"
+                    >
+                      {isExistingToken ? 'Update Allowance' : 'Add Allowance'}
+                    </button>
+                  </NetworkGate>
+                </div>
               </div>
             </div>
           )}

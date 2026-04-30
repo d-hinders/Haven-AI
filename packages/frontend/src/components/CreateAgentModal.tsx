@@ -15,6 +15,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
+import NetworkGate from './NetworkGate'
 import {
   getSafeNonce,
   signSafeTx,
@@ -591,13 +592,13 @@ export default function CreateAgentModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
           <div>
-            <h2 className="text-sm font-semibold">Add agent</h2>
+            <h2 className="text-sm font-semibold">Connect agent</h2>
             <p className="text-xs text-zinc-600 mt-0.5">
               {step === 'details' && "Name the agent you'll hand these credentials to"}
               {step === 'policy' && 'Set spending limits and (optionally) restrict recipients'}
               {step === 'key' && 'Choose the signing key the agent will use'}
-              {step === 'review' && 'Review and add the agent'}
-              {step === 'executing' && 'Adding agent...'}
+              {step === 'review' && 'Review and connect the agent'}
+              {step === 'executing' && 'Connecting agent...'}
               {step === 'done' && 'Credentials ready to hand off'}
             </p>
           </div>
@@ -1106,14 +1107,18 @@ export default function CreateAgentModal({
                 >
                   Back
                 </button>
-                <button
-                  onClick={handleExecute}
-                  disabled={!!deployBlockReason()}
-                  title={deployBlockReason() ?? undefined}
-                  className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
-                >
-                  Add agent
-                </button>
+                <div className="flex-1">
+                  <NetworkGate requiredChainId={chainId}>
+                    <button
+                      onClick={handleExecute}
+                      disabled={!!deployBlockReason()}
+                      title={deployBlockReason() ?? undefined}
+                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
+                    >
+                      Connect agent
+                    </button>
+                  </NetworkGate>
+                </div>
               </div>
             </div>
           )}

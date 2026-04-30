@@ -10,6 +10,7 @@ import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate, isValidAddress } from '@/lib/format'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
+import NetworkGate from './NetworkGate'
 
 
 // ── Props ────────────────────────────────────────────────────────────
@@ -488,12 +489,16 @@ export default function SendModal({
               >
                 Back
               </button>
-              <button
-                onClick={handleConfirm}
-                className="flex-1 py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-              >
-                {isMultiSig ? 'Sign & Propose' : 'Sign & Execute'}
-              </button>
+              <div className="flex-1">
+                <NetworkGate requiredChainId={chainId}>
+                  <button
+                    onClick={handleConfirm}
+                    className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+                  >
+                    {isMultiSig ? 'Sign & Propose' : 'Sign & Execute'}
+                  </button>
+                </NetworkGate>
+              </div>
             </div>
           </div>
         )}

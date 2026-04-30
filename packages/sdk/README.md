@@ -42,11 +42,13 @@ import { HavenClient } from '@haven_ai/sdk'
 const haven = new HavenClient({
   apiKey: process.env.HAVEN_API_KEY!,       // from Haven dashboard
   delegateKey: process.env.DELEGATE_KEY!,   // agent's delegate private key
-  baseUrl: 'https://api.haven.xyz',         // or your self-hosted URL
+  baseUrl: 'https://havenbackend-production-8a00.up.railway.app', // hosted Haven, or your self-hosted URL
 })
 
 // haven.fetch handles 402 → pay → retry automatically
-const response = await haven.fetch('https://api.haven.xyz/demo/x402/data')
+const response = await haven.fetch(
+  'https://havenbackend-production-8a00.up.railway.app/demo/x402/data',
+)
 const data = await response.json()
 
 console.log(data.message)     // "You paid! Here's your demo data."
@@ -55,7 +57,7 @@ console.log(data.explorerUrl) // link to the on-chain payment tx
 ```
 
 Tell your agent:
-> "Use Haven to fetch `https://api.haven.xyz/demo/x402/data` and show me what came back."
+> "Use Haven to fetch `https://havenbackend-production-8a00.up.railway.app/demo/x402/data` and show me what came back."
 
 The agent will pay a tiny amount (~0.01 EURe on Gnosis Chain), receive the demo payload, and you'll see the payment in your Haven dashboard activity feed — no local server or extra config required.
 

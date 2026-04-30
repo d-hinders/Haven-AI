@@ -31,10 +31,11 @@ function slugify(name: string): string {
 // ── SKILL.md ───────────────────────────────────────────────────────
 
 function buildSkillMd(input: HandoffInput): string {
-  const { agent, policy } = input
+  const { agent, policy, appBaseUrl } = input
   const policySummary = policy.allowances
     .map((a) => `${a.amount} ${a.tokenSymbol}`)
     .join(', ') || 'none configured'
+  const revokeUrl = `${(appBaseUrl ?? 'https://haven-ai-frontend.vercel.app').replace(/\/+$/, '')}/agents`
 
   return `---
 name: haven-pay
@@ -106,7 +107,7 @@ message to the user verbatim — it's written for humans. Common cases:
 ## Revoke
 
 If this skill or its credentials leak, revoke the agent at
-https://app.haven.xyz/agents — payments stop immediately.
+${revokeUrl} — payments stop immediately.
 `
 }
 

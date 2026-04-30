@@ -95,7 +95,7 @@ Credentials are portable:
   "agent_id": "agt_123",
   "secret": "sk_live_xxx",
   "safe_address": "0x...",
-  "api_url": "https://api.haven.xyz"
+  "api_url": "https://havenbackend-production-8a00.up.railway.app"
 }
 ```
 

@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useDisconnect } from 'wagmi'
+import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
+import { useAccount, useDisconnect } from 'wagmi'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 
@@ -16,11 +16,14 @@ interface PopoverProps {
   open: boolean
   onClose: () => void
   /**
-   * Opens RainbowKit's connector picker so the user can pick a different
-   * wallet. The popover disconnects the current wallet first — RainbowKit
-   * won't show the picker while a connection is active.
+   * Begin a "switch wallet" flow: disconnect the current wallet and then
+   * open RainbowKit's connector picker. Driven from the parent so the
+   * picker is opened *after* the disconnected render has committed —
+   * RainbowKit refuses to open the connect modal while a wallet is
+   * still connected, and the popover unmounts as soon as we disconnect.
    */
-  openConnectModal: () => void
+  onSwitchWallet: () => void
+  switching: boolean
   anchorRef: React.RefObject<HTMLButtonElement | null>
 }
 
@@ -29,13 +32,13 @@ function WalletPopover({
   chainName,
   open,
   onClose,
-  openConnectModal,
+  onSwitchWallet,
+  switching,
   anchorRef,
 }: PopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null)
   const { disconnectAsync } = useDisconnect()
   const [copied, setCopied] = useState(false)
-  const [switching, setSwitching] = useState(false)
 
   useEscapeToClose(open, onClose)
 
@@ -103,20 +106,9 @@ function WalletPopover({
         <button
           type="button"
           disabled={switching}
-          onClick={async () => {
-            // Disconnect first so RainbowKit's connect modal lets the user
-            // pick a different wallet (the modal is suppressed while a
-            // connector is active). Then open the picker.
-            setSwitching(true)
-            try {
-              await disconnectAsync()
-              onClose()
-              openConnectModal()
-            } catch {
-              /* user declined; stay connected */
-            } finally {
-              setSwitching(false)
-            }
+          onClick={() => {
+            onClose()
+            onSwitchWallet()
           }}
           className="w-full text-left px-3 py-2 rounded-md text-sm text-zinc-200 hover:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
         >
@@ -151,6 +143,32 @@ function WalletPopover({
 export default function WalletButton() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
+
+  // "Switch wallet" flow: disconnect, then open the connect modal once
+  // wagmi has committed isConnected=false. Driven from the parent so the
+  // open call survives the popover unmounting and lands in the
+  // disconnected render path (RainbowKit refuses to open the connect
+  // modal while a wallet is still connected).
+  const { isConnected } = useAccount()
+  const { disconnectAsync } = useDisconnect()
+  const { openConnectModal: openConnectModalHook } = useConnectModal()
+  const [pendingSwitch, setPendingSwitch] = useState(false)
+
+  useEffect(() => {
+    if (pendingSwitch && !isConnected && openConnectModalHook) {
+      setPendingSwitch(false)
+      openConnectModalHook()
+    }
+  }, [pendingSwitch, isConnected, openConnectModalHook])
+
+  const handleSwitchWallet = async () => {
+    setPendingSwitch(true)
+    try {
+      await disconnectAsync()
+    } catch {
+      setPendingSwitch(false)
+    }
+  }
 
   return (
     <ConnectButton.Custom>
@@ -239,7 +257,8 @@ export default function WalletButton() {
               chainName={chain.name}
               open={popoverOpen}
               onClose={() => setPopoverOpen(false)}
-              openConnectModal={openConnectModal}
+              onSwitchWallet={handleSwitchWallet}
+              switching={pendingSwitch}
               anchorRef={triggerRef}
             />
           </div>

@@ -17,6 +17,7 @@ import {
 import { getExplorerUrl } from '@/lib/chains'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { truncate, timeAgo, timeUntil } from '@/lib/format'
+import NetworkGate from './NetworkGate'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -172,13 +173,17 @@ function ApprovalCard({
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => onApproveAndExecute(approval)}
-              disabled={executing}
-              className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
-            >
-              {executing ? 'Executing...' : 'Approve & Execute'}
-            </button>
+            <div className="flex-1">
+              <NetworkGate requiredChainId={chainId}>
+                <button
+                  onClick={() => onApproveAndExecute(approval)}
+                  disabled={executing}
+                  className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+                >
+                  {executing ? 'Executing...' : 'Approve & Execute'}
+                </button>
+              </NetworkGate>
+            </div>
             <button
               onClick={() => setConfirmReject(true)}
               disabled={executing}

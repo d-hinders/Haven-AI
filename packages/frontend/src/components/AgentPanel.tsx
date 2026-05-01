@@ -808,26 +808,16 @@ export default function AgentPanel() {
           <p className="text-xs text-zinc-500 mb-5 max-w-xs text-center leading-relaxed">
             Set up payment credentials and on-chain spending limits, then hand them off to your agent so it can spend from your Safe within your rules.
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => { setCreatePreset('demo'); setCreateOpen(true) }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-              Spin up a demo agent
-            </button>
-            <button
-              onClick={() => { setCreatePreset(null); setCreateOpen(true) }}
-              className="px-4 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-xs font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all"
-            >
-              Configure from scratch
-            </button>
-          </div>
-          <p className="text-[10px] text-zinc-700 mt-3 max-w-xs text-center">
-            Demo agent: 10 USDC/day on-chain allowance, auto-generated signing key, ready to drop into an x402-enabled agent.
-          </p>
+          <button
+            onClick={() => { setCreatePreset(null); setCreateOpen(true) }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Connect agent
+          </button>
         </div>
       )}
 

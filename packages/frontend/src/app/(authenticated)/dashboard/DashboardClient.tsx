@@ -218,10 +218,6 @@ export default function DashboardClient() {
             setCreateAgentPreset(null)
             setCreateAgentOpen(true)
           }}
-          onAddDemoAgent={() => {
-            setCreateAgentPreset('demo')
-            setCreateAgentOpen(true)
-          }}
         />
       )}
 

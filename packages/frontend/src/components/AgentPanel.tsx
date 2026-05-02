@@ -17,10 +17,8 @@ import { getSafeNonce, signSafeTx, executeSafeTx, proposeSafeTx, getChainTokens 
 import CreateAgentModal from './CreateAgentModal'
 import EditAgentModal from './EditAgentModal'
 import HowItWorksModal from './HowItWorksModal'
-import ApprovalQueue from './ApprovalQueue'
 import AgentActivityFeed from './AgentActivityFeed'
 import ConfirmDialog from './ConfirmDialog'
-import { useApprovals } from '@/hooks/useApprovals'
 import { truncate } from '@/lib/format'
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -662,11 +660,10 @@ export default function AgentPanel() {
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
   const [showRevokedAgents, setShowRevokedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
-  const [activeView, setActiveView] = useState<'agents' | 'approvals' | 'activity'>(
+  const [activeView, setActiveView] = useState<'agents' | 'activity'>(
     'agents',
   )
   const [activityAgent, setActivityAgent] = useState<Agent | null>(null)
-  const { pendingCount: pendingApprovals } = useApprovals()
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
     [agents],
@@ -906,21 +903,6 @@ export default function AgentPanel() {
               {visibleAgents.length}
             </span>
           </button>
-          <button
-            onClick={() => setActiveView('approvals')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all relative ${
-              activeView === 'approvals'
-                ? 'bg-white/[0.06] text-zinc-200'
-                : 'text-zinc-600 hover:text-zinc-400'
-            }`}
-          >
-            Approvals
-            {pendingApprovals > 0 && (
-              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400">
-                {pendingApprovals}
-              </span>
-            )}
-          </button>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -946,9 +928,6 @@ export default function AgentPanel() {
           </button>
         </div>
       </div>
-
-      {/* Approvals view */}
-      {activeView === 'approvals' && <ApprovalQueue />}
 
       {/* Activity view */}
       {activeView === 'activity' && activityAgent && (

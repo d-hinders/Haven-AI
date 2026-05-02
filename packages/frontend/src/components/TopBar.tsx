@@ -1,5 +1,6 @@
 'use client'
 
+import ApprovalNotifications from './ApprovalNotifications'
 import WalletButton from './WalletButton'
 
 interface TopBarProps {
@@ -16,7 +17,10 @@ export default function TopBar({ title }: TopBarProps) {
           <h1 className="text-sm font-medium text-zinc-400">{title}</h1>
         )}
       </div>
-      <WalletButton />
+      <div className="flex items-center gap-3">
+        <ApprovalNotifications />
+        <WalletButton />
+      </div>
     </header>
   )
 }

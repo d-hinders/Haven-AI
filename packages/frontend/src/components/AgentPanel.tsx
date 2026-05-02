@@ -233,6 +233,21 @@ function AgentCard({
     setTimeout(() => setCopied(false), 2000)
   }
 
+  async function handleConfirmPause() {
+    setPauseModalOpen(false)
+    onPause(agent)
+  }
+
+  async function handleConfirmRevoke() {
+    setRevokeModalOpen(false)
+    onRevoke(agent)
+  }
+
+  async function handleConfirmDelete() {
+    setDeleteModalOpen(false)
+    onDelete(agent)
+  }
+
   // Merge on-chain + DB allowance data: on-chain is primary, DB fills gaps
   const displayAllowances = useMemo(() => {
     if (onChainAllowances && onChainAllowances.length > 0) {
@@ -493,7 +508,7 @@ function AgentCard({
     <ConfirmDialog
       open={pauseModalOpen}
       onCancel={() => setPauseModalOpen(false)}
-      onConfirm={() => onPause(agent)}
+      onConfirm={handleConfirmPause}
       title={`Pause ${agent.name}?`}
       body={
         <div className="space-y-3">
@@ -519,7 +534,7 @@ function AgentCard({
     <ConfirmDialog
       open={revokeModalOpen}
       onCancel={() => setRevokeModalOpen(false)}
-      onConfirm={() => onRevoke(agent)}
+      onConfirm={handleConfirmRevoke}
       title={`Revoke ${agent.name}?`}
       body={
         <div className="space-y-3">
@@ -544,7 +559,7 @@ function AgentCard({
     <ConfirmDialog
       open={deleteModalOpen}
       onCancel={() => setDeleteModalOpen(false)}
-      onConfirm={() => onDelete(agent)}
+      onConfirm={handleConfirmDelete}
       title={`Delete ${agent.name}?`}
       body="This removes the agent record from Haven only. It does not change any on-chain state, so deletion is only available after the agent has already been revoked."
       confirmLabel="Delete agent"

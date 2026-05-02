@@ -319,16 +319,73 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params
 
     const result = await pool.query(
-      'DELETE FROM agents WHERE id = $1 AND user_id = $2 RETURNING id',
+      `DELETE FROM agents
+       WHERE id = $1 AND user_id = $2 AND status = 'revoked'
+       RETURNING id`,
       [id, sub],
     )
 
     if (result.rows.length === 0) {
-      return reply.code(404).send({ error: 'Agent not found' })
+      const existing = await pool.query(
+        'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
+        [id, sub],
+      )
+      if (existing.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' })
+      }
+      return reply.code(409).send({ error: 'Only revoked agents can be deleted' })
     }
 
     return { success: true }
   })
+
+  // POST /agents/:id/pause — pause an agent at the Haven API level
+  app.post<{ Params: { id: string } }>(
+    '/:id/pause',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id } = request.params
+
+      const result = await pool.query(
+        `UPDATE agents SET status = 'paused', updated_at = NOW()
+         WHERE id = $1 AND user_id = $2 AND status = 'active'
+         RETURNING id`,
+        [id, sub],
+      )
+
+      if (result.rows.length === 0) {
+        return reply
+          .code(404)
+          .send({ error: 'Agent not found or cannot be paused' })
+      }
+
+      return { success: true }
+    },
+  )
+
+  // POST /agents/:id/resume — resume a paused agent
+  app.post<{ Params: { id: string } }>(
+    '/:id/resume',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id } = request.params
+
+      const result = await pool.query(
+        `UPDATE agents SET status = 'active', updated_at = NOW()
+         WHERE id = $1 AND user_id = $2 AND status = 'paused'
+         RETURNING id`,
+        [id, sub],
+      )
+
+      if (result.rows.length === 0) {
+        return reply
+          .code(404)
+          .send({ error: 'Agent not found or cannot be resumed' })
+      }
+
+      return { success: true }
+    },
+  )
 
   // POST /agents/:id/revoke — revoke an agent
   app.post<{ Params: { id: string } }>(
@@ -339,7 +396,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
       const result = await pool.query(
         `UPDATE agents SET status = 'revoked', updated_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND status = 'active'
+         WHERE id = $1 AND user_id = $2 AND status IN ('active', 'paused')
          RETURNING id`,
         [id, sub],
       )
@@ -347,7 +404,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       if (result.rows.length === 0) {
         return reply
           .code(404)
-          .send({ error: 'Agent not found or already revoked' })
+          .send({ error: 'Agent not found or cannot be revoked' })
       }
 
       return { success: true }

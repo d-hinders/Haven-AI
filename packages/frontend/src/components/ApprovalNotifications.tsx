@@ -75,9 +75,10 @@ export default function ApprovalNotifications() {
           ref={panelRef}
           role="dialog"
           aria-label="Pending approvals"
-          className="absolute right-0 top-full mt-3 w-[360px] max-w-[calc(100vw-2rem)] z-50 overflow-hidden rounded-2xl border border-white/[0.10] bg-[#121216] shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-none"
+          className="absolute right-0 top-full mt-3 w-[360px] max-w-[calc(100vw-2rem)] z-50 isolate overflow-hidden rounded-2xl border border-white/[0.10] bg-[#121216] shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
         >
-          <div className="px-4 py-3 border-b border-white/[0.06] bg-[#15151a] flex items-center justify-between">
+          <div className="absolute inset-0 bg-[#121216]" aria-hidden="true" />
+          <div className="relative px-4 py-3 border-b border-white/[0.06] bg-[#15151a] flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-zinc-100">Approvals</p>
               <p className="text-[11px] text-zinc-500">
@@ -94,7 +95,7 @@ export default function ApprovalNotifications() {
           </div>
 
           {loading ? (
-            <div className="p-4 space-y-3 bg-[#121216]">
+            <div className="relative p-4 space-y-3 bg-[#121216]">
               {[0, 1].map((index) => (
                 <div
                   key={index}
@@ -107,7 +108,7 @@ export default function ApprovalNotifications() {
               ))}
             </div>
           ) : pendingApprovals.length === 0 ? (
-            <div className="px-5 py-8 text-center bg-[#121216]">
+            <div className="relative px-5 py-8 text-center bg-[#121216]">
               <div className="w-11 h-11 rounded-2xl bg-emerald-500/12 text-emerald-400 flex items-center justify-center mx-auto mb-3 shadow-inner shadow-emerald-500/5">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 12l2 2 4-4" />
@@ -121,7 +122,7 @@ export default function ApprovalNotifications() {
             </div>
           ) : (
             <>
-              <div className="max-h-[360px] overflow-y-auto p-2 space-y-2 bg-[#121216]">
+              <div className="relative max-h-[360px] overflow-y-auto p-2 space-y-2 bg-[#121216]">
                 {pendingApprovals.map((approval) => (
                   <Link
                     key={approval.id}
@@ -151,7 +152,7 @@ export default function ApprovalNotifications() {
                   </Link>
                 ))}
               </div>
-              <div className="px-4 py-3 border-t border-white/[0.06] bg-[#15151a]">
+              <div className="relative px-4 py-3 border-t border-white/[0.06] bg-[#15151a]">
                 <Link
                   href="/approvals"
                   onClick={() => setOpen(false)}

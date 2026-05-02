@@ -217,6 +217,7 @@ function AgentCard({
 }) {
   const [showKey, setShowKey] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [pauseModalOpen, setPauseModalOpen] = useState(false)
   const [revokeModalOpen, setRevokeModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
 
@@ -357,6 +358,22 @@ function AgentCard({
         </div>
       )}
 
+      {isPaused && (
+        <div className="mb-4 flex items-start gap-2 px-3 py-2.5 bg-amber-500/8 border border-amber-500/20 rounded-lg">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400 flex-shrink-0 mt-0.5">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M10 15V9" />
+            <path d="M14 15V9" />
+          </svg>
+          <div>
+            <p className="text-[11px] font-medium text-amber-300">Paused in Haven</p>
+            <p className="text-[11px] text-amber-200/80 leading-relaxed">
+              New API-initiated transactions are blocked until you resume this agent. On-chain delegate access and allowances are still in place.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Allowance bars — on-chain primary */}
       {isOperational && (
         <div className="space-y-2 mb-4">
@@ -430,9 +447,9 @@ function AgentCard({
             <span className="text-zinc-800">|</span>
             {isActive ? (
               <button
-                onClick={() => onPause(agent)}
+                onClick={() => setPauseModalOpen(true)}
                 disabled={isBusy}
-                className="text-xs text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50"
+                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
               >
                 {busyAction === 'pause' ? 'Pausing...' : 'Pause'}
               </button>
@@ -440,9 +457,9 @@ function AgentCard({
               <button
                 onClick={() => onResume(agent)}
                 disabled={isBusy}
-                className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-50"
+                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
               >
-                {busyAction === 'resume' ? 'Resuming...' : 'Resume'}
+                {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
               </button>
             )}
             <span className="text-zinc-800">|</span>
@@ -472,6 +489,32 @@ function AgentCard({
         )}
       </div>
     </div>
+
+    <ConfirmDialog
+      open={pauseModalOpen}
+      onCancel={() => setPauseModalOpen(false)}
+      onConfirm={() => onPause(agent)}
+      title={`Pause ${agent.name}?`}
+      body={
+        <div className="space-y-3">
+          <p>
+            Pausing stops this agent from creating new transactions through Haven right away, without changing its on-chain delegate access.
+          </p>
+          <div className="rounded-lg border border-indigo-500/15 bg-indigo-500/[0.04] px-3 py-3 text-zinc-300">
+            <p className="text-xs font-medium text-indigo-300 mb-1">What stays the same</p>
+            <p className="text-xs leading-relaxed">
+              The Safe delegate and on-chain spending limits remain in place. You can resume this agent later without reconnecting or reconfiguring it.
+            </p>
+          </div>
+          <p className="text-xs text-zinc-500">
+            Use Pause for a fast, reversible stop. Use Revoke when you also want to remove the agent&apos;s on-chain spending authority.
+          </p>
+        </div>
+      }
+      confirmLabel="Pause agent"
+      tone="primary"
+      loading={busyAction === 'pause'}
+    />
 
     <ConfirmDialog
       open={revokeModalOpen}

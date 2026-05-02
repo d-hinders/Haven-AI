@@ -10,15 +10,6 @@ export interface SelfSignAgentAllowance {
   token_symbol: string
   allowance_amount: string
   reset_period_min: number
-  approval_threshold: string | null
-}
-
-export interface SelfSignAgentRecipient {
-  id: string
-  agent_id: string
-  address: string
-  label: string | null
-  created_at: string
 }
 
 export interface SelfSignAgent {
@@ -26,14 +17,12 @@ export interface SelfSignAgent {
   name: string
   description: string | null
   delegate_address: string
-  restrict_recipients: boolean
   safe_id: string | null
   safe_address: string | null
   safe_name: string | null
   status: string
   created_at: string
   allowances: SelfSignAgentAllowance[]
-  allowed_recipients: SelfSignAgentRecipient[]
   auth_type: 'self_sign'
 }
 
@@ -61,14 +50,11 @@ export function useSelfSignAgents() {
       description?: string
       delegate_address: string
       safe_id?: string
-      restrict_recipients?: boolean
-      allowed_recipients?: { address: string; label?: string }[]
       allowances?: {
         token_address: string
         token_symbol: string
         allowance_amount: string
         reset_period_min: number
-        approval_threshold?: string | null
       }[]
     }) => {
       const agent = await api.post<SelfSignAgent>('/self-sign-agents', body)
@@ -84,8 +70,6 @@ export function useSelfSignAgents() {
       body: {
         name?: string
         description?: string
-        restrict_recipients?: boolean
-        allowed_recipients?: { address: string; label?: string }[]
       },
     ) => {
       const updated = await api.put<SelfSignAgent>(`/self-sign-agents/${id}`, body)
@@ -113,7 +97,6 @@ export function useSelfSignAgents() {
         token_symbol: string
         allowance_amount: string
         reset_period_min: number
-        approval_threshold?: string | null
       },
     ) => {
       const allowance = await api.post<SelfSignAgentAllowance>(

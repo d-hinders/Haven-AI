@@ -14,7 +14,6 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
-import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 import NetworkGate from './NetworkGate'
 import {
   getSafeNonce,
@@ -143,10 +142,6 @@ export default function CreateAgentModal({
   const [addAmount, setAddAmount] = useState('')
   const [addReset, setAddReset] = useState(1440) // daily
 
-  // Form: recipient allowlist
-  const [restrictRecipients, setRestrictRecipients] = useState(false)
-  const [allowedRecipients, setAllowedRecipients] = useState<RecipientEntry[]>([])
-
   // Execution
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('checking')
   const [execError, setExecError] = useState<string | null>(null)
@@ -181,8 +176,6 @@ export default function CreateAgentModal({
     setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
     setAddReset(1440)
-    setRestrictRecipients(false)
-    setAllowedRecipients([])
     setExecStatus('checking')
     setExecError(null)
     setTxHash(null)
@@ -441,8 +434,6 @@ export default function CreateAgentModal({
           description: description.trim() || undefined,
           delegate_address: delegateAddress,
           safe_id: safeId || undefined,
-          restrict_recipients: restrictRecipients,
-          allowed_recipients: restrictRecipients ? allowedRecipients : [],
           allowances: allowances.map((a) => ({
             token_address:
               a.tokenAddress ?? '0x0000000000000000000000000000000000000000',
@@ -522,10 +513,6 @@ export default function CreateAgentModal({
           amount: a.amount,
           resetPeriodMin: a.resetTimeMin,
         })),
-        restrictRecipients,
-        allowedRecipients: restrictRecipients
-          ? allowedRecipients.map((r) => ({ address: r.address, label: r.label }))
-          : [],
       },
       credentials: {
         apiKey: createdApiKey,
@@ -617,7 +604,7 @@ export default function CreateAgentModal({
             <h2 className="text-sm font-semibold">Connect agent</h2>
             <p className="text-xs text-zinc-600 mt-0.5">
               {step === 'details' && "Name the agent you'll hand these credentials to"}
-              {step === 'policy' && 'Set spending limits and (optionally) restrict recipients'}
+              {step === 'policy' && 'Set on-chain spending limits — token, amount, frequency'}
               {step === 'key' && 'Choose the signing key the agent will use'}
               {step === 'review' && 'Review and connect the agent'}
               {step === 'executing' && 'Connecting agent...'}
@@ -819,15 +806,11 @@ export default function CreateAgentModal({
                 </p>
               )}
 
-              {/* Recipient allowlist */}
-              <div className="pt-2 border-t border-white/[0.06]">
-                <RecipientAllowlistEditor
-                  enabled={restrictRecipients}
-                  onToggle={setRestrictRecipients}
-                  recipients={allowedRecipients}
-                  onChange={setAllowedRecipients}
-                />
-              </div>
+              <p className="text-[11px] text-zinc-600 leading-relaxed pt-2 border-t border-white/[0.06]">
+                Payments that exceed these on-chain limits aren&apos;t rejected — they&apos;re queued
+                for your approval in the dashboard. The agent always has an escape hatch for
+                larger spend without raising its on-chain allowance.
+              </p>
 
               <div className="flex gap-3">
                 <button
@@ -1061,30 +1044,6 @@ export default function CreateAgentModal({
                     ))}
                   </div>
                 </div>
-                {restrictRecipients && (
-                  <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                      Recipient allowlist
-                    </p>
-                    {allowedRecipients.length > 0 ? (
-                      <div className="space-y-1">
-                        {allowedRecipients.map((r) => (
-                          <div key={r.address} className="text-xs text-zinc-400">
-                            {r.label ? (
-                              <span>{r.label} <span className="font-mono text-zinc-600">({truncate(r.address)})</span></span>
-                            ) : (
-                              <span className="font-mono">{truncate(r.address)}</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-amber-400/70">
-                        Restriction enabled but no recipients added — agent won&apos;t be able to send to anyone
-                      </p>
-                    )}
-                  </div>
-                )}
               </div>
 
               {/* What will happen */}

@@ -10,8 +10,6 @@ interface CreateAgentBody {
   description?: string
   delegate_address: string
   safe_id?: string
-  restrict_recipients?: boolean
-  allowed_recipients?: { address: string; label?: string }[]
   allowances?: {
     token_address: string
     token_symbol: string
@@ -23,8 +21,6 @@ interface CreateAgentBody {
 interface UpdateAgentBody {
   name?: string
   description?: string
-  restrict_recipients?: boolean
-  allowed_recipients?: { address: string; label?: string }[]
 }
 
 interface AgentRow {
@@ -33,7 +29,6 @@ interface AgentRow {
   name: string
   description: string | null
   delegate_address: string | null
-  restrict_recipients: boolean
   safe_id: string | null
   safe_address: string | null
   safe_name: string | null
@@ -51,14 +46,6 @@ interface AllowanceRow {
   reset_period_min: number
 }
 
-interface RecipientRow {
-  id: string
-  agent_id: string
-  address: string
-  label: string | null
-  created_at: string
-}
-
 function isValidAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
@@ -68,12 +55,12 @@ function isValidAddress(addr: string): boolean {
 export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /agents — list agents with their allowances and allowed recipients
+  // GET /agents — list agents with their on-chain allowance config
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
     const agentResult = await pool.query<AgentRow>(
-      `SELECT a.id, a.name, a.description, a.delegate_address, a.restrict_recipients,
+      `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name,
               a.api_key_prefix, a.status, a.created_at
        FROM agents a
@@ -89,7 +76,6 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     const agentIds = agentResult.rows.map((a) => a.id)
 
-    // Fetch allowances for all agents in one query
     const allowanceResult = await pool.query<AllowanceRow>(
       `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
        FROM agent_allowances WHERE agent_id = ANY($1) ORDER BY created_at ASC`,
@@ -103,33 +89,18 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       allowancesByAgent.set(row.agent_id, existing)
     }
 
-    // Fetch allowed recipients for all agents
-    const recipientResult = await pool.query<RecipientRow>(
-      `SELECT id, agent_id, address, label, created_at
-       FROM agent_allowed_recipients WHERE agent_id = ANY($1) ORDER BY created_at ASC`,
-      [agentIds],
-    )
-
-    const recipientsByAgent = new Map<string, RecipientRow[]>()
-    for (const row of recipientResult.rows) {
-      const existing = recipientsByAgent.get(row.agent_id) ?? []
-      existing.push(row)
-      recipientsByAgent.set(row.agent_id, existing)
-    }
-
     const agents = agentResult.rows.map((agent) => ({
       ...agent,
       allowances: allowancesByAgent.get(agent.id) ?? [],
-      allowed_recipients: recipientsByAgent.get(agent.id) ?? [],
     }))
 
     return { agents }
   })
 
-  // POST /agents — create agent with delegate address, allowances, and optional recipient restrictions
+  // POST /agents — create agent with delegate address and on-chain allowance config
   app.post<{ Body: CreateAgentBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { name, description, delegate_address, safe_id, allowances, restrict_recipients, allowed_recipients } = request.body
+    const { name, description, delegate_address, safe_id, allowances } = request.body
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return reply.code(400).send({ error: 'Name is required' })
@@ -150,7 +121,6 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
       resolvedSafeId = safe_id
     } else {
-      // Default to user's default Safe
       const defaultSafe = await pool.query(
         'SELECT id FROM user_safes WHERE user_id = $1 AND is_default = true LIMIT 1',
         [sub],
@@ -160,7 +130,6 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Check for duplicate delegate address
     const existing = await pool.query(
       'SELECT id FROM agents WHERE user_id = $1 AND delegate_address = $2 AND status != $3',
       [sub, delegate_address.toLowerCase(), 'revoked'],
@@ -180,14 +149,13 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       await client.query('BEGIN')
 
       const agentResult = await client.query<AgentRow>(
-        `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, restrict_recipients, safe_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id, name, description, delegate_address, restrict_recipients, safe_id, api_key_prefix, status, created_at`,
-        [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKeyHash, apiKeyPrefix, restrict_recipients ?? false, resolvedSafeId],
+        `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, safe_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at`,
+        [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKeyHash, apiKeyPrefix, resolvedSafeId],
       )
       const agent = agentResult.rows[0]
 
-      // Insert allowance records
       const savedAllowances: AllowanceRow[] = []
       if (allowances && allowances.length > 0) {
         for (const a of allowances) {
@@ -207,28 +175,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      // Insert allowed recipients
-      const savedRecipients: RecipientRow[] = []
-      if (restrict_recipients && allowed_recipients && allowed_recipients.length > 0) {
-        for (const r of allowed_recipients) {
-          if (!isValidAddress(r.address)) continue
-          const res = await client.query<RecipientRow>(
-            `INSERT INTO agent_allowed_recipients (agent_id, address, label)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (agent_id, address) DO NOTHING
-             RETURNING id, agent_id, address, label, created_at`,
-            [agent.id, r.address.toLowerCase(), r.label?.trim() ?? null],
-          )
-          if (res.rows[0]) savedRecipients.push(res.rows[0])
-        }
-      }
-
       await client.query('COMMIT')
       return reply.code(201).send({
         ...agent,
-        api_key: apiKey, // Return plaintext key only on creation — it's not stored
+        api_key: apiKey,
         allowances: savedAllowances,
-        allowed_recipients: savedRecipients,
       })
     } catch (err) {
       await client.query('ROLLBACK')
@@ -238,77 +189,37 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
   })
 
-  // PUT /agents/:id — update agent metadata + recipient restrictions
+  // PUT /agents/:id — update agent name/description
   app.put<{ Params: { id: string }; Body: UpdateAgentBody }>(
     '/:id',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id } = request.params
-      const { name, description, restrict_recipients, allowed_recipients } = request.body
+      const { name, description } = request.body
 
-      const client = await pool.connect()
-      try {
-        await client.query('BEGIN')
+      const result = await pool.query<AgentRow>(
+        `UPDATE agents
+         SET name        = COALESCE($3, name),
+             description = COALESCE($4, description),
+             updated_at  = NOW()
+         WHERE id = $1 AND user_id = $2
+         RETURNING id, name, description, delegate_address, api_key_prefix, status, created_at`,
+        [id, sub, name?.trim() ?? null, description?.trim() ?? null],
+      )
 
-        const result = await client.query<AgentRow>(
-          `UPDATE agents
-           SET name                = COALESCE($3, name),
-               description         = COALESCE($4, description),
-               restrict_recipients = COALESCE($5, restrict_recipients),
-               updated_at          = NOW()
-           WHERE id = $1 AND user_id = $2
-           RETURNING id, name, description, delegate_address, restrict_recipients, api_key_prefix, status, created_at`,
-          [id, sub, name?.trim() ?? null, description?.trim() ?? null, restrict_recipients ?? null],
-        )
+      if (result.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' })
+      }
 
-        if (result.rows.length === 0) {
-          await client.query('ROLLBACK')
-          return reply.code(404).send({ error: 'Agent not found' })
-        }
+      const allowanceResult = await pool.query<AllowanceRow>(
+        `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
+         FROM agent_allowances WHERE agent_id = $1`,
+        [id],
+      )
 
-        // If allowed_recipients is provided, replace the full set
-        if (allowed_recipients !== undefined) {
-          await client.query(
-            'DELETE FROM agent_allowed_recipients WHERE agent_id = $1',
-            [id],
-          )
-          if (allowed_recipients.length > 0) {
-            for (const r of allowed_recipients) {
-              if (!isValidAddress(r.address)) continue
-              await client.query(
-                `INSERT INTO agent_allowed_recipients (agent_id, address, label)
-                 VALUES ($1, $2, $3)
-                 ON CONFLICT (agent_id, address) DO NOTHING`,
-                [id, r.address.toLowerCase(), r.label?.trim() ?? null],
-              )
-            }
-          }
-        }
-
-        await client.query('COMMIT')
-
-        // Fetch updated data
-        const allowanceResult = await pool.query<AllowanceRow>(
-          `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-           FROM agent_allowances WHERE agent_id = $1`,
-          [id],
-        )
-        const recipientResult = await pool.query<RecipientRow>(
-          `SELECT id, agent_id, address, label, created_at
-           FROM agent_allowed_recipients WHERE agent_id = $1`,
-          [id],
-        )
-
-        return {
-          ...result.rows[0],
-          allowances: allowanceResult.rows,
-          allowed_recipients: recipientResult.rows,
-        }
-      } catch (err) {
-        await client.query('ROLLBACK')
-        throw err
-      } finally {
-        client.release()
+      return {
+        ...result.rows[0],
+        allowances: allowanceResult.rows,
       }
     },
   )
@@ -411,7 +322,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // POST /agents/:id/allowances — add/update an allowance record
+  // POST /agents/:id/allowances — add/update an allowance record (mirrors on-chain)
   app.post<{
     Params: { id: string }
     Body: {
@@ -419,15 +330,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       token_symbol: string
       allowance_amount: string
       reset_period_min: number
-      approval_threshold?: string | null
     }
   }>('/:id/allowances', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
-    const { token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold } =
-      request.body
+    const { token_address, token_symbol, allowance_amount, reset_period_min } = request.body
 
-    // Verify agent belongs to user
     const agentCheck = await pool.query(
       'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
       [id, sub],
@@ -436,26 +344,25 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: 'Agent not found' })
     }
 
-    const result = await pool.query<AllowanceRow & { approval_threshold: string | null }>(
-      `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold)
-       VALUES ($1, $2, $3, $4, $5, $6)
+    const result = await pool.query<AllowanceRow>(
+      `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (agent_id, token_address)
-       DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, approval_threshold = $6, updated_at = NOW()
-       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold`,
-      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min, approval_threshold ?? null],
+       DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, updated_at = NOW()
+       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
+      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min],
     )
 
     return result.rows[0]
   })
 
-  // DELETE /agents/:id/allowances/:tokenAddress — remove an allowance record
+  // DELETE /agents/:id/allowances/:tokenAddress
   app.delete<{ Params: { id: string; tokenAddress: string } }>(
     '/:id/allowances/:tokenAddress',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id, tokenAddress } = request.params
 
-      // Verify agent belongs to user
       const agentCheck = await pool.query(
         'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
         [id, sub],

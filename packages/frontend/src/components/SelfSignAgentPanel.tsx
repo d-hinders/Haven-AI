@@ -8,7 +8,6 @@ import { useSelfSignAgents, type SelfSignAgent } from '@/hooks/useSelfSignAgents
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainTokens } from '@/lib/safe-tx'
 import { truncate, isValidAddress } from '@/lib/format'
-import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
 
 // ── Local types ────────────────────────────────────────────────────
 
@@ -92,8 +91,6 @@ function CreateSelfSignModal({
     description?: string
     delegate_address: string
     safe_id?: string
-    restrict_recipients?: boolean
-    allowed_recipients?: { address: string; label?: string }[]
     allowances?: {
       token_address: string
       token_symbol: string
@@ -129,10 +126,6 @@ function CreateSelfSignModal({
   const [addToken, setAddToken] = useState(tokenOptions[0]?.symbol ?? '')
   const [addAmount, setAddAmount] = useState('')
   const [addReset, setAddReset] = useState(1440)
-
-  // Recipients
-  const [restrictRecipients, setRestrictRecipients] = useState(false)
-  const [allowedRecipients, setAllowedRecipients] = useState<RecipientEntry[]>([])
 
   // Submit
   const [loading, setLoading] = useState(false)
@@ -217,10 +210,6 @@ function CreateSelfSignModal({
         description: description.trim() || undefined,
         delegate_address: delegateAddress,
         safe_id: activeSafe?.id,
-        restrict_recipients: restrictRecipients,
-        allowed_recipients: restrictRecipients
-          ? allowedRecipients.map((r) => ({ address: r.address, label: r.label || undefined }))
-          : [],
         allowances: allowances.map((a) => ({
           token_address: a.tokenAddress,
           token_symbol: a.tokenSymbol,
@@ -538,15 +527,10 @@ function CreateSelfSignModal({
                 </p>
               )}
 
-              {/* Recipient allowlist */}
-              <div className="pt-2 border-t border-white/[0.06]">
-                <RecipientAllowlistEditor
-                  enabled={restrictRecipients}
-                  onToggle={setRestrictRecipients}
-                  recipients={allowedRecipients}
-                  onChange={setAllowedRecipients}
-                />
-              </div>
+              <p className="text-[11px] text-zinc-600 leading-relaxed pt-2 border-t border-white/[0.06]">
+                Payments above the on-chain limit are queued for your approval in the
+                dashboard — the agent always has an escape hatch.
+              </p>
 
               <div className="flex gap-3">
                 <button
@@ -595,26 +579,6 @@ function CreateSelfSignModal({
                     ))}
                   </div>
                 </div>
-                {restrictRecipients && (
-                  <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Recipient allowlist</p>
-                    {allowedRecipients.length > 0 ? (
-                      <div className="space-y-1">
-                        {allowedRecipients.map((r) => (
-                          <div key={r.address} className="text-xs text-zinc-400">
-                            {r.label
-                              ? <span>{r.label} <span className="font-mono text-zinc-600">({truncate(r.address)})</span></span>
-                              : <span className="font-mono">{truncate(r.address)}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-amber-400/70">
-                        Restriction enabled but no recipients added — agent won&apos;t be able to send to anyone
-                      </p>
-                    )}
-                  </div>
-                )}
                 <div>
                   <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Authentication</p>
                   <p className="text-xs text-zinc-500">EIP-191 personal_sign — no API key stored</p>
@@ -725,19 +689,6 @@ function AgentCard({
         <ShieldIcon size={12} />
         <span>Authenticates via EIP-191 personal_sign — no API key stored</span>
       </div>
-
-      {/* Recipient restriction */}
-      {isActive && agent.restrict_recipients && (
-        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-indigo-500/5 border border-indigo-500/10 rounded-lg">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-indigo-400 flex-shrink-0">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-          </svg>
-          <span className="text-[10px] text-indigo-400">
-            Restricted to {agent.allowed_recipients?.length ?? 0} allowed recipient{(agent.allowed_recipients?.length ?? 0) !== 1 ? 's' : ''}
-          </span>
-        </div>
-      )}
 
       {/* Spending limits */}
       {isActive && agent.allowances.length > 0 && (

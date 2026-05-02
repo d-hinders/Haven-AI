@@ -26,8 +26,6 @@ const BASE_INPUT: HandoffInput = {
     allowances: [
       { tokenSymbol: 'EURe', amount: '10', resetPeriodMin: 1440 },
     ],
-    restrictRecipients: false,
-    allowedRecipients: [],
   },
   credentials: {
     apiKey: 'sk_agent_TESTKEY_NEVERREAL',
@@ -153,42 +151,12 @@ describe('buildHandoff — policy', () => {
     expect(markdown).toContain('none configured')
   })
 
-  it('warns when recipient allowlist is enabled but empty', () => {
-    const { markdown } = buildHandoff(
-      withInput({
-        policy: {
-          ...BASE_INPUT.policy,
-          restrictRecipients: true,
-          allowedRecipients: [],
-        },
-      }),
-    )
-    // The exact phrasing may evolve, but the warning must communicate that
-    // the agent literally cannot send anywhere in this state.
-    expect(markdown.toLowerCase()).toMatch(/cannot send|empty/)
-  })
-
-  it('lists each allowed recipient when the allowlist has entries', () => {
-    const { markdown } = buildHandoff(
-      withInput({
-        policy: {
-          ...BASE_INPUT.policy,
-          restrictRecipients: true,
-          allowedRecipients: [
-            { address: '0x1111111111111111111111111111111111111111', label: 'Alice' },
-            { address: '0x2222222222222222222222222222222222222222' },
-          ],
-        },
-      }),
-    )
-    expect(markdown).toContain('0x1111111111111111111111111111111111111111')
-    expect(markdown).toContain('Alice')
-    expect(markdown).toContain('0x2222222222222222222222222222222222222222')
-  })
-
-  it('says "any address" when recipients are not restricted', () => {
+  it('mentions the manual approval queue as the over-limit escape hatch', () => {
     const { markdown } = buildHandoff(BASE_INPUT)
-    expect(markdown).toContain('any address')
+    // Policy lives entirely on-chain now; the only "escape hatch" for
+    // payments above the allowance is the owner-approval queue.
+    expect(markdown.toLowerCase()).toMatch(/approval/)
+    expect(markdown.toLowerCase()).toMatch(/queue|dashboard/)
   })
 })
 

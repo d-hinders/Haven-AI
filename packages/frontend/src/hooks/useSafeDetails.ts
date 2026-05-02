@@ -17,9 +17,15 @@ export function useSafeDetails(safeAddress: string | null): UseSafeDetailsReturn
   const [error, setError] = useState<string | null>(null)
 
   const fetchDetails = useCallback(async () => {
-    if (!safeAddress) return
+    if (!safeAddress) {
+      setDetails(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
 
     try {
+      setLoading(true)
       setError(null)
       const data = await api.get<SafeDetails>(`/safe/${safeAddress}/details`)
       setDetails(data)
@@ -32,7 +38,7 @@ export function useSafeDetails(safeAddress: string | null): UseSafeDetailsReturn
 
   useEffect(() => {
     fetchDetails()
-  }, [fetchDetails])
+  }, [fetchDetails, safeAddress])
 
   return { details, loading, error, refetch: fetchDetails }
 }

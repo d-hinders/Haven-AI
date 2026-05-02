@@ -154,6 +154,9 @@ export default function CreateAgentModal({
   const [copiedDoneKey, setCopiedDoneKey] = useState(false)
   const [copiedEnv, setCopiedEnv] = useState(false)
   const [showRawCreds, setShowRawCreds] = useState(false)
+  // True once the user has downloaded the handoff file or copied the .env.
+  // Used to gate close-without-saving on the Done step — see handleClose.
+  const [credentialsSaved, setCredentialsSaved] = useState(false)
 
   // Wagmi
   const { address: connectedAddress } = useAccount()
@@ -182,12 +185,29 @@ export default function CreateAgentModal({
     setCopiedDoneKey(false)
     setCopiedEnv(false)
     setShowRawCreds(false)
+    setCredentialsSaved(false)
   }, [])
 
   const handleClose = useCallback(() => {
+    // Guard against accidental dismissal of the Done step before the user has
+    // saved the credentials. The agent is already on-chain at this point, but
+    // the API key (and a generated delegate private key, if any) cannot be
+    // shown again — closing without saving leaves the user with an active
+    // but uncallable agent that they can only recover by revoking and
+    // recreating.
+    if (step === 'done' && createdApiKey && !credentialsSaved) {
+      const confirmed = window.confirm(
+        'You haven\'t saved the agent credentials yet.\n\n' +
+        'The API key and delegate private key cannot be shown again. ' +
+        'If you close this dialog now, the agent will be active on-chain ' +
+        'but uncallable, and you\'ll need to revoke it and create a new one.\n\n' +
+        'Close anyway?',
+      )
+      if (!confirmed) return
+    }
     resetForm()
     onClose()
-  }, [onClose, resetForm])
+  }, [step, createdApiKey, credentialsSaved, onClose, resetForm])
 
   // Escape-to-close — allow closing in all steps except while an on-chain
   // action is actively in flight (mirrors the backdrop-click behaviour).
@@ -523,6 +543,7 @@ export default function CreateAgentModal({
       new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
       filename,
     )
+    setCredentialsSaved(true)
   }
 
   function handleCopyEnv() {
@@ -530,6 +551,7 @@ export default function CreateAgentModal({
     if (!input) return
     const dotenv = buildDotenv(input)
     copyToClipboard(dotenv, setCopiedEnv)
+    setCredentialsSaved(true)
   }
 
   // Generate a key the first time the user reaches the Key step in 'generate'

@@ -6,7 +6,6 @@ import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { useAgents } from '@/hooks/useAgents'
-import { useActivityFeed } from '@/hooks/useAgentActivity'
 import {
   useAggregatedPortfolio,
   useAggregatedBalances,
@@ -18,6 +17,9 @@ import TransactionList from '@/components/TransactionList'
 import DashboardInfo from '@/components/DashboardInfo'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import CreateAgentModal from '@/components/CreateAgentModal'
+import DashboardSendModal from '@/components/DashboardSendModal'
+import ReceiveFundsModal from '@/components/ReceiveFundsModal'
+import AddFundsModal from '@/components/AddFundsModal'
 
 // ── Status dot ───────────────────────────────────────────────────────
 
@@ -102,9 +104,8 @@ export default function DashboardClient() {
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
 
-  const { resolveAddress } = useContacts()
+  const { contacts, resolveAddress } = useContacts()
   const { agents, refetch: refetchAgents } = useAgents()
-  const { pendingApprovals } = useActivityFeed()
 
   // Aggregated data across all Safes
   const { totalUsd, totalEur, loading: portfolioLoading, refetch: refetchPortfolio } = useAggregatedPortfolio()
@@ -156,6 +157,14 @@ export default function DashboardClient() {
   const [infoOpen, setInfoOpen] = useState(false)
   const [createAgentOpen, setCreateAgentOpen] = useState(false)
   const [createAgentPreset, setCreateAgentPreset] = useState<'demo' | null>(null)
+  const [sendOpen, setSendOpen] = useState(false)
+  const [receiveOpen, setReceiveOpen] = useState(false)
+  const [addFundsOpen, setAddFundsOpen] = useState(false)
+
+  const hasLinkedSafes = safes.length > 0
+  const actionHint = hasLinkedSafes
+    ? (safes.length > 1 ? 'Choose any linked Safe when you send or receive funds.' : undefined)
+    : 'Link an account first to send or receive funds through Haven.'
 
   return (
     <div className="max-w-5xl">
@@ -178,32 +187,17 @@ export default function DashboardClient() {
         </button>
       </div>
 
-      {/* Pending approvals banner */}
-      {pendingApprovals > 0 && (
-        <div className="flex items-center gap-2 px-4 py-3 mb-6 rounded-lg bg-amber-500/[0.05] border border-amber-500/20">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-amber-400 flex-shrink-0">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 8v4M12 16h.01" />
-          </svg>
-          <span className="text-sm text-amber-400">
-            {pendingApprovals} payment{pendingApprovals !== 1 ? 's' : ''} pending your approval
-          </span>
-          <Link
-            href="/agents"
-            className="text-xs text-amber-300 hover:text-amber-200 ml-auto font-medium"
-          >
-            Review
-          </Link>
-        </div>
-      )}
-
       {/* Portfolio total */}
       <PortfolioHero
         totalFiat={totalFiat}
         currency={currency}
-        accountCount={safes.length}
-        agentCount={activeAgents.length}
         loading={portfolioLoading}
+        onSend={() => setSendOpen(true)}
+        onReceive={() => setReceiveOpen(true)}
+        onAddFunds={() => setAddFundsOpen(true)}
+        sendDisabled={!hasLinkedSafes}
+        receiveDisabled={!hasLinkedSafes}
+        actionsHint={actionHint}
       />
 
       {/* Stage-aware onboarding guide — fund first, then add an agent. Hides
@@ -216,10 +210,6 @@ export default function DashboardClient() {
           onSelectSafe={setGuideSafeId}
           onAddAgent={() => {
             setCreateAgentPreset(null)
-            setCreateAgentOpen(true)
-          }}
-          onAddDemoAgent={() => {
-            setCreateAgentPreset('demo')
             setCreateAgentOpen(true)
           }}
         />
@@ -367,6 +357,29 @@ export default function DashboardClient() {
       </div>
 
       <DashboardInfo open={infoOpen} onClose={() => setInfoOpen(false)} />
+
+      <DashboardSendModal
+        open={sendOpen}
+        onClose={() => setSendOpen(false)}
+        contacts={contacts}
+        resolveAddress={resolveAddress}
+        onSuccess={() => {
+          refetchBalances()
+          refetchPortfolio()
+          refetchTx()
+        }}
+      />
+
+      <ReceiveFundsModal
+        open={receiveOpen}
+        onClose={() => setReceiveOpen(false)}
+        safes={safes}
+      />
+
+      <AddFundsModal
+        open={addFundsOpen}
+        onClose={() => setAddFundsOpen(false)}
+      />
 
       {/* Agent modal mounted at the dashboard so the onboarding guide can open
           it in-place. The modal carries its own Safe picker, so we don't need

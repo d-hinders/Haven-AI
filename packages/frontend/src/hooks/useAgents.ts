@@ -12,6 +12,8 @@ export interface AgentAllowance {
   reset_period_min: number
 }
 
+export type AgentStatus = 'active' | 'paused' | 'revoked'
+
 export interface Agent {
   id: string
   name: string
@@ -21,7 +23,7 @@ export interface Agent {
   safe_address: string | null
   safe_name: string | null
   api_key: string
-  status: string
+  status: AgentStatus
   created_at: string
   allowances: AgentAllowance[]
 }
@@ -94,6 +96,20 @@ export function useAgents() {
     )
   }, [])
 
+  const pauseAgent = useCallback(async (id: string): Promise<void> => {
+    await api.post(`/agents/${id}/pause`, {})
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: 'paused' } : a)),
+    )
+  }, [])
+
+  const resumeAgent = useCallback(async (id: string): Promise<void> => {
+    await api.post(`/agents/${id}/resume`, {})
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: 'active' } : a)),
+    )
+  }, [])
+
   return {
     agents,
     loading,
@@ -101,6 +117,8 @@ export function useAgents() {
     updateAgent,
     deleteAgent,
     revokeAgent,
+    pauseAgent,
+    resumeAgent,
     refetch: fetchAgents,
   }
 }

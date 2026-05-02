@@ -12,6 +12,13 @@ import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
 import NetworkGate from './NetworkGate'
 
+interface SendSafeOption {
+  id: string
+  name: string
+  address: string
+  chainId: number
+  isDefault: boolean
+}
 
 // ── Props ────────────────────────────────────────────────────────────
 interface SendModalProps {
@@ -24,6 +31,11 @@ interface SendModalProps {
   contacts?: Contact[]
   resolveAddress?: (address: string) => string | null
   chainId?: number
+  safeOptions?: SendSafeOption[]
+  selectedSafeOptionId?: string
+  onSelectSafeOption?: (safeId: string) => void
+  contextLoading?: boolean
+  contextError?: string | null
 }
 
 // ── Component ────────────────────────────────────────────────────────
@@ -37,6 +49,11 @@ export default function SendModal({
   contacts = [],
   resolveAddress,
   chainId = 100,
+  safeOptions = [],
+  selectedSafeOptionId,
+  onSelectSafeOption,
+  contextLoading = false,
+  contextError = null,
 }: SendModalProps) {
   const { address: connectedAddress } = useAccount()
   const { status, txHash, error, send, reset } = useSendTransaction()
@@ -92,10 +109,12 @@ export default function SendModal({
     (b) => b.symbol.toLowerCase() === selectedToken.toLowerCase(),
   )
   const tokenConfig = chainTokens[selectedToken]
+  const selectedSafeOption =
+    safeOptions.find((safe) => safe.id === selectedSafeOptionId) ?? null
   const threshold = safeDetails?.threshold ?? 1
   const isMultiSig = threshold > 1
 
-  // Reset everything when modal opens/closes
+  // Reset everything when the modal opens or the selected Safe changes.
   useEffect(() => {
     if (open) {
       setSelectedToken(defaultToken)
@@ -108,7 +127,7 @@ export default function SendModal({
       setContactSearch('')
       reset()
     }
-  }, [open, reset])
+  }, [defaultToken, open, reset, safeAddress])
 
   // Track send status to update step
   useEffect(() => {
@@ -158,6 +177,14 @@ export default function SendModal({
 
   // ── Actions ──────────────────────────────────────────────────────
   const handleReview = () => {
+    if (contextLoading || !safeDetails) {
+      setFormError('Account details are still loading. Please wait a moment.')
+      return
+    }
+    if (contextError) {
+      setFormError('Could not load this account. Try again in a moment.')
+      return
+    }
     if (validate()) setStep('review')
   }
 
@@ -230,6 +257,89 @@ export default function SendModal({
         {/* ── STEP 1: Form ────────────────────────────────────────── */}
         {step === 'form' && (
           <div className="p-6 space-y-5">
+            {safeOptions.length > 0 && (
+              <div>
+                <label className="block text-xs text-zinc-400 mb-2">
+                  Send from
+                </label>
+                <div className="space-y-2">
+                  {safeOptions.length === 1 && selectedSafeOption ? (
+                    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-sm font-medium text-zinc-200">
+                          {selectedSafeOption.name}
+                        </span>
+                        {selectedSafeOption.isDefault && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 font-medium">
+                            Default
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[11px] text-zinc-500">
+                          {getChainConfig(selectedSafeOption.chainId).name}
+                        </span>
+                        <span className="text-[11px] text-zinc-500 font-mono">
+                          {truncate(selectedSafeOption.address)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    safeOptions.map((safe) => {
+                      const isSelected = safe.id === selectedSafeOptionId
+                      return (
+                        <button
+                          key={safe.id}
+                          type="button"
+                          onClick={() => onSelectSafeOption?.(safe.id)}
+                          className={`w-full rounded-lg border px-4 py-3 text-left transition-all duration-150 ${
+                            isSelected
+                              ? 'border-indigo-500/50 bg-indigo-500/10'
+                              : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className={`text-sm font-medium ${isSelected ? 'text-indigo-200' : 'text-zinc-200'}`}>
+                              {safe.name}
+                            </span>
+                            {safe.isDefault && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                isSelected
+                                  ? 'bg-indigo-400/15 text-indigo-200'
+                                  : 'bg-white/[0.05] text-zinc-400'
+                              }`}>
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-[11px] text-zinc-500">
+                              {getChainConfig(safe.chainId).name}
+                            </span>
+                            <span className="text-[11px] text-zinc-500 font-mono">
+                              {truncate(safe.address)}
+                            </span>
+                          </div>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {(contextLoading || contextError) && (
+              <div className={`rounded-lg px-4 py-3 text-xs border ${
+                contextError
+                  ? 'text-red-400 bg-red-400/10 border-red-400/20'
+                  : 'text-zinc-400 bg-white/[0.02] border-white/[0.06]'
+              }`}>
+                {contextError
+                  ? 'We could not load this account right now. Try again in a moment.'
+                  : 'Loading this account’s balances and signing details...'}
+              </div>
+            )}
+
             {/* Token selector */}
             <div>
               <label className="block text-xs text-zinc-400 mb-2">Token</label>
@@ -417,7 +527,7 @@ export default function SendModal({
             {/* Continue button */}
             <button
               onClick={handleReview}
-              disabled={!amount || !recipient}
+              disabled={!amount || !recipient || contextLoading || !!contextError || !safeDetails}
               className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Continue
@@ -458,9 +568,16 @@ export default function SendModal({
               <div className="h-px bg-white/[0.06]" />
               <div className="flex justify-between items-center">
                 <span className="text-xs text-zinc-500">From Safe</span>
-                <span className="text-sm text-zinc-400 font-mono">
-                  {truncate(safeAddress)}
-                </span>
+                <div className="text-right">
+                  {selectedSafeOption && (
+                    <p className="text-sm font-medium text-zinc-200 mb-0.5">
+                      {selectedSafeOption.name}
+                    </p>
+                  )}
+                  <span className="text-sm text-zinc-400 font-mono">
+                    {truncate(safeAddress)}
+                  </span>
+                </div>
               </div>
               <div className="h-px bg-white/[0.06]" />
               <div className="flex justify-between items-center">

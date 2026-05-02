@@ -17,9 +17,15 @@ export function useBalances(safeAddress: string | null): UseBalancesReturn {
   const [error, setError] = useState<string | null>(null)
 
   const fetchBalances = useCallback(async () => {
-    if (!safeAddress) return
+    if (!safeAddress) {
+      setBalances([])
+      setError(null)
+      setLoading(false)
+      return
+    }
 
     try {
+      setLoading(true)
       setError(null)
       const data = await api.get<BalancesResponse>(
         `/balances/${safeAddress}`,
@@ -35,10 +41,12 @@ export function useBalances(safeAddress: string | null): UseBalancesReturn {
   useEffect(() => {
     fetchBalances()
 
+    if (!safeAddress) return
+
     // Refresh every 60 seconds
     const interval = setInterval(fetchBalances, 60_000)
     return () => clearInterval(interval)
-  }, [fetchBalances])
+  }, [fetchBalances, safeAddress])
 
   return { balances, loading, error, refetch: fetchBalances }
 }

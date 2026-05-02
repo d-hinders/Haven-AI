@@ -9,22 +9,17 @@ interface CreateSelfSignAgentBody {
   description?: string
   delegate_address: string
   safe_id?: string
-  restrict_recipients?: boolean
-  allowed_recipients?: { address: string; label?: string }[]
   allowances?: {
     token_address: string
     token_symbol: string
     allowance_amount: string
     reset_period_min: number
-    approval_threshold?: string | null
   }[]
 }
 
 interface UpdateSelfSignAgentBody {
   name?: string
   description?: string
-  restrict_recipients?: boolean
-  allowed_recipients?: { address: string; label?: string }[]
 }
 
 interface AgentRow {
@@ -33,7 +28,6 @@ interface AgentRow {
   name: string
   description: string | null
   delegate_address: string
-  restrict_recipients: boolean
   safe_id: string | null
   safe_address: string | null
   safe_name: string | null
@@ -48,15 +42,6 @@ interface AllowanceRow {
   token_symbol: string
   allowance_amount: string
   reset_period_min: number
-  approval_threshold: string | null
-}
-
-interface RecipientRow {
-  id: string
-  agent_id: string
-  address: string
-  label: string | null
-  created_at: string
 }
 
 function isValidAddress(addr: string): boolean {
@@ -68,12 +53,12 @@ function isValidAddress(addr: string): boolean {
 export default async function selfSignAgentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /self-sign-agents — list agents with allowances and recipients
+  // GET /self-sign-agents — list agents with on-chain allowance config
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
     const agentResult = await pool.query<AgentRow>(
-      `SELECT a.id, a.name, a.description, a.delegate_address, a.restrict_recipients,
+      `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name AS safe_name,
               a.status, a.created_at
        FROM self_sign_agents a
@@ -88,14 +73,8 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
     const agentIds = agentResult.rows.map((a) => a.id)
 
     const allowanceResult = await pool.query<AllowanceRow>(
-      `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold
+      `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
        FROM self_sign_agent_allowances WHERE agent_id = ANY($1) ORDER BY created_at ASC`,
-      [agentIds],
-    )
-
-    const recipientResult = await pool.query<RecipientRow>(
-      `SELECT id, agent_id, address, label, created_at
-       FROM self_sign_agent_recipients WHERE agent_id = ANY($1) ORDER BY created_at ASC`,
       [agentIds],
     )
 
@@ -106,18 +85,10 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
       allowancesByAgent.set(row.agent_id, existing)
     }
 
-    const recipientsByAgent = new Map<string, RecipientRow[]>()
-    for (const row of recipientResult.rows) {
-      const existing = recipientsByAgent.get(row.agent_id) ?? []
-      existing.push(row)
-      recipientsByAgent.set(row.agent_id, existing)
-    }
-
     return {
       agents: agentResult.rows.map((agent) => ({
         ...agent,
         allowances: allowancesByAgent.get(agent.id) ?? [],
-        allowed_recipients: recipientsByAgent.get(agent.id) ?? [],
         auth_type: 'self_sign',
       })),
     }
@@ -131,8 +102,6 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
       description,
       delegate_address,
       safe_id,
-      restrict_recipients = false,
-      allowed_recipients = [],
       allowances = [],
     } = request.body
 
@@ -141,7 +110,6 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
       return reply.code(400).send({ error: 'Valid delegate_address is required' })
     }
 
-    // Verify safe belongs to user (if provided)
     if (safe_id) {
       const safeCheck = await pool.query(
         'SELECT id FROM user_safes WHERE id = $1 AND user_id = $2',
@@ -157,45 +125,35 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
       await client.query('BEGIN')
 
       const agentResult = await client.query<{ id: string }>(
-        `INSERT INTO self_sign_agents (user_id, name, description, delegate_address, safe_id, restrict_recipients)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO self_sign_agents (user_id, name, description, delegate_address, safe_id)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id`,
-        [sub, name.trim(), description ?? null, delegate_address.toLowerCase(), safe_id ?? null, restrict_recipients],
+        [sub, name.trim(), description ?? null, delegate_address.toLowerCase(), safe_id ?? null],
       )
       const agentId = agentResult.rows[0].id
 
       for (const allowance of allowances) {
         await client.query(
           `INSERT INTO self_sign_agent_allowances
-             (agent_id, token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold)
-           VALUES ($1, $2, $3, $4, $5, $6)
+             (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
+           VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (agent_id, token_address) DO UPDATE
              SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3,
-                 approval_threshold = $6, updated_at = NOW()`,
+                 updated_at = NOW()`,
           [
             agentId,
             allowance.token_address.toLowerCase(),
             allowance.token_symbol,
             allowance.allowance_amount,
             allowance.reset_period_min,
-            allowance.approval_threshold ?? null,
           ],
-        )
-      }
-
-      for (const recipient of allowed_recipients) {
-        if (!isValidAddress(recipient.address)) continue
-        await client.query(
-          `INSERT INTO self_sign_agent_recipients (agent_id, address, label)
-           VALUES ($1, $2, $3) ON CONFLICT (agent_id, address) DO NOTHING`,
-          [agentId, recipient.address.toLowerCase(), recipient.label ?? null],
         )
       }
 
       await client.query('COMMIT')
 
       const agent = await pool.query(
-        `SELECT a.id, a.name, a.description, a.delegate_address, a.restrict_recipients,
+        `SELECT a.id, a.name, a.description, a.delegate_address,
                 a.safe_id, us.safe_address, us.name AS safe_name, a.status, a.created_at
          FROM self_sign_agents a
          LEFT JOIN user_safes us ON a.safe_id = us.id
@@ -203,7 +161,7 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
         [agentId],
       )
 
-      return { ...agent.rows[0], allowances, allowed_recipients, auth_type: 'self_sign' }
+      return { ...agent.rows[0], allowances, auth_type: 'self_sign' }
     } catch (err: unknown) {
       await client.query('ROLLBACK')
       if ((err as { code?: string }).code === '23505') {
@@ -215,13 +173,13 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
     }
   })
 
-  // PUT /self-sign-agents/:id — update name/description/recipients
+  // PUT /self-sign-agents/:id — update name/description
   app.put<{ Params: { id: string }; Body: UpdateSelfSignAgentBody }>(
     '/:id',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id } = request.params
-      const { name, description, restrict_recipients, allowed_recipients } = request.body
+      const { name, description } = request.body
 
       const agentCheck = await pool.query(
         'SELECT id FROM self_sign_agents WHERE id = $1 AND user_id = $2',
@@ -229,42 +187,17 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
       )
       if (agentCheck.rows.length === 0) return reply.code(404).send({ error: 'Agent not found' })
 
-      const client = await pool.connect()
-      try {
-        await client.query('BEGIN')
-
-        await client.query(
-          `UPDATE self_sign_agents
-           SET name = COALESCE($1, name),
-               description = COALESCE($2, description),
-               restrict_recipients = COALESCE($3, restrict_recipients),
-               updated_at = NOW()
-           WHERE id = $4`,
-          [name?.trim() ?? null, description ?? null, restrict_recipients ?? null, id],
-        )
-
-        if (allowed_recipients !== undefined) {
-          await client.query('DELETE FROM self_sign_agent_recipients WHERE agent_id = $1', [id])
-          for (const r of allowed_recipients) {
-            if (!isValidAddress(r.address)) continue
-            await client.query(
-              `INSERT INTO self_sign_agent_recipients (agent_id, address, label)
-               VALUES ($1, $2, $3) ON CONFLICT (agent_id, address) DO NOTHING`,
-              [id, r.address.toLowerCase(), r.label ?? null],
-            )
-          }
-        }
-
-        await client.query('COMMIT')
-      } catch (err) {
-        await client.query('ROLLBACK')
-        throw err
-      } finally {
-        client.release()
-      }
+      await pool.query(
+        `UPDATE self_sign_agents
+         SET name = COALESCE($1, name),
+             description = COALESCE($2, description),
+             updated_at = NOW()
+         WHERE id = $3`,
+        [name?.trim() ?? null, description ?? null, id],
+      )
 
       const agent = await pool.query(
-        `SELECT a.id, a.name, a.description, a.delegate_address, a.restrict_recipients,
+        `SELECT a.id, a.name, a.description, a.delegate_address,
                 a.safe_id, us.safe_address, us.name AS safe_name, a.status, a.created_at
          FROM self_sign_agents a
          LEFT JOIN user_safes us ON a.safe_id = us.id
@@ -310,13 +243,11 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
       token_symbol: string
       allowance_amount: string
       reset_period_min: number
-      approval_threshold?: string | null
     }
   }>('/:id/allowances', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
-    const { token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold } =
-      request.body
+    const { token_address, token_symbol, allowance_amount, reset_period_min } = request.body
 
     const agentCheck = await pool.query(
       'SELECT id FROM self_sign_agents WHERE id = $1 AND user_id = $2',
@@ -326,13 +257,13 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
 
     const result = await pool.query<AllowanceRow>(
       `INSERT INTO self_sign_agent_allowances
-         (agent_id, token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (agent_id, token_address) DO UPDATE
          SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3,
-             approval_threshold = $6, updated_at = NOW()
-       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min, approval_threshold`,
-      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min, approval_threshold ?? null],
+             updated_at = NOW()
+       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
+      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min],
     )
     return result.rows[0]
   })

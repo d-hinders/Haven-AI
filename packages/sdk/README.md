@@ -161,6 +161,27 @@ const haven = new HavenClient({
 })
 ```
 
+## Payments above the on-chain allowance
+
+Haven's policy lives entirely on the Safe AllowanceModule (token, amount,
+reset period). If an agent requests a payment above the remaining allowance,
+Haven does **not** reject it — it returns HTTP 202 with `status: 'pending_approval'`
+and queues it for the wallet owner to approve in the dashboard.
+
+Surface that to the user: the payment isn't dead, it's waiting for a human to
+sign off. Don't retry — the same request would just queue another approval.
+
+```typescript
+try {
+  await haven.pay({ token: 'USDC', amount: '500', to: '0xabc...' })
+} catch (err) {
+  if (err instanceof HavenApiError && err.statusCode === 202) {
+    // err.body.payment_id, err.body.remaining, err.body.requested
+    console.log('Queued for owner approval — visible in the Haven dashboard.')
+  }
+}
+```
+
 ## Error Handling
 
 ```typescript

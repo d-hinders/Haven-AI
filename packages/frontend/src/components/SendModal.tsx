@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { type Address } from 'viem'
 import { useAccount } from 'wagmi'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
@@ -80,7 +80,6 @@ export default function SendModal({
   const [step, setStep] = useState<'form' | 'review' | 'executing' | 'result'>('form')
   const [showContactPicker, setShowContactPicker] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
-  const pickerRef = useRef<HTMLDivElement>(null)
 
   // Escape-to-close (disabled during execution so the user can't abandon a
   // signing flow by tapping a key).
@@ -91,23 +90,16 @@ export default function SendModal({
       c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
       c.address.toLowerCase().includes(contactSearch.toLowerCase()),
   )
-
-  // Close picker on outside click
-  useEffect(() => {
-    if (!showContactPicker) return
-    const handler = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setShowContactPicker(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [showContactPicker])
+  const quickContacts = contacts.slice(0, 3)
 
   // Get balance for selected token
   const tokenBalance = balances.find(
     (b) => b.symbol.toLowerCase() === selectedToken.toLowerCase(),
   )
+  const amountWarning =
+    amount && tokenBalance && parseFloat(amount) > parseFloat(tokenBalance.formatted)
+      ? `This amount is higher than your available balance of ${tokenBalance.formatted} ${selectedToken}.`
+      : ''
   const tokenConfig = chainTokens[selectedToken]
   const selectedSafeOption =
     safeOptions.find((safe) => safe.id === selectedSafeOptionId) ?? null
@@ -207,6 +199,14 @@ export default function SendModal({
   const handleDone = () => {
     onSuccess?.()
     onClose()
+  }
+
+  const handleSelectContact = (contact: Contact) => {
+    setRecipient(contact.address)
+    setSelectedContactName(contact.name)
+    setShowContactPicker(false)
+    setContactSearch('')
+    setFormError('')
   }
 
   // ── Don't render if closed ───────────────────────────────────────
@@ -398,12 +398,21 @@ export default function SendModal({
                     }
                   }}
                   placeholder="0.00"
-                  className="w-full px-4 py-3 pr-16 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
+                  className={`w-full px-4 py-3 pr-16 bg-white/[0.04] border rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:ring-1 transition-colors font-mono ${
+                    amountWarning
+                      ? 'border-red-400/30 focus:border-red-400/40 focus:ring-red-400/20'
+                      : 'border-white/[0.08] focus:border-indigo-500/50 focus:ring-indigo-500/30'
+                  }`}
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-500">
                   {selectedToken}
                 </span>
               </div>
+              {amountWarning && (
+                <p className="mt-2 text-xs text-red-400">
+                  {amountWarning}
+                </p>
+              )}
             </div>
 
             {/* Recipient */}
@@ -424,54 +433,7 @@ export default function SendModal({
                 )}
               </div>
 
-              <div className="relative" ref={pickerRef}>
-                {/* Contact picker dropdown */}
-                {showContactPicker && (
-                  <div className="absolute bottom-full mb-1 left-0 right-0 bg-[#0e0e10] border border-white/[0.10] rounded-lg shadow-xl z-10 overflow-hidden">
-                    <div className="p-2 border-b border-white/[0.06]">
-                      <input
-                        type="text"
-                        autoFocus
-                        value={contactSearch}
-                        onChange={(e) => setContactSearch(e.target.value)}
-                        placeholder="Search contacts..."
-                        className="w-full px-3 py-1.5 bg-white/[0.04] border border-white/[0.06] rounded-md text-xs text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/40"
-                      />
-                    </div>
-                    <div className="max-h-44 overflow-y-auto">
-                      {filteredContacts.length === 0 ? (
-                        <p className="text-xs text-zinc-600 text-center py-3">No contacts found</p>
-                      ) : (
-                        filteredContacts.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => {
-                              setRecipient(c.address)
-                              setSelectedContactName(c.name)
-                              setShowContactPicker(false)
-                              setFormError('')
-                            }}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors text-left"
-                          >
-                            <div className="w-6 h-6 rounded-full bg-indigo-500/15 flex items-center justify-center flex-shrink-0">
-                              <span className="text-[10px] font-semibold text-indigo-300">
-                                {c.name.slice(0, 2).toUpperCase()}
-                              </span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-medium text-[#ededed] truncate">{c.name}</p>
-                              <p className="text-[10px] text-zinc-500 font-mono">
-                                {c.address.slice(0, 6)}...{c.address.slice(-4)}
-                              </p>
-                            </div>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-
+              <div className="relative">
                 {/* Selected contact badge */}
                 {selectedContactName && (
                   <div className="flex items-center gap-2 mb-1.5">
@@ -507,6 +469,122 @@ export default function SendModal({
                   className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
                 />
               </div>
+
+              {contacts.length > 0 && !showContactPicker && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <p className="text-[11px] text-zinc-500">
+                      Quick select
+                    </p>
+                    {contacts.length > quickContacts.length && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowContactPicker(true)
+                          setContactSearch('')
+                        }}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                      >
+                        Browse all contacts
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {quickContacts.map((contact) => {
+                      const isSelected = contact.address.toLowerCase() === recipient.toLowerCase()
+                      return (
+                        <button
+                          key={contact.id}
+                          type="button"
+                          onClick={() => handleSelectContact(contact)}
+                          className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                            isSelected
+                              ? 'border-indigo-500/40 bg-indigo-500/12 text-indigo-200'
+                              : 'border-white/[0.08] bg-white/[0.02] text-zinc-300 hover:bg-white/[0.05]'
+                          }`}
+                        >
+                          <span className="w-5 h-5 rounded-full bg-indigo-500/15 text-[10px] font-semibold text-indigo-300 flex items-center justify-center">
+                            {contact.name.slice(0, 2).toUpperCase()}
+                          </span>
+                          <span className="text-xs font-medium">{contact.name}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {contacts.length > 0 && showContactPicker && (
+                <div className="mt-3 rounded-xl border border-white/[0.08] bg-[#0e0e10] overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 px-3 py-3 border-b border-white/[0.06]">
+                    <p className="text-xs font-medium text-zinc-300">
+                      Choose a contact
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowContactPicker(false)
+                        setContactSearch('')
+                      }}
+                      className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="p-3 border-b border-white/[0.06]">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={contactSearch}
+                      onChange={(e) => setContactSearch(e.target.value)}
+                      placeholder="Search contacts..."
+                      className="w-full px-3 py-2 bg-white/[0.04] border border-white/[0.06] rounded-md text-xs text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/40"
+                    />
+                  </div>
+                  <div className="max-h-52 overflow-y-auto">
+                    {filteredContacts.length === 0 ? (
+                      <p className="text-xs text-zinc-600 text-center py-4">
+                        No contacts found
+                      </p>
+                    ) : (
+                      filteredContacts.map((contact) => {
+                        const isSelected = contact.address.toLowerCase() === recipient.toLowerCase()
+                        return (
+                          <button
+                            key={contact.id}
+                            type="button"
+                            onClick={() => handleSelectContact(contact)}
+                            className={`w-full flex items-center gap-2.5 px-3 py-3 transition-colors text-left ${
+                              isSelected
+                                ? 'bg-indigo-500/10'
+                                : 'hover:bg-white/[0.04]'
+                            }`}
+                          >
+                            <div className="w-7 h-7 rounded-full bg-indigo-500/15 flex items-center justify-center flex-shrink-0">
+                              <span className="text-[10px] font-semibold text-indigo-300">
+                                {contact.name.slice(0, 2).toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium text-[#ededed] truncate">
+                                {contact.name}
+                              </p>
+                              <p className="text-[10px] text-zinc-500 font-mono">
+                                {contact.address.slice(0, 6)}...{contact.address.slice(-4)}
+                              </p>
+                            </div>
+                            {isSelected && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-200 font-medium">
+                                Selected
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Error */}

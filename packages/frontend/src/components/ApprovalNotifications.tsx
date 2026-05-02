@@ -75,9 +75,9 @@ export default function ApprovalNotifications() {
           ref={panelRef}
           role="dialog"
           aria-label="Pending approvals"
-          className="absolute right-0 top-full mt-2 w-[360px] max-w-[calc(100vw-2rem)] z-50 bg-[#111113] border border-white/[0.08] rounded-2xl shadow-2xl shadow-black/40 overflow-hidden"
+          className="absolute right-0 top-full mt-3 w-[360px] max-w-[calc(100vw-2rem)] z-50 overflow-hidden rounded-2xl border border-white/[0.10] bg-[#121216] shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-none"
         >
-          <div className="px-4 py-3 border-b border-white/[0.05] flex items-center justify-between">
+          <div className="px-4 py-3 border-b border-white/[0.06] bg-[#15151a] flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-zinc-100">Approvals</p>
               <p className="text-[11px] text-zinc-500">
@@ -94,11 +94,11 @@ export default function ApprovalNotifications() {
           </div>
 
           {loading ? (
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 bg-[#121216]">
               {[0, 1].map((index) => (
                 <div
                   key={index}
-                  className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3"
+                  className="rounded-xl border border-white/[0.06] bg-[#18181d] p-3"
                 >
                   <div className="h-3 w-28 rounded bg-white/[0.06] animate-pulse mb-2" />
                   <div className="h-2 w-44 rounded bg-white/[0.04] animate-pulse mb-2" />
@@ -107,8 +107,8 @@ export default function ApprovalNotifications() {
               ))}
             </div>
           ) : pendingApprovals.length === 0 ? (
-            <div className="px-5 py-8 text-center">
-              <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto mb-3">
+            <div className="px-5 py-8 text-center bg-[#121216]">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-500/12 text-emerald-400 flex items-center justify-center mx-auto mb-3 shadow-inner shadow-emerald-500/5">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 12l2 2 4-4" />
                   <circle cx="12" cy="12" r="10" />
@@ -121,13 +121,13 @@ export default function ApprovalNotifications() {
             </div>
           ) : (
             <>
-              <div className="max-h-[360px] overflow-y-auto p-2 space-y-2">
+              <div className="max-h-[360px] overflow-y-auto p-2 space-y-2 bg-[#121216]">
                 {pendingApprovals.map((approval) => (
                   <Link
                     key={approval.id}
                     href="/approvals"
                     onClick={() => setOpen(false)}
-                    className="block rounded-xl border border-white/[0.05] bg-white/[0.02] px-3 py-3 hover:bg-white/[0.04] hover:border-white/[0.08] transition-all"
+                    className="block rounded-xl border border-white/[0.06] bg-[#18181d] px-3 py-3 hover:bg-[#1c1c22] hover:border-white/[0.10] transition-all"
                   >
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div className="min-w-0">
@@ -151,7 +151,7 @@ export default function ApprovalNotifications() {
                   </Link>
                 ))}
               </div>
-              <div className="px-4 py-3 border-t border-white/[0.05] bg-white/[0.02]">
+              <div className="px-4 py-3 border-t border-white/[0.06] bg-[#15151a]">
                 <Link
                   href="/approvals"
                   onClick={() => setOpen(false)}

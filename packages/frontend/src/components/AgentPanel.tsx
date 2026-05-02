@@ -661,6 +661,7 @@ export default function AgentPanel() {
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
   const [showRevokedAgents, setShowRevokedAgents] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<'agents' | 'approvals' | 'activity'>(
     'agents',
   )
@@ -674,6 +675,12 @@ export default function AgentPanel() {
     () => agents.filter((agent) => agent.status === 'revoked'),
     [agents],
   )
+
+  useEffect(() => {
+    if (!toastMessage) return
+    const timeout = window.setTimeout(() => setToastMessage(null), 3000)
+    return () => window.clearTimeout(timeout)
+  }, [toastMessage])
 
   // Collect managed delegate addresses from DB agents
   const managedDelegates = useMemo(
@@ -796,6 +803,7 @@ export default function AgentPanel() {
         !err.message.includes('denied')
       ) {
         console.error('Revoke failed:', err)
+        setToastMessage('Revoke failed')
       }
     } finally {
       setBusyAgentId(null)
@@ -810,6 +818,7 @@ export default function AgentPanel() {
       await pauseAgent(agent.id)
     } catch (err) {
       console.error('Pause failed:', err)
+      setToastMessage('Pause failed')
     } finally {
       setBusyAgentId(null)
       setBusyAction(null)
@@ -823,6 +832,7 @@ export default function AgentPanel() {
       await resumeAgent(agent.id)
     } catch (err) {
       console.error('Resume failed:', err)
+      setToastMessage('Resume failed')
     } finally {
       setBusyAgentId(null)
       setBusyAction(null)
@@ -836,6 +846,7 @@ export default function AgentPanel() {
       await deleteAgent(agent.id)
     } catch (err) {
       console.error('Delete failed:', err)
+      setToastMessage('Delete failed')
     } finally {
       setBusyAgentId(null)
       setBusyAction(null)
@@ -862,6 +873,23 @@ export default function AgentPanel() {
 
   return (
     <div>
+      {toastMessage && (
+        <div className="fixed right-4 top-4 z-[250] pointer-events-none">
+          <div className="rounded-lg border border-red-500/20 bg-[#171518] px-4 py-3 shadow-2xl shadow-black/30">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center flex-shrink-0">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-zinc-200">{toastMessage}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-1">

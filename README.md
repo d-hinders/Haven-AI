@@ -25,6 +25,10 @@ This is a TypeScript monorepo:
 | `packages/frontend` | Next.js dashboard — wallet connect, Safe deploy, agent management |
 | `packages/sdk` | `@haven_ai/sdk` — TypeScript SDK for agent payment integration |
 
+## Team Docs
+
+- [PR Workflow Checklist](docs/pr-workflow-checklist.md)
+
 ## Prerequisites
 
 - **Node.js** v18+ — [nodejs.org](https://nodejs.org)

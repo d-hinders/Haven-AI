@@ -17,9 +17,8 @@ import { getSafeNonce, signSafeTx, executeSafeTx, proposeSafeTx, getChainTokens 
 import CreateAgentModal from './CreateAgentModal'
 import EditAgentModal from './EditAgentModal'
 import HowItWorksModal from './HowItWorksModal'
-import ApprovalQueue from './ApprovalQueue'
 import AgentActivityFeed from './AgentActivityFeed'
-import { useApprovals } from '@/hooks/useApprovals'
+import ConfirmDialog from './ConfirmDialog'
 import { truncate } from '@/lib/format'
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -195,9 +194,11 @@ function AgentCard({
   onChainLoading,
   onEdit,
   onViewActivity,
+  onPause,
+  onResume,
   onRevoke,
   onDelete,
-  revoking,
+  busyAction,
   chainId = 100,
 }: {
   agent: Agent
@@ -205,22 +206,44 @@ function AgentCard({
   onChainLoading: boolean
   onEdit: (agent: Agent) => void
   onViewActivity: (agent: Agent) => void
+  onPause: (agent: Agent) => void
+  onResume: (agent: Agent) => void
   onRevoke: (agent: Agent) => void
   onDelete: (agent: Agent) => void
-  revoking: boolean
+  busyAction: 'pause' | 'resume' | 'revoke' | 'delete' | null
   chainId?: number
 }) {
   const [showKey, setShowKey] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [confirmRevoke, setConfirmRevoke] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [pauseModalOpen, setPauseModalOpen] = useState(false)
+  const [revokeModalOpen, setRevokeModalOpen] = useState(false)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
 
   const isActive = agent.status === 'active'
+  const isPaused = agent.status === 'paused'
+  const isRevoked = agent.status === 'revoked'
+  const isOperational = !isRevoked
+  const isBusy = busyAction !== null
 
   function copyKey() {
     navigator.clipboard.writeText(agent.api_key)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  async function handleConfirmPause() {
+    setPauseModalOpen(false)
+    onPause(agent)
+  }
+
+  async function handleConfirmRevoke() {
+    setRevokeModalOpen(false)
+    onRevoke(agent)
+  }
+
+  async function handleConfirmDelete() {
+    setDeleteModalOpen(false)
+    onDelete(agent)
   }
 
   // Merge on-chain + DB allowance data: on-chain is primary, DB fills gaps
@@ -247,7 +270,12 @@ function AgentCard({
   }, [onChainAllowances, onChainLoading, agent.allowances])
 
   return (
-    <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 hover:border-white/[0.1] transition-all">
+    <>
+    <div className={`bg-white/[0.02] border rounded-xl p-5 transition-all ${
+      isRevoked
+        ? 'border-white/[0.04] opacity-80'
+        : 'border-white/[0.06] hover:border-white/[0.1]'
+    }`}>
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
@@ -255,7 +283,9 @@ function AgentCard({
             className={`w-9 h-9 rounded-xl flex items-center justify-center ${
               isActive
                 ? 'bg-indigo-500/10 text-indigo-400'
-                : 'bg-white/[0.04] text-zinc-600'
+                : isPaused
+                  ? 'bg-amber-500/10 text-amber-400'
+                  : 'bg-white/[0.04] text-zinc-600'
             }`}
           >
             <BotIcon size={17} />
@@ -269,7 +299,9 @@ function AgentCard({
                 className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                   isActive
                     ? 'bg-emerald-500/10 text-emerald-400'
-                    : agent.status === 'revoked'
+                    : isPaused
+                      ? 'bg-amber-500/10 text-amber-400'
+                      : agent.status === 'revoked'
                       ? 'bg-red-500/10 text-red-400'
                       : 'bg-zinc-800 text-zinc-500'
                 }`}
@@ -289,6 +321,19 @@ function AgentCard({
             )}
           </div>
         </div>
+        <button
+          onClick={() => onViewActivity(agent)}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+            isRevoked
+              ? 'border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]'
+              : 'border-indigo-500/20 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/15 hover:text-indigo-200'
+          }`}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+          Activity
+        </button>
       </div>
 
       {/* Delegate address */}
@@ -313,21 +358,24 @@ function AgentCard({
         </div>
       )}
 
-      {/* Recipient restriction indicator */}
-      {isActive && agent.restrict_recipients && (
-        <div className="mb-4 flex items-center gap-2 px-2.5 py-1.5 bg-indigo-500/5 border border-indigo-500/10 rounded-lg">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-indigo-400 flex-shrink-0">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      {isPaused && (
+        <div className="mb-4 flex items-start gap-2 px-3 py-2.5 bg-amber-500/8 border border-amber-500/20 rounded-lg">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400 flex-shrink-0 mt-0.5">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M10 15V9" />
+            <path d="M14 15V9" />
           </svg>
-          <span className="text-[10px] text-indigo-400">
-            Restricted to {agent.allowed_recipients?.length ?? 0} allowed recipient{(agent.allowed_recipients?.length ?? 0) !== 1 ? 's' : ''}
-          </span>
+          <div>
+            <p className="text-[11px] font-medium text-amber-300">Paused in Haven</p>
+            <p className="text-[11px] text-amber-200/80 leading-relaxed">
+              New API-initiated transactions are blocked until you resume this agent. On-chain delegate access and allowances are still in place.
+            </p>
+          </div>
         </div>
       )}
 
       {/* Allowance bars — on-chain primary */}
-      {isActive && (
+      {isOperational && (
         <div className="space-y-2 mb-4">
           <p className="text-[10px] text-zinc-700 uppercase tracking-wide">
             Spending limits
@@ -351,7 +399,7 @@ function AgentCard({
       )}
 
       {/* API Key */}
-      {isActive && (
+      {isOperational && (
         <div className="mb-4">
           <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
             API Key
@@ -386,75 +434,123 @@ function AgentCard({
       )}
 
       {/* Actions */}
-      {isActive && (
-        <div className="flex items-center gap-2 pt-3 border-t border-white/[0.05]">
-          <button
-            onClick={() => onViewActivity(agent)}
-            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-          >
-            Activity
-          </button>
-          <span className="text-zinc-800">|</span>
-          <button
-            onClick={() => onEdit(agent)}
-            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-          >
-            Edit
-          </button>
-          <span className="text-zinc-800">|</span>
-          {confirmRevoke ? (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-zinc-500">Revoke on-chain?</span>
-              <button
-                onClick={() => onRevoke(agent)}
-                disabled={revoking}
-                className="text-red-400 hover:text-red-300 font-medium transition-colors disabled:opacity-50"
-              >
-                {revoking ? 'Revoking...' : 'Yes'}
-              </button>
-              <button
-                onClick={() => setConfirmRevoke(false)}
-                className="text-zinc-600 hover:text-zinc-400 transition-colors"
-              >
-                No
-              </button>
-            </div>
-          ) : (
+      <div className="flex items-center gap-2 pt-3 border-t border-white/[0.05]">
+        {isOperational && (
+          <>
             <button
-              onClick={() => setConfirmRevoke(true)}
-              className="text-xs text-zinc-600 hover:text-red-400 transition-colors"
+              onClick={() => onEdit(agent)}
+              disabled={isBusy}
+              className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
+            >
+              Edit
+            </button>
+            <span className="text-zinc-800">|</span>
+            {isActive ? (
+              <button
+                onClick={() => setPauseModalOpen(true)}
+                disabled={isBusy}
+                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
+              >
+                {busyAction === 'pause' ? 'Pausing...' : 'Pause'}
+              </button>
+            ) : (
+              <button
+                onClick={() => onResume(agent)}
+                disabled={isBusy}
+                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
+              >
+                {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
+              </button>
+            )}
+            <span className="text-zinc-800">|</span>
+            <button
+              onClick={() => setRevokeModalOpen(true)}
+              disabled={isBusy}
+              className="text-xs text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-50"
             >
               Revoke
             </button>
-          )}
-          <span className="text-zinc-800">|</span>
-          {confirmDelete ? (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-zinc-500">Delete?</span>
-              <button
-                onClick={() => onDelete(agent)}
-                className="text-red-400 hover:text-red-300 font-medium transition-colors"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="text-zinc-600 hover:text-zinc-400 transition-colors"
-              >
-                No
-              </button>
-            </div>
-          ) : (
+          </>
+        )}
+        {isRevoked && (
+          <>
+            <span className="text-xs text-zinc-600">
+              On-chain access already revoked
+            </span>
+            <span className="text-zinc-800">|</span>
             <button
-              onClick={() => setConfirmDelete(true)}
-              className="text-xs text-zinc-600 hover:text-red-400 transition-colors"
+              onClick={() => setDeleteModalOpen(true)}
+              disabled={isBusy}
+              className="text-xs text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-50"
             >
               Delete
             </button>
-          )}
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
+
+    <ConfirmDialog
+      open={pauseModalOpen}
+      onCancel={() => setPauseModalOpen(false)}
+      onConfirm={handleConfirmPause}
+      title={`Pause ${agent.name}?`}
+      body={
+        <div className="space-y-3">
+          <p>
+            Pausing stops this agent from creating new transactions through Haven right away, without changing its on-chain delegate access.
+          </p>
+          <div className="rounded-lg border border-indigo-500/15 bg-indigo-500/[0.04] px-3 py-3 text-zinc-300">
+            <p className="text-xs font-medium text-indigo-300 mb-1">What stays the same</p>
+            <p className="text-xs leading-relaxed">
+              The Safe delegate and on-chain spending limits remain in place. You can resume this agent later without reconnecting or reconfiguring it.
+            </p>
+          </div>
+          <p className="text-xs text-zinc-500">
+            Use Pause for a fast, reversible stop. Use Revoke when you also want to remove the agent&apos;s on-chain spending authority.
+          </p>
+        </div>
+      }
+      confirmLabel="Pause agent"
+      tone="primary"
+      loading={busyAction === 'pause'}
+    />
+
+    <ConfirmDialog
+      open={revokeModalOpen}
+      onCancel={() => setRevokeModalOpen(false)}
+      onConfirm={handleConfirmRevoke}
+      title={`Revoke ${agent.name}?`}
+      body={
+        <div className="space-y-3">
+          <p>
+            This removes the agent&apos;s Haven access immediately and also revokes its on-chain spending authority through your Safe.
+          </p>
+          <div className="rounded-lg border border-red-500/15 bg-red-500/[0.04] px-3 py-3 text-zinc-300">
+            <p className="text-xs font-medium text-red-300 mb-1">What happens next</p>
+            <p className="text-xs leading-relaxed">
+              Haven will stop accepting new API requests from this agent, and you&apos;ll be asked to sign or propose a Safe transaction that removes the delegate&apos;s on-chain spending access.
+            </p>
+          </div>
+          <p className="text-xs text-zinc-500">
+            Use Pause when you want a quick, reversible stop. Use Revoke when you want to fully shut this agent down.
+          </p>
+        </div>
+      }
+      confirmLabel="Revoke agent"
+      loading={busyAction === 'revoke'}
+    />
+
+    <ConfirmDialog
+      open={deleteModalOpen}
+      onCancel={() => setDeleteModalOpen(false)}
+      onConfirm={handleConfirmDelete}
+      title={`Delete ${agent.name}?`}
+      body="This removes the agent record from Haven only. It does not change any on-chain state, so deletion is only available after the agent has already been revoked."
+      confirmLabel="Delete agent"
+      loading={busyAction === 'delete'}
+    />
+    </>
   )
 }
 
@@ -538,7 +634,7 @@ export default function AgentPanel() {
   const safeAddress = activeSafe?.safe_address ?? null
   const chainId = activeSafe?.chain_id ?? 100
   const { details: safeDetails } = useSafeDetails(safeAddress)
-  const { agents, loading, revokeAgent, deleteAgent, refetch } = useAgents()
+  const { agents, loading, revokeAgent, pauseAgent, resumeAgent, deleteAgent, refetch } = useAgents()
   const { address: connectedAddress } = useAccount()
   const publicClient = usePublicClient()
   const { data: walletClient } = useWalletClient()
@@ -547,18 +643,34 @@ export default function AgentPanel() {
   const [createPreset, setCreatePreset] = useState<'demo' | null>(null)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [howItWorksOpen, setHowItWorksOpen] = useState(false)
-  const [revoking, setRevoking] = useState(false)
-  const [activeView, setActiveView] = useState<'agents' | 'approvals' | 'activity'>(
+  const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
+  const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
+  const [showRevokedAgents, setShowRevokedAgents] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [activeView, setActiveView] = useState<'agents' | 'activity'>(
     'agents',
   )
   const [activityAgent, setActivityAgent] = useState<Agent | null>(null)
-  const { pendingCount: pendingApprovals } = useApprovals()
+  const visibleAgents = useMemo(
+    () => agents.filter((agent) => agent.status !== 'revoked'),
+    [agents],
+  )
+  const revokedAgents = useMemo(
+    () => agents.filter((agent) => agent.status === 'revoked'),
+    [agents],
+  )
+
+  useEffect(() => {
+    if (!toastMessage) return
+    const timeout = window.setTimeout(() => setToastMessage(null), 3000)
+    return () => window.clearTimeout(timeout)
+  }, [toastMessage])
 
   // Collect managed delegate addresses from DB agents
   const managedDelegates = useMemo(
     () =>
       agents
-        .filter((a) => a.status === 'active' && a.delegate_address)
+        .filter((a) => a.status !== 'revoked' && a.delegate_address)
         .map((a) => a.delegate_address!),
     [agents],
   )
@@ -596,7 +708,8 @@ export default function AgentPanel() {
     )
       return
 
-    setRevoking(true)
+    setBusyAgentId(agent.id)
+    setBusyAction('revoke')
     try {
       const nonce = await getSafeNonce(publicClient, safeAddress as Address)
       const safeTx = buildAgentRevokeTx(agent.delegate_address as Address, nonce)
@@ -674,17 +787,53 @@ export default function AgentPanel() {
         !err.message.includes('denied')
       ) {
         console.error('Revoke failed:', err)
+        setToastMessage('Revoke failed')
       }
     } finally {
-      setRevoking(false)
+      setBusyAgentId(null)
+      setBusyAction(null)
+    }
+  }
+
+  async function handlePause(agent: Agent) {
+    setBusyAgentId(agent.id)
+    setBusyAction('pause')
+    try {
+      await pauseAgent(agent.id)
+    } catch (err) {
+      console.error('Pause failed:', err)
+      setToastMessage('Pause failed')
+    } finally {
+      setBusyAgentId(null)
+      setBusyAction(null)
+    }
+  }
+
+  async function handleResume(agent: Agent) {
+    setBusyAgentId(agent.id)
+    setBusyAction('resume')
+    try {
+      await resumeAgent(agent.id)
+    } catch (err) {
+      console.error('Resume failed:', err)
+      setToastMessage('Resume failed')
+    } finally {
+      setBusyAgentId(null)
+      setBusyAction(null)
     }
   }
 
   async function handleDelete(agent: Agent) {
+    setBusyAgentId(agent.id)
+    setBusyAction('delete')
     try {
       await deleteAgent(agent.id)
     } catch (err) {
       console.error('Delete failed:', err)
+      setToastMessage('Delete failed')
+    } finally {
+      setBusyAgentId(null)
+      setBusyAction(null)
     }
   }
 
@@ -708,6 +857,23 @@ export default function AgentPanel() {
 
   return (
     <div>
+      {toastMessage && (
+        <div className="fixed right-4 top-4 z-[250] pointer-events-none">
+          <div className="rounded-lg border border-red-500/20 bg-[#171518] px-4 py-3 shadow-2xl shadow-black/30">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center flex-shrink-0">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-zinc-200">{toastMessage}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-1">
@@ -721,23 +887,8 @@ export default function AgentPanel() {
           >
             Agents
             <span className="ml-1 text-zinc-700">
-              {agents.filter((a) => a.status === 'active').length}
+              {visibleAgents.length}
             </span>
-          </button>
-          <button
-            onClick={() => setActiveView('approvals')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all relative ${
-              activeView === 'approvals'
-                ? 'bg-white/[0.06] text-zinc-200'
-                : 'text-zinc-600 hover:text-zinc-400'
-            }`}
-          >
-            Approvals
-            {pendingApprovals > 0 && (
-              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400">
-                {pendingApprovals}
-              </span>
-            )}
           </button>
         </div>
         <div className="flex items-center gap-2">
@@ -764,9 +915,6 @@ export default function AgentPanel() {
           </button>
         </div>
       </div>
-
-      {/* Approvals view */}
-      {activeView === 'approvals' && <ApprovalQueue />}
 
       {/* Activity view */}
       {activeView === 'activity' && activityAgent && (
@@ -808,26 +956,16 @@ export default function AgentPanel() {
           <p className="text-xs text-zinc-500 mb-5 max-w-xs text-center leading-relaxed">
             Set up payment credentials and on-chain spending limits, then hand them off to your agent so it can spend from your Safe within your rules.
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => { setCreatePreset('demo'); setCreateOpen(true) }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-              Spin up a demo agent
-            </button>
-            <button
-              onClick={() => { setCreatePreset(null); setCreateOpen(true) }}
-              className="px-4 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-xs font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all"
-            >
-              Configure from scratch
-            </button>
-          </div>
-          <p className="text-[10px] text-zinc-700 mt-3 max-w-xs text-center">
-            Demo agent: 10 USDC/day on-chain allowance, auto-generated signing key, ready to drop into an x402-enabled agent.
-          </p>
+          <button
+            onClick={() => { setCreatePreset(null); setCreateOpen(true) }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Connect agent
+          </button>
         </div>
       )}
 
@@ -835,7 +973,7 @@ export default function AgentPanel() {
       {activeView === 'agents' && (agents.length > 0 || unmanagedDelegates.length > 0) && (
         <div className="space-y-3">
           {/* Managed agents */}
-          {agents.map((agent) => {
+          {visibleAgents.map((agent) => {
             const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
             const chainData = delegateKey
               ? onChainData.get(delegateKey)?.allowances ?? null
@@ -849,13 +987,57 @@ export default function AgentPanel() {
                 onChainLoading={onChainLoading}
                 onEdit={setEditAgent}
                 onViewActivity={handleViewActivity}
+                onPause={handlePause}
+                onResume={handleResume}
                 onRevoke={handleRevoke}
                 onDelete={handleDelete}
-                revoking={revoking}
+                busyAction={busyAgentId === agent.id ? busyAction : null}
                 chainId={chainId}
               />
             )
           })}
+
+          {revokedAgents.length > 0 && (
+            <div className="pt-1">
+              <button
+                onClick={() => setShowRevokedAgents((prev) => !prev)}
+                className="inline-flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={`transition-transform ${showRevokedAgents ? 'rotate-90' : ''}`}
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+                {showRevokedAgents ? 'Hide revoked agents' : 'Show revoked agents'}
+                <span className="text-zinc-700">({revokedAgents.length})</span>
+              </button>
+            </div>
+          )}
+
+          {showRevokedAgents && revokedAgents.map((agent) => (
+            <AgentCard
+              key={agent.id}
+              agent={agent}
+              onChainAllowances={null}
+              onChainLoading={false}
+              onEdit={setEditAgent}
+              onViewActivity={handleViewActivity}
+              onPause={handlePause}
+              onResume={handleResume}
+              onRevoke={handleRevoke}
+              onDelete={handleDelete}
+              busyAction={busyAgentId === agent.id ? busyAction : null}
+              chainId={chainId}
+            />
+          ))}
 
           {/* Unmanaged on-chain delegates */}
           {unmanagedDelegates.map((d) => (

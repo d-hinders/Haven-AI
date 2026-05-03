@@ -38,7 +38,6 @@ const DEMO = {
     policy: {
       dailyLimit: '50 USDC',
       perTxLimit: '1 USDC',
-      approvalThreshold: '1 USDC',
       allowedCategories: ['api_access', 'data'],
       allowedNetworks: ['Base', 'Gnosis'],
     },
@@ -68,7 +67,6 @@ const DEMO = {
 
 const POLICY_CHECKS: string[] = [
   'Within per-tx limit (1 USDC)',
-  'Below approval threshold',
   `Network ${'Base'} allowed`,
   'On-chain allowance sufficient',
 ]
@@ -170,7 +168,7 @@ export default function X402DemoPage() {
       push({
         phase: 'policy',
         label: 'Policy engine evaluating intent',
-        detail: 'Per-tx limit, approval threshold, network allowlist, on-chain allowance',
+        detail: 'Per-tx limit, network allowlist, on-chain allowance',
       })
     })
     // Stagger 4 checks across ~1200ms (300ms per check)

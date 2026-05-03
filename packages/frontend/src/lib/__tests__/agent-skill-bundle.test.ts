@@ -21,8 +21,6 @@ const BASE_INPUT: HandoffInput = {
   },
   policy: {
     allowances: [{ tokenSymbol: 'EURe', amount: '10', resetPeriodMin: 1440 }],
-    restrictRecipients: false,
-    allowedRecipients: [],
   },
   credentials: {
     apiKey: 'sk_agent_TESTKEY_NEVERREAL',

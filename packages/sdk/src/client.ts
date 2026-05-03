@@ -107,6 +107,19 @@ export class HavenClient {
       to: request.to,
     })
 
+    // Haven returns HTTP 202 with this status when the requested amount
+    // exceeds the on-chain allowance. The payment is parked for the owner
+    // to approve in the dashboard — there's nothing to sign yet, so the SDK
+    // surfaces it as an explicit error rather than returning a malformed
+    // intent with no signData.
+    if (raw.status === 'pending_approval') {
+      throw new HavenApiError(
+        `Payment exceeds the on-chain allowance and was queued for owner approval (payment_id: ${raw.payment_id}).`,
+        202,
+        raw,
+      )
+    }
+
     return {
       paymentId: raw.payment_id,
       status: 'pending_signature',

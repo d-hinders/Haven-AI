@@ -23,11 +23,6 @@ export interface HandoffAllowance {
   resetPeriodMin: number
 }
 
-export interface HandoffRecipient {
-  address: string
-  label?: string
-}
-
 export interface HandoffInput {
   agent: {
     id: string
@@ -40,8 +35,6 @@ export interface HandoffInput {
   }
   policy: {
     allowances: HandoffAllowance[]
-    restrictRecipients: boolean
-    allowedRecipients: HandoffRecipient[]
   }
   credentials: {
     apiKey: string
@@ -181,22 +174,9 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
       policyLines.push(`  - ${a.amount} ${a.tokenSymbol} ${resetLabel(a.resetPeriodMin)}`)
     }
   }
-  if (policy.restrictRecipients) {
-    if (policy.allowedRecipients.length === 0) {
-      policyLines.push(
-        `- **Recipients:** allowlist enabled but empty — the agent cannot send anywhere until you add recipients.`,
-      )
-    } else {
-      policyLines.push(`- **Allowed recipients:**`)
-      for (const r of policy.allowedRecipients) {
-        policyLines.push(
-          `  - \`${r.address}\`${r.label ? ` — ${r.label}` : ''}`,
-        )
-      }
-    }
-  } else {
-    policyLines.push(`- **Recipients:** any address`)
-  }
+  policyLines.push(
+    `- **Over-allowance payments:** automatically queued for owner approval in the Haven dashboard.`,
+  )
 
   const credentialLines: string[] = [
     `**API key** — authenticates every request to Haven:`,
@@ -244,9 +224,11 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     ``,
     ...policyLines,
     ``,
-    `The Haven backend enforces this policy on every request. An agent presenting`,
-    `these credentials can only spend within these limits — losing them ≠ losing`,
-    `the Safe.`,
+    `Policy is enforced by the on-chain Safe AllowanceModule — the agent cannot`,
+    `move more than the configured amount per reset window. Payments above the`,
+    `remaining allowance are not rejected; they're queued for owner approval`,
+    `in the Haven dashboard, so the agent always has an escape hatch for`,
+    `out-of-band spend without raising its on-chain limits.`,
     ``,
     `## Credentials`,
     ``,

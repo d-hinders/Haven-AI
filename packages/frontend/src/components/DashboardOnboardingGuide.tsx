@@ -117,10 +117,11 @@ function FundingPanel({
   const chainConfig = safe ? getChainConfig(safe.chain_id) : null
   const tokens = chainConfig ? Object.values(chainConfig.tokens) : []
 
+  const [showQr, setShowQr] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!safe?.safe_address) {
+    if (!safe?.safe_address || !showQr) {
       setQrDataUrl(null)
       return
     }
@@ -139,7 +140,11 @@ function FundingPanel({
     return () => {
       cancelled = true
     }
-  }, [safe?.safe_address])
+  }, [safe?.safe_address, showQr])
+
+  useEffect(() => {
+    setShowQr(false)
+  }, [safe?.id])
 
   if (!safe || !chainConfig) return null
 
@@ -178,7 +183,7 @@ function FundingPanel({
 
       {/* Address row + QR */}
       <div className="flex items-start gap-4 p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
-        {qrDataUrl && (
+        {showQr && qrDataUrl && (
           <img
             src={qrDataUrl}
             alt="Deposit address QR code"
@@ -206,6 +211,12 @@ function FundingPanel({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                 </svg>
               </a>
+              <button
+                onClick={() => setShowQr((value) => !value)}
+                className="text-[10px] px-2 py-1 rounded border border-indigo-500/20 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/15 transition-colors"
+              >
+                {showQr ? 'Hide QR' : 'Show QR'}
+              </button>
             </div>
           </div>
           <div>

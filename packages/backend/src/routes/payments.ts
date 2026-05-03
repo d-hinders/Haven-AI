@@ -3,6 +3,7 @@ import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
+import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import {
   getTokenAllowance,
   computeEffectiveAllowance,
@@ -364,10 +365,21 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           signature,
         )
 
+        const fiatValues = await getFiatValuesForTokenAmount(
+          intent.token_symbol,
+          intent.amount_human,
+        )
+
         // 5. Success
         await pool.query(
-          `UPDATE payment_intents SET status = 'confirmed', tx_hash = $1, confirmed_at = NOW() WHERE id = $2`,
-          [txHash, id],
+          `UPDATE payment_intents
+           SET status = 'confirmed',
+               tx_hash = $1,
+               confirmed_at = NOW(),
+               usd_value = $3,
+               eur_value = $4
+           WHERE id = $2`,
+          [txHash, id, fiatValues.usd, fiatValues.eur],
         )
 
         return reply.send({

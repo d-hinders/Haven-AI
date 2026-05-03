@@ -71,7 +71,8 @@ interface ParsedTokenFilter {
   address: string | null
 }
 
-const txCache = createCache<FetchSafeTransactionsResult>(30_000)
+const txCache = createCache<Transaction[]>(30_000)
+const txInflight = new Map<string, Promise<FetchSafeTransactionsResult>>()
 
 function parsePositiveInt(
   value: string | undefined,
@@ -132,7 +133,17 @@ async function fetchSafeTransactions({
     txCache.delete(cacheKey)
   }
 
-  return txCache.getOrFetch(cacheKey, async () => {
+  const cached = txCache.get(cacheKey)
+  if (cached !== undefined) {
+    return { transactions: cached, hadFailures: false }
+  }
+
+  const inflight = txInflight.get(cacheKey)
+  if (inflight) {
+    return inflight
+  }
+
+  const requestPromise = (async () => {
     const addrLower = safeAddress.toLowerCase()
     let hadFailures = false
     const logFail = (kind: string) => (err: unknown) => {
@@ -214,19 +225,46 @@ async function fetchSafeTransactions({
       })
     }
 
-    transactions.sort((a, b) => b.timestamp - a.timestamp)
+    transactions.sort(compareTransactions)
 
     const seen = new Set<string>()
-    return {
-      transactions: transactions.filter((tx) => {
+    const deduped = transactions.filter((tx) => {
         const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}`
         if (seen.has(key)) return false
         seen.add(key)
         return true
-      }),
+      })
+
+    txCache.set(cacheKey, deduped)
+
+    return {
+      transactions: deduped,
       hadFailures,
     }
+  })().finally(() => {
+    txInflight.delete(cacheKey)
   })
+
+  txInflight.set(cacheKey, requestPromise)
+  return requestPromise
+}
+
+function compareTransactions(a: Transaction, b: Transaction): number {
+  return (
+    b.timestamp - a.timestamp ||
+    b.blockNumber - a.blockNumber ||
+    a.hash.localeCompare(b.hash) ||
+    a.type.localeCompare(b.type) ||
+    a.from.localeCompare(b.from) ||
+    a.to.localeCompare(b.to)
+  )
+}
+
+function compareEnrichedTransactions(
+  a: EnrichedTransaction,
+  b: EnrichedTransaction,
+): number {
+  return compareTransactions(a, b) || a.safeAddress.localeCompare(b.safeAddress)
 }
 
 async function enrichTransactionsWithAgents(
@@ -385,7 +423,7 @@ export default async function transactionRoutes(
       }
     }
 
-    merged.sort((a, b) => b.timestamp - a.timestamp)
+    merged.sort(compareEnrichedTransactions)
 
     const seen = new Set<string>()
     const deduped = merged.filter((tx) => {
@@ -474,34 +512,43 @@ export default async function transactionRoutes(
         chainId: safe.chain_id,
         isNative: true,
       })
+    }
 
-      try {
-        const { transactions } = await fetchSafeTransactions({
-          safeId: safe.id,
-          safeAddress: safe.safe_address,
-          chainId: safe.chain_id,
-          log: request.log,
-          fresh,
-        })
-
-        for (const tx of transactions) {
-          if (tx.type !== 'erc20' || !tx.tokenAddress) continue
-          const key = `${safe.chain_id}:${tx.tokenAddress.toLowerCase()}`
-          if (tokenOptions.has(key)) continue
-
-          tokenOptions.set(key, {
-            key,
-            symbol: tx.asset,
-            address: tx.tokenAddress.toLowerCase(),
+    const tokenResults = await Promise.all(
+      safeResult.rows.map(async (safe) => {
+        try {
+          const { transactions } = await fetchSafeTransactions({
+            safeId: safe.id,
+            safeAddress: safe.safe_address,
             chainId: safe.chain_id,
-            isNative: false,
+            log: request.log,
+            fresh,
           })
+
+          return { safe, transactions }
+        } catch (err) {
+          request.log.warn(
+            { err, safeId: safe.id, safeAddress: safe.safe_address, chainId: safe.chain_id },
+            'Transaction filter token collection failed',
+          )
+          return { safe, transactions: [] as Transaction[] }
         }
-      } catch (err) {
-        request.log.warn(
-          { err, safeId: safe.id, safeAddress: safe.safe_address, chainId: safe.chain_id },
-          'Transaction filter token collection failed',
-        )
+      }),
+    )
+
+    for (const { safe, transactions } of tokenResults) {
+      for (const tx of transactions) {
+        if (tx.type !== 'erc20' || !tx.tokenAddress) continue
+        const key = `${safe.chain_id}:${tx.tokenAddress.toLowerCase()}`
+        if (tokenOptions.has(key)) continue
+
+        tokenOptions.set(key, {
+          key,
+          symbol: tx.asset,
+          address: tx.tokenAddress.toLowerCase(),
+          chainId: safe.chain_id,
+          isNative: false,
+        })
       }
     }
 
@@ -570,6 +617,7 @@ export default async function transactionRoutes(
         chainId,
         safeId,
         safeAddress,
+        // These aggregated-only fields are stripped back off before responding.
         safeName: '',
       })),
     )

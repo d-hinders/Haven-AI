@@ -1,5 +1,7 @@
 # Transactions Page Implementation Plan
 
+This is an implementation snapshot captured for PR #34 and may drift from the live codebase over time.
+
 This document refines `/Users/danielhinders/.claude/plans/new-feature-in-the-calm-frog.md` into a codebase-ready implementation plan for Haven.
 
 ## Goal

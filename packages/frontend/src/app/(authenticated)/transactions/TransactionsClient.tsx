@@ -49,7 +49,8 @@ export default function TransactionsClient() {
     .filter((name): name is string => Boolean(name))
 
   const handleRefresh = async () => {
-    await Promise.all([refresh(), refreshFilters()])
+    await refresh()
+    await refreshFilters(false)
   }
 
   if (!hasSafes) {

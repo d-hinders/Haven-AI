@@ -250,7 +250,7 @@ export default function FilterBar({
               className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-1 text-xs text-indigo-400 transition-colors hover:bg-indigo-500/15"
             >
               <span>{chip.label}</span>
-              <span aria-hidden="true">x</span>
+              <span aria-hidden="true">×</span>
             </button>
           ))}
         </div>

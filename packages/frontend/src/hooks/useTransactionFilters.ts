@@ -7,7 +7,7 @@ import type { TransactionFilterOptionsResponse } from '@/types/transactions'
 interface UseTransactionFiltersReturn extends TransactionFilterOptionsResponse {
   loading: boolean
   error: string | null
-  refresh: () => Promise<void>
+  refresh: (fresh?: boolean) => Promise<void>
 }
 
 export function useTransactionFilters(): UseTransactionFiltersReturn {
@@ -47,8 +47,8 @@ export function useTransactionFilters(): UseTransactionFiltersReturn {
     void fetchFilters(false)
   }, [fetchFilters])
 
-  const refresh = useCallback(async () => {
-    await fetchFilters(true)
+  const refresh = useCallback(async (fresh = true) => {
+    await fetchFilters(fresh)
   }, [fetchFilters])
 
   return {

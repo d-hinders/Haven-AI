@@ -2,24 +2,23 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
-import { type Address, hashTypedData } from 'viem'
+import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import {
-  buildAgentRevokeTx,
   computeEffectiveAllowance,
   RESET_PERIODS,
   type AllowanceInfo,
 } from '@/lib/allowance-module'
-import { getSafeNonce, signSafeTx, executeSafeTx, proposeSafeTx, getChainTokens } from '@/lib/safe-tx'
+import { getChainTokens } from '@/lib/safe-tx'
 import CreateAgentModal from './CreateAgentModal'
 import EditAgentModal from './EditAgentModal'
 import HowItWorksModal from './HowItWorksModal'
-import AgentActivityFeed from './AgentActivityFeed'
 import ConfirmDialog from './ConfirmDialog'
 import { truncate } from '@/lib/format'
+import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -192,8 +191,8 @@ function AgentCard({
   agent,
   onChainAllowances,
   onChainLoading,
+  onViewDetails,
   onEdit,
-  onViewActivity,
   onPause,
   onResume,
   onRevoke,
@@ -204,8 +203,8 @@ function AgentCard({
   agent: Agent
   onChainAllowances: AllowanceInfo[] | null
   onChainLoading: boolean
+  onViewDetails: (agent: Agent) => void
   onEdit: (agent: Agent) => void
-  onViewActivity: (agent: Agent) => void
   onPause: (agent: Agent) => void
   onResume: (agent: Agent) => void
   onRevoke: (agent: Agent) => void
@@ -301,7 +300,7 @@ function AgentCard({
                     ? 'bg-emerald-500/10 text-emerald-400'
                     : isPaused
                       ? 'bg-amber-500/10 text-amber-400'
-                      : agent.status === 'revoked'
+                    : agent.status === 'revoked'
                       ? 'bg-red-500/10 text-red-400'
                       : 'bg-zinc-800 text-zinc-500'
                 }`}
@@ -322,7 +321,7 @@ function AgentCard({
           </div>
         </div>
         <button
-          onClick={() => onViewActivity(agent)}
+          onClick={() => onViewDetails(agent)}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
             isRevoked
               ? 'border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]'
@@ -330,9 +329,10 @@ function AgentCard({
           }`}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+            <circle cx="12" cy="12" r="3" />
           </svg>
-          Activity
+          View details
         </button>
       </div>
 
@@ -474,6 +474,7 @@ function AgentCard({
         )}
         {isRevoked && (
           <>
+            <span className="text-zinc-800">|</span>
             <span className="text-xs text-zinc-600">
               On-chain access already revoked
             </span>
@@ -630,27 +631,30 @@ function UnmanagedDelegateCard({
 // ── Main panel ─────────────────────────────────────────────────────
 
 export default function AgentPanel() {
-  const { user, activeSafe } = useAuth()
+  const { activeSafe } = useAuth()
   const safeAddress = activeSafe?.safe_address ?? null
   const chainId = activeSafe?.chain_id ?? 100
   const { details: safeDetails } = useSafeDetails(safeAddress)
-  const { agents, loading, revokeAgent, pauseAgent, resumeAgent, deleteAgent, refetch } = useAgents()
+  const {
+    agents,
+    loading,
+    revokeAgent,
+    pauseAgent,
+    resumeAgent,
+    deleteAgent,
+    refetch,
+  } = useAgents()
   const { address: connectedAddress } = useAccount()
   const publicClient = usePublicClient()
   const { data: walletClient } = useWalletClient()
 
   const [createOpen, setCreateOpen] = useState(false)
-  const [createPreset, setCreatePreset] = useState<'demo' | null>(null)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [howItWorksOpen, setHowItWorksOpen] = useState(false)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
   const [showRevokedAgents, setShowRevokedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
-  const [activeView, setActiveView] = useState<'agents' | 'activity'>(
-    'agents',
-  )
-  const [activityAgent, setActivityAgent] = useState<Agent | null>(null)
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
     [agents],
@@ -703,91 +707,28 @@ export default function AgentPanel() {
       !walletClient ||
       !connectedAddress ||
       !safeAddress ||
-      !safeDetails ||
-      !agent.delegate_address
+      !safeDetails
     )
       return
 
     setBusyAgentId(agent.id)
     setBusyAction('revoke')
     try {
-      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
-      const safeTx = buildAgentRevokeTx(agent.delegate_address as Address, nonce)
-      const signature = await signSafeTx(
+      await revokeAgentOnChain({
+        agent,
+        publicClient,
         walletClient,
-        safeAddress as Address,
-        safeTx,
         connectedAddress,
+        safeAddress: safeAddress as Address,
+        safeDetails,
         chainId,
-      )
-
-      const threshold = safeDetails.threshold ?? 1
-      if (threshold <= 1) {
-        await executeSafeTx(
-          walletClient,
-          publicClient,
-          safeAddress as Address,
-          safeTx,
-          signature,
-          connectedAddress,
-          chainId,
-        )
-      } else {
-        const safeTxHash = hashTypedData({
-          domain: {
-            chainId,
-            verifyingContract: safeAddress as Address,
-          },
-          types: {
-            SafeTx: [
-              { name: 'to', type: 'address' },
-              { name: 'value', type: 'uint256' },
-              { name: 'data', type: 'bytes' },
-              { name: 'operation', type: 'uint8' },
-              { name: 'safeTxGas', type: 'uint256' },
-              { name: 'baseGas', type: 'uint256' },
-              { name: 'gasPrice', type: 'uint256' },
-              { name: 'gasToken', type: 'address' },
-              { name: 'refundReceiver', type: 'address' },
-              { name: 'nonce', type: 'uint256' },
-            ],
-          },
-          primaryType: 'SafeTx',
-          message: {
-            to: safeTx.to,
-            value: safeTx.value,
-            data: safeTx.data,
-            operation: safeTx.operation,
-            safeTxGas: safeTx.safeTxGas,
-            baseGas: safeTx.baseGas,
-            gasPrice: safeTx.gasPrice,
-            gasToken: safeTx.gasToken,
-            refundReceiver: safeTx.refundReceiver,
-            nonce: safeTx.nonce,
-          },
-        })
-        await proposeSafeTx(
-          safeAddress as Address,
-          safeTx,
-          safeTxHash,
-          signature,
-          connectedAddress,
-          chainId,
-        )
-      }
-
-      // Update in Haven backend
+      })
       await revokeAgent(agent.id)
-      refetchOnChain()
+      await refetchOnChain()
     } catch (err) {
-      // If user rejected, just ignore
-      if (
-        err instanceof Error &&
-        !err.message.includes('rejected') &&
-        !err.message.includes('denied')
-      ) {
+      if (!isUserRejectedError(err)) {
         console.error('Revoke failed:', err)
-        setToastMessage('Revoke failed')
+        setToastMessage(err instanceof Error ? err.message : 'Revoke failed')
       }
     } finally {
       setBusyAgentId(null)
@@ -802,7 +743,7 @@ export default function AgentPanel() {
       await pauseAgent(agent.id)
     } catch (err) {
       console.error('Pause failed:', err)
-      setToastMessage('Pause failed')
+      setToastMessage(err instanceof Error ? err.message : 'Pause failed')
     } finally {
       setBusyAgentId(null)
       setBusyAction(null)
@@ -816,7 +757,7 @@ export default function AgentPanel() {
       await resumeAgent(agent.id)
     } catch (err) {
       console.error('Resume failed:', err)
-      setToastMessage('Resume failed')
+      setToastMessage(err instanceof Error ? err.message : 'Resume failed')
     } finally {
       setBusyAgentId(null)
       setBusyAction(null)
@@ -830,16 +771,15 @@ export default function AgentPanel() {
       await deleteAgent(agent.id)
     } catch (err) {
       console.error('Delete failed:', err)
-      setToastMessage('Delete failed')
+      setToastMessage(err instanceof Error ? err.message : 'Delete failed')
     } finally {
       setBusyAgentId(null)
       setBusyAction(null)
     }
   }
 
-  function handleViewActivity(agent: Agent) {
-    setActivityAgent(agent)
-    setActiveView('activity')
+  function handleViewDetails(agent: Agent) {
+    window.location.href = `/agents/${agent.id}`
   }
 
   // ── Render ─────────────────────────────────────────────
@@ -877,19 +817,12 @@ export default function AgentPanel() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => { setActiveView('agents'); setActivityAgent(null) }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              activeView === 'agents'
-                ? 'bg-white/[0.06] text-zinc-200'
-                : 'text-zinc-600 hover:text-zinc-400'
-            }`}
-          >
+          <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.06] text-zinc-200">
             Agents
             <span className="ml-1 text-zinc-700">
               {visibleAgents.length}
             </span>
-          </button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -916,17 +849,8 @@ export default function AgentPanel() {
         </div>
       </div>
 
-      {/* Activity view */}
-      {activeView === 'activity' && activityAgent && (
-        <AgentActivityFeed
-          agentId={activityAgent.id}
-          agentName={activityAgent.name}
-          onClose={() => { setActiveView('agents'); setActivityAgent(null) }}
-        />
-      )}
-
       {/* Agents view */}
-      {activeView === 'agents' && loading && agents.length === 0 && (
+      {loading && agents.length === 0 && (
         <div className="space-y-3">
           {[0, 1].map((i) => (
             <div
@@ -947,7 +871,7 @@ export default function AgentPanel() {
       )}
 
       {/* Empty state */}
-      {activeView === 'agents' && !loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
+      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
         <div className="flex flex-col items-center justify-center h-72 rounded-xl border border-dashed border-white/[0.06] px-6">
           <div className="w-12 h-12 rounded-xl bg-white/[0.04] flex items-center justify-center mb-3">
             <BotIcon size={24} />
@@ -957,7 +881,7 @@ export default function AgentPanel() {
             Set up payment credentials and on-chain spending limits, then hand them off to your agent so it can spend from your Safe within your rules.
           </p>
           <button
-            onClick={() => { setCreatePreset(null); setCreateOpen(true) }}
+            onClick={() => setCreateOpen(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -970,7 +894,7 @@ export default function AgentPanel() {
       )}
 
       {/* Agent list */}
-      {activeView === 'agents' && (agents.length > 0 || unmanagedDelegates.length > 0) && (
+      {(agents.length > 0 || unmanagedDelegates.length > 0) && (
         <div className="space-y-3">
           {/* Managed agents */}
           {visibleAgents.map((agent) => {
@@ -985,8 +909,8 @@ export default function AgentPanel() {
                 agent={agent}
                 onChainAllowances={chainData}
                 onChainLoading={onChainLoading}
+                onViewDetails={handleViewDetails}
                 onEdit={setEditAgent}
-                onViewActivity={handleViewActivity}
                 onPause={handlePause}
                 onResume={handleResume}
                 onRevoke={handleRevoke}
@@ -1028,8 +952,8 @@ export default function AgentPanel() {
               agent={agent}
               onChainAllowances={null}
               onChainLoading={false}
+              onViewDetails={handleViewDetails}
               onEdit={setEditAgent}
-              onViewActivity={handleViewActivity}
               onPause={handlePause}
               onResume={handleResume}
               onRevoke={handleRevoke}
@@ -1054,10 +978,9 @@ export default function AgentPanel() {
       {/* Create modal */}
       <CreateAgentModal
         open={createOpen}
-        onClose={() => { setCreateOpen(false); setCreatePreset(null) }}
+        onClose={() => setCreateOpen(false)}
         safeAddress={safeAddress}
         safeId={activeSafe?.id}
-        preset={createPreset}
         onCreated={() => {
           // Don't close the modal here — the Done step shows the one-time
           // handoff file / skill bundle / raw credentials. User dismisses via

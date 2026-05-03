@@ -77,17 +77,21 @@ export async function agentAuthMiddleware(
   )
 
   if (result.rows.length === 0) {
-    return reply.code(401).send({ error: 'Invalid API key' })
+    return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 
   const row = result.rows[0]
 
-  if (row.status === 'paused') {
-    return reply.code(403).send({ error: 'Agent is paused' })
+  if (row.status === 'revoked') {
+    return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 
-  if (row.status !== 'active') {
-    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+  if (row.status === 'paused') {
+    return reply.code(403).send({
+      error: 'agent_paused',
+      detail:
+        'New API-initiated transactions are blocked until you resume this agent. On-chain delegate access and allowances are still in place.',
+    })
   }
 
   if (!row.delegate_address) {

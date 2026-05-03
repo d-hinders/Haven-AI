@@ -11,15 +11,27 @@ interface UseSafeDetailsReturn {
   refetch: () => void
 }
 
-export function useSafeDetails(safeAddress: string | null): UseSafeDetailsReturn {
+interface UseSafeDetailsOptions {
+  enabled?: boolean
+}
+
+export function useSafeDetails(
+  safeAddress: string | null,
+  { enabled = true }: UseSafeDetailsOptions = {},
+): UseSafeDetailsReturn {
   const [details, setDetails] = useState<SafeDetails | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(Boolean(safeAddress) && enabled)
   const [error, setError] = useState<string | null>(null)
 
   const fetchDetails = useCallback(async () => {
     if (!safeAddress) {
       setDetails(null)
       setError(null)
+      setLoading(false)
+      return
+    }
+
+    if (!enabled) {
       setLoading(false)
       return
     }
@@ -34,11 +46,23 @@ export function useSafeDetails(safeAddress: string | null): UseSafeDetailsReturn
     } finally {
       setLoading(false)
     }
-  }, [safeAddress])
+  }, [enabled, safeAddress])
 
   useEffect(() => {
+    if (!safeAddress) {
+      setDetails(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    if (!enabled) {
+      setLoading(false)
+      return
+    }
+
     fetchDetails()
-  }, [fetchDetails, safeAddress])
+  }, [enabled, fetchDetails, safeAddress])
 
   return { details, loading, error, refetch: fetchDetails }
 }

@@ -3,6 +3,7 @@ import { ethers } from 'ethers'
 import pool from '../db.js'
 import { selfSignAgentAuthMiddleware, type SelfSignAgentContext } from '../middleware/selfSignAgentAuth.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
+import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import {
   getTokenAllowance,
   computeEffectiveAllowance,
@@ -338,11 +339,20 @@ export default async function selfSignPaymentRoutes(app: FastifyInstance): Promi
           signature,
         )
 
+        const fiatValues = await getFiatValuesForTokenAmount(
+          intent.token_symbol,
+          intent.amount_human,
+        )
+
         await pool.query(
           `UPDATE self_sign_payment_intents
-           SET status = 'confirmed', tx_hash = $1, confirmed_at = NOW()
+           SET status = 'confirmed',
+               tx_hash = $1,
+               confirmed_at = NOW(),
+               usd_value = $3,
+               eur_value = $4
            WHERE id = $2`,
-          [txHash, id],
+          [txHash, id, fiatValues.usd, fiatValues.eur],
         )
 
         return reply.send({

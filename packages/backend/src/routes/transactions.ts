@@ -38,7 +38,7 @@ interface UserSafeRow {
   name: string
 }
 
-interface EnrichedTransaction extends Transaction {
+export interface EnrichedTransaction extends Transaction {
   chainId: number
   safeId: string
   safeAddress: string
@@ -118,7 +118,7 @@ function parseTokenKey(tokenKey: string | undefined): ParsedTokenFilter | null {
   return { chainId, address: assetPart.toLowerCase() }
 }
 
-async function fetchSafeTransactions({
+export async function fetchSafeTransactions({
   safeId,
   safeAddress,
   chainId,
@@ -249,7 +249,7 @@ async function fetchSafeTransactions({
   return requestPromise
 }
 
-function compareTransactions(a: Transaction, b: Transaction): number {
+export function compareTransactions(a: Transaction, b: Transaction): number {
   return (
     b.timestamp - a.timestamp ||
     b.blockNumber - a.blockNumber ||
@@ -267,7 +267,7 @@ function compareEnrichedTransactions(
   return compareTransactions(a, b) || a.safeAddress.localeCompare(b.safeAddress)
 }
 
-async function enrichTransactionsWithAgents(
+export async function enrichTransactionsWithAgents(
   userId: string,
   transactions: EnrichedTransaction[],
 ): Promise<EnrichedTransaction[]> {

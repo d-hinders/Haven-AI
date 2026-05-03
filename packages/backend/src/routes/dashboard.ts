@@ -4,10 +4,14 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { fetchPortfolioForSafe } from '../lib/portfolio.js'
 import {
+  compareTransactions,
   type EnrichedTransaction,
   enrichTransactionsWithAgents,
   fetchSafeTransactions,
 } from './transactions.js'
+
+const AGENT_PREVIEW_LIMIT = 6
+const TRANSACTION_PREVIEW_LIMIT = 5
 
 interface UserSafeRow {
   id: string
@@ -34,6 +38,7 @@ interface AllowanceRow {
 }
 
 interface SnapshotRow {
+  snapshot_date: string
   total_usd: string
   total_eur: string
 }
@@ -45,21 +50,6 @@ interface MonthlySpendRow {
   fallback_amount: string | null
 }
 
-function compareTransactions(
-  a: EnrichedTransaction,
-  b: EnrichedTransaction,
-): number {
-  return (
-    b.timestamp - a.timestamp ||
-    b.blockNumber - a.blockNumber ||
-    a.hash.localeCompare(b.hash) ||
-    a.type.localeCompare(b.type) ||
-    a.from.localeCompare(b.from) ||
-    a.to.localeCompare(b.to) ||
-    a.safeAddress.localeCompare(b.safeAddress)
-  )
-}
-
 function getSnapshotDate(offsetDays = 0): string {
   const date = new Date()
   date.setUTCDate(date.getUTCDate() + offsetDays)
@@ -68,7 +58,7 @@ function getSnapshotDate(offsetDays = 0): string {
 
 function computePercentChange(current: number, previous: number): number {
   if (previous === 0) {
-    return current === 0 ? 0 : 100
+    return 0
   }
   return ((current - previous) / previous) * 100
 }
@@ -90,8 +80,8 @@ async function accumulateMonthlySpend(
       row.token_symbol,
       fallbackAmount.toString(),
     )
-    usd += fallback.usd
-    eur += fallback.eur
+    usd += fallback.usd ?? 0
+    eur += fallback.eur ?? 0
   }
 
   return { usd, eur }
@@ -169,28 +159,31 @@ export default async function dashboardRoutes(
     const todayDate = getSnapshotDate(0)
     const yesterdayDate = getSnapshotDate(-1)
 
-    await pool.query(
-      `INSERT INTO user_daily_portfolio_snapshots (
-         user_id, snapshot_date, total_usd, total_eur, updated_at
-       ) VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (user_id, snapshot_date)
-       DO UPDATE SET
-         total_usd = EXCLUDED.total_usd,
-         total_eur = EXCLUDED.total_eur,
-         updated_at = NOW()`,
-      [sub, todayDate, totalUsd, totalEur],
-    )
-
-    const yesterdaySnapshot = await pool.query<SnapshotRow>(
-      `SELECT total_usd, total_eur
+    const snapshotResult = await pool.query<SnapshotRow>(
+      `SELECT snapshot_date, total_usd, total_eur
        FROM user_daily_portfolio_snapshots
-       WHERE user_id = $1 AND snapshot_date = $2`,
-      [sub, yesterdayDate],
+       WHERE user_id = $1 AND snapshot_date = ANY($2)`,
+      [sub, [todayDate, yesterdayDate]],
     )
 
-    const previousUsd = Number(yesterdaySnapshot.rows[0]?.total_usd ?? '0')
-    const previousEur = Number(yesterdaySnapshot.rows[0]?.total_eur ?? '0')
-    const changeAvailable = yesterdaySnapshot.rows.length > 0
+    const snapshotsByDate = new Map(
+      snapshotResult.rows.map((row) => [row.snapshot_date, row]),
+    )
+
+    if (!snapshotsByDate.has(todayDate)) {
+      await pool.query(
+        `INSERT INTO user_daily_portfolio_snapshots (
+           user_id, snapshot_date, total_usd, total_eur, updated_at
+         ) VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (user_id, snapshot_date) DO NOTHING`,
+        [sub, todayDate, totalUsd, totalEur],
+      )
+    }
+
+    const yesterdaySnapshot = snapshotsByDate.get(yesterdayDate)
+    const previousUsd = Number(yesterdaySnapshot?.total_usd ?? '0')
+    const previousEur = Number(yesterdaySnapshot?.total_eur ?? '0')
+    const changeAvailable = Boolean(yesterdaySnapshot)
 
     const [paymentSpendRows, approvalSpendRows] = await Promise.all([
       pool.query<MonthlySpendRow>(
@@ -201,6 +194,11 @@ export default async function dashboardRoutes(
                   SUM(
                     CASE
                       WHEN usd_value IS NULL OR eur_value IS NULL
+                        OR (
+                          COALESCE(usd_value, 0) = 0
+                          AND COALESCE(eur_value, 0) = 0
+                          AND amount_human::NUMERIC > 0
+                        )
                         THEN amount_human::NUMERIC
                       ELSE 0
                     END
@@ -222,6 +220,11 @@ export default async function dashboardRoutes(
                   SUM(
                     CASE
                       WHEN usd_value IS NULL OR eur_value IS NULL
+                        OR (
+                          COALESCE(usd_value, 0) = 0
+                          AND COALESCE(eur_value, 0) = 0
+                          AND amount_human::NUMERIC > 0
+                        )
                         THEN amount_human::NUMERIC
                       ELSE 0
                     END
@@ -246,8 +249,8 @@ export default async function dashboardRoutes(
     const monthlySpendEur = paymentSpend.eur + approvalSpend.eur
 
     const mergedTransactions: EnrichedTransaction[] = []
-    for (const safe of safes) {
-      try {
+    const transactionResults = await Promise.allSettled(
+      safes.map(async (safe) => {
         const { transactions } = await fetchSafeTransactions({
           safeId: safe.id,
           safeAddress: safe.safe_address,
@@ -255,22 +258,28 @@ export default async function dashboardRoutes(
           log: request.log,
         })
 
-        for (const tx of transactions) {
-          mergedTransactions.push({
-            ...tx,
-            chainId: safe.chain_id,
-            safeId: safe.id,
-            safeAddress: safe.safe_address,
-            safeName: safe.name,
-          })
-        }
-      } catch (err) {
-        request.log.warn(
-          { err, safeId: safe.id, chainId: safe.chain_id },
-          'Dashboard transaction aggregation failed',
-        )
+        return transactions.map((tx) => ({
+          ...tx,
+          chainId: safe.chain_id,
+          safeId: safe.id,
+          safeAddress: safe.safe_address,
+          safeName: safe.name,
+        }))
+      }),
+    )
+
+    transactionResults.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        mergedTransactions.push(...result.value)
+        return
       }
-    }
+
+      const safe = safes[index]
+      request.log.warn(
+        { err: result.reason, safeId: safe.id, chainId: safe.chain_id },
+        'Dashboard transaction aggregation failed',
+      )
+    })
 
     mergedTransactions.sort(compareTransactions)
 
@@ -309,7 +318,7 @@ export default async function dashboardRoutes(
         activeAccounts: safes.length,
       },
       pendingApprovals: Number(pendingApprovalsResult.rows[0]?.count ?? '0'),
-      agents: agents.slice(0, 6).map((agent) => ({
+      agents: agents.slice(0, AGENT_PREVIEW_LIMIT).map((agent) => ({
         id: agent.id,
         name: agent.name,
         status: agent.status,
@@ -322,7 +331,7 @@ export default async function dashboardRoutes(
           resetPeriodMin: allowance.reset_period_min,
         })),
       })),
-      transactions: enrichedTransactions.slice(0, 5).map((tx) => ({
+      transactions: enrichedTransactions.slice(0, TRANSACTION_PREVIEW_LIMIT).map((tx) => ({
         hash: tx.hash,
         type: tx.type,
         from: tx.from,

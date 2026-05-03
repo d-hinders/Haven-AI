@@ -249,7 +249,7 @@ export async function fetchSafeTransactions({
   return requestPromise
 }
 
-function compareTransactions(a: Transaction, b: Transaction): number {
+export function compareTransactions(a: Transaction, b: Transaction): number {
   return (
     b.timestamp - a.timestamp ||
     b.blockNumber - a.blockNumber ||

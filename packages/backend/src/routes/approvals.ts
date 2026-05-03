@@ -205,6 +205,12 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
         [id, sub, tx_hash, fiatValues.usd, fiatValues.eur],
       )
 
+      if (result.rows.length === 0) {
+        return reply.code(409).send({
+          error: 'Approval request is no longer approved',
+        })
+      }
+
       return { id, status: 'executed', tx_hash }
     },
   )

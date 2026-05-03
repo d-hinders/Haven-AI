@@ -62,11 +62,9 @@ function statusClasses(status: string): string {
 }
 
 function formatAllowanceAmount(amount: string, tokenSymbol: string, chainId: number | null): string {
-  const chain = chainId ? getChainConfig(chainId) : getChainConfig(100)
-  const tokenConfig =
-    Object.values(chain.tokens).find((token) => token.symbol === tokenSymbol) ??
-    Object.values(getChainConfig(100).tokens).find((token) => token.symbol === tokenSymbol) ??
-    Object.values(getChainConfig(8453).tokens).find((token) => token.symbol === tokenSymbol)
+  const tokenConfig = chainId
+    ? Object.values(getChainConfig(chainId).tokens).find((token) => token.symbol === tokenSymbol)
+    : null
 
   const decimals = tokenConfig?.decimals ?? 18
   try {
@@ -375,11 +373,14 @@ export default function DashboardClient() {
   }, [actionSafeId, defaultSafe?.id, safes])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
+  const sendModalDataEnabled = sendOpen && Boolean(selectedActionSafe)
   const { balances: selectedSafeBalances, refetch: refetchSelectedBalances } = useBalances(
     selectedActionSafe?.safe_address ?? null,
+    { enabled: sendModalDataEnabled },
   )
   const { details: selectedSafeDetails } = useSafeDetails(
     selectedActionSafe?.safe_address ?? null,
+    { enabled: sendModalDataEnabled },
   )
 
   const totalFiat = currency === 'EUR' ? (overview?.totals.eur ?? 0) : (overview?.totals.usd ?? 0)

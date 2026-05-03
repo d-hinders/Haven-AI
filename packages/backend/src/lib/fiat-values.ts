@@ -1,8 +1,8 @@
 import { getTokenPrice } from './prices.js'
 
 export interface FiatValues {
-  usd: number
-  eur: number
+  usd: number | null
+  eur: number | null
 }
 
 export async function getFiatValuesForTokenAmount(
@@ -21,6 +21,6 @@ export async function getFiatValuesForTokenAmount(
       eur: amount * price.eur,
     }
   } catch {
-    return { usd: 0, eur: 0 }
+    return { usd: null, eur: null }
   }
 }

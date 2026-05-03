@@ -563,7 +563,6 @@ export default function DashboardClient() {
           selectedSafeId={guideSafeId}
           onSelectSafe={setGuideSafeId}
           onAddAgent={() => openCreateAgent(null)}
-          onAddDemoAgent={() => openCreateAgent('demo')}
         />
       )}
 

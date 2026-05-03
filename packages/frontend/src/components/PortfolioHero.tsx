@@ -3,9 +3,13 @@
 interface PortfolioHeroProps {
   totalFiat: number
   currency: 'USD' | 'EUR'
-  accountCount: number
-  agentCount: number
   loading: boolean
+  onSend: () => void
+  onReceive: () => void
+  onAddFunds: () => void
+  sendDisabled?: boolean
+  receiveDisabled?: boolean
+  actionsHint?: string
 }
 
 function formatCurrency(value: number, currency: 'USD' | 'EUR'): string {
@@ -20,9 +24,13 @@ function formatCurrency(value: number, currency: 'USD' | 'EUR'): string {
 export default function PortfolioHero({
   totalFiat,
   currency,
-  accountCount,
-  agentCount,
   loading,
+  onSend,
+  onReceive,
+  onAddFunds,
+  sendDisabled = false,
+  receiveDisabled = false,
+  actionsHint,
 }: PortfolioHeroProps) {
   return (
     <div className="relative rounded-xl border border-white/[0.06] overflow-hidden mb-8">
@@ -50,21 +58,37 @@ export default function PortfolioHero({
             )}
           </div>
 
-          {/* Summary stats */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
-              </svg>
-              <span>{accountCount} account{accountCount !== 1 ? 's' : ''}</span>
+          <div className="flex flex-col items-stretch sm:items-end gap-2.5">
+            <div className="flex flex-wrap sm:justify-end gap-2">
+              <button
+                type="button"
+                onClick={onSend}
+                disabled={sendDisabled}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:from-indigo-500 disabled:hover:to-violet-600"
+              >
+                Send
+              </button>
+              <button
+                type="button"
+                onClick={onReceive}
+                disabled={receiveDisabled}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-white/[0.10] bg-white/[0.03] text-zinc-200 text-sm font-medium hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Receive
+              </button>
+              <button
+                type="button"
+                onClick={onAddFunds}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-300 text-sm font-medium hover:bg-white/[0.05] hover:text-zinc-200 transition-colors"
+              >
+                Add funds
+              </button>
             </div>
-            <div className="w-px h-3 bg-white/[0.08]" />
-            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
-              </svg>
-              <span>{agentCount} agent{agentCount !== 1 ? 's' : ''}</span>
-            </div>
+            {actionsHint && (
+              <p className="text-[11px] text-zinc-500 sm:text-right max-w-xs">
+                {actionsHint}
+              </p>
+            )}
           </div>
         </div>
       </div>

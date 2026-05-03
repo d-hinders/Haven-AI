@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg'
 
-export const version = '004_dashboard_overview'
+export const version = '005_dashboard_overview'
 
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`

@@ -24,7 +24,14 @@ export function useBalances(
   const [error, setError] = useState<string | null>(null)
 
   const fetchBalances = useCallback(async () => {
-    if (!safeAddress || !enabled) {
+    if (!safeAddress) {
+      setBalances([])
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    if (!enabled) {
       setLoading(false)
       return
     }
@@ -44,7 +51,14 @@ export function useBalances(
   }, [enabled, safeAddress])
 
   useEffect(() => {
-    if (!safeAddress || !enabled) {
+    if (!safeAddress) {
+      setBalances([])
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    if (!enabled) {
       setLoading(false)
       return
     }

@@ -129,9 +129,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     // Human-readable amount for storage
     const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
 
-    // 4. Policy check: DB allowance
+    // 4. Policy check: agent must have this token in the on-chain allowance config
     const dbAllowance = await pool.query(
-      `SELECT allowance_amount, approval_threshold FROM agent_allowances
+      `SELECT allowance_amount FROM agent_allowances
        WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
       [agent.id, tokenAddress],
     )
@@ -141,55 +141,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // 5. Approval threshold check
-    const approvalThreshold = dbAllowance.rows[0].approval_threshold
-      ? BigInt(dbAllowance.rows[0].approval_threshold)
-      : null
-
-    if (approvalThreshold !== null && amountRaw > approvalThreshold) {
-      const approvalResult = await pool.query(
-        `INSERT INTO approval_requests (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, reason, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
-          NOW() + interval '24 hours')
-        RETURNING id, status, expires_at`,
-        [
-          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
-          tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
-          amountRaw.toString(), amountHuman,
-          `x402 payment for ${url}${category ? ` (${category})` : ''}`,
-        ],
-      )
-      const approval = approvalResult.rows[0]
-      return reply.code(202).send({
-        payment_id: approval.id,
-        status: 'pending_approval',
-        message: `Payment of ${amountHuman} ${tokenConfig.symbol} exceeds approval threshold. Queued for human approval.`,
-        approval_threshold: ethers.formatUnits(approvalThreshold, tokenConfig.decimals),
-        expires_at: approval.expires_at,
-      })
-    }
-
-    // 6. Recipient allowlist check
-    const agentRestriction = await pool.query(
-      `SELECT restrict_recipients FROM agents WHERE id = $1`,
-      [agent.id],
-    )
-    if (agentRestriction.rows[0]?.restrict_recipients) {
-      const recipientCheck = await pool.query(
-        `SELECT id FROM agent_allowed_recipients
-         WHERE agent_id = $1 AND LOWER(address) = LOWER($2)`,
-        [agent.id, payTo],
-      )
-      if (recipientCheck.rows.length === 0) {
-        return reply.code(403).send({
-          error: `Recipient ${payTo} is not in the allowed recipients list for this agent`,
-        })
-      }
-    }
-
-    // 7. Rate limiting: max x402 payments per hour
+    // 5. Rate limiting: max x402 payments per hour
     const agentConfig = await pool.query(
       `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
       [agent.id],
@@ -208,7 +160,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // 8. On-chain allowance check
+    // 6. On-chain allowance check + auto-queue when over the remaining allowance
     let onChainAllowance
     try {
       onChainAllowance = await getTokenAllowance(
@@ -226,15 +178,35 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
     const effective = computeEffectiveAllowance(onChainAllowance)
     if (amountRaw > effective.remaining) {
-      return reply.code(403).send({
-        error: 'Amount exceeds remaining on-chain allowance',
-        remaining: effective.remaining.toString(),
-        requested: amountRaw.toString(),
+      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const approvalReason = `x402 payment for ${url}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
+
+      const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
+        `INSERT INTO approval_requests (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, reason, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
+          NOW() + interval '24 hours')
+        RETURNING id, status, expires_at`,
+        [
+          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+          tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
+          amountRaw.toString(), amountHuman, approvalReason,
+        ],
+      )
+      const approval = approvalResult.rows[0]
+      return reply.code(202).send({
+        payment_id: approval.id,
+        status: 'pending_approval',
+        message: `Payment of ${amountHuman} ${tokenConfig.symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
+        remaining: remainingHuman,
+        requested: amountHuman,
         token: tokenConfig.symbol,
+        expires_at: approval.expires_at,
       })
     }
 
-    // 9. Generate transfer hash on-chain
+    // 7. Generate transfer hash on-chain
     let signHash: string
     try {
       signHash = await generateTransferHash(

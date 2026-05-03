@@ -6,6 +6,7 @@ import { getChain, getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import {
   getTokenAllowance,
+  computeEffectiveAllowance,
   generateTransferHash,
   recoverSigner,
   executeAllowanceTransfer,
@@ -70,44 +71,6 @@ function resolveToken(chainId: number, symbol: string) {
   return null
 }
 
-/**
- * Sum amount_raw for this agent+token over payments in the current reset window.
- * Counts 'submitted' and 'confirmed' to prevent double-spending before on-chain confirmation.
- * If resetPeriodMin === 0 the limit is cumulative (no reset).
- */
-async function computeSpent(
-  agentId: string,
-  tokenAddress: string,
-  resetPeriodMin: number,
-): Promise<bigint> {
-  let query: string
-  let params: unknown[]
-
-  if (resetPeriodMin > 0) {
-    const windowStart = new Date(Date.now() - resetPeriodMin * 60 * 1000)
-    query = `
-      SELECT COALESCE(SUM(amount_raw::NUMERIC), 0)::TEXT AS total
-      FROM self_sign_payment_intents
-      WHERE agent_id = $1
-        AND LOWER(token_address) = LOWER($2)
-        AND status IN ('submitted', 'confirmed')
-        AND created_at >= $3`
-    params = [agentId, tokenAddress, windowStart]
-  } else {
-    // No reset — lifetime cumulative
-    query = `
-      SELECT COALESCE(SUM(amount_raw::NUMERIC), 0)::TEXT AS total
-      FROM self_sign_payment_intents
-      WHERE agent_id = $1
-        AND LOWER(token_address) = LOWER($2)
-        AND status IN ('submitted', 'confirmed')`
-    params = [agentId, tokenAddress]
-  }
-
-  const result = await pool.query<{ total: string }>(query, params)
-  return BigInt(result.rows[0].total)
-}
-
 // ── Routes ────────────────────────────────────────────────────────
 
 export default async function selfSignPaymentRoutes(app: FastifyInstance): Promise<void> {
@@ -154,13 +117,9 @@ export default async function selfSignPaymentRoutes(app: FastifyInstance): Promi
       return reply.code(400).send({ error: 'Amount must be greater than zero' })
     }
 
-    // 4. Policy check — token must be configured in allowances
-    const dbAllowance = await pool.query<{
-      allowance_amount: string
-      reset_period_min: number
-      approval_threshold: string | null
-    }>(
-      `SELECT allowance_amount, reset_period_min, approval_threshold
+    // 4. Policy check — token must be configured in the on-chain allowance set
+    const dbAllowance = await pool.query<{ allowance_amount: string }>(
+      `SELECT allowance_amount
        FROM self_sign_agent_allowances
        WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
       [agent.id, tokenAddress],
@@ -172,30 +131,30 @@ export default async function selfSignPaymentRoutes(app: FastifyInstance): Promi
       })
     }
 
-    const { allowance_amount, reset_period_min, approval_threshold } = dbAllowance.rows[0]
-    const allowanceAmount = BigInt(allowance_amount)
-
-    // 5. Recipient allowlist check
-    const agentRow = await pool.query<{ restrict_recipients: boolean }>(
-      'SELECT restrict_recipients FROM self_sign_agents WHERE id = $1',
-      [agent.id],
-    )
-    if (agentRow.rows[0]?.restrict_recipients) {
-      const recipientCheck = await pool.query(
-        `SELECT id FROM self_sign_agent_recipients
-         WHERE agent_id = $1 AND LOWER(address) = LOWER($2)`,
-        [agent.id, to],
+    // 5. On-chain allowance check + auto-queue on exceed
+    let onChainAllowance
+    try {
+      onChainAllowance = await getTokenAllowance(
+        agent.chain_id,
+        agent.safe_address,
+        agent.delegate_address,
+        tokenAddress,
       )
-      if (recipientCheck.rows.length === 0) {
-        return reply.code(403).send({
-          error: `Recipient ${to} is not in the allowed recipients list for this agent`,
-        })
-      }
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to read on-chain allowance',
+        details: err instanceof Error ? err.message : String(err),
+      })
     }
 
-    // 6. Approval threshold check
-    const approvalThresholdBigInt = approval_threshold ? BigInt(approval_threshold) : null
-    if (approvalThresholdBigInt !== null && amountRaw > approvalThresholdBigInt) {
+    const effective = computeEffectiveAllowance(onChainAllowance)
+
+    if (amountRaw > effective.remaining) {
+      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const approvalReason =
+        reason ??
+        `Exceeds remaining allowance (${amount} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
+
       const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
         `INSERT INTO approval_requests (
            agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
@@ -213,48 +172,25 @@ export default async function selfSignPaymentRoutes(app: FastifyInstance): Promi
           to.toLowerCase(),
           amountRaw.toString(),
           amount,
-          reason ?? null,
+          approvalReason,
         ],
       )
       const approval = approvalResult.rows[0]
       return reply.code(202).send({
         payment_id: approval.id,
         status: 'pending_approval',
-        message: `Payment of ${amount} ${tokenConfig.symbol} exceeds approval threshold. Queued for human approval.`,
-        approval_threshold: ethers.formatUnits(approvalThresholdBigInt, tokenConfig.decimals),
+        message: `Payment of ${amount} ${tokenConfig.symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
+        remaining: remainingHuman,
+        requested: amount,
+        token: tokenConfig.symbol,
         expires_at: approval.expires_at,
       })
     }
 
-    // 7. DB spending enforcement — check remaining in current reset window
-    const spent = await computeSpent(agent.id, tokenAddress, reset_period_min)
-    const remaining = allowanceAmount - spent
-
-    if (amountRaw > remaining) {
-      return reply.code(403).send({
-        error: 'Amount exceeds remaining spending limit',
-        token: tokenConfig.symbol,
-        allowance: ethers.formatUnits(allowanceAmount, tokenConfig.decimals),
-        spent: ethers.formatUnits(spent, tokenConfig.decimals),
-        remaining: ethers.formatUnits(remaining > 0n ? remaining : 0n, tokenConfig.decimals),
-        requested: amount,
-        reset_period_min,
-      })
-    }
-
-    // 8. Generate transfer hash (AllowanceModule format)
+    // 6. Generate transfer hash (AllowanceModule format)
+    const allowanceNonce = onChainAllowance.nonce
     let signHash: string
-    let allowanceNonce: number
-
     try {
-      const onChainAllowance = await getTokenAllowance(
-        agent.chain_id,
-        agent.safe_address,
-        agent.delegate_address,
-        tokenAddress,
-      )
-      allowanceNonce = onChainAllowance.nonce
-
       signHash = await generateTransferHash(
         agent.chain_id,
         agent.safe_address,
@@ -265,15 +201,11 @@ export default async function selfSignPaymentRoutes(app: FastifyInstance): Promi
         0n,
         allowanceNonce,
       )
-    } catch {
-      // Delegate not registered on-chain — store intent for manual/off-chain flow
-      signHash = ethers.keccak256(
-        ethers.AbiCoder.defaultAbiCoder().encode(
-          ['address', 'address', 'address', 'uint256', 'uint256'],
-          [agent.safe_address, tokenAddress, to.toLowerCase(), amountRaw, Date.now()],
-        ),
-      )
-      allowanceNonce = 0
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to generate transfer hash',
+        details: err instanceof Error ? err.message : String(err),
+      })
     }
 
     // 9. Store payment intent

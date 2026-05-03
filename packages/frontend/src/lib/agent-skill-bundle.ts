@@ -64,11 +64,12 @@ executes; the agent cannot spend beyond the configured limits.
 ## What this agent is allowed to do
 
 - **Spending limits:** ${policySummary}
-- **Recipients:** ${policy.restrictRecipients ? `allowlist (${policy.allowedRecipients.length} entries)` : 'any address'}
 
-If a payment exceeds these limits, Haven rejects it server-side — the skill
-surfaces a structured error. Don't try to work around limits; tell the user
-to adjust the policy in the Haven dashboard.
+These limits are enforced by the on-chain Safe AllowanceModule. If a payment
+exceeds the remaining allowance, Haven does **not** reject it — it queues it
+for owner approval in the Haven dashboard and returns \`status: pending_approval\`.
+Tell the user the payment is awaiting their approval; don't retry until it's
+either approved (the SDK will pick up the executed tx) or rejected.
 
 ## Setup (one-time)
 
@@ -98,10 +99,9 @@ const data = await res.json()
 Haven errors are shaped \`{ error, status, details? }\`. Surface the error
 message to the user verbatim — it's written for humans. Common cases:
 
-- \`policy_violation\`: the payment exceeds a limit. Tell the user which
-  limit and suggest raising it in the dashboard.
-- \`recipient_not_allowed\`: the allowlist blocks this address. Offer to
-  add the recipient in the dashboard.
+- \`pending_approval\` (HTTP 202): the payment exceeds the on-chain allowance
+  and was queued. Tell the user it's waiting for owner approval in the Haven
+  dashboard. Don't retry until the queued payment is approved or rejected.
 - \`insufficient_funds\`: the Safe doesn't have enough of that token.
 
 ## Revoke

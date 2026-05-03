@@ -14,7 +14,6 @@ interface Props {
   selectedSafeId: string | null
   onSelectSafe: (id: string) => void
   onAddAgent: () => void
-  onAddDemoAgent: () => void
 }
 
 // ── Step tracker ───────────────────────────────────────────────────
@@ -248,10 +247,8 @@ function FundingPanel({
 
 function AddAgentPanel({
   onAddAgent,
-  onAddDemoAgent,
 }: {
   onAddAgent: () => void
-  onAddDemoAgent: () => void
 }) {
   return (
     <div className="space-y-4">
@@ -276,15 +273,6 @@ function AddAgentPanel({
           </svg>
           Connect agent
         </button>
-        <button
-          onClick={onAddDemoAgent}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-300 text-sm font-medium hover:bg-white/[0.05] hover:text-zinc-100 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
-          Spin up a demo agent
-        </button>
       </div>
     </div>
   )
@@ -298,7 +286,6 @@ export default function DashboardOnboardingGuide({
   selectedSafeId,
   onSelectSafe,
   onAddAgent,
-  onAddDemoAgent,
 }: Props) {
   return (
     <div className="p-5 mb-6 rounded-xl bg-gradient-to-br from-indigo-500/[0.08] to-violet-500/[0.06] border border-indigo-500/20">
@@ -313,7 +300,6 @@ export default function DashboardOnboardingGuide({
       {stage === 'add-agent' && (
         <AddAgentPanel
           onAddAgent={onAddAgent}
-          onAddDemoAgent={onAddDemoAgent}
         />
       )}
     </div>

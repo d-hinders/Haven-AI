@@ -24,7 +24,14 @@ export function useSafeDetails(
   const [error, setError] = useState<string | null>(null)
 
   const fetchDetails = useCallback(async () => {
-    if (!safeAddress || !enabled) {
+    if (!safeAddress) {
+      setDetails(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    if (!enabled) {
       setLoading(false)
       return
     }
@@ -42,7 +49,14 @@ export function useSafeDetails(
   }, [enabled, safeAddress])
 
   useEffect(() => {
-    if (!safeAddress || !enabled) {
+    if (!safeAddress) {
+      setDetails(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    if (!enabled) {
       setLoading(false)
       return
     }

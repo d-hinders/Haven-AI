@@ -131,7 +131,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             <div className="mt-4 flex flex-wrap gap-4 text-sm text-zinc-500">
               <span>Account: <span className="text-zinc-300">{agent.safe_name ?? safe?.name ?? 'Unassigned'}</span></span>
               {chainConfig ? <span>Network: <span className="text-zinc-300">{chainConfig.name}</span></span> : null}
-              <span>Recipients: <span className="text-zinc-300">{agent.restrict_recipients ? `${agent.allowed_recipients.length} allowlisted` : 'Any recipient'}</span></span>
+              <span>Recipients: <span className="text-zinc-300">Any recipient</span></span>
             </div>
           </div>
 

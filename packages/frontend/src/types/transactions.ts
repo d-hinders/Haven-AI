@@ -16,12 +16,63 @@ export interface Transaction {
   agentName?: string
 }
 
+export interface AggregatedTransaction extends Transaction {
+  chainId: number
+  safeId: string
+  safeAddress: string
+  safeName: string
+  agentId?: string
+}
+
 export interface TransactionsResponse {
   transactions: Transaction[]
   total: number
   page: number
   limit: number
   pages: number
+}
+
+export interface TransactionsFeedResponse {
+  transactions: AggregatedTransaction[]
+  total: number
+  offset: number
+  limit: number
+  hasMore: boolean
+  partialFailure: boolean
+  failedSafeIds: string[]
+}
+
+export interface TransactionFilterState {
+  safeId?: string
+  agentId?: string
+  tokenKey?: string
+}
+
+export interface TransactionFilterSafeOption {
+  id: string
+  name: string
+  address: string
+  chainId: number
+}
+
+export interface TransactionFilterAgentOption {
+  id: string
+  name: string
+  status: string
+}
+
+export interface TransactionFilterTokenOption {
+  key: string
+  symbol: string
+  address: string | null
+  chainId: number
+  isNative: boolean
+}
+
+export interface TransactionFilterOptionsResponse {
+  safes: TransactionFilterSafeOption[]
+  agents: TransactionFilterAgentOption[]
+  tokens: TransactionFilterTokenOption[]
 }
 
 export interface BalanceItem {

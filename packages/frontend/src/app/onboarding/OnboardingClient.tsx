@@ -25,7 +25,6 @@ export default function OnboardingClient() {
   const router = useRouter()
 
   const { address, isConnected } = useAccount()
-  const publicClient = usePublicClient()
 
   const [step, setStep] = useState<Step>('choose-signer')
   const [signerMode, setSignerMode] = useState<SignerMode>(null)
@@ -35,6 +34,7 @@ export default function OnboardingClient() {
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
   const [selectedChainId, setSelectedChainId] = useState(100)
+  const publicClient = usePublicClient({ chainId: selectedChainId })
   const signer = useActiveSigner({ chainId: selectedChainId })
 
   const progressSteps = useMemo(() => {

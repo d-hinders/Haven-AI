@@ -78,7 +78,7 @@ export default function EditAgentModal({
   const [txHash, setTxHash] = useState<string | null>(null)
 
   // Wagmi
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress: safeAddress as Address,
     chainId,

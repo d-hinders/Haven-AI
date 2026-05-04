@@ -208,7 +208,7 @@ export default function ApprovalQueue() {
   const chainId = activeSafe?.chain_id ?? 100
   const { details: safeDetails } = useSafeDetails(safeAddress)
   const { approvals, pendingCount, loading, approve, reject, markExecuted, refetch } = useApprovals()
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,

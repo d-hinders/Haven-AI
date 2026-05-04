@@ -107,7 +107,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     ? onChainData.get(delegateKey)?.allowances ?? null
     : null
 
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,

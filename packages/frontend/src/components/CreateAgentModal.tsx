@@ -162,7 +162,7 @@ export default function CreateAgentModal({
   const [credentialsSaved, setCredentialsSaved] = useState(false)
 
   // Wagmi
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,

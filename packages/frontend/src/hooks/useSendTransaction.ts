@@ -38,7 +38,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
   const [error, setError] = useState<string | null>(null)
 
   const { activeSafe } = useAuth()
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId: activeSafe?.chain_id })
   const signer = useActiveSigner({
     safeAddress: activeSafe?.safe_address as Address | undefined,
     chainId: activeSafe?.chain_id,

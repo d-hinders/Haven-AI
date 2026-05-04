@@ -6,14 +6,20 @@ const {
   mockGetRelayer,
   mockWarnIfRelayerLow,
   mockExecTransaction,
+  mockExecTransactionStaticCall,
   mockContractConstructor,
 } = vi.hoisted(() => {
   const execTransaction = vi.fn()
+  const execTransactionStaticCall = vi.fn()
+  Object.assign(execTransaction, {
+    staticCall: execTransactionStaticCall,
+  })
   return {
     mockQuery: vi.fn(),
     mockGetRelayer: vi.fn(),
     mockWarnIfRelayerLow: vi.fn(),
     mockExecTransaction: execTransaction,
+    mockExecTransactionStaticCall: execTransactionStaticCall,
     mockContractConstructor: vi.fn(function contractMock() {
       return {
         execTransaction,
@@ -75,10 +81,12 @@ describe('Safe exec routes', () => {
     mockGetRelayer.mockReset()
     mockWarnIfRelayerLow.mockReset()
     mockExecTransaction.mockReset()
+    mockExecTransactionStaticCall.mockReset()
     mockContractConstructor.mockClear()
 
     mockGetRelayer.mockReturnValue({ address: '0xrelayer' })
     mockWarnIfRelayerLow.mockResolvedValue(undefined)
+    mockExecTransactionStaticCall.mockResolvedValue(true)
   })
 
   function signToken(payload: { sub: string; email: string }): string {
@@ -113,6 +121,18 @@ describe('Safe exec routes', () => {
     })
     expect(mockWarnIfRelayerLow).toHaveBeenCalledWith(100)
     expect(mockGetRelayer).toHaveBeenCalledWith(100)
+    expect(mockExecTransactionStaticCall).toHaveBeenCalledWith(
+      validBody.to,
+      0n,
+      '0x',
+      0,
+      0n,
+      0n,
+      0n,
+      validBody.gas_token,
+      validBody.refund_receiver,
+      validBody.signatures,
+    )
     expect(mockExecTransaction).toHaveBeenCalledWith(
       validBody.to,
       0n,
@@ -124,6 +144,7 @@ describe('Safe exec routes', () => {
       validBody.gas_token,
       validBody.refund_receiver,
       validBody.signatures,
+      { gasLimit: 1_500_000n },
     )
   })
 
@@ -173,7 +194,7 @@ describe('Safe exec routes', () => {
         signer_address: '0x0802e96a6dd7e1dd80620cf5d759d41b714c0ce2',
       }],
     })
-    mockExecTransaction.mockRejectedValueOnce(new Error('execution reverted: GS013'))
+    mockExecTransactionStaticCall.mockRejectedValueOnce(new Error('execution reverted: GS013'))
 
     const response = await app.inject({
       method: 'POST',

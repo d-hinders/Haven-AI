@@ -14,6 +14,8 @@ const SAFE_EXEC_ABI = [
   'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns (bool success)',
 ] as const
 
+const RELAY_EXEC_GAS_LIMIT = 1_500_000n
+
 interface ExecSafeBody {
   chain_id: number
   safe_address: string
@@ -37,21 +39,36 @@ interface StoredPasskeySafeRow {
 }
 
 interface SafeContract {
-  execTransaction(
-    to: string,
-    value: bigint,
-    data: string,
-    operation: number,
-    safeTxGas: bigint,
-    baseGas: bigint,
-    gasPrice: bigint,
-    gasToken: string,
-    refundReceiver: string,
-    signatures: string,
-  ): Promise<{
-    hash: string
-    wait(): Promise<unknown>
-  }>
+  execTransaction: {
+    (
+      to: string,
+      value: bigint,
+      data: string,
+      operation: number,
+      safeTxGas: bigint,
+      baseGas: bigint,
+      gasPrice: bigint,
+      gasToken: string,
+      refundReceiver: string,
+      signatures: string,
+      overrides?: { gasLimit?: bigint },
+    ): Promise<{
+      hash: string
+      wait(): Promise<unknown>
+    }>
+    staticCall(
+      to: string,
+      value: bigint,
+      data: string,
+      operation: number,
+      safeTxGas: bigint,
+      baseGas: bigint,
+      gasPrice: bigint,
+      gasToken: string,
+      refundReceiver: string,
+      signatures: string,
+    ): Promise<boolean>
+  }
 }
 
 function parseHexCoordinate(value: Buffer): `0x${string}` {
@@ -143,7 +160,7 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
         relayer,
       ) as unknown as SafeContract
 
-      const tx = await safe.execTransaction(
+      const execArgs = [
         body.to,
         BigInt(body.value),
         body.data,
@@ -154,7 +171,18 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
         body.gas_token,
         body.refund_receiver,
         body.signatures,
-      )
+      ] as const
+
+      // Validate the execution path without spending relayer gas. This catches
+      // invalid signatures or failing Safe inner transactions before we submit.
+      await safe.execTransaction.staticCall(...execArgs)
+
+      // Contract-signature validation plus module setup calls can be expensive
+      // to estimate on remote RPCs, so we send with a conservative explicit
+      // gas limit after the static preflight succeeds.
+      const tx = await safe.execTransaction(...execArgs, {
+        gasLimit: RELAY_EXEC_GAS_LIMIT,
+      })
       await tx.wait()
 
       return reply.code(201).send({

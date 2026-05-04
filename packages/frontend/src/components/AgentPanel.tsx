@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
+import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type Agent } from '@/hooks/useAgents'
@@ -19,6 +19,7 @@ import HowItWorksModal from './HowItWorksModal'
 import ConfirmDialog from './ConfirmDialog'
 import { truncate } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
+import { useActiveSigner } from '@/lib/signer'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -644,9 +645,11 @@ export default function AgentPanel() {
     deleteAgent,
     refetch,
   } = useAgents()
-  const { address: connectedAddress } = useAccount()
   const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const signer = useActiveSigner({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
 
   const [createOpen, setCreateOpen] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
@@ -704,8 +707,7 @@ export default function AgentPanel() {
   async function handleRevoke(agent: Agent) {
     if (
       !publicClient ||
-      !walletClient ||
-      !connectedAddress ||
+      !signer ||
       !safeAddress ||
       !safeDetails
     )
@@ -717,8 +719,7 @@ export default function AgentPanel() {
       await revokeAgentOnChain({
         agent,
         publicClient,
-        walletClient,
-        connectedAddress,
+        signer,
         safeAddress: safeAddress as Address,
         safeDetails,
         chainId,

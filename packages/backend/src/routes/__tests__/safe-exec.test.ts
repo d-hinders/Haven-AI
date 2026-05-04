@@ -12,6 +12,7 @@ const {
   mockSafeEncodeTransactionData,
   mockSafeCheckSignatures,
   mockOwnerIsValidSignature,
+  mockCreateSigner,
   mockContractConstructor,
 } = vi.hoisted(() => {
   const execTransaction = vi.fn()
@@ -21,6 +22,7 @@ const {
   const safeEncodeTransactionData = vi.fn()
   const safeCheckSignatures = vi.fn()
   const ownerIsValidSignature = vi.fn()
+  const createSigner = vi.fn()
   Object.assign(execTransaction, {
     staticCall: execTransactionStaticCall,
     estimateGas: execTransactionEstimateGas,
@@ -36,7 +38,14 @@ const {
     mockSafeEncodeTransactionData: safeEncodeTransactionData,
     mockSafeCheckSignatures: safeCheckSignatures,
     mockOwnerIsValidSignature: ownerIsValidSignature,
+    mockCreateSigner: createSigner,
     mockContractConstructor: vi.fn((address: string, abi: unknown) => {
+      if (Array.isArray(abi) && abi.some((item) => String(item).includes('createSigner(uint256 x, uint256 y, uint176 verifiers)'))) {
+        return {
+          createSigner,
+        }
+      }
+
       if (Array.isArray(abi) && abi.some((item) => String(item).includes('isValidSignature(bytes32,bytes)'))) {
         return {
           isValidSignature: ownerIsValidSignature,
@@ -122,9 +131,15 @@ describe('Safe exec routes', () => {
     mockSafeEncodeTransactionData.mockReset()
     mockSafeCheckSignatures.mockReset()
     mockOwnerIsValidSignature.mockReset()
+    mockCreateSigner.mockReset()
     mockContractConstructor.mockClear()
 
-    mockGetRelayer.mockReturnValue({ address: '0xrelayer' })
+    mockGetRelayer.mockReturnValue({
+      address: '0xrelayer',
+      provider: {
+        getCode: vi.fn().mockResolvedValue('0x1234'),
+      },
+    })
     mockWarnIfRelayerLow.mockResolvedValue(undefined)
     mockSafeNonce.mockResolvedValue(1n)
     mockSafeEncodeTransactionData.mockResolvedValue('0xdeadbeef')
@@ -132,6 +147,10 @@ describe('Safe exec routes', () => {
     mockExecTransactionStaticCall.mockResolvedValue(true)
     mockExecTransactionEstimateGas.mockResolvedValue(1_900_000n)
     mockOwnerIsValidSignature.mockResolvedValue('0x1626ba7e')
+    mockCreateSigner.mockResolvedValue({
+      hash: '0xsignertx',
+      wait: vi.fn().mockResolvedValue({}),
+    })
   })
 
   function signToken(payload: { sub: string; email: string }): string {
@@ -166,6 +185,7 @@ describe('Safe exec routes', () => {
     })
     expect(mockWarnIfRelayerLow).toHaveBeenCalledWith(100)
     expect(mockGetRelayer).toHaveBeenCalledWith(100)
+    expect(mockCreateSigner).not.toHaveBeenCalled()
     expect(mockOwnerIsValidSignature).toHaveBeenCalledTimes(1)
     expect(mockSafeCheckSignatures).toHaveBeenCalledWith(
       expect.any(String),
@@ -363,6 +383,41 @@ describe('Safe exec routes', () => {
       validBody.refund_receiver,
       validBody.signatures,
       { gasLimit: 5_000_000n },
+    )
+  })
+
+  it('POST /safe/exec auto-deploys the passkey signer if the deterministic signer address has no code', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
+        public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
+        signer_address: signerAddress,
+      }],
+    })
+    mockGetRelayer.mockReturnValue({
+      address: '0xrelayer',
+      provider: {
+        getCode: vi.fn().mockResolvedValueOnce('0x'),
+      },
+    })
+    mockExecTransaction.mockResolvedValueOnce({
+      hash: '0xtxhash',
+      wait: vi.fn().mockResolvedValue({}),
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validBody,
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(mockCreateSigner).toHaveBeenCalledWith(
+      BigInt('0x11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff'),
+      BigInt('0xffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100'),
+      BigInt('0x445a0683e494ea0c5af3e83c5159fbe47cf9e765'),
     )
   })
 

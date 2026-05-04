@@ -24,6 +24,9 @@ const PROXY_FACTORY_ABI = [
   'function proxyCreationCode() view returns (bytes)',
   'event ProxyCreation(address proxy, address singleton)',
 ] as const
+const PASSKEY_SIGNER_FACTORY_ABI = [
+  'function createSigner(uint256 x, uint256 y, uint176 verifiers) returns (address signer)',
+] as const
 
 const SAFE_SETUP_IFACE = new Interface(SAFE_SETUP_ABI)
 const PROXY_FACTORY_IFACE = new Interface(PROXY_FACTORY_ABI)
@@ -47,6 +50,13 @@ interface SafeProxyFactoryContract {
     wait(): Promise<{ logs: Array<{ address?: string; topics?: string[]; data?: string }> } | null>
   }>
   proxyCreationCode(): Promise<string>
+}
+
+interface PasskeySignerFactoryContract {
+  createSigner(x: bigint, y: bigint, verifiers: bigint): Promise<{
+    hash: string
+    wait(): Promise<unknown>
+  }>
 }
 
 function parseHexCoordinate(value: Buffer): `0x${string}` {
@@ -109,6 +119,34 @@ function predictSafeProxyAddress(args: {
     salt,
     keccak256(deploymentData),
   )
+}
+
+async function ensurePasskeySignerDeployed(args: {
+  relayer: ReturnType<typeof getRelayer>
+  factoryAddress: string
+  signerAddress: string
+  x: `0x${string}`
+  y: `0x${string}`
+  verifierAddress: string
+}): Promise<void> {
+  const provider = args.relayer.provider
+  const code = provider ? await provider.getCode(args.signerAddress) : '0x'
+  if (code !== '0x') {
+    return
+  }
+
+  const signerFactory = new Contract(
+    args.factoryAddress,
+    PASSKEY_SIGNER_FACTORY_ABI,
+    args.relayer,
+  ) as unknown as PasskeySignerFactoryContract
+
+  const tx = await signerFactory.createSigner(
+    BigInt(args.x),
+    BigInt(args.y),
+    BigInt(args.verifierAddress),
+  )
+  await tx.wait()
 }
 
 export default async function safeDeployRoutes(app: FastifyInstance): Promise<void> {
@@ -185,6 +223,14 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
 
       await warnIfRelayerLow(chain_id)
       const relayer = getRelayer(chain_id)
+      await ensurePasskeySignerDeployed({
+        relayer,
+        factoryAddress: chain.passkey.factoryAddress,
+        signerAddress: expectedSignerAddress,
+        x: parseHexCoordinate(passkey.public_key_x),
+        y: parseHexCoordinate(passkey.public_key_y),
+        verifierAddress: chain.passkey.verifier,
+      })
       const factory = new Contract(
         chain.contracts.safeProxyFactory,
         PROXY_FACTORY_ABI,

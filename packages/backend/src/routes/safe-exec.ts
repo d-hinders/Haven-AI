@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { Contract, TypedDataEncoder } from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { isSupportedChain } from '../lib/chains.js'
+import { getChain, isSupportedChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
 import { getRelayer, warnIfRelayerLow } from '../lib/relayer.js'
 
@@ -18,6 +18,9 @@ const SAFE_EXEC_ABI = [
 ] as const
 const ERC1271_ABI = [
   'function isValidSignature(bytes32,bytes) view returns (bytes4)',
+] as const
+const PASSKEY_SIGNER_FACTORY_ABI = [
+  'function createSigner(uint256 x, uint256 y, uint176 verifiers) returns (address signer)',
 ] as const
 
 const ERC1271_MAGIC_VALUE = '0x1626ba7e'
@@ -125,6 +128,13 @@ interface SignatureValidatorContract {
   isValidSignature(message: string, signature: string): Promise<string>
 }
 
+interface PasskeySignerFactoryContract {
+  createSigner(x: bigint, y: bigint, verifiers: bigint): Promise<{
+    hash: string
+    wait(): Promise<unknown>
+  }>
+}
+
 function parseHexCoordinate(value: Buffer): `0x${string}` {
   return `0x${value.toString('hex')}` as `0x${string}`
 }
@@ -210,6 +220,34 @@ function getRelayExecGasLimit(estimatedGas: bigint | null): bigint {
   return buffered > RELAY_EXEC_GAS_LIMIT_MAX ? RELAY_EXEC_GAS_LIMIT_MAX : buffered
 }
 
+async function ensurePasskeySignerDeployed(args: {
+  relayer: ReturnType<typeof getRelayer>
+  factoryAddress: string
+  signerAddress: string
+  x: `0x${string}`
+  y: `0x${string}`
+  verifierAddress: string
+}): Promise<void> {
+  const provider = args.relayer.provider
+  const code = provider ? await provider.getCode(args.signerAddress) : '0x'
+  if (code !== '0x') {
+    return
+  }
+
+  const signerFactory = new Contract(
+    args.factoryAddress,
+    PASSKEY_SIGNER_FACTORY_ABI,
+    args.relayer,
+  ) as unknown as PasskeySignerFactoryContract
+
+  const tx = await signerFactory.createSigner(
+    BigInt(args.x),
+    BigInt(args.y),
+    BigInt(args.verifierAddress),
+  )
+  await tx.wait()
+}
+
 export default async function safeExecRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
@@ -262,9 +300,12 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
     }
 
     const passkey = result.rows[0]
+    const chain = getChain(body.chain_id)
+    const x = parseHexCoordinate(passkey.public_key_x)
+    const y = parseHexCoordinate(passkey.public_key_y)
     const expectedSignerAddress = predictSafePasskeySignerAddress({
-      x: parseHexCoordinate(passkey.public_key_x),
-      y: parseHexCoordinate(passkey.public_key_y),
+      x,
+      y,
       chainId: body.chain_id,
     })
 
@@ -276,6 +317,14 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
     try {
       await warnIfRelayerLow(body.chain_id)
       const relayer = getRelayer(body.chain_id)
+      await ensurePasskeySignerDeployed({
+        relayer,
+        factoryAddress: chain.passkey.factoryAddress,
+        signerAddress: expectedSignerAddress,
+        x,
+        y,
+        verifierAddress: chain.passkey.verifier,
+      })
       const safe = new Contract(
         body.safe_address,
         SAFE_EXEC_ABI,

@@ -64,32 +64,36 @@ export interface ExecSafeResponse {
   chain_id: number
 }
 
+export function getResolvedApiBaseUrl(): string {
+  if (typeof window === 'undefined') {
+    return BASE_URL
+  }
+
+  const searchParams = new URLSearchParams(window.location.search)
+  const overrideParam = searchParams.get('apiBaseUrl')
+
+  if (overrideParam === 'default') {
+    window.localStorage.removeItem(API_OVERRIDE_STORAGE_KEY)
+    return BASE_URL
+  }
+
+  if (overrideParam) {
+    const normalized = overrideParam.replace(/\/+$/, '')
+    window.localStorage.setItem(API_OVERRIDE_STORAGE_KEY, normalized)
+    return normalized
+  }
+
+  const storedOverride = window.localStorage.getItem(API_OVERRIDE_STORAGE_KEY)
+  if (storedOverride) {
+    return storedOverride.replace(/\/+$/, '')
+  }
+
+  return BASE_URL
+}
+
 class ApiClient {
   private resolveBaseUrl(): string {
-    if (typeof window === 'undefined') {
-      return BASE_URL
-    }
-
-    const searchParams = new URLSearchParams(window.location.search)
-    const overrideParam = searchParams.get('apiBaseUrl')
-
-    if (overrideParam === 'default') {
-      window.localStorage.removeItem(API_OVERRIDE_STORAGE_KEY)
-      return BASE_URL
-    }
-
-    if (overrideParam) {
-      const normalized = overrideParam.replace(/\/+$/, '')
-      window.localStorage.setItem(API_OVERRIDE_STORAGE_KEY, normalized)
-      return normalized
-    }
-
-    const storedOverride = window.localStorage.getItem(API_OVERRIDE_STORAGE_KEY)
-    if (storedOverride) {
-      return storedOverride.replace(/\/+$/, '')
-    }
-
-    return BASE_URL
+    return getResolvedApiBaseUrl()
   }
 
   private getToken(): string | null {

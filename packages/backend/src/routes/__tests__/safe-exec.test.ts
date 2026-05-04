@@ -7,14 +7,17 @@ const {
   mockWarnIfRelayerLow,
   mockExecTransaction,
   mockExecTransactionStaticCall,
+  mockExecTransactionEstimateGas,
   mockOwnerIsValidSignature,
   mockContractConstructor,
 } = vi.hoisted(() => {
   const execTransaction = vi.fn()
   const execTransactionStaticCall = vi.fn()
+  const execTransactionEstimateGas = vi.fn()
   const ownerIsValidSignature = vi.fn()
   Object.assign(execTransaction, {
     staticCall: execTransactionStaticCall,
+    estimateGas: execTransactionEstimateGas,
   })
   return {
     mockQuery: vi.fn(),
@@ -22,6 +25,7 @@ const {
     mockWarnIfRelayerLow: vi.fn(),
     mockExecTransaction: execTransaction,
     mockExecTransactionStaticCall: execTransactionStaticCall,
+    mockExecTransactionEstimateGas: execTransactionEstimateGas,
     mockOwnerIsValidSignature: ownerIsValidSignature,
     mockContractConstructor: vi.fn((address: string, abi: unknown) => {
       if (Array.isArray(abi) && abi.some((item) => String(item).includes('isValidSignature(bytes32,bytes)'))) {
@@ -101,12 +105,14 @@ describe('Safe exec routes', () => {
     mockWarnIfRelayerLow.mockReset()
     mockExecTransaction.mockReset()
     mockExecTransactionStaticCall.mockReset()
+    mockExecTransactionEstimateGas.mockReset()
     mockOwnerIsValidSignature.mockReset()
     mockContractConstructor.mockClear()
 
     mockGetRelayer.mockReturnValue({ address: '0xrelayer' })
     mockWarnIfRelayerLow.mockResolvedValue(undefined)
     mockExecTransactionStaticCall.mockResolvedValue(true)
+    mockExecTransactionEstimateGas.mockResolvedValue(1_900_000n)
     mockOwnerIsValidSignature.mockResolvedValue('0x1626ba7e')
   })
 
@@ -166,7 +172,7 @@ describe('Safe exec routes', () => {
       validBody.gas_token,
       validBody.refund_receiver,
       validBody.signatures,
-      { gasLimit: 1_500_000n },
+      { gasLimit: 2_050_000n },
     )
   })
 
@@ -251,6 +257,44 @@ describe('Safe exec routes', () => {
     expect(response.statusCode).toBe(502)
     expect(response.json().error).toBe('Passkey signature is invalid for this Safe transaction')
     expect(mockExecTransactionStaticCall).not.toHaveBeenCalled()
+  })
+
+  it('POST /safe/exec falls back to a conservative gas limit when estimation fails', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
+        public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
+        signer_address: signerAddress,
+      }],
+    })
+    mockExecTransactionEstimateGas.mockRejectedValueOnce(new Error('estimate failed'))
+    mockExecTransaction.mockResolvedValueOnce({
+      hash: '0xtxhash',
+      wait: vi.fn().mockResolvedValue({}),
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validBody,
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(mockExecTransaction).toHaveBeenCalledWith(
+      validBody.to,
+      0n,
+      '0x',
+      0,
+      0n,
+      0n,
+      0n,
+      validBody.gas_token,
+      validBody.refund_receiver,
+      validBody.signatures,
+      { gasLimit: 5_000_000n },
+    )
   })
 
   it('POST /safe/exec requires auth', async () => {

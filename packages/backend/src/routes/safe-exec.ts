@@ -19,7 +19,9 @@ const ERC1271_ABI = [
 
 const ERC1271_MAGIC_VALUE = '0x1626ba7e'
 
-const RELAY_EXEC_GAS_LIMIT = 1_500_000n
+const RELAY_EXEC_GAS_BUFFER = 150_000n
+const RELAY_EXEC_GAS_LIMIT_FALLBACK = 5_000_000n
+const RELAY_EXEC_GAS_LIMIT_MAX = 8_000_000n
 const SAFE_TX_TYPES = {
   SafeTx: [
     { name: 'to', type: 'address' },
@@ -87,6 +89,18 @@ interface SafeContract {
       refundReceiver: string,
       signatures: string,
     ): Promise<boolean>
+    estimateGas(
+      to: string,
+      value: bigint,
+      data: string,
+      operation: number,
+      safeTxGas: bigint,
+      baseGas: bigint,
+      gasPrice: bigint,
+      gasToken: string,
+      refundReceiver: string,
+      signatures: string,
+    ): Promise<bigint>
   }
 }
 
@@ -168,6 +182,15 @@ function parsePasskeyInnerSignature(signatures: string, expectedSignerAddress: s
   }
 
   return `0x${hex.slice(innerStart, innerEnd)}`
+}
+
+function getRelayExecGasLimit(estimatedGas: bigint | null): bigint {
+  if (estimatedGas === null) {
+    return RELAY_EXEC_GAS_LIMIT_FALLBACK
+  }
+
+  const buffered = estimatedGas + RELAY_EXEC_GAS_BUFFER
+  return buffered > RELAY_EXEC_GAS_LIMIT_MAX ? RELAY_EXEC_GAS_LIMIT_MAX : buffered
 }
 
 export default async function safeExecRoutes(app: FastifyInstance): Promise<void> {
@@ -283,11 +306,21 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       // invalid signatures or failing Safe inner transactions before we submit.
       await safe.execTransaction.staticCall(...execArgs)
 
-      // Contract-signature validation plus module setup calls can be expensive
-      // to estimate on remote RPCs, so we send with a conservative explicit
-      // gas limit after the static preflight succeeds.
+      let estimatedGas: bigint | null = null
+      try {
+        estimatedGas = await safe.execTransaction.estimateGas(...execArgs)
+      } catch (error) {
+        request.log.warn(
+          { err: error, userId: sub, chainId: body.chain_id, safeAddress: body.safe_address },
+          'Safe execution gas estimation failed; falling back to a conservative gas limit',
+        )
+      }
+
+      // Contract-signature validation plus module setup calls can be expensive.
+      // Use the provider estimate when available, otherwise fall back to a high
+      // explicit gas limit so relayed batched admin flows don't under-gas.
       const tx = await safe.execTransaction(...execArgs, {
-        gasLimit: RELAY_EXEC_GAS_LIMIT,
+        gasLimit: getRelayExecGasLimit(estimatedGas),
       })
       await tx.wait()
 

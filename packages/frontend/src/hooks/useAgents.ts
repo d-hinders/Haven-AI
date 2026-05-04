@@ -12,28 +12,20 @@ export interface AgentAllowance {
   reset_period_min: number
 }
 
-export interface AgentRecipient {
-  id: string
-  agent_id: string
-  address: string
-  label: string | null
-  created_at: string
-}
+export type AgentStatus = 'active' | 'paused' | 'revoked'
 
 export interface Agent {
   id: string
   name: string
   description: string | null
   delegate_address: string | null
-  restrict_recipients: boolean
   safe_id: string | null
   safe_address: string | null
   safe_name: string | null
   api_key: string
-  status: string
+  status: AgentStatus
   created_at: string
   allowances: AgentAllowance[]
-  allowed_recipients: AgentRecipient[]
 }
 
 interface CreateAgentParams {
@@ -41,8 +33,6 @@ interface CreateAgentParams {
   description?: string
   delegate_address: string
   safe_id?: string
-  restrict_recipients?: boolean
-  allowed_recipients?: { address: string; label?: string }[]
   allowances?: {
     token_address: string
     token_symbol: string
@@ -85,8 +75,6 @@ export function useAgents() {
       params: {
         name?: string
         description?: string
-        restrict_recipients?: boolean
-        allowed_recipients?: { address: string; label?: string }[]
       },
     ): Promise<Agent> => {
       const agent = await api.put<Agent>(`/agents/${id}`, params)
@@ -108,6 +96,20 @@ export function useAgents() {
     )
   }, [])
 
+  const pauseAgent = useCallback(async (id: string): Promise<void> => {
+    await api.post(`/agents/${id}/pause`, {})
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: 'paused' } : a)),
+    )
+  }, [])
+
+  const resumeAgent = useCallback(async (id: string): Promise<void> => {
+    await api.post(`/agents/${id}/resume`, {})
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: 'active' } : a)),
+    )
+  }, [])
+
   return {
     agents,
     loading,
@@ -115,6 +117,8 @@ export function useAgents() {
     updateAgent,
     deleteAgent,
     revokeAgent,
+    pauseAgent,
+    resumeAgent,
     refetch: fetchAgents,
   }
 }

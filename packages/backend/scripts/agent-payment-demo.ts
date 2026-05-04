@@ -5,7 +5,7 @@
  * waits for human approval before executing. Shows the agent → human
  * → Haven flow that makes it clear an AI is initiating transactions.
  *
- * This demo uses @haven-fi/sdk to handle the entire payment flow.
+ * This demo uses @haven_ai/sdk to handle the entire payment flow.
  *
  * Usage:
  *   cd packages/backend
@@ -23,7 +23,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import { HavenClient, havenTools } from '@haven-fi/sdk'
+import { HavenClient, havenTools } from '@haven_ai/sdk'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -132,7 +132,7 @@ async function runAgent(taskPrompt: string): Promise<void> {
   // Conversation loop
   while (true) {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: systemPrompt,
       tools,
@@ -259,7 +259,7 @@ async function runAgent(taskPrompt: string): Promise<void> {
 // ── Main ──────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log(`\n${c.bold}${c.white}Haven Agent Demo${c.reset} ${c.dim}(powered by @haven-fi/sdk)${c.reset}`)
+  console.log(`\n${c.bold}${c.white}Haven Agent Demo${c.reset} ${c.dim}(powered by @haven_ai/sdk)${c.reset}`)
   console.log('  ' + '─'.repeat(40))
 
   preflight()

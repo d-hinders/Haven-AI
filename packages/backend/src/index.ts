@@ -10,6 +10,7 @@ import userRoutes from './routes/user.js'
 import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
 import portfolioRoutes from './routes/portfolio.js'
+import dashboardRoutes from './routes/dashboard.js'
 import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
 import contactRoutes from './routes/contacts.js'
@@ -18,6 +19,10 @@ import approvalRoutes from './routes/approvals.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
+import selfSignAgentRoutes from './routes/self-sign-agents.js'
+import selfSignPaymentRoutes from './routes/self-sign-payments.js'
+import x402ResourceRoutes from './routes/x402-resources.js'
+import demoX402Routes from './routes/demo-x402.js'
 import pool from './db.js'
 
 const app = Fastify({
@@ -53,8 +58,20 @@ process.on('uncaughtException', (error) => {
 })
 
 // --- Plugins ---
+// CORS:
+//   - Browser dashboard: served from `config.frontendUrl`. CORS protects it
+//     from other websites making authenticated requests on the user's behalf.
+//   - Agent SDK clients: hit `/agents/...` and `/payments/...` from arbitrary
+//     hosts (any agent runtime — Claude console, custom servers, MCP, etc.).
+//     They authenticate with `Authorization: Bearer sk_agent_*` — that's the
+//     real security boundary, not the Origin header.
+//
+// Reflecting the request origin (or accepting requests with no Origin, which
+// is what server-side fetch sends) gives us both: dashboard credential flow
+// keeps working, agents from anywhere can authenticate.
 await app.register(cors, {
-  origin: config.frontendUrl,
+  origin: true,
+  credentials: true,
 })
 
 await app.register(fastifyJwt, {
@@ -87,6 +104,7 @@ await app.register(userRoutes, { prefix: '/user' })
 await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
+await app.register(dashboardRoutes, { prefix: '/dashboard' })
 await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(contactRoutes, { prefix: '/contacts' })
@@ -95,6 +113,11 @@ await app.register(approvalRoutes, { prefix: '/approvals' })
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
+await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
+await app.register(selfSignPaymentRoutes, { prefix: '/self-sign-payments' })
+await app.register(x402ResourceRoutes, { prefix: '/x402' })
+// Public demo — no auth hook, registered separately
+await app.register(demoX402Routes, { prefix: '/demo/x402' })
 
 // --- Start ---
 const start = async () => {

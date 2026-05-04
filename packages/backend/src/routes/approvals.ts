@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -18,6 +19,9 @@ interface ApprovalRow {
   status: string
   tx_hash: string | null
   reviewed_at: string | null
+  usd_value: string | null
+  eur_value: string | null
+  executed_at: string | null
   created_at: string
   expires_at: string
 }
@@ -170,17 +174,40 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
         return reply.code(400).send({ error: 'Valid tx_hash is required' })
       }
 
+      const existing = await pool.query<ApprovalRow>(
+        `SELECT *
+         FROM approval_requests
+         WHERE id = $1 AND user_id = $2 AND status = 'approved'`,
+        [id, sub],
+      )
+
+      if (existing.rows.length === 0) {
+        return reply.code(404).send({
+          error: 'Approval request not found or not approved',
+        })
+      }
+
+      const approval = existing.rows[0]
+      const fiatValues = await getFiatValuesForTokenAmount(
+        approval.token_symbol,
+        approval.amount_human,
+      )
+
       const result = await pool.query<ApprovalRow>(
         `UPDATE approval_requests
-         SET status = 'executed', tx_hash = $3
+         SET status = 'executed',
+             tx_hash = $3,
+             executed_at = NOW(),
+             usd_value = $4,
+             eur_value = $5
          WHERE id = $1 AND user_id = $2 AND status = 'approved'
          RETURNING id`,
-        [id, sub, tx_hash],
+        [id, sub, tx_hash, fiatValues.usd, fiatValues.eur],
       )
 
       if (result.rows.length === 0) {
-        return reply.code(404).send({
-          error: 'Approval request not found or not approved',
+        return reply.code(409).send({
+          error: 'Approval request is no longer approved',
         })
       }
 

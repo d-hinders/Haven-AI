@@ -38,7 +38,6 @@ const DEMO = {
     policy: {
       dailyLimit: '50 USDC',
       perTxLimit: '1 USDC',
-      approvalThreshold: '1 USDC',
       allowedCategories: ['api_access', 'data'],
       allowedNetworks: ['Base', 'Gnosis'],
     },
@@ -68,7 +67,6 @@ const DEMO = {
 
 const POLICY_CHECKS: string[] = [
   'Within per-tx limit (1 USDC)',
-  'Below approval threshold',
   `Network ${'Base'} allowed`,
   'On-chain allowance sufficient',
 ]
@@ -170,7 +168,7 @@ export default function X402DemoPage() {
       push({
         phase: 'policy',
         label: 'Policy engine evaluating intent',
-        detail: 'Per-tx limit, approval threshold, network allowlist, on-chain allowance',
+        detail: 'Per-tx limit, network allowlist, on-chain allowance',
       })
     })
     // Stagger 4 checks across ~1200ms (300ms per check)
@@ -273,8 +271,7 @@ export default function X402DemoPage() {
       {/* Hero */}
       <section className="relative max-w-6xl mx-auto px-6 pt-16 pb-10 z-10">
         <div className="inline-flex items-center gap-2 mb-6 px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-medium">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-          Live x402 payment demo
+          How x402 works
         </div>
         <h1 className="text-3xl md:text-5xl font-bold tracking-tight leading-[1.05] mb-4 max-w-3xl">
           <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">
@@ -286,48 +283,150 @@ export default function X402DemoPage() {
           </span>
         </h1>
         <p className="text-base md:text-lg text-zinc-400 leading-relaxed max-w-2xl">
-          An agent encounters an HTTP 402. Haven evaluates the payment against its
-          policy, signs from the Safe, and settles on Base — all before the agent's
-          retry finishes.
+          An agent hits a paywall. Just seconds later it has the data — no card,
+          no human, no key. Press play to see one HTTP 402 become a settled
+          transaction on Base.
         </p>
+      </section>
+
+      {/* What is x402 */}
+      <section className="relative max-w-6xl mx-auto px-6 pb-10 z-10">
+        <div className="flex items-baseline gap-4 mb-6">
+          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
+            [what is x402]
+          </span>
+          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">
+            The standard
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-6 items-start">
+          <div className="space-y-4 text-sm md:text-[15px] text-zinc-400 leading-relaxed">
+            <p>
+              <span className="text-zinc-200 font-medium">x402</span> is an open
+              payment standard built on top of the long-dormant{' '}
+              <span className="font-mono text-zinc-300">HTTP 402 Payment Required</span>{' '}
+              status code. Originally proposed by Coinbase, it lets any web service
+              charge for a single request — no account, no API key, no card on file.
+              The client pays a small amount in stablecoin, attaches the proof, and
+              the server unlocks the resource.
+            </p>
+            <p>
+              That's the unlock for agentic workflows. AI agents discover and use
+              tools the same way humans browse the web: one request at a time,
+              often across services they've never seen before. With x402, an agent
+              can pay per call for an API, a piece of data, or a unit of compute —
+              programmatically, without a human in the checkout loop. It turns the
+              web into something machines can actually transact on.
+            </p>
+          </div>
+          <div className="bg-[#0b0b0f] border border-white/[0.06] rounded-md p-5">
+            <div className="text-[11px] text-zinc-500 uppercase tracking-wider mb-4">
+              The protocol in 3 lines
+            </div>
+            <ol className="space-y-3 text-sm">
+              <li className="flex items-start gap-3">
+                <span className="text-[11px] font-mono text-indigo-300 tabular-nums mt-0.5">01</span>
+                <div>
+                  <div className="text-zinc-200">Request → 402</div>
+                  <div className="text-xs text-zinc-500">Server asks for payment.</div>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="text-[11px] font-mono text-indigo-300 tabular-nums mt-0.5">02</span>
+                <div>
+                  <div className="text-zinc-200">Pay → proof</div>
+                  <div className="text-xs text-zinc-500">Client signs and settles on-chain.</div>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="text-[11px] font-mono text-indigo-300 tabular-nums mt-0.5">03</span>
+                <div>
+                  <div className="text-zinc-200">Retry → 200</div>
+                  <div className="text-xs text-zinc-500">Server returns the resource.</div>
+                </div>
+              </li>
+            </ol>
+          </div>
+        </div>
       </section>
 
       {/* Stage */}
       <section className="relative max-w-6xl mx-auto px-6 pb-6 z-10">
-        {/* Step ribbon */}
-        <div className="mb-6 flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
-          {DEMO.steps.map((s, i) => {
-            const stepPhase = s.phase as Phase
-            const isFinal = i === DEMO.steps.length - 1
-            const stepReached = reached(phase, stepPhase)
-            // Treat the final step as "complete" (green) once delivered fires
-            const isCurrent = i === currentStep && !(isDone && isFinal)
+        {/* Flow intro + actor legend */}
+        <div className="mb-6 max-w-3xl">
+          <p className="text-sm md:text-[15px] text-zinc-400 leading-relaxed">
+            Below is one x402 payment in motion: a Research Agent buying a single
+            API call for $0.05 USDC. Four actors take part — watch how a request,
+            a 402, and a settled tx flow between them.
+          </p>
+        </div>
+        <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+          {(['agent', 'server', 'haven', 'chain'] as const).map((kind) => {
+            const cfg = COLUMN_CONFIG[kind]
+            const role =
+              kind === 'agent'
+                ? 'The AI making the request'
+                : kind === 'server'
+                ? 'The API charging for access'
+                : kind === 'haven'
+                ? 'Policy engine + Safe signer'
+                : 'The settlement chain'
             return (
-              <div key={s.phase} className="flex items-center gap-1.5">
-                <span
-                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border transition-all duration-200 ${
-                    isCurrent
-                      ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100 shadow-[0_0_20px_-4px_rgba(99,102,241,0.6)] ring-1 ring-indigo-400/40'
-                      : stepReached
-                      ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300/80'
-                      : 'border-white/[0.06] text-zinc-600'
-                  }`}
+              <div
+                key={kind}
+                className="flex items-center gap-2.5 px-3 py-2 rounded-md border border-white/[0.06] bg-[#0b0b0f]/60"
+              >
+                <div
+                  className={`w-6 h-6 rounded bg-gradient-to-br ${cfg.iconGradient} flex items-center justify-center flex-shrink-0`}
                 >
-                  {isCurrent && (
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
-                    </span>
-                  )}
-                  <span className="tabular-nums">{i + 1}.</span> {s.label}
-                </span>
-                {i < DEMO.steps.length - 1 && (
-                  <span className={stepReached ? 'text-emerald-400/50' : 'text-zinc-700'}>›</span>
-                )}
+                  {cfg.icon}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider">
+                    {cfg.kicker}
+                  </div>
+                  <div className="text-xs text-zinc-300 truncate">{role}</div>
+                </div>
               </div>
             )
           })}
         </div>
+
+        {/* Payment-flow canvas */}
+        <div className="border border-white/[0.06] rounded-lg bg-[#0a0a0f]/40 p-5 md:p-7">
+          <div className="flex items-center justify-between mb-5 gap-3">
+            <div className="flex items-baseline gap-3 min-w-0">
+              <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
+                [flow]
+              </span>
+              <h3 className="text-sm font-medium text-zinc-200 truncate">
+                x402 payment flow
+              </h3>
+            </div>
+            <div
+              className={`shrink-0 inline-flex items-center gap-2 px-2.5 py-1 rounded border text-[11px] font-mono transition-colors ${
+                isRunning
+                  ? 'border-indigo-400/50 bg-indigo-500/10 text-indigo-200'
+                  : isDone
+                  ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-300'
+                  : 'border-white/[0.08] text-zinc-500'
+              }`}
+            >
+              {isRunning && (
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
+                </span>
+              )}
+              <span className="tabular-nums">
+                {isRunning
+                  ? `Step ${currentStep + 1} / ${DEMO.steps.length} — ${DEMO.steps[currentStep].label}`
+                  : isDone
+                  ? `Complete · ${DEMO.steps.length} / ${DEMO.steps.length}`
+                  : 'Idle'}
+              </span>
+            </div>
+          </div>
 
         {/* 2x2 actor grid with 3 arrows */}
         <div
@@ -426,6 +525,7 @@ export default function X402DemoPage() {
             />
           </div>
         </div>
+        </div>
 
         {/* Controls */}
         <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -502,47 +602,6 @@ export default function X402DemoPage() {
               </li>
             ))}
           </ol>
-        </div>
-      </section>
-
-      {/* Technical details */}
-      <section className="relative max-w-6xl mx-auto px-6 py-10 z-10">
-        <div className="flex items-baseline gap-4 mb-6">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
-            [request]
-          </span>
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">
-            What the agent sends
-          </h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/[0.06] rounded-md overflow-hidden">
-          <pre className="bg-[#0b0b0f] p-5 text-xs text-zinc-400 font-mono leading-relaxed overflow-x-auto">
-{`POST /x402/authorize
-Authorization: Bearer ${DEMO.agent.apiKeyPreview}
-Content-Type: application/json
-
-{
-  "url":      "${DEMO.resourceUrl}",
-  "payTo":    "${DEMO.payTo}",
-  "amount":   "${(parseFloat(DEMO.amount) * 1_000_000).toString()}",
-  "asset":    "${DEMO.tokenAddress}",
-  "network":  "${DEMO.caip2}",
-  "category": "api_access"
-}`}
-          </pre>
-          <pre className="bg-[#0b0b0f] p-5 text-xs text-zinc-400 font-mono leading-relaxed overflow-x-auto">
-{`HTTP/1.1 201 Created
-
-{
-  "payment_id":   "pi_8f2c…e14",
-  "status":       "confirmed",
-  "tx_hash":      "${shortHex(DEMO.txHash, 10, 8)}",
-  "token":        "${DEMO.token}",
-  "amount":       "${DEMO.amount}",
-  "to":           "${DEMO.payTo.toLowerCase()}",
-  "resource_url": "${DEMO.resourceUrl}"
-}`}
-          </pre>
         </div>
       </section>
 
@@ -632,12 +691,13 @@ function StageColumn({
             className="pointer-events-none absolute inset-0 rounded-md"
             style={{ animation: 'cardPulse 2s ease-in-out infinite' }}
           />
-          <div className="absolute top-3 right-3 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-indigo-300 z-10">
-            <span className="relative flex h-2 w-2">
+          <div className="absolute top-3 right-3 flex items-center gap-1.5 text-[10px] font-mono text-indigo-200 z-10 px-1.5 py-0.5 rounded border border-indigo-400/40 bg-indigo-500/15">
+            <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
             </span>
-            active
+            <span className="tabular-nums text-indigo-300">{phaseStep(phase)}</span>
+            <span className="text-indigo-100/90">{DEMO.steps[Math.max(0, phaseStep(phase) - 1)]?.label}</span>
           </div>
         </>
       )}

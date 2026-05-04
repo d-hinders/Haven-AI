@@ -23,7 +23,11 @@ This is a TypeScript monorepo:
 |---|---|
 | `packages/backend` | Fastify API — auth, agents, payments, Safe integration |
 | `packages/frontend` | Next.js dashboard — wallet connect, Safe deploy, agent management |
-| `packages/sdk` | `@haven-fi/sdk` — TypeScript SDK for agent payment integration |
+| `packages/sdk` | `@haven_ai/sdk` — TypeScript SDK for agent payment integration |
+
+## Team Docs
+
+- [PR Workflow Checklist](docs/pr-workflow-checklist.md)
 
 ## Prerequisites
 
@@ -36,8 +40,8 @@ This is a TypeScript monorepo:
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/d-hinders/Haven.git
-cd Haven
+git clone https://github.com/d-hinders/Haven-AI.git
+cd Haven-AI
 npm install
 ```
 
@@ -115,18 +119,18 @@ npm run dev
 
 ## SDK — Agent Integration
 
-The `@haven-fi/sdk` package wraps the 3-step payment API into a single function call. This is what developers use to give their agents payment capabilities.
+The `@haven_ai/sdk` package wraps the 3-step payment API into a single function call. This is what developers use to give their agents payment capabilities.
 
 ### Install
 
 ```bash
-npm install @haven-fi/sdk
+npm install @haven_ai/sdk
 ```
 
 ### One-liner payment
 
 ```typescript
-import { HavenClient } from '@haven-fi/sdk'
+import { HavenClient } from '@haven_ai/sdk'
 
 const haven = new HavenClient({
   apiKey: 'sk_agent_xxx',          // from Haven dashboard
@@ -149,14 +153,14 @@ console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x... (or basescan.o
 The SDK ships with pre-built tool definitions for Claude and OpenAI:
 
 ```typescript
-import { HavenClient, havenTools } from '@haven-fi/sdk'
+import { HavenClient, havenTools } from '@haven_ai/sdk'
 import Anthropic from '@anthropic-ai/sdk'
 
 const haven = new HavenClient({ apiKey, delegateKey })
 const anthropic = new Anthropic()
 
 const response = await anthropic.messages.create({
-  model: 'claude-opus-4-6',
+  model: 'claude-opus-4-7',
   tools: havenTools.claude(),  // ready-made tool schemas
   messages: [{ role: 'user', content: 'Pay 5 EURe to 0xabc for API access' }],
 })
@@ -363,7 +367,7 @@ From `packages/backend/`:
 ## Project Structure
 
 ```
-Haven/
+Haven-AI/
 ├── .env.example               # Environment variable template
 ├── docker-compose.yml         # PostgreSQL for local dev
 ├── packages/
@@ -394,7 +398,7 @@ Haven/
 │   │   │   ├── signer.ts          # Raw ECDSA signing (AllowanceModule-compatible)
 │   │   │   ├── types.ts           # TypeScript types + error classes
 │   │   │   └── tools.ts           # Pre-built tool defs for Claude & OpenAI
-│   │   ├── package.json           # @haven-fi/sdk (publishable to npm)
+│   │   ├── package.json           # @haven_ai/sdk (publishable to npm)
 │   │   └── README.md              # SDK documentation
 │   └── frontend/
 │       └── src/
@@ -441,6 +445,53 @@ Haven/
 - **Tailwind CSS** — styling
 - **Gnosis Chain + Base** — supported EVM networks
 - **Anthropic SDK** — Claude agent demo
+
+## Contributing — Hosted Setup & Dev Workflow
+
+Haven runs in production on **Vercel** (frontend) and **Railway** (backend + Postgres). The `main` branch auto-deploys to both.
+
+### Repository workflow
+
+All changes go through pull requests — no direct pushes to `main`.
+
+1. Branch off `main` → make your changes
+2. Push the branch and open a PR on GitHub
+3. CI runs automatically (type-check + build for SDK, backend, frontend)
+4. Vercel posts a preview URL as a comment on the PR — click to test the frontend live
+5. Once CI is green, the PR author can self-merge
+6. Merging to `main` triggers automatic deploys to Vercel + Railway (~2 min)
+
+### Frontend-only changes
+
+The Vercel preview URL points at the **production Railway backend**. You can test most frontend changes directly against the preview URL — no local setup needed beyond the PR.
+
+### Backend changes — test locally first
+
+Vercel previews share the prod backend, so backend changes can't be tested via the PR preview alone. Run the backend locally before opening the PR:
+
+```bash
+# 1. Start the local Postgres
+npm run docker:up
+
+# 2. In one terminal — run the backend on :3001
+npm run dev -w packages/backend
+
+# 3. In another terminal — run the frontend on :3000
+#    (set NEXT_PUBLIC_API_URL=http://localhost:3001 in your .env)
+npm run dev -w packages/frontend
+```
+
+Test the full flow locally, then push and open the PR. Once merged, watch the Railway deploy logs to confirm the change deployed cleanly in prod.
+
+### Inspecting prod
+
+Collaborators have **Viewer** access to the Railway project — you can see services, deploy logs, and runtime logs, but not change env vars. If a deploy fails or behaves unexpectedly:
+
+- **Railway → backend service → Deployments** — build logs and runtime logs
+- **Railway → Postgres → Data** — inspect tables (read-only with Viewer role)
+- **Vercel previews** — every PR has a preview URL with its own build logs (linked from the PR comment)
+
+If you need an env var changed in Railway or a secret rotated, ping the project owner.
 
 ## License
 

@@ -24,6 +24,11 @@ const icons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
     </svg>
   ),
+  transactions: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 7.5h11.25m0 0L15.75 4.5m3 3l-3 3M16.5 16.5H5.25m0 0l3-3m-3 3l3 3" />
+    </svg>
+  ),
   agents: (
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
@@ -50,6 +55,7 @@ const icons = {
 const mainNav: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: icons.dashboard },
   { label: 'Accounts', href: '/accounts', icon: icons.account },
+  { label: 'Transactions', href: '/transactions', icon: icons.transactions },
   { label: 'Agents', href: '/agents', icon: icons.agents },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
 ]
@@ -67,7 +73,8 @@ export default function Sidebar() {
       {/* Mobile toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="lg:hidden fixed top-4 left-4 z-[60] w-8 h-8 flex items-center justify-center rounded-md bg-[#111] border border-white/[0.08] text-zinc-400"
+        aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
+        className="lg:hidden fixed top-4 left-4 z-[60] w-8 h-8 flex items-center justify-center rounded-md bg-[#111] border border-white/[0.08] text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -150,15 +157,20 @@ export default function Sidebar() {
                 {userInitial}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-zinc-300 truncate">{user?.email}</p>
+                <p
+                  className="text-sm text-zinc-300 truncate"
+                  title={user?.email ?? undefined}
+                >
+                  {user?.email}
+                </p>
               </div>
               <button
                 onClick={() => {
                   logout()
                   router.push('/')
                 }}
-                className="text-zinc-600 hover:text-zinc-400 transition-colors flex-shrink-0"
-                title="Log out"
+                aria-label="Log out"
+                className="p-1 rounded-md text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.04] transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
               >
                 {icons.logout}
               </button>

@@ -31,8 +31,12 @@ export default function SignupPage() {
 
     setSubmitting(true)
     try {
-      await signup(email, password)
-      router.push('/login?registered=1')
+      const u = await signup(email, password)
+      if (u.safe_address) {
+        router.push('/dashboard')
+      } else {
+        router.push('/onboarding')
+      }
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message)
@@ -95,6 +99,7 @@ export default function SignupPage() {
                 id="email"
                 type="email"
                 required
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
@@ -113,6 +118,7 @@ export default function SignupPage() {
                 id="password"
                 type="password"
                 required
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
@@ -131,6 +137,7 @@ export default function SignupPage() {
                 id="confirm"
                 type="password"
                 required
+                autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"

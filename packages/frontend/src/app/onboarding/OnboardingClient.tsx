@@ -9,6 +9,7 @@ import { deploySafe, type DeployStage } from '@/lib/safe'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
 import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
+import NetworkGate from '@/components/NetworkGate'
 import type { User } from '@/context/AuthContext'
 
 type Step = 'connect' | 'deploy' | 'done'
@@ -17,7 +18,7 @@ export default function OnboardingClient() {
   const { user, loading, updateUser, refreshUser } = useAuth()
   const router = useRouter()
 
-  const { address, isConnected, chain } = useAccount()
+  const { address, isConnected } = useAccount()
   const publicClient = usePublicClient()
   const { data: walletClient } = useWalletClient()
 
@@ -43,7 +44,10 @@ export default function OnboardingClient() {
     }
   }, [loading, user, router])
 
-  // When wallet connects, save the address and advance to deploy step
+  // When wallet connects, save the address and advance to deploy step.
+  // If the save fails we still advance (the address will be re-saved during
+  // /user/safe), but we log the error and surface a non-blocking warning so
+  // nothing fails silently.
   useEffect(() => {
     if (isConnected && address && user && step === 'connect') {
       api
@@ -52,14 +56,17 @@ export default function OnboardingClient() {
           updateUser(updated)
           setStep('deploy')
         })
-        .catch(() => {
-          // Non-critical — address will be saved during deploy
+        .catch((err: unknown) => {
+          console.warn('[Haven] Failed to persist wallet address before deploy:', err)
+          // Address will be saved during deploy via /user/safe. Advance so
+          // the user isn't stuck, but keep the warning visible.
+          setError(
+            'We couldn\u2019t save your wallet address just now. You can continue \u2014 we\u2019ll save it when you deploy.',
+          )
           setStep('deploy')
         })
     }
   }, [isConnected, address, user, step, updateUser])
-
-  const wrongNetwork = isConnected && chain?.id !== selectedChainId
 
   const handleDeploy = async () => {
     if (!walletClient || !publicClient || !address) return
@@ -237,36 +244,31 @@ export default function OnboardingClient() {
                 </select>
               </div>
 
-              {/* Wrong network warning */}
-              {wrongNetwork && (
-                <div className="mb-6 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-md px-4 py-3">
-                  Please switch to {getChainConfig(selectedChainId).name} in your wallet to continue.
-                </div>
-              )}
-
               {error && (
                 <div className="mb-6 text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-4 py-3">
                   {error}
                 </div>
               )}
 
-              <button
-                onClick={handleDeploy}
-                disabled={deploying || wrongNetwork}
-                className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {deploying ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    {deployStage === 'signing' && 'Waiting for signature...'}
-                    {deployStage === 'confirming' && 'Confirming on-chain...'}
-                    {deployStage === 'registering' && 'Finalizing...'}
-                    {!deployStage && 'Deploying Safe...'}
-                  </span>
-                ) : (
-                  'Deploy Safe'
-                )}
-              </button>
+              <NetworkGate requiredChainId={selectedChainId}>
+                <button
+                  onClick={handleDeploy}
+                  disabled={deploying}
+                  className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {deploying ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      {deployStage === 'signing' && 'Waiting for signature...'}
+                      {deployStage === 'confirming' && 'Confirming on-chain...'}
+                      {deployStage === 'registering' && 'Finalizing...'}
+                      {!deployStage && 'Deploying Safe...'}
+                    </span>
+                  ) : (
+                    'Deploy Safe'
+                  )}
+                </button>
+              </NetworkGate>
 
               {deploying && (
                 <div className="mt-6 space-y-2">

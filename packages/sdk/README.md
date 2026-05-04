@@ -1,19 +1,19 @@
-# @haven-fi/sdk
+# @haven_ai/sdk
 
-TypeScript SDK for [Haven](https://github.com/d-hinders/Haven) — agent wallet infrastructure for the autonomous economy.
+TypeScript SDK for [Haven](https://github.com/d-hinders/Haven-AI) — agent wallet infrastructure for the autonomous economy.
 
 Haven gives AI agents the ability to hold, send, and receive money within strict, user-defined guardrails. This SDK makes it trivial to integrate Haven payments into any agent.
 
 ## Install
 
 ```bash
-npm install @haven-fi/sdk
+npm install @haven_ai/sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { HavenClient } from '@haven-fi/sdk'
+import { HavenClient } from '@haven_ai/sdk'
 
 const haven = new HavenClient({
   apiKey: 'sk_agent_xxx',          // from Haven dashboard
@@ -31,6 +31,35 @@ const result = await haven.pay({
 console.log(result.txHash)      // 0x...
 console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x... (or basescan.org for Base)
 ```
+
+## Try it live — zero setup
+
+Haven hosts a demo endpoint you can hit immediately after creating an agent:
+
+```typescript
+import { HavenClient } from '@haven_ai/sdk'
+
+const haven = new HavenClient({
+  apiKey: process.env.HAVEN_API_KEY!,       // from Haven dashboard
+  delegateKey: process.env.DELEGATE_KEY!,   // agent's delegate private key
+  baseUrl: 'https://havenbackend-production-8a00.up.railway.app', // hosted Haven, or your self-hosted URL
+})
+
+// haven.fetch handles 402 → pay → retry automatically
+const response = await haven.fetch(
+  'https://havenbackend-production-8a00.up.railway.app/demo/x402/data',
+)
+const data = await response.json()
+
+console.log(data.message)     // "You paid! Here's your demo data."
+console.log(data.fact)        // a fun fact about the agent economy
+console.log(data.explorerUrl) // link to the on-chain payment tx
+```
+
+Tell your agent:
+> "Use Haven to fetch `https://havenbackend-production-8a00.up.railway.app/demo/x402/data` and show me what came back."
+
+The agent will pay a tiny amount (~0.01 EURe on Gnosis Chain), receive the demo payload, and you'll see the payment in your Haven dashboard activity feed — no local server or extra config required.
 
 ## Supported Networks & Tokens
 
@@ -71,7 +100,7 @@ const response = await haven.fetch('https://paid-api.example.com/data')
 const data = await response.json()
 
 // Manual — parse and authorize the 402 yourself
-import { parsePaymentRequired } from '@haven-fi/sdk'
+import { parsePaymentRequired } from '@haven_ai/sdk'
 
 const apiResponse = await fetch('https://paid-api.example.com/data')
 if (apiResponse.status === 402) {
@@ -90,14 +119,14 @@ Supported x402 networks: `eip155:100` (Gnosis Chain) and `eip155:8453` (Base).
 The SDK ships with ready-made tool schemas for Claude and OpenAI:
 
 ```typescript
-import { HavenClient, havenTools } from '@haven-fi/sdk'
+import { HavenClient, havenTools } from '@haven_ai/sdk'
 import Anthropic from '@anthropic-ai/sdk'
 
 const haven = new HavenClient({ apiKey, delegateKey })
 const anthropic = new Anthropic()
 
 const response = await anthropic.messages.create({
-  model: 'claude-opus-4-6',
+  model: 'claude-opus-4-7',
   tools: havenTools.claude(),  // or havenTools.openai() for OpenAI
   messages: [{ role: 'user', content: 'Pay 5 EURe to 0xabc for API access' }],
 })
@@ -132,10 +161,31 @@ const haven = new HavenClient({
 })
 ```
 
+## Payments above the on-chain allowance
+
+Haven's policy lives entirely on the Safe AllowanceModule (token, amount,
+reset period). If an agent requests a payment above the remaining allowance,
+Haven does **not** reject it — it returns HTTP 202 with `status: 'pending_approval'`
+and queues it for the wallet owner to approve in the dashboard.
+
+Surface that to the user: the payment isn't dead, it's waiting for a human to
+sign off. Don't retry — the same request would just queue another approval.
+
+```typescript
+try {
+  await haven.pay({ token: 'USDC', amount: '500', to: '0xabc...' })
+} catch (err) {
+  if (err instanceof HavenApiError && err.statusCode === 202) {
+    // err.body.payment_id, err.body.remaining, err.body.requested
+    console.log('Queued for owner approval — visible in the Haven dashboard.')
+  }
+}
+```
+
 ## Error Handling
 
 ```typescript
-import { HavenApiError, HavenSigningError, HavenTimeoutError } from '@haven-fi/sdk'
+import { HavenApiError, HavenSigningError, HavenTimeoutError } from '@haven_ai/sdk'
 
 try {
   await haven.pay({ token: 'EURe', amount: '5.00', to: '0xabc...' })

@@ -3,6 +3,7 @@ import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
+import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import {
   getTokenAllowance,
@@ -36,6 +37,21 @@ function isValidAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
+/**
+ * Normalise an Ethereum address to its canonical EIP-55 checksum form.
+ *
+ * x402 payment-required headers are emitted by third-party services that may
+ * ship malformed (non-checksummed or mis-cased) addresses. ethers v6 throws
+ * `bad address checksum` when ABI-encoding such values, which surfaced here
+ * as a confusing "Failed to generate transfer hash" error.
+ *
+ * Lower-casing first lets `getAddress()` skip checksum validation and just
+ * recompute it, so any 40-hex address (any casing) is accepted.
+ */
+function normaliseAddress(addr: string): string {
+  return ethers.getAddress(addr.toLowerCase())
+}
+
 /** Resolve a token from its contract address for a specific chain. */
 function resolveTokenByAddress(chainId: number, address: string) {
   const lower = address.toLowerCase()
@@ -60,7 +76,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
    */
   app.post<{ Body: X402AuthorizeBody }>('/', async (request, reply) => {
     const agent = request.agent as AgentContext
-    const { url, payTo, amount, asset, network, description, category, signature } = request.body
+    const { url, amount, asset, network, description, category, signature } = request.body
+    let { payTo } = request.body
 
     // 1. Validate inputs
     if (!url || typeof url !== 'string') {
@@ -69,6 +86,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     if (!payTo || !isValidAddress(payTo)) {
       return reply.code(400).send({ error: 'Valid payTo address is required' })
     }
+    // Re-checksum to canonical EIP-55 form. Third-party x402 servers sometimes
+    // ship mis-cased addresses; ethers ABI-encoding rejects those downstream.
+    payTo = normaliseAddress(payTo)
     if (!amount || typeof amount !== 'string') {
       return reply.code(400).send({ error: 'Amount (atomic units) is required' })
     }
@@ -109,9 +129,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     // Human-readable amount for storage
     const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
 
-    // 4. Policy check: DB allowance
+    // 4. Policy check: agent must have this token in the on-chain allowance config
     const dbAllowance = await pool.query(
-      `SELECT allowance_amount, approval_threshold FROM agent_allowances
+      `SELECT allowance_amount FROM agent_allowances
        WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
       [agent.id, tokenAddress],
     )
@@ -121,55 +141,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // 5. Approval threshold check
-    const approvalThreshold = dbAllowance.rows[0].approval_threshold
-      ? BigInt(dbAllowance.rows[0].approval_threshold)
-      : null
-
-    if (approvalThreshold !== null && amountRaw > approvalThreshold) {
-      const approvalResult = await pool.query(
-        `INSERT INTO approval_requests (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, reason, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
-          NOW() + interval '24 hours')
-        RETURNING id, status, expires_at`,
-        [
-          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
-          tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
-          amountRaw.toString(), amountHuman,
-          `x402 payment for ${url}${category ? ` (${category})` : ''}`,
-        ],
-      )
-      const approval = approvalResult.rows[0]
-      return reply.code(202).send({
-        payment_id: approval.id,
-        status: 'pending_approval',
-        message: `Payment of ${amountHuman} ${tokenConfig.symbol} exceeds approval threshold. Queued for human approval.`,
-        approval_threshold: ethers.formatUnits(approvalThreshold, tokenConfig.decimals),
-        expires_at: approval.expires_at,
-      })
-    }
-
-    // 6. Recipient allowlist check
-    const agentRestriction = await pool.query(
-      `SELECT restrict_recipients FROM agents WHERE id = $1`,
-      [agent.id],
-    )
-    if (agentRestriction.rows[0]?.restrict_recipients) {
-      const recipientCheck = await pool.query(
-        `SELECT id FROM agent_allowed_recipients
-         WHERE agent_id = $1 AND LOWER(address) = LOWER($2)`,
-        [agent.id, payTo],
-      )
-      if (recipientCheck.rows.length === 0) {
-        return reply.code(403).send({
-          error: `Recipient ${payTo} is not in the allowed recipients list for this agent`,
-        })
-      }
-    }
-
-    // 7. Rate limiting: max x402 payments per hour
+    // 5. Rate limiting: max x402 payments per hour
     const agentConfig = await pool.query(
       `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
       [agent.id],
@@ -188,7 +160,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // 8. On-chain allowance check
+    // 6. On-chain allowance check + auto-queue when over the remaining allowance
     let onChainAllowance
     try {
       onChainAllowance = await getTokenAllowance(
@@ -206,15 +178,35 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
     const effective = computeEffectiveAllowance(onChainAllowance)
     if (amountRaw > effective.remaining) {
-      return reply.code(403).send({
-        error: 'Amount exceeds remaining on-chain allowance',
-        remaining: effective.remaining.toString(),
-        requested: amountRaw.toString(),
+      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const approvalReason = `x402 payment for ${url}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
+
+      const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
+        `INSERT INTO approval_requests (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, reason, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
+          NOW() + interval '24 hours')
+        RETURNING id, status, expires_at`,
+        [
+          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+          tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
+          amountRaw.toString(), amountHuman, approvalReason,
+        ],
+      )
+      const approval = approvalResult.rows[0]
+      return reply.code(202).send({
+        payment_id: approval.id,
+        status: 'pending_approval',
+        message: `Payment of ${amountHuman} ${tokenConfig.symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
+        remaining: remainingHuman,
+        requested: amountHuman,
         token: tokenConfig.symbol,
+        expires_at: approval.expires_at,
       })
     }
 
-    // 9. Generate transfer hash on-chain
+    // 7. Generate transfer hash on-chain
     let signHash: string
     try {
       signHash = await generateTransferHash(
@@ -295,9 +287,20 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           signature,
         )
 
+        const fiatValues = await getFiatValuesForTokenAmount(
+          tokenConfig.symbol,
+          amountHuman,
+        )
+
         await pool.query(
-          `UPDATE payment_intents SET status = 'confirmed', tx_hash = $1, confirmed_at = NOW() WHERE id = $2`,
-          [txHash, intent.id],
+          `UPDATE payment_intents
+           SET status = 'confirmed',
+               tx_hash = $1,
+               confirmed_at = NOW(),
+               usd_value = $3,
+               eur_value = $4
+           WHERE id = $2`,
+          [txHash, intent.id, fiatValues.usd, fiatValues.eur],
         )
 
         return reply.code(201).send({

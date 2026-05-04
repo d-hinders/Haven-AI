@@ -18,6 +18,9 @@ const PAGES: InfoPage[] = [
     content: (
       <div className="space-y-5">
         <p className="text-sm text-zinc-400 leading-relaxed">
+          In Haven, an &ldquo;agent&rdquo; is the bundle of credentials and on-chain limits you issue to your real agent. Haven never runs your agent &mdash; it equips it.
+        </p>
+        <p className="text-sm text-zinc-400 leading-relaxed">
           Haven uses a <span className="text-zinc-200">non-custodial, policy-first</span> model.
           Agents can spend from your Safe within strict on-chain limits &mdash; without Haven
           or the agent ever having full access to your funds.

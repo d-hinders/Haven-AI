@@ -10,16 +10,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:payment": "tsx scripts/test-payment-flow.ts",
-    "agent:demo": "tsx scripts/agent-payment-demo.ts"
+    "agent:demo": "tsx scripts/agent-payment-demo.ts",
+    "demo:x402": "tsx scripts/x402-live-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.87.0",
-    "@haven-fi/sdk": "*",
+    "@haven_ai/sdk": "*",
     "@fastify/cors": "^10.0.0",
     "@fastify/jwt": "^10.0.0",
     "@safe-global/protocol-kit": "^5.1.0",
     "bcrypt": "^6.0.0",
     "dotenv": "^16.4.0",
+    "ethereum-cryptography": "^2.2.1",
     "ethers": "^6.13.0",
     "fastify": "^5.2.0",
     "pg": "^8.13.0"

@@ -1,12 +1,15 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { usePublicClient, useWalletClient } from 'wagmi'
-import { type Address, hashTypedData } from 'viem'
+import { usePublicClient } from 'wagmi'
+import { type Address } from 'viem'
+import { useAuth } from '@/context/AuthContext'
+import { useActiveSigner } from '@/lib/signer'
 import {
   buildSafeTx,
   signSafeTx,
   executeSafeTx,
+  getSafeTxHash,
   proposeSafeTx,
   getSafeNonce,
   type SendParams,
@@ -34,8 +37,12 @@ export function useSendTransaction(): UseSendTransactionReturn {
   const [txHash, setTxHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const { activeSafe } = useAuth()
   const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const signer = useActiveSigner({
+    safeAddress: activeSafe?.safe_address as Address | undefined,
+    chainId: activeSafe?.chain_id,
+  })
 
   const reset = useCallback(() => {
     setStatus('idle')
@@ -48,10 +55,10 @@ export function useSendTransaction(): UseSendTransactionReturn {
       params: SendParams,
       safeAddress: Address,
       threshold: number,
-      signer: Address,
+      _owner: Address,
       chainId: number = 100,
     ) => {
-      if (!walletClient || !publicClient) {
+      if (!signer || !publicClient) {
         setError('Wallet not connected')
         setStatus('error')
         return
@@ -68,18 +75,17 @@ export function useSendTransaction(): UseSendTransactionReturn {
 
         // Sign
         setStatus('signing')
-        const signature = await signSafeTx(walletClient, safeAddress, safeTx, signer, chainId)
+        const signature = await signSafeTx(signer, safeAddress, safeTx, chainId)
 
         if (threshold <= 1) {
           // Single-owner: execute directly
           setStatus('executing')
           const result = await executeSafeTx(
-            walletClient,
+            signer,
             publicClient,
             safeAddress,
             safeTx,
             signature,
-            signer,
             chainId,
           )
           setTxHash(result.txHash)
@@ -88,42 +94,9 @@ export function useSendTransaction(): UseSendTransactionReturn {
           // Multi-sig: propose to Safe Transaction Service
           setStatus('executing')
 
-          // Compute the safeTxHash for the proposal
-          const safeTxHash = hashTypedData({
-            domain: {
-              chainId,
-              verifyingContract: safeAddress,
-            },
-            types: {
-              SafeTx: [
-                { name: 'to', type: 'address' },
-                { name: 'value', type: 'uint256' },
-                { name: 'data', type: 'bytes' },
-                { name: 'operation', type: 'uint8' },
-                { name: 'safeTxGas', type: 'uint256' },
-                { name: 'baseGas', type: 'uint256' },
-                { name: 'gasPrice', type: 'uint256' },
-                { name: 'gasToken', type: 'address' },
-                { name: 'refundReceiver', type: 'address' },
-                { name: 'nonce', type: 'uint256' },
-              ],
-            },
-            primaryType: 'SafeTx',
-            message: {
-              to: safeTx.to,
-              value: safeTx.value,
-              data: safeTx.data,
-              operation: safeTx.operation,
-              safeTxGas: safeTx.safeTxGas,
-              baseGas: safeTx.baseGas,
-              gasPrice: safeTx.gasPrice,
-              gasToken: safeTx.gasToken,
-              refundReceiver: safeTx.refundReceiver,
-              nonce: safeTx.nonce,
-            },
-          })
+          const safeTxHash = getSafeTxHash(safeAddress, safeTx, chainId)
 
-          await proposeSafeTx(safeAddress, safeTx, safeTxHash, signature, signer, chainId)
+          await proposeSafeTx(safeAddress, safeTx, safeTxHash, signature, signer.address, chainId)
           setTxHash(safeTxHash)
           setStatus('proposed')
         }
@@ -142,7 +115,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
         setStatus('error')
       }
     },
-    [walletClient, publicClient],
+    [signer, publicClient],
   )
 
   return { status, txHash, error, send, reset }

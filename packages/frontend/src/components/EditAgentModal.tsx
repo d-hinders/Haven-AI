@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useCallback, useMemo } from 'react'
-import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
-import { type Address, parseUnits, hashTypedData } from 'viem'
+import { usePublicClient } from 'wagmi'
+import { type Address, parseUnits } from 'viem'
 import {
   buildSetAllowanceTx,
   RESET_PERIODS,
@@ -18,11 +18,13 @@ import {
   signSafeTx,
   executeSafeTx,
   proposeSafeTx,
+  getSafeTxHash,
   getChainTokens,
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
 import type { Agent } from '@/hooks/useAgents'
 import { truncate } from '@/lib/format'
+import { useActiveSigner } from '@/lib/signer'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -75,9 +77,11 @@ export default function EditAgentModal({
   const [txHash, setTxHash] = useState<string | null>(null)
 
   // Wagmi
-  const { address: connectedAddress } = useAccount()
   const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const signer = useActiveSigner({
+    safeAddress: safeAddress as Address,
+    chainId,
+  })
 
   // Tokens already configured on-chain for this delegate
   const existingTokenAddrs = useMemo(() => {
@@ -124,7 +128,7 @@ export default function EditAgentModal({
   // ── Execute ────────────────────────────────────────────
 
   async function handleExecute() {
-    if (!publicClient || !walletClient || !connectedAddress || !safeDetails || !selectedTokenConfig) return
+    if (!publicClient || !signer || !safeDetails || !selectedTokenConfig) return
     if (!amount || Number(amount) <= 0) return
 
     setStep('executing')
@@ -147,10 +151,9 @@ export default function EditAgentModal({
       // Sign
       setExecStatus('signing')
       const signature = await signSafeTx(
-        walletClient,
+        signer,
         safeAddress as Address,
         safeTx,
-        connectedAddress,
         chainId,
       )
 
@@ -159,56 +162,23 @@ export default function EditAgentModal({
       if (threshold <= 1) {
         setExecStatus('executing')
         const result = await executeSafeTx(
-          walletClient,
+          signer,
           publicClient,
           safeAddress as Address,
           safeTx,
           signature,
-          connectedAddress,
           chainId,
         )
         setTxHash(result.txHash)
       } else {
         setExecStatus('executing')
-        const safeTxHash = hashTypedData({
-          domain: {
-            chainId,
-            verifyingContract: safeAddress as Address,
-          },
-          types: {
-            SafeTx: [
-              { name: 'to', type: 'address' },
-              { name: 'value', type: 'uint256' },
-              { name: 'data', type: 'bytes' },
-              { name: 'operation', type: 'uint8' },
-              { name: 'safeTxGas', type: 'uint256' },
-              { name: 'baseGas', type: 'uint256' },
-              { name: 'gasPrice', type: 'uint256' },
-              { name: 'gasToken', type: 'address' },
-              { name: 'refundReceiver', type: 'address' },
-              { name: 'nonce', type: 'uint256' },
-            ],
-          },
-          primaryType: 'SafeTx',
-          message: {
-            to: safeTx.to,
-            value: safeTx.value,
-            data: safeTx.data,
-            operation: safeTx.operation,
-            safeTxGas: safeTx.safeTxGas,
-            baseGas: safeTx.baseGas,
-            gasPrice: safeTx.gasPrice,
-            gasToken: safeTx.gasToken,
-            refundReceiver: safeTx.refundReceiver,
-            nonce: safeTx.nonce,
-          },
-        })
+        const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
         await proposeSafeTx(
           safeAddress as Address,
           safeTx,
           safeTxHash,
           signature,
-          connectedAddress,
+          signer.address,
           chainId,
         )
         setTxHash(safeTxHash)

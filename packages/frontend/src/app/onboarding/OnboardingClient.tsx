@@ -6,8 +6,9 @@ import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { api } from '@/lib/api'
 import { deploySafe, type DeployStage } from '@/lib/safe'
+import { useActiveSigner } from '@/lib/signer'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
+import { useAccount, usePublicClient } from 'wagmi'
 import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import NetworkGate from '@/components/NetworkGate'
 import type { User } from '@/context/AuthContext'
@@ -20,7 +21,6 @@ export default function OnboardingClient() {
 
   const { address, isConnected } = useAccount()
   const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
 
   const [step, setStep] = useState<Step>('connect')
   const [deploying, setDeploying] = useState(false)
@@ -29,6 +29,7 @@ export default function OnboardingClient() {
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
   const [selectedChainId, setSelectedChainId] = useState(100)
+  const signer = useActiveSigner({ chainId: selectedChainId })
 
   // Redirect if not logged in
   useEffect(() => {
@@ -69,7 +70,7 @@ export default function OnboardingClient() {
   }, [isConnected, address, user, step, updateUser])
 
   const handleDeploy = async () => {
-    if (!walletClient || !publicClient || !address) return
+    if (!signer || !publicClient) return
 
     setDeploying(true)
     setDeployStage('signing')
@@ -77,9 +78,8 @@ export default function OnboardingClient() {
 
     try {
       const result = await deploySafe(
-        walletClient,
+        signer,
         publicClient,
-        address,
         selectedChainId,
         (stage, data) => {
           setDeployStage(stage)
@@ -92,7 +92,10 @@ export default function OnboardingClient() {
       // Save to backend
       setDeployStage('registering')
       await api.put<User>('/user/safe', { safe_address: result.safeAddress, chain_id: selectedChainId })
-      updateUser({ safe_address: result.safeAddress, wallet_address: address })
+      updateUser({
+        safe_address: result.safeAddress,
+        wallet_address: signer.type === 'eoa' ? signer.address : user?.wallet_address,
+      })
       await refreshUser()
 
       setStep('done')

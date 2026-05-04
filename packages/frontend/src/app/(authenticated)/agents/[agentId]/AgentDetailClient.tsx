@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
-import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
+import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type AgentStatus } from '@/hooks/useAgents'
@@ -14,6 +14,7 @@ import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate, timeAgo } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
+import { useActiveSigner } from '@/lib/signer'
 import EditAgentModal from '@/components/EditAgentModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 
@@ -107,8 +108,10 @@ export default function AgentDetailClient({ agentId }: Props) {
     : null
 
   const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
-  const { address: connectedAddress } = useAccount()
+  const signer = useActiveSigner({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
 
   const [editOpen, setEditOpen] = useState(false)
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
@@ -194,12 +197,11 @@ export default function AgentDetailClient({ agentId }: Props) {
   async function handleRevoke() {
     if (
       !publicClient ||
-      !walletClient ||
-      !connectedAddress ||
+      !signer ||
       !safeAddress ||
       !safeDetails
     ) {
-      setErrorMessage('Connect your wallet and reload Safe details before revoking this agent.')
+      setErrorMessage('Connect a signer and reload Safe details before revoking this agent.')
       return
     }
 
@@ -209,8 +211,7 @@ export default function AgentDetailClient({ agentId }: Props) {
       await revokeAgentOnChain({
         agent: currentAgent,
         publicClient,
-        walletClient,
-        connectedAddress,
+        signer,
         safeAddress: safeAddress as Address,
         safeDetails,
         chainId,

@@ -5,6 +5,38 @@ interface ApiError {
   statusCode?: number
 }
 
+export interface DeployPasskeySafeBody {
+  chain_id: number
+  salt_nonce?: string
+}
+
+export interface DeployPasskeySafeResponse {
+  safe_address: string
+  tx_hash: string
+  chain_id: number
+}
+
+export interface ExecSafeBody {
+  chain_id: number
+  safe_address: string
+  to: string
+  value: string
+  data: string
+  operation: 0 | 1
+  safe_tx_gas: string
+  base_gas: string
+  gas_price: string
+  gas_token: string
+  refund_receiver: string
+  nonce: string
+  signatures: string
+}
+
+export interface ExecSafeResponse {
+  tx_hash: string
+  chain_id: number
+}
+
 class ApiClient {
   private getToken(): string | null {
     if (typeof window === 'undefined') return null
@@ -60,6 +92,14 @@ class ApiClient {
 
   delete<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'DELETE' })
+  }
+
+  deployPasskeySafe(body: DeployPasskeySafeBody): Promise<DeployPasskeySafeResponse> {
+    return this.post<DeployPasskeySafeResponse>('/safe/deploy', body)
+  }
+
+  execSafe(body: ExecSafeBody): Promise<ExecSafeResponse> {
+    return this.post<ExecSafeResponse>('/safe/exec', body)
   }
 }
 

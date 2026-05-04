@@ -8,8 +8,9 @@ import { useAgents } from '@/hooks/useAgents'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
 import { deploySafe } from '@/lib/safe'
+import { useActiveSigner } from '@/lib/signer'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
+import { useAccount, usePublicClient } from 'wagmi'
 import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -49,7 +50,7 @@ function AddSafeModal({
 
   const { address: walletAddress, isConnected, chain } = useAccount()
   const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const signer = useActiveSigner({ chainId: deployChainId })
   const wrongNetwork = isConnected && chain?.id !== deployChainId
 
   const resetState = () => {
@@ -96,14 +97,14 @@ function AddSafeModal({
 
   // ── Deploy flow ──
   const handleDeploy = async () => {
-    if (!walletClient || !publicClient || !walletAddress) return
+    if (!signer || !publicClient || signer.type !== 'eoa' || !walletAddress) return
 
     setDeploying(true)
     setDeployStep('deploying')
     setError('')
 
     try {
-      const result = await deploySafe(walletClient, publicClient, walletAddress, deployChainId)
+      const result = await deploySafe(signer, publicClient, deployChainId)
       setDeployedAddress(result.safeAddress)
       setDeployTxHash(result.txHash)
 

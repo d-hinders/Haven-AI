@@ -3,16 +3,11 @@ import {
   type Address,
   type Hash,
   type PublicClient,
-  type WalletClient,
-  getContractAddress,
   keccak256,
-  encodeAbiParameters,
-  parseAbiParameters,
-  concat,
-  pad,
-  toHex,
 } from 'viem'
 import { getChainConfig } from './chains'
+import { api } from './api'
+import type { HavenUserSigner } from './signer'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
@@ -66,13 +61,16 @@ export type DeployStage = 'signing' | 'confirming' | 'registering'
  * The connected wallet becomes the sole owner with a threshold of 1.
  * Returns the deployed Safe address.
  */
-export async function deploySafe(
-  walletClient: WalletClient,
+async function deploySafeWithEoa(
+  signer: HavenUserSigner,
   publicClient: PublicClient,
-  owner: Address,
   chainId: number = 100,
   onProgress?: (stage: DeployStage, data?: { txHash?: Hash }) => void,
 ): Promise<{ safeAddress: Address; txHash: Hash }> {
+  if (signer.type !== 'eoa') {
+    throw new Error('EOA signer required')
+  }
+
   const chainCfg = getChainConfig(chainId)
   const SAFE_PROXY_FACTORY = chainCfg.contracts.safeProxyFactory
   const SAFE_SINGLETON_L2 = chainCfg.contracts.safeSingletonL2
@@ -83,7 +81,7 @@ export async function deploySafe(
     abi: SAFE_SETUP_ABI,
     functionName: 'setup',
     args: [
-      [owner],       // owners
+      [signer.address], // owners
       1n,            // threshold
       ZERO,          // to  (no delegate call)
       '0x',          // data
@@ -99,13 +97,13 @@ export async function deploySafe(
 
   // 3. Call ProxyFactory.createProxyWithNonce()
   onProgress?.('signing')
-  const txHash = await walletClient.writeContract({
+  const txHash = await signer.walletClient.writeContract({
     address: SAFE_PROXY_FACTORY,
     abi: PROXY_FACTORY_ABI,
     functionName: 'createProxyWithNonce',
     args: [SAFE_SINGLETON_L2, initializer, saltNonce],
     chain: chainCfg.viemChain,
-    account: owner,
+    account: signer.address,
   })
 
   // 4. Wait for the tx to be mined and extract the deployed proxy address
@@ -134,4 +132,36 @@ export async function deploySafe(
 
   onProgress?.('registering', { txHash })
   return { safeAddress, txHash }
+}
+
+async function deploySafeWithPasskey(
+  signer: HavenUserSigner,
+  chainId: number,
+  onProgress?: (stage: DeployStage, data?: { txHash?: Hash }) => void,
+): Promise<{ safeAddress: Address; txHash: Hash }> {
+  if (signer.type !== 'passkey') {
+    throw new Error('Passkey signer required')
+  }
+
+  const result = await api.deployPasskeySafe({ chain_id: chainId })
+  onProgress?.('confirming', { txHash: result.tx_hash as Hash })
+  onProgress?.('registering', { txHash: result.tx_hash as Hash })
+
+  return {
+    safeAddress: result.safe_address as Address,
+    txHash: result.tx_hash as Hash,
+  }
+}
+
+export async function deploySafe(
+  signer: HavenUserSigner,
+  publicClient: PublicClient,
+  chainId: number = 100,
+  onProgress?: (stage: DeployStage, data?: { txHash?: Hash }) => void,
+): Promise<{ safeAddress: Address; txHash: Hash }> {
+  if (signer.type === 'eoa') {
+    return deploySafeWithEoa(signer, publicClient, chainId, onProgress)
+  }
+
+  return deploySafeWithPasskey(signer, chainId, onProgress)
 }

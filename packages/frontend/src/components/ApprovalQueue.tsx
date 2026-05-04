@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
-import { type Address, hashTypedData } from 'viem'
+import { usePublicClient } from 'wagmi'
+import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useApprovals, type ApprovalRequest } from '@/hooks/useApprovals'
 import {
@@ -11,12 +11,14 @@ import {
   signSafeTx,
   executeSafeTx,
   proposeSafeTx,
+  getSafeTxHash,
   getChainTokens,
   type SendParams,
 } from '@/lib/safe-tx'
 import { getExplorerUrl } from '@/lib/chains'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { truncate, timeAgo, timeUntil } from '@/lib/format'
+import { useActiveSigner } from '@/lib/signer'
 import NetworkGate from './NetworkGate'
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -206,9 +208,11 @@ export default function ApprovalQueue() {
   const chainId = activeSafe?.chain_id ?? 100
   const { details: safeDetails } = useSafeDetails(safeAddress)
   const { approvals, pendingCount, loading, approve, reject, markExecuted, refetch } = useApprovals()
-  const { address: connectedAddress } = useAccount()
   const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const signer = useActiveSigner({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
 
   const [executing, setExecuting] = useState(false)
 
@@ -216,7 +220,7 @@ export default function ApprovalQueue() {
   const pastApprovals = approvals.filter((a) => a.status !== 'pending')
 
   async function handleApproveAndExecute(approval: ApprovalRequest) {
-    if (!publicClient || !walletClient || !connectedAddress || !safeAddress || !safeDetails) return
+    if (!publicClient || !signer || !safeAddress || !safeDetails) return
 
     setExecuting(true)
     try {
@@ -240,10 +244,9 @@ export default function ApprovalQueue() {
       const nonce = await getSafeNonce(publicClient, safeAddress as Address)
       const safeTx = buildSafeTx(sendParams, nonce)
       const signature = await signSafeTx(
-        walletClient,
+        signer,
         safeAddress as Address,
         safeTx,
-        connectedAddress,
         chainId,
       )
 
@@ -253,52 +256,22 @@ export default function ApprovalQueue() {
 
       if (threshold <= 1) {
         const result = await executeSafeTx(
-          walletClient,
+          signer,
           publicClient,
           safeAddress as Address,
           safeTx,
           signature,
-          connectedAddress,
           chainId,
         )
         txHash = result.txHash
       } else {
-        const safeTxHash = hashTypedData({
-          domain: { chainId, verifyingContract: safeAddress as Address },
-          types: {
-            SafeTx: [
-              { name: 'to', type: 'address' },
-              { name: 'value', type: 'uint256' },
-              { name: 'data', type: 'bytes' },
-              { name: 'operation', type: 'uint8' },
-              { name: 'safeTxGas', type: 'uint256' },
-              { name: 'baseGas', type: 'uint256' },
-              { name: 'gasPrice', type: 'uint256' },
-              { name: 'gasToken', type: 'address' },
-              { name: 'refundReceiver', type: 'address' },
-              { name: 'nonce', type: 'uint256' },
-            ],
-          },
-          primaryType: 'SafeTx',
-          message: {
-            to: safeTx.to,
-            value: safeTx.value,
-            data: safeTx.data,
-            operation: safeTx.operation,
-            safeTxGas: safeTx.safeTxGas,
-            baseGas: safeTx.baseGas,
-            gasPrice: safeTx.gasPrice,
-            gasToken: safeTx.gasToken,
-            refundReceiver: safeTx.refundReceiver,
-            nonce: safeTx.nonce,
-          },
-        })
+        const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
         await proposeSafeTx(
           safeAddress as Address,
           safeTx,
           safeTxHash,
           signature,
-          connectedAddress,
+          signer.address,
           chainId,
         )
       }

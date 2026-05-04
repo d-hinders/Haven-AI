@@ -185,7 +185,7 @@ export default async function dashboardRoutes(
     const previousEur = Number(yesterdaySnapshot?.total_eur ?? '0')
     const changeAvailable = Boolean(yesterdaySnapshot)
 
-    const [paymentSpendRows, approvalSpendRows] = await Promise.all([
+    const [paymentSpendRows, selfSignSpendRows, approvalSpendRows] = await Promise.all([
       pool.query<MonthlySpendRow>(
         `SELECT token_symbol,
                 COALESCE(SUM(usd_value), 0)::TEXT AS usd_sum,
@@ -231,6 +231,32 @@ export default async function dashboardRoutes(
                   ),
                   0
                 )::TEXT AS fallback_amount
+         FROM self_sign_payment_intents
+         WHERE user_id = $1
+           AND status = 'confirmed'
+           AND confirmed_at >= DATE_TRUNC('month', NOW())
+         GROUP BY token_symbol`,
+        [sub],
+      ),
+      pool.query<MonthlySpendRow>(
+        `SELECT token_symbol,
+                COALESCE(SUM(usd_value), 0)::TEXT AS usd_sum,
+                COALESCE(SUM(eur_value), 0)::TEXT AS eur_sum,
+                COALESCE(
+                  SUM(
+                    CASE
+                      WHEN usd_value IS NULL OR eur_value IS NULL
+                        OR (
+                          COALESCE(usd_value, 0) = 0
+                          AND COALESCE(eur_value, 0) = 0
+                          AND amount_human::NUMERIC > 0
+                        )
+                        THEN amount_human::NUMERIC
+                      ELSE 0
+                    END
+                  ),
+                  0
+                )::TEXT AS fallback_amount
          FROM approval_requests
          WHERE user_id = $1
            AND status = 'executed'
@@ -240,13 +266,16 @@ export default async function dashboardRoutes(
       ),
     ])
 
-    const [paymentSpend, approvalSpend] = await Promise.all([
+    const [paymentSpend, selfSignSpend, approvalSpend] = await Promise.all([
       accumulateMonthlySpend(paymentSpendRows.rows),
+      accumulateMonthlySpend(selfSignSpendRows.rows),
       accumulateMonthlySpend(approvalSpendRows.rows),
     ])
 
-    const monthlySpendUsd = paymentSpend.usd + approvalSpend.usd
-    const monthlySpendEur = paymentSpend.eur + approvalSpend.eur
+    const monthlySpendUsd =
+      paymentSpend.usd + selfSignSpend.usd + approvalSpend.usd
+    const monthlySpendEur =
+      paymentSpend.eur + selfSignSpend.eur + approvalSpend.eur
 
     const mergedTransactions: EnrichedTransaction[] = []
     const transactionResults = await Promise.allSettled(

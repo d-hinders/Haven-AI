@@ -21,6 +21,7 @@ import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
+import safeExecRoutes from './routes/safe-exec.js'
 import selfSignAgentRoutes from './routes/self-sign-agents.js'
 import selfSignPaymentRoutes from './routes/self-sign-payments.js'
 import x402ResourceRoutes from './routes/x402-resources.js'
@@ -117,6 +118,7 @@ await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
+await app.register(safeExecRoutes, { prefix: '/safe' })
 await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
 await app.register(selfSignPaymentRoutes, { prefix: '/self-sign-payments' })
 await app.register(x402ResourceRoutes, { prefix: '/x402' })

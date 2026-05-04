@@ -45,8 +45,10 @@ describe('Auth routes', () => {
 
       expect(response.statusCode).toBe(201)
       const body = response.json()
-      expect(body.id).toBe('user-1')
-      expect(body.email).toBe('test@example.com')
+      expect(body.token).toBeDefined()
+      expect(body.user.id).toBe('user-1')
+      expect(body.user.email).toBe('test@example.com')
+      expect(body.user.safes).toEqual([])
     })
 
     it('returns 400 for missing email', async () => {
@@ -111,6 +113,7 @@ describe('Auth routes', () => {
           safe_address: null,
         }],
       })
+      mockQuery.mockResolvedValueOnce({ rows: [] })
 
       const response = await app.inject({
         method: 'POST',
@@ -125,6 +128,7 @@ describe('Auth routes', () => {
       expect(body.user.id).toBe('user-1')
       expect(body.user.email).toBe('test@example.com')
       expect(body.user.wallet_address).toBe('0x1234567890abcdef1234567890abcdef12345678')
+      expect(body.user.safes).toEqual([])
       // password_hash should NOT be in the response
       expect(body.user.password_hash).toBeUndefined()
     })
@@ -182,6 +186,7 @@ describe('Auth routes', () => {
           created_at: '2025-01-01T00:00:00.000Z',
         }],
       })
+      mockQuery.mockResolvedValueOnce({ rows: [] })
 
       const response = await app.inject({
         method: 'GET',
@@ -193,6 +198,7 @@ describe('Auth routes', () => {
       const body = response.json()
       expect(body.id).toBe('user-1')
       expect(body.email).toBe('test@example.com')
+      expect(body.safes).toEqual([])
     })
 
     it('returns 401 without token', async () => {

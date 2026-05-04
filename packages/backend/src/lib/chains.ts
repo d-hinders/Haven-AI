@@ -35,6 +35,12 @@ export interface ChainConfig {
     allowanceModule: string
     multiSendCallOnly: string
   }
+  passkey: {
+    /** P-256 verifier the Safe passkey signer will call. */
+    verifier: string
+    /** SafeWebAuthnSignerFactory deployment for this chain. */
+    factoryAddress: string
+  }
   tokens: Record<string, TokenConfig>
   /** Reverse lookup: lowercase contract address → TokenConfig */
   tokenByAddress: Record<string, TokenConfig>
@@ -81,6 +87,11 @@ const GNOSIS: ChainConfig = {
     allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
   },
+  passkey: {
+    verifier: '0x445a0683e494ea0c5af3e83c5159fbe47cf9e765',
+    // SafeWebAuthnSignerFactory live deployment used by the frontend parity checks in PR #40.
+    factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',
+  },
   tokens: GNOSIS_TOKENS,
   tokenByAddress: buildTokenByAddress(GNOSIS_TOKENS),
 }
@@ -124,6 +135,11 @@ const BASE: ChainConfig = {
     // These are at the same CREATE2 addresses on Base
     allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
+  },
+  passkey: {
+    verifier: '0x0000000000000000000000000000000000000100',
+    // SafeWebAuthnSignerFactory live deployment used by the frontend parity checks in PR #40.
+    factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',
   },
   tokens: BASE_TOKENS,
   tokenByAddress: buildTokenByAddress(BASE_TOKENS),

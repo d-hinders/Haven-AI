@@ -6,7 +6,6 @@ import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit'
 import { config } from '@/lib/wagmi'
-import ApiBaseDebugLabel from '@/components/ApiBaseDebugLabel'
 
 import '@rainbow-me/rainbowkit/styles.css'
 
@@ -22,12 +21,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   // During SSR / static prerender, render children without wallet providers
   // This avoids WagmiProviderNotFoundError during next build
   if (!mounted) {
-    return (
-      <AuthProvider>
-        {children}
-        <ApiBaseDebugLabel />
-      </AuthProvider>
-    )
+    return <AuthProvider>{children}</AuthProvider>
   }
 
   return (
@@ -41,10 +35,7 @@ export default function Providers({ children }: { children: ReactNode }) {
             overlayBlur: 'small',
           })}
         >
-          <AuthProvider>
-            {children}
-            <ApiBaseDebugLabel />
-          </AuthProvider>
+          <AuthProvider>{children}</AuthProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

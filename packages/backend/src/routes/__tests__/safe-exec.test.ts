@@ -8,12 +8,18 @@ const {
   mockExecTransaction,
   mockExecTransactionStaticCall,
   mockExecTransactionEstimateGas,
+  mockSafeNonce,
+  mockSafeEncodeTransactionData,
+  mockSafeCheckSignatures,
   mockOwnerIsValidSignature,
   mockContractConstructor,
 } = vi.hoisted(() => {
   const execTransaction = vi.fn()
   const execTransactionStaticCall = vi.fn()
   const execTransactionEstimateGas = vi.fn()
+  const safeNonce = vi.fn()
+  const safeEncodeTransactionData = vi.fn()
+  const safeCheckSignatures = vi.fn()
   const ownerIsValidSignature = vi.fn()
   Object.assign(execTransaction, {
     staticCall: execTransactionStaticCall,
@@ -26,6 +32,9 @@ const {
     mockExecTransaction: execTransaction,
     mockExecTransactionStaticCall: execTransactionStaticCall,
     mockExecTransactionEstimateGas: execTransactionEstimateGas,
+    mockSafeNonce: safeNonce,
+    mockSafeEncodeTransactionData: safeEncodeTransactionData,
+    mockSafeCheckSignatures: safeCheckSignatures,
     mockOwnerIsValidSignature: ownerIsValidSignature,
     mockContractConstructor: vi.fn((address: string, abi: unknown) => {
       if (Array.isArray(abi) && abi.some((item) => String(item).includes('isValidSignature(bytes32,bytes)'))) {
@@ -35,6 +44,9 @@ const {
       }
 
       return {
+        nonce: safeNonce,
+        encodeTransactionData: safeEncodeTransactionData,
+        checkSignatures: safeCheckSignatures,
         execTransaction,
       }
     }),
@@ -106,11 +118,17 @@ describe('Safe exec routes', () => {
     mockExecTransaction.mockReset()
     mockExecTransactionStaticCall.mockReset()
     mockExecTransactionEstimateGas.mockReset()
+    mockSafeNonce.mockReset()
+    mockSafeEncodeTransactionData.mockReset()
+    mockSafeCheckSignatures.mockReset()
     mockOwnerIsValidSignature.mockReset()
     mockContractConstructor.mockClear()
 
     mockGetRelayer.mockReturnValue({ address: '0xrelayer' })
     mockWarnIfRelayerLow.mockResolvedValue(undefined)
+    mockSafeNonce.mockResolvedValue(1n)
+    mockSafeEncodeTransactionData.mockResolvedValue('0xdeadbeef')
+    mockSafeCheckSignatures.mockResolvedValue(undefined)
     mockExecTransactionStaticCall.mockResolvedValue(true)
     mockExecTransactionEstimateGas.mockResolvedValue(1_900_000n)
     mockOwnerIsValidSignature.mockResolvedValue('0x1626ba7e')
@@ -149,6 +167,11 @@ describe('Safe exec routes', () => {
     expect(mockWarnIfRelayerLow).toHaveBeenCalledWith(100)
     expect(mockGetRelayer).toHaveBeenCalledWith(100)
     expect(mockOwnerIsValidSignature).toHaveBeenCalledTimes(1)
+    expect(mockSafeCheckSignatures).toHaveBeenCalledWith(
+      expect.any(String),
+      '0xdeadbeef',
+      validBody.signatures,
+    )
     expect(mockExecTransactionStaticCall).toHaveBeenCalledWith(
       validBody.to,
       0n,
@@ -256,6 +279,52 @@ describe('Safe exec routes', () => {
 
     expect(response.statusCode).toBe(502)
     expect(response.json().error).toBe('Passkey signature is invalid for this Safe transaction')
+    expect(mockExecTransactionStaticCall).not.toHaveBeenCalled()
+  })
+
+  it('POST /safe/exec returns 409 when the Safe nonce is stale', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
+        public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
+        signer_address: signerAddress,
+      }],
+    })
+    mockSafeNonce.mockResolvedValueOnce(2n)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validBody,
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toBe('Safe nonce changed; refresh and try again')
+    expect(mockExecTransactionStaticCall).not.toHaveBeenCalled()
+  })
+
+  it('POST /safe/exec returns a specific error when Safe rejects the full signature payload', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
+        public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
+        signer_address: signerAddress,
+      }],
+    })
+    mockSafeCheckSignatures.mockRejectedValueOnce(new Error('execution reverted: GS024'))
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validBody,
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json().error).toBe('Safe rejected the signed transaction payload')
     expect(mockExecTransactionStaticCall).not.toHaveBeenCalled()
   })
 

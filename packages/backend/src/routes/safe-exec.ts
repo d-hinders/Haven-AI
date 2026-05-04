@@ -12,6 +12,9 @@ const DECIMAL_RE = /^\d+$/
 
 const SAFE_EXEC_ABI = [
   'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns (bool success)',
+  'function nonce() view returns (uint256)',
+  'function encodeTransactionData(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 _nonce) view returns (bytes)',
+  'function checkSignatures(bytes32 dataHash,bytes data,bytes signatures) view',
 ] as const
 const ERC1271_ABI = [
   'function isValidSignature(bytes32,bytes) view returns (bytes4)',
@@ -60,6 +63,20 @@ interface StoredPasskeySafeRow {
 }
 
 interface SafeContract {
+  nonce(): Promise<bigint>
+  encodeTransactionData(
+    to: string,
+    value: bigint,
+    data: string,
+    operation: number,
+    safeTxGas: bigint,
+    baseGas: bigint,
+    gasPrice: bigint,
+    gasToken: string,
+    refundReceiver: string,
+    nonce: bigint,
+  ): Promise<string>
+  checkSignatures(dataHash: string, data: string, signatures: string): Promise<void>
   execTransaction: {
     (
       to: string,
@@ -282,6 +299,22 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
         body.refund_receiver,
         body.signatures,
       ] as const
+      const currentNonce = await safe.nonce()
+      const requestedNonce = BigInt(body.nonce)
+      if (currentNonce !== requestedNonce) {
+        request.log.warn(
+          {
+            userId: sub,
+            chainId: body.chain_id,
+            safeAddress: body.safe_address,
+            requestedNonce: requestedNonce.toString(),
+            currentNonce: currentNonce.toString(),
+          },
+          'Safe execution request used a stale nonce',
+        )
+        return reply.code(409).send({ error: 'Safe nonce changed; refresh and try again' })
+      }
+
       const safeTxHash = computeSafeTxHash(body)
       const innerSignature = parsePasskeyInnerSignature(body.signatures, expectedSignerAddress)
 
@@ -300,6 +333,36 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
           'Passkey signature validation failed for Safe execution',
         )
         return reply.code(502).send({ error: 'Passkey signature is invalid for this Safe transaction' })
+      }
+
+      const txHashData = await safe.encodeTransactionData(
+        body.to,
+        BigInt(body.value),
+        body.data,
+        body.operation,
+        BigInt(body.safe_tx_gas),
+        BigInt(body.base_gas),
+        BigInt(body.gas_price),
+        body.gas_token,
+        body.refund_receiver,
+        requestedNonce,
+      )
+
+      try {
+        await safe.checkSignatures(safeTxHash, txHashData, body.signatures)
+      } catch (error) {
+        request.log.error(
+          {
+            err: error,
+            userId: sub,
+            chainId: body.chain_id,
+            safeAddress: body.safe_address,
+            safeTxHash,
+            requestedNonce: requestedNonce.toString(),
+          },
+          'Safe rejected the full signature package before execution',
+        )
+        return reply.code(502).send({ error: 'Safe rejected the signed transaction payload' })
       }
 
       // Validate the execution path without spending relayer gas. This catches

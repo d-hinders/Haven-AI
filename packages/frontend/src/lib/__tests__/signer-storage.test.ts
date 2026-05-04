@@ -17,11 +17,12 @@ import {
   setStoredPasskeySigner,
   useActiveSigner,
 } from '@/lib/signer'
+import type { StoredPasskeySigner } from '@/lib/signer'
 
 const SAFE_ADDRESS = '0x07058311f995c89F4DbE17Db61fa1A3CDe638975' as Address
 const SIGNER_ADDRESS = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2' as Address
 
-const storedValue = {
+const storedValue: StoredPasskeySigner = {
   schemaVersion: 1 as const,
   address: SIGNER_ADDRESS,
   credentialId: 'credential-123',

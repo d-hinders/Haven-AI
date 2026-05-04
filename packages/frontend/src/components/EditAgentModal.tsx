@@ -25,6 +25,7 @@ import type { SafeDetails } from '@/types/transactions'
 import type { Agent } from '@/hooks/useAgents'
 import { truncate } from '@/lib/format'
 import { useActiveSigner } from '@/lib/signer'
+import { SigningStatus } from './SigningStatus'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -210,7 +211,11 @@ export default function EditAgentModal({
         if (short) message = short
       }
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
-        setExecError('Transaction rejected in wallet')
+        setExecError(
+          signer?.type === 'passkey'
+            ? 'Face ID or Touch ID was cancelled'
+            : 'Transaction rejected in wallet',
+        )
       } else {
         setExecError(message)
       }
@@ -415,15 +420,19 @@ export default function EditAgentModal({
                   <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
                   <div>
                     <p className="text-sm text-zinc-200 font-medium">
-                      {execStatus === 'signing' && 'Sign in your wallet...'}
+                      {execStatus === 'signing' && 'Awaiting signature...'}
                       {execStatus === 'executing' && 'Executing on-chain...'}
                       {execStatus === 'saving' && 'Saving to Haven...'}
                     </p>
-                    <p className="text-xs text-zinc-600 mt-1">
-                      {execStatus === 'signing'
-                        ? 'Approve the transaction in your connected wallet'
-                        : 'This may take a moment'}
-                    </p>
+                    <div className="text-xs text-zinc-600 mt-1">
+                      {execStatus === 'signing' ? (
+                        <SigningStatus signer={signer} stage="signing" />
+                      ) : execStatus === 'executing' ? (
+                        <SigningStatus signer={signer} stage="executing" />
+                      ) : (
+                        'This may take a moment'
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (

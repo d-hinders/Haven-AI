@@ -16,6 +16,32 @@ export interface DeployPasskeySafeResponse {
   chain_id: number
 }
 
+export interface EnrollPasskeyBody {
+  credential_id: string
+  public_key_x: `0x${string}`
+  public_key_y: `0x${string}`
+  chain_id: number
+  raw_attestation_object?: string
+}
+
+export interface EnrollPasskeyResponse {
+  id: string
+  credential_id: string
+  signer_address: string
+  chain_id: number
+}
+
+export interface ListPasskeysResponse {
+  passkeys: Array<{
+    id: string
+    credential_id: string
+    signer_address: string
+    chain_id: number
+    safe_address: string | null
+    created_at: string
+  }>
+}
+
 export interface ExecSafeBody {
   chain_id: number
   safe_address: string
@@ -96,6 +122,14 @@ class ApiClient {
 
   deployPasskeySafe(body: DeployPasskeySafeBody): Promise<DeployPasskeySafeResponse> {
     return this.post<DeployPasskeySafeResponse>('/safe/deploy', body)
+  }
+
+  enrollPasskey(body: EnrollPasskeyBody): Promise<EnrollPasskeyResponse> {
+    return this.post<EnrollPasskeyResponse>('/passkeys', body)
+  }
+
+  listPasskeys(): Promise<ListPasskeysResponse> {
+    return this.get<ListPasskeysResponse>('/passkeys')
   }
 
   execSafe(body: ExecSafeBody): Promise<ExecSafeResponse> {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
@@ -13,6 +14,7 @@ import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
 import { truncate, timeAgo } from '@/lib/format'
+import { getStoredPasskeySigner } from '@/lib/signer'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import CreateAgentModal from '@/components/CreateAgentModal'
 import SendModal from '@/components/SendModal'
@@ -319,7 +321,7 @@ function TransactionsSection({
 }
 
 export default function DashboardClient() {
-  const { user, activeSafe } = useAuth()
+  const { user, activeSafe, passkeys } = useAuth()
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
   const { contacts, resolveAddress } = useContacts()
@@ -373,6 +375,21 @@ export default function DashboardClient() {
   }, [actionSafeId, defaultSafe?.id, safes])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
+  const selectedActionSafePasskey = selectedActionSafe
+    ? passkeys.find(
+        (passkey) =>
+          passkey.chain_id === selectedActionSafe.chain_id &&
+          passkey.safe_address?.toLowerCase() === selectedActionSafe.safe_address.toLowerCase(),
+      ) ?? null
+    : null
+  const selectedActionSafeStoredPasskey = selectedActionSafe
+    ? getStoredPasskeySigner({
+        safeAddress: selectedActionSafe.safe_address as Address,
+        chainId: selectedActionSafe.chain_id,
+      })
+    : null
+  const requiresOtherDevice =
+    Boolean(selectedActionSafePasskey) && !selectedActionSafeStoredPasskey
   const sendModalDataEnabled = sendOpen && Boolean(selectedActionSafe)
   const { balances: selectedSafeBalances, refetch: refetchSelectedBalances } = useBalances(
     selectedActionSafe?.safe_address ?? null,
@@ -503,6 +520,16 @@ export default function DashboardClient() {
                   Create or import account
                 </Link>
               </div>
+            ) : requiresOtherDevice ? (
+              <div className="max-w-sm rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-5 py-4">
+                <p className="text-sm font-semibold text-amber-100">
+                  This Safe uses a passkey on another device.
+                </p>
+                <p className="mt-2 text-sm text-amber-200/80 leading-relaxed">
+                  Sign in from the device where you set up Face ID / Touch ID to operate this Safe.
+                  Cross-device passkey support is coming soon.
+                </p>
+              </div>
             ) : (
               <div className="flex flex-wrap gap-3">
                 <button
@@ -556,7 +583,7 @@ export default function DashboardClient() {
         />
       </div>
 
-      {onboardingStage && (
+      {onboardingStage && !requiresOtherDevice && (
         <DashboardOnboardingGuide
           stage={onboardingStage}
           safes={safes}

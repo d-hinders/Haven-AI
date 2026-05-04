@@ -1,4 +1,5 @@
 const BASE_URL = '/api'
+const API_OVERRIDE_STORAGE_KEY = 'haven_api_base_url'
 
 interface ApiError {
   error: string
@@ -64,6 +65,33 @@ export interface ExecSafeResponse {
 }
 
 class ApiClient {
+  private resolveBaseUrl(): string {
+    if (typeof window === 'undefined') {
+      return BASE_URL
+    }
+
+    const searchParams = new URLSearchParams(window.location.search)
+    const overrideParam = searchParams.get('apiBaseUrl')
+
+    if (overrideParam === 'default') {
+      window.localStorage.removeItem(API_OVERRIDE_STORAGE_KEY)
+      return BASE_URL
+    }
+
+    if (overrideParam) {
+      const normalized = overrideParam.replace(/\/+$/, '')
+      window.localStorage.setItem(API_OVERRIDE_STORAGE_KEY, normalized)
+      return normalized
+    }
+
+    const storedOverride = window.localStorage.getItem(API_OVERRIDE_STORAGE_KEY)
+    if (storedOverride) {
+      return storedOverride.replace(/\/+$/, '')
+    }
+
+    return BASE_URL
+  }
+
   private getToken(): string | null {
     if (typeof window === 'undefined') return null
     return localStorage.getItem('haven_token')
@@ -83,7 +111,7 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${token}`
     }
 
-    const response = await fetch(`${BASE_URL}${path}`, {
+    const response = await fetch(`${this.resolveBaseUrl()}${path}`, {
       ...options,
       headers,
     })

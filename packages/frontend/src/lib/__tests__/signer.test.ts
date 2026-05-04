@@ -25,12 +25,13 @@ describe('getStoredPasskeySigner', () => {
     localStorage.setItem(
       'haven_passkey_0x07058311f995c89f4dbe17db61fa1a3cde638975_100',
       JSON.stringify({
-        signerAddress: PASSKEY_SIGNER_ADDRESS,
-        passkeyCredentialId: 'credential-123',
+        address: PASSKEY_SIGNER_ADDRESS,
+        credentialId: 'credential-123',
         publicKey: {
           x: `0x${'11'.repeat(32)}`,
           y: `0x${'22'.repeat(32)}`,
         },
+        chainId: 100,
       }),
     )
 
@@ -61,6 +62,7 @@ describe('getStoredPasskeySigner', () => {
           x: '0x1234',
           y: `0x${'22'.repeat(32)}`,
         },
+        chainId: 100,
       }),
     )
 
@@ -90,6 +92,7 @@ describe('useActiveSigner', () => {
           x: `0x${'11'.repeat(32)}`,
           y: `0x${'22'.repeat(32)}`,
         },
+        chainId: 100,
       }),
     )
     mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })

@@ -201,7 +201,7 @@ export default function AgentDetailClient({ agentId }: Props) {
       !safeAddress ||
       !safeDetails
     ) {
-      setErrorMessage('Connect a signer and reload Safe details before revoking this agent.')
+      setErrorMessage('Connect your wallet and reload Safe details before revoking this agent.')
       return
     }
 

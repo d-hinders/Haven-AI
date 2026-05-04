@@ -19,16 +19,18 @@ export interface PasskeySigner {
   chainId: number
 }
 
+/**
+ * PR #4 writes passkey signer metadata in this exact shape under
+ * `haven_passkey_${safeAddress.toLowerCase()}_${chainId}`.
+ */
 interface StoredPasskeyMetadata {
-  address?: string
-  signerAddress?: string
-  passkeySignerAddress?: string
-  credentialId?: string
-  passkeyCredentialId?: string
-  publicKey?: {
-    x?: string
-    y?: string
+  address: string
+  credentialId: string
+  publicKey: {
+    x: string
+    y: string
   }
+  chainId?: number
 }
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
@@ -50,11 +52,7 @@ export function getStoredPasskeySigner(args: {
 
   try {
     const parsed = JSON.parse(raw) as StoredPasskeyMetadata
-    const address =
-      parsed.address ??
-      parsed.signerAddress ??
-      parsed.passkeySignerAddress
-    const credentialId = parsed.credentialId ?? parsed.passkeyCredentialId
+    const { address, credentialId } = parsed
     const x = parsed.publicKey?.x
     const y = parsed.publicKey?.y
 
@@ -93,6 +91,10 @@ export function getStoredPasskeySigner(args: {
  *      return a PasskeySigner.
  *   2. If Wagmi has a connected EOA, return an EoaSigner.
  *   3. Otherwise return null.
+ *
+ * Note: this reads localStorage during render and does not subscribe to storage updates yet.
+ * PR #4's enrollment UI will need to add an external-store subscription so same-tab writes
+ * trigger a rerender immediately.
  */
 export function useActiveSigner(args: {
   safeAddress?: Address

@@ -12,6 +12,11 @@ import {
 import { getPasskeyAssertion } from '@/lib/passkey'
 import type { PasskeySigner } from '@/lib/signer'
 
+// Safe's on-chain WebAuthn verifier expects the JSON tail after `"challenge"`,
+// not the parsed object. Current browsers serialize `clientDataJSON` in this
+// compact order, so we strip the prefix with a regex and preserve the remaining
+// bytes exactly. If a browser changes field order or whitespace, replace this
+// with a parse-and-reserialize implementation that preserves the expected tail.
 const CLIENT_DATA_FIELDS_RE = /^\{"type":"webauthn.get","challenge":"[A-Za-z0-9\-_]{43}",(.*)\}$/
 
 function decodeClientDataFields(clientDataJSON: `0x${string}`): string {

@@ -355,7 +355,7 @@ function readCborLength(
   }
 
   const lengthBytes = 1 << (additionalInfo - 24)
-  if (additionalInfo < 24 || additionalInfo > 27) {
+  if (additionalInfo > 27) {
     throw new Error(`Unsupported CBOR additional info ${additionalInfo}.`)
   }
 

@@ -86,23 +86,25 @@ describe('createPasskey', () => {
   it('throws PasskeyUnsupportedError when navigator.credentials is unavailable', async () => {
     const originalCredentials = navigator.credentials
 
-    Object.defineProperty(navigator, 'credentials', {
-      configurable: true,
-      value: undefined,
-    })
+    try {
+      Object.defineProperty(navigator, 'credentials', {
+        configurable: true,
+        value: undefined,
+      })
 
-    await expect(
-      createPasskey({
-        userId: new Uint8Array(16),
-        userName: 'codex@example.com',
-        userDisplayName: 'Codex Tester',
-      }),
-    ).rejects.toBeInstanceOf(PasskeyUnsupportedError)
-
-    Object.defineProperty(navigator, 'credentials', {
-      configurable: true,
-      value: originalCredentials,
-    })
+      await expect(
+        createPasskey({
+          userId: new Uint8Array(16),
+          userName: 'codex@example.com',
+          userDisplayName: 'Codex Tester',
+        }),
+      ).rejects.toBeInstanceOf(PasskeyUnsupportedError)
+    } finally {
+      Object.defineProperty(navigator, 'credentials', {
+        configurable: true,
+        value: originalCredentials,
+      })
+    }
   })
 })
 

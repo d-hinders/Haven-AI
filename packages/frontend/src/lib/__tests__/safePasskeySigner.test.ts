@@ -24,9 +24,16 @@ describe('predictSafePasskeySignerAddress', () => {
   })
 
   it('matches the pinned Base fixture for a known key pair', () => {
-    // Fixture generated once locally from the same CREATE2 inputs and pinned as a regression check.
+    // Verified against the live SafeWebAuthnSignerFactory.getSigner(...) deployment on Base.
     expect(predictSafePasskeySignerAddress({ x: X, y: Y, chainId: 8453 })).toBe(
-      '0x83eBD691831a2d3a0809DB82748bb5935299F96B',
+      '0xe54122F41f7ADF87fB6d5Ab36BAe42FC2AAc882C',
+    )
+  })
+
+  it('matches the pinned Gnosis fixture for a known key pair', () => {
+    // Verified against the live SafeWebAuthnSignerFactory.getSigner(...) deployment on Gnosis.
+    expect(predictSafePasskeySignerAddress({ x: X, y: Y, chainId: 100 })).toBe(
+      '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
     )
   })
 })
@@ -38,6 +45,6 @@ describe('getSafePasskeyConfig', () => {
   })
 
   it('throws for unsupported chains', () => {
-    expect(() => getSafePasskeyConfig(1)).toThrow(/Unsupported chain|Unsupported passkey signer chain/)
+    expect(() => getSafePasskeyConfig(1)).toThrow('Unsupported chain: 1')
   })
 })

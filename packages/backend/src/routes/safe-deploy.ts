@@ -1,8 +1,17 @@
 import { FastifyInstance } from 'fastify'
-import { Contract, Interface, ZeroAddress, getAddress } from 'ethers'
+import {
+  Contract,
+  Interface,
+  ZeroAddress,
+  getAddress,
+  getCreate2Address,
+  keccak256,
+  solidityPacked,
+  solidityPackedKeccak256,
+} from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getChainConfig, isSupportedChain } from '../lib/chains.js'
+import { getChain, isSupportedChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
 import { getRelayer, warnIfRelayerLow } from '../lib/relayer.js'
 
@@ -12,6 +21,7 @@ const SAFE_SETUP_ABI = [
 
 const PROXY_FACTORY_ABI = [
   'function createProxyWithNonce(address _singleton, bytes initializer, uint256 saltNonce) returns (address proxy)',
+  'function proxyCreationCode() view returns (bytes)',
   'event ProxyCreation(address proxy, address singleton)',
 ] as const
 
@@ -31,6 +41,14 @@ interface StoredPasskeyRow {
   safe_address: string | null
 }
 
+interface SafeProxyFactoryContract {
+  createProxyWithNonce(singleton: string, initializer: string, saltNonce: bigint): Promise<{
+    hash: string
+    wait(): Promise<{ logs: Array<{ address?: string; topics?: string[]; data?: string }> } | null>
+  }>
+  proxyCreationCode(): Promise<string>
+}
+
 function parseHexCoordinate(value: Buffer): `0x${string}` {
   return `0x${value.toString('hex')}` as `0x${string}`
 }
@@ -42,7 +60,7 @@ function isInsufficientFundsError(error: unknown): boolean {
 
 function isRetriableDeployError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-  return message.includes('create2') || message.includes('salt') || message.includes('already deployed')
+  return message.includes('already deployed') || message.includes('create2')
 }
 
 function extractSafeAddressFromReceipt(
@@ -70,6 +88,29 @@ function extractSafeAddressFromReceipt(
   throw new Error('Safe deployment transaction succeeded but ProxyCreation event not found')
 }
 
+function predictSafeProxyAddress(args: {
+  factoryAddress: string
+  singletonAddress: string
+  initializer: string
+  saltNonce: bigint
+  proxyCreationCode: string
+}): string {
+  const deploymentData = solidityPacked(
+    ['bytes', 'uint256'],
+    [args.proxyCreationCode, BigInt(args.singletonAddress)],
+  )
+  const salt = solidityPackedKeccak256(
+    ['bytes32', 'uint256'],
+    [keccak256(args.initializer), args.saltNonce],
+  )
+
+  return getCreate2Address(
+    args.factoryAddress,
+    salt,
+    keccak256(deploymentData),
+  )
+}
+
 export default async function safeDeployRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
@@ -85,60 +126,91 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
       return reply.code(400).send({ error: 'salt_nonce must be a decimal string' })
     }
 
-    const passkeyResult = await pool.query<StoredPasskeyRow>(
-      `SELECT id, public_key_x, public_key_y, signer_address, safe_address
-       FROM user_passkeys
-       WHERE user_id = $1 AND chain_id = $2`,
-      [sub, chain_id],
-    )
-
-    if (passkeyResult.rows.length === 0) {
-      return reply.code(404).send({ error: 'No passkey enrolled for this chain' })
-    }
-
-    const passkey = passkeyResult.rows[0]
-    if (passkey.safe_address) {
-      return reply.code(409).send({ error: 'A Safe is already deployed for this passkey' })
-    }
-
-    const expectedSignerAddress = predictSafePasskeySignerAddress({
-      x: parseHexCoordinate(passkey.public_key_x),
-      y: parseHexCoordinate(passkey.public_key_y),
-      chainId: chain_id,
-    })
-
-    if (expectedSignerAddress.toLowerCase() !== passkey.signer_address.toLowerCase()) {
-      throw new Error(`Stored passkey signer mismatch for user ${sub} on chain ${chain_id}`)
-    }
-
-    const chain = getChainConfig(chain_id)
-    const initializer = SAFE_SETUP_IFACE.encodeFunctionData('setup', [
-      [expectedSignerAddress],
-      1n,
-      ZeroAddress,
-      '0x',
-      chain.contracts.fallbackHandler,
-      ZeroAddress,
-      0n,
-      ZeroAddress,
-    ])
-
+    const chain = getChain(chain_id)
     const saltNonce = salt_nonce
       ? BigInt(salt_nonce)
       : BigInt(Math.floor(Math.random() * 1_000_000_000))
 
+    const client = await pool.connect()
+    let transactionOpen = false
+
     try {
+      await client.query('BEGIN')
+      transactionOpen = true
+
+      const passkeyResult = await client.query<StoredPasskeyRow>(
+        `SELECT id, public_key_x, public_key_y, signer_address, safe_address
+         FROM user_passkeys
+         WHERE user_id = $1 AND chain_id = $2
+         FOR UPDATE`,
+        [sub, chain_id],
+      )
+
+      if (passkeyResult.rows.length === 0) {
+        await client.query('ROLLBACK')
+        transactionOpen = false
+        return reply.code(404).send({ error: 'No passkey enrolled for this chain' })
+      }
+
+      const passkey = passkeyResult.rows[0]
+      if (passkey.safe_address) {
+        await client.query('ROLLBACK')
+        transactionOpen = false
+        return reply.code(409).send({ error: 'A Safe is already deployed for this passkey' })
+      }
+
+      const expectedSignerAddress = predictSafePasskeySignerAddress({
+        x: parseHexCoordinate(passkey.public_key_x),
+        y: parseHexCoordinate(passkey.public_key_y),
+        chainId: chain_id,
+      })
+
+      if (expectedSignerAddress.toLowerCase() !== passkey.signer_address.toLowerCase()) {
+        request.log.error({ userId: sub, chainId: chain_id }, 'Stored passkey signer mismatch')
+        await client.query('ROLLBACK')
+        transactionOpen = false
+        return reply.code(500).send({ error: 'Internal server error' })
+      }
+
+      const deploymentInitializer = SAFE_SETUP_IFACE.encodeFunctionData('setup', [
+        [expectedSignerAddress],
+        1n,
+        ZeroAddress,
+        '0x',
+        chain.contracts.fallbackHandler,
+        ZeroAddress,
+        0n,
+        ZeroAddress,
+      ])
+
       await warnIfRelayerLow(chain_id)
       const relayer = getRelayer(chain_id)
       const factory = new Contract(
         chain.contracts.safeProxyFactory,
         PROXY_FACTORY_ABI,
         relayer,
-      )
+      ) as unknown as SafeProxyFactoryContract
+
+      const proxyCreationCode = await factory.proxyCreationCode()
+      const predictedSafeAddress = predictSafeProxyAddress({
+        factoryAddress: chain.contracts.safeProxyFactory,
+        singletonAddress: chain.contracts.safeSingletonL2,
+        initializer: deploymentInitializer,
+        saltNonce,
+        proxyCreationCode,
+      })
+
+      const provider = relayer.provider
+      const existingCode = provider ? await provider.getCode(predictedSafeAddress) : '0x'
+      if (existingCode !== '0x') {
+        await client.query('ROLLBACK')
+        transactionOpen = false
+        return reply.code(503).send({ error: 'Safe deployment collided; please try again later' })
+      }
 
       const tx = await factory.createProxyWithNonce(
         chain.contracts.safeSingletonL2,
-        initializer,
+        deploymentInitializer,
         saltNonce,
       )
       const receipt = await tx.wait()
@@ -148,12 +220,15 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
 
       const safeAddress = extractSafeAddressFromReceipt(chain.contracts.safeProxyFactory, receipt)
 
-      await pool.query(
+      await client.query(
         `UPDATE user_passkeys
          SET safe_address = $1
          WHERE id = $2`,
         [safeAddress, passkey.id],
       )
+
+      await client.query('COMMIT')
+      transactionOpen = false
 
       return reply.code(201).send({
         safe_address: safeAddress,
@@ -161,6 +236,13 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         chain_id,
       })
     } catch (error) {
+      if (transactionOpen) {
+        try {
+          await client.query('ROLLBACK')
+        } catch (rollbackError) {
+          request.log.error({ err: rollbackError }, 'Failed to roll back passkey safe deployment transaction')
+        }
+      }
       if (isInsufficientFundsError(error)) {
         return reply.code(503).send({ error: 'Relayer is temporarily unfunded; please try again later' })
       }
@@ -168,6 +250,8 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         return reply.code(503).send({ error: 'Safe deployment collided; please try again later' })
       }
       throw error
+    } finally {
+      client.release()
     }
   })
 }

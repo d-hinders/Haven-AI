@@ -7,7 +7,7 @@ import {
   getCreateAddress,
   keccak256,
 } from 'ethers'
-import { getChainConfig } from './chains.js'
+import { getChain } from './chains.js'
 
 export interface SafePasskeyConfig {
   factoryAddress: string
@@ -53,7 +53,7 @@ export function predictSafePasskeySignerAddress(args: {
 }
 
 export function getSafePasskeyConfig(chainId: number): SafePasskeyConfig {
-  const chain = getChainConfig(chainId)
+  const chain = getChain(chainId)
   const factoryAddress = getAddress(chain.passkey.factoryAddress)
 
   return {

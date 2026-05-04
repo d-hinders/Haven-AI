@@ -1,6 +1,6 @@
 import { JsonRpcProvider, Wallet, formatEther, parseEther } from 'ethers'
 import { config } from '../config.js'
-import { getChainConfig } from './chains.js'
+import { getChain } from './chains.js'
 
 const providers = new Map<number, JsonRpcProvider>()
 const relayers = new Map<number, Wallet>()
@@ -8,7 +8,7 @@ const relayers = new Map<number, Wallet>()
 function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)
   if (!provider) {
-    provider = new JsonRpcProvider(getChainConfig(chainId).rpcUrl)
+    provider = new JsonRpcProvider(getChain(chainId).rpcUrl)
     providers.set(chainId, provider)
   }
   return provider

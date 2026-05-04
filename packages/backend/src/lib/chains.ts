@@ -162,10 +162,6 @@ export function getChain(chainId: number): ChainConfig {
   return chain
 }
 
-export function getChainConfig(chainId: number): ChainConfig {
-  return getChain(chainId)
-}
-
 export function getExplorerUrl(
   chainId: number,
   type: 'tx' | 'address',

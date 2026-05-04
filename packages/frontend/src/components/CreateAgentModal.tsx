@@ -14,7 +14,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
-import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
+import NetworkGate from './NetworkGate'
 import {
   getSafeNonce,
   signSafeTx,
@@ -142,10 +142,6 @@ export default function CreateAgentModal({
   const [addAmount, setAddAmount] = useState('')
   const [addReset, setAddReset] = useState(1440) // daily
 
-  // Form: recipient allowlist
-  const [restrictRecipients, setRestrictRecipients] = useState(false)
-  const [allowedRecipients, setAllowedRecipients] = useState<RecipientEntry[]>([])
-
   // Execution
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('checking')
   const [execError, setExecError] = useState<string | null>(null)
@@ -158,6 +154,9 @@ export default function CreateAgentModal({
   const [copiedDoneKey, setCopiedDoneKey] = useState(false)
   const [copiedEnv, setCopiedEnv] = useState(false)
   const [showRawCreds, setShowRawCreds] = useState(false)
+  // True once the user has downloaded the handoff file or copied the .env.
+  // Used to gate close-without-saving on the Done step — see handleClose.
+  const [credentialsSaved, setCredentialsSaved] = useState(false)
 
   // Wagmi
   const { address: connectedAddress } = useAccount()
@@ -177,8 +176,6 @@ export default function CreateAgentModal({
     setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
     setAddReset(1440)
-    setRestrictRecipients(false)
-    setAllowedRecipients([])
     setExecStatus('checking')
     setExecError(null)
     setTxHash(null)
@@ -188,12 +185,29 @@ export default function CreateAgentModal({
     setCopiedDoneKey(false)
     setCopiedEnv(false)
     setShowRawCreds(false)
+    setCredentialsSaved(false)
   }, [])
 
   const handleClose = useCallback(() => {
+    // Guard against accidental dismissal of the Done step before the user has
+    // saved the credentials. The agent is already on-chain at this point, but
+    // the API key (and a generated delegate private key, if any) cannot be
+    // shown again — closing without saving leaves the user with an active
+    // but uncallable agent that they can only recover by revoking and
+    // recreating.
+    if (step === 'done' && createdApiKey && !credentialsSaved) {
+      const confirmed = window.confirm(
+        'You haven\'t saved the agent credentials yet.\n\n' +
+        'The API key and delegate private key cannot be shown again. ' +
+        'If you close this dialog now, the agent will be active on-chain ' +
+        'but uncallable, and you\'ll need to revoke it and create a new one.\n\n' +
+        'Close anyway?',
+      )
+      if (!confirmed) return
+    }
     resetForm()
     onClose()
-  }, [onClose, resetForm])
+  }, [step, createdApiKey, credentialsSaved, onClose, resetForm])
 
   // Escape-to-close — allow closing in all steps except while an on-chain
   // action is actively in flight (mirrors the backdrop-click behaviour).
@@ -420,8 +434,6 @@ export default function CreateAgentModal({
           description: description.trim() || undefined,
           delegate_address: delegateAddress,
           safe_id: safeId || undefined,
-          restrict_recipients: restrictRecipients,
-          allowed_recipients: restrictRecipients ? allowedRecipients : [],
           allowances: allowances.map((a) => ({
             token_address:
               a.tokenAddress ?? '0x0000000000000000000000000000000000000000',
@@ -501,10 +513,6 @@ export default function CreateAgentModal({
           amount: a.amount,
           resetPeriodMin: a.resetTimeMin,
         })),
-        restrictRecipients,
-        allowedRecipients: restrictRecipients
-          ? allowedRecipients.map((r) => ({ address: r.address, label: r.label }))
-          : [],
       },
       credentials: {
         apiKey: createdApiKey,
@@ -535,6 +543,7 @@ export default function CreateAgentModal({
       new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
       filename,
     )
+    setCredentialsSaved(true)
   }
 
   function handleCopyEnv() {
@@ -542,6 +551,7 @@ export default function CreateAgentModal({
     if (!input) return
     const dotenv = buildDotenv(input)
     copyToClipboard(dotenv, setCopiedEnv)
+    setCredentialsSaved(true)
   }
 
   // Generate a key the first time the user reaches the Key step in 'generate'
@@ -591,13 +601,13 @@ export default function CreateAgentModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
           <div>
-            <h2 className="text-sm font-semibold">Add agent</h2>
+            <h2 className="text-sm font-semibold">Connect agent</h2>
             <p className="text-xs text-zinc-600 mt-0.5">
               {step === 'details' && "Name the agent you'll hand these credentials to"}
-              {step === 'policy' && 'Set spending limits and (optionally) restrict recipients'}
+              {step === 'policy' && 'Set on-chain spending limits — token, amount, frequency'}
               {step === 'key' && 'Choose the signing key the agent will use'}
-              {step === 'review' && 'Review and add the agent'}
-              {step === 'executing' && 'Adding agent...'}
+              {step === 'review' && 'Review and connect the agent'}
+              {step === 'executing' && 'Connecting agent...'}
               {step === 'done' && 'Credentials ready to hand off'}
             </p>
           </div>
@@ -796,15 +806,11 @@ export default function CreateAgentModal({
                 </p>
               )}
 
-              {/* Recipient allowlist */}
-              <div className="pt-2 border-t border-white/[0.06]">
-                <RecipientAllowlistEditor
-                  enabled={restrictRecipients}
-                  onToggle={setRestrictRecipients}
-                  recipients={allowedRecipients}
-                  onChange={setAllowedRecipients}
-                />
-              </div>
+              <p className="text-[11px] text-zinc-600 leading-relaxed pt-2 border-t border-white/[0.06]">
+                Payments that exceed these on-chain limits aren&apos;t rejected — they&apos;re queued
+                for your approval in the dashboard. The agent always has an escape hatch for
+                larger spend without raising its on-chain allowance.
+              </p>
 
               <div className="flex gap-3">
                 <button
@@ -1038,30 +1044,6 @@ export default function CreateAgentModal({
                     ))}
                   </div>
                 </div>
-                {restrictRecipients && (
-                  <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                      Recipient allowlist
-                    </p>
-                    {allowedRecipients.length > 0 ? (
-                      <div className="space-y-1">
-                        {allowedRecipients.map((r) => (
-                          <div key={r.address} className="text-xs text-zinc-400">
-                            {r.label ? (
-                              <span>{r.label} <span className="font-mono text-zinc-600">({truncate(r.address)})</span></span>
-                            ) : (
-                              <span className="font-mono">{truncate(r.address)}</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-amber-400/70">
-                        Restriction enabled but no recipients added — agent won&apos;t be able to send to anyone
-                      </p>
-                    )}
-                  </div>
-                )}
               </div>
 
               {/* What will happen */}
@@ -1106,14 +1088,18 @@ export default function CreateAgentModal({
                 >
                   Back
                 </button>
-                <button
-                  onClick={handleExecute}
-                  disabled={!!deployBlockReason()}
-                  title={deployBlockReason() ?? undefined}
-                  className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
-                >
-                  Add agent
-                </button>
+                <div className="flex-1">
+                  <NetworkGate requiredChainId={chainId}>
+                    <button
+                      onClick={handleExecute}
+                      disabled={!!deployBlockReason()}
+                      title={deployBlockReason() ?? undefined}
+                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
+                    >
+                      Connect agent
+                    </button>
+                  </NetworkGate>
+                </div>
               </div>
             </div>
           )}

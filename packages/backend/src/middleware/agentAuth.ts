@@ -63,14 +63,16 @@ export async function agentAuthMiddleware(
     delegate_address: string | null
     safe_address: string | null
     chain_id: number
+    status: string
   }>(
     `SELECT a.id, a.user_id, a.name, a.delegate_address,
+            a.status,
             COALESCE(us.safe_address, u.safe_address) as safe_address,
             COALESCE(us.chain_id, 100) as chain_id
      FROM agents a
      JOIN users u ON a.user_id = u.id
      LEFT JOIN user_safes us ON a.safe_id = us.id
-     WHERE a.api_key_hash = $1 AND a.status = 'active'`,
+     WHERE a.api_key_hash = $1`,
     [createHash('sha256').update(apiKey).digest('hex')],
   )
 
@@ -79,6 +81,18 @@ export async function agentAuthMiddleware(
   }
 
   const row = result.rows[0]
+
+  if (row.status === 'revoked') {
+    return reply.code(401).send({ error: 'Invalid or revoked API key' })
+  }
+
+  if (row.status === 'paused') {
+    return reply.code(403).send({
+      error: 'agent_paused',
+      detail:
+        'New API-initiated transactions are blocked until you resume this agent. On-chain delegate access and allowances are still in place.',
+    })
+  }
 
   if (!row.delegate_address) {
     return reply.code(403).send({ error: 'Agent has no delegate address configured' })

@@ -10,6 +10,7 @@ import userRoutes from './routes/user.js'
 import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
 import portfolioRoutes from './routes/portfolio.js'
+import dashboardRoutes from './routes/dashboard.js'
 import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
 import contactRoutes from './routes/contacts.js'
@@ -20,6 +21,8 @@ import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
 import selfSignAgentRoutes from './routes/self-sign-agents.js'
 import selfSignPaymentRoutes from './routes/self-sign-payments.js'
+import x402ResourceRoutes from './routes/x402-resources.js'
+import demoX402Routes from './routes/demo-x402.js'
 import pool from './db.js'
 
 const app = Fastify({
@@ -101,6 +104,7 @@ await app.register(userRoutes, { prefix: '/user' })
 await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
+await app.register(dashboardRoutes, { prefix: '/dashboard' })
 await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(contactRoutes, { prefix: '/contacts' })
@@ -111,6 +115,9 @@ await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
 await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
 await app.register(selfSignPaymentRoutes, { prefix: '/self-sign-payments' })
+await app.register(x402ResourceRoutes, { prefix: '/x402' })
+// Public demo — no auth hook, registered separately
+await app.register(demoX402Routes, { prefix: '/demo/x402' })
 
 // --- Start ---
 const start = async () => {

@@ -12,7 +12,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
-import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
+import NetworkGate from './NetworkGate'
 import {
   getSafeNonce,
   signSafeTx,
@@ -68,15 +68,6 @@ export default function EditAgentModal({
   const [selectedToken, setSelectedToken] = useState<string>(defaultToken)
   const [amount, setAmount] = useState('')
   const [resetTimeMin, setResetTimeMin] = useState(1440)
-  const [approvalThreshold, setApprovalThreshold] = useState('')
-
-  // Recipient allowlist state
-  const [restrictRecipients, setRestrictRecipients] = useState(agent.restrict_recipients ?? false)
-  const [allowedRecipients, setAllowedRecipients] = useState<RecipientEntry[]>(
-    (agent.allowed_recipients ?? []).map((r) => ({ address: r.address, label: r.label ?? undefined })),
-  )
-  const [recipientsSaving, setRecipientsSaving] = useState(false)
-  const [recipientsSaved, setRecipientsSaved] = useState(false)
 
   // Execution
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('signing')
@@ -117,17 +108,10 @@ export default function EditAgentModal({
     setSelectedToken(defaultToken)
     setAmount('')
     setResetTimeMin(1440)
-    setApprovalThreshold('')
-    setRestrictRecipients(agent.restrict_recipients ?? false)
-    setAllowedRecipients(
-      (agent.allowed_recipients ?? []).map((r) => ({ address: r.address, label: r.label ?? undefined })),
-    )
-    setRecipientsSaving(false)
-    setRecipientsSaved(false)
     setExecStatus('signing')
     setExecError(null)
     setTxHash(null)
-  }, [])
+  }, [defaultToken])
 
   const handleClose = useCallback(() => {
     resetForm()
@@ -237,9 +221,6 @@ export default function EditAgentModal({
           token_symbol: selectedTokenConfig.symbol,
           allowance_amount: rawAmount.toString(),
           reset_period_min: resetTimeMin,
-          approval_threshold: approvalThreshold && Number(approvalThreshold) > 0
-            ? parseUnits(approvalThreshold, selectedTokenConfig.decimals).toString()
-            : null,
         })
 
       setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
@@ -373,67 +354,12 @@ export default function EditAgentModal({
                     This will replace the existing {selectedToken} allowance on-chain
                   </p>
                 )}
-
-                {/* Approval threshold */}
-                <div className="pt-2 border-t border-white/[0.06]">
-                  <label className="block text-[11px] text-zinc-500 mb-1.5">
-                    Approval threshold (optional)
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={approvalThreshold}
-                      onChange={(e) => setApprovalThreshold(e.target.value)}
-                      placeholder={`e.g. 10`}
-                      className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
-                    />
-                    <span className="text-xs text-zinc-600">{selectedToken}</span>
-                  </div>
-                  <p className="text-[10px] text-zinc-700 mt-1">
-                    Payments above this amount require your approval in the dashboard.
-                    Leave empty for no approval requirement.
-                  </p>
-                </div>
               </div>
 
-              {/* Recipient allowlist */}
-              <div className="p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
-                <RecipientAllowlistEditor
-                  enabled={restrictRecipients}
-                  onToggle={setRestrictRecipients}
-                  recipients={allowedRecipients}
-                  onChange={setAllowedRecipients}
-                />
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    onClick={async () => {
-                      setRecipientsSaving(true)
-                      setRecipientsSaved(false)
-                      try {
-                        await api.put(`/agents/${agent.id}`, {
-                            restrict_recipients: restrictRecipients,
-                            allowed_recipients: restrictRecipients ? allowedRecipients : [],
-                          })
-                        setRecipientsSaved(true)
-                        setTimeout(() => setRecipientsSaved(false), 2000)
-                      } catch {
-                        // ignore
-                      } finally {
-                        setRecipientsSaving(false)
-                      }
-                    }}
-                    disabled={recipientsSaving}
-                    className="text-xs font-medium text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors"
-                  >
-                    {recipientsSaving ? 'Saving...' : recipientsSaved ? 'Saved!' : 'Save recipients'}
-                  </button>
-                  <p className="text-[10px] text-zinc-700">
-                    Recipients are saved to Haven (no on-chain tx needed)
-                  </p>
-                </div>
-              </div>
+              <p className="text-[11px] text-zinc-600 leading-relaxed">
+                Payments that exceed the on-chain limit are queued for your approval in
+                the dashboard — no separate threshold to configure.
+              </p>
 
               <div className="flex gap-3">
                 <button
@@ -497,12 +423,16 @@ export default function EditAgentModal({
                 >
                   Back
                 </button>
-                <button
-                  onClick={handleExecute}
-                  className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20"
-                >
-                  {isExistingToken ? 'Update Allowance' : 'Add Allowance'}
-                </button>
+                <div className="flex-1">
+                  <NetworkGate requiredChainId={chainId}>
+                    <button
+                      onClick={handleExecute}
+                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20"
+                    >
+                      {isExistingToken ? 'Update Allowance' : 'Add Allowance'}
+                    </button>
+                  </NetworkGate>
+                </div>
               </div>
             </div>
           )}

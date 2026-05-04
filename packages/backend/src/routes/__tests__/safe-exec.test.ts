@@ -7,10 +7,12 @@ const {
   mockWarnIfRelayerLow,
   mockExecTransaction,
   mockExecTransactionStaticCall,
+  mockOwnerIsValidSignature,
   mockContractConstructor,
 } = vi.hoisted(() => {
   const execTransaction = vi.fn()
   const execTransactionStaticCall = vi.fn()
+  const ownerIsValidSignature = vi.fn()
   Object.assign(execTransaction, {
     staticCall: execTransactionStaticCall,
   })
@@ -20,7 +22,14 @@ const {
     mockWarnIfRelayerLow: vi.fn(),
     mockExecTransaction: execTransaction,
     mockExecTransactionStaticCall: execTransactionStaticCall,
-    mockContractConstructor: vi.fn(function contractMock() {
+    mockOwnerIsValidSignature: ownerIsValidSignature,
+    mockContractConstructor: vi.fn((address: string, abi: unknown) => {
+      if (Array.isArray(abi) && abi.some((item) => String(item).includes('isValidSignature(bytes32,bytes)'))) {
+        return {
+          isValidSignature: ownerIsValidSignature,
+        }
+      }
+
       return {
         execTransaction,
       }
@@ -51,6 +60,16 @@ import { buildApp } from '../../__tests__/helpers.js'
 
 describe('Safe exec routes', () => {
   let app: FastifyInstance
+  const signerAddress = '0x0802e96a6dd7e1dd80620cf5d759d41b714c0ce2'
+
+  function buildPasskeyContractSignature(ownerAddress: string, innerSignature: string): string {
+    const ownerWord = ownerAddress.toLowerCase().slice(2).padStart(64, '0')
+    const offsetWord = '41'.padStart(64, '0')
+    const typeByte = '00'
+    const innerHex = innerSignature.startsWith('0x') ? innerSignature.slice(2) : innerSignature
+    const lengthWord = (innerHex.length / 2).toString(16).padStart(64, '0')
+    return `0x${ownerWord}${offsetWord}${typeByte}${lengthWord}${innerHex}`
+  }
 
   const validBody = {
     chain_id: 100,
@@ -65,7 +84,7 @@ describe('Safe exec routes', () => {
     gas_token: '0x0000000000000000000000000000000000000000',
     refund_receiver: '0x0000000000000000000000000000000000000000',
     nonce: '1',
-    signatures: '0x1234',
+    signatures: buildPasskeyContractSignature(signerAddress, '0x1234'),
   }
 
   beforeAll(async () => {
@@ -82,11 +101,13 @@ describe('Safe exec routes', () => {
     mockWarnIfRelayerLow.mockReset()
     mockExecTransaction.mockReset()
     mockExecTransactionStaticCall.mockReset()
+    mockOwnerIsValidSignature.mockReset()
     mockContractConstructor.mockClear()
 
     mockGetRelayer.mockReturnValue({ address: '0xrelayer' })
     mockWarnIfRelayerLow.mockResolvedValue(undefined)
     mockExecTransactionStaticCall.mockResolvedValue(true)
+    mockOwnerIsValidSignature.mockResolvedValue('0x1626ba7e')
   })
 
   function signToken(payload: { sub: string; email: string }): string {
@@ -99,7 +120,7 @@ describe('Safe exec routes', () => {
       rows: [{
         public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
         public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
-        signer_address: '0x0802e96a6dd7e1dd80620cf5d759d41b714c0ce2',
+        signer_address: signerAddress,
       }],
     })
     mockExecTransaction.mockResolvedValueOnce({
@@ -121,6 +142,7 @@ describe('Safe exec routes', () => {
     })
     expect(mockWarnIfRelayerLow).toHaveBeenCalledWith(100)
     expect(mockGetRelayer).toHaveBeenCalledWith(100)
+    expect(mockOwnerIsValidSignature).toHaveBeenCalledTimes(1)
     expect(mockExecTransactionStaticCall).toHaveBeenCalledWith(
       validBody.to,
       0n,
@@ -169,7 +191,7 @@ describe('Safe exec routes', () => {
       rows: [{
         public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
         public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
-        signer_address: '0x0802e96a6dd7e1dd80620cf5d759d41b714c0ce2',
+        signer_address: signerAddress,
       }],
     })
     mockExecTransaction.mockRejectedValueOnce(new Error('insufficient funds for intrinsic transaction cost'))
@@ -191,7 +213,7 @@ describe('Safe exec routes', () => {
       rows: [{
         public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
         public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
-        signer_address: '0x0802e96a6dd7e1dd80620cf5d759d41b714c0ce2',
+        signer_address: signerAddress,
       }],
     })
     mockExecTransactionStaticCall.mockRejectedValueOnce(new Error('execution reverted: GS013'))
@@ -206,6 +228,29 @@ describe('Safe exec routes', () => {
     expect(response.statusCode).toBe(502)
     expect(response.json().error).toBe('Safe execution reverted on-chain')
     expect(JSON.stringify(response.json())).not.toContain('GS013')
+  })
+
+  it('POST /safe/exec returns a specific error when the passkey signature is invalid', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
+        public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
+        signer_address: signerAddress,
+      }],
+    })
+    mockOwnerIsValidSignature.mockResolvedValueOnce('0xffffffff')
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validBody,
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json().error).toBe('Passkey signature is invalid for this Safe transaction')
+    expect(mockExecTransactionStaticCall).not.toHaveBeenCalled()
   })
 
   it('POST /safe/exec requires auth', async () => {

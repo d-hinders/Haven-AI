@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify'
-import { Contract } from 'ethers'
+import { Contract, TypedDataEncoder } from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isSupportedChain } from '../lib/chains.js'
@@ -13,8 +13,27 @@ const DECIMAL_RE = /^\d+$/
 const SAFE_EXEC_ABI = [
   'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns (bool success)',
 ] as const
+const ERC1271_ABI = [
+  'function isValidSignature(bytes32,bytes) view returns (bytes4)',
+] as const
+
+const ERC1271_MAGIC_VALUE = '0x1626ba7e'
 
 const RELAY_EXEC_GAS_LIMIT = 1_500_000n
+const SAFE_TX_TYPES = {
+  SafeTx: [
+    { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'data', type: 'bytes' },
+    { name: 'operation', type: 'uint8' },
+    { name: 'safeTxGas', type: 'uint256' },
+    { name: 'baseGas', type: 'uint256' },
+    { name: 'gasPrice', type: 'uint256' },
+    { name: 'gasToken', type: 'address' },
+    { name: 'refundReceiver', type: 'address' },
+    { name: 'nonce', type: 'uint256' },
+  ],
+}
 
 interface ExecSafeBody {
   chain_id: number
@@ -71,6 +90,10 @@ interface SafeContract {
   }
 }
 
+interface SignatureValidatorContract {
+  isValidSignature(message: string, signature: string): Promise<string>
+}
+
 function parseHexCoordinate(value: Buffer): `0x${string}` {
   return `0x${value.toString('hex')}` as `0x${string}`
 }
@@ -86,6 +109,65 @@ function isValidAddress(value: string): boolean {
 
 function isValidDecimal(value: string): boolean {
   return DECIMAL_RE.test(value)
+}
+
+function computeSafeTxHash(body: ExecSafeBody): string {
+  return TypedDataEncoder.hash(
+    {
+      chainId: body.chain_id,
+      verifyingContract: body.safe_address,
+    },
+    SAFE_TX_TYPES,
+    {
+      to: body.to,
+      value: BigInt(body.value),
+      data: body.data,
+      operation: body.operation,
+      safeTxGas: BigInt(body.safe_tx_gas),
+      baseGas: BigInt(body.base_gas),
+      gasPrice: BigInt(body.gas_price),
+      gasToken: body.gas_token,
+      refundReceiver: body.refund_receiver,
+      nonce: BigInt(body.nonce),
+    },
+  )
+}
+
+function parsePasskeyInnerSignature(signatures: string, expectedSignerAddress: string): string | null {
+  const hex = signatures.startsWith('0x') ? signatures.slice(2) : signatures
+  if (hex.length < 194) {
+    return null
+  }
+
+  const encodedSigner = `0x${hex.slice(24, 64)}`
+  if (encodedSigner.toLowerCase() !== expectedSignerAddress.toLowerCase()) {
+    return null
+  }
+
+  const offset = Number(BigInt(`0x${hex.slice(64, 128)}`))
+  const signatureType = hex.slice(128, 130)
+  if (!Number.isFinite(offset) || signatureType !== '00') {
+    return null
+  }
+
+  const lengthWordStart = offset * 2
+  const lengthWordEnd = lengthWordStart + 64
+  if (hex.length < lengthWordEnd) {
+    return null
+  }
+
+  const innerLength = Number(BigInt(`0x${hex.slice(lengthWordStart, lengthWordEnd)}`))
+  if (!Number.isFinite(innerLength) || innerLength < 0) {
+    return null
+  }
+
+  const innerStart = lengthWordEnd
+  const innerEnd = innerStart + innerLength * 2
+  if (hex.length < innerEnd) {
+    return null
+  }
+
+  return `0x${hex.slice(innerStart, innerEnd)}`
 }
 
 export default async function safeExecRoutes(app: FastifyInstance): Promise<void> {
@@ -159,6 +241,11 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
         SAFE_EXEC_ABI,
         relayer,
       ) as unknown as SafeContract
+      const ownerValidator = new Contract(
+        expectedSignerAddress,
+        ERC1271_ABI,
+        relayer,
+      ) as unknown as SignatureValidatorContract
 
       const execArgs = [
         body.to,
@@ -172,6 +259,25 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
         body.refund_receiver,
         body.signatures,
       ] as const
+      const safeTxHash = computeSafeTxHash(body)
+      const innerSignature = parsePasskeyInnerSignature(body.signatures, expectedSignerAddress)
+
+      if (!innerSignature) {
+        request.log.error(
+          { userId: sub, chainId: body.chain_id, safeAddress: body.safe_address },
+          'Malformed passkey contract signature payload',
+        )
+        return reply.code(502).send({ error: 'Passkey signature payload is malformed' })
+      }
+
+      const signatureMagicValue = await ownerValidator.isValidSignature(safeTxHash, innerSignature)
+      if (signatureMagicValue.toLowerCase() !== ERC1271_MAGIC_VALUE) {
+        request.log.error(
+          { userId: sub, chainId: body.chain_id, safeAddress: body.safe_address, safeTxHash },
+          'Passkey signature validation failed for Safe execution',
+        )
+        return reply.code(502).send({ error: 'Passkey signature is invalid for this Safe transaction' })
+      }
 
       // Validate the execution path without spending relayer gas. This catches
       // invalid signatures or failing Safe inner transactions before we submit.

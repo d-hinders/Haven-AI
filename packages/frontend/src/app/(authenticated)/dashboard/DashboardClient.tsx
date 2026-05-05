@@ -11,16 +11,17 @@ import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
 import { truncate, timeAgo } from '@/lib/format'
-import { getStoredPasskeySigner } from '@/lib/signer'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import CreateAgentModal from '@/components/CreateAgentModal'
 import SendModal from '@/components/SendModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
+import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -321,7 +322,7 @@ function TransactionsSection({
 }
 
 export default function DashboardClient() {
-  const { user, activeSafe, passkeys } = useAuth()
+  const { user, activeSafe } = useAuth()
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
   const { contacts, resolveAddress } = useContacts()
@@ -375,21 +376,11 @@ export default function DashboardClient() {
   }, [actionSafeId, defaultSafe?.id, safes])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
-  const selectedActionSafePasskey = selectedActionSafe
-    ? passkeys.find(
-        (passkey) =>
-          passkey.chain_id === selectedActionSafe.chain_id &&
-          passkey.safe_address?.toLowerCase() === selectedActionSafe.safe_address.toLowerCase(),
-      ) ?? null
-    : null
-  const selectedActionSafeStoredPasskey = selectedActionSafe
-    ? getStoredPasskeySigner({
-        safeAddress: selectedActionSafe.safe_address as Address,
-        chainId: selectedActionSafe.chain_id,
-      })
-    : null
-  const requiresOtherDevice =
-    Boolean(selectedActionSafePasskey) && !selectedActionSafeStoredPasskey
+  const actionGate = useSafeOperationGate({
+    safeAddress: selectedActionSafe?.safe_address as Address | undefined,
+    chainId: selectedActionSafe?.chain_id,
+  })
+  const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
   const sendModalDataEnabled = sendOpen && Boolean(selectedActionSafe)
   const { balances: selectedSafeBalances, refetch: refetchSelectedBalances } = useBalances(
     selectedActionSafe?.safe_address ?? null,
@@ -521,15 +512,7 @@ export default function DashboardClient() {
                 </Link>
               </div>
             ) : requiresOtherDevice ? (
-              <div className="max-w-sm rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-5 py-4">
-                <p className="text-sm font-semibold text-amber-100">
-                  This Safe uses a passkey on another device.
-                </p>
-                <p className="mt-2 text-sm text-amber-200/80 leading-relaxed">
-                  Sign in from the device where you set up Face ID / Touch ID to operate this Safe.
-                  Cross-device passkey support is coming soon.
-                </p>
-              </div>
+              <PasskeyOtherDeviceNotice className="max-w-sm" />
             ) : (
               <div className="flex flex-wrap gap-3">
                 <button

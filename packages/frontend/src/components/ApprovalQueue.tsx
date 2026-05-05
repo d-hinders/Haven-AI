@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useApprovals, type ApprovalRequest } from '@/hooks/useApprovals'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import {
   getSafeNonce,
   buildSafeTx,
@@ -20,6 +21,7 @@ import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { truncate, timeAgo, timeUntil } from '@/lib/format'
 import { useActiveSigner } from '@/lib/signer'
 import NetworkGate from './NetworkGate'
+import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -67,12 +69,16 @@ function ApprovalCard({
   onApproveAndExecute,
   onReject,
   executing,
+  executionDisabled = false,
+  showOtherDeviceNotice = false,
   chainId = 100,
 }: {
   approval: ApprovalRequest
-  onApproveAndExecute: (approval: ApprovalRequest) => void
+  onApproveAndExecute: () => void
   onReject: (id: string) => void
   executing: boolean
+  executionDisabled?: boolean
+  showOtherDeviceNotice?: boolean
   chainId?: number
 }) {
   const isPending = approval.status === 'pending'
@@ -153,81 +159,105 @@ function ApprovalCard({
 
       {/* Actions */}
       {isPending && (
-        confirmReject ? (
-          <div className="flex items-center gap-2 bg-red-500/[0.04] border border-red-500/20 rounded-lg px-3 py-2">
-            <span className="flex-1 text-xs text-zinc-300">
-              Reject this payment? The agent will be notified.
-            </span>
-            <button
-              onClick={() => { onReject(approval.id); setConfirmReject(false) }}
-              disabled={executing}
-              className="px-3 py-1.5 rounded-md bg-red-500 hover:bg-red-400 text-white text-xs font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
-            >
-              Reject
-            </button>
-            <button
-              onClick={() => setConfirmReject(false)}
-              disabled={executing}
-              className="px-3 py-1.5 rounded-md text-zinc-400 text-xs font-medium hover:bg-white/[0.04] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <NetworkGate requiredChainId={chainId}>
-                <button
-                  onClick={() => onApproveAndExecute(approval)}
-                  disabled={executing}
-                  className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
-                >
-                  {executing ? 'Executing...' : 'Approve & Execute'}
-                </button>
-              </NetworkGate>
+        <div className="space-y-3">
+          {showOtherDeviceNotice && (
+            <PasskeyOtherDeviceNotice />
+          )}
+          {confirmReject ? (
+            <div className="flex items-center gap-2 bg-red-500/[0.04] border border-red-500/20 rounded-lg px-3 py-2">
+              <span className="flex-1 text-xs text-zinc-300">
+                Reject this payment? The agent will be notified.
+              </span>
+              <button
+                onClick={() => { onReject(approval.id); setConfirmReject(false) }}
+                disabled={executing}
+                className="px-3 py-1.5 rounded-md bg-red-500 hover:bg-red-400 text-white text-xs font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+              >
+                Reject
+              </button>
+              <button
+                onClick={() => setConfirmReject(false)}
+                disabled={executing}
+                className="px-3 py-1.5 rounded-md text-zinc-400 text-xs font-medium hover:bg-white/[0.04] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+              >
+                Cancel
+              </button>
             </div>
-            <button
-              onClick={() => setConfirmReject(true)}
-              disabled={executing}
-              className="px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-400 text-xs font-medium hover:bg-white/[0.04] hover:text-red-400 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
-            >
-              Reject
-            </button>
-          </div>
-        )
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <NetworkGate requiredChainId={chainId}>
+                  <button
+                    onClick={onApproveAndExecute}
+                    disabled={executing || executionDisabled}
+                    className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+                  >
+                    {executing ? 'Executing...' : 'Approve & Execute'}
+                  </button>
+                </NetworkGate>
+              </div>
+              <button
+                onClick={() => setConfirmReject(true)}
+                disabled={executing}
+                className="px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-400 text-xs font-medium hover:bg-white/[0.04] hover:text-red-400 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+              >
+                Reject
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
 }
 
-// ── Main component ───────────────────────────────────────────────
-
-export default function ApprovalQueue() {
-  const { user, activeSafe } = useAuth()
-  const safeAddress = activeSafe?.safe_address ?? null
-  const chainId = activeSafe?.chain_id ?? 100
+function ApprovalCardWithContext({
+  approval,
+  executingApprovalId,
+  setExecutingApprovalId,
+  approve,
+  reject,
+  markExecuted,
+  refetch,
+}: {
+  approval: ApprovalRequest
+  executingApprovalId: string | null
+  setExecutingApprovalId: (id: string | null) => void
+  approve: (id: string) => Promise<unknown>
+  reject: (id: string) => Promise<void>
+  markExecuted: (id: string, txHash: string) => Promise<void>
+  refetch: () => Promise<void>
+}) {
+  const { user } = useAuth()
+  const safe = useMemo(
+    () =>
+      user?.safes.find(
+        (item) => item.safe_address.toLowerCase() === approval.safe_address.toLowerCase(),
+      ) ?? null,
+    [approval.safe_address, user?.safes],
+  )
+  const safeAddress = (safe?.safe_address ?? approval.safe_address) as Address
+  const chainId = safe?.chain_id ?? 100
   const { details: safeDetails } = useSafeDetails(safeAddress)
-  const { approvals, pendingCount, loading, approve, reject, markExecuted, refetch } = useApprovals()
   const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
-    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    safeAddress,
     chainId,
   })
+  const operationGate = useSafeOperationGate({
+    safeAddress,
+    chainId,
+  })
+  const executionDisabled = operationGate.kind === 'passkey_on_other_device'
+  const executing = executingApprovalId === approval.id
 
-  const [executing, setExecuting] = useState(false)
+  async function handleApproveAndExecute() {
+    if (executionDisabled || !publicClient || !signer || !safeDetails) return
 
-  const pendingApprovals = approvals.filter((a) => a.status === 'pending')
-  const pastApprovals = approvals.filter((a) => a.status !== 'pending')
-
-  async function handleApproveAndExecute(approval: ApprovalRequest) {
-    if (!publicClient || !signer || !safeAddress || !safeDetails) return
-
-    setExecuting(true)
+    setExecutingApprovalId(approval.id)
     try {
-      // 1. Mark as approved in backend
       await approve(approval.id)
 
-      // 2. Build and sign Safe transaction
       const chainTokens = getChainTokens(chainId)
       const tokenSymbol = resolveTokenSymbol(approval.token_address, chainId)
       const tokenConfig = chainTokens[tokenSymbol]
@@ -241,16 +271,15 @@ export default function ApprovalQueue() {
         recipient: approval.to_address as Address,
       }
 
-      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
+      const nonce = await getSafeNonce(publicClient, safeAddress)
       const safeTx = buildSafeTx(sendParams, nonce)
       const signature = await signSafeTx(
         signer,
-        safeAddress as Address,
+        safeAddress,
         safeTx,
         chainId,
       )
 
-      // 3. Execute or propose
       const threshold = safeDetails.threshold ?? 1
       let txHash: string | undefined
 
@@ -258,16 +287,16 @@ export default function ApprovalQueue() {
         const result = await executeSafeTx(
           signer,
           publicClient,
-          safeAddress as Address,
+          safeAddress,
           safeTx,
           signature,
           chainId,
         )
         txHash = result.txHash
       } else {
-        const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
+        const safeTxHash = getSafeTxHash(safeAddress, safeTx, chainId)
         await proposeSafeTx(
-          safeAddress as Address,
+          safeAddress,
           safeTx,
           safeTxHash,
           signature,
@@ -276,18 +305,17 @@ export default function ApprovalQueue() {
         )
       }
 
-      // 4. Record execution
       if (txHash) {
         await markExecuted(approval.id, txHash)
       }
 
-      refetch()
+      await refetch()
     } catch (err) {
       if (err instanceof Error && !err.message.includes('rejected') && !err.message.includes('denied')) {
         console.error('Approval execution failed:', err)
       }
     } finally {
-      setExecuting(false)
+      setExecutingApprovalId(null)
     }
   }
 
@@ -299,7 +327,27 @@ export default function ApprovalQueue() {
     }
   }
 
-  if (!safeAddress) return null
+  return (
+    <ApprovalCard
+      approval={approval}
+      onApproveAndExecute={handleApproveAndExecute}
+      onReject={handleReject}
+      executing={executing}
+      executionDisabled={executionDisabled}
+      showOtherDeviceNotice={executionDisabled}
+      chainId={chainId}
+    />
+  )
+}
+
+// ── Main component ───────────────────────────────────────────────
+
+export default function ApprovalQueue() {
+  const { approvals, pendingCount, loading, approve, reject, markExecuted, refetch } = useApprovals()
+  const [executingApprovalId, setExecutingApprovalId] = useState<string | null>(null)
+
+  const pendingApprovals = approvals.filter((a) => a.status === 'pending')
+  const pastApprovals = approvals.filter((a) => a.status !== 'pending')
 
   return (
     <div>
@@ -350,13 +398,15 @@ export default function ApprovalQueue() {
       {pendingApprovals.length > 0 && (
         <div className="space-y-3 mb-6">
           {pendingApprovals.map((a) => (
-            <ApprovalCard
+            <ApprovalCardWithContext
               key={a.id}
               approval={a}
-              onApproveAndExecute={handleApproveAndExecute}
-              onReject={handleReject}
-              executing={executing}
-              chainId={chainId}
+              executingApprovalId={executingApprovalId}
+              setExecutingApprovalId={setExecutingApprovalId}
+              approve={approve}
+              reject={reject}
+              markExecuted={markExecuted}
+              refetch={refetch}
             />
           ))}
         </div>

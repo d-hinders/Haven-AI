@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { type Address } from 'viem'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
 import { useActiveSigner } from '@/lib/signer'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -11,6 +12,7 @@ import { truncate, isValidAddress } from '@/lib/format'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
 import NetworkGate from './NetworkGate'
+import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
 import { SigningStatus } from './SigningStatus'
 
 interface SendSafeOption {
@@ -61,6 +63,11 @@ export default function SendModal({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
   })
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
+  const blockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
 
   // Build token list from chain config
   const chainConfig = getChainConfig(chainId)
@@ -185,7 +192,7 @@ export default function SendModal({
   }
 
   const handleConfirm = async () => {
-    if (!signer || !tokenConfig) return
+    if (blockedByOtherDevice || !signer || !tokenConfig) return
 
     setStep('executing')
 
@@ -593,6 +600,10 @@ export default function SendModal({
             </div>
 
             {/* Error */}
+            {blockedByOtherDevice && (
+              <PasskeyOtherDeviceNotice />
+            )}
+
             {formError && (
               <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
                 {formError}
@@ -610,7 +621,7 @@ export default function SendModal({
             {/* Continue button */}
             <button
               onClick={handleReview}
-              disabled={!amount || !recipient || contextLoading || !!contextError || !safeDetails}
+              disabled={!amount || !recipient || contextLoading || !!contextError || !safeDetails || blockedByOtherDevice}
               className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Continue
@@ -684,6 +695,10 @@ export default function SendModal({
               </div>
             )}
 
+            {blockedByOtherDevice && (
+              <PasskeyOtherDeviceNotice />
+            )}
+
             <div className="flex gap-3">
               <button
                 onClick={() => setStep('form')}
@@ -695,7 +710,8 @@ export default function SendModal({
                 <NetworkGate requiredChainId={chainId}>
                   <button
                     onClick={handleConfirm}
-                    className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+                    disabled={blockedByOtherDevice}
+                    className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {isMultiSig ? 'Sign & Propose' : 'Sign & Execute'}
                   </button>

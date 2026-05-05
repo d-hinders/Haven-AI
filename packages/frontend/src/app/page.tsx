@@ -1,11 +1,7 @@
-const NAV_LINKS = [
-  { label: 'Product', href: '#' },
-  { label: 'How it works', href: '/how-it-works' },
-  { label: 'Docs', href: '#' },
-  { label: 'GitHub', href: '#' },
-]
+import { SiteHeader } from '@/components/marketing/SiteHeader'
+import { SiteFooter } from '@/components/marketing/SiteFooter'
 
-const INTEGRATIONS = ['Safe', 'Gnosis Chain', 'x402', 'USDC', 'EURe']
+const INTEGRATIONS = ['Safe', 'Gnosis Chain', 'x402', 'Stripe MPP', 'USDC', 'EURe']
 
 const PROBLEM_CARDS = [
   {
@@ -61,8 +57,8 @@ const DIFFERENTIATORS = [
     body: 'Agents express intent in plain terms — pay, transfer, approve. Haven handles the blockchain complexity so agents never need to.',
   },
   {
-    title: 'x402 native',
-    body: 'Built-in support for HTTP 402 payments. Agents can autonomously pay for API access, data, and compute without human intervention.',
+    title: 'Protocol native',
+    body: 'Built-in support for x402 (HTTP 402 paywalls) and Stripe MPP (machine-payments protocol). Agents transact via open standards — stablecoin settlement today, fiat rails next.',
   },
   {
     title: 'Runtime agnostic',
@@ -84,39 +80,7 @@ export default function Home() {
         style={{ background: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.18) 0%, transparent 70%)' }}
       />
 
-      {/* Navigation */}
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] backdrop-blur-md bg-[#0a0a0a]/80">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-          <span className="text-[15px] font-semibold tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">
-            Haven
-          </span>
-          <div className="hidden md:flex items-center gap-8">
-            {NAV_LINKS.map((link) => (
-              <a
-                key={link.label}
-                href={link.href}
-                className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200"
-              >
-                {link.label}
-              </a>
-            ))}
-          </div>
-          <div className="flex items-center gap-4">
-            <a
-              href="/login"
-              className="text-sm text-zinc-400 hover:text-[#ededed] transition-colors duration-200"
-            >
-              Log in
-            </a>
-            <a
-              href="/signup"
-              className="text-sm px-4 py-1.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-            >
-              Get Early Access
-            </a>
-          </div>
-        </div>
-      </nav>
+      <SiteHeader />
 
       {/* Hero */}
       <section className="relative max-w-6xl mx-auto px-6 pt-24 pb-20 md:pt-32 md:pb-28 z-10">
@@ -266,30 +230,44 @@ export default function Home() {
 
       <div className="border-t border-white/[0.06]" />
 
-      {/* [04] Built for the Agent Economy */}
+      {/* [04] Protocol Native */}
       <section className="relative max-w-6xl mx-auto px-6 py-20 md:py-24 z-10">
         <div className="flex items-baseline gap-4 mb-12">
           <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">[04]</span>
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">Built for the Agent Economy</h2>
+          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">Protocol Native</h2>
         </div>
+        <p className="text-sm text-zinc-400 leading-relaxed max-w-2xl mb-10">
+          Agents need to transact across rails. Haven speaks the open standards — x402 for pay-per-request flows, Stripe MPP for broader agent commerce — under one policy engine. Stablecoin settlement today; SPT-backed fiat rails next.
+        </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/[0.06]">
-          <div className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300">
+          <a
+            href="/protocols/x402"
+            className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300 block"
+          >
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-indigo-500/40 via-violet-500/40 to-transparent opacity-40" />
-            <h3 className="text-base font-semibold mb-3">x402 Protocol Support</h3>
+            <div className="text-[11px] uppercase tracking-widest text-indigo-300/80 mb-3 font-mono">HTTP paywalls</div>
+            <h3 className="text-base font-semibold mb-3">x402 — pay-per-request HTTP</h3>
             <p className="text-sm text-zinc-500 leading-relaxed">
-              When an agent encounters an HTTP 402 response, Haven acts as the policy-aware wallet backend. It evaluates the payment against the agent's active policy, signs from the Safe if approved, and returns the proof — without the agent ever handling keys or understanding blockchain mechanics.
+              Agents resolve HTTP 402 paywalls autonomously. Haven evaluates the payment against the agent's allowance, settles on-chain from the Safe, and returns the proof — the agent never handles keys.
             </p>
-            <a href="/demo/x402" className="inline-flex items-center gap-1 mt-4 text-xs text-indigo-300 hover:text-indigo-200 transition-colors duration-200">
-              Watch the x402 flow →
-            </a>
-          </div>
-          <div className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300">
+            <span className="inline-flex items-center gap-1 mt-4 text-xs text-indigo-300 group-hover:text-indigo-200 transition-colors duration-200">
+              See the x402 flow →
+            </span>
+          </a>
+          <a
+            href="/protocols/mpp"
+            className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300 block"
+          >
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-violet-500/40 to-indigo-500/40 opacity-40" />
-            <h3 className="text-base font-semibold mb-3">Portable Credentials, Not Keys</h3>
+            <div className="text-[11px] uppercase tracking-widest text-violet-300/80 mb-3 font-mono">Stablecoin checkout</div>
+            <h3 className="text-base font-semibold mb-3">Stripe MPP — agent-initiated payments</h3>
             <p className="text-sm text-zinc-500 leading-relaxed">
-              Agents receive API credentials scoped to their policy — not private keys. Credentials are time-limited, independently revocable, and produce a full audit trail. Compromise an agent credential and you have compromised nothing on-chain. Revoke it in a single API call.
+              Stripe's Machine Payments Protocol is rail-agnostic — stablecoins on-chain or fiat (cards, wallets, BNPL) via Shared Payment Tokens. Haven implements the stablecoin path today: agents settle USDC under the same policy that gates x402 spend. SPT-backed fiat next.
             </p>
-          </div>
+            <span className="inline-flex items-center gap-1 mt-4 text-xs text-violet-300 group-hover:text-violet-200 transition-colors duration-200">
+              See the MPP flow →
+            </span>
+          </a>
         </div>
       </section>
 
@@ -348,7 +326,7 @@ export default function Home() {
               Get Early Access
             </a>
             <a
-              href="#"
+              href="/how-it-works"
               className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200 underline underline-offset-4 decoration-zinc-700"
             >
               Read the Technical Overview
@@ -357,30 +335,7 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="border-t border-white/[0.06]" />
-
-      {/* Footer */}
-      <footer className="max-w-6xl mx-auto px-6 py-8 relative z-10">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div>
-            <span className="block text-sm font-semibold mb-1 bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">
-              Haven
-            </span>
-            <span className="text-xs text-zinc-600">© 2026 Haven. Built on Safe & Gnosis Chain.</span>
-          </div>
-          <div className="flex flex-wrap gap-6">
-            {['Docs', 'GitHub', 'Twitter'].map((link) => (
-              <a
-                key={link}
-                href="#"
-                className="text-xs text-zinc-500 hover:text-[#ededed] transition-colors duration-200"
-              >
-                {link}
-              </a>
-            ))}
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
 
     </div>
   )

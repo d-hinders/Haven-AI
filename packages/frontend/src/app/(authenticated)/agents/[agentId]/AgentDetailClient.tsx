@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useAgents, type AgentStatus } from '@/hooks/useAgents'
 import { useAgentActivity } from '@/hooks/useAgentActivity'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
@@ -17,6 +18,7 @@ import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import EditAgentModal from '@/components/EditAgentModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 
 function statusLabel(status: AgentStatus | string): string {
   if (status === 'active') return 'Connected'
@@ -107,11 +109,16 @@ export default function AgentDetailClient({ agentId }: Props) {
     ? onChainData.get(delegateKey)?.allowances ?? null
     : null
 
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
   })
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
+  const revokeBlockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
 
   const [editOpen, setEditOpen] = useState(false)
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
@@ -195,6 +202,11 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
 
   async function handleRevoke() {
+    if (revokeBlockedByOtherDevice) {
+      setErrorMessage(null)
+      return
+    }
+
     if (
       !publicClient ||
       !signer ||
@@ -285,7 +297,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             {!isRevoked ? (
               <button
                 onClick={() => setConfirmAction('revoke')}
-                disabled={pendingAction !== null}
+                disabled={pendingAction !== null || revokeBlockedByOtherDevice}
                 className="inline-flex items-center justify-center rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-200 hover:bg-red-500/15 disabled:opacity-50 transition-colors"
               >
                 Revoke
@@ -312,6 +324,10 @@ export default function AgentDetailClient({ agentId }: Props) {
           </div>
         </div>
       </div>
+
+      {revokeBlockedByOtherDevice ? (
+        <PasskeyOtherDeviceNotice className="mt-4" />
+      ) : null}
 
       {isPaused ? (
         <div className="mt-4 rounded-xl border border-amber-500/15 bg-amber-500/5 px-4 py-3">

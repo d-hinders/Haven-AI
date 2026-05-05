@@ -49,7 +49,7 @@ function AddSafeModal({
   const [deployChainId, setDeployChainId] = useState(100)
 
   const { address: walletAddress, isConnected, chain } = useAccount()
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId: deployChainId })
   const signer = useActiveSigner({ chainId: deployChainId })
   const wrongNetwork = isConnected && chain?.id !== deployChainId
 

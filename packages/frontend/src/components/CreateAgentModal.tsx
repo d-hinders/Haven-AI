@@ -27,6 +27,7 @@ import { truncate, isValidAddress } from '@/lib/format'
 import { buildHandoff, buildDotenv, type HandoffInput } from '@/lib/agent-handoff'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useActiveSigner } from '@/lib/signer'
+import { SigningStatus } from './SigningStatus'
 
 
 interface AllowanceEntry {
@@ -161,7 +162,7 @@ export default function CreateAgentModal({
   const [credentialsSaved, setCredentialsSaved] = useState(false)
 
   // Wagmi
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
@@ -435,7 +436,11 @@ export default function CreateAgentModal({
       }
 
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
-        setExecError('Transaction rejected in wallet')
+        setExecError(
+          signer?.type === 'passkey'
+            ? 'Face ID or Touch ID was cancelled'
+            : 'Transaction rejected in wallet',
+        )
       } else {
         setExecError(message)
       }
@@ -573,7 +578,7 @@ export default function CreateAgentModal({
             <h2 className="text-sm font-semibold">Connect agent</h2>
             <p className="text-xs text-zinc-600 mt-0.5">
               {step === 'details' && "Name the agent you'll hand these credentials to"}
-              {step === 'policy' && 'Set on-chain spending limits — token, amount, frequency'}
+              {step === 'policy' && 'Set spending limits — token, amount, frequency'}
               {step === 'key' && 'Choose the signing key the agent will use'}
               {step === 'review' && 'Review and connect the agent'}
               {step === 'executing' && 'Connecting agent...'}
@@ -776,9 +781,8 @@ export default function CreateAgentModal({
               )}
 
               <p className="text-[11px] text-zinc-600 leading-relaxed pt-2 border-t border-white/[0.06]">
-                Payments that exceed these on-chain limits aren&apos;t rejected — they&apos;re queued
-                for your approval in the dashboard. The agent always has an escape hatch for
-                larger spend without raising its on-chain allowance.
+                Payments that exceed these limits aren&apos;t rejected — they&apos;re queued
+                for your approval in the dashboard.
               </p>
 
               <div className="flex gap-3">
@@ -896,8 +900,7 @@ export default function CreateAgentModal({
                       <line x1="12" y1="8" x2="12.01" y2="8" />
                     </svg>
                     <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      A fresh keypair was generated in your browser. Haven never sees the private key —
-                      you&apos;ll download it with the rest of the agent&apos;s credentials on the last step.
+                      A fresh keypair was generated in your browser. Haven never sees the private key.
                     </p>
                   </div>
 
@@ -1015,29 +1018,6 @@ export default function CreateAgentModal({
                 </div>
               </div>
 
-              {/* What will happen */}
-              <div className="space-y-2">
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">
-                  On-chain actions (single transaction)
-                </p>
-                <div className="space-y-1 text-xs text-zinc-400">
-                  <p className="flex items-center gap-2">
-                    <span className="w-1 h-1 rounded-full bg-indigo-400" />
-                    Enable AllowanceModule on Safe (if needed)
-                  </p>
-                  <p className="flex items-center gap-2">
-                    <span className="w-1 h-1 rounded-full bg-indigo-400" />
-                    Add {truncate(delegateAddress)} as delegate
-                  </p>
-                  {allowances.map((a) => (
-                    <p key={a.tokenSymbol} className="flex items-center gap-2">
-                      <span className="w-1 h-1 rounded-full bg-indigo-400" />
-                      Set {a.amount} {a.tokenSymbol} allowance ({resetLabel(a.resetTimeMin).toLowerCase()})
-                    </p>
-                  ))}
-                </div>
-              </div>
-
               {(safeDetails?.threshold ?? 1) > 1 && (
                 <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/10 rounded-lg px-3 py-2">
                   Multi-sig Safe ({safeDetails?.threshold}/{safeDetails?.owners?.length}) — this will be proposed for co-signer approval.
@@ -1058,7 +1038,7 @@ export default function CreateAgentModal({
                   Back
                 </button>
                 <div className="flex-1">
-                  <NetworkGate requiredChainId={chainId}>
+                  <NetworkGate requiredChainId={chainId} autoSwitch>
                     <button
                       onClick={handleExecute}
                       disabled={!!deployBlockReason()}
@@ -1082,15 +1062,19 @@ export default function CreateAgentModal({
                   <div>
                     <p className="text-sm text-zinc-200 font-medium">
                       {execStatus === 'checking' && 'Checking module status...'}
-                      {execStatus === 'signing' && 'Sign in your wallet...'}
+                      {execStatus === 'signing' && 'Awaiting signature...'}
                       {execStatus === 'executing' && 'Submitting to chain...'}
                       {execStatus === 'saving' && 'Saving agent...'}
                     </p>
-                    <p className="text-xs text-zinc-600 mt-1">
-                      {execStatus === 'signing'
-                        ? 'Approve the transaction in your connected wallet'
-                        : 'This may take a moment'}
-                    </p>
+                    <div className="text-xs text-zinc-600 mt-1">
+                      {execStatus === 'signing' ? (
+                        <SigningStatus signer={signer} stage="signing" />
+                      ) : execStatus === 'executing' ? (
+                        <SigningStatus signer={signer} stage="executing" />
+                      ) : (
+                        'This may take a moment'
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (

@@ -99,7 +99,7 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: 'Log in' }))
 
     await waitFor(() => {
-      expect(screen.getByText('Invalid credentials')).toBeInTheDocument()
+      expect(screen.getByText('Invalid email or password.')).toBeInTheDocument()
     })
   })
 })

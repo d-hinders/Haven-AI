@@ -38,7 +38,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
   const [error, setError] = useState<string | null>(null)
 
   const { activeSafe } = useAuth()
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId: activeSafe?.chain_id })
   const signer = useActiveSigner({
     safeAddress: activeSafe?.safe_address as Address | undefined,
     chainId: activeSafe?.chain_id,
@@ -59,7 +59,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
       chainId: number = 100,
     ) => {
       if (!signer || !publicClient) {
-        setError('Wallet not connected')
+        setError('No signer available')
         setStatus('error')
         return
       }
@@ -108,7 +108,11 @@ export function useSendTransaction(): UseSendTransactionReturn {
             err.message.includes('user rejected') ||
             err.message.includes('User denied'))
         ) {
-          setError('Transaction rejected in wallet')
+          setError(
+            signer.type === 'passkey'
+              ? 'Face ID or Touch ID was cancelled'
+              : 'Transaction rejected in wallet',
+          )
         } else {
           setError(err instanceof Error ? err.message : 'Transaction failed')
         }

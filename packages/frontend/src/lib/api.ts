@@ -1,4 +1,5 @@
 const BASE_URL = '/api'
+const API_OVERRIDE_STORAGE_KEY = 'haven_api_base_url'
 
 interface ApiError {
   error: string
@@ -14,6 +15,32 @@ export interface DeployPasskeySafeResponse {
   safe_address: string
   tx_hash: string
   chain_id: number
+}
+
+export interface EnrollPasskeyBody {
+  credential_id: string
+  public_key_x: `0x${string}`
+  public_key_y: `0x${string}`
+  chain_id: number
+  raw_attestation_object?: string
+}
+
+export interface EnrollPasskeyResponse {
+  id: string
+  credential_id: string
+  signer_address: string
+  chain_id: number
+}
+
+export interface ListPasskeysResponse {
+  passkeys: Array<{
+    id: string
+    credential_id: string
+    signer_address: string
+    chain_id: number
+    safe_address: string | null
+    created_at: string
+  }>
 }
 
 export interface ExecSafeBody {
@@ -37,7 +64,38 @@ export interface ExecSafeResponse {
   chain_id: number
 }
 
+export function getResolvedApiBaseUrl(): string {
+  if (typeof window === 'undefined') {
+    return BASE_URL
+  }
+
+  const searchParams = new URLSearchParams(window.location.search)
+  const overrideParam = searchParams.get('apiBaseUrl')
+
+  if (overrideParam === 'default') {
+    window.localStorage.removeItem(API_OVERRIDE_STORAGE_KEY)
+    return BASE_URL
+  }
+
+  if (overrideParam) {
+    const normalized = overrideParam.replace(/\/+$/, '')
+    window.localStorage.setItem(API_OVERRIDE_STORAGE_KEY, normalized)
+    return normalized
+  }
+
+  const storedOverride = window.localStorage.getItem(API_OVERRIDE_STORAGE_KEY)
+  if (storedOverride) {
+    return storedOverride.replace(/\/+$/, '')
+  }
+
+  return BASE_URL
+}
+
 class ApiClient {
+  private resolveBaseUrl(): string {
+    return getResolvedApiBaseUrl()
+  }
+
   private getToken(): string | null {
     if (typeof window === 'undefined') return null
     return localStorage.getItem('haven_token')
@@ -57,7 +115,7 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${token}`
     }
 
-    const response = await fetch(`${BASE_URL}${path}`, {
+    const response = await fetch(`${this.resolveBaseUrl()}${path}`, {
       ...options,
       headers,
     })
@@ -96,6 +154,14 @@ class ApiClient {
 
   deployPasskeySafe(body: DeployPasskeySafeBody): Promise<DeployPasskeySafeResponse> {
     return this.post<DeployPasskeySafeResponse>('/safe/deploy', body)
+  }
+
+  enrollPasskey(body: EnrollPasskeyBody): Promise<EnrollPasskeyResponse> {
+    return this.post<EnrollPasskeyResponse>('/passkeys', body)
+  }
+
+  listPasskeys(): Promise<ListPasskeysResponse> {
+    return this.get<ListPasskeysResponse>('/passkeys')
   }
 
   execSafe(body: ExecSafeBody): Promise<ExecSafeResponse> {

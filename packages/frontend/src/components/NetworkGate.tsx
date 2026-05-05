@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { useAccount, useSwitchChain } from 'wagmi'
 import { getChainConfig } from '@/lib/chains'
 
@@ -9,6 +9,8 @@ interface NetworkGateProps {
   children: ReactNode
   /** Optional class on the wrapper around the switch button. */
   className?: string
+  /** When true, request a chain switch automatically once per mismatch. */
+  autoSwitch?: boolean
 }
 
 /**
@@ -21,9 +23,35 @@ export default function NetworkGate({
   requiredChainId,
   children,
   className,
+  autoSwitch = false,
 }: NetworkGateProps) {
   const { isConnected, chain } = useAccount()
   const { switchChain, isPending, error } = useSwitchChain()
+  const attemptedMismatchRef = useRef<string | null>(null)
+
+  const mismatchKey =
+    isConnected && chain?.id !== undefined && chain.id !== requiredChainId
+      ? `${chain.id}->${requiredChainId}`
+      : null
+
+  useEffect(() => {
+    if (!autoSwitch || !switchChain || !mismatchKey || isPending) {
+      return
+    }
+
+    if (attemptedMismatchRef.current === mismatchKey) {
+      return
+    }
+
+    attemptedMismatchRef.current = mismatchKey
+    switchChain({ chainId: requiredChainId })
+  }, [autoSwitch, isPending, mismatchKey, requiredChainId, switchChain])
+
+  useEffect(() => {
+    if (chain?.id === requiredChainId) {
+      attemptedMismatchRef.current = null
+    }
+  }, [chain?.id, requiredChainId])
 
   if (!isConnected || chain?.id === requiredChainId) {
     return <>{children}</>

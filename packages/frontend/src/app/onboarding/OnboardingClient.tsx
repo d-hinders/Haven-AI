@@ -188,18 +188,20 @@ export default function OnboardingClient() {
           <div className="flex items-center gap-3 mb-10">
             {progressSteps.map((currentStep, index) => {
               const currentIndex = progressSteps.findIndex((progressStep) => progressStep === step)
+              const isCompleted = currentIndex > index || (step === 'done' && currentStep === 'done')
+              const isActive = step === currentStep && step !== 'done'
               return (
                 <div key={currentStep} className="flex items-center gap-3">
                   <div
                     className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border transition-colors duration-300 ${
-                      step === currentStep
+                      isActive
                         ? 'border-indigo-500 bg-indigo-500/20 text-indigo-300'
-                        : currentIndex > index
+                        : isCompleted
                           ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
                           : 'border-white/[0.08] text-zinc-600'
                     }`}
                   >
-                    {currentIndex > index ? '✓' : index + 1}
+                    {isCompleted ? '✓' : index + 1}
                   </div>
                   {index < progressSteps.length - 1 && (
                     <div
@@ -421,9 +423,6 @@ export default function OnboardingClient() {
 
           {step === 'done' && (
             <div>
-              <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mb-6">
-                <span className="text-emerald-400 text-xl">✓</span>
-              </div>
               <h1 className="text-2xl font-bold tracking-tight mb-2">Safe deployed</h1>
               <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
                 Your non-custodial smart account is live on {getChainConfig(selectedChainId).name}. You can now create agents

@@ -58,7 +58,7 @@ const DIFFERENTIATORS = [
   },
   {
     title: 'Protocol native',
-    body: 'Built-in support for x402 (HTTP 402 payments) and Stripe MPP (agent fiat commerce). Agents pay across crypto and fiat rails without bespoke integrations.',
+    body: 'Built-in support for x402 (HTTP 402 paywalls) and Stripe MPP (machine-payments protocol). Agents transact via open standards — stablecoin settlement today, fiat rails next.',
   },
   {
     title: 'Runtime agnostic',
@@ -237,7 +237,7 @@ export default function Home() {
           <h2 className="text-xs text-zinc-500 uppercase tracking-widest">Protocol Native</h2>
         </div>
         <p className="text-sm text-zinc-400 leading-relaxed max-w-2xl mb-10">
-          Agents need to pay across crypto and fiat rails. Haven speaks both — same policy engine, two sets of protocols. No proprietary payment flows.
+          Agents need to transact across rails. Haven speaks the open standards — x402 for HTTP paywalls, Stripe MPP for broader checkouts — under one policy engine. Stablecoin settlement today; SPT-backed fiat rails next.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/[0.06]">
           <a
@@ -245,7 +245,7 @@ export default function Home() {
             className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300 block"
           >
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-indigo-500/40 via-violet-500/40 to-transparent opacity-40" />
-            <div className="text-[11px] uppercase tracking-widest text-indigo-300/80 mb-3 font-mono">Crypto rails</div>
+            <div className="text-[11px] uppercase tracking-widest text-indigo-300/80 mb-3 font-mono">HTTP paywalls</div>
             <h3 className="text-base font-semibold mb-3">x402 — pay-per-request HTTP</h3>
             <p className="text-sm text-zinc-500 leading-relaxed">
               Agents resolve HTTP 402 paywalls autonomously. Haven evaluates the payment against the agent's allowance, settles on-chain from the Safe, and returns the proof — the agent never handles keys.
@@ -259,10 +259,10 @@ export default function Home() {
             className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300 block"
           >
             <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-violet-500/40 to-indigo-500/40 opacity-40" />
-            <div className="text-[11px] uppercase tracking-widest text-violet-300/80 mb-3 font-mono">Fiat rails</div>
-            <h3 className="text-base font-semibold mb-3">Stripe MPP — agent commerce on cards</h3>
+            <div className="text-[11px] uppercase tracking-widest text-violet-300/80 mb-3 font-mono">Stablecoin checkout</div>
+            <h3 className="text-base font-semibold mb-3">Stripe MPP — agent-initiated payments</h3>
             <p className="text-sm text-zinc-500 leading-relaxed">
-              Stripe's Machine Payments Protocol gives agents Shared Payment Tokens — one-time, scope-bound credentials for fiat checkouts. Haven mints, governs, and revokes them under the same policy that gates on-chain spend.
+              Stripe's Machine Payments Protocol is rail-agnostic — stablecoins on-chain or fiat (cards, wallets, BNPL) via Shared Payment Tokens. Haven implements the stablecoin path today: agents settle USDC under the same policy that gates x402 spend. SPT-backed fiat next.
             </p>
             <span className="inline-flex items-center gap-1 mt-4 text-xs text-violet-300 group-hover:text-violet-200 transition-colors duration-200">
               See the MPP flow →

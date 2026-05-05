@@ -10,10 +10,9 @@ type Phase =
   | 'requesting'
   | 'authorize'
   | 'policy'
-  | 'minted'
-  | 'present'
-  | 'charging'
-  | 'captured'
+  | 'sign'
+  | 'broadcast'
+  | 'confirmed'
   | 'delivered'
 
 interface TimelineEvent {
@@ -23,45 +22,54 @@ interface TimelineEvent {
   phase: Phase
 }
 
+// Realistic demo payload — Base mainnet USDC payment for a SaaS subscription
 const DEMO = {
-  resourceLabel: 'Premium analytics dashboard — 1 month',
+  resourceUrl: 'https://insightly.example/checkout?item=pro_monthly',
+  resourceLabel: 'Insightly Pro — 1 month',
   amount: '29.00',
-  currency: 'USD',
-  merchant: {
-    name: 'Insightly',
-    host: 'checkout.insightly.example',
-  },
+  token: 'USDC',
+  tokenAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  network: 'Base',
+  chainId: 8453,
+  caip2: 'eip155:8453',
+  payTo: '0x4F3ea5d9fE55AAd7F2F00f1eC00cD5BCd8f3bcFc',
   agent: {
     name: 'Ops Agent',
     apiKeyPreview: 'sk_agent_a1b9…7e',
     policy: {
-      monthlyLimit: '500 USD',
-      perTxLimit: '100 USD',
-      allowedCategories: ['software', 'data'],
+      monthlyLimit: '500 USDC',
+      perTxLimit: '100 USDC',
+      allowedNetworks: ['Base', 'Gnosis'],
     },
     monthlySpent: '142.50',
     monthlyLimitNum: 500,
   },
-  spt: 'spt_1Q4d8KH5Yj9c8e1f',
-  chargeId: 'ch_3Q4d9MH5Yj9c8e1g',
-  cardLast4: '4242',
-  network: 'Visa',
+  merchant: {
+    name: 'Insightly',
+    host: 'insightly.example',
+    acceptedRails: ['USDC · Base', 'USDC · Gnosis'],
+  },
+  signHash:
+    '0x6c1f4e93a6c1ffde7019a2c5d8b4f16e0a39c7f82bc5d138e40b79aa2c6d9b3a',
+  txHash:
+    '0x4d8a3b1d2c8f4a60bd5e97c1a4f3b6d29e8c05f14a7b89f3d2c1e4a5b6c7e2f8',
+  blockNumber: 14_892_103,
+  gasUsed: '41,228',
   steps: [
-    { phase: 'requesting', label: 'Agent picks item' },
-    { phase: 'authorize', label: 'Request SPT' },
+    { phase: 'requesting', label: 'Agent drafts payment intent' },
+    { phase: 'authorize', label: 'Forward to Haven' },
     { phase: 'policy', label: 'Policy evaluation' },
-    { phase: 'minted', label: 'SPT minted' },
-    { phase: 'present', label: 'Agent presents SPT' },
-    { phase: 'charging', label: 'Stripe authorizes' },
-    { phase: 'captured', label: 'Captured on card' },
-    { phase: 'delivered', label: 'Receipt + access' },
+    { phase: 'sign', label: 'Haven signs transfer' },
+    { phase: 'broadcast', label: 'Broadcast to Base' },
+    { phase: 'confirmed', label: 'On-chain confirmation' },
+    { phase: 'delivered', label: 'Merchant fulfils' },
   ] as const,
 }
 
 const POLICY_CHECKS: string[] = [
-  'Within per-tx limit ($100)',
-  'Category "software" allowed',
-  'Monthly remaining sufficient',
+  'Within per-tx limit (100 USDC)',
+  `Network ${'Base'} allowed`,
+  'On-chain allowance sufficient',
 ]
 
 function shortHex(s: string, head = 6, tail = 4) {
@@ -73,10 +81,9 @@ const phaseOrder: Phase[] = [
   'requesting',
   'authorize',
   'policy',
-  'minted',
-  'present',
-  'charging',
-  'captured',
+  'sign',
+  'broadcast',
+  'confirmed',
   'delivered',
 ]
 function phaseIndex(p: Phase) {
@@ -121,33 +128,36 @@ export default function MPPDemoPage() {
 
     let t = 0
 
+    // 1. Agent drafts payment intent
     t += 400
     schedule(t, () => {
       setPhase('requesting')
       push({
         phase: 'requesting',
-        label: 'Agent selected analytics dashboard',
-        detail: `${DEMO.resourceLabel} • ${DEMO.amount} ${DEMO.currency}`,
+        label: 'Agent drafted payment intent',
+        detail: `${DEMO.resourceLabel} • ${DEMO.amount} ${DEMO.token} → ${shortHex(DEMO.payTo)}`,
       })
     })
 
+    // 2. Agent forwards intent to Haven
     t += 1100
     schedule(t, () => {
       setPhase('authorize')
       push({
         phase: 'authorize',
-        label: 'Agent requested SPT from Haven',
+        label: 'Agent forwarded intent to Haven',
         detail: `POST /mpp/authorize • ${DEMO.agent.apiKeyPreview}`,
       })
     })
 
+    // 3. Haven policy engine evaluates — staggered ticks
     const policyStart = t + 500
     schedule(policyStart, () => {
       setPhase('policy')
       push({
         phase: 'policy',
         label: 'Policy engine evaluating intent',
-        detail: 'Per-tx limit, category allowlist, monthly remaining',
+        detail: 'Per-tx limit, network allowlist, on-chain allowance',
       })
     })
     for (let i = 1; i <= POLICY_CHECKS.length; i++) {
@@ -155,55 +165,50 @@ export default function MPPDemoPage() {
     }
     t += 500 + 300 * POLICY_CHECKS.length + 300
 
+    // 4. Sign
     schedule(t, () => {
-      setPhase('minted')
+      setPhase('sign')
       push({
-        phase: 'minted',
-        label: 'Haven minted Shared Payment Token',
-        detail: `${DEMO.spt} • scope: ${DEMO.merchant.name} • single-use`,
+        phase: 'sign',
+        label: 'Policy cleared — delegate signed transfer',
+        detail: `Remaining this month: ${(DEMO.agent.monthlyLimitNum - parseFloat(DEMO.agent.monthlySpent) - parseFloat(DEMO.amount)).toFixed(2)} ${DEMO.token} • ${shortHex(DEMO.signHash, 8, 6)}`,
       })
     })
 
-    t += 1100
+    // 5. Broadcast
+    t += 900
     schedule(t, () => {
-      setPhase('present')
+      setPhase('broadcast')
       push({
-        phase: 'present',
-        label: 'Agent presented SPT at checkout',
-        detail: `→ ${DEMO.merchant.host}`,
+        phase: 'broadcast',
+        label: 'Allowance transfer submitted to Base',
+        detail: 'Safe → ERC-20 transfer via AllowanceModule',
       })
     })
 
-    t += 1100
+    // 6. Confirmed on Base
+    t += 1600
     schedule(t, () => {
-      setPhase('charging')
+      setPhase('confirmed')
       push({
-        phase: 'charging',
-        label: 'Merchant exchanged SPT with Stripe',
-        detail: `Authorize ${DEMO.amount} ${DEMO.currency} • ${DEMO.network} ••${DEMO.cardLast4}`,
+        phase: 'confirmed',
+        label: `Confirmed in block ${DEMO.blockNumber.toLocaleString()}`,
+        detail: `tx ${shortHex(DEMO.txHash, 10, 8)} • gas ${DEMO.gasUsed}`,
       })
     })
 
-    t += 1500
-    schedule(t, () => {
-      setPhase('captured')
-      push({
-        phase: 'captured',
-        label: 'Capture confirmed by card network',
-        detail: `charge ${shortHex(DEMO.chargeId, 8, 6)} • SPT consumed`,
-      })
-    })
-
-    t += 1100
+    // 7. Merchant verifies receipt + fulfils
+    t += 1400
     schedule(t, () => {
       setPhase('delivered')
       push({
         phase: 'delivered',
-        label: 'Merchant granted access — receipt logged',
-        detail: `Remaining this month: ${(DEMO.agent.monthlyLimitNum - parseFloat(DEMO.agent.monthlySpent) - parseFloat(DEMO.amount)).toFixed(2)} ${DEMO.currency}`,
+        label: 'Merchant verified receipt — access granted',
+        detail: `200 OK • ${DEMO.resourceLabel}`,
       })
     })
 
+    // 8. Settle — stop the delivery arrow from pulsing
     t += 1200
     schedule(t, () => setSettled(true))
   }, [])
@@ -235,13 +240,14 @@ export default function MPPDemoPage() {
           </span>
           <br />
           <span className="bg-gradient-to-br from-white via-violet-100 to-fuchsia-300 bg-clip-text text-transparent">
-            check out with a card.
+            check out in stablecoins.
           </span>
         </h1>
         <p className="text-base md:text-lg text-zinc-400 leading-relaxed max-w-2xl">
-          An agent buys a SaaS subscription. Haven mints a one-time, scope-bound
-          payment token, the merchant charges Stripe, and the receipt lands in your
-          audit log — without a card number ever leaving Haven.
+          An agent subscribes to a SaaS tool. Haven validates the intent
+          against your policy and settles the payment in USDC straight from
+          your Safe — one open standard, no proprietary checkout, no card
+          details in agent memory.
         </p>
       </section>
 
@@ -259,20 +265,23 @@ export default function MPPDemoPage() {
           <div className="space-y-4 text-sm md:text-[15px] text-zinc-400 leading-relaxed">
             <p>
               <span className="text-zinc-200 font-medium">Stripe MPP</span> — the{' '}
-              <span className="text-zinc-300">Machine Payments Protocol</span> — is
-              an open standard for agents transacting on existing card rails.
-              Instead of giving an agent a card number, you give it a{' '}
-              <span className="font-mono text-zinc-300">Shared Payment Token (SPT)</span>:
-              a one-time, scope-bound credential that authorises a single charge at
-              a single merchant, up to a single amount.
+              <span className="text-zinc-300">Machine Payments Protocol</span> —
+              is an open standard for agent-initiated payments across rails.
+              It's payment-agnostic: the same protocol can settle directly{' '}
+              <span className="text-zinc-300">on-chain in stablecoins</span>, or
+              carry traditional methods (cards, wallets, BNPL) via Stripe{' '}
+              <span className="font-mono text-zinc-300">Shared Payment Tokens</span>.
+              Where x402 covers the HTTP 402 paywall case, MPP covers the
+              broader checkout — subscriptions, one-off purchases, anything an
+              agent and a merchant need to coordinate.
             </p>
             <p>
-              That maps cleanly onto how agents already work. An agent decides what
-              to buy, asks Haven for an SPT, and presents it at checkout. The
-              merchant redeems the SPT through Stripe; the card network does the
-              rest. The agent never sees a PAN, the merchant never holds a re-usable
-              credential, and Haven keeps the policy and audit trail in one place —
-              the same one that gates on-chain spend.
+              Haven implements the stablecoin path of MPP today. Agents settle
+              USDC directly to merchants from your Safe, gated by the same
+              allowance, approval, and audit model that wraps x402. SPT-backed
+              fiat rails — cards, wallets, BNPL — are on the roadmap. Either
+              way the agent never touches keys or card numbers, and you keep
+              one policy across every payment.
             </p>
           </div>
           <div className="bg-[#0b0b0f] border border-white/[0.06] rounded-md p-5">
@@ -283,25 +292,29 @@ export default function MPPDemoPage() {
               <li className="flex items-start gap-3">
                 <span className="text-[11px] font-mono text-violet-300 tabular-nums mt-0.5">01</span>
                 <div>
-                  <div className="text-zinc-200">Intent → SPT</div>
-                  <div className="text-xs text-zinc-500">Wallet mints a scoped token.</div>
+                  <div className="text-zinc-200">Intent → authorization</div>
+                  <div className="text-xs text-zinc-500">Haven evaluates against policy.</div>
                 </div>
               </li>
               <li className="flex items-start gap-3">
                 <span className="text-[11px] font-mono text-violet-300 tabular-nums mt-0.5">02</span>
                 <div>
-                  <div className="text-zinc-200">Present → charge</div>
-                  <div className="text-xs text-zinc-500">Merchant redeems SPT through Stripe.</div>
+                  <div className="text-zinc-200">Present → pay</div>
+                  <div className="text-xs text-zinc-500">Stablecoin transfer or scoped fiat credential.</div>
                 </div>
               </li>
               <li className="flex items-start gap-3">
                 <span className="text-[11px] font-mono text-violet-300 tabular-nums mt-0.5">03</span>
                 <div>
                   <div className="text-zinc-200">Capture → fulfil</div>
-                  <div className="text-xs text-zinc-500">Card network settles, agent gets access.</div>
+                  <div className="text-xs text-zinc-500">Merchant confirms, fulfils, Haven logs.</div>
                 </div>
               </li>
             </ol>
+            <div className="mt-5 pt-4 border-t border-white/[0.06] text-[11px] text-zinc-500 leading-relaxed">
+              Haven supports the <span className="text-violet-300">stablecoin</span> path
+              today. SPT-backed fiat rails coming next.
+            </div>
           </div>
         </div>
       </section>
@@ -310,22 +323,22 @@ export default function MPPDemoPage() {
       <section className="relative max-w-6xl mx-auto px-6 pb-6 z-10">
         <div className="mb-6 max-w-3xl">
           <p className="text-sm md:text-[15px] text-zinc-400 leading-relaxed">
-            Below is one MPP payment in motion: an Ops Agent buying a $29 monthly
-            analytics subscription. Four actors take part — watch how an intent, an
-            SPT, and a captured charge flow between them.
+            Below is one MPP payment in motion: an Ops Agent subscribing to an
+            analytics dashboard for 29 USDC on Base. Four actors take part —
+            agent, merchant, Haven, and the chain that settles.
           </p>
         </div>
         <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-          {(['agent', 'merchant', 'haven', 'stripe'] as const).map((kind) => {
+          {(['agent', 'merchant', 'haven', 'chain'] as const).map((kind) => {
             const cfg = COLUMN_CONFIG[kind]
             const role =
               kind === 'agent'
                 ? 'The AI making the purchase'
                 : kind === 'merchant'
-                ? 'The store taking the payment'
+                ? 'Accepts MPP stablecoin'
                 : kind === 'haven'
-                ? 'Policy engine + token mint'
-                : 'Card network + settlement'
+                ? 'Policy engine + Safe signer'
+                : 'The settlement chain'
             return (
               <div
                 key={kind}
@@ -355,7 +368,7 @@ export default function MPPDemoPage() {
                 [flow]
               </span>
               <h3 className="text-sm font-medium text-zinc-200 truncate">
-                MPP payment flow
+                MPP stablecoin payment flow
               </h3>
             </div>
             <div
@@ -383,7 +396,7 @@ export default function MPPDemoPage() {
             </div>
           </div>
 
-          {/* 2x2 actor grid with 3 arrows */}
+          {/* 2x2 actor grid with arrows */}
           <div
             className="grid gap-0"
             style={{
@@ -399,7 +412,6 @@ export default function MPPDemoPage() {
                 active={
                   phase === 'requesting' ||
                   phase === 'authorize' ||
-                  phase === 'present' ||
                   (phase === 'delivered' && !settled)
                 }
               />
@@ -409,16 +421,16 @@ export default function MPPDemoPage() {
                 orientation="horizontal"
                 reverse={phase === 'delivered'}
                 active={
-                  phase === 'present' ||
+                  phase === 'requesting' ||
                   (phase === 'delivered' && !settled)
                 }
-                done={reached(phase, 'present')}
+                done={reached(phase, 'requesting')}
                 color={reached(phase, 'delivered') ? 'emerald' : 'violet'}
                 label={
-                  phase === 'present'
-                    ? 'SPT'
+                  phase === 'requesting'
+                    ? 'intent'
                     : phase === 'delivered' && !settled
-                    ? 'access'
+                    ? '200 OK'
                     : undefined
                 }
               />
@@ -428,8 +440,7 @@ export default function MPPDemoPage() {
                 kind="merchant"
                 phase={phase}
                 active={
-                  phase === 'present' ||
-                  phase === 'charging' ||
+                  phase === 'requesting' ||
                   (phase === 'delivered' && !settled)
                 }
               />
@@ -439,46 +450,49 @@ export default function MPPDemoPage() {
             <div className="row-start-2 col-start-1 flex items-center justify-center">
               <FlowArrow
                 orientation="vertical"
-                reverse={phase === 'minted'}
-                active={phase === 'authorize' || phase === 'minted'}
-                done={reached(phase, 'present')}
+                reverse={false}
+                active={phase === 'authorize'}
+                done={reached(phase, 'policy')}
                 color="violet"
-                label={
-                  phase === 'authorize'
-                    ? 'authorize'
-                    : phase === 'minted'
-                    ? 'SPT'
-                    : undefined
-                }
+                label={phase === 'authorize' ? 'authorize' : undefined}
               />
             </div>
             <div className="row-start-2 col-start-2" />
             <div className="row-start-2 col-start-3 flex items-center justify-center">
               <FlowArrow
                 orientation="vertical"
-                reverse={false}
-                active={phase === 'charging'}
-                done={reached(phase, 'captured')}
-                color="violet"
-                label={phase === 'charging' ? 'charge' : undefined}
+                reverse
+                active={phase === 'delivered' && !settled}
+                done={reached(phase, 'delivered')}
+                color={reached(phase, 'delivered') ? 'emerald' : 'violet'}
+                label={phase === 'delivered' && !settled ? 'receipt' : undefined}
               />
             </div>
 
-            {/* Row 3: Haven — empty — Stripe */}
+            {/* Row 3: Haven — [H arrow] — Chain */}
             <div className="row-start-3 col-start-1">
               <StageColumn
                 kind="haven"
                 phase={phase}
-                active={phase === 'policy' || phase === 'minted'}
+                active={phase === 'policy' || phase === 'sign'}
                 policyProgress={policyProgress}
               />
             </div>
-            <div className="row-start-3 col-start-2" />
+            <div className="row-start-3 col-start-2 flex items-center justify-center">
+              <FlowArrow
+                orientation="horizontal"
+                reverse={false}
+                active={phase === 'broadcast'}
+                done={reached(phase, 'confirmed')}
+                color="violet"
+                label={phase === 'broadcast' ? 'submit tx' : undefined}
+              />
+            </div>
             <div className="row-start-3 col-start-3">
               <StageColumn
-                kind="stripe"
+                kind="chain"
                 phase={phase}
-                active={phase === 'charging' || phase === 'captured'}
+                active={phase === 'broadcast' || phase === 'confirmed'}
               />
             </div>
           </div>
@@ -574,11 +588,11 @@ export default function MPPDemoPage() {
         <div className="relative">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight mb-4">
             <span className="bg-gradient-to-br from-white to-violet-200 bg-clip-text text-transparent">
-              One policy. Card rails included.
+              One policy. Open standards. Stablecoin settlement.
             </span>
           </h2>
           <p className="text-zinc-500 text-sm mb-8">
-            Same allowance model, no card numbers in agent memory.
+            Same allowance model as x402. No proprietary checkout in the way.
           </p>
           <Link
             href="/signup"
@@ -629,7 +643,7 @@ function StageColumn({
   active,
   policyProgress = 0,
 }: {
-  kind: 'agent' | 'haven' | 'stripe' | 'merchant'
+  kind: 'agent' | 'haven' | 'chain' | 'merchant'
   phase: Phase
   active: boolean
   policyProgress?: number
@@ -679,7 +693,7 @@ function StageColumn({
       {kind === 'agent' && <AgentContent phase={phase} />}
       {kind === 'merchant' && <MerchantContent phase={phase} />}
       {kind === 'haven' && <HavenContent phase={phase} policyProgress={policyProgress} />}
-      {kind === 'stripe' && <StripeContent phase={phase} />}
+      {kind === 'chain' && <ChainContent phase={phase} />}
     </div>
   )
 }
@@ -715,48 +729,44 @@ const COLUMN_CONFIG = {
       </svg>
     ),
   },
-  stripe: {
+  chain: {
     kicker: 'Settlement',
-    title: 'Stripe + card network',
+    title: 'Base',
     iconGradient: 'from-fuchsia-500 to-pink-600',
     icon: (
       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5.25-1.5a3.75 3.75 0 01-7.5 0" />
       </svg>
     ),
   },
 } as const
 
 function AgentContent({ phase }: { phase: Phase }) {
-  const hasRequest = reached(phase, 'requesting')
-  const hasMinted = reached(phase, 'minted')
-  const isPresenting = reached(phase, 'present')
+  const hasIntent = reached(phase, 'requesting')
   const isDelivered = reached(phase, 'delivered')
-  const isWaiting = reached(phase, 'authorize') && !hasMinted
+  const isWaiting = reached(phase, 'authorize') && !isDelivered
 
   const subtext =
     phase === 'idle'
-      ? 'Ready to subscribe to analytics dashboard.'
-      : !hasMinted
-      ? isWaiting
-        ? 'Waiting for Haven to mint a payment token…'
-        : 'Drafting purchase intent.'
-      : !isPresenting
-      ? 'Got SPT — heading to checkout.'
+      ? 'Ready to subscribe to Insightly Pro.'
+      : !hasIntent
+      ? 'Drafting payment intent…'
       : isDelivered
       ? 'Subscription active. Receipt logged.'
-      : 'Presenting SPT to merchant…'
+      : isWaiting
+      ? 'Asked Haven to settle on-chain.'
+      : 'Forwarding intent to Haven.'
 
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">{subtext}</div>
 
-      {hasRequest && !hasMinted && (
+      {hasIntent && (
         <div className="rounded border border-white/[0.06] bg-black/30 p-3 font-mono text-[11px]">
           <div className="flex items-center gap-2">
             <span className="text-zinc-500 shrink-0">→</span>
-            <span className="text-zinc-400 truncate">intent: subscribe • {DEMO.amount} {DEMO.currency}</span>
-            {!hasMinted && (
+            <span className="text-zinc-400 truncate">pay {DEMO.amount} {DEMO.token} on {DEMO.network}</span>
+            {!isDelivered && (
               <span className="ml-auto inline-flex gap-1">
                 <span className="w-1 h-1 rounded-full bg-zinc-500" style={{ animation: 'bounce 1s ease-in-out infinite' }} />
                 <span className="w-1 h-1 rounded-full bg-zinc-500" style={{ animation: 'bounce 1s ease-in-out 0.15s infinite' }} />
@@ -767,22 +777,22 @@ function AgentContent({ phase }: { phase: Phase }) {
         </div>
       )}
 
-      {hasMinted && !isDelivered && (
-        <div className="rounded border border-violet-500/30 bg-violet-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
-          <div className="text-violet-300">SPT acquired</div>
-          <div className="text-zinc-500 mt-1 truncate">{shortHex(DEMO.spt, 10, 4)}</div>
-        </div>
-      )}
-
       {isDelivered && (
         <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
           <div className="flex items-center gap-2 text-emerald-300">
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
             </svg>
-            access granted
+            ← 200 OK • access granted
           </div>
           <div className="text-zinc-500 mt-1">{DEMO.resourceLabel}</div>
+        </div>
+      )}
+
+      {isWaiting && !isDelivered && (
+        <div className="text-[11px] text-zinc-500 font-mono flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+          waiting for Haven to settle…
         </div>
       )}
 
@@ -794,32 +804,33 @@ function AgentContent({ phase }: { phase: Phase }) {
 }
 
 function MerchantContent({ phase }: { phase: Phase }) {
-  const isPresenting = reached(phase, 'present')
-  const isCharging = reached(phase, 'charging')
+  const hasIntent = reached(phase, 'requesting')
   const isDelivered = reached(phase, 'delivered')
+  const awaitingProof =
+    reached(phase, 'authorize') && !isDelivered
 
   const subtext =
     phase === 'idle'
-      ? 'Stripe-MPP-enabled checkout.'
-      : !isPresenting
-      ? 'Waiting for an SPT at checkout…'
+      ? 'MPP merchant — accepts USDC on Base / Gnosis.'
+      : !hasIntent
+      ? 'Listening for payment intents…'
       : isDelivered
-      ? 'Charge captured — granting access.'
-      : isCharging
-      ? 'Redeeming SPT through Stripe…'
-      : 'SPT received — submitting to Stripe.'
+      ? 'Verified on-chain receipt — granting access.'
+      : awaitingProof
+      ? 'Awaiting on-chain settlement…'
+      : 'Quoted price to agent.'
 
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">{subtext}</div>
 
-      {isPresenting && !isDelivered && (
+      {hasIntent && !isDelivered && (
         <div className="rounded border border-violet-500/30 bg-violet-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
-          <div className="text-violet-300">→ POST /v1/charges</div>
+          <div className="text-violet-300">→ MPP quote</div>
           <div className="text-zinc-500 mt-1">
-            spt {shortHex(DEMO.spt, 8, 4)}
+            pay {DEMO.amount} {DEMO.token} → {shortHex(DEMO.payTo)}
           </div>
-          <div className="text-zinc-600 mt-0.5">amount: {DEMO.amount} {DEMO.currency}</div>
+          <div className="text-zinc-600 mt-0.5">accepts: {DEMO.merchant.acceptedRails.join(' · ')}</div>
         </div>
       )}
 
@@ -836,7 +847,7 @@ function MerchantContent({ phase }: { phase: Phase }) {
       )}
 
       <div className="text-[11px] text-zinc-600">
-        price <span className="text-zinc-400 font-mono">{DEMO.amount} {DEMO.currency} / mo</span>
+        price <span className="text-zinc-400 font-mono">{DEMO.amount} {DEMO.token} / mo</span>
       </div>
     </div>
   )
@@ -850,7 +861,7 @@ function HavenContent({
   policyProgress: number
 }) {
   const inPolicy = phase === 'policy'
-  const afterPolicy = reached(phase, 'minted')
+  const afterPolicy = reached(phase, 'sign')
 
   function checkStatus(i: number): 'pass' | 'pending' | 'idle' {
     if (afterPolicy) return 'pass'
@@ -863,7 +874,7 @@ function HavenContent({
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">
-        Evaluating intent, then minting a scope-bound SPT.
+        Evaluating intent against the agent policy.
       </div>
       <ul className="space-y-1.5">
         {POLICY_CHECKS.map((label, i) => {
@@ -891,44 +902,44 @@ function HavenContent({
       </ul>
       {afterPolicy && (
         <div className="rounded border border-violet-500/30 bg-violet-500/[0.06] p-2.5 font-mono text-[11px] text-violet-200 animate-[fadeInUp_0.3s_ease-out]">
-          spt {shortHex(DEMO.spt, 8, 4)}
+          sign_hash {shortHex(DEMO.signHash, 8, 6)}
         </div>
       )}
     </div>
   )
 }
 
-function StripeContent({ phase }: { phase: Phase }) {
+function ChainContent({ phase }: { phase: Phase }) {
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">
-        Redeems SPT, charges the card on file via the network.
+        Safe executes allowance transfer via AllowanceModule.
       </div>
-      {!reached(phase, 'charging') && (
+      {!reached(phase, 'broadcast') && (
         <div className="rounded border border-white/[0.06] bg-black/30 p-3 text-[11px] text-zinc-600">
-          awaiting SPT
+          awaiting submission
         </div>
       )}
-      {reached(phase, 'charging') && !reached(phase, 'captured') && (
+      {reached(phase, 'broadcast') && !reached(phase, 'confirmed') && (
         <div className="rounded border border-fuchsia-500/30 bg-fuchsia-500/[0.05] p-3 font-mono text-[11px] text-fuchsia-200">
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-400 animate-pulse" />
-            authorizing on {DEMO.network}…
+            pending on mempool…
           </div>
-          <div className="text-fuchsia-300/60 mt-1">••{DEMO.cardLast4}</div>
+          <div className="text-fuchsia-300/60 mt-1">{shortHex(DEMO.txHash, 8, 6)}</div>
         </div>
       )}
-      {reached(phase, 'captured') && (
+      {reached(phase, 'confirmed') && (
         <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] text-emerald-200 animate-[fadeInUp_0.3s_ease-out]">
           <div className="flex items-center gap-2">
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
             </svg>
-            captured
+            confirmed
           </div>
-          <div className="text-emerald-300/70 mt-1 truncate">{shortHex(DEMO.chargeId, 10, 6)}</div>
+          <div className="text-emerald-300/70 mt-1 truncate">{shortHex(DEMO.txHash, 10, 8)}</div>
           <div className="text-emerald-300/50 mt-0.5">
-            {DEMO.amount} {DEMO.currency} • {DEMO.network} ••{DEMO.cardLast4}
+            block {DEMO.blockNumber.toLocaleString()} • {DEMO.gasUsed} gas
           </div>
         </div>
       )}
@@ -958,13 +969,11 @@ function phaseDotColor(p: Phase) {
       return 'bg-sky-400'
     case 'authorize':
     case 'policy':
+    case 'sign':
       return 'bg-violet-400'
-    case 'minted':
-    case 'present':
-      return 'bg-violet-400'
-    case 'charging':
+    case 'broadcast':
       return 'bg-fuchsia-400'
-    case 'captured':
+    case 'confirmed':
     case 'delivered':
       return 'bg-emerald-400'
     default:

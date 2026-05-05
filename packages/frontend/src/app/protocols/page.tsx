@@ -5,7 +5,7 @@ import { SiteFooter } from '@/components/marketing/SiteFooter'
 const PROTOCOLS = [
   {
     slug: 'x402',
-    rail: 'Crypto rails',
+    rail: 'HTTP paywalls',
     name: 'x402',
     tagline: 'Pay-per-request HTTP, settled on-chain.',
     body:
@@ -22,12 +22,12 @@ const PROTOCOLS = [
   },
   {
     slug: 'mpp',
-    rail: 'Fiat rails',
+    rail: 'Stablecoin checkout',
     name: 'Stripe MPP',
-    tagline: 'Agent commerce on cards, governed by policy.',
+    tagline: 'Agent-initiated checkouts, paid in stablecoins today.',
     body:
-      "Stripe's Machine Payments Protocol turns regular payment methods into Shared Payment Tokens — one-time, scope-bound credentials an agent can hand to a merchant. Haven mints, governs, and revokes those tokens under the same policy that gates on-chain spend.",
-    bullets: ['Works at any Stripe-accepting merchant', 'SPTs are scope-bound and one-time-use', 'Same allowance model as crypto rails'],
+      "Stripe's Machine Payments Protocol is an open standard for agent-initiated payments across rails — stablecoins on-chain or fiat methods (cards, wallets, BNPL) via Shared Payment Tokens. Haven implements the stablecoin path today: agents settle USDC directly to merchants, gated by the same allowance and approval rules that wrap x402.",
+    bullets: ['Open standard, not a proprietary checkout', 'Stablecoin settlement live; SPT-backed fiat next', 'Same allowance model as x402'],
     cta: 'See an MPP payment',
     href: '/protocols/mpp',
     accentFrom: 'from-violet-500',
@@ -73,7 +73,7 @@ export default function ProtocolsPage() {
             </span>
           </h1>
           <p className="text-lg md:text-xl text-zinc-400 leading-relaxed max-w-2xl">
-            Agents need to pay across crypto and fiat. Haven speaks both — natively. The same allowance, approval, and audit model wraps x402 settlement on-chain and Stripe MPP charges in the card networks.
+            Agents need to transact across rails. Haven speaks the open standards — x402 for HTTP paywalls and Stripe MPP for broader checkouts — and wraps every payment in the same allowance, approval, and audit model. Stablecoin settlement today; SPT-backed fiat rails next.
           </p>
         </div>
       </section>
@@ -90,15 +90,15 @@ export default function ProtocolsPage() {
           {[
             {
               title: 'No proprietary checkout',
-              body: "Haven doesn't invent a new payment flow. Agents speak the same protocols merchants already accept — HTTP 402 today, Stripe's MPP for fiat tomorrow.",
+              body: "Haven doesn't invent a new payment flow. Agents speak open standards merchants and services are converging on — x402 for HTTP paywalls, Stripe MPP for full checkouts.",
             },
             {
-              title: 'One policy, both rails',
+              title: 'One policy, every payment',
               body: 'Whether the agent is buying an API call or a SaaS seat, the same per-token allowance and approval flow gate the spend. You set rules once.',
             },
             {
               title: 'Portable, revocable credentials',
-              body: 'On-chain delegate addresses for crypto, MPP Shared Payment Tokens for fiat. Both scope-bound, both revocable in a single call. Agents never hold raw secrets.',
+              body: 'On-chain delegate addresses today; MPP Shared Payment Tokens once SPT-backed fiat rails ship. Both scope-bound and revocable in a single call. Agents never hold raw payment secrets.',
             },
           ].map((card) => (
             <div

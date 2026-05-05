@@ -73,7 +73,7 @@ export default function ProtocolsPage() {
             </span>
           </h1>
           <p className="text-lg md:text-xl text-zinc-400 leading-relaxed max-w-2xl">
-            Agents need to transact across rails. Haven speaks the open standards — x402 for HTTP paywalls and Stripe MPP for broader checkouts — and wraps every payment in the same allowance, approval, and audit model. Stablecoin settlement today; SPT-backed fiat rails next.
+            Agents need to transact across rails. Haven speaks the open standards — x402 for pay-per-request flows, Stripe MPP for broader agent commerce — and wraps every payment in the same allowance, approval, and audit model. Stablecoin settlement today; SPT-backed fiat rails next.
           </p>
         </div>
       </section>
@@ -89,8 +89,8 @@ export default function ProtocolsPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-white/[0.06]">
           {[
             {
-              title: 'No proprietary checkout',
-              body: "Haven doesn't invent a new payment flow. Agents speak open standards merchants and services are converging on — x402 for HTTP paywalls, Stripe MPP for full checkouts.",
+              title: 'Open standards, not bespoke',
+              body: "Haven doesn't invent a new payment flow. Agents speak the open standards merchants and services are converging on — x402 for pay-per-request flows, Stripe MPP for broader agent commerce.",
             },
             {
               title: 'One policy, every payment',

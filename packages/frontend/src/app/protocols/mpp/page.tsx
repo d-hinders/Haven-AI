@@ -246,8 +246,8 @@ export default function MPPDemoPage() {
         <p className="text-base md:text-lg text-zinc-400 leading-relaxed max-w-2xl">
           An agent subscribes to a SaaS tool. Haven validates the intent
           against your policy and settles the payment in USDC straight from
-          your Safe — one open standard, no proprietary checkout, no card
-          details in agent memory.
+          your Safe — no card details in agent memory, no unrestricted
+          credentials, and a full audit trail.
         </p>
       </section>
 
@@ -267,21 +267,25 @@ export default function MPPDemoPage() {
               <span className="text-zinc-200 font-medium">Stripe MPP</span> — the{' '}
               <span className="text-zinc-300">Machine Payments Protocol</span> —
               is an open standard for agent-initiated payments across rails.
-              It's payment-agnostic: the same protocol can settle directly{' '}
-              <span className="text-zinc-300">on-chain in stablecoins</span>, or
-              carry traditional methods (cards, wallets, BNPL) via Stripe{' '}
+              It supports direct{' '}
+              <span className="text-zinc-300">on-chain crypto payments</span> as
+              well as fiat methods such as cards, wallets, and BNPL through
+              Stripe{' '}
               <span className="font-mono text-zinc-300">Shared Payment Tokens</span>.
-              Where x402 covers the HTTP 402 paywall case, MPP covers the
-              broader checkout — subscriptions, one-off purchases, anything an
-              agent and a merchant need to coordinate.
             </p>
             <p>
-              Haven implements the stablecoin path of MPP today. Agents settle
-              USDC directly to merchants from your Safe, gated by the same
-              allowance, approval, and audit model that wraps x402. SPT-backed
-              fiat rails — cards, wallets, BNPL — are on the roadmap. Either
-              way the agent never touches keys or card numbers, and you keep
-              one policy across every payment.
+              Where x402 focuses on programmatic HTTP 402 payment flows, MPP
+              extends the same machine-payment idea into broader agent
+              commerce — one-off purchases, subscriptions, and other payments
+              an agent and a merchant need to coordinate.
+            </p>
+            <p>
+              Haven supports the stablecoin path: agents settle USDC directly
+              to merchants from your Safe, gated by the same allowance,
+              approval, and audit model that wraps x402. SPT-backed fiat rails
+              — cards, wallets, and BNPL — are on the roadmap. Either way the
+              agent never touches private keys or card numbers, and you keep
+              one policy layer across every payment.
             </p>
           </div>
           <div className="bg-[#0b0b0f] border border-white/[0.06] rounded-md p-5">
@@ -592,7 +596,7 @@ export default function MPPDemoPage() {
             </span>
           </h2>
           <p className="text-zinc-500 text-sm mb-8">
-            Same allowance model as x402. No proprietary checkout in the way.
+            Same allowance model as x402. No card numbers in agent memory.
           </p>
           <Link
             href="/signup"

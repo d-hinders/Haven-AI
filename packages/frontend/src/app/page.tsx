@@ -237,7 +237,7 @@ export default function Home() {
           <h2 className="text-xs text-zinc-500 uppercase tracking-widest">Protocol Native</h2>
         </div>
         <p className="text-sm text-zinc-400 leading-relaxed max-w-2xl mb-10">
-          Agents need to transact across rails. Haven speaks the open standards — x402 for HTTP paywalls, Stripe MPP for broader checkouts — under one policy engine. Stablecoin settlement today; SPT-backed fiat rails next.
+          Agents need to transact across rails. Haven speaks the open standards — x402 for pay-per-request flows, Stripe MPP for broader agent commerce — under one policy engine. Stablecoin settlement today; SPT-backed fiat rails next.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/[0.06]">
           <a

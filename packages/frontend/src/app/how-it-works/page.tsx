@@ -239,8 +239,8 @@ export default function HowItWorksPage() {
             <a href="/signup" className="px-5 py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/25">
               Get Early Access
             </a>
-            <a href="/protocols/x402" className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2">
-              See how x402 works
+            <a href="/protocols" className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2">
+              See the protocols
             </a>
           </div>
         </div>
@@ -322,8 +322,8 @@ export default function HowItWorksPage() {
             <a href="/signup" className="px-6 py-3 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-xl shadow-indigo-500/30">
               Get Early Access
             </a>
-            <a href="/protocols/x402" className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200 underline underline-offset-4 decoration-zinc-700">
-              See how x402 works
+            <a href="/protocols" className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200 underline underline-offset-4 decoration-zinc-700">
+              See the protocols
             </a>
           </div>
         </div>

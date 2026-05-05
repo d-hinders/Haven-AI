@@ -178,13 +178,13 @@ function FundingPanel({
             >
               {safes.map((entry) => (
                 <option key={entry.id} value={entry.id}>
-                  {entry.name} — {getChainConfig(entry.chain_id).name}
+                  {entry.name}
                 </option>
               ))}
             </select>
           ) : (
             <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-sm text-zinc-200">
-              {safe.name} — {chainConfig.name}
+              {safe.name}
             </div>
           )}
         </div>

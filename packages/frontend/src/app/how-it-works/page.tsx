@@ -14,37 +14,37 @@ const STEPS: Step[] = [
   {
     step: '01',
     title: 'Create your Haven account',
-    body: 'Sign up with your email, no credit card, no setup call.',
+    body: 'Sign up with your email. No credit card and no setup call needed.',
     visual: 'account',
   },
   {
     step: '02',
-    title: 'Connect your wallet',
-    body: "Bring an existing wallet — or spin up a new one. This is the personal key you use to sign off on changes. It's yours, not Haven's.",
+    title: 'Choose how you sign in',
+    body: 'Use Face ID / Touch ID or connect your wallet. Either way, you stay in control of your account.',
     visual: 'wallet',
   },
   {
     step: '03',
-    title: 'Create your Haven wallet',
-    body: 'We deploy a smart wallet — your wallet — that holds the funds your agents will spend. You stay in control. Haven can never move money on its own.',
+    title: 'Set up your Haven wallet',
+    body: 'We create your Haven wallet in the background. This is where you hold the funds your agents can spend.',
     visual: 'vault',
   },
   {
     step: '04',
-    title: 'Fund your wallet',
-    body: 'Send USDC, EURe, or any supported asset to your wallet address. Balances appear instantly. Withdraw or top up whenever you want.',
+    title: 'Add funds',
+    body: 'Add USDC, EURe, or another supported token to start making payments.',
     visual: 'fund',
   },
   {
     step: '05',
-    title: 'Add an agent',
-    body: 'Set the rules — daily limit, allowed recipients, what kinds of things the agent can pay for. Generate credentials.',
+    title: 'Set agent rules',
+    body: 'Choose how much an agent can spend, who it can pay, and what it can pay for.',
     visual: 'credentials',
   },
   {
     step: '06',
-    title: 'Hand the credential to your agent',
-    body: 'Drop the credential into your agent — Claude, GPT, a custom script, anything. It can now pay autonomously, but only inside the rules you set.',
+    title: 'Connect your agent',
+    body: 'Add your Haven credential to Claude, GPT, or your own agent. It can now make payments within the rules you set.',
     visual: 'agent',
   },
 ]
@@ -251,7 +251,7 @@ export default function HowItWorksPage() {
       {/* Step rows */}
       <section className="relative max-w-6xl mx-auto px-6 py-16 md:py-24 z-10">
         <div className="mb-12">
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">The Six Steps</h2>
+          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">How Haven works</h2>
         </div>
 
         <div className="space-y-px bg-white/[0.06]">

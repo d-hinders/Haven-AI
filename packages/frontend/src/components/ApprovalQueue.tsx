@@ -5,6 +5,7 @@ import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useApprovals, type ApprovalRequest } from '@/hooks/useApprovals'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import {
   getSafeNonce,
   buildSafeTx,
@@ -20,6 +21,7 @@ import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { truncate, timeAgo, timeUntil } from '@/lib/format'
 import { useActiveSigner } from '@/lib/signer'
 import NetworkGate from './NetworkGate'
+import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -67,12 +69,14 @@ function ApprovalCard({
   onApproveAndExecute,
   onReject,
   executing,
+  executionDisabled = false,
   chainId = 100,
 }: {
   approval: ApprovalRequest
   onApproveAndExecute: (approval: ApprovalRequest) => void
   onReject: (id: string) => void
   executing: boolean
+  executionDisabled?: boolean
   chainId?: number
 }) {
   const isPending = approval.status === 'pending'
@@ -179,7 +183,7 @@ function ApprovalCard({
               <NetworkGate requiredChainId={chainId}>
                 <button
                   onClick={() => onApproveAndExecute(approval)}
-                  disabled={executing}
+                  disabled={executing || executionDisabled}
                   className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
                 >
                   {executing ? 'Executing...' : 'Approve & Execute'}
@@ -203,7 +207,7 @@ function ApprovalCard({
 // ── Main component ───────────────────────────────────────────────
 
 export default function ApprovalQueue() {
-  const { user, activeSafe } = useAuth()
+  const { activeSafe } = useAuth()
   const safeAddress = activeSafe?.safe_address ?? null
   const chainId = activeSafe?.chain_id ?? 100
   const { details: safeDetails } = useSafeDetails(safeAddress)
@@ -213,6 +217,11 @@ export default function ApprovalQueue() {
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
   })
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
+  const executionDisabled = operationGate.kind === 'passkey_on_other_device'
 
   const [executing, setExecuting] = useState(false)
 
@@ -220,7 +229,7 @@ export default function ApprovalQueue() {
   const pastApprovals = approvals.filter((a) => a.status !== 'pending')
 
   async function handleApproveAndExecute(approval: ApprovalRequest) {
-    if (!publicClient || !signer || !safeAddress || !safeDetails) return
+    if (executionDisabled || !publicClient || !signer || !safeAddress || !safeDetails) return
 
     setExecuting(true)
     try {
@@ -315,6 +324,10 @@ export default function ApprovalQueue() {
         </div>
       </div>
 
+      {executionDisabled && (
+        <PasskeyOtherDeviceNotice className="mb-4" />
+      )}
+
       {/* Loading */}
       {loading && (
         <div className="space-y-3">
@@ -356,6 +369,7 @@ export default function ApprovalQueue() {
               onApproveAndExecute={handleApproveAndExecute}
               onReject={handleReject}
               executing={executing}
+              executionDisabled={executionDisabled}
               chainId={chainId}
             />
           ))}

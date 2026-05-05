@@ -299,6 +299,36 @@ describe('Safe deploy routes', () => {
     expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK')
   })
 
+  it('POST /safe/deploy returns a generic 500 when createProxyWithNonce fails after the collision preflight passes', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'passkey-1',
+          public_key_x: Buffer.from('11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff', 'hex'),
+          public_key_y: Buffer.from('ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100', 'hex'),
+          signer_address: '0xe54122f41f7adf87fb6d5ab36bae42fc2aac882c',
+          safe_address: null,
+        }],
+      })
+    mockCreateProxyWithNonce.mockRejectedValueOnce(new Error('create2 collision after submission'))
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/deploy',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { chain_id: 8453 },
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toMatchObject({
+      statusCode: 500,
+      message: 'create2 collision after submission',
+    })
+    expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK')
+  })
+
   it('POST /safe/deploy skips signer deployment when the deterministic signer already has code', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     mockClientQuery

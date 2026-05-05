@@ -68,11 +68,6 @@ function isInsufficientFundsError(error: unknown): boolean {
   return message.includes('insufficient funds')
 }
 
-function isRetriableDeployError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-  return message.includes('already deployed') || message.includes('create2')
-}
-
 function extractSafeAddressFromReceipt(
   factoryAddress: string,
   receipt: { logs: Array<{ address?: string; topics?: string[]; data?: string }> },
@@ -291,9 +286,6 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
       }
       if (isInsufficientFundsError(error)) {
         return reply.code(503).send({ error: 'Relayer is temporarily unfunded; please try again later' })
-      }
-      if (isRetriableDeployError(error)) {
-        return reply.code(503).send({ error: 'Safe deployment collided; please try again later' })
       }
       throw error
     } finally {

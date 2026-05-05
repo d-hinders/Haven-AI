@@ -66,7 +66,7 @@ export default function SettingsClient() {
             <p className="text-sm font-mono text-zinc-300">
               {user?.wallet_address
                 ? truncate(user.wallet_address)
-                : 'Not connected'}
+                : 'Passkey-managed account'}
             </p>
           </div>
 

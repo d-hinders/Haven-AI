@@ -16,17 +16,19 @@ const SAFE_EXEC_ABI = [
   'function encodeTransactionData(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 _nonce) view returns (bytes)',
   'function checkSignatures(bytes32 dataHash,bytes data,bytes signatures) view',
 ] as const
-const ERC1271_ABI = [
-  'function isValidSignature(bytes32,bytes) view returns (bytes4)',
-] as const
 const PASSKEY_SIGNER_FACTORY_ABI = [
   'function createSigner(uint256 x, uint256 y, uint176 verifiers) returns (address signer)',
 ] as const
 
-const ERC1271_MAGIC_VALUE = '0x1626ba7e'
-
+// The provider estimate has been reliable once the signer contract exists, but
+// passkey-backed Safe admin flows still need a little headroom beyond the raw
+// estimate. These values were tuned against the live Gnosis passkey smoke tests
+// that previously failed with under-gassed relayed execTransaction calls.
 const RELAY_EXEC_GAS_BUFFER = 150_000n
+// Fallback only when estimateGas itself fails; keep it high enough for module
+// enablement + allowance setup + passkey signature verification in one tx.
 const RELAY_EXEC_GAS_LIMIT_FALLBACK = 5_000_000n
+// Upper bound to avoid accidentally submitting an unbounded relayer tx.
 const RELAY_EXEC_GAS_LIMIT_MAX = 8_000_000n
 const SAFE_TX_TYPES = {
   SafeTx: [
@@ -124,10 +126,6 @@ interface SafeContract {
   }
 }
 
-interface SignatureValidatorContract {
-  isValidSignature(message: string, signature: string): Promise<string>
-}
-
 interface PasskeySignerFactoryContract {
   createSigner(x: bigint, y: bigint, verifiers: bigint): Promise<{
     hash: string
@@ -172,43 +170,6 @@ function computeSafeTxHash(body: ExecSafeBody): string {
       nonce: BigInt(body.nonce),
     },
   )
-}
-
-function parsePasskeyInnerSignature(signatures: string, expectedSignerAddress: string): string | null {
-  const hex = signatures.startsWith('0x') ? signatures.slice(2) : signatures
-  if (hex.length < 194) {
-    return null
-  }
-
-  const encodedSigner = `0x${hex.slice(24, 64)}`
-  if (encodedSigner.toLowerCase() !== expectedSignerAddress.toLowerCase()) {
-    return null
-  }
-
-  const offset = Number(BigInt(`0x${hex.slice(64, 128)}`))
-  const signatureType = hex.slice(128, 130)
-  if (!Number.isFinite(offset) || signatureType !== '00') {
-    return null
-  }
-
-  const lengthWordStart = offset * 2
-  const lengthWordEnd = lengthWordStart + 64
-  if (hex.length < lengthWordEnd) {
-    return null
-  }
-
-  const innerLength = Number(BigInt(`0x${hex.slice(lengthWordStart, lengthWordEnd)}`))
-  if (!Number.isFinite(innerLength) || innerLength < 0) {
-    return null
-  }
-
-  const innerStart = lengthWordEnd
-  const innerEnd = innerStart + innerLength * 2
-  if (hex.length < innerEnd) {
-    return null
-  }
-
-  return `0x${hex.slice(innerStart, innerEnd)}`
 }
 
 function getRelayExecGasLimit(estimatedGas: bigint | null): bigint {
@@ -330,11 +291,6 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
         SAFE_EXEC_ABI,
         relayer,
       ) as unknown as SafeContract
-      const ownerValidator = new Contract(
-        expectedSignerAddress,
-        ERC1271_ABI,
-        relayer,
-      ) as unknown as SignatureValidatorContract
 
       const execArgs = [
         body.to,
@@ -365,25 +321,6 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       }
 
       const safeTxHash = computeSafeTxHash(body)
-      const innerSignature = parsePasskeyInnerSignature(body.signatures, expectedSignerAddress)
-
-      if (!innerSignature) {
-        request.log.error(
-          { userId: sub, chainId: body.chain_id, safeAddress: body.safe_address },
-          'Malformed passkey contract signature payload',
-        )
-        return reply.code(502).send({ error: 'Passkey signature payload is malformed' })
-      }
-
-      const signatureMagicValue = await ownerValidator.isValidSignature(safeTxHash, innerSignature)
-      if (signatureMagicValue.toLowerCase() !== ERC1271_MAGIC_VALUE) {
-        request.log.error(
-          { userId: sub, chainId: body.chain_id, safeAddress: body.safe_address, safeTxHash },
-          'Passkey signature validation failed for Safe execution',
-        )
-        return reply.code(502).send({ error: 'Passkey signature is invalid for this Safe transaction' })
-      }
-
       const txHashData = await safe.encodeTransactionData(
         body.to,
         BigInt(body.value),

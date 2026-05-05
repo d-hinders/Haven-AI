@@ -79,6 +79,9 @@ function getPasskeyForChain(
   return passkeys.find((passkey) => passkey.chain_id === chainId) ?? null
 }
 
+const CROSS_DEVICE_PASSKEY_MESSAGE =
+  'You already enrolled a passkey on another device. Sign in there to continue.'
+
 export default function PasskeyEnrollFlow({
   user,
   selectedChainId,
@@ -140,12 +143,13 @@ export default function PasskeyEnrollFlow({
           throw err
         }
 
+        if (existing.credential_id !== createdPasskey.credentialId) {
+          throw new Error(CROSS_DEVICE_PASSKEY_MESSAGE)
+        }
+
         signerAddress = existing.signer_address
         credentialId = existing.credential_id
-        storedPublicKey =
-          existing.credential_id === createdPasskey.credentialId
-            ? createdPasskey.publicKey
-            : undefined
+        storedPublicKey = createdPasskey.publicKey
       }
 
       setStage('deploying')

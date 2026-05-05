@@ -146,7 +146,7 @@ describe('PasskeyEnrollFlow', () => {
       passkeys: [
         {
           id: 'passkey-1',
-          credential_id: 'credential-existing',
+          credential_id: 'credential-123',
           signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
           chain_id: 100,
           safe_address: null,
@@ -169,6 +169,48 @@ describe('PasskeyEnrollFlow', () => {
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(mockListPasskeys).toHaveBeenCalled()
     expect(mockDeployPasskeySafe).toHaveBeenCalledWith({ chain_id: 100 })
+  })
+
+  it('fails fast when the existing passkey belongs to another device', async () => {
+    const onComplete = vi.fn()
+    const onError = vi.fn()
+    mockEnrollPasskey.mockRejectedValue(new ApiRequestError('A passkey is already registered for this chain', 409))
+    mockListPasskeys.mockResolvedValue({
+      passkeys: [
+        {
+          id: 'passkey-1',
+          credential_id: 'credential-other-device',
+          signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
+          chain_id: 100,
+          safe_address: null,
+          created_at: '2026-05-04T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <PasskeyEnrollFlow
+        user={mockUser}
+        selectedChainId={100}
+        onComplete={onComplete}
+        onError={onError}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use Face ID / Touch ID' }))
+
+    await waitFor(() =>
+      expect(onError).toHaveBeenCalledWith(
+        'You already enrolled a passkey on another device. Sign in there to continue.',
+      ),
+    )
+    expect(onComplete).not.toHaveBeenCalled()
+    expect(mockDeployPasskeySafe).not.toHaveBeenCalled()
+    expect(
+      localStorage.getItem(
+        passkeyStorageKey('0x07058311f995c89F4DbE17Db61fa1A3CDe638975', 100),
+      ),
+    ).toBeNull()
   })
 
   it('recovers from deploy conflicts by reusing the existing safe address', async () => {

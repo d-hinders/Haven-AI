@@ -364,6 +364,7 @@ export default function DashboardClient() {
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [actionSafeId, setActionSafeId] = useState<string | null>(null)
+  const [isGuideDismissed, setIsGuideDismissed] = useState(false)
 
   useEffect(() => {
     if (guideSafeId && safes.some((safe) => safe.id === guideSafeId)) return
@@ -374,6 +375,20 @@ export default function DashboardClient() {
     if (actionSafeId && safes.some((safe) => safe.id === actionSafeId)) return
     setActionSafeId(defaultSafe?.id ?? null)
   }, [actionSafeId, defaultSafe?.id, safes])
+
+  const onboardingDismissKey =
+    user && onboardingStage
+      ? `haven_dashboard_onboarding_dismissed:${user.id}:${onboardingStage}`
+      : null
+
+  useEffect(() => {
+    if (!onboardingDismissKey) {
+      setIsGuideDismissed(false)
+      return
+    }
+
+    setIsGuideDismissed(window.localStorage.getItem(onboardingDismissKey) === '1')
+  }, [onboardingDismissKey])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
   const actionGate = useSafeOperationGate({
@@ -435,6 +450,12 @@ export default function DashboardClient() {
     setPickerAction(null)
   }
 
+  function dismissOnboardingGuide() {
+    if (!onboardingDismissKey) return
+    window.localStorage.setItem(onboardingDismissKey, '1')
+    setIsGuideDismissed(true)
+  }
+
   return (
     <div className="max-w-6xl">
       <div className="mb-8">
@@ -469,6 +490,17 @@ export default function DashboardClient() {
             Review
           </Link>
         </div>
+      )}
+
+      {onboardingStage && !requiresOtherDevice && !isGuideDismissed && (
+        <DashboardOnboardingGuide
+          stage={onboardingStage}
+          safes={safes}
+          selectedSafeId={guideSafeId}
+          onSelectSafe={setGuideSafeId}
+          onAddAgent={() => openCreateAgent(null)}
+          onDismiss={dismissOnboardingGuide}
+        />
       )}
 
       <div className="relative overflow-hidden rounded-2xl border border-white/[0.06] mb-6">
@@ -565,16 +597,6 @@ export default function DashboardClient() {
           loading={overviewLoading && !overview}
         />
       </div>
-
-      {onboardingStage && !requiresOtherDevice && (
-        <DashboardOnboardingGuide
-          stage={onboardingStage}
-          safes={safes}
-          selectedSafeId={guideSafeId}
-          onSelectSafe={setGuideSafeId}
-          onAddAgent={() => openCreateAgent(null)}
-        />
-      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <ConnectedAgentsSection

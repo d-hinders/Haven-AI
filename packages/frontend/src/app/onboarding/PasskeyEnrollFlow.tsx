@@ -38,11 +38,11 @@ function stageLabel(stage: Stage): string {
     case 'creating_passkey':
       return 'Creating passkey'
     case 'enrolling':
-      return 'Enrolling signer'
+      return 'Preparing your account'
     case 'deploying':
-      return 'Deploying Safe'
+      return 'Creating your Haven wallet'
     case 'registering':
-      return 'Registering with Haven'
+      return 'Finishing setup'
     case 'done':
       return 'Done'
     case 'error':
@@ -55,13 +55,13 @@ function stageLabel(stage: Stage): string {
 function stageHint(stage: Stage): string {
   switch (stage) {
     case 'creating_passkey':
-      return 'Approve the browser prompt to create your passkey.'
+      return 'Approve the prompt to create your secure passkey.'
     case 'enrolling':
-      return 'Saving your signer metadata to Haven.'
+      return 'Saving your sign-in method to your Haven account.'
     case 'deploying':
-      return 'Haven is asking the relayer to deploy your Safe.'
+      return 'Creating your Haven wallet.'
     case 'registering':
-      return 'Linking the Safe to your account.'
+      return 'Linking your wallet to your Haven account.'
     case 'done':
       return 'Your passkey-backed Safe is ready.'
     case 'error':
@@ -241,6 +241,13 @@ export default function PasskeyEnrollFlow({
 
       {stage !== 'idle' && (
         <div className="space-y-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight mb-2">Setting up your Haven account</h1>
+            <p className="text-sm text-zinc-500 leading-relaxed">
+              We&apos;re creating your passkey signer and deploying your account now.
+            </p>
+          </div>
+
           {stageItems.map((item, index) => {
             const order: Stage[] = ['creating_passkey', 'enrolling', 'deploying', 'registering']
             const currentIndex = order.indexOf(stage)

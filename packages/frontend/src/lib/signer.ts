@@ -1,7 +1,10 @@
 'use client'
 
+import { useMemo, useSyncExternalStore } from 'react'
 import { useAccount, useWalletClient } from 'wagmi'
 import type { Address, WalletClient } from 'viem'
+
+export const PASSKEY_SCHEMA_VERSION = 1
 
 export type HavenUserSigner = EoaSigner | PasskeySigner
 
@@ -15,86 +18,154 @@ export interface PasskeySigner {
   type: 'passkey'
   address: Address
   credentialId: string
-  publicKey: { x: `0x${string}`; y: `0x${string}` }
+  publicKey?: { x: `0x${string}`; y: `0x${string}` }
   chainId: number
 }
 
-/**
- * PR #4 writes passkey signer metadata in this exact shape under
- * `haven_passkey_${safeAddress.toLowerCase()}_${chainId}`.
- */
-interface StoredPasskeyMetadata {
-  address: string
+export interface StoredPasskeySigner {
+  schemaVersion: 1
+  address: Address
   credentialId: string
-  publicKey: {
-    x: string
-    y: string
-  }
-  chainId?: number
+  publicKey?: { x: `0x${string}`; y: `0x${string}` }
+  chainId: number
+  safeAddress: Address
+  createdAt: number
 }
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/
 
+export function passkeyStorageKey(safeAddress: Address, chainId: number): string {
+  return `haven_passkey_${safeAddress.toLowerCase()}_${chainId}`
+}
+
+function passkeyDeviceKey(credentialId: string): string {
+  return `haven_passkey_device_${credentialId}`
+}
+
+function dispatchStorageChange(key: string, oldValue: string | null, newValue: string | null): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new StorageEvent('storage', { key, oldValue, newValue }))
+}
+
+export function rememberPasskeyCredentialOnDevice(credentialId: string): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(passkeyDeviceKey(credentialId), '1')
+}
+
+export function hasPasskeyCredentialOnDevice(credentialId: string): boolean {
+  if (typeof window === 'undefined') return false
+  return window.localStorage.getItem(passkeyDeviceKey(credentialId)) === '1'
+}
+
+export function setStoredPasskeySigner(value: StoredPasskeySigner): void {
+  if (typeof window === 'undefined') return
+
+  const normalized: StoredPasskeySigner = {
+    ...value,
+    safeAddress: value.safeAddress.toLowerCase() as Address,
+  }
+  const key = passkeyStorageKey(normalized.safeAddress, normalized.chainId)
+  const oldValue = window.localStorage.getItem(key)
+  const newValue = JSON.stringify(normalized)
+
+  window.localStorage.setItem(key, newValue)
+  dispatchStorageChange(key, oldValue, newValue)
+}
+
+export function clearStoredPasskeySigner(args: {
+  safeAddress: Address
+  chainId: number
+}): void {
+  if (typeof window === 'undefined') return
+
+  const key = passkeyStorageKey(args.safeAddress, args.chainId)
+  const oldValue = window.localStorage.getItem(key)
+
+  window.localStorage.removeItem(key)
+  dispatchStorageChange(key, oldValue, null)
+}
+
 export function getStoredPasskeySigner(args: {
   safeAddress?: Address
   chainId?: number
 }): PasskeySigner | null {
-  if (typeof window === 'undefined' || !args.safeAddress || args.chainId === undefined) {
+  const { safeAddress, chainId } = args
+  if (!safeAddress || chainId === undefined) {
     return null
   }
 
-  const key = `haven_passkey_${args.safeAddress.toLowerCase()}_${args.chainId}`
-  const raw = window.localStorage.getItem(key)
+  const raw = getStoredPasskeySignerValue(args)
   if (!raw) {
     return null
   }
 
   try {
-    const parsed = JSON.parse(raw) as StoredPasskeyMetadata
-    const { address, credentialId } = parsed
+    const parsed = JSON.parse(raw) as Partial<StoredPasskeySigner>
     const x = parsed.publicKey?.x
     const y = parsed.publicKey?.y
 
     if (
-      !address ||
-      !credentialId ||
-      !x ||
-      !y ||
-      !ETH_ADDRESS_RE.test(address) ||
-      !HEX_32_RE.test(x) ||
-      !HEX_32_RE.test(y)
+      parsed.schemaVersion !== PASSKEY_SCHEMA_VERSION ||
+      !parsed.address ||
+      !parsed.credentialId ||
+      !parsed.safeAddress ||
+      typeof parsed.createdAt !== 'number' ||
+      typeof parsed.chainId !== 'number' ||
+      !ETH_ADDRESS_RE.test(parsed.address) ||
+      !ETH_ADDRESS_RE.test(parsed.safeAddress) ||
+      parsed.chainId !== chainId ||
+      parsed.safeAddress.toLowerCase() !== safeAddress.toLowerCase() ||
+      ((x !== undefined || y !== undefined) && (!x || !y || !HEX_32_RE.test(x) || !HEX_32_RE.test(y)))
     ) {
       return null
     }
 
     return {
       type: 'passkey',
-      address: address as Address,
-      credentialId,
-      publicKey: {
-        x: x as `0x${string}`,
-        y: y as `0x${string}`,
-      },
-      chainId: args.chainId,
+      address: parsed.address as Address,
+      credentialId: parsed.credentialId,
+      publicKey:
+        x && y
+          ? {
+              x: x as `0x${string}`,
+              y: y as `0x${string}`,
+            }
+          : undefined,
+      chainId: parsed.chainId,
     }
   } catch {
     return null
   }
 }
 
+function subscribe(onChange: () => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => {}
+  }
+
+  window.addEventListener('storage', onChange)
+  return () => window.removeEventListener('storage', onChange)
+}
+
+function getStoredPasskeySignerValue(args: {
+  safeAddress?: Address
+  chainId?: number
+}): string | null {
+  if (typeof window === 'undefined' || !args.safeAddress || args.chainId === undefined) {
+    return null
+  }
+
+  return window.localStorage.getItem(passkeyStorageKey(args.safeAddress, args.chainId))
+}
+
 /**
- * Read the active human signer for the dashboard's currently-selected Safe.
+ * Read the active human signer for a specific Safe.
  *
  * Resolution order:
- *   1. If localStorage has passkey signer metadata for the current safeAddress + chainId,
- *      return a PasskeySigner.
- *   2. If Wagmi has a connected EOA, return an EoaSigner.
+ *   1. If localStorage has passkey signer metadata for the safeAddress + chainId, return it.
+ *   2. Otherwise, if Wagmi has a connected EOA, return that signer.
  *   3. Otherwise return null.
- *
- * Note: this reads localStorage during render and does not subscribe to storage updates yet.
- * PR #4's enrollment UI will need to add an external-store subscription so same-tab writes
- * trigger a rerender immediately.
  */
 export function useActiveSigner(args: {
   safeAddress?: Address
@@ -103,7 +174,16 @@ export function useActiveSigner(args: {
   const { address } = useAccount()
   const { data: walletClient } = useWalletClient()
 
-  const passkeySigner = getStoredPasskeySigner(args)
+  const passkeySignerValue = useSyncExternalStore(
+    subscribe,
+    () => getStoredPasskeySignerValue(args),
+    () => null,
+  )
+  const passkeySigner = useMemo(
+    () => getStoredPasskeySigner(args),
+    [args.chainId, args.safeAddress, passkeySignerValue],
+  )
+
   if (passkeySigner) {
     return passkeySigner
   }

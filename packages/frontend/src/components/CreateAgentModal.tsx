@@ -27,6 +27,7 @@ import { truncate, isValidAddress } from '@/lib/format'
 import { buildHandoff, buildDotenv, type HandoffInput } from '@/lib/agent-handoff'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useActiveSigner } from '@/lib/signer'
+import { SigningStatus } from './SigningStatus'
 
 
 interface AllowanceEntry {
@@ -161,7 +162,7 @@ export default function CreateAgentModal({
   const [credentialsSaved, setCredentialsSaved] = useState(false)
 
   // Wagmi
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
@@ -435,7 +436,11 @@ export default function CreateAgentModal({
       }
 
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
-        setExecError('Transaction rejected in wallet')
+        setExecError(
+          signer?.type === 'passkey'
+            ? 'Face ID or Touch ID was cancelled'
+            : 'Transaction rejected in wallet',
+        )
       } else {
         setExecError(message)
       }
@@ -1082,15 +1087,19 @@ export default function CreateAgentModal({
                   <div>
                     <p className="text-sm text-zinc-200 font-medium">
                       {execStatus === 'checking' && 'Checking module status...'}
-                      {execStatus === 'signing' && 'Sign in your wallet...'}
+                      {execStatus === 'signing' && 'Awaiting signature...'}
                       {execStatus === 'executing' && 'Submitting to chain...'}
                       {execStatus === 'saving' && 'Saving agent...'}
                     </p>
-                    <p className="text-xs text-zinc-600 mt-1">
-                      {execStatus === 'signing'
-                        ? 'Approve the transaction in your connected wallet'
-                        : 'This may take a moment'}
-                    </p>
+                    <div className="text-xs text-zinc-600 mt-1">
+                      {execStatus === 'signing' ? (
+                        <SigningStatus signer={signer} stage="signing" />
+                      ) : execStatus === 'executing' ? (
+                        <SigningStatus signer={signer} stage="executing" />
+                      ) : (
+                        'This may take a moment'
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (

@@ -25,6 +25,7 @@ describe('getStoredPasskeySigner', () => {
     localStorage.setItem(
       'haven_passkey_0x07058311f995c89f4dbe17db61fa1a3cde638975_100',
       JSON.stringify({
+        schemaVersion: 1,
         address: PASSKEY_SIGNER_ADDRESS,
         credentialId: 'credential-123',
         publicKey: {
@@ -32,6 +33,8 @@ describe('getStoredPasskeySigner', () => {
           y: `0x${'22'.repeat(32)}`,
         },
         chainId: 100,
+        safeAddress: SAFE_ADDRESS,
+        createdAt: 123,
       }),
     )
 
@@ -56,6 +59,7 @@ describe('getStoredPasskeySigner', () => {
     localStorage.setItem(
       'haven_passkey_0x07058311f995c89f4dbe17db61fa1a3cde638975_100',
       JSON.stringify({
+        schemaVersion: 1,
         address: PASSKEY_SIGNER_ADDRESS,
         credentialId: 'credential-123',
         publicKey: {
@@ -63,6 +67,8 @@ describe('getStoredPasskeySigner', () => {
           y: `0x${'22'.repeat(32)}`,
         },
         chainId: 100,
+        safeAddress: SAFE_ADDRESS,
+        createdAt: 123,
       }),
     )
 
@@ -86,6 +92,7 @@ describe('useActiveSigner', () => {
     localStorage.setItem(
       'haven_passkey_0x07058311f995c89f4dbe17db61fa1a3cde638975_100',
       JSON.stringify({
+        schemaVersion: 1,
         address: PASSKEY_SIGNER_ADDRESS,
         credentialId: 'credential-123',
         publicKey: {
@@ -93,6 +100,8 @@ describe('useActiveSigner', () => {
           y: `0x${'22'.repeat(32)}`,
         },
         chainId: 100,
+        safeAddress: SAFE_ADDRESS,
+        createdAt: 123,
       }),
     )
     mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { type Address } from 'viem'
-import { useAccount } from 'wagmi'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
+import { useActiveSigner } from '@/lib/signer'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainTokens, type SendParams } from '@/lib/safe-tx'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
@@ -11,6 +11,7 @@ import { truncate, isValidAddress } from '@/lib/format'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
 import NetworkGate from './NetworkGate'
+import { SigningStatus } from './SigningStatus'
 
 interface SendSafeOption {
   id: string
@@ -55,8 +56,11 @@ export default function SendModal({
   contextLoading = false,
   contextError = null,
 }: SendModalProps) {
-  const { address: connectedAddress } = useAccount()
   const { status, txHash, error, send, reset } = useSendTransaction()
+  const signer = useActiveSigner({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
 
   // Build token list from chain config
   const chainConfig = getChainConfig(chainId)
@@ -181,7 +185,7 @@ export default function SendModal({
   }
 
   const handleConfirm = async () => {
-    if (!connectedAddress || !tokenConfig) return
+    if (!signer || !tokenConfig) return
 
     setStep('executing')
 
@@ -193,7 +197,7 @@ export default function SendModal({
       recipient: recipient as Address,
     }
 
-    await send(params, safeAddress as Address, threshold, connectedAddress, chainId)
+    await send(params, safeAddress as Address, threshold, signer.address, chainId)
   }
 
   const handleDone = () => {
@@ -216,7 +220,8 @@ export default function SendModal({
   const statusLabel: Record<SendStatus, string> = {
     idle: '',
     building: 'Preparing transaction...',
-    signing: 'Waiting for wallet signature...',
+    signing:
+      signer?.type === 'passkey' ? 'Waiting for Face ID or Touch ID...' : 'Waiting for signature...',
     executing: isMultiSig ? 'Submitting proposal...' : `Confirming on ${getChainConfig(chainId).name}...`,
     confirmed: 'Transaction confirmed!',
     proposed: 'Transaction proposed!',
@@ -666,7 +671,9 @@ export default function SendModal({
               <div className="flex justify-between items-center">
                 <span className="text-xs text-zinc-500">Gas paid by</span>
                 <span className="text-sm text-zinc-400">
-                  Your signing wallet{gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}
+                  {signer?.type === 'passkey'
+                    ? `Haven relayer${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
+                    : `Your signing wallet${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`}
                 </span>
               </div>
             </div>
@@ -707,11 +714,13 @@ export default function SendModal({
               <div className="absolute inset-0 w-14 h-14 rounded-full border-2 border-transparent border-t-indigo-500 animate-spin" />
             </div>
             <p className="text-sm text-zinc-300 mb-1">{statusLabel[status]}</p>
-            <p className="text-xs text-zinc-600">
-              {status === 'signing' && 'Check your wallet for a signature request'}
-              {status === 'executing' && 'This may take a few seconds'}
-              {status === 'building' && 'Reading Safe nonce...'}
-            </p>
+            {status === 'building' ? (
+              <p className="text-xs text-zinc-600">Reading Safe nonce...</p>
+            ) : status === 'signing' || status === 'executing' ? (
+              <div className="text-xs text-zinc-600">
+                <SigningStatus signer={signer} stage={status} />
+              </div>
+            ) : null}
           </div>
         )}
 

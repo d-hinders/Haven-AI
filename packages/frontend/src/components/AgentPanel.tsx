@@ -645,7 +645,7 @@ export default function AgentPanel() {
     deleteAgent,
     refetch,
   } = useAgents()
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,

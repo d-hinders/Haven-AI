@@ -4,6 +4,8 @@ import { api, ApiRequestError } from '@/lib/api'
 describe('ApiClient', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
+    localStorage.clear()
+    window.history.replaceState({}, '', '/')
   })
 
   function mockFetchOk(data: unknown) {
@@ -44,6 +46,33 @@ describe('ApiClient', () => {
 
       const callArgs = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
       expect(callArgs[1].headers).not.toHaveProperty('Authorization')
+    })
+
+    it('uses apiBaseUrl query param override and persists it', async () => {
+      mockFetchOk({ id: 1 })
+      window.history.replaceState({}, '', '/?apiBaseUrl=https%3A%2F%2Fbranch-backend.example')
+
+      await api.get('/users')
+
+      expect(fetch).toHaveBeenCalledWith('https://branch-backend.example/users', {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+      expect(localStorage.getItem('haven_api_base_url')).toBe('https://branch-backend.example')
+    })
+
+    it('uses persisted backend override when present', async () => {
+      mockFetchOk({ id: 1 })
+      localStorage.setItem('haven_api_base_url', 'https://branch-backend.example/')
+
+      await api.get('/users')
+
+      expect(fetch).toHaveBeenCalledWith('https://branch-backend.example/users', {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
     })
   })
 
@@ -94,6 +123,21 @@ describe('ApiClient', () => {
         expect((err as ApiRequestError).message).toBe('Forbidden')
         expect((err as ApiRequestError).status).toBe(403)
       }
+    })
+
+    it('clears the persisted override when apiBaseUrl=default is provided', async () => {
+      mockFetchError(403, { error: 'Forbidden' })
+      localStorage.setItem('haven_api_base_url', 'https://branch-backend.example')
+      window.history.replaceState({}, '', '/?apiBaseUrl=default')
+
+      await expect(api.get('/secret')).rejects.toThrow(ApiRequestError)
+
+      expect(fetch).toHaveBeenCalledWith('/api/secret', {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+      expect(localStorage.getItem('haven_api_base_url')).toBeNull()
     })
   })
 })

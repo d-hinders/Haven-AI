@@ -161,6 +161,16 @@ export default function OnboardingClient() {
     )
   }
 
+  const isPasskeyOnboarding = signerMode === 'passkey'
+  const completionTitle = isPasskeyOnboarding
+    ? 'Your Haven account is ready'
+    : 'Safe deployed'
+  const completionDescription = isPasskeyOnboarding
+    ? `Your account is live on ${getChainConfig(selectedChainId).name}. You can now add funds, create agent budgets, and start making payments.`
+    : `Your non-custodial smart account is live on ${getChainConfig(selectedChainId).name}. You can now create agents with spending policies and start transacting.`
+  const completionAddressLabel = isPasskeyOnboarding ? 'Account address' : 'Safe address'
+  const completionTxLabel = isPasskeyOnboarding ? 'Setup transaction' : 'Transaction'
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-[#ededed] flex flex-col">
       <div
@@ -218,10 +228,10 @@ export default function OnboardingClient() {
           {step === 'choose-signer' && (
             <div className="space-y-6">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight mb-2">Choose how you want to sign</h1>
+                <h1 className="text-2xl font-bold tracking-tight mb-2">Set up your Haven account</h1>
                 <p className="text-sm text-zinc-500 leading-relaxed">
-                  Pick the signer that will own your Safe smart account. Passkeys are the default,
-                  while wallets remain available for crypto-native users.
+                  Choose the network for your account, then pick how you want to approve
+                  payments and changes.
                 </p>
               </div>
 
@@ -249,7 +259,7 @@ export default function OnboardingClient() {
                 className="w-full rounded-xl border border-indigo-500/25 bg-gradient-to-r from-indigo-500/20 to-violet-600/15 px-5 py-4 text-left hover:border-indigo-400/40 hover:bg-indigo-500/[0.08] transition-all"
               >
                 <div className="text-sm font-semibold text-zinc-100">Use Face ID / Touch ID</div>
-                <div className="mt-1 text-xs text-zinc-400">Fastest, no wallet needed.</div>
+                <div className="mt-1 text-xs text-zinc-400">Fastest option. Creates a secure passkey.</div>
               </button>
 
               <button
@@ -261,7 +271,7 @@ export default function OnboardingClient() {
                 className="w-full rounded-xl border border-white/[0.08] bg-white/[0.02] px-5 py-4 text-left hover:bg-white/[0.05] transition-colors"
               >
                 <div className="text-sm font-semibold text-zinc-100">Connect a wallet instead</div>
-                <div className="mt-1 text-xs text-zinc-500">For crypto-native users.</div>
+                <div className="mt-1 text-xs text-zinc-500">Use an existing crypto wallet.</div>
               </button>
             </div>
           )}
@@ -423,15 +433,14 @@ export default function OnboardingClient() {
 
           {step === 'done' && (
             <div>
-              <h1 className="text-2xl font-bold tracking-tight mb-2">Safe deployed</h1>
+              <h1 className="text-2xl font-bold tracking-tight mb-2">{completionTitle}</h1>
               <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
-                Your non-custodial smart account is live on {getChainConfig(selectedChainId).name}. You can now create agents
-                with spending policies and start transacting.
+                {completionDescription}
               </p>
 
               <div className="mb-6 space-y-3">
                 <div className="p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
-                  <span className="block text-xs text-zinc-500 mb-1">Safe address</span>
+                  <span className="block text-xs text-zinc-500 mb-1">{completionAddressLabel}</span>
                   <a
                     href={getExplorerUrl(selectedChainId, 'address', safeAddress)}
                     target="_blank"
@@ -443,7 +452,7 @@ export default function OnboardingClient() {
                 </div>
                 {txHash && txHash !== EMPTY_TX_HASH && (
                   <div className="p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
-                    <span className="block text-xs text-zinc-500 mb-1">Transaction</span>
+                    <span className="block text-xs text-zinc-500 mb-1">{completionTxLabel}</span>
                     <a
                       href={getExplorerUrl(selectedChainId, 'tx', txHash)}
                       target="_blank"

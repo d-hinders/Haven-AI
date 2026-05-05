@@ -30,12 +30,12 @@ function StepTracker({ stage }: { stage: Stage }) {
   ]
 
   return (
-    <ol className="flex flex-wrap items-center gap-2 text-sm" aria-label="Onboarding progress">
+    <ol className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Onboarding progress">
       {steps.map((step, index) => (
-        <li key={step.label} className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
+        <li key={step.label} className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
             <span
-              className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border text-[12px] font-semibold ${
+              className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${
                 step.state === 'done'
                   ? 'border-emerald-500/20 bg-emerald-500/12 text-emerald-300'
                   : step.state === 'active'
@@ -52,7 +52,7 @@ function StepTracker({ stage }: { stage: Stage }) {
               )}
             </span>
             <span
-              className={`text-sm font-medium ${
+              className={`text-[12px] font-medium ${
                 step.state === 'done'
                   ? 'text-zinc-200'
                   : step.state === 'active'
@@ -64,7 +64,7 @@ function StepTracker({ stage }: { stage: Stage }) {
             </span>
           </div>
           {index < steps.length - 1 && (
-            <div className="w-8 md:w-16">
+            <div className="w-5 md:w-10">
               {step.state === 'done' ? (
                 <div className="h-px bg-indigo-400/60" />
               ) : (
@@ -154,27 +154,27 @@ function FundingPanel({
   if (!safe || !chainConfig) return null
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr),220px] lg:items-start">
-      <div className="space-y-4">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr),180px] lg:items-start">
+      <div className="space-y-3">
         <div>
-          <h3 className="mb-2 text-[30px] font-semibold leading-tight tracking-tight text-zinc-50 sm:text-[32px]">
+          <h3 className="mb-1.5 text-2xl font-semibold leading-tight tracking-tight text-zinc-50 sm:text-[28px]">
             Add funds to start using Haven
           </h3>
-          <p className="text-sm text-zinc-300">
+          <p className="text-[13px] text-zinc-300">
             Send a supported token to your Haven account on{' '}
             <span className="text-zinc-100">{chainConfig.name}</span>.
           </p>
         </div>
 
         <div>
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500">
             Account
           </p>
           {safes.length > 1 ? (
             <select
               value={safe.id}
               onChange={(e) => onSelectSafe(e.target.value)}
-              className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-zinc-200 focus:outline-none focus:border-indigo-400/50"
+              className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-indigo-400/50"
             >
               {safes.map((entry) => (
                 <option key={entry.id} value={entry.id}>
@@ -183,19 +183,19 @@ function FundingPanel({
               ))}
             </select>
           ) : (
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-zinc-200">
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-sm text-zinc-200">
               {safe.name} — {chainConfig.name}
             </div>
           )}
         </div>
 
         <div>
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500">
             Deposit address
           </p>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
-              <code className="min-w-0 flex-1 truncate text-xs text-zinc-100">
+          <div className="flex flex-col gap-2.5 sm:flex-row">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5">
+              <code className="min-w-0 flex-1 truncate text-[11px] text-zinc-100">
                 {safe.safe_address}
               </code>
               <CopyButton text={safe.safe_address} />
@@ -214,7 +214,7 @@ function FundingPanel({
 
             <button
               onClick={() => setShowQr((value) => !value)}
-              className="inline-flex items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-white/[0.06]"
+              className="inline-flex items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-zinc-200 transition-colors hover:bg-white/[0.06]"
             >
               {showQr ? 'Hide QR code' : 'Show QR code'}
             </button>
@@ -222,44 +222,44 @@ function FundingPanel({
         </div>
 
         {showQr && qrDataUrl && (
-          <div className="w-fit rounded-xl border border-white/[0.08] bg-black/25 p-3">
+          <div className="w-fit rounded-xl border border-white/[0.08] bg-black/25 p-2.5">
             <img
               src={qrDataUrl}
               alt="Deposit address QR code"
-              className="h-[128px] w-[128px] rounded-lg"
+              className="h-[112px] w-[112px] rounded-lg"
             />
           </div>
         )}
       </div>
 
-      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 lg:min-h-full lg:rounded-none lg:border-l lg:border-r-0 lg:border-y-0 lg:bg-transparent lg:py-1 lg:pl-5 lg:pr-0">
-        <div className="space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.03] text-zinc-300">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3 lg:min-h-full lg:rounded-none lg:border-l lg:border-r-0 lg:border-y-0 lg:bg-transparent lg:py-0.5 lg:pl-4 lg:pr-0">
+        <div className="space-y-3">
+          <div className="flex items-start gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.03] text-zinc-300">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2l7 4v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-4z" />
                 <path d="M9 10h6M9 14h6" />
               </svg>
             </div>
             <div>
-              <p className="text-sm text-zinc-400">Network</p>
-              <p className="mt-1 text-lg font-medium text-zinc-100">{chainConfig.name}</p>
+              <p className="text-xs text-zinc-400">Network</p>
+              <p className="mt-0.5 text-sm font-medium text-zinc-100">{chainConfig.name}</p>
             </div>
           </div>
 
           <div className="h-px bg-white/[0.06]" />
 
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.03] text-zinc-300">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <div className="flex items-start gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.03] text-zinc-300">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 7v10" />
                 <path d="M15 9.5c0-1.38-1.34-2.5-3-2.5s-3 1.12-3 2.5 1.34 2.5 3 2.5 3 1.12 3 2.5-1.34 2.5-3 2.5-3-1.12-3-2.5" />
               </svg>
             </div>
             <div>
-              <p className="text-sm text-zinc-400">Supported tokens</p>
-              <p className="mt-1 text-lg font-medium text-zinc-100">
+              <p className="text-xs text-zinc-400">Supported tokens</p>
+              <p className="mt-0.5 text-sm font-medium text-zinc-100">
                 {tokens.map((token) => token.symbol).join(', ')}
               </p>
             </div>
@@ -276,12 +276,12 @@ function AddAgentPanel({
   onAddAgent: () => void
 }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div>
-        <h3 className="mb-2 text-2xl font-semibold tracking-tight text-zinc-50">
+        <h3 className="mb-1.5 text-xl font-semibold tracking-tight text-zinc-50">
           Connect your first agent
         </h3>
-        <p className="max-w-2xl text-sm text-zinc-300">
+        <p className="max-w-2xl text-[13px] text-zinc-300">
           Give an agent access to spend from your Haven account with clear limits
           that you control.
         </p>
@@ -289,7 +289,7 @@ function AddAgentPanel({
 
       <button
         onClick={onAddAgent}
-        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:from-indigo-400 hover:to-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:from-indigo-400 hover:to-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -320,8 +320,8 @@ export default function DashboardOnboardingGuide({
       />
       <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(129,140,248,0.18),transparent_58%)] pointer-events-none" />
 
-      <div className="relative p-5">
-        <div className="flex flex-col gap-4 border-b border-white/[0.06] pb-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="relative p-4">
+        <div className="flex flex-col gap-3 border-b border-white/[0.06] pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <StepTracker stage={stage} />
           </div>
@@ -329,7 +329,7 @@ export default function DashboardOnboardingGuide({
           <button
             type="button"
             onClick={onDismiss}
-            className="inline-flex items-center gap-2 self-start rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/[0.08] hover:text-white"
+            className="inline-flex items-center gap-2 self-start rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/[0.08] hover:text-white"
             aria-label="Dismiss onboarding guide"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -339,7 +339,7 @@ export default function DashboardOnboardingGuide({
           </button>
         </div>
 
-        <div className="pt-5">
+        <div className="pt-4">
           {stage === 'fund' && (
             <FundingPanel
               safes={safes}

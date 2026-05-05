@@ -6,6 +6,7 @@ import * as x402Resources from './003_x402_resources.js'
 import * as simplifyPolicy from './004_simplify_policy.js'
 import * as dashboardOverview from './005_dashboard_overview.js'
 import * as userPasskeys from './006_user_passkeys.js'
+import * as accountDefaultName from './007_account_default_name.js'
 
 export interface Migration {
   version: string
@@ -25,4 +26,5 @@ export const migrations: Migration[] = [
   simplifyPolicy,
   dashboardOverview,
   userPasskeys,
+  accountDefaultName,
 ]

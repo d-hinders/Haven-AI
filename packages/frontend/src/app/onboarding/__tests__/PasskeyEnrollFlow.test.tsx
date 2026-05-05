@@ -90,7 +90,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
       safeAddress: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -109,7 +109,6 @@ describe('PasskeyEnrollFlow', () => {
     expect(mockPost).toHaveBeenCalledWith('/user/safes', {
       safe_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
       chain_id: 100,
-      name: 'gnosis',
     })
 
     expect(mockCreatePasskey.mock.invocationCallOrder[0]).toBeLessThan(mockEnrollPasskey.mock.invocationCallOrder[0])
@@ -131,7 +130,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
 
     await waitFor(() => expect(onError).toHaveBeenCalledWith('Face ID prompt was cancelled.'))
     expect(mockEnrollPasskey).not.toHaveBeenCalled()
@@ -164,7 +163,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(mockListPasskeys).toHaveBeenCalled()
@@ -197,7 +196,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
 
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith(
@@ -238,7 +237,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
       safeAddress: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -256,7 +255,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
 
     await waitFor(() => {
       const stored = localStorage.getItem(

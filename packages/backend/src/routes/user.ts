@@ -59,7 +59,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     // Also insert into user_safes (multi-Safe support)
     await pool.query(
       `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
-       VALUES ($1, $2, $3, 'My Safe', true)
+       VALUES ($1, $2, $3, 'My account', true)
        ON CONFLICT (user_id, safe_address, chain_id) DO NOTHING`,
       [sub, safe_address, chain_id],
     )

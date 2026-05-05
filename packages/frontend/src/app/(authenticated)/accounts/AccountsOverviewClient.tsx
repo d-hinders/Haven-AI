@@ -87,7 +87,7 @@ function AddSafeModal({
     }
 
     try {
-      await onAdd(importAddress, name || 'My Safe', importChainId)
+      await onAdd(importAddress, name || 'My account', importChainId)
       resetState()
       onClose()
     } catch (err: unknown) {
@@ -109,7 +109,7 @@ function AddSafeModal({
       setDeployTxHash(result.txHash)
 
       // Register in Haven
-      await onAdd(result.safeAddress, name || 'My Safe', deployChainId)
+      await onAdd(result.safeAddress, name || 'My account', deployChainId)
       setDeployStep('done')
     } catch (err: unknown) {
       setDeployStep('wallet')
@@ -331,7 +331,7 @@ function AddSafeModal({
                   </svg>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-zinc-200">{name || 'My Safe'}</p>
+                  <p className="text-sm font-medium text-zinc-200">{name || 'My account'}</p>
                   <p className="text-xs text-zinc-500">Successfully deployed on {getChainConfig(deployChainId).name}</p>
                 </div>
               </div>

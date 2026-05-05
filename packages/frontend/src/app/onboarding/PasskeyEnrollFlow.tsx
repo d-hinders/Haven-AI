@@ -5,7 +5,6 @@ import type { Address, Hash } from 'viem'
 import type { User } from '@/context/AuthContext'
 import { api, ApiRequestError, type ListPasskeysResponse } from '@/lib/api'
 import { base64UrlEncode, createPasskey, PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
-import { getChainConfig } from '@/lib/chains'
 import {
   PASSKEY_SCHEMA_VERSION,
   rememberPasskeyCredentialOnDevice,
@@ -179,7 +178,6 @@ export default function PasskeyEnrollFlow({
         await api.post('/user/safes', {
           safe_address: safeAddress,
           chain_id: selectedChainId,
-          name: getChainConfig(selectedChainId).shortName,
         })
       } catch (err) {
         if (!(err instanceof ApiRequestError) || err.status !== 409) {
@@ -221,18 +219,12 @@ export default function PasskeyEnrollFlow({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-4">
-        <span className="block text-xs text-zinc-500 mb-2">Network</span>
-        <span className="text-sm text-zinc-200">{getChainConfig(selectedChainId).name}</span>
-      </div>
-
       {stage === 'idle' && (
         <div className="space-y-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight mb-2">Use Face ID or Touch ID</h1>
             <p className="text-sm text-zinc-500 leading-relaxed">
-              Create a passkey for this browser, enroll it with Haven, and deploy a Safe that uses
-              that passkey-backed signer as its owner.
+              Create a secure passkey to approve actions in your Haven account.
             </p>
           </div>
 
@@ -242,7 +234,7 @@ export default function PasskeyEnrollFlow({
             }}
             className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
           >
-            Use Face ID / Touch ID
+            Continue with Face ID / Touch ID
           </button>
         </div>
       )}

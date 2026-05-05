@@ -10,6 +10,15 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+  async redirects() {
+    return [
+      {
+        source: '/demo/x402',
+        destination: '/protocols/x402',
+        permanent: true,
+      },
+    ]
+  },
 }
 
 export default nextConfig

@@ -1,11 +1,7 @@
 'use client'
 
-const NAV_LINKS = [
-  { label: 'Product', href: '/' },
-  { label: 'How it works', href: '/how-it-works' },
-  { label: 'Docs', href: '#' },
-  { label: 'GitHub', href: '#' },
-]
+import { SiteHeader } from '@/components/marketing/SiteHeader'
+import { SiteFooter } from '@/components/marketing/SiteFooter'
 
 type Step = {
   step: string
@@ -211,31 +207,7 @@ export default function HowItWorksPage() {
         style={{ background: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.18) 0%, transparent 70%)' }}
       />
 
-      {/* Navigation (matches homepage) */}
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] backdrop-blur-md bg-[#0a0a0a]/80">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-          <a href="/" className="text-[15px] font-semibold tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">
-            Haven
-          </a>
-          <div className="hidden md:flex items-center gap-8">
-            {NAV_LINKS.map((link) => (
-              <a
-                key={link.label}
-                href={link.href}
-                className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200"
-              >
-                {link.label}
-              </a>
-            ))}
-          </div>
-          <div className="flex items-center gap-4">
-            <a href="/login" className="text-sm text-zinc-400 hover:text-[#ededed] transition-colors duration-200">Log in</a>
-            <a href="/signup" className="text-sm px-4 py-1.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20">
-              Get Early Access
-            </a>
-          </div>
-        </div>
-      </nav>
+      <SiteHeader />
 
       {/* Hero */}
       <section className="relative max-w-6xl mx-auto px-6 pt-20 pb-16 md:pt-28 md:pb-24 z-10">
@@ -267,7 +239,7 @@ export default function HowItWorksPage() {
             <a href="/signup" className="px-5 py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/25">
               Get Early Access
             </a>
-            <a href="/demo/x402" className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2">
+            <a href="/protocols/x402" className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2">
               See how x402 works
             </a>
           </div>
@@ -350,33 +322,14 @@ export default function HowItWorksPage() {
             <a href="/signup" className="px-6 py-3 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-xl shadow-indigo-500/30">
               Get Early Access
             </a>
-            <a href="/demo/x402" className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200 underline underline-offset-4 decoration-zinc-700">
+            <a href="/protocols/x402" className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200 underline underline-offset-4 decoration-zinc-700">
               See how x402 works
             </a>
           </div>
         </div>
       </section>
 
-      <div className="border-t border-white/[0.06]" />
-
-      {/* Footer (matches homepage) */}
-      <footer className="max-w-6xl mx-auto px-6 py-8 relative z-10">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div>
-            <span className="block text-sm font-semibold mb-1 bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">
-              Haven
-            </span>
-            <span className="text-xs text-zinc-600">© 2026 Haven. Built on Safe & Gnosis Chain.</span>
-          </div>
-          <div className="flex flex-wrap gap-6">
-            {['Docs', 'GitHub', 'Twitter'].map((link) => (
-              <a key={link} href="#" className="text-xs text-zinc-500 hover:text-[#ededed] transition-colors duration-200">
-                {link}
-              </a>
-            ))}
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

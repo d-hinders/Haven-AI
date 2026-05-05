@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { SiteHeader } from '@/components/marketing/SiteHeader'
+import { SiteFooter } from '@/components/marketing/SiteFooter'
 
 type Phase =
   | 'idle'
   | 'requesting'
-  | 'challenged'
   | 'authorize'
   | 'policy'
-  | 'sign'
-  | 'broadcast'
-  | 'confirmed'
+  | 'minted'
+  | 'present'
+  | 'charging'
+  | 'captured'
   | 'delivered'
 
 interface TimelineEvent {
@@ -21,54 +23,45 @@ interface TimelineEvent {
   phase: Phase
 }
 
-// Realistic demo payload — Base mainnet USDC transfer for a premium API call
 const DEMO = {
-  resourceUrl: 'https://api.research.example/query?q=sector+analysis+2026',
-  resourceLabel: 'Premium research API',
-  amount: '0.05',
-  token: 'USDC',
-  tokenAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  network: 'Base',
-  chainId: 8453,
-  caip2: 'eip155:8453',
-  payTo: '0x4F3ea5d9fE55AAd7F2F00f1eC00cD5BCd8f3bcFc',
+  resourceLabel: 'Premium analytics dashboard — 1 month',
+  amount: '29.00',
+  currency: 'USD',
+  merchant: {
+    name: 'Insightly',
+    host: 'checkout.insightly.example',
+  },
   agent: {
-    name: 'Research Agent',
-    apiKeyPreview: 'sk_agent_d4c8…9f',
+    name: 'Ops Agent',
+    apiKeyPreview: 'sk_agent_a1b9…7e',
     policy: {
-      dailyLimit: '50 USDC',
-      perTxLimit: '1 USDC',
-      allowedCategories: ['api_access', 'data'],
-      allowedNetworks: ['Base', 'Gnosis'],
+      monthlyLimit: '500 USD',
+      perTxLimit: '100 USD',
+      allowedCategories: ['software', 'data'],
     },
-    dailySpent: '3.25',
-    dailyLimitNum: 50,
+    monthlySpent: '142.50',
+    monthlyLimitNum: 500,
   },
-  server: {
-    host: 'api.research.example',
-  },
-  signHash:
-    '0x8b2f4e93a6c1ffde7019a2c5d8b4f16e0a39c7f82bc5d138e40b79aa2c6d4e8f',
-  txHash:
-    '0x7a9e3b1d2c8f4a60bd5e97c1a4f3b6d29e8c05f14a7b89f3d2c1e4a5b6c7d8e9',
-  blockNumber: 14_892_103,
-  gasUsed: '41,228',
+  spt: 'spt_1Q4d8KH5Yj9c8e1f',
+  chargeId: 'ch_3Q4d9MH5Yj9c8e1g',
+  cardLast4: '4242',
+  network: 'Visa',
   steps: [
-    { phase: 'requesting', label: 'Agent requests data' },
-    { phase: 'challenged', label: 'Server returns 402' },
-    { phase: 'authorize', label: 'Forward to Haven' },
+    { phase: 'requesting', label: 'Agent picks item' },
+    { phase: 'authorize', label: 'Request SPT' },
     { phase: 'policy', label: 'Policy evaluation' },
-    { phase: 'sign', label: 'Safe signs transfer' },
-    { phase: 'broadcast', label: 'Broadcast to Base' },
-    { phase: 'confirmed', label: 'On-chain confirmation' },
-    { phase: 'delivered', label: 'Data delivered' },
+    { phase: 'minted', label: 'SPT minted' },
+    { phase: 'present', label: 'Agent presents SPT' },
+    { phase: 'charging', label: 'Stripe authorizes' },
+    { phase: 'captured', label: 'Captured on card' },
+    { phase: 'delivered', label: 'Receipt + access' },
   ] as const,
 }
 
 const POLICY_CHECKS: string[] = [
-  'Within per-tx limit (1 USDC)',
-  `Network ${'Base'} allowed`,
-  'On-chain allowance sufficient',
+  'Within per-tx limit ($100)',
+  'Category "software" allowed',
+  'Monthly remaining sufficient',
 ]
 
 function shortHex(s: string, head = 6, tail = 4) {
@@ -78,12 +71,12 @@ function shortHex(s: string, head = 6, tail = 4) {
 const phaseOrder: Phase[] = [
   'idle',
   'requesting',
-  'challenged',
   'authorize',
   'policy',
-  'sign',
-  'broadcast',
-  'confirmed',
+  'minted',
+  'present',
+  'charging',
+  'captured',
   'delivered',
 ]
 function phaseIndex(p: Phase) {
@@ -98,7 +91,7 @@ function phaseStep(p: Phase): number {
   return i < 0 ? 0 : i + 1
 }
 
-export default function X402DemoPage() {
+export default function MPPDemoPage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [policyProgress, setPolicyProgress] = useState<number>(0)
@@ -128,101 +121,89 @@ export default function X402DemoPage() {
 
     let t = 0
 
-    // 1. Agent sends GET to paywalled API
     t += 400
     schedule(t, () => {
       setPhase('requesting')
       push({
         phase: 'requesting',
-        label: 'Agent requested premium research data',
-        detail: `GET ${DEMO.resourceUrl}`,
+        label: 'Agent selected analytics dashboard',
+        detail: `${DEMO.resourceLabel} • ${DEMO.amount} ${DEMO.currency}`,
       })
     })
 
-    // 2. Server responds with 402
-    t += 1100
-    schedule(t, () => {
-      setPhase('challenged')
-      push({
-        phase: 'challenged',
-        label: 'Server responded 402 Payment Required',
-        detail: `${DEMO.amount} ${DEMO.token} on ${DEMO.network} → ${shortHex(DEMO.payTo)}`,
-      })
-    })
-
-    // 3. Agent forwards challenge to Haven
     t += 1100
     schedule(t, () => {
       setPhase('authorize')
       push({
         phase: 'authorize',
-        label: 'Agent forwarded challenge to Haven',
-        detail: `POST /x402/authorize • ${DEMO.agent.apiKeyPreview}`,
+        label: 'Agent requested SPT from Haven',
+        detail: `POST /mpp/authorize • ${DEMO.agent.apiKeyPreview}`,
       })
     })
 
-    // 4. Haven policy engine evaluates — staggered ticks
     const policyStart = t + 500
     schedule(policyStart, () => {
       setPhase('policy')
       push({
         phase: 'policy',
         label: 'Policy engine evaluating intent',
-        detail: 'Per-tx limit, network allowlist, on-chain allowance',
+        detail: 'Per-tx limit, category allowlist, monthly remaining',
       })
     })
-    // Stagger 4 checks across ~1200ms (300ms per check)
     for (let i = 1; i <= POLICY_CHECKS.length; i++) {
       schedule(policyStart + i * 300, () => setPolicyProgress(i))
     }
-
-    // Policy + ticks total ~500 + 300*4 + 300 = 2000ms
     t += 500 + 300 * POLICY_CHECKS.length + 300
 
-    // 5. Sign
     schedule(t, () => {
-      setPhase('sign')
+      setPhase('minted')
       push({
-        phase: 'sign',
-        label: 'Policy cleared — delegate signed transfer hash',
-        detail: `Remaining today: ${(DEMO.agent.dailyLimitNum - parseFloat(DEMO.agent.dailySpent) - parseFloat(DEMO.amount)).toFixed(2)} ${DEMO.token} • ${shortHex(DEMO.signHash, 8, 6)}`,
+        phase: 'minted',
+        label: 'Haven minted Shared Payment Token',
+        detail: `${DEMO.spt} • scope: ${DEMO.merchant.name} • single-use`,
       })
     })
 
-    // 6. Broadcast
-    t += 900
+    t += 1100
     schedule(t, () => {
-      setPhase('broadcast')
+      setPhase('present')
       push({
-        phase: 'broadcast',
-        label: 'Allowance transfer submitted to Base',
-        detail: 'Safe → ERC-20 transfer via AllowanceModule',
+        phase: 'present',
+        label: 'Agent presented SPT at checkout',
+        detail: `→ ${DEMO.merchant.host}`,
       })
     })
 
-    // 7. Confirmed on Base
-    t += 1600
+    t += 1100
     schedule(t, () => {
-      setPhase('confirmed')
+      setPhase('charging')
       push({
-        phase: 'confirmed',
-        label: `Confirmed in block ${DEMO.blockNumber.toLocaleString()}`,
-        detail: `tx ${shortHex(DEMO.txHash, 10, 8)} • gas ${DEMO.gasUsed}`,
+        phase: 'charging',
+        label: 'Merchant exchanged SPT with Stripe',
+        detail: `Authorize ${DEMO.amount} ${DEMO.currency} • ${DEMO.network} ••${DEMO.cardLast4}`,
       })
     })
 
-    // 8. Agent retries with proof, server delivers data
+    t += 1500
+    schedule(t, () => {
+      setPhase('captured')
+      push({
+        phase: 'captured',
+        label: 'Capture confirmed by card network',
+        detail: `charge ${shortHex(DEMO.chargeId, 8, 6)} • SPT consumed`,
+      })
+    })
+
     t += 1100
     schedule(t, () => {
       setPhase('delivered')
       push({
         phase: 'delivered',
-        label: 'Agent retried with proof — data delivered',
-        detail: `200 OK • ${DEMO.resourceLabel}`,
+        label: 'Merchant granted access — receipt logged',
+        detail: `Remaining this month: ${(DEMO.agent.monthlyLimitNum - parseFloat(DEMO.agent.monthlySpent) - parseFloat(DEMO.amount)).toFixed(2)} ${DEMO.currency}`,
       })
     })
 
-    // 9. Settle — stop the delivery arrow from pulsing
     t += 1200
     schedule(t, () => setSettled(true))
   }, [])
@@ -233,67 +214,42 @@ export default function X402DemoPage() {
 
   return (
     <div className="bg-[#0a0a0a] text-[#ededed] min-h-screen overflow-x-hidden">
-      {/* Top gradient wash */}
       <div
         className="pointer-events-none fixed inset-x-0 top-0 h-[500px] z-0"
         style={{
           background:
-            'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.18) 0%, transparent 70%)',
+            'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(139,92,246,0.18) 0%, transparent 70%)',
         }}
       />
 
-      {/* Nav */}
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] backdrop-blur-md bg-[#0a0a0a]/80">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link
-            href="/"
-            className="text-[15px] font-semibold tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent"
-          >
-            Haven
-          </Link>
-          <div className="flex items-center gap-4">
-            <Link
-              href="/"
-              className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors"
-            >
-              ← Back
-            </Link>
-            <Link
-              href="/signup"
-              className="text-sm px-4 py-1.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white font-medium hover:from-indigo-400 hover:to-violet-500 transition-all shadow-lg shadow-indigo-500/20"
-            >
-              Get Early Access
-            </Link>
-          </div>
-        </div>
-      </nav>
+      <SiteHeader />
 
       {/* Hero */}
       <section className="relative max-w-6xl mx-auto px-6 pt-16 pb-10 z-10">
-        <div className="inline-flex items-center gap-2 mb-6 px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-medium">
-          How x402 works
+        <div className="inline-flex items-center gap-2 mb-6 px-3 py-1 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300 text-xs font-medium">
+          How Stripe MPP works
         </div>
         <h1 className="text-3xl md:text-5xl font-bold tracking-tight leading-[1.05] mb-4 max-w-3xl">
-          <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">
+          <span className="bg-gradient-to-br from-white via-white to-violet-200 bg-clip-text text-transparent">
             Watch an AI agent
           </span>
           <br />
-          <span className="bg-gradient-to-br from-white via-indigo-100 to-violet-300 bg-clip-text text-transparent">
-            pay the internet.
+          <span className="bg-gradient-to-br from-white via-violet-100 to-fuchsia-300 bg-clip-text text-transparent">
+            check out with a card.
           </span>
         </h1>
         <p className="text-base md:text-lg text-zinc-400 leading-relaxed max-w-2xl">
-          An agent hits a paywall. Just seconds later it has the data — no card,
-          no human, no key. Press play to see one HTTP 402 become a settled
-          transaction on Base.
+          An agent buys a SaaS subscription. Haven mints a one-time, scope-bound
+          payment token, the merchant charges Stripe, and the receipt lands in your
+          audit log — without a card number ever leaving Haven.
         </p>
       </section>
 
-      {/* What is x402 */}
+      {/* What is MPP */}
       <section className="relative max-w-6xl mx-auto px-6 pb-10 z-10">
         <div className="flex items-baseline gap-4 mb-6">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
-            [what is x402]
+          <span className="text-xs font-mono bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
+            [what is mpp]
           </span>
           <h2 className="text-xs text-zinc-500 uppercase tracking-widest">
             The standard
@@ -302,21 +258,21 @@ export default function X402DemoPage() {
         <div className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-6 items-start">
           <div className="space-y-4 text-sm md:text-[15px] text-zinc-400 leading-relaxed">
             <p>
-              <span className="text-zinc-200 font-medium">x402</span> is an open
-              payment standard built on top of the long-dormant{' '}
-              <span className="font-mono text-zinc-300">HTTP 402 Payment Required</span>{' '}
-              status code. Originally proposed by Coinbase, it lets any web service
-              charge for a single request — no account, no API key, no card on file.
-              The client pays a small amount in stablecoin, attaches the proof, and
-              the server unlocks the resource.
+              <span className="text-zinc-200 font-medium">Stripe MPP</span> — the{' '}
+              <span className="text-zinc-300">Machine Payments Protocol</span> — is
+              an open standard for agents transacting on existing card rails.
+              Instead of giving an agent a card number, you give it a{' '}
+              <span className="font-mono text-zinc-300">Shared Payment Token (SPT)</span>:
+              a one-time, scope-bound credential that authorises a single charge at
+              a single merchant, up to a single amount.
             </p>
             <p>
-              That's the unlock for agentic workflows. AI agents discover and use
-              tools the same way humans browse the web: one request at a time,
-              often across services they've never seen before. With x402, an agent
-              can pay per call for an API, a piece of data, or a unit of compute —
-              programmatically, without a human in the checkout loop. It turns the
-              web into something machines can actually transact on.
+              That maps cleanly onto how agents already work. An agent decides what
+              to buy, asks Haven for an SPT, and presents it at checkout. The
+              merchant redeems the SPT through Stripe; the card network does the
+              rest. The agent never sees a PAN, the merchant never holds a re-usable
+              credential, and Haven keeps the policy and audit trail in one place —
+              the same one that gates on-chain spend.
             </p>
           </div>
           <div className="bg-[#0b0b0f] border border-white/[0.06] rounded-md p-5">
@@ -325,24 +281,24 @@ export default function X402DemoPage() {
             </div>
             <ol className="space-y-3 text-sm">
               <li className="flex items-start gap-3">
-                <span className="text-[11px] font-mono text-indigo-300 tabular-nums mt-0.5">01</span>
+                <span className="text-[11px] font-mono text-violet-300 tabular-nums mt-0.5">01</span>
                 <div>
-                  <div className="text-zinc-200">Request → 402</div>
-                  <div className="text-xs text-zinc-500">Server asks for payment.</div>
+                  <div className="text-zinc-200">Intent → SPT</div>
+                  <div className="text-xs text-zinc-500">Wallet mints a scoped token.</div>
                 </div>
               </li>
               <li className="flex items-start gap-3">
-                <span className="text-[11px] font-mono text-indigo-300 tabular-nums mt-0.5">02</span>
+                <span className="text-[11px] font-mono text-violet-300 tabular-nums mt-0.5">02</span>
                 <div>
-                  <div className="text-zinc-200">Pay → proof</div>
-                  <div className="text-xs text-zinc-500">Client signs and settles on-chain.</div>
+                  <div className="text-zinc-200">Present → charge</div>
+                  <div className="text-xs text-zinc-500">Merchant redeems SPT through Stripe.</div>
                 </div>
               </li>
               <li className="flex items-start gap-3">
-                <span className="text-[11px] font-mono text-indigo-300 tabular-nums mt-0.5">03</span>
+                <span className="text-[11px] font-mono text-violet-300 tabular-nums mt-0.5">03</span>
                 <div>
-                  <div className="text-zinc-200">Retry → 200</div>
-                  <div className="text-xs text-zinc-500">Server returns the resource.</div>
+                  <div className="text-zinc-200">Capture → fulfil</div>
+                  <div className="text-xs text-zinc-500">Card network settles, agent gets access.</div>
                 </div>
               </li>
             </ol>
@@ -352,25 +308,24 @@ export default function X402DemoPage() {
 
       {/* Stage */}
       <section className="relative max-w-6xl mx-auto px-6 pb-6 z-10">
-        {/* Flow intro + actor legend */}
         <div className="mb-6 max-w-3xl">
           <p className="text-sm md:text-[15px] text-zinc-400 leading-relaxed">
-            Below is one x402 payment in motion: a Research Agent buying a single
-            API call for $0.05 USDC. Four actors take part — watch how a request,
-            a 402, and a settled tx flow between them.
+            Below is one MPP payment in motion: an Ops Agent buying a $29 monthly
+            analytics subscription. Four actors take part — watch how an intent, an
+            SPT, and a captured charge flow between them.
           </p>
         </div>
         <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-          {(['agent', 'server', 'haven', 'chain'] as const).map((kind) => {
+          {(['agent', 'merchant', 'haven', 'stripe'] as const).map((kind) => {
             const cfg = COLUMN_CONFIG[kind]
             const role =
               kind === 'agent'
-                ? 'The AI making the request'
-                : kind === 'server'
-                ? 'The API charging for access'
+                ? 'The AI making the purchase'
+                : kind === 'merchant'
+                ? 'The store taking the payment'
                 : kind === 'haven'
-                ? 'Policy engine + Safe signer'
-                : 'The settlement chain'
+                ? 'Policy engine + token mint'
+                : 'Card network + settlement'
             return (
               <div
                 key={kind}
@@ -396,17 +351,17 @@ export default function X402DemoPage() {
         <div className="border border-white/[0.06] rounded-lg bg-[#0a0a0f]/40 p-5 md:p-7">
           <div className="flex items-center justify-between mb-5 gap-3">
             <div className="flex items-baseline gap-3 min-w-0">
-              <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
+              <span className="text-xs font-mono bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
                 [flow]
               </span>
               <h3 className="text-sm font-medium text-zinc-200 truncate">
-                x402 payment flow
+                MPP payment flow
               </h3>
             </div>
             <div
               className={`shrink-0 inline-flex items-center gap-2 px-2.5 py-1 rounded border text-[11px] font-mono transition-colors ${
                 isRunning
-                  ? 'border-indigo-400/50 bg-indigo-500/10 text-indigo-200'
+                  ? 'border-violet-400/50 bg-violet-500/10 text-violet-200'
                   : isDone
                   ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-300'
                   : 'border-white/[0.08] text-zinc-500'
@@ -414,8 +369,8 @@ export default function X402DemoPage() {
             >
               {isRunning && (
                 <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-violet-400" />
                 </span>
               )}
               <span className="tabular-nums">
@@ -428,103 +383,105 @@ export default function X402DemoPage() {
             </div>
           </div>
 
-        {/* 2x2 actor grid with 3 arrows */}
-        <div
-          className="grid gap-0"
-          style={{
-            gridTemplateColumns: '1fr 72px 1fr',
-            gridTemplateRows: 'auto 72px auto',
-          }}
-        >
-          {/* Row 1: Agent — [H arrow] — Server */}
-          <div className="row-start-1 col-start-1">
-            <StageColumn
-              kind="agent"
-              phase={phase}
-              active={
-                phase === 'requesting' ||
-                phase === 'challenged' ||
-                phase === 'authorize' ||
-                (phase === 'delivered' && !settled)
-              }
-            />
-          </div>
-          <div className="row-start-1 col-start-2 flex items-center justify-center">
-            <FlowArrow
-              orientation="horizontal"
-              reverse={phase === 'challenged' || phase === 'delivered'}
-              active={
-                phase === 'requesting' ||
-                phase === 'challenged' ||
-                (phase === 'delivered' && !settled)
-              }
-              done={reached(phase, 'challenged')}
-              color={reached(phase, 'delivered') ? 'emerald' : 'indigo'}
-              label={
-                phase === 'requesting'
-                  ? 'GET'
-                  : phase === 'challenged'
-                  ? '402'
-                  : phase === 'delivered' && !settled
-                  ? '200 OK'
-                  : undefined
-              }
-            />
-          </div>
-          <div className="row-start-1 col-start-3">
-            <StageColumn
-              kind="server"
-              phase={phase}
-              active={
-                phase === 'requesting' ||
-                phase === 'challenged' ||
-                (phase === 'delivered' && !settled)
-              }
-              policyProgress={policyProgress}
-            />
-          </div>
+          {/* 2x2 actor grid with 3 arrows */}
+          <div
+            className="grid gap-0"
+            style={{
+              gridTemplateColumns: '1fr 72px 1fr',
+              gridTemplateRows: 'auto 72px auto',
+            }}
+          >
+            {/* Row 1: Agent — [H arrow] — Merchant */}
+            <div className="row-start-1 col-start-1">
+              <StageColumn
+                kind="agent"
+                phase={phase}
+                active={
+                  phase === 'requesting' ||
+                  phase === 'authorize' ||
+                  phase === 'present' ||
+                  (phase === 'delivered' && !settled)
+                }
+              />
+            </div>
+            <div className="row-start-1 col-start-2 flex items-center justify-center">
+              <FlowArrow
+                orientation="horizontal"
+                reverse={phase === 'delivered'}
+                active={
+                  phase === 'present' ||
+                  (phase === 'delivered' && !settled)
+                }
+                done={reached(phase, 'present')}
+                color={reached(phase, 'delivered') ? 'emerald' : 'violet'}
+                label={
+                  phase === 'present'
+                    ? 'SPT'
+                    : phase === 'delivered' && !settled
+                    ? 'access'
+                    : undefined
+                }
+              />
+            </div>
+            <div className="row-start-1 col-start-3">
+              <StageColumn
+                kind="merchant"
+                phase={phase}
+                active={
+                  phase === 'present' ||
+                  phase === 'charging' ||
+                  (phase === 'delivered' && !settled)
+                }
+              />
+            </div>
 
-          {/* Row 2: [V arrow] — empty — empty */}
-          <div className="row-start-2 col-start-1 flex items-center justify-center">
-            <FlowArrow
-              orientation="vertical"
-              reverse={false}
-              active={phase === 'authorize'}
-              done={reached(phase, 'policy')}
-              color="indigo"
-              label={phase === 'authorize' ? 'authorize' : undefined}
-            />
-          </div>
-          <div className="row-start-2 col-start-2" />
-          <div className="row-start-2 col-start-3" />
+            {/* Row 2: [V arrow] — empty — [V arrow] */}
+            <div className="row-start-2 col-start-1 flex items-center justify-center">
+              <FlowArrow
+                orientation="vertical"
+                reverse={phase === 'minted'}
+                active={phase === 'authorize' || phase === 'minted'}
+                done={reached(phase, 'present')}
+                color="violet"
+                label={
+                  phase === 'authorize'
+                    ? 'authorize'
+                    : phase === 'minted'
+                    ? 'SPT'
+                    : undefined
+                }
+              />
+            </div>
+            <div className="row-start-2 col-start-2" />
+            <div className="row-start-2 col-start-3 flex items-center justify-center">
+              <FlowArrow
+                orientation="vertical"
+                reverse={false}
+                active={phase === 'charging'}
+                done={reached(phase, 'captured')}
+                color="violet"
+                label={phase === 'charging' ? 'charge' : undefined}
+              />
+            </div>
 
-          {/* Row 3: Haven — [H arrow] — Chain */}
-          <div className="row-start-3 col-start-1">
-            <StageColumn
-              kind="haven"
-              phase={phase}
-              active={phase === 'policy' || phase === 'sign'}
-              policyProgress={policyProgress}
-            />
+            {/* Row 3: Haven — empty — Stripe */}
+            <div className="row-start-3 col-start-1">
+              <StageColumn
+                kind="haven"
+                phase={phase}
+                active={phase === 'policy' || phase === 'minted'}
+                policyProgress={policyProgress}
+              />
+            </div>
+            <div className="row-start-3 col-start-2" />
+            <div className="row-start-3 col-start-3">
+              <StageColumn
+                kind="stripe"
+                phase={phase}
+                active={phase === 'charging' || phase === 'captured'}
+              />
+            </div>
           </div>
-          <div className="row-start-3 col-start-2 flex items-center justify-center">
-            <FlowArrow
-              orientation="horizontal"
-              reverse={false}
-              active={phase === 'broadcast'}
-              done={reached(phase, 'confirmed')}
-              color="indigo"
-              label={phase === 'broadcast' ? 'submit tx' : undefined}
-            />
-          </div>
-          <div className="row-start-3 col-start-3">
-            <StageColumn
-              kind="chain"
-              phase={phase}
-              active={phase === 'broadcast' || phase === 'confirmed'}
-            />
-          </div>
-        </div>
         </div>
 
         {/* Controls */}
@@ -532,7 +489,7 @@ export default function X402DemoPage() {
           {!isRunning && !isDone && (
             <button
               onClick={run}
-              className="group px-5 py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all shadow-lg shadow-indigo-500/25 inline-flex items-center gap-2"
+              className="group px-5 py-2.5 rounded-md bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white text-sm font-medium hover:from-violet-400 hover:to-fuchsia-500 transition-all shadow-lg shadow-violet-500/25 inline-flex items-center gap-2"
             >
               <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M6 4l10 6-10 6V4z" />
@@ -545,14 +502,14 @@ export default function X402DemoPage() {
               disabled
               className="px-5 py-2.5 rounded-md bg-white/[0.06] text-zinc-500 text-sm font-medium inline-flex items-center gap-2 cursor-not-allowed"
             >
-              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+              <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
               Settling payment…
             </button>
           )}
           {isDone && (
             <button
               onClick={run}
-              className="px-5 py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all shadow-lg shadow-indigo-500/25 inline-flex items-center gap-2"
+              className="px-5 py-2.5 rounded-md bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white text-sm font-medium hover:from-violet-400 hover:to-fuchsia-500 transition-all shadow-lg shadow-violet-500/25 inline-flex items-center gap-2"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
@@ -566,7 +523,7 @@ export default function X402DemoPage() {
       {/* Timeline */}
       <section className="relative max-w-6xl mx-auto px-6 py-10 z-10">
         <div className="flex items-baseline gap-4 mb-6">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
+          <span className="text-xs font-mono bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
             [timeline]
           </span>
           <h2 className="text-xs text-zinc-500 uppercase tracking-widest">
@@ -611,21 +568,21 @@ export default function X402DemoPage() {
           className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-[400px]"
           style={{
             background:
-              'radial-gradient(ellipse 60% 80% at 50% 50%, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.06) 40%, transparent 70%)',
+              'radial-gradient(ellipse 60% 80% at 50% 50%, rgba(139,92,246,0.12) 0%, rgba(217,70,239,0.06) 40%, transparent 70%)',
           }}
         />
         <div className="relative">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight mb-4">
-            <span className="bg-gradient-to-br from-white to-indigo-200 bg-clip-text text-transparent">
-              Build an agent that pays its own way.
+            <span className="bg-gradient-to-br from-white to-violet-200 bg-clip-text text-transparent">
+              One policy. Card rails included.
             </span>
           </h2>
           <p className="text-zinc-500 text-sm mb-8">
-            Policies, approvals, and receipts included. Keys optional.
+            Same allowance model, no card numbers in agent memory.
           </p>
           <Link
             href="/signup"
-            className="inline-block px-6 py-3 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all shadow-xl shadow-indigo-500/30"
+            className="inline-block px-6 py-3 rounded-md bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white text-sm font-medium hover:from-violet-400 hover:to-fuchsia-500 transition-all shadow-xl shadow-violet-500/30"
           >
             Get Early Access
           </Link>
@@ -654,10 +611,12 @@ export default function X402DemoPage() {
           100% { top: calc(100% - 0.5rem); opacity: 0; }
         }
         @keyframes cardPulse {
-          0%, 100% { box-shadow: inset 0 0 0 1px rgba(99,102,241,0.25); }
-          50% { box-shadow: inset 0 0 0 1px rgba(99,102,241,0.55); }
+          0%, 100% { box-shadow: inset 0 0 0 1px rgba(139,92,246,0.25); }
+          50% { box-shadow: inset 0 0 0 1px rgba(139,92,246,0.55); }
         }
       `}</style>
+
+      <SiteFooter />
     </div>
   )
 }
@@ -670,7 +629,7 @@ function StageColumn({
   active,
   policyProgress = 0,
 }: {
-  kind: 'agent' | 'haven' | 'chain' | 'server'
+  kind: 'agent' | 'haven' | 'stripe' | 'merchant'
   phase: Phase
   active: boolean
   policyProgress?: number
@@ -680,24 +639,24 @@ function StageColumn({
     <div
       className={`relative bg-[#0b0b0f] border rounded-md p-5 h-full transition-all duration-300 ${
         active
-          ? 'border-indigo-400/70 shadow-[0_0_60px_-6px_rgba(99,102,241,0.55)] ring-1 ring-indigo-400/30'
+          ? 'border-violet-400/70 shadow-[0_0_60px_-6px_rgba(139,92,246,0.55)] ring-1 ring-violet-400/30'
           : 'border-white/[0.06]'
       }`}
     >
       {active && (
         <>
-          <div className="absolute -top-px inset-x-4 h-px bg-gradient-to-r from-transparent via-indigo-400 to-transparent" />
+          <div className="absolute -top-px inset-x-4 h-px bg-gradient-to-r from-transparent via-violet-400 to-transparent" />
           <div
             className="pointer-events-none absolute inset-0 rounded-md"
             style={{ animation: 'cardPulse 2s ease-in-out infinite' }}
           />
-          <div className="absolute top-3 right-3 flex items-center gap-1.5 text-[10px] font-mono text-indigo-200 z-10 px-1.5 py-0.5 rounded border border-indigo-400/40 bg-indigo-500/15">
+          <div className="absolute top-3 right-3 flex items-center gap-1.5 text-[10px] font-mono text-violet-200 z-10 px-1.5 py-0.5 rounded border border-violet-400/40 bg-violet-500/15">
             <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-violet-400" />
             </span>
-            <span className="tabular-nums text-indigo-300">{phaseStep(phase)}</span>
-            <span className="text-indigo-100/90">{DEMO.steps[Math.max(0, phaseStep(phase) - 1)]?.label}</span>
+            <span className="tabular-nums text-violet-300">{phaseStep(phase)}</span>
+            <span className="text-violet-100/90">{DEMO.steps[Math.max(0, phaseStep(phase) - 1)]?.label}</span>
           </div>
         </>
       )}
@@ -718,9 +677,9 @@ function StageColumn({
       </div>
 
       {kind === 'agent' && <AgentContent phase={phase} />}
-      {kind === 'server' && <ServerContent phase={phase} />}
+      {kind === 'merchant' && <MerchantContent phase={phase} />}
       {kind === 'haven' && <HavenContent phase={phase} policyProgress={policyProgress} />}
-      {kind === 'chain' && <ChainContent phase={phase} />}
+      {kind === 'stripe' && <StripeContent phase={phase} />}
     </div>
   )
 }
@@ -729,40 +688,40 @@ const COLUMN_CONFIG = {
   agent: {
     kicker: 'Client',
     title: DEMO.agent.name,
-    iconGradient: 'from-sky-500 to-indigo-600',
+    iconGradient: 'from-sky-500 to-violet-600',
     icon: (
       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
       </svg>
     ),
   },
-  server: {
-    kicker: 'Resource server',
-    title: DEMO.server.host,
+  merchant: {
+    kicker: 'Merchant',
+    title: DEMO.merchant.name,
     iconGradient: 'from-amber-500 to-orange-600',
     icon: (
       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
       </svg>
     ),
   },
   haven: {
     kicker: 'Policy engine',
     title: 'Haven',
-    iconGradient: 'from-indigo-500 to-violet-600',
+    iconGradient: 'from-violet-500 to-fuchsia-600',
     icon: (
       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
       </svg>
     ),
   },
-  chain: {
+  stripe: {
     kicker: 'Settlement',
-    title: 'Base',
-    iconGradient: 'from-violet-500 to-fuchsia-600',
+    title: 'Stripe + card network',
+    iconGradient: 'from-fuchsia-500 to-pink-600',
     icon: (
       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5.25-1.5a3.75 3.75 0 01-7.5 0" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
       </svg>
     ),
   },
@@ -770,31 +729,34 @@ const COLUMN_CONFIG = {
 
 function AgentContent({ phase }: { phase: Phase }) {
   const hasRequest = reached(phase, 'requesting')
-  const hasChallenge = reached(phase, 'challenged')
+  const hasMinted = reached(phase, 'minted')
+  const isPresenting = reached(phase, 'present')
   const isDelivered = reached(phase, 'delivered')
-  const isWaiting = reached(phase, 'authorize') && !isDelivered
+  const isWaiting = reached(phase, 'authorize') && !hasMinted
 
   const subtext =
     phase === 'idle'
-      ? 'Ready to request premium research data.'
-      : !hasChallenge
-      ? 'Sending request to paid API…'
+      ? 'Ready to subscribe to analytics dashboard.'
+      : !hasMinted
+      ? isWaiting
+        ? 'Waiting for Haven to mint a payment token…'
+        : 'Drafting purchase intent.'
+      : !isPresenting
+      ? 'Got SPT — heading to checkout.'
       : isDelivered
-      ? 'Got the data after payment was confirmed.'
-      : isWaiting
-      ? 'Received 402 — asked Haven to settle.'
-      : 'Received 402 — forwarding to Haven.'
+      ? 'Subscription active. Receipt logged.'
+      : 'Presenting SPT to merchant…'
 
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">{subtext}</div>
 
-      {hasRequest && (
+      {hasRequest && !hasMinted && (
         <div className="rounded border border-white/[0.06] bg-black/30 p-3 font-mono text-[11px]">
           <div className="flex items-center gap-2">
             <span className="text-zinc-500 shrink-0">→</span>
-            <span className="text-zinc-400 truncate">GET /query?q=sector+analysis</span>
-            {!hasChallenge && (
+            <span className="text-zinc-400 truncate">intent: subscribe • {DEMO.amount} {DEMO.currency}</span>
+            {!hasMinted && (
               <span className="ml-auto inline-flex gap-1">
                 <span className="w-1 h-1 rounded-full bg-zinc-500" style={{ animation: 'bounce 1s ease-in-out infinite' }} />
                 <span className="w-1 h-1 rounded-full bg-zinc-500" style={{ animation: 'bounce 1s ease-in-out 0.15s infinite' }} />
@@ -805,22 +767,22 @@ function AgentContent({ phase }: { phase: Phase }) {
         </div>
       )}
 
+      {hasMinted && !isDelivered && (
+        <div className="rounded border border-violet-500/30 bg-violet-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
+          <div className="text-violet-300">SPT acquired</div>
+          <div className="text-zinc-500 mt-1 truncate">{shortHex(DEMO.spt, 10, 4)}</div>
+        </div>
+      )}
+
       {isDelivered && (
         <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
           <div className="flex items-center gap-2 text-emerald-300">
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
             </svg>
-            ← 200 OK • research.json
+            access granted
           </div>
-          <div className="text-zinc-500 mt-1">Sector analysis 2026 delivered</div>
-        </div>
-      )}
-
-      {isWaiting && (
-        <div className="text-[11px] text-zinc-500 font-mono flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-          waiting for Haven to settle…
+          <div className="text-zinc-500 mt-1">{DEMO.resourceLabel}</div>
         </div>
       )}
 
@@ -831,44 +793,33 @@ function AgentContent({ phase }: { phase: Phase }) {
   )
 }
 
-function ServerContent({ phase }: { phase: Phase }) {
-  const hasIncoming = reached(phase, 'requesting')
-  const hasChallenge = reached(phase, 'challenged')
+function MerchantContent({ phase }: { phase: Phase }) {
+  const isPresenting = reached(phase, 'present')
+  const isCharging = reached(phase, 'charging')
   const isDelivered = reached(phase, 'delivered')
-  const awaitingProof =
-    reached(phase, 'authorize') && !isDelivered
 
   const subtext =
     phase === 'idle'
-      ? 'Paid API endpoint — serves on proof of payment.'
-      : !hasChallenge
-      ? 'Receiving request from agent…'
+      ? 'Stripe-MPP-enabled checkout.'
+      : !isPresenting
+      ? 'Waiting for an SPT at checkout…'
       : isDelivered
-      ? 'Payment verified — content delivered.'
-      : awaitingProof
-      ? 'Awaiting payment proof…'
-      : 'Returned 402 Payment Required.'
+      ? 'Charge captured — granting access.'
+      : isCharging
+      ? 'Redeeming SPT through Stripe…'
+      : 'SPT received — submitting to Stripe.'
 
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">{subtext}</div>
 
-      {hasIncoming && !hasChallenge && (
-        <div className="rounded border border-white/[0.06] bg-black/30 p-3 font-mono text-[11px]">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-            <span className="text-zinc-400">processing /query…</span>
-          </div>
-        </div>
-      )}
-
-      {hasChallenge && !isDelivered && (
-        <div className="rounded border border-amber-500/30 bg-amber-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
-          <div className="text-amber-300">→ 402 Payment Required</div>
+      {isPresenting && !isDelivered && (
+        <div className="rounded border border-violet-500/30 bg-violet-500/[0.06] p-3 font-mono text-[11px] animate-[fadeInUp_0.3s_ease-out]">
+          <div className="text-violet-300">→ POST /v1/charges</div>
           <div className="text-zinc-500 mt-1">
-            pay {DEMO.amount} {DEMO.token} → {shortHex(DEMO.payTo)}
+            spt {shortHex(DEMO.spt, 8, 4)}
           </div>
-          <div className="text-zinc-600 mt-0.5">network: {DEMO.network}</div>
+          <div className="text-zinc-600 mt-0.5">amount: {DEMO.amount} {DEMO.currency}</div>
         </div>
       )}
 
@@ -878,14 +829,14 @@ function ServerContent({ phase }: { phase: Phase }) {
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
             </svg>
-            → 200 OK • research.json
+            paid · seat granted
           </div>
-          <div className="text-zinc-500 mt-1">{DEMO.resourceLabel}</div>
+          <div className="text-zinc-500 mt-1">{DEMO.merchant.host}</div>
         </div>
       )}
 
       <div className="text-[11px] text-zinc-600">
-        price <span className="text-zinc-400 font-mono">{DEMO.amount} {DEMO.token} / call</span>
+        price <span className="text-zinc-400 font-mono">{DEMO.amount} {DEMO.currency} / mo</span>
       </div>
     </div>
   )
@@ -899,7 +850,7 @@ function HavenContent({
   policyProgress: number
 }) {
   const inPolicy = phase === 'policy'
-  const afterPolicy = reached(phase, 'sign')
+  const afterPolicy = reached(phase, 'minted')
 
   function checkStatus(i: number): 'pass' | 'pending' | 'idle' {
     if (afterPolicy) return 'pass'
@@ -912,7 +863,7 @@ function HavenContent({
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">
-        Evaluating intent against the agent policy.
+        Evaluating intent, then minting a scope-bound SPT.
       </div>
       <ul className="space-y-1.5">
         {POLICY_CHECKS.map((label, i) => {
@@ -939,45 +890,45 @@ function HavenContent({
         })}
       </ul>
       {afterPolicy && (
-        <div className="rounded border border-indigo-500/30 bg-indigo-500/[0.06] p-2.5 font-mono text-[11px] text-indigo-200 animate-[fadeInUp_0.3s_ease-out]">
-          sign_hash {shortHex(DEMO.signHash, 8, 6)}
+        <div className="rounded border border-violet-500/30 bg-violet-500/[0.06] p-2.5 font-mono text-[11px] text-violet-200 animate-[fadeInUp_0.3s_ease-out]">
+          spt {shortHex(DEMO.spt, 8, 4)}
         </div>
       )}
     </div>
   )
 }
 
-function ChainContent({ phase }: { phase: Phase }) {
+function StripeContent({ phase }: { phase: Phase }) {
   return (
     <div className="space-y-3">
       <div className="text-xs text-zinc-500 leading-relaxed">
-        Safe executes allowance transfer via AllowanceModule.
+        Redeems SPT, charges the card on file via the network.
       </div>
-      {!reached(phase, 'broadcast') && (
+      {!reached(phase, 'charging') && (
         <div className="rounded border border-white/[0.06] bg-black/30 p-3 text-[11px] text-zinc-600">
-          awaiting submission
+          awaiting SPT
         </div>
       )}
-      {reached(phase, 'broadcast') && !reached(phase, 'confirmed') && (
-        <div className="rounded border border-sky-500/30 bg-sky-500/[0.05] p-3 font-mono text-[11px] text-sky-200">
+      {reached(phase, 'charging') && !reached(phase, 'captured') && (
+        <div className="rounded border border-fuchsia-500/30 bg-fuchsia-500/[0.05] p-3 font-mono text-[11px] text-fuchsia-200">
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
-            pending on mempool…
+            <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-400 animate-pulse" />
+            authorizing on {DEMO.network}…
           </div>
-          <div className="text-sky-300/60 mt-1">{shortHex(DEMO.txHash, 8, 6)}</div>
+          <div className="text-fuchsia-300/60 mt-1">••{DEMO.cardLast4}</div>
         </div>
       )}
-      {reached(phase, 'confirmed') && (
+      {reached(phase, 'captured') && (
         <div className="rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-3 font-mono text-[11px] text-emerald-200 animate-[fadeInUp_0.3s_ease-out]">
           <div className="flex items-center gap-2">
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
             </svg>
-            confirmed
+            captured
           </div>
-          <div className="text-emerald-300/70 mt-1 truncate">{shortHex(DEMO.txHash, 10, 8)}</div>
+          <div className="text-emerald-300/70 mt-1 truncate">{shortHex(DEMO.chargeId, 10, 6)}</div>
           <div className="text-emerald-300/50 mt-0.5">
-            block {DEMO.blockNumber.toLocaleString()} • {DEMO.gasUsed} gas
+            {DEMO.amount} {DEMO.currency} • {DEMO.network} ••{DEMO.cardLast4}
           </div>
         </div>
       )}
@@ -995,7 +946,7 @@ function PolicyDot({ status }: { status: 'pass' | 'pending' | 'idle' }) {
   }
   if (status === 'pending') {
     return (
-      <span className="w-2.5 h-2.5 rounded-full border-2 border-zinc-500 border-t-indigo-400 animate-spin shrink-0" />
+      <span className="w-2.5 h-2.5 rounded-full border-2 border-zinc-500 border-t-violet-400 animate-spin shrink-0" />
     )
   }
   return <span className="w-2.5 h-2.5 rounded-full border border-zinc-700 shrink-0" />
@@ -1005,15 +956,15 @@ function phaseDotColor(p: Phase) {
   switch (p) {
     case 'requesting':
       return 'bg-sky-400'
-    case 'challenged':
-      return 'bg-amber-400'
     case 'authorize':
     case 'policy':
-    case 'sign':
-      return 'bg-indigo-400'
-    case 'broadcast':
-      return 'bg-sky-400'
-    case 'confirmed':
+      return 'bg-violet-400'
+    case 'minted':
+    case 'present':
+      return 'bg-violet-400'
+    case 'charging':
+      return 'bg-fuchsia-400'
+    case 'captured':
     case 'delivered':
       return 'bg-emerald-400'
     default:
@@ -1028,14 +979,14 @@ function FlowArrow({
   reverse,
   active,
   done,
-  color = 'indigo',
+  color = 'violet',
   label,
 }: {
   orientation: 'horizontal' | 'vertical'
   reverse: boolean
   active: boolean
   done: boolean
-  color?: 'indigo' | 'emerald'
+  color?: 'violet' | 'emerald'
   label?: string
 }) {
   const isH = orientation === 'horizontal'
@@ -1049,11 +1000,11 @@ function FlowArrow({
           label: 'text-emerald-300',
         }
       : {
-          line: 'bg-gradient-to-r from-indigo-500/30 via-indigo-400 to-indigo-500/30',
-          lineV: 'bg-gradient-to-b from-indigo-500/30 via-indigo-400 to-indigo-500/30',
-          dot: 'bg-indigo-400',
-          shadow: 'shadow-[0_0_12px_rgba(99,102,241,0.8)]',
-          label: 'text-indigo-300',
+          line: 'bg-gradient-to-r from-violet-500/30 via-violet-400 to-violet-500/30',
+          lineV: 'bg-gradient-to-b from-violet-500/30 via-violet-400 to-violet-500/30',
+          dot: 'bg-violet-400',
+          shadow: 'shadow-[0_0_12px_rgba(139,92,246,0.8)]',
+          label: 'text-violet-300',
         }
 
   return (
@@ -1062,7 +1013,6 @@ function FlowArrow({
         isH ? 'w-full h-12' : 'h-full w-12'
       }`}
     >
-      {/* Static line */}
       <div
         className={`${
           isH
@@ -1071,7 +1021,6 @@ function FlowArrow({
         } transition-colors duration-300`}
       />
 
-      {/* Moving dot */}
       {active && (
         <span
           className={`absolute w-2 h-2 rounded-full ${palette.dot} ${palette.shadow}`}
@@ -1093,7 +1042,6 @@ function FlowArrow({
         />
       )}
 
-      {/* Optional label */}
       {label && active && (
         <span
           className={`absolute ${

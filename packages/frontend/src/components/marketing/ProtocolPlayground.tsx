@@ -209,7 +209,6 @@ export function ProtocolPlayground({ kind }: { kind: ProtocolKind }) {
           active={!isDone && ['requesting', 'challenged'].includes(phase)}
           done={reached(phase, 'delivered')}
           complete={isDone}
-          success={reached(phase, 'delivered')}
           lines={[
             reached(phase, 'requesting') ? 'Request received' : 'Ready',
             reached(phase, 'challenged') ? demo.challenge : 'Payment terms prepared',
@@ -279,7 +278,6 @@ export function ProtocolPlayground({ kind }: { kind: ProtocolKind }) {
           active={['broadcast', 'confirmed'].includes(phase)}
           done={reached(phase, 'confirmed')}
           complete={isDone}
-          success={reached(phase, 'confirmed')}
           lines={[
             reached(phase, 'broadcast') ? 'Transfer submitted' : 'Waiting',
             reached(phase, 'confirmed') ? 'Block 14,892,103' : demo.amount,
@@ -327,7 +325,6 @@ function StageCard({
   active,
   done,
   complete = false,
-  success = false,
   children,
 }: {
   className?: string
@@ -337,7 +334,6 @@ function StageCard({
   active: boolean
   done: boolean
   complete?: boolean
-  success?: boolean
   children?: ReactNode
 }) {
   return (
@@ -346,9 +342,7 @@ function StageCard({
         active
           ? 'border-[var(--v2-brand)]/45 bg-[var(--v2-brand-soft)]/55 shadow-[0_12px_32px_-18px_rgba(79,70,229,0.34)]'
           : done
-          ? success
-            ? 'border-[var(--v2-success)]/25 bg-[var(--v2-success-soft)]/70'
-            : 'border-[var(--v2-border)] bg-white'
+          ? 'border-[var(--v2-border)] bg-white'
           : 'border-[var(--v2-border)] bg-white'
       } h-full ${className}`}
     >

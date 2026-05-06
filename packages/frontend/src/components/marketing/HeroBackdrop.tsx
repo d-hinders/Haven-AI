@@ -1,6 +1,6 @@
 export function HeroBackdrop({ variant = 'default' }: { variant?: 'default' | 'soft' }) {
   return (
-    <div aria-hidden className="v2-mesh-drift pointer-events-none absolute inset-0 overflow-hidden">
+    <div aria-hidden className="v2-mesh-drift pointer-events-none absolute -inset-16 overflow-hidden">
       <div
         className="absolute -top-32 -left-32 w-[680px] h-[680px] rounded-full blur-3xl"
         style={{

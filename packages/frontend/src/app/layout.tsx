@@ -6,9 +6,9 @@ import Providers from './providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Haven — Agent-first wallet infrastructure',
+  title: 'Haven — Agent payments within your rules',
   description:
-    'Non-custodial wallet infrastructure that gives AI agents the ability to hold, send, and receive money — within strict, user-defined guardrails.',
+    'An account for your agents. You set the rules; they pay within them, never beyond. No raw keys, no shared cards.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

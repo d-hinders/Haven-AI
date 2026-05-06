@@ -78,26 +78,26 @@ function WalletPopover({
       ref={popoverRef}
       role="dialog"
       aria-label="Wallet menu"
-      className="absolute right-0 top-full mt-2 w-72 z-50 bg-[#111113] border border-white/[0.08] rounded-xl shadow-2xl shadow-black/40 overflow-hidden"
+      className="absolute right-0 top-full mt-2 w-72 z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)] overflow-hidden"
     >
-      <div className="p-4 border-b border-white/[0.04]">
-        <div className="text-xs text-zinc-500 mb-1">Connected wallet</div>
+      <div className="p-4 border-b border-[var(--v2-border)]">
+        <div className="text-xs text-[var(--v2-ink-3)] mb-1">Connected wallet</div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-mono text-zinc-200">
+          <span className="text-sm font-mono text-[var(--v2-ink)]">
             {shortAddress(address)}
           </span>
           <button
             type="button"
             onClick={handleCopy}
-            className="px-2 py-1 rounded-md text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+            className="px-2 py-1 rounded-md text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
             {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
         {chainName && (
-          <div className="mt-3 text-xs text-zinc-500">
+          <div className="mt-3 text-xs text-[var(--v2-ink-3)]">
             Network:{' '}
-            <span className="text-zinc-300">{chainName}</span>
+            <span className="text-[var(--v2-ink)]">{chainName}</span>
           </div>
         )}
       </div>
@@ -110,7 +110,7 @@ function WalletPopover({
             onClose()
             onSwitchWallet()
           }}
-          className="w-full text-left px-3 py-2 rounded-md text-sm text-zinc-200 hover:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+          className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
         >
           {switching ? 'Disconnecting…' : 'Switch wallet'}
         </button>
@@ -125,7 +125,7 @@ function WalletPopover({
               /* ignore */
             }
           }}
-          className="w-full text-left px-3 py-2 rounded-md text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+          className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30"
         >
           Disconnect
         </button>
@@ -202,7 +202,7 @@ export default function WalletButton() {
             <button
               type="button"
               onClick={openConnectModal}
-              className="px-4 py-2 rounded-md text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white shadow-lg shadow-indigo-500/20 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+              className="px-4 py-2 rounded-md text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-[var(--v2-shadow-button)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
               Connect wallet
             </button>
@@ -217,7 +217,7 @@ export default function WalletButton() {
             <button
               type="button"
               onClick={openChainModal}
-              className="px-3 py-2 rounded-md text-sm font-medium bg-red-500/10 text-red-300 border border-red-500/30 hover:bg-red-500/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+              className="px-3 py-2 rounded-md text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-[var(--v2-danger)]/25 hover:border-[var(--v2-danger)]/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30"
             >
               Wrong network
             </button>
@@ -232,7 +232,7 @@ export default function WalletButton() {
               onClick={() => setPopoverOpen((v) => !v)}
               aria-haspopup="dialog"
               aria-expanded={popoverOpen}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.06] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
               {account.ensAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -244,7 +244,7 @@ export default function WalletButton() {
               ) : (
                 <span
                   aria-hidden
-                  className="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600"
+                  className="w-5 h-5 rounded-full bg-[var(--v2-brand)]"
                 />
               )}
               <span className="font-mono">

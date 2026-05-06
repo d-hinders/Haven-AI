@@ -74,7 +74,7 @@ export default function Sidebar() {
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-4 left-4 z-[60] w-8 h-8 flex items-center justify-center rounded-md bg-[#111] border border-white/[0.08] text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+        className="lg:hidden fixed top-4 left-4 z-[60] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -84,22 +84,23 @@ export default function Sidebar() {
       {/* Overlay for mobile */}
       {!collapsed && (
         <div
-          className="lg:hidden fixed inset-0 bg-black/60 z-40"
+          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-40"
           onClick={() => setCollapsed(true)}
         />
       )}
 
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-[240px] h-screen lg:h-full bg-[#0a0a0a] border-r border-white/[0.06] flex flex-col flex-shrink-0 transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-[240px] h-screen lg:h-full bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
           collapsed ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'
         }`}
       >
         {/* Logo */}
-        <div className="h-14 flex items-center px-5 border-b border-white/[0.06] flex-shrink-0">
+        <div className="h-14 flex items-center px-5 flex-shrink-0">
           <Link
             href="/dashboard"
-            className="text-[15px] font-semibold tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent"
+            className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
           >
+            <span aria-hidden className="inline-block w-5 h-5 rounded-md bg-[var(--v2-brand)]" />
             Haven
           </Link>
         </div>
@@ -115,14 +116,14 @@ export default function Sidebar() {
                 onClick={() => setCollapsed(true)}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-150 ${
                   active
-                    ? 'bg-white/[0.06] text-white'
-                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]'
+                    ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+                    : 'text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)]'
                 }`}
               >
-                <span className={active ? 'text-indigo-400' : ''}>{item.icon}</span>
+                <span className={active ? 'text-[var(--v2-brand)]' : ''}>{item.icon}</span>
                 <span className="flex-1">{item.label}</span>
                 {item.badge && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-indigo-400 font-medium">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
                     {item.badge}
                   </span>
                 )}
@@ -132,7 +133,7 @@ export default function Sidebar() {
         </nav>
 
         {/* Bottom section */}
-        <div className="flex-shrink-0 border-t border-white/[0.06]">
+        <div className="flex-shrink-0 border-t border-[var(--v2-border)]">
           {/* Settings */}
           <div className="px-3 py-2">
             <Link
@@ -140,11 +141,11 @@ export default function Sidebar() {
               onClick={() => setCollapsed(true)}
               className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-150 ${
                 pathname === '/settings'
-                  ? 'bg-white/[0.06] text-white'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]'
+                  ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+                  : 'text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)]'
               }`}
             >
-              <span className={pathname === '/settings' ? 'text-indigo-400' : ''}>{icons.settings}</span>
+              <span className={pathname === '/settings' ? 'text-[var(--v2-brand)]' : ''}>{icons.settings}</span>
               <span>Settings</span>
             </Link>
           </div>
@@ -153,12 +154,12 @@ export default function Sidebar() {
           <div className="px-3 pb-4 pt-1">
             <div className="flex items-center gap-3 px-3 py-2">
               {/* Avatar */}
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-[var(--v2-brand)] flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
                 {userInitial}
               </div>
               <div className="flex-1 min-w-0">
                 <p
-                  className="text-sm text-zinc-300 truncate"
+                  className="text-sm text-[var(--v2-ink)] truncate"
                   title={user?.email ?? undefined}
                 >
                   {user?.email}
@@ -170,7 +171,7 @@ export default function Sidebar() {
                   router.push('/')
                 }}
                 aria-label="Log out"
-                className="p-1 rounded-md text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.04] transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                className="p-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
                 {icons.logout}
               </button>

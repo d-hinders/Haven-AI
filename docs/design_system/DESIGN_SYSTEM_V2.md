@@ -235,3 +235,24 @@ Tonally: marketing copy can be **slightly more inviting** to match the more ener
 | Legacy redirect | `packages/frontend/src/app/v2/page.tsx` redirects to `/` |
 
 The handoff plan in `docs/REDESIGN_HANDOFF.md` enumerates the migration tasks.
+
+---
+
+## 8. App Migration Mapping
+
+Phase 2 migrates the authenticated app from the old dark surface system onto the light v2 tokens. Use this mapping before touching page-level styling:
+
+| Old dark token/class | Light v2 target | Notes |
+|---|---|---|
+| `bg-[#0a0a0a]` | `bg-bg` | Main app background |
+| `bg-[#111113]`, `bg-[#121216]`, `bg-white/[0.02]` | `bg-white` or `bg-surface` | Use white for cards/panels; use surface for page bands and nested areas |
+| `bg-white/[0.04]`, `bg-white/[0.06]` | `bg-surface-2` or `bg-brand-soft` | Use `brand-soft` only for selected/active states |
+| `border-white/[0.06]` | `border-border` | Default card, row, and shell dividers |
+| `border-white/[0.08]`, `border-white/[0.10]` | `border-border-strong` | Hover/focus or stronger panel boundaries |
+| `text-[#ededed]`, `text-zinc-100`, `text-zinc-200`, `text-zinc-300` | `text-ink` | Primary headings and readable body text |
+| `text-zinc-400` | `text-ink-2` | Secondary text |
+| `text-zinc-500`, `text-zinc-600`, `text-zinc-700` | `text-ink-3` | Tertiary, captions, disabled text |
+| `bg-gradient-to-r from-indigo-500 to-violet-600` | `bg-brand` | App buttons use solid brand, not gradients |
+| `shadow-black/*` | `shadow-modal` or `shadow-card` | Use token shadows rather than black glow |
+
+Semantic colors keep their meaning: emerald/success, amber/warning, red/danger. Prefer the v2 semantic tokens (`success`, `warning`, `danger`) for new work.

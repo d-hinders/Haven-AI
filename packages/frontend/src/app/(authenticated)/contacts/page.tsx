@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { ApiRequestError } from '@/lib/api'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import ContactsInfo from '@/components/ContactsInfo'
 import { truncate, isValidAddress } from '@/lib/format'
 
 function Initials({ name }: { name: string }) {
@@ -15,7 +14,7 @@ function Initials({ name }: { name: string }) {
       : parts[0].slice(0, 2).toUpperCase()
   return (
     <div className="w-9 h-9 rounded-full bg-indigo-500/15 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
-      <span className="text-xs font-semibold text-indigo-300">{initials}</span>
+      <span className="text-xs font-semibold text-[var(--v2-brand-strong)]">{initials}</span>
     </div>
   )
 }
@@ -71,16 +70,16 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm mx-4 bg-[#111113] border border-white/[0.08] rounded-xl shadow-2xl shadow-black/40">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-          <h2 className="text-base font-semibold text-[#ededed]">
+      <div className="absolute inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm mx-4 bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
+          <h2 className="text-base font-semibold text-[var(--v2-ink)]">
             {mode === 'add' ? 'Add contact' : 'Edit contact'}
           </h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="p-1 -mr-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -90,34 +89,34 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div>
-            <label className="block text-xs text-zinc-400 mb-1.5">Name</label>
+            <label className="block text-xs text-[var(--v2-ink-2)] mb-1.5">Name</label>
             <input
               ref={nameRef}
               type="text"
               value={name}
               onChange={(e) => { setName(e.target.value); setError('') }}
               placeholder="Alice"
-              className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
+              className="w-full px-3 py-2.5 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)] focus:ring-1 focus:ring-[var(--v2-brand)]/20 transition-colors"
             />
           </div>
 
           {mode === 'add' && (
             <div>
-              <label className="block text-xs text-zinc-400 mb-1.5">Address</label>
+              <label className="block text-xs text-[var(--v2-ink-2)] mb-1.5">Address</label>
               <input
                 type="text"
                 value={address}
                 onChange={(e) => { setAddress(e.target.value); setError('') }}
                 placeholder="0x..."
-                className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
+                className="w-full px-3 py-2.5 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)] focus:ring-1 focus:ring-[var(--v2-brand)]/20 transition-colors font-mono"
               />
             </div>
           )}
 
           {mode === 'edit' && initial && (
             <div>
-              <label className="block text-xs text-zinc-400 mb-1.5">Address</label>
-              <p className="px-3 py-2.5 bg-white/[0.02] border border-white/[0.05] rounded-lg text-sm text-zinc-500 font-mono">
+              <label className="block text-xs text-[var(--v2-ink-2)] mb-1.5">Address</label>
+              <p className="px-3 py-2.5 bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-lg text-sm text-[var(--v2-ink-3)] font-mono">
                 {initial.address}
               </p>
             </div>
@@ -141,14 +140,14 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2.5 rounded-lg border border-white/[0.08] text-sm text-zinc-300 hover:bg-white/[0.04] transition-colors"
+              className="flex-1 py-2.5 rounded-lg border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+              className="flex-1 py-2.5 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)] disabled:opacity-50"
             >
               {saving ? 'Saving...' : mode === 'add' ? 'Add contact' : 'Save changes'}
             </button>
@@ -176,19 +175,19 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
   }
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/[0.02] transition-colors group">
+    <div className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-[var(--v2-surface)] transition-colors group">
       <Initials name={contact.name} />
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[#ededed] truncate">{contact.name}</p>
-        <p className="text-xs text-zinc-500 font-mono mt-0.5">{truncate(contact.address)}</p>
+        <p className="text-sm font-medium text-[var(--v2-ink)] truncate">{contact.name}</p>
+        <p className="text-xs text-[var(--v2-ink-3)] font-mono mt-0.5">{truncate(contact.address)}</p>
       </div>
 
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={copyAddress}
           title="Copy address"
-          className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+          className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
         >
           {copied ? (
             <svg className="w-4 h-4 text-emerald-400 animate-check-pop" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -204,7 +203,7 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
         <button
           onClick={() => onEdit(contact)}
           title="Edit contact"
-          className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+          className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
@@ -214,7 +213,7 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
         <button
           onClick={() => onDelete(contact)}
           title="Delete contact"
-          className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+          className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-red-400 hover:bg-red-400/10 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
@@ -247,8 +246,8 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm mx-4 bg-[#111113] border border-white/[0.08] rounded-xl shadow-2xl shadow-black/40 p-5">
+      <div className="absolute inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm mx-4 bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)] p-5">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-9 h-9 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
             <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -256,20 +255,20 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
             </svg>
           </div>
           <div>
-            <p className="text-sm font-medium text-[#ededed]">Delete contact</p>
-            <p className="text-xs text-zinc-500 mt-0.5">This action cannot be undone.</p>
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Delete contact</p>
+            <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">This action cannot be undone.</p>
           </div>
         </div>
 
-        <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-4 py-3 mb-4">
-          <p className="text-sm font-medium text-zinc-200">{contact.name}</p>
-          <p className="text-xs text-zinc-500 font-mono mt-0.5">{truncate(contact.address)}</p>
+        <div className="bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-lg px-4 py-3 mb-4">
+          <p className="text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
+          <p className="text-xs text-[var(--v2-ink-3)] font-mono mt-0.5">{truncate(contact.address)}</p>
         </div>
 
         <div className="flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 py-2.5 rounded-lg border border-white/[0.08] text-sm text-zinc-300 hover:bg-white/[0.04] transition-colors"
+            className="flex-1 py-2.5 rounded-lg border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
           >
             Cancel
           </button>
@@ -292,7 +291,6 @@ export default function ContactsPage() {
   const [showAdd, setShowAdd] = useState(false)
   const [editTarget, setEditTarget] = useState<Contact | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null)
-  const [infoOpen, setInfoOpen] = useState(false)
 
   const filtered = contacts.filter(
     (c) =>
@@ -301,27 +299,16 @@ export default function ContactsPage() {
   )
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-5xl">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight mb-1">Contacts</h1>
-          <p className="text-sm text-zinc-500">Save and label frequently used addresses</p>
+          <p className="text-sm text-[var(--v2-ink-3)]">Save and label frequently used addresses</p>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setInfoOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-sm font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all duration-200"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            How it works
-          </button>
-          <button
             onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)]"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -334,7 +321,7 @@ export default function ContactsPage() {
       {contacts.length > 0 && (
         <div className="relative mb-4">
           <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none"
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--v2-ink-3)] pointer-events-none"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -347,7 +334,7 @@ export default function ContactsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name or address..."
-            className="w-full pl-9 pr-4 py-2.5 bg-white/[0.03] border border-white/[0.07] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 transition-colors"
+            className="w-full pl-9 pr-4 py-2.5 bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-lg text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)] focus:ring-1 focus:ring-[var(--v2-brand)]/20 transition-colors"
           />
         </div>
       )}
@@ -356,10 +343,10 @@ export default function ContactsPage() {
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-lg">
-              <div className="w-9 h-9 rounded-full bg-white/[0.05] animate-pulse flex-shrink-0" />
+              <div className="w-9 h-9 rounded-full bg-[var(--v2-surface-2)] animate-pulse flex-shrink-0" />
               <div className="flex-1 space-y-2">
-                <div className="h-3 w-32 bg-white/[0.05] rounded animate-pulse" />
-                <div className="h-2 w-24 bg-white/[0.05] rounded animate-pulse" />
+                <div className="h-3 w-32 bg-[var(--v2-surface-2)] rounded animate-pulse" />
+                <div className="h-2 w-24 bg-[var(--v2-surface-2)] rounded animate-pulse" />
               </div>
             </div>
           ))}
@@ -367,8 +354,8 @@ export default function ContactsPage() {
       )}
 
       {!loading && filtered.length > 0 && (
-        <div className="rounded-xl border border-white/[0.07] overflow-hidden">
-          <div className="divide-y divide-white/[0.05]">
+        <div className="rounded-xl border border-[var(--v2-border)] overflow-hidden">
+          <div className="divide-y divide-[var(--v2-border)]">
             {filtered.map((contact) => (
               <ContactRow
                 key={contact.id}
@@ -382,16 +369,16 @@ export default function ContactsPage() {
       )}
 
       {!loading && contacts.length > 0 && filtered.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.07] py-12 text-center">
-          <p className="text-sm text-zinc-500">No contacts match &quot;{search}&quot;</p>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--v2-border)] py-12 text-center">
+          <p className="text-sm text-[var(--v2-ink-3)]">No contacts match &quot;{search}&quot;</p>
         </div>
       )}
 
       {!loading && contacts.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.08] p-16 text-center">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--v2-border)] p-16 text-center">
           <div className="w-14 h-14 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-5">
             <svg
-              className="w-7 h-7 text-indigo-400"
+              className="w-7 h-7 text-[var(--v2-brand)]"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -405,12 +392,12 @@ export default function ContactsPage() {
             </svg>
           </div>
           <h2 className="text-base font-semibold mb-1">No contacts yet</h2>
-          <p className="text-sm text-zinc-500 max-w-xs leading-relaxed mb-6">
+          <p className="text-sm text-[var(--v2-ink-3)] max-w-xs leading-relaxed mb-6">
             Save addresses with names for quick access when sending payments.
           </p>
           <button
             onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-sm font-medium hover:bg-indigo-500/15 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 text-[var(--v2-brand)] text-sm font-medium hover:bg-[var(--v2-brand-soft)] transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -446,7 +433,6 @@ export default function ContactsPage() {
         />
       )}
 
-      <ContactsInfo open={infoOpen} onClose={() => setInfoOpen(false)} />
     </div>
   )
 }

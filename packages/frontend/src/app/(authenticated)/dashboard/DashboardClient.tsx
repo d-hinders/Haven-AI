@@ -551,11 +551,7 @@ export default function DashboardClient() {
                 <p className={`mt-4 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
                   {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
                 </p>
-              ) : (
-                <p className="mt-4 text-sm text-[var(--v2-ink-2)]">
-                  Balance change appears after your first full day of activity.
-                </p>
-              )}
+              ) : null}
             </div>
 
             {safes.length === 0 ? (

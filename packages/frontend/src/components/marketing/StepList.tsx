@@ -1,0 +1,23 @@
+type Step = {
+  step: string
+  title: string
+  body: string
+}
+
+export function StepList({ steps }: { steps: Step[] }) {
+  return (
+    <ol className="grid grid-cols-1 md:grid-cols-3 gap-px bg-[var(--v2-border)] rounded-[10px] overflow-hidden border border-[var(--v2-border)]">
+      {steps.map((s) => (
+        <li key={s.step} className="bg-white p-7 md:p-8">
+          <div className="text-[12px] font-medium text-[var(--v2-brand)] mb-5 v2-tabular">
+            {s.step}
+          </div>
+          <h3 className="text-[16px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+            {s.title}
+          </h3>
+          <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)]">{s.body}</p>
+        </li>
+      ))}
+    </ol>
+  )
+}

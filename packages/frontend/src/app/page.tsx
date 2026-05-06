@@ -1,12 +1,19 @@
+import Link from 'next/link'
 import { SiteHeader } from '@/components/marketing/SiteHeader'
 import { SiteFooter } from '@/components/marketing/SiteFooter'
+import { Button } from '@/components/ui/Button'
+import { Section } from '@/components/marketing/Section'
+import { Card } from '@/components/ui/Card'
+import { StepList } from '@/components/marketing/StepList'
+import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
+import { FlowCard } from '@/components/marketing/FlowCard'
 
 const INTEGRATIONS = ['Safe', 'Gnosis Chain', 'x402', 'Stripe MPP', 'USDC', 'EURe']
 
 const PROBLEM_CARDS = [
   {
     title: 'Agents hit paywalls and stop',
-    body: 'Most agents have no way to handle payment-gated services. When they encounter a paywall, the workflow breaks — requiring human intervention to continue.',
+    body: 'Most agents have no way to handle payment‑gated services. When they encounter a paywall, the workflow breaks — requiring human intervention to continue.',
   },
   {
     title: 'Hardcoded keys are a disaster',
@@ -14,7 +21,7 @@ const PROBLEM_CARDS = [
   },
   {
     title: "Workarounds don't scale",
-    body: "Manual approvals and shared credit cards negate the value of automation. You end up babysitting every transaction, defeating the purpose of autonomous agents entirely.",
+    body: 'Manual approvals and shared credit cards negate the value of automation. You end up babysitting every transaction, defeating the purpose entirely.',
   },
 ]
 
@@ -22,321 +29,316 @@ const HOW_IT_WORKS = [
   {
     step: '01',
     title: 'Create an account',
-    body: 'Sign up and set up your Haven account in minutes. Your funds are held in a non-custodial smart wallet — you retain full ownership at all times.',
+    body: 'Sign up and set up your Haven account in minutes. Your Haven wallet keeps funds under your control.',
   },
   {
     step: '02',
-    title: 'Create an agent with policies',
-    body: 'Define exactly what each agent can do: daily spend limits, allowed assets, approved recipients, time constraints, and per-transaction approval thresholds.',
+    title: 'Set agent rules',
+    body: 'Choose how much each agent can spend, who it can pay, and what it can pay for.',
   },
   {
     step: '03',
-    title: 'Agents transact within the rules',
-    body: 'Agents send payment intents to Haven. The policy engine evaluates each one and executes via Safe — or queues for human approval when thresholds are exceeded.',
+    title: 'Connect your agent',
+    body: 'Add your Haven credential to Claude, GPT, or your own agent. It can now make payments — only within the rules you set.',
   },
 ]
 
 const POLICY_METRICS = [
-  { value: '$500', label: 'Daily spend limit' },
-  { value: 'ERC-20', label: 'Asset allowlists' },
+  { value: '$500', label: 'Daily budget' },
+  { value: 'ERC‑20', label: 'Allowed tokens' },
   { value: '>$100', label: 'Requires approval' },
-  { value: '100%', label: 'Audited transactions' },
+  { value: '100%', label: 'Audited payments' },
 ]
 
 const DIFFERENTIATORS = [
   {
-    title: 'Non-custodial',
-    body: 'Your funds live in a smart wallet you control. Haven never holds signing authority — if we disappear tomorrow, your money is safe.',
+    title: 'You stay in control',
+    body: 'Your funds live in your Haven wallet. You approve actions; Haven never moves money on its own. If we disappear tomorrow, your money is safe.',
   },
   {
-    title: 'Policy-first',
-    body: 'Every action is evaluated against your rules before execution. No intent touches the blockchain without passing through the policy engine.',
+    title: 'Rules‑first',
+    body: 'Every payment is checked against your rules before it goes through. Nothing reaches the network without clearing your rules.',
   },
   {
-    title: 'Agent-first API',
+    title: 'Built for agents',
     body: 'Agents express intent in plain terms — pay, transfer, approve. Haven handles the blockchain complexity so agents never need to.',
   },
   {
-    title: 'Protocol native',
-    body: 'Built-in support for x402 (HTTP 402 paywalls) and Stripe MPP (machine-payments protocol). Agents transact via open standards — stablecoin settlement today, fiat rails next.',
+    title: 'Open standards',
+    body: 'Built‑in support for x402 (HTTP 402 paywalls) and Stripe MPP. Stablecoin settlement today, fiat rails next.',
   },
   {
-    title: 'Runtime agnostic',
+    title: 'Works with any agent',
     body: 'Works with Claude, GPT, custom scripts, and any orchestration framework. Haven makes no assumptions about where your agents run.',
   },
   {
-    title: 'Defense in depth',
-    body: 'Five independent security layers — smart account, policy engine, credential scoping, approval flows, and full audit trail.',
+    title: 'Layered security',
+    body: 'Five independent layers — your Haven account, your rules, scoped agent credentials, approval flows, and a full audit trail.',
   },
 ]
 
 export default function Home() {
   return (
-    <div className="bg-[#0a0a0a] text-[#ededed] min-h-screen overflow-x-hidden">
-
-      {/* Page-level top gradient wash */}
-      <div
-        className="pointer-events-none fixed inset-x-0 top-0 h-[500px] z-0"
-        style={{ background: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.18) 0%, transparent 70%)' }}
-      />
-
+    <>
       <SiteHeader />
 
-      {/* Hero */}
-      <section className="relative max-w-6xl mx-auto px-6 pt-24 pb-20 md:pt-32 md:pb-28 z-10">
+      {/* Hero with mesh backdrop */}
+      <section className="relative overflow-hidden">
+        <HeroBackdrop />
+        <div className="relative max-w-6xl mx-auto px-6 pt-20 md:pt-28 pb-16 md:pb-24">
+          <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-12 lg:gap-16 items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
+                Agent‑first wallet infrastructure
+              </div>
 
-        {/* Hero background blobs */}
-        <div
-          className="pointer-events-none absolute -top-20 -left-40 w-[700px] h-[700px] rounded-full opacity-100"
-          style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)' }}
-        />
-        <div
-          className="pointer-events-none absolute top-10 right-0 w-[500px] h-[500px] rounded-full opacity-100"
-          style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.10) 0%, transparent 70%)' }}
-        />
+              <h1 className="text-[44px] md:text-[64px] font-semibold tracking-[-0.03em] leading-[1.02] text-[var(--v2-ink)] mb-6">
+                Agents{' '}
+                <span className="relative whitespace-nowrap">
+                  <span
+                    className="bg-clip-text text-transparent"
+                    style={{
+                      backgroundImage:
+                        'linear-gradient(110deg, #4f46e5 0%, #7c3aed 45%, #ec4899 100%)',
+                    }}
+                  >
+                    transact
+                  </span>
+                  <span className="text-[var(--v2-ink)]">.</span>
+                </span>
+                <br />
+                You set the rules.
+              </h1>
 
-        {/* Dot grid texture */}
+              <p className="text-[17px] md:text-[18px] leading-relaxed text-[var(--v2-ink-2)] mb-8 max-w-[520px]">
+                An account for your agents. You set the rules — they pay within them,
+                never beyond. No raw keys, no shared cards.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3 mb-10">
+                <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+                <Button href="/how-it-works" variant="ghost" size="lg">
+                  See how it works
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+                <span className="text-[12px] text-[var(--v2-ink-3)] mr-1">Integrates with</span>
+                {INTEGRATIONS.map((name) => (
+                  <span
+                    key={name}
+                    className="text-[12px] px-2 py-1 rounded-md bg-white/80 backdrop-blur text-[var(--v2-ink-2)] border border-[var(--v2-border)]"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="relative">
+              <FlowCard />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* The problem */}
+      <Section
+        eyebrow="The problem"
+        title="Agents need money. Today, that's an open wound."
+        lede="Hardcoded credentials, shared cards, manual approvals — every workaround undoes the value of automation."
+        className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {PROBLEM_CARDS.map((card) => (
+            <Card key={card.title} className="p-7">
+              <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+                {card.title}
+              </h3>
+              <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)]">{card.body}</p>
+            </Card>
+          ))}
+        </div>
+      </Section>
+
+      {/* How it works */}
+      <Section
+        eyebrow="How it works"
+        title="Three steps. One set of rules. Zero raw keys."
+        lede="An account holds funds. Rules define what each agent can do. Haven checks them before any money moves."
+      >
+        <StepList steps={HOW_IT_WORKS} />
+
+        <div className="mt-10 flex justify-start">
+          <Button href="/how-it-works" variant="ghost" size="md" trailingIcon>
+            See the full walkthrough
+          </Button>
+        </div>
+      </Section>
+
+      {/* Agent rules — striking dark indigo band */}
+      <section
+        data-v2-dark-section
+        className="relative overflow-hidden text-white"
+        style={{
+          background:
+            'radial-gradient(ellipse 80% 60% at 20% 0%, rgba(124,58,237,0.55) 0%, transparent 60%), radial-gradient(ellipse 70% 70% at 100% 100%, rgba(236,72,153,0.45) 0%, transparent 55%), linear-gradient(180deg, #1e1b4b 0%, #2e2a78 100%)',
+        }}
+      >
         <div
-          className="pointer-events-none absolute inset-0 opacity-30"
+          aria-hidden
+          className="absolute inset-0 opacity-[0.18] pointer-events-none"
           style={{
-            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)',
-            backgroundSize: '28px 28px',
+            backgroundImage:
+              'radial-gradient(circle, rgba(255,255,255,0.6) 1px, transparent 1px)',
+            backgroundSize: '24px 24px',
+            maskImage:
+              'radial-gradient(ellipse 80% 60% at 50% 30%, black 0%, transparent 75%)',
+            WebkitMaskImage:
+              'radial-gradient(ellipse 80% 60% at 50% 30%, black 0%, transparent 75%)',
           }}
         />
-
-        <div className="relative max-w-3xl">
-          {/* Eyebrow badge */}
-          <div className="inline-flex items-center gap-2 mb-7 px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-            Agent-first wallet infrastructure
+        <div className="relative max-w-6xl mx-auto px-6 py-20 md:py-28">
+          <div className="max-w-2xl mb-12">
+            <div className="text-[12px] font-medium tracking-tight text-fuchsia-200 mb-3">
+              <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-300 inline-block mr-2" />
+              Agent rules
+            </div>
+            <h2 className="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.1] mb-4">
+              The rules that gate every payment.
+            </h2>
+            <p className="text-[16px] leading-relaxed text-white/75">
+              Every payment is checked against your rules before any money moves.
+              Agents request — you decide.
+            </p>
           </div>
 
-          <h1 className="text-4xl md:text-6xl font-bold tracking-tight leading-[1.05] mb-6">
-            <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">
-              Agents transact.
-            </span>
-            <br />
-            <span className="bg-gradient-to-br from-white via-indigo-100 to-violet-300 bg-clip-text text-transparent">
-              You set the rules.
-            </span>
-          </h1>
-
-          <p className="text-lg md:text-xl text-zinc-400 leading-relaxed mb-10 max-w-2xl">
-            Non-custodial wallet infrastructure that gives AI agents the ability to hold, send, and receive money — within strict, user-defined guardrails.
-          </p>
-
-          <div className="flex flex-wrap gap-3 mb-16">
-            <a
-              href="/signup"
-              className="px-5 py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/25"
-            >
-              Get Early Access
-            </a>
-            <a
-              href="/how-it-works"
-              className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2"
-            >
-              See how it works
-            </a>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-zinc-600 mr-1">Integrates with</span>
-            {INTEGRATIONS.map((name) => (
-              <span
-                key={name}
-                className="text-xs px-3 py-1 border border-white/[0.1] text-zinc-400 rounded-sm hover:border-indigo-500/40 hover:text-indigo-300 transition-colors duration-200"
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-px rounded-[12px] overflow-hidden bg-white/10 border border-white/10 backdrop-blur">
+            {POLICY_METRICS.map((metric) => (
+              <div
+                key={metric.label}
+                className="bg-white/[0.04] hover:bg-white/[0.08] transition-colors px-6 py-7"
               >
-                {name}
-              </span>
+                <div className="text-[28px] md:text-[32px] font-semibold tracking-[-0.02em] text-white v2-tabular">
+                  {metric.value}
+                </div>
+                <div className="text-[13px] text-white/70 mt-1">{metric.label}</div>
+              </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Gradient divider */}
-      <div className="h-px bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent" />
-
-      {/* [01] The Problem */}
-      <section className="relative max-w-6xl mx-auto px-6 py-20 md:py-24 z-10">
-        <div className="flex items-baseline gap-4 mb-12">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">[01]</span>
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">The Problem</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-white/[0.06]">
-          {PROBLEM_CARDS.map((card) => (
-            <div
-              key={card.title}
-              className="bg-[#0a0a0a] p-8 hover:bg-[#0d0d12] transition-colors duration-300"
-            >
-              <div className="w-6 h-px bg-gradient-to-r from-indigo-500 to-violet-500 mb-5 opacity-70" />
-              <h3 className="text-base font-semibold mb-3 leading-snug">{card.title}</h3>
-              <p className="text-sm text-zinc-500 leading-relaxed">{card.body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <div className="border-t border-white/[0.06]" />
-
-      {/* [02] How It Works */}
-      <section className="relative max-w-6xl mx-auto px-6 py-20 md:py-24 z-10">
-        <div className="flex items-baseline gap-4 mb-12">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">[02]</span>
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">How It Works</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-white/[0.06]">
-          {HOW_IT_WORKS.map((item) => (
-            <div key={item.step} className="bg-[#0a0a0a] p-8 hover:bg-[#0d0d12] transition-colors duration-300">
-              <span className="block text-2xl font-bold mb-5 bg-gradient-to-br from-indigo-400 to-violet-500 bg-clip-text text-transparent">
-                {item.step}
+      {/* Protocol native */}
+      <Section
+        eyebrow="Protocol native"
+        title="One set of rules. Open standards. Stablecoins today, fiat next."
+        lede="Haven speaks the open standards — x402 for pay‑per‑request flows, Stripe MPP for broader agent commerce — under one agent rules layer."
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">
+            <Link href="/protocols/x402" className="block">
+              <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-3">
+                HTTP paywalls
+              </div>
+              <h3 className="text-[18px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+                x402 — pay‑per‑request HTTP
+              </h3>
+              <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)] mb-4">
+                Agents resolve HTTP 402 paywalls autonomously. Haven evaluates the payment
+                against your agent rules, settles on‑chain, and returns the proof.
+              </p>
+              <span className="text-[13px] font-medium text-[var(--v2-brand)] inline-flex items-center gap-1 group-hover:gap-2 transition-all">
+                See the x402 flow
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                  <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </span>
-              <h3 className="text-base font-semibold mb-3">{item.title}</h3>
-              <p className="text-sm text-zinc-500 leading-relaxed">{item.body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+            </Link>
+          </Card>
 
-      {/* Gradient divider */}
-      <div className="h-px bg-gradient-to-r from-transparent via-violet-500/30 to-transparent" />
-
-      {/* [03] Policy Engine */}
-      <section className="relative max-w-6xl mx-auto px-6 py-20 md:py-24 z-10">
-        {/* Background glow for this section */}
-        <div
-          className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 w-[500px] h-[400px] opacity-100"
-          style={{ background: 'radial-gradient(ellipse, rgba(139,92,246,0.07) 0%, transparent 70%)' }}
-        />
-        <div className="flex items-baseline gap-4 mb-12">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">[03]</span>
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">Policy Engine</h2>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/[0.06] mb-12">
-          {POLICY_METRICS.map((metric) => (
-            <div key={metric.label} className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300">
-              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              <span className="block text-3xl font-bold tracking-tight mb-1 bg-gradient-to-br from-indigo-300 to-violet-400 bg-clip-text text-transparent">
-                {metric.value}
+          <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(124,58,237,0.30)] transition-all group">
+            <Link href="/protocols/mpp" className="block">
+              <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-3">
+                Stablecoin checkout
+              </div>
+              <h3 className="text-[18px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+                Stripe MPP — agent‑initiated payments
+              </h3>
+              <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)] mb-4">
+                Stripe's Machine Payments Protocol is rail‑agnostic — stablecoins on‑chain or
+                fiat via Shared Payment Tokens. Haven implements the stablecoin path today.
+              </p>
+              <span className="text-[13px] font-medium text-[var(--v2-brand)] inline-flex items-center gap-1 group-hover:gap-2 transition-all">
+                See the MPP flow
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                  <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </span>
-              <span className="text-xs text-zinc-500">{metric.label}</span>
-            </div>
-          ))}
+            </Link>
+          </Card>
         </div>
-        <p className="relative text-sm text-zinc-400 leading-relaxed max-w-2xl">
-          Every payment intent passes through the policy engine before any money moves. Policies are owned and set by the account holder — agents can request actions, but cannot modify the rules that govern them. Nothing reaches the blockchain without policy clearance.
-        </p>
-      </section>
+      </Section>
 
-      <div className="border-t border-white/[0.06]" />
-
-      {/* [04] Protocol Native */}
-      <section className="relative max-w-6xl mx-auto px-6 py-20 md:py-24 z-10">
-        <div className="flex items-baseline gap-4 mb-12">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">[04]</span>
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">Protocol Native</h2>
-        </div>
-        <p className="text-sm text-zinc-400 leading-relaxed max-w-2xl mb-10">
-          Agents need to transact across rails. Haven speaks the open standards — x402 for pay-per-request flows, Stripe MPP for broader agent commerce — under one policy engine. Stablecoin settlement today; SPT-backed fiat rails next.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/[0.06]">
-          <a
-            href="/protocols/x402"
-            className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300 block"
-          >
-            <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-indigo-500/40 via-violet-500/40 to-transparent opacity-40" />
-            <div className="text-[11px] uppercase tracking-widest text-indigo-300/80 mb-3 font-mono">HTTP paywalls</div>
-            <h3 className="text-base font-semibold mb-3">x402 — pay-per-request HTTP</h3>
-            <p className="text-sm text-zinc-500 leading-relaxed">
-              Agents resolve HTTP 402 paywalls autonomously. Haven evaluates the payment against the agent's allowance, settles on-chain from the Safe, and returns the proof — the agent never handles keys.
-            </p>
-            <span className="inline-flex items-center gap-1 mt-4 text-xs text-indigo-300 group-hover:text-indigo-200 transition-colors duration-200">
-              See the x402 flow →
-            </span>
-          </a>
-          <a
-            href="/protocols/mpp"
-            className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300 block"
-          >
-            <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-violet-500/40 to-indigo-500/40 opacity-40" />
-            <div className="text-[11px] uppercase tracking-widest text-violet-300/80 mb-3 font-mono">Stablecoin checkout</div>
-            <h3 className="text-base font-semibold mb-3">Stripe MPP — agent-initiated payments</h3>
-            <p className="text-sm text-zinc-500 leading-relaxed">
-              Stripe's Machine Payments Protocol is rail-agnostic — stablecoins on-chain or fiat (cards, wallets, BNPL) via Shared Payment Tokens. Haven implements the stablecoin path today: agents settle USDC under the same policy that gates x402 spend. SPT-backed fiat next.
-            </p>
-            <span className="inline-flex items-center gap-1 mt-4 text-xs text-violet-300 group-hover:text-violet-200 transition-colors duration-200">
-              See the MPP flow →
-            </span>
-          </a>
-        </div>
-      </section>
-
-      <div className="border-t border-white/[0.06]" />
-
-      {/* [05] Key Differentiators */}
-      <section className="relative max-w-6xl mx-auto px-6 py-20 md:py-24 z-10">
-        <div className="flex items-baseline gap-4 mb-12">
-          <span className="text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">[05]</span>
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">Why Haven</h2>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-px bg-white/[0.06]">
+      {/* Why Haven */}
+      <Section
+        eyebrow="Why Haven"
+        title="Built for the way agents actually transact."
+        className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {DIFFERENTIATORS.map((item, i) => (
-            <div key={item.title} className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300">
-              {/* Top gradient accent line */}
-              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-indigo-500/60 via-violet-500/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              {/* Index number */}
-              <span className="block text-xs font-mono mb-5 bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
+            <Card key={item.title} className="p-7">
+              <div className="text-[12px] font-medium text-[var(--v2-brand)] mb-4 v2-tabular">
                 {String(i + 1).padStart(2, '0')}
-              </span>
-              <h3 className="text-sm font-semibold text-[#ededed] mb-2">{item.title}</h3>
-              <p className="text-sm text-zinc-500 leading-relaxed">{item.body}</p>
-            </div>
+              </div>
+              <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+                {item.title}
+              </h3>
+              <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)]">{item.body}</p>
+            </Card>
           ))}
         </div>
-      </section>
+      </Section>
 
-      {/* Gradient divider */}
-      <div className="h-px bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent" />
-
-      {/* [06] CTA */}
-      <section className="relative max-w-6xl mx-auto px-6 py-24 md:py-32 text-center z-10 overflow-hidden">
-        {/* CTA section glow */}
-        <div
-          className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-[400px]"
-          style={{ background: 'radial-gradient(ellipse 60% 80% at 50% 50%, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.06) 40%, transparent 70%)' }}
-        />
-
-        <div className="relative">
-          <span className="block text-xs font-mono bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent mb-8">[06]</span>
-          <h2 className="text-3xl md:text-5xl font-bold tracking-tight leading-[1.05] mb-4">
-            <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">
-              Ready to give your agents
-            </span>
-            <br />
-            <span className="bg-gradient-to-br from-indigo-200 via-violet-200 to-violet-300 bg-clip-text text-transparent">
-              financial superpowers?
-            </span>
+      {/* CTA — bold brand band */}
+      <section
+        data-v2-dark-section
+        className="relative overflow-hidden text-white"
+        style={{
+          background:
+            'radial-gradient(ellipse 80% 80% at 50% 0%, rgba(236,72,153,0.35) 0%, transparent 55%), linear-gradient(180deg, #4f46e5 0%, #4338ca 100%)',
+        }}
+      >
+        <div className="relative max-w-6xl mx-auto px-6 py-24 md:py-32 text-center">
+          <h2 className="text-[34px] md:text-[48px] font-semibold tracking-[-0.025em] leading-[1.1] mb-4 max-w-[720px] mx-auto">
+            Ready to put your agents to work?
           </h2>
-          <p className="text-zinc-500 text-sm mb-10">No credit card required. Deploy in minutes.</p>
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <a
+          <p className="text-[16px] text-white/80 mb-9">
+            No credit card. No setup call. Live in minutes.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Link
               href="/signup"
-              className="px-6 py-3 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-xl shadow-indigo-500/30"
+              className="inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors h-12 px-6 text-[15px] bg-white text-[var(--v2-ink)] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)]"
             >
-              Get Early Access
-            </a>
-            <a
+              Get early access
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </Link>
+            <Link
               href="/how-it-works"
-              className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200 underline underline-offset-4 decoration-zinc-700"
+              className="inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors h-12 px-6 text-[15px] bg-white/10 hover:bg-white/15 text-white border border-white/20 backdrop-blur"
             >
-              Read the Technical Overview
-            </a>
+              Read the technical overview
+            </Link>
           </div>
         </div>
       </section>
 
       <SiteFooter />
-
-    </div>
+    </>
   )
 }

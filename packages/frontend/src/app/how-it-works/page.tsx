@@ -1,16 +1,11 @@
-'use client'
-
 import { SiteHeader } from '@/components/marketing/SiteHeader'
 import { SiteFooter } from '@/components/marketing/SiteFooter'
+import { Button } from '@/components/ui/Button'
+import { Section } from '@/components/marketing/Section'
+import { Card } from '@/components/ui/Card'
+import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 
-type Step = {
-  step: string
-  title: string
-  body: string
-  visual: 'account' | 'wallet' | 'vault' | 'fund' | 'credentials' | 'agent'
-}
-
-const STEPS: Step[] = [
+const STEPS = [
   {
     step: '01',
     title: 'Create your Haven account',
@@ -47,131 +42,140 @@ const STEPS: Step[] = [
     body: 'Add your Haven credential to Claude, GPT, or your own agent. It can now make payments within the rules you set.',
     visual: 'agent',
   },
-]
+] as const
 
 const PROMISES = [
-  { value: 'Non-custodial', label: 'Haven never holds your funds' },
-  { value: '1-click revoke', label: 'Kill an agent instantly' },
+  { value: 'You stay in control', label: 'Haven never moves money on its own' },
+  { value: 'Instant revoke', label: 'Stop an agent in one click' },
   { value: 'Full audit log', label: 'Every payment, every check' },
 ]
 
+// ─── Quiet, illustrative visuals (no glow, no emoji, no animation) ───
+
 function VisualAccount() {
   return (
-    <div className="relative h-44 flex items-center justify-center">
-      <div className="relative w-64 h-28 rounded-lg border border-white/10 bg-gradient-to-br from-white/[0.04] to-transparent overflow-hidden">
-        <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)', backgroundSize: '14px 14px' }} />
-        <div className="relative p-4 flex flex-col gap-2">
-          <div className="h-2 w-20 rounded-full bg-white/10" />
-          <div className="h-2 w-32 rounded-full bg-white/10" />
-          <div className="mt-2 inline-flex items-center gap-2 self-start px-2 py-1 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-[10px] font-medium animate-[hwShimmer_2.4s_ease-in-out_infinite]">
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-            Account ready
-          </div>
+    <Card className="p-5">
+      <div className="text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)] mb-3">Account</div>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[14px] font-medium text-[var(--v2-ink)]">daniel@haven.run</div>
+          <div className="text-[12px] text-[var(--v2-ink-3)]">Created just now</div>
         </div>
-        <div className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 text-sm animate-[hwPop_1.6s_ease-out_0.4s_both]">✓</div>
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--v2-success-soft)] text-[var(--v2-success)] text-[11px] font-medium">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-success)]" />
+          Verified
+        </span>
       </div>
-    </div>
+    </Card>
   )
 }
 
 function VisualWallet() {
   return (
-    <div className="relative h-44 flex items-center justify-center">
-      <div className="relative w-72 h-28 flex items-center justify-between px-2">
-        <div className="w-24 h-20 rounded-md border border-white/10 bg-gradient-to-br from-white/[0.05] to-transparent flex items-center justify-center animate-[hwSlideR_1.4s_ease-out_both]">
-          <span className="text-2xl">👤</span>
+    <Card className="p-5">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1">
+          <div className="text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)] mb-1">Sign-in method</div>
+          <div className="text-[13px] font-mono text-[var(--v2-ink)]">0xA1f2…29c4</div>
         </div>
-        <div className="flex-1 mx-3 h-px bg-gradient-to-r from-indigo-500/0 via-indigo-400/60 to-violet-500/0 relative overflow-hidden">
-          <span className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-indigo-300 shadow-[0_0_12px_3px_rgba(129,140,248,0.6)] animate-[hwFlow_2.2s_linear_infinite]" />
-        </div>
-        <div className="w-24 h-20 rounded-md border border-indigo-400/30 bg-gradient-to-br from-indigo-500/15 to-violet-600/15 flex items-center justify-center animate-[hwSlideL_1.4s_ease-out_both]">
-          <span className="text-2xl">🔐</span>
+        <svg className="w-5 h-5 text-[var(--v2-ink-3)]" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path d="M3 8h10M9.5 4.5L13 8 9.5 11.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <div className="flex-1 text-right">
+          <div className="text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)] mb-1">Haven account</div>
+          <div className="text-[13px] font-mono text-[var(--v2-brand)]">connected</div>
         </div>
       </div>
-    </div>
+    </Card>
   )
 }
 
 function VisualVault() {
   return (
-    <div className="relative h-44 flex items-center justify-center">
-      <div className="relative w-32 h-32 rounded-2xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 to-violet-600/15 flex items-center justify-center shadow-[0_0_60px_-10px_rgba(99,102,241,0.55)] animate-[hwPulseGlow_2.6s_ease-in-out_infinite]">
-        <div className="absolute inset-2 rounded-xl border border-white/10" />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-10 h-10 rounded-full border-2 border-indigo-300/70 flex items-center justify-center">
-            <div className="w-3 h-3 rounded-full bg-gradient-to-br from-indigo-300 to-violet-400" />
-          </div>
-        </div>
-        <div className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-[#0a0a0a] border border-emerald-400/50 flex items-center justify-center text-emerald-300 text-base shadow-lg shadow-emerald-500/20 animate-[hwPop_1.6s_ease-out_0.6s_both]">🛡</div>
+    <Card className="p-5">
+      <div className="text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)] mb-3">Haven wallet ready</div>
+      <div className="text-[13px] font-mono text-[var(--v2-ink)] mb-1">0x4F3e…3bcFc</div>
+      <div className="text-[12px] text-[var(--v2-ink-3)] mb-4">Gnosis Chain · ready to fund</div>
+      <div className="flex items-center gap-2 text-[12px] text-[var(--v2-success)]">
+        <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M6.5 11.2L3.8 8.5l-1 1L6.5 13.2 14 5.7l-1-1z" />
+        </svg>
+        Haven cannot move funds without your approval
       </div>
-    </div>
+    </Card>
   )
 }
 
 function VisualFund() {
+  const balances = [
+    { sym: 'USDC', amt: '1,250.00', label: 'US Dollar Coin' },
+    { sym: 'EURe', amt: '480.00', label: 'Monerium EUR' },
+  ]
   return (
-    <div className="relative h-44 flex items-center justify-center">
-      <div className="relative flex flex-col items-center gap-5">
-        <div className="flex items-center gap-3">
-          <span className="hw-anim w-7 h-7 rounded-full bg-gradient-to-br from-amber-300/80 to-amber-500/80 text-[#0a0a0a] text-[11px] font-semibold flex items-center justify-center shadow-md" style={{ animation: 'hwFadeUp 0.6s ease-out 0.1s both' }}>$</span>
-          <span className="hw-anim w-7 h-7 rounded-full bg-gradient-to-br from-sky-300/80 to-indigo-400/80 text-[#0a0a0a] text-[11px] font-semibold flex items-center justify-center shadow-md" style={{ animation: 'hwFadeUp 0.6s ease-out 0.2s both' }}>€</span>
-          <span className="hw-anim w-7 h-7 rounded-full bg-gradient-to-br from-emerald-300/80 to-emerald-500/80 text-[#0a0a0a] text-[11px] font-semibold flex items-center justify-center shadow-md" style={{ animation: 'hwFadeUp 0.6s ease-out 0.3s both' }}>◈</span>
-        </div>
-        <div className="relative w-40 h-24 rounded-xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/10 to-violet-600/10 flex flex-col items-center justify-center animate-[hwPulseGlow_3.2s_ease-in-out_infinite]">
-          <span className="text-[10px] uppercase tracking-widest text-zinc-500">Balance</span>
-          <span className="text-lg font-semibold bg-gradient-to-br from-white to-indigo-200 bg-clip-text text-transparent animate-[hwTick_0.7s_ease-out_0.5s_both]">
-            1,250 USDC
-          </span>
-        </div>
+    <Card className="p-0 overflow-hidden">
+      <div className="px-5 pt-4 pb-3 border-b border-[var(--v2-border)] flex items-baseline justify-between">
+        <span className="text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)]">Balance</span>
+        <span className="text-[20px] font-semibold text-[var(--v2-ink)] v2-tabular">$1,730.00</span>
       </div>
-    </div>
+      <ul className="divide-y divide-[var(--v2-border)]">
+        {balances.map((b) => (
+          <li key={b.sym} className="flex items-center justify-between px-5 py-3">
+            <div>
+              <div className="text-[13px] font-medium text-[var(--v2-ink)]">{b.sym}</div>
+              <div className="text-[11px] text-[var(--v2-ink-3)]">{b.label}</div>
+            </div>
+            <div className="text-[13px] text-[var(--v2-ink)] v2-tabular">{b.amt}</div>
+          </li>
+        ))}
+      </ul>
+    </Card>
   )
 }
 
 function VisualCredentials() {
+  const rules: [string, string][] = [
+    ['Daily limit', '500 USDC'],
+    ['Per transaction', '50 USDC'],
+    ['Allowed assets', 'USDC, EURe'],
+  ]
   return (
-    <div className="relative h-44 flex items-center justify-center">
-      <div className="relative w-72 h-32">
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-36 rounded-md border border-white/10 bg-gradient-to-br from-white/[0.05] to-transparent p-3 animate-[hwSlideR_1.4s_ease-out_both]">
-          <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">Policy</div>
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[10px]"><span className="text-zinc-500">Daily</span><span className="text-zinc-300">$500</span></div>
-            <div className="flex items-center justify-between text-[10px]"><span className="text-zinc-500">Per tx</span><span className="text-zinc-300">$50</span></div>
-            <div className="flex items-center justify-between text-[10px]"><span className="text-zinc-500">Asset</span><span className="text-indigo-300">USDC</span></div>
+    <Card className="p-5">
+      <div className="text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)] mb-3">Agent rules</div>
+      <dl className="divide-y divide-[var(--v2-border)]">
+        {rules.map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between py-2 first:pt-0 last:pb-0 text-[13px]">
+            <dt className="text-[var(--v2-ink-2)]">{k}</dt>
+            <dd className="text-[var(--v2-ink)] font-medium v2-tabular">{v}</dd>
           </div>
-        </div>
-        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-36 rounded-md border border-indigo-400/30 bg-gradient-to-br from-indigo-500/15 to-violet-600/15 p-3 animate-[hwSlideL_1.4s_ease-out_both]">
-          <div className="text-[10px] uppercase tracking-widest text-indigo-300/80 mb-2">Credential</div>
-          <div className="font-mono text-[10px] text-zinc-300 break-all leading-snug">sk_live_••••<br/>9aF2c7•••</div>
-          <div className="mt-2 inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-400/30 text-emerald-300 text-[9px]">
-            <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" /> active
-          </div>
-        </div>
+        ))}
+      </dl>
+      <div className="mt-4 pt-4 border-t border-[var(--v2-border)] flex items-center justify-between">
+        <code className="text-[12px] font-mono text-[var(--v2-ink-2)]">sk_live_••••9aF2</code>
+        <button className="text-[12px] font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]">Copy</button>
       </div>
-    </div>
+    </Card>
   )
 }
 
 function VisualAgent() {
   return (
-    <div className="relative h-44 flex items-center justify-center">
-      <div className="relative w-72 h-32 flex items-center justify-between">
-        <div className="w-20 h-20 rounded-full border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 to-violet-600/15 flex items-center justify-center text-3xl shadow-[0_0_30px_-8px_rgba(99,102,241,0.5)]">
-          🤖
+    <Card className="p-5">
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)]">Receipt</div>
+          <div className="text-[13px] text-[var(--v2-ink)] v2-tabular mt-1">api.research.example</div>
         </div>
-        <div className="flex-1 mx-3 h-px bg-gradient-to-r from-indigo-400/0 via-indigo-400/60 to-emerald-400/60 relative overflow-hidden">
-          <span className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-indigo-300 shadow-[0_0_12px_3px_rgba(129,140,248,0.6)] animate-[hwFlow_2s_linear_infinite]" />
-        </div>
-        <div className="w-28 rounded-md border border-emerald-400/30 bg-gradient-to-br from-emerald-500/10 to-transparent p-3">
-          <div className="text-[9px] uppercase tracking-widest text-emerald-300/80 mb-1">Receipt</div>
-          <div className="text-[11px] text-zinc-200 font-medium">Paid · 2.50 USDC</div>
-          <div className="mt-1 text-[9px] text-zinc-500">api.example.com</div>
-          <div className="mt-1.5 inline-flex items-center gap-1 text-emerald-300 text-[10px]">
-            <span className="text-sm leading-none">✓</span> settled
-          </div>
-        </div>
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--v2-success-soft)] text-[var(--v2-success)] text-[11px] font-medium">
+          <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 11.2L3.8 8.5l-1 1L6.5 13.2 14 5.7l-1-1z" /></svg>
+          Settled
+        </span>
       </div>
-    </div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-[24px] font-semibold text-[var(--v2-ink)] v2-tabular">2.50</span>
+        <span className="text-[13px] text-[var(--v2-ink-2)]">USDC</span>
+      </div>
+      <div className="text-[12px] text-[var(--v2-ink-3)] mt-3 font-mono truncate">tx 0x7a9e…d8e9 · block 14,892,103</div>
+    </Card>
   )
 }
 
@@ -184,152 +188,114 @@ const VISUALS = {
   agent: VisualAgent,
 }
 
-export default function HowItWorksPage() {
+export default function HowItWorks() {
   return (
-    <div className="bg-[#0a0a0a] text-[#ededed] min-h-screen overflow-x-hidden">
-      <style jsx global>{`
-        @keyframes hwFadeUp { 0% { opacity: 0; transform: translateY(14px); } 100% { opacity: 1; transform: translateY(0); } }
-        @keyframes hwFlow { 0% { left: -8px; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: calc(100% + 8px); opacity: 0; } }
-        @keyframes hwPop { 0% { opacity: 0; transform: scale(0.4); } 60% { opacity: 1; transform: scale(1.15); } 100% { opacity: 1; transform: scale(1); } }
-        @keyframes hwPulseGlow { 0%, 100% { box-shadow: 0 0 50px -12px rgba(99,102,241,0.45); } 50% { box-shadow: 0 0 70px -8px rgba(139,92,246,0.65); } }
-        @keyframes hwSlideR { 0% { opacity: 0; transform: translateX(-18px); } 100% { opacity: 1; transform: translateX(0); } }
-        @keyframes hwSlideL { 0% { opacity: 0; transform: translateX(18px); } 100% { opacity: 1; transform: translateX(0); } }
-        @keyframes hwShimmer { 0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); } 50% { box-shadow: 0 0 24px 0 rgba(99,102,241,0.4); } }
-        @keyframes hwTick { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: translateY(0); } }
-        @keyframes hwDrop { 0% { opacity: 0; transform: translateY(-30px) scale(0.8); } 30% { opacity: 1; } 80% { opacity: 1; transform: translateY(72px) scale(1); } 100% { opacity: 0; transform: translateY(80px) scale(0.6); } }
-        @keyframes hwNodePulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(129,140,248,0.0); } 50% { box-shadow: 0 0 0 6px rgba(129,140,248,0.15); } }
-        .hw-anim { animation-fill-mode: both; }
-      `}</style>
-
-      {/* Page-level top gradient wash */}
-      <div
-        className="pointer-events-none fixed inset-x-0 top-0 h-[500px] z-0"
-        style={{ background: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.18) 0%, transparent 70%)' }}
-      />
-
+    <>
       <SiteHeader />
 
       {/* Hero */}
-      <section className="relative max-w-6xl mx-auto px-6 pt-20 pb-16 md:pt-28 md:pb-24 z-10">
-        <div className="pointer-events-none absolute -top-20 -left-40 w-[700px] h-[700px] rounded-full" style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)' }} />
-        <div className="pointer-events-none absolute top-10 right-0 w-[500px] h-[500px] rounded-full" style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.10) 0%, transparent 70%)' }} />
-        <div className="pointer-events-none absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
-
-        <div className="relative max-w-3xl">
-          <div className="inline-flex items-center gap-2 mb-7 px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-medium hw-anim" style={{ animation: 'hwFadeUp 0.6s ease-out' }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-            Get started in minutes
-          </div>
-
-          <h1 className="text-4xl md:text-6xl font-bold tracking-tight leading-[1.05] mb-6 hw-anim" style={{ animation: 'hwFadeUp 0.7s ease-out 0.05s' }}>
-            <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">
-              Empower your agent
-            </span>
-            <br />
-            <span className="bg-gradient-to-br from-white via-indigo-100 to-violet-300 bg-clip-text text-transparent">
-              with payment functionality
-            </span>
-          </h1>
-
-          <p className="text-lg md:text-xl text-zinc-400 leading-relaxed mb-10 max-w-2xl hw-anim" style={{ animation: 'hwFadeUp 0.7s ease-out 0.15s' }}>
-            Your agent pays for things on its own — and you stay in control of every dollar.
-          </p>
-
-          <div className="flex flex-wrap gap-3 hw-anim" style={{ animation: 'hwFadeUp 0.7s ease-out 0.25s' }}>
-            <a href="/signup" className="px-5 py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/25">
-              Get Early Access
-            </a>
-            <a href="/protocols" className="px-5 py-2.5 border border-white/20 text-sm hover:border-white/40 hover:bg-white/[0.04] transition-all duration-200 rounded-md inline-flex items-center gap-2">
-              See the protocols
-            </a>
-          </div>
+      <section className="relative overflow-hidden">
+        <HeroBackdrop variant="soft" />
+        <div className="max-w-6xl mx-auto px-6 pt-20 md:pt-24 pb-12 relative">
+        <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
+          Get started in minutes
+        </div>
+        <h1 className="text-[44px] md:text-[60px] font-semibold tracking-[-0.03em] leading-[1.04] text-[var(--v2-ink)] mb-5 max-w-[720px]">
+          Empower your agent with{' '}
+          <span
+            className="bg-clip-text text-transparent"
+            style={{
+              backgroundImage:
+                'linear-gradient(110deg, #4f46e5 0%, #7c3aed 45%, #ec4899 100%)',
+            }}
+          >
+            payment functionality
+          </span>
+          .
+        </h1>
+        <p className="text-[17px] md:text-[18px] leading-relaxed text-[var(--v2-ink-2)] max-w-[560px] mb-8">
+          Your agent pays for things on its own — and you stay in control of every dollar.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+          <Button href="/protocols/x402" variant="ghost" size="lg">See the protocols</Button>
+        </div>
         </div>
       </section>
 
-      <div className="h-px bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent" />
+      {/* Steps */}
+      <section className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]">
+        <div className="max-w-6xl mx-auto px-6 py-16 md:py-20">
+          <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-3">
+            The six steps
+          </div>
+          <h2 className="text-[28px] md:text-[34px] font-semibold tracking-[-0.02em] leading-[1.15] text-[var(--v2-ink)] mb-10 max-w-[600px]">
+            From zero to a paying agent.
+          </h2>
 
-      {/* Step rows */}
-      <section className="relative max-w-6xl mx-auto px-6 py-16 md:py-24 z-10">
-        <div className="mb-12">
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">How Haven works</h2>
-        </div>
-
-        <div className="space-y-px bg-white/[0.06]">
-          {STEPS.map((s, i) => {
-            const Visual = VISUALS[s.visual]
-            const reverse = i % 2 === 1
-            return (
-              <div
-                key={s.step}
-                className="relative bg-[#0a0a0a] hover:bg-[#0d0d12] transition-colors duration-300 group overflow-hidden"
-              >
-                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-indigo-500/40 via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center px-6 md:px-10 py-12 md:py-16 ${reverse ? 'md:[direction:rtl]' : ''}`}>
-                  <div className={`${reverse ? 'md:[direction:ltr]' : ''}`}>
-                    <span className="block text-3xl font-bold mb-4 bg-gradient-to-br from-indigo-400 to-violet-500 bg-clip-text text-transparent">
-                      {s.step}
-                    </span>
-                    <h3 className="text-2xl md:text-3xl font-semibold mb-4 tracking-tight">{s.title}</h3>
-                    <p className="text-base text-zinc-400 leading-relaxed max-w-md">{s.body}</p>
-                  </div>
-                  <div className={`${reverse ? 'md:[direction:ltr]' : ''}`}>
-                    <Visual />
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+          <ol className="space-y-5">
+            {STEPS.map((s, i) => {
+              const Visual = VISUALS[s.visual]
+              const reverse = i % 2 === 1
+              return (
+                <li key={s.step}>
+                  <Card className="p-7 md:p-10">
+                    <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center ${reverse ? 'md:[&>*:first-child]:order-2' : ''}`}>
+                      <div>
+                        <div className="text-[12px] font-medium text-[var(--v2-brand)] mb-3 v2-tabular">
+                          Step {s.step}
+                        </div>
+                        <h3 className="text-[22px] md:text-[26px] font-semibold tracking-[-0.02em] leading-[1.2] text-[var(--v2-ink)] mb-3">
+                          {s.title}
+                        </h3>
+                        <p className="text-[15px] leading-relaxed text-[var(--v2-ink-2)] max-w-[460px]">
+                          {s.body}
+                        </p>
+                      </div>
+                      <div>
+                        <Visual />
+                      </div>
+                    </div>
+                  </Card>
+                </li>
+              )
+            })}
+          </ol>
         </div>
       </section>
 
-      <div className="h-px bg-gradient-to-r from-transparent via-violet-500/30 to-transparent" />
-
-      {/* Promises band */}
-      <section className="relative max-w-6xl mx-auto px-6 py-16 md:py-20 z-10">
-        <div className="mb-10">
-          <h2 className="text-xs text-zinc-500 uppercase tracking-widest">What You Get</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-white/[0.06]">
+      {/* Promises */}
+      <Section eyebrow="What you get" title="Three durable guarantees.">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {PROMISES.map((p) => (
-            <div key={p.value} className="relative bg-[#0a0a0a] p-8 overflow-hidden group hover:bg-[#0d0d12] transition-colors duration-300">
-              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              <span className="block text-2xl font-bold tracking-tight mb-1 bg-gradient-to-br from-indigo-300 to-violet-400 bg-clip-text text-transparent">
+            <Card key={p.value} className="p-7">
+              <div className="text-[20px] font-semibold tracking-tight text-[var(--v2-ink)] mb-1">
                 {p.value}
-              </span>
-              <span className="text-sm text-zinc-500">{p.label}</span>
-            </div>
+              </div>
+              <div className="text-[14px] text-[var(--v2-ink-2)]">{p.label}</div>
+            </Card>
           ))}
         </div>
-      </section>
-
-      <div className="h-px bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent" />
+      </Section>
 
       {/* CTA */}
-      <section className="relative max-w-6xl mx-auto px-6 py-24 md:py-32 text-center z-10 overflow-hidden">
-        <div className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-[400px]" style={{ background: 'radial-gradient(ellipse 60% 80% at 50% 50%, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.06) 40%, transparent 70%)' }} />
-        <div className="relative">
-          <h2 className="text-3xl md:text-5xl font-bold tracking-tight leading-[1.05] mb-4">
-            <span className="bg-gradient-to-br from-white via-white to-indigo-200 bg-clip-text text-transparent">
-              Ready to set up
-            </span>
-            <br />
-            <span className="bg-gradient-to-br from-indigo-200 via-violet-200 to-violet-300 bg-clip-text text-transparent">
-              your first agent?
-            </span>
+      <section className="border-t border-[var(--v2-border)]">
+        <div className="max-w-6xl mx-auto px-6 py-20 md:py-24 text-center">
+          <h2 className="text-[28px] md:text-[36px] font-semibold tracking-[-0.025em] leading-[1.1] text-[var(--v2-ink)] mb-3 max-w-[600px] mx-auto">
+            Ready to set up your first agent?
           </h2>
-          <p className="text-zinc-500 text-sm mb-10">No credit card required. Deploy in minutes.</p>
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <a href="/signup" className="px-6 py-3 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-xl shadow-indigo-500/30">
-              Get Early Access
-            </a>
-            <a href="/protocols" className="text-sm text-zinc-500 hover:text-[#ededed] transition-colors duration-200 underline underline-offset-4 decoration-zinc-700">
-              See the protocols
-            </a>
+          <p className="text-[15px] text-[var(--v2-ink-2)] mb-8">
+            No credit card. No setup call. Live in minutes.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+            <Button href="/protocols/x402" variant="ghost" size="lg">See the protocols</Button>
           </div>
         </div>
       </section>
 
       <SiteFooter />
-    </div>
+    </>
   )
 }

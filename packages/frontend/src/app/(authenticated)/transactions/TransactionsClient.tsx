@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
@@ -9,6 +8,8 @@ import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import type { TransactionFilterState } from '@/types/transactions'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 export default function TransactionsClient() {
   const { user } = useAuth()
@@ -20,14 +21,12 @@ export default function TransactionsClient() {
     tokens,
     loading: filtersLoading,
     error: filtersError,
-    refresh: refreshFilters,
   } = useTransactionFilters()
   const {
     transactions,
     total,
     loadingInitial,
     loadingMore,
-    refreshing,
     hasMore,
     error,
     partialFailure,
@@ -48,72 +47,40 @@ export default function TransactionsClient() {
     .map((id) => safeNamesById.get(id))
     .filter((name): name is string => Boolean(name))
 
-  const handleRefresh = async () => {
-    await refresh()
-    await refreshFilters(false)
-  }
-
   if (!hasSafes) {
     return (
       <div className="max-w-5xl">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight mb-1">Transactions</h1>
-          <p className="text-sm text-zinc-500">All activity across your Safes</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-1">Transactions</h1>
+          <p className="text-sm text-[var(--v2-ink-2)]">All activity across your Haven accounts</p>
         </div>
 
-        <div className="rounded-xl border border-dashed border-white/[0.08] bg-white/[0.02] p-10 text-center">
-          <p className="text-sm text-zinc-400 mb-2">No accounts linked yet</p>
-          <p className="text-xs text-zinc-600 mb-5">
-            Add a Safe to Haven before we can show transaction history.
-          </p>
-          <Link
-            href="/onboarding"
-            className="inline-flex items-center rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400 transition-colors"
-          >
-            Add a Safe
-          </Link>
-        </div>
+        <EmptyState
+          title="No accounts linked yet"
+          body="Add a Haven account before we can show transaction history."
+          action={<Button href="/onboarding">Add account</Button>}
+        />
       </div>
     )
   }
 
   return (
     <div className="max-w-6xl">
-      <div className="mb-8 flex items-start justify-between gap-4">
+      <div className="mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight mb-1">Transactions</h1>
-          <p className="text-sm text-zinc-500">All activity across your Safes</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-1">Transactions</h1>
+          <p className="text-sm text-[var(--v2-ink-2)]">All activity across your Haven accounts</p>
         </div>
-        <button
-          onClick={() => void handleRefresh()}
-          disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <svg
-            className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.8}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M16.023 9.348h4.992V4.356M2.977 14.652H7.97v4.992m12.042-1.636a9 9 0 00-15.66-2.032M3.638 6.338A9 9 0 0119.298 8.37"
-            />
-          </svg>
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
       </div>
 
       {partialFailure && (
-        <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-sm text-amber-200">
+        <div className="mb-4 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
           <div className="font-medium mb-1">Some accounts failed to load completely.</div>
-          <div className="text-xs text-amber-200/80">
+          <div className="text-xs text-[var(--v2-warning)]">
             {failedSafeNames.length > 0
               ? `Affected: ${failedSafeNames.join(', ')}.`
-              : 'Some Safe explorers returned partial data.'}{' '}
-            Try refresh to re-run the fetches.
+              : 'Some network explorers returned partial data.'}{' '}
+            Reload the page to try again.
           </div>
         </div>
       )}
@@ -129,13 +96,13 @@ export default function TransactionsClient() {
       />
 
       <div className="mt-5 mb-3 flex items-center justify-between gap-4">
-        <span className="text-xs text-zinc-600">
+        <span className="text-xs text-[var(--v2-ink-3)]">
           {loadingInitial
             ? 'Loading transactions...'
             : `${total} transaction${total !== 1 ? 's' : ''}`}
         </span>
         {!loadingInitial && transactions.length > 0 && (
-          <span className="text-xs text-zinc-700">
+          <span className="text-xs text-[var(--v2-ink-3)]">
             Showing {transactions.length} of {total}
           </span>
         )}
@@ -148,7 +115,6 @@ export default function TransactionsClient() {
         onRefresh={() => void refresh()}
         resolveAddress={resolveAddress}
         safeNamesByAddress={safeNamesByAddress}
-        showSafeTag={!filters.safeId}
         hasActiveFilters={hasActiveFilters}
       />
 
@@ -158,12 +124,12 @@ export default function TransactionsClient() {
             <button
               onClick={() => void loadMore()}
               disabled={loadingMore}
-              className="inline-flex min-w-36 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.02] px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-w-36 items-center justify-center rounded-md border border-[var(--v2-border-strong)] bg-white px-4 py-2 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loadingMore ? 'Loading...' : 'Load more'}
             </button>
           ) : (
-            <span className="text-xs text-zinc-700">You&apos;ve reached the end.</span>
+            <span className="text-xs text-[var(--v2-ink-3)]">You&apos;ve reached the end.</span>
           )}
         </div>
       )}

@@ -527,12 +527,12 @@ export default function DashboardClient() {
         />
       )}
 
-      <div className="relative overflow-hidden rounded-[14px] border border-blue-300/70 bg-blue-100 mb-6 shadow-[var(--v2-shadow-card)]">
+      <div className="relative mb-6 overflow-hidden rounded-[24px] border border-[#E7E9F2] bg-[#F7F5FF] shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]">
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              'linear-gradient(135deg, rgba(191,219,254,0.98) 0%, rgba(186,230,253,0.92) 52%, rgba(219,234,254,0.98) 100%), radial-gradient(ellipse 82% 72% at 12% 0%, rgba(37,99,235,0.22) 0%, transparent 58%)',
+              'linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%)',
           }}
         />
         <div className="relative px-6 py-7 sm:px-8 sm:py-8">

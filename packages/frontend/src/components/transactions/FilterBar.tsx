@@ -32,18 +32,18 @@ function tokenLabel(token: TransactionFilterTokenOption): string {
 }
 
 function agentStatusTone(status: string): string {
-  if (status === 'active') return 'text-zinc-200'
-  if (status === 'paused') return 'text-zinc-500'
-  return 'text-zinc-600'
+  if (status === 'active') return 'text-[var(--v2-ink)]'
+  if (status === 'paused') return 'text-[var(--v2-ink-2)]'
+  return 'text-[var(--v2-ink-3)]'
 }
 
 function triggerClasses(active: boolean, disabled = false): string {
   return [
     'flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors',
     active
-      ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-300'
-      : 'border-white/[0.06] bg-white/[0.04] text-zinc-300 hover:bg-white/[0.06]',
-    disabled ? 'cursor-not-allowed opacity-60 hover:bg-white/[0.04]' : '',
+      ? 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+      : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]',
+    disabled ? 'cursor-not-allowed opacity-60 hover:bg-white' : '',
   ].join(' ')
 }
 
@@ -87,7 +87,7 @@ export default function FilterBar({
 
   const chips = [
     selectedSafe
-      ? { key: 'safeId' as const, label: `Safe: ${selectedSafe.name}` }
+      ? { key: 'safeId' as const, label: `Account: ${selectedSafe.name}` }
       : null,
     selectedAgent
       ? { key: 'agentId' as const, label: `Initiator: ${selectedAgent.name}` }
@@ -104,7 +104,7 @@ export default function FilterBar({
   }
 
   return (
-    <div ref={ref} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+    <div ref={ref} className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
       <div className="flex flex-wrap items-start gap-3">
         <div className="relative">
           <button
@@ -115,11 +115,11 @@ export default function FilterBar({
             disabled={safes.length <= 1}
             className={triggerClasses(Boolean(filters.safeId), safes.length <= 1)}
           >
-            <span>Safe: {selectedSafe?.name ?? 'All'}</span>
+            <span>Account: {selectedSafe?.name ?? 'All'}</span>
             <Chevron open={open === 'safe'} />
           </button>
           {open === 'safe' && safes.length > 1 && (
-            <div className="absolute left-0 top-full z-40 mt-2 min-w-60 overflow-hidden rounded-lg border border-white/[0.08] bg-[#141414] shadow-xl">
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-60 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
               <DropdownButton
                 active={!filters.safeId}
                 onClick={() => {
@@ -140,7 +140,7 @@ export default function FilterBar({
                 >
                   <div className="min-w-0 text-left">
                     <div className="truncate font-medium">{safe.name}</div>
-                    <div className="text-[10px] text-zinc-600">
+                    <div className="text-[10px] text-[var(--v2-ink-3)]">
                       {chainLabel(safe.chainId)}
                     </div>
                   </div>
@@ -159,7 +159,7 @@ export default function FilterBar({
             <Chevron open={open === 'agent'} />
           </button>
           {open === 'agent' && (
-            <div className="absolute left-0 top-full z-40 mt-2 min-w-64 overflow-hidden rounded-lg border border-white/[0.08] bg-[#141414] shadow-xl">
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-64 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
               <DropdownButton
                 active={!filters.agentId}
                 onClick={() => {
@@ -193,7 +193,7 @@ export default function FilterBar({
                     <div className={`truncate font-medium ${agentStatusTone(agent.status)}`}>
                       {agent.name}
                     </div>
-                    <div className="text-[10px] uppercase tracking-wide text-zinc-600">
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--v2-ink-3)]">
                       {agent.status}
                     </div>
                   </div>
@@ -212,7 +212,7 @@ export default function FilterBar({
             <Chevron open={open === 'token'} />
           </button>
           {open === 'token' && (
-            <div className="absolute left-0 top-full z-40 mt-2 max-h-80 min-w-72 overflow-y-auto rounded-lg border border-white/[0.08] bg-[#141414] shadow-xl">
+            <div className="absolute left-0 top-full z-40 mt-2 max-h-80 min-w-72 overflow-y-auto rounded-lg border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
               <DropdownButton
                 active={!filters.tokenKey}
                 onClick={() => {
@@ -247,7 +247,7 @@ export default function FilterBar({
             <button
               key={chip.key}
               onClick={() => clearFilter(chip.key)}
-              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-1 text-xs text-indigo-400 transition-colors hover:bg-indigo-500/15"
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-brand-soft)] px-2 py-1 text-xs text-[var(--v2-brand)] transition-colors hover:bg-[var(--v2-brand)]/15"
             >
               <span>{chip.label}</span>
               <span aria-hidden="true">×</span>
@@ -258,8 +258,8 @@ export default function FilterBar({
 
       {(loading || error) && (
         <div className="mt-3 text-xs">
-          {loading && <span className="text-zinc-600">Loading filter options...</span>}
-          {error && <span className="text-red-400">{error}</span>}
+          {loading && <span className="text-[var(--v2-ink-3)]">Loading filter options...</span>}
+          {error && <span className="text-[var(--v2-danger)]">{error}</span>}
         </div>
       )}
     </div>
@@ -294,8 +294,8 @@ function DropdownButton({
       onClick={onClick}
       className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors ${
         active
-          ? 'bg-indigo-500/10 text-indigo-400'
-          : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200'
+          ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+          : 'text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]'
       }`}
     >
       {children}

@@ -45,7 +45,7 @@ function StatusBadge({ status }: { status: string }) {
     approved: 'bg-blue-500/10 text-blue-400',
     rejected: 'bg-red-500/10 text-red-400',
     executed: 'bg-emerald-500/10 text-emerald-400',
-    expired: 'bg-zinc-500/10 text-zinc-500',
+    expired: 'bg-zinc-500/10 text-[var(--v2-ink-3)]',
   }
   const isPending = status === 'pending' || status === 'approved'
   const dotColor = status === 'pending' ? 'bg-amber-400' : 'bg-blue-400'
@@ -88,12 +88,12 @@ function ApprovalCard({
     <div className={`p-4 rounded-xl border transition-all ${
       isPending
         ? 'bg-amber-500/[0.02] border-amber-500/20 hover:border-amber-500/30'
-        : 'bg-white/[0.02] border-white/[0.06]'
+        : 'bg-[var(--v2-surface)] border-[var(--v2-border)]'
     }`}>
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-            isPending ? 'bg-amber-500/10 text-amber-400' : 'bg-white/[0.04] text-zinc-500'
+            isPending ? 'bg-amber-500/10 text-amber-400' : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
           }`}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <circle cx="12" cy="12" r="10" />
@@ -101,9 +101,9 @@ function ApprovalCard({
             </svg>
           </div>
           <div>
-            <p className="text-xs font-medium text-zinc-200">{approval.agent_name}</p>
+            <p className="text-xs font-medium text-[var(--v2-ink)]">{approval.agent_name}</p>
             <p
-              className="text-[10px] text-zinc-600"
+              className="text-[10px] text-[var(--v2-ink-3)]"
               title={new Date(approval.created_at).toLocaleString()}
             >
               {timeAgo(approval.created_at)}
@@ -114,22 +114,22 @@ function ApprovalCard({
       </div>
 
       {/* Payment details */}
-      <div className="bg-black/20 rounded-lg p-3 mb-3 space-y-1.5">
+      <div className="bg-[var(--v2-surface)] rounded-lg p-3 mb-3 space-y-1.5">
         <div className="flex justify-between text-xs">
-          <span className="text-zinc-500">Amount</span>
-          <span className="text-zinc-200 font-medium">
+          <span className="text-[var(--v2-ink-3)]">Amount</span>
+          <span className="text-[var(--v2-ink)] font-medium">
             {approval.amount_human} {approval.token_symbol}
           </span>
         </div>
         <div className="flex justify-between text-xs">
-          <span className="text-zinc-500">To</span>
-          <span className="text-zinc-400 font-mono">{truncate(approval.to_address)}</span>
+          <span className="text-[var(--v2-ink-3)]">To</span>
+          <span className="text-[var(--v2-ink-2)] font-mono">{truncate(approval.to_address)}</span>
         </div>
         {approval.reason && (
           <div className="flex justify-between text-xs gap-3">
-            <span className="text-zinc-500 flex-shrink-0">Reason</span>
+            <span className="text-[var(--v2-ink-3)] flex-shrink-0">Reason</span>
             <span
-              className="text-zinc-400 max-w-[240px] truncate"
+              className="text-[var(--v2-ink-2)] max-w-[240px] truncate"
               title={approval.reason}
             >
               {approval.reason}
@@ -138,18 +138,18 @@ function ApprovalCard({
         )}
         {isPending && (
           <div className="flex justify-between text-xs">
-            <span className="text-zinc-500">Expires</span>
-            <span className="text-zinc-600">{timeUntil(approval.expires_at)}</span>
+            <span className="text-[var(--v2-ink-3)]">Expires</span>
+            <span className="text-[var(--v2-ink-3)]">{timeUntil(approval.expires_at)}</span>
           </div>
         )}
         {approval.tx_hash && (
           <div className="flex justify-between text-xs">
-            <span className="text-zinc-500">Tx</span>
+            <span className="text-[var(--v2-ink-3)]">Tx</span>
             <a
               href={getExplorerUrl(chainId, 'tx', approval.tx_hash!)}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-indigo-400 hover:text-indigo-300 font-mono"
+              className="text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] font-mono"
             >
               {truncate(approval.tx_hash)}
             </a>
@@ -165,7 +165,7 @@ function ApprovalCard({
           )}
           {confirmReject ? (
             <div className="flex items-center gap-2 bg-red-500/[0.04] border border-red-500/20 rounded-lg px-3 py-2">
-              <span className="flex-1 text-xs text-zinc-300">
+              <span className="flex-1 text-xs text-[var(--v2-ink)]">
                 Reject this payment? The agent will be notified.
               </span>
               <button
@@ -178,7 +178,7 @@ function ApprovalCard({
               <button
                 onClick={() => setConfirmReject(false)}
                 disabled={executing}
-                className="px-3 py-1.5 rounded-md text-zinc-400 text-xs font-medium hover:bg-white/[0.04] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                className="px-3 py-1.5 rounded-md text-[var(--v2-ink-2)] text-xs font-medium hover:bg-[var(--v2-surface-2)] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
                 Cancel
               </button>
@@ -190,16 +190,17 @@ function ApprovalCard({
                   <button
                     onClick={onApproveAndExecute}
                     disabled={executing || executionDisabled}
-                    className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+                    aria-label="Approve & Execute"
+                    className="w-full px-3 py-2 rounded-lg bg-[var(--v2-success)] text-white text-xs font-medium hover:bg-emerald-600 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-success)]/30"
                   >
-                    {executing ? 'Executing...' : 'Approve & Execute'}
+                    {executing ? 'Approving...' : 'Approve payment'}
                   </button>
                 </NetworkGate>
               </div>
               <button
                 onClick={() => setConfirmReject(true)}
                 disabled={executing}
-                className="px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-400 text-xs font-medium hover:bg-white/[0.04] hover:text-red-400 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+                className="px-3 py-2 rounded-lg border border-[var(--v2-border)] text-[var(--v2-ink-2)] text-xs font-medium hover:bg-[var(--v2-surface-2)] hover:text-red-400 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
               >
                 Reject
               </button>
@@ -354,7 +355,7 @@ export default function ApprovalQueue() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-zinc-200">Pending Approvals</h2>
+          <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Pending Approvals</h2>
           {pendingCount > 0 && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400">
               {pendingCount}
@@ -367,12 +368,12 @@ export default function ApprovalQueue() {
       {loading && (
         <div className="space-y-3">
           {[0, 1].map((i) => (
-            <div key={i} className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4">
+            <div key={i} className="bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-xl p-4">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-7 h-7 rounded-lg bg-white/[0.04] animate-pulse" />
-                <div className="h-3 w-24 bg-white/[0.06] rounded animate-pulse" />
+                <div className="w-7 h-7 rounded-lg bg-[var(--v2-surface-2)] animate-pulse" />
+                <div className="h-3 w-24 bg-[var(--v2-surface-2)] rounded animate-pulse" />
               </div>
-              <div className="h-16 bg-white/[0.02] rounded-lg animate-pulse" />
+              <div className="h-16 bg-[var(--v2-surface)] rounded-lg animate-pulse" />
             </div>
           ))}
         </div>
@@ -380,15 +381,15 @@ export default function ApprovalQueue() {
 
       {/* Empty state */}
       {!loading && pendingApprovals.length === 0 && (
-        <div className="text-center py-8 rounded-xl border border-dashed border-white/[0.06]">
+        <div className="text-center py-8 rounded-xl border border-dashed border-[var(--v2-border)]">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-emerald-400">
               <path d="M9 12l2 2 4-4" />
               <circle cx="12" cy="12" r="10" />
             </svg>
           </div>
-          <p className="text-xs text-zinc-400">You&apos;re all caught up</p>
-          <p className="text-[10px] text-zinc-600 mt-1">
+          <p className="text-xs text-[var(--v2-ink-2)]">You&apos;re all caught up</p>
+          <p className="text-[10px] text-[var(--v2-ink-3)] mt-1">
             Agent payments that need approval will appear here.
           </p>
         </div>
@@ -415,24 +416,24 @@ export default function ApprovalQueue() {
       {/* Past approvals */}
       {pastApprovals.length > 0 && (
         <div>
-          <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-3">History</p>
+          <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-3">History</p>
           <div className="space-y-2">
             {pastApprovals.slice(0, 10).map((a) => (
               <div
                 key={a.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]"
+                className="flex items-center justify-between p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]"
               >
                 <div className="flex items-center gap-2">
                   <StatusBadge status={a.status} />
-                  <span className="text-xs text-zinc-400">
+                  <span className="text-xs text-[var(--v2-ink-2)]">
                     {a.amount_human} {a.token_symbol}
                   </span>
-                  <span className="text-xs text-zinc-700">to {truncate(a.to_address)}</span>
+                  <span className="text-xs text-[var(--v2-ink-3)]">to {truncate(a.to_address)}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-zinc-700">{a.agent_name}</span>
+                  <span className="text-[10px] text-[var(--v2-ink-3)]">{a.agent_name}</span>
                   <span
-                    className="text-[10px] text-zinc-800"
+                    className="text-[10px] text-[var(--v2-ink-3)]"
                     title={new Date(a.created_at).toLocaleString()}
                   >
                     {timeAgo(a.created_at)}

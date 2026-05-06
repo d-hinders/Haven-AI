@@ -3,8 +3,8 @@
 import { getChainConfig } from '@/lib/chains'
 
 /**
- * Small coloured pill identifying which chain a Safe lives on. Designed to
- * sit next to a Safe name or address — compact, quiet, but enough to tell
+ * Small coloured pill identifying which chain a Haven account lives on. Designed to
+ * sit next to an account name or address — compact, quiet, but enough to tell
  * Gnosis and Base apart at a glance on the Accounts list.
  */
 
@@ -27,9 +27,9 @@ const CHAIN_STYLES: Record<number, { dot: string; text: string; border: string; 
 
 const FALLBACK_STYLE = {
   dot: 'bg-zinc-400',
-  text: 'text-zinc-400',
-  border: 'border-white/[0.08]',
-  bg: 'bg-white/[0.04]',
+  text: 'text-[var(--v2-ink-2)]',
+  border: 'border-[var(--v2-border)]',
+  bg: 'bg-[var(--v2-surface-2)]',
 }
 
 interface NetworkPillProps {

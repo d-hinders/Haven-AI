@@ -20,14 +20,14 @@ export function DiagramBox({
     <div
       className={`rounded-lg border px-3 py-2 text-center ${
         accent
-          ? 'border-indigo-500/30 bg-indigo-500/[0.06]'
-          : 'border-white/[0.08] bg-white/[0.03]'
+          ? 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)]'
+          : 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
       } ${className}`}
     >
-      <p className={`text-xs font-medium ${accent ? 'text-indigo-300' : 'text-zinc-300'}`}>
+      <p className={`text-xs font-medium ${accent ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink)]'}`}>
         {label}
       </p>
-      {sub && <p className="text-[10px] text-zinc-600 mt-0.5">{sub}</p>}
+      {sub && <p className="text-[10px] text-[var(--v2-ink-3)] mt-0.5">{sub}</p>}
     </div>
   )
 }
@@ -36,7 +36,7 @@ export function Arrow({ direction = 'down' }: { direction?: 'down' | 'right' }) 
   if (direction === 'right') {
     return (
       <div className="flex items-center justify-center px-1">
-        <svg width="20" height="12" viewBox="0 0 20 12" fill="none" className="text-zinc-700">
+        <svg width="20" height="12" viewBox="0 0 20 12" fill="none" className="text-[var(--v2-ink-3)]">
           <path d="M0 6h16M12 1l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
@@ -44,7 +44,7 @@ export function Arrow({ direction = 'down' }: { direction?: 'down' | 'right' }) 
   }
   return (
     <div className="flex items-center justify-center py-1">
-      <svg width="12" height="20" viewBox="0 0 12 20" fill="none" className="text-zinc-700">
+      <svg width="12" height="20" viewBox="0 0 12 20" fill="none" className="text-[var(--v2-ink-3)]">
         <path d="M6 0v16M1 12l5 5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </div>
@@ -53,7 +53,7 @@ export function Arrow({ direction = 'down' }: { direction?: 'down' | 'right' }) 
 
 export function Label({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-block text-[10px] font-medium uppercase tracking-wider text-indigo-400 bg-indigo-500/10 rounded px-1.5 py-0.5">
+    <span className="inline-block text-[10px] font-medium uppercase tracking-wider text-[var(--v2-brand)] bg-[var(--v2-brand-soft)] rounded px-1.5 py-0.5">
       {children}
     </span>
   )
@@ -97,18 +97,18 @@ export default function InfoModal({ open, onClose, pages }: Props) {
   const isLast = page === pages.length - 1
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-[#0e0e0e] border border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/40 backdrop-blur-sm">
+      <div className="bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06] flex-shrink-0">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)] flex-shrink-0">
           <div>
-            <h2 className="text-sm font-semibold text-zinc-200">{current.title}</h2>
-            <p className="text-xs text-zinc-600 mt-0.5">{current.subtitle}</p>
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">{current.title}</h2>
+            <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">{current.subtitle}</p>
           </div>
           <button
             onClick={handleClose}
             aria-label="Close"
-            className="p-1 -mr-1 rounded-md text-zinc-700 hover:text-zinc-400 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -119,15 +119,15 @@ export default function InfoModal({ open, onClose, pages }: Props) {
 
         {/* Page dots */}
         {pages.length > 1 && (
-          <div className="flex items-center justify-center gap-1.5 px-6 py-3 border-b border-white/[0.04] flex-shrink-0">
+          <div className="flex items-center justify-center gap-1.5 px-6 py-3 border-b border-[var(--v2-border)] flex-shrink-0">
             {pages.map((_, i) => (
               <button
                 key={i}
                 onClick={() => setPage(i)}
                 className={`h-1.5 rounded-full transition-all duration-200 ${
                   i === page
-                    ? 'w-6 bg-indigo-500'
-                    : 'w-1.5 bg-white/[0.1] hover:bg-white/[0.2]'
+                    ? 'w-6 bg-[var(--v2-brand)]'
+                    : 'w-1.5 bg-[var(--v2-border-strong)] hover:bg-[var(--v2-ink-3)]'
                 }`}
               />
             ))}
@@ -141,11 +141,11 @@ export default function InfoModal({ open, onClose, pages }: Props) {
 
         {/* Navigation */}
         {pages.length > 1 && (
-          <div className="flex items-center justify-between px-6 py-4 border-t border-white/[0.06] flex-shrink-0">
+          <div className="flex items-center justify-between px-6 py-4 border-t border-[var(--v2-border)] flex-shrink-0">
             <button
               onClick={() => setPage((p) => p - 1)}
               disabled={isFirst}
-              className="text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-0 disabled:cursor-default transition-colors flex items-center gap-1"
+              className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] disabled:opacity-0 disabled:cursor-default transition-colors flex items-center gap-1"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="15 18 9 12 15 6" />
@@ -153,21 +153,21 @@ export default function InfoModal({ open, onClose, pages }: Props) {
               Previous
             </button>
 
-            <span className="text-[10px] text-zinc-700">
+            <span className="text-[10px] text-[var(--v2-ink-3)]">
               {page + 1} / {pages.length}
             </span>
 
             {isLast ? (
               <button
                 onClick={handleClose}
-                className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
               >
                 Done
               </button>
             ) : (
               <button
                 onClick={() => setPage((p) => p + 1)}
-                className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1"
+                className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors flex items-center gap-1"
               >
                 Next
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

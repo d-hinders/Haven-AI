@@ -15,11 +15,12 @@ import {
 import { getChainTokens } from '@/lib/safe-tx'
 import CreateAgentModal from './CreateAgentModal'
 import EditAgentModal from './EditAgentModal'
-import HowItWorksModal from './HowItWorksModal'
 import ConfirmDialog from './ConfirmDialog'
 import { truncate } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
+import { Button } from './ui/Button'
+import { EmptyState } from './ui/EmptyState'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -120,33 +121,33 @@ function AllowanceBar({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-zinc-400 font-medium flex items-center gap-1.5">
+        <span className="text-[var(--v2-ink-2)] font-medium flex items-center gap-1.5">
           {tokenSymbol(info.token, chainId)}
           {nearLimit && (
             <span
-              className="inline-flex items-center gap-1 text-[9px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 font-semibold uppercase tracking-wide animate-pulse"
+              className="inline-flex items-center gap-1 text-[9px] px-1 py-0.5 rounded bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] font-semibold uppercase tracking-wide animate-pulse"
               title={`${pct}% of allowance spent`}
             >
-              <span className="w-1 h-1 rounded-full bg-red-400" />
+              <span className="w-1 h-1 rounded-full bg-[var(--v2-danger)]" />
               near limit
             </span>
           )}
           {loading && (
-            <span className="ml-1 text-zinc-700 animate-pulse">...</span>
+            <span className="ml-1 text-[var(--v2-ink-3)] animate-pulse">...</span>
           )}
         </span>
-        <span className="text-zinc-600">
+        <span className="text-[var(--v2-ink-3)]">
           {formatAmount(remaining, decimals)} / {formatAmount(total, decimals)} remaining
           {info.resetTimeMin > 0 && (
-            <span className="text-zinc-700 ml-1">
+            <span className="text-[var(--v2-ink-3)] ml-1">
               per {resetLabel(info.resetTimeMin).toLowerCase()}
             </span>
           )}
         </span>
       </div>
       <div
-        className={`w-full h-[3px] bg-white/[0.05] rounded-full overflow-hidden ${
-          nearLimit ? 'ring-1 ring-red-500/30 ring-offset-0' : ''
+        className={`w-full h-[3px] bg-[var(--v2-surface-2)] rounded-full overflow-hidden ${
+          nearLimit ? 'ring-1 ring-[var(--v2-danger)]/30 ring-offset-0' : ''
         }`}
       >
         <div
@@ -158,17 +159,17 @@ function AllowanceBar({
       </div>
       {/* Reset info */}
       {effective.isResetPending && (
-        <p className="text-[10px] text-emerald-500/70">
+        <p className="text-[10px] text-[var(--v2-success)]">
           Reset pending — full allowance available
         </p>
       )}
       {!effective.isResetPending && effective.nextResetTime && (
-        <p className="text-[10px] text-zinc-700">
+        <p className="text-[10px] text-[var(--v2-ink-3)]">
           Resets in {timeUntil(effective.nextResetTime)}
         </p>
       )}
       {remaining === 0n && total > 0n && !effective.isResetPending && (
-        <p className="text-[10px] text-red-400/70">
+        <p className="text-[10px] text-[var(--v2-danger)]">
           Fully spent{info.resetTimeMin > 0 ? ' — resets ' + (effective.nextResetTime ? 'in ' + timeUntil(effective.nextResetTime) : 'next period') : ''}
         </p>
       )}
@@ -179,9 +180,9 @@ function AllowanceBar({
 function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className="text-zinc-500">{symbol}</span>
-      <div className="flex-1 h-[3px] bg-white/[0.05] rounded-full" />
-      <span className="text-zinc-700 animate-pulse">loading...</span>
+      <span className="text-[var(--v2-ink-2)]">{symbol}</span>
+      <div className="flex-1 h-[3px] bg-[var(--v2-surface-2)] rounded-full" />
+      <span className="text-[var(--v2-ink-3)] animate-pulse">loading...</span>
     </div>
   )
 }
@@ -213,8 +214,6 @@ function AgentCard({
   busyAction: 'pause' | 'resume' | 'revoke' | 'delete' | null
   chainId?: number
 }) {
-  const [showKey, setShowKey] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [pauseModalOpen, setPauseModalOpen] = useState(false)
   const [revokeModalOpen, setRevokeModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
@@ -224,12 +223,6 @@ function AgentCard({
   const isRevoked = agent.status === 'revoked'
   const isOperational = !isRevoked
   const isBusy = busyAction !== null
-
-  function copyKey() {
-    navigator.clipboard.writeText(agent.api_key)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
 
   async function handleConfirmPause() {
     setPauseModalOpen(false)
@@ -271,51 +264,51 @@ function AgentCard({
 
   return (
     <>
-    <div className={`bg-white/[0.02] border rounded-xl p-5 transition-all ${
+    <div className={`rounded-[10px] border bg-white p-4 shadow-[var(--v2-shadow-card)] transition-colors ${
       isRevoked
-        ? 'border-white/[0.04] opacity-80'
-        : 'border-white/[0.06] hover:border-white/[0.1]'
+        ? 'border-[var(--v2-border)] opacity-80'
+        : 'border-[var(--v2-border)] hover:border-[var(--v2-border-strong)]'
     }`}>
       {/* Header */}
-      <div className="flex items-start justify-between mb-4">
+      <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex items-center gap-3">
           <div
-            className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+            className={`w-8 h-8 rounded-xl flex items-center justify-center ${
               isActive
-                ? 'bg-indigo-500/10 text-indigo-400'
+                ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                 : isPaused
-                  ? 'bg-amber-500/10 text-amber-400'
-                  : 'bg-white/[0.04] text-zinc-600'
+                  ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
+                  : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
             }`}
           >
             <BotIcon size={17} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-zinc-200">
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
                 {agent.name}
               </h3>
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                   isActive
-                    ? 'bg-emerald-500/10 text-emerald-400'
+                    ? 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
                     : isPaused
-                      ? 'bg-amber-500/10 text-amber-400'
+                      ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
                     : agent.status === 'revoked'
-                      ? 'bg-red-500/10 text-red-400'
-                      : 'bg-zinc-800 text-zinc-500'
+                      ? 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
+                      : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
                 }`}
               >
                 {agent.status}
               </span>
             </div>
             {agent.safe_name && (
-              <p className="text-xs text-zinc-500 mt-0.5">
-                <span className="text-zinc-600">Account:</span> {agent.safe_name}
+              <p className="text-xs text-[var(--v2-ink-2)] mt-0.5">
+                <span className="text-[var(--v2-ink-3)]">Account:</span> {agent.safe_name}
               </p>
             )}
             {agent.description && (
-              <p className="text-xs text-zinc-600 mt-0.5">
+              <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
                 {agent.description}
               </p>
             )}
@@ -325,8 +318,8 @@ function AgentCard({
           onClick={() => onViewDetails(agent)}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
             isRevoked
-              ? 'border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]'
-              : 'border-indigo-500/20 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/15 hover:text-indigo-200'
+              ? 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]'
+              : 'border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] hover:bg-[var(--v2-brand)]/15'
           }`}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -337,120 +330,83 @@ function AgentCard({
         </button>
       </div>
 
-      {/* Delegate address */}
-      {agent.delegate_address && (
-        <div className="mb-4">
-          <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-            Delegate
-          </p>
-          <p className="text-xs font-mono text-zinc-500">
-            {truncate(agent.delegate_address)}
-            <button
-              onClick={() => navigator.clipboard.writeText(agent.delegate_address!)}
-              className="ml-2 text-zinc-700 hover:text-zinc-400 transition-colors"
-              title="Copy address"
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            </button>
-          </p>
-        </div>
-      )}
-
       {isPaused && (
-        <div className="mb-4 flex items-start gap-2 px-3 py-2.5 bg-amber-500/8 border border-amber-500/20 rounded-lg">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400 flex-shrink-0 mt-0.5">
+        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-warning)] flex-shrink-0 mt-0.5">
             <circle cx="12" cy="12" r="10" />
             <path d="M10 15V9" />
             <path d="M14 15V9" />
           </svg>
           <div>
-            <p className="text-[11px] font-medium text-amber-300">Paused in Haven</p>
-            <p className="text-[11px] text-amber-200/80 leading-relaxed">
-              New API-initiated transactions are blocked until you resume this agent. On-chain delegate access and allowances are still in place.
+            <p className="text-[11px] font-medium text-[var(--v2-warning)]">Paused in Haven</p>
+            <p className="text-[11px] text-[var(--v2-warning)] leading-relaxed">
+              New agent payments are blocked until you resume this agent. Existing network permissions stay in place.
             </p>
           </div>
         </div>
       )}
 
-      {/* Allowance bars — on-chain primary */}
       {isOperational && (
-        <div className="space-y-2 mb-4">
-          <p className="text-[10px] text-zinc-700 uppercase tracking-wide">
-            Spending limits
-            <span className="text-zinc-800 ml-1 normal-case">(on-chain)</span>
-          </p>
-
-          {/* On-chain allowances */}
-          {displayAllowances && displayAllowances.length > 0 ? (
-            displayAllowances.map((info) => (
-              <AllowanceBar key={info.token} info={info} chainId={chainId} />
-            ))
-          ) : !onChainLoading && (!displayAllowances || displayAllowances.length === 0) ? (
-            <p className="text-xs text-zinc-700">No on-chain allowances found</p>
+        <div className={`mb-3 grid gap-4 ${agent.delegate_address ? 'md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]' : ''}`}>
+          {agent.delegate_address ? (
+            <div>
+              <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
+                Delegate
+              </p>
+              <p className="text-xs font-mono text-[var(--v2-ink-2)]">
+                {truncate(agent.delegate_address)}
+                <button
+                  onClick={() => navigator.clipboard.writeText(agent.delegate_address!)}
+                  className="ml-2 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors"
+                  title="Copy address"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </button>
+              </p>
+            </div>
           ) : null}
 
-          {/* DB tokens still loading from chain */}
-          {pendingDbTokens.map((symbol) => (
-            <AllowanceBarSkeleton key={symbol} symbol={symbol} />
-          ))}
-        </div>
-      )}
+          <div className="space-y-2">
+            <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide">
+              Agent budget
+              <span className="text-[var(--v2-ink-3)] ml-1 normal-case">(network)</span>
+            </p>
 
-      {/* API Key */}
-      {isOperational && (
-        <div className="mb-4">
-          <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-            API Key
-          </p>
-          <div className="flex items-center gap-2">
-            <code className="text-xs font-mono text-zinc-600 bg-white/[0.02] rounded px-2 py-1 flex-1 truncate">
-              {showKey ? agent.api_key : `sk_agent_${'*'.repeat(16)}`}
-            </code>
-            <button
-              onClick={() => setShowKey(!showKey)}
-              className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
-            >
-              {showKey ? 'Hide' : 'Show'}
-            </button>
-            <button
-              onClick={copyKey}
-              className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
-            >
-              {copied ? (
-                <span className="inline-flex items-center gap-1 text-emerald-400 animate-check-pop">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                  Copied
-                </span>
-              ) : (
-                'Copy'
-              )}
-            </button>
+            {displayAllowances && displayAllowances.length > 0 ? (
+              displayAllowances.map((info) => (
+                <AllowanceBar key={info.token} info={info} chainId={chainId} />
+              ))
+            ) : !onChainLoading && (!displayAllowances || displayAllowances.length === 0) ? (
+              <p className="text-xs text-[var(--v2-ink-3)]">No network budget found</p>
+            ) : null}
+
+            {pendingDbTokens.map((symbol) => (
+              <AllowanceBarSkeleton key={symbol} symbol={symbol} />
+            ))}
           </div>
         </div>
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-2 pt-3 border-t border-white/[0.05]">
+      <div className="flex items-center gap-2 pt-3 border-t border-[var(--v2-border)]">
         {isOperational && (
           <>
             <button
               onClick={() => onEdit(agent)}
               disabled={isBusy}
-              className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
+              className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
             >
               Edit
             </button>
-            <span className="text-zinc-800">|</span>
+            <span className="text-[var(--v2-border-strong)]">|</span>
             {isActive ? (
               <button
                 onClick={() => setPauseModalOpen(true)}
                 disabled={isBusy}
-                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
               >
                 {busyAction === 'pause' ? 'Pausing...' : 'Pause'}
               </button>
@@ -458,16 +414,16 @@ function AgentCard({
               <button
                 onClick={() => onResume(agent)}
                 disabled={isBusy}
-                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
               >
                 {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
               </button>
             )}
-            <span className="text-zinc-800">|</span>
+            <span className="text-[var(--v2-border-strong)]">|</span>
             <button
               onClick={() => setRevokeModalOpen(true)}
               disabled={isBusy}
-              className="text-xs text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-50"
+              className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
             >
               Revoke
             </button>
@@ -475,15 +431,15 @@ function AgentCard({
         )}
         {isRevoked && (
           <>
-            <span className="text-zinc-800">|</span>
-            <span className="text-xs text-zinc-600">
-              On-chain access already revoked
+            <span className="text-[var(--v2-border-strong)]">|</span>
+            <span className="text-xs text-[var(--v2-ink-3)]">
+              Network access already revoked
             </span>
-            <span className="text-zinc-800">|</span>
+            <span className="text-[var(--v2-border-strong)]">|</span>
             <button
               onClick={() => setDeleteModalOpen(true)}
               disabled={isBusy}
-              className="text-xs text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-50"
+              className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
             >
               Delete
             </button>
@@ -500,16 +456,16 @@ function AgentCard({
       body={
         <div className="space-y-3">
           <p>
-            Pausing stops this agent from creating new transactions through Haven right away, without changing its on-chain delegate access.
+            Pausing stops this agent from creating new payments through Haven right away, without changing its network permissions.
           </p>
-          <div className="rounded-lg border border-indigo-500/15 bg-indigo-500/[0.04] px-3 py-3 text-zinc-300">
-            <p className="text-xs font-medium text-indigo-300 mb-1">What stays the same</p>
+          <div className="rounded-lg border border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
+            <p className="text-xs font-medium text-[var(--v2-brand)] mb-1">What stays the same</p>
             <p className="text-xs leading-relaxed">
-              The Safe delegate and on-chain spending limits remain in place. You can resume this agent later without reconnecting or reconfiguring it.
+              The agent&apos;s network permissions remain in place. You can resume this agent later without reconnecting or reconfiguring it.
             </p>
           </div>
-          <p className="text-xs text-zinc-500">
-            Use Pause for a fast, reversible stop. Use Revoke when you also want to remove the agent&apos;s on-chain spending authority.
+          <p className="text-xs text-[var(--v2-ink-2)]">
+            Use Pause for a fast, reversible stop. Use Revoke when you also want to remove the agent&apos;s network spending authority.
           </p>
         </div>
       }
@@ -526,15 +482,15 @@ function AgentCard({
       body={
         <div className="space-y-3">
           <p>
-            This removes the agent&apos;s Haven access immediately and also revokes its on-chain spending authority through your Safe.
+            This removes the agent&apos;s Haven access immediately and also revokes its network spending authority.
           </p>
-          <div className="rounded-lg border border-red-500/15 bg-red-500/[0.04] px-3 py-3 text-zinc-300">
-            <p className="text-xs font-medium text-red-300 mb-1">What happens next</p>
+          <div className="rounded-lg border border-[var(--v2-danger)]/15 bg-[var(--v2-danger-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
+            <p className="text-xs font-medium text-[var(--v2-danger)] mb-1">What happens next</p>
             <p className="text-xs leading-relaxed">
-              Haven will stop accepting new API requests from this agent, and you&apos;ll be asked to sign or propose a Safe transaction that removes the delegate&apos;s on-chain spending access.
+              Haven will stop accepting new requests from this agent, and you&apos;ll be asked to approve the update that removes its spending access.
             </p>
           </div>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-[var(--v2-ink-2)]">
             Use Pause when you want a quick, reversible stop. Use Revoke when you want to fully shut this agent down.
           </p>
         </div>
@@ -548,7 +504,7 @@ function AgentCard({
       onCancel={() => setDeleteModalOpen(false)}
       onConfirm={handleConfirmDelete}
       title={`Delete ${agent.name}?`}
-      body="This removes the agent record from Haven only. It does not change any on-chain state, so deletion is only available after the agent has already been revoked."
+      body="This removes the agent record from Haven only. It does not restore or change network access, so deletion is only available after the agent has already been revoked."
       confirmLabel="Delete agent"
       loading={busyAction === 'delete'}
     />
@@ -568,10 +524,10 @@ function UnmanagedDelegateCard({
   chainId?: number
 }) {
   return (
-    <div className="bg-white/[0.02] border border-dashed border-amber-500/20 rounded-xl p-5">
+    <div className="rounded-[10px] border border-dashed border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-5">
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-white text-[var(--v2-warning)] flex items-center justify-center">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 9v4M12 17h.01" />
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
@@ -579,14 +535,14 @@ function UnmanagedDelegateCard({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-zinc-200">
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
                 Unmanaged Delegate
               </h3>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-500/10 text-amber-400">
-                on-chain only
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-white text-[var(--v2-warning)]">
+                network only
               </span>
             </div>
-            <p className="text-xs text-zinc-600 mt-0.5">
+            <p className="text-xs text-[var(--v2-warning)] mt-0.5">
               This delegate was set up outside Haven
             </p>
           </div>
@@ -595,14 +551,14 @@ function UnmanagedDelegateCard({
 
       {/* Delegate address */}
       <div className="mb-4">
-        <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
+        <p className="text-[10px] text-[var(--v2-warning)] uppercase tracking-wide mb-1">
           Delegate
         </p>
-        <p className="text-xs font-mono text-zinc-500">
+        <p className="text-xs font-mono text-[var(--v2-ink-2)]">
           {truncate(delegate)}
           <button
             onClick={() => navigator.clipboard.writeText(delegate)}
-            className="ml-2 text-zinc-700 hover:text-zinc-400 transition-colors"
+            className="ml-2 text-[var(--v2-warning)] hover:text-[var(--v2-ink)] transition-colors"
             title="Copy address"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -616,9 +572,9 @@ function UnmanagedDelegateCard({
       {/* On-chain allowances */}
       {allowances.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[10px] text-zinc-700 uppercase tracking-wide">
-            Spending limits
-            <span className="text-zinc-800 ml-1 normal-case">(on-chain)</span>
+          <p className="text-[10px] text-[var(--v2-warning)] uppercase tracking-wide">
+            Agent budget
+            <span className="text-[var(--v2-warning)] ml-1 normal-case">(network)</span>
           </p>
           {allowances.map((info) => (
             <AllowanceBar key={info.token} info={info} chainId={chainId} />
@@ -653,7 +609,6 @@ export default function AgentPanel() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
-  const [howItWorksOpen, setHowItWorksOpen] = useState(false)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
   const [showRevokedAgents, setShowRevokedAgents] = useState(false)
@@ -787,12 +742,11 @@ export default function AgentPanel() {
 
   if (!safeAddress) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 rounded-xl border border-dashed border-white/[0.06]">
-        <BotIcon size={24} />
-        <p className="text-sm text-zinc-500 mt-3">
-          Deploy a Safe to manage agents
-        </p>
-      </div>
+      <EmptyState
+        icon={<BotIcon size={24} />}
+        title="Create a Haven account to manage agents"
+        body="Agents need a Haven account before they can receive a credential and rules."
+      />
     )
   }
 
@@ -800,16 +754,16 @@ export default function AgentPanel() {
     <div>
       {toastMessage && (
         <div className="fixed right-4 top-4 z-[250] pointer-events-none">
-          <div className="rounded-lg border border-red-500/20 bg-[#171518] px-4 py-3 shadow-2xl shadow-black/30">
+          <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-white px-4 py-3 shadow-[var(--v2-shadow-modal)]">
             <div className="flex items-center gap-2">
-              <div className="w-5 h-5 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center flex-shrink-0">
+              <div className="w-5 h-5 rounded-full bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] flex items-center justify-center flex-shrink-0">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="8" x2="12" y2="12" />
                   <line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
               </div>
-              <p className="text-sm font-medium text-zinc-200">{toastMessage}</p>
+              <p className="text-sm font-medium text-[var(--v2-ink)]">{toastMessage}</p>
             </div>
           </div>
         </div>
@@ -818,35 +772,24 @@ export default function AgentPanel() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-1">
-          <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.06] text-zinc-200">
+          <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--v2-surface-2)] text-[var(--v2-ink)]">
             Agents
-            <span className="ml-1 text-zinc-700">
+            <span className="ml-1 text-[var(--v2-ink-3)]">
               {visibleAgents.length}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setHowItWorksOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-sm font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all duration-200"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            How it works
-          </button>
-          <button
+          <Button
             onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+            size="sm"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             Connect agent
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -856,16 +799,16 @@ export default function AgentPanel() {
           {[0, 1].map((i) => (
             <div
               key={i}
-              className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5"
+              className="bg-white border border-[var(--v2-border)] rounded-[10px] p-5"
             >
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-9 h-9 rounded-xl bg-white/[0.04] animate-pulse" />
+                <div className="w-9 h-9 rounded-xl bg-[var(--v2-surface-2)] animate-pulse" />
                 <div className="space-y-2">
-                  <div className="h-3 w-32 bg-white/[0.06] rounded animate-pulse" />
-                  <div className="h-2 w-48 bg-white/[0.04] rounded animate-pulse" />
+                  <div className="h-3 w-32 bg-[var(--v2-surface-2)] rounded animate-pulse" />
+                  <div className="h-2 w-48 bg-[var(--v2-surface-2)] rounded animate-pulse" />
                 </div>
               </div>
-              <div className="h-2 w-full bg-white/[0.04] rounded animate-pulse" />
+              <div className="h-2 w-full bg-[var(--v2-surface-2)] rounded animate-pulse" />
             </div>
           ))}
         </div>
@@ -873,25 +816,12 @@ export default function AgentPanel() {
 
       {/* Empty state */}
       {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-72 rounded-xl border border-dashed border-white/[0.06] px-6">
-          <div className="w-12 h-12 rounded-xl bg-white/[0.04] flex items-center justify-center mb-3">
-            <BotIcon size={24} />
-          </div>
-          <p className="text-sm text-zinc-300 mb-1">No agents yet</p>
-          <p className="text-xs text-zinc-500 mb-5 max-w-xs text-center leading-relaxed">
-            Set up payment credentials and on-chain spending limits, then hand them off to your agent so it can spend from your Safe within your rules.
-          </p>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Connect agent
-          </button>
-        </div>
+        <EmptyState
+          icon={<BotIcon size={24} />}
+          title="No agents yet"
+          body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
+          action={<Button onClick={() => setCreateOpen(true)}>Connect agent</Button>}
+        />
       )}
 
       {/* Agent list */}
@@ -926,7 +856,7 @@ export default function AgentPanel() {
             <div className="pt-1">
               <button
                 onClick={() => setShowRevokedAgents((prev) => !prev)}
-                className="inline-flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="inline-flex items-center gap-2 text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
               >
                 <svg
                   width="12"
@@ -942,7 +872,7 @@ export default function AgentPanel() {
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
                 {showRevokedAgents ? 'Hide revoked agents' : 'Show revoked agents'}
-                <span className="text-zinc-700">({revokedAgents.length})</span>
+                <span className="text-[var(--v2-ink-3)]">({revokedAgents.length})</span>
               </button>
             </div>
           )}
@@ -964,7 +894,7 @@ export default function AgentPanel() {
             />
           ))}
 
-          {/* Unmanaged on-chain delegates */}
+          {/* Unmanaged network delegates */}
           {unmanagedDelegates.map((d) => (
             <UnmanagedDelegateCard
               key={d.address}
@@ -984,10 +914,10 @@ export default function AgentPanel() {
         safeId={activeSafe?.id}
         onCreated={() => {
           // Don't close the modal here — the Done step shows the one-time
-          // handoff file / skill bundle / raw credentials. User dismisses via
+          // setup file / skill bundle / raw credentials. User dismisses via
           // the Done button, which fires onClose.
           refetch()
-          // Refresh on-chain data after a short delay for tx confirmation
+          // Refresh network data after a short delay for tx confirmation
           setTimeout(refetchOnChain, 2000)
         }}
       />
@@ -1010,12 +940,6 @@ export default function AgentPanel() {
           }}
         />
       )}
-
-      {/* How it works modal */}
-      <HowItWorksModal
-        open={howItWorksOpen}
-        onClose={() => setHowItWorksOpen(false)}
-      />
     </div>
   )
 }

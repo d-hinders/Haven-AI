@@ -22,6 +22,7 @@ import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
+import { Button } from '@/components/ui/Button'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -59,9 +60,9 @@ function statusLabel(status: string): string {
 }
 
 function statusClasses(status: string): string {
-  if (status === 'active') return 'bg-emerald-500/10 text-emerald-400'
-  if (status === 'paused') return 'bg-amber-500/10 text-amber-300'
-  return 'bg-white/[0.06] text-zinc-500'
+  if (status === 'active') return 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+  if (status === 'paused') return 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
+  return 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
 }
 
 function formatAllowanceAmount(amount: string, tokenSymbol: string, chainId: number | null): string {
@@ -128,23 +129,23 @@ function MetricCard({
   loading: boolean
 }) {
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
-      <p className="text-sm text-zinc-400">{label}</p>
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]">
+      <p className="text-sm text-[var(--v2-ink-2)]">{label}</p>
       {loading ? (
-        <div className="mt-4 h-8 w-24 rounded bg-white/[0.06] animate-pulse" />
+        <div className="mt-4 h-8 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
       ) : (
-        <p className="mt-4 text-3xl font-semibold tracking-tight text-zinc-100">{value}</p>
+        <p className="mt-4 text-3xl font-semibold tracking-tight text-[var(--v2-ink)]">{value}</p>
       )}
       {href ? (
         <Link
           href={href}
-          className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-indigo-300 hover:text-indigo-200 transition-colors"
+          className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
         >
           View all
           <span aria-hidden="true">→</span>
         </Link>
       ) : footer ? (
-        <p className="mt-4 text-sm text-zinc-500">{footer}</p>
+        <p className="mt-4 text-sm text-[var(--v2-ink-3)]">{footer}</p>
       ) : null}
     </div>
   )
@@ -162,21 +163,21 @@ function ConnectedAgentsSection({
   onConnectAgent: () => void
 }) {
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-        <h2 className="text-sm font-semibold text-zinc-100">Connected agents</h2>
-        <Link href="/agents" className="text-sm font-medium text-indigo-300 hover:text-indigo-200 transition-colors">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
+        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Connected agents</h2>
+        <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
           View all
         </Link>
       </div>
 
       {agents.length === 0 ? (
         <div className="p-6">
-          <div className="rounded-lg border border-dashed border-white/[0.08] bg-white/[0.01] p-6 text-center">
-            <p className="text-sm text-zinc-300">
+          <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
+            <p className="text-sm text-[var(--v2-ink)]">
               {hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
             </p>
-            <p className="mt-2 text-xs text-zinc-500">
+            <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
               {!hasAccounts
                 ? 'Create or import an account before connecting agents.'
                 : hasAnyAgents
@@ -186,18 +187,15 @@ function ConnectedAgentsSection({
             <div className="mt-4 flex items-center justify-center gap-3">
               {hasAccounts ? (
                 <>
-                  <button
-                    onClick={onConnectAgent}
-                    className="rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-medium text-white hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-                  >
+                  <Button onClick={onConnectAgent} size="sm">
                     Connect agent
-                  </button>
-                  <Link href="/agents" className="text-sm font-medium text-indigo-300 hover:text-indigo-200 transition-colors">
+                  </Button>
+                  <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
                     Go to Agents
                   </Link>
                 </>
               ) : (
-                <Link href="/accounts" className="text-sm font-medium text-indigo-300 hover:text-indigo-200 transition-colors">
+                <Link href="/accounts" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
                   Go to Accounts
                 </Link>
               )}
@@ -205,32 +203,32 @@ function ConnectedAgentsSection({
           </div>
         </div>
       ) : (
-        <div className="divide-y divide-white/[0.06]">
-          {agents.map((agent) => (
+        <div className="divide-y divide-[var(--v2-border)]">
+          {agents.slice(0, 5).map((agent) => (
             <Link
               key={agent.id}
               href={`/agents/${agent.id}`}
-              className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-white/[0.03] transition-colors"
+              className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-[var(--v2-surface)] transition-colors"
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/15 flex items-center justify-center text-indigo-300 flex-shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/15 flex items-center justify-center text-[var(--v2-brand)] flex-shrink-0">
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
                     </svg>
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-zinc-100 truncate">{agent.name}</p>
+                      <p className="text-sm font-medium text-[var(--v2-ink)] truncate">{agent.name}</p>
                       <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${statusClasses(agent.status)}`}>
                         {statusLabel(agent.status)}
                       </span>
                     </div>
-                    <p className="mt-1 text-xs text-zinc-500 truncate">{buildSpendSummary(agent)}</p>
+                    <p className="mt-1 text-xs text-[var(--v2-ink-3)] truncate">{buildSpendSummary(agent)}</p>
                   </div>
                 </div>
               </div>
-              <svg className="w-4 h-4 text-zinc-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-4 h-4 text-[var(--v2-ink-3)] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
             </Link>
@@ -258,6 +256,29 @@ function transactionSubtitle(tx: AggregatedTransaction, resolveAddress: (address
   return `${tx.direction === 'in' ? 'From' : 'To'} ${label}`
 }
 
+function TransactionDirectionIcon({ direction }: { direction: AggregatedTransaction['direction'] }) {
+  const incoming = direction === 'in'
+
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border ${
+        incoming
+          ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+          : 'border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+      }`}
+    >
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        {incoming ? (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
+        ) : (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0l-5 5m5-5l5 5" />
+        )}
+      </svg>
+    </span>
+  )
+}
+
 function TransactionsSection({
   transactions,
   hasAccounts,
@@ -268,50 +289,53 @@ function TransactionsSection({
   resolveAddress: (address: string) => string | null
 }) {
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-        <h2 className="text-sm font-semibold text-zinc-100">Recent transactions</h2>
-        <Link href="/transactions" className="text-sm font-medium text-indigo-300 hover:text-indigo-200 transition-colors">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
+        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Recent transactions</h2>
+        <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
           View all
         </Link>
       </div>
 
       {transactions.length === 0 ? (
         <div className="p-6">
-          <div className="rounded-lg border border-dashed border-white/[0.08] bg-white/[0.01] p-6 text-center">
-            <p className="text-sm text-zinc-300">No transactions yet</p>
-            <p className="mt-2 text-xs text-zinc-500">
+          <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
+            <p className="text-sm text-[var(--v2-ink)]">No transactions yet</p>
+            <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
               {hasAccounts
                 ? 'Fund an account or make your first payment to start building activity here.'
                 : 'Create or import an account to start tracking transactions.'}
             </p>
-            <Link href={hasAccounts ? '/transactions' : '/accounts'} className="mt-4 inline-flex text-sm font-medium text-indigo-300 hover:text-indigo-200 transition-colors">
+            <Link href={hasAccounts ? '/transactions' : '/accounts'} className="mt-4 inline-flex text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
               {hasAccounts ? 'Open transactions' : 'Go to accounts'}
             </Link>
           </div>
         </div>
       ) : (
-        <div className="divide-y divide-white/[0.06]">
-          {transactions.map((tx) => (
+        <div className="divide-y divide-[var(--v2-border)]">
+          {transactions.slice(0, 5).map((tx) => (
             <Link
               key={`${tx.hash}-${tx.type}-${tx.safeId}`}
               href="/transactions"
-              className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-white/[0.03] transition-colors"
+              className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-[var(--v2-surface)] transition-colors"
             >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-zinc-100 truncate">
-                  {transactionTitle(tx, resolveAddress)}
-                </p>
-                <p className="mt-1 text-xs text-zinc-500 truncate">
-                  {transactionSubtitle(tx, resolveAddress)}
-                </p>
+              <div className="flex min-w-0 items-center gap-3">
+                <TransactionDirectionIcon direction={tx.direction} />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-[var(--v2-ink)]">
+                    {transactionTitle(tx, resolveAddress)}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-[var(--v2-ink-3)]">
+                    {transactionSubtitle(tx, resolveAddress)}
+                  </p>
+                </div>
               </div>
               <div className="text-right flex-shrink-0">
-                <p className={`text-sm font-medium ${tx.direction === 'in' ? 'text-emerald-400' : 'text-zinc-100'}`}>
+                <p className={`text-sm font-medium ${tx.direction === 'in' ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink)]'}`}>
                   {tx.direction === 'in' ? '+' : '-'}
                   {tx.valueFormatted} {tx.asset}
                 </p>
-                <p className="mt-1 text-xs text-zinc-500">{timeAgo(tx.timestamp * 1000)}</p>
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{timeAgo(tx.timestamp * 1000)}</p>
               </div>
             </Link>
           ))}
@@ -459,17 +483,17 @@ export default function DashboardClient() {
   return (
     <div className="max-w-6xl">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight text-zinc-100">Dashboard</h1>
-        <p className="mt-1 text-sm text-zinc-500">Overview across all accounts</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">Dashboard</h1>
+        <p className="mt-1 text-sm text-[var(--v2-ink-2)]">Overview across all accounts</p>
       </div>
 
       {overviewError && !overview && (
-        <div className="mb-6 rounded-xl border border-red-400/20 bg-red-500/[0.04] px-4 py-3">
+        <div className="mb-6 rounded-xl border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-red-300">{overviewError}</p>
+            <p className="text-sm text-[var(--v2-danger)]">{overviewError}</p>
             <button
               onClick={refetchOverview}
-              className="text-sm font-medium text-red-200 hover:text-white transition-colors"
+              className="text-sm font-medium text-[var(--v2-danger)] hover:underline transition-colors"
             >
               Retry
             </button>
@@ -478,15 +502,15 @@ export default function DashboardClient() {
       )}
 
       {(overview?.pendingApprovals ?? 0) > 0 && (
-        <div className="mb-6 flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-4 py-3">
-          <svg className="w-4 h-4 text-amber-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <div className="mb-6 flex items-center gap-3 rounded-xl border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3">
+          <svg className="w-4 h-4 text-[var(--v2-warning)] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <circle cx="12" cy="12" r="10" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4M12 16h.01" />
           </svg>
-          <p className="text-sm text-amber-200">
+          <p className="text-sm text-[var(--v2-warning)]">
             {overview?.pendingApprovals} payment{overview?.pendingApprovals === 1 ? '' : 's'} pending your approval
           </p>
-          <Link href="/agents" className="ml-auto text-sm font-medium text-amber-100 hover:text-white transition-colors">
+          <Link href="/agents" className="ml-auto text-sm font-medium text-[var(--v2-warning)] hover:underline transition-colors">
             Review
           </Link>
         </div>
@@ -503,32 +527,32 @@ export default function DashboardClient() {
         />
       )}
 
-      <div className="relative overflow-hidden rounded-2xl border border-white/[0.06] mb-6">
+      <div className="relative overflow-hidden rounded-[14px] border border-blue-300/70 bg-blue-100 mb-6 shadow-[var(--v2-shadow-card)]">
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              'linear-gradient(135deg, rgba(99,102,241,0.16) 0%, rgba(79,70,229,0.10) 48%, rgba(15,23,42,0.35) 100%)',
+              'linear-gradient(135deg, rgba(191,219,254,0.98) 0%, rgba(186,230,253,0.92) 52%, rgba(219,234,254,0.98) 100%), radial-gradient(ellipse 82% 72% at 12% 0%, rgba(37,99,235,0.22) 0%, transparent 58%)',
           }}
         />
         <div className="relative px-6 py-7 sm:px-8 sm:py-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-sm font-medium text-zinc-300 mb-3">Total balance</p>
+              <p className="text-sm font-medium text-[var(--v2-ink-2)] mb-3">Total balance</p>
               {overviewLoading && !overview ? (
-                <div className="h-12 w-52 rounded bg-white/[0.08] animate-pulse" />
+                <div className="h-12 w-52 rounded bg-[var(--v2-surface-2)] animate-pulse" />
               ) : (
-                <p className="text-4xl sm:text-5xl font-semibold tracking-tight text-white">
+                <p className="text-4xl sm:text-5xl font-semibold tracking-tight text-[var(--v2-ink)]">
                   {formatCurrency(totalFiat, currency)}
                 </p>
               )}
 
               {overview?.change.available ? (
-                <p className={`mt-4 text-sm font-medium ${changeAmount >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                <p className={`mt-4 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
                   {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
                 </p>
               ) : (
-                <p className="mt-4 text-sm text-zinc-400">
+                <p className="mt-4 text-sm text-[var(--v2-ink-2)]">
                   Balance change appears after your first full day of activity.
                 </p>
               )}
@@ -536,35 +560,23 @@ export default function DashboardClient() {
 
             {safes.length === 0 ? (
               <div className="flex flex-wrap gap-3">
-                <Link
-                  href="/accounts"
-                  className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-5 py-3 text-sm font-medium text-white hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-                >
+                <Button href="/accounts" size="lg">
                   Create or import account
-                </Link>
+                </Button>
               </div>
             ) : requiresOtherDevice ? (
               <PasskeyOtherDeviceNotice className="max-w-sm" />
             ) : (
               <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={() => openHeroAction('send')}
-                  className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-5 py-3 text-sm font-medium text-white hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-                >
+                <Button onClick={() => openHeroAction('send')} size="lg">
                   Send
-                </button>
-                <button
-                  onClick={() => openHeroAction('receive')}
-                  className="inline-flex items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.03] px-5 py-3 text-sm font-medium text-zinc-100 hover:bg-white/[0.06] transition-colors"
-                >
+                </Button>
+                <Button onClick={() => openHeroAction('receive')} variant="ghost" size="lg">
                   Receive
-                </button>
-                <button
-                  onClick={() => openHeroAction('add-funds')}
-                  className="inline-flex items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.03] px-5 py-3 text-sm font-medium text-zinc-100 hover:bg-white/[0.06] transition-colors"
-                >
+                </Button>
+                <Button onClick={() => openHeroAction('add-funds')} variant="ghost" size="lg">
                   Add funds
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -598,7 +610,7 @@ export default function DashboardClient() {
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
         <ConnectedAgentsSection
           agents={overview?.agents ?? []}
           hasAnyAgents={agents.length > 0}

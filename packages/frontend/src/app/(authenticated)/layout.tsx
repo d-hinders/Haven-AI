@@ -16,11 +16,11 @@ export default function AuthenticatedLayout({
 }) {
   return (
     <ProtectedRoute>
-      <div className="flex h-screen bg-[#0a0a0a] text-[#ededed] overflow-hidden">
+      <div className="flex h-screen bg-[var(--v2-bg)] text-[var(--v2-ink)] overflow-hidden">
         <Sidebar />
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <TopBar />
-          <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
+          <main className="flex-1 bg-[var(--v2-bg)] p-6 lg:p-8 overflow-y-auto">
             <ErrorBoundary>{children}</ErrorBoundary>
           </main>
         </div>

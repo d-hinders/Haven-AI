@@ -1,7 +1,8 @@
 import Link from 'next/link'
+import { forwardRef } from 'react'
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
-type Variant = 'primary' | 'ghost'
+type Variant = 'primary' | 'ghost' | 'tertiary' | 'danger'
 type Size = 'sm' | 'md' | 'lg'
 
 const SIZE_CLASS: Record<Size, string> = {
@@ -15,19 +16,13 @@ const VARIANT_CLASS: Record<Variant, string> = {
     'bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)]',
   ghost:
     'bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]',
+  tertiary:
+    'bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]',
+  danger:
+    'bg-[var(--v2-danger)] text-white hover:bg-[var(--v2-danger)]/90 shadow-[var(--v2-shadow-button)]',
 }
 
-export function Button({
-  children,
-  href,
-  type = 'button',
-  disabled,
-  onClick,
-  variant = 'primary',
-  size = 'md',
-  className = '',
-  trailingIcon,
-}: {
+type ButtonProps = {
   children: ReactNode
   href?: string
   type?: ButtonHTMLAttributes<HTMLButtonElement>['type']
@@ -37,7 +32,19 @@ export function Button({
   size?: Size
   className?: string
   trailingIcon?: boolean
-}) {
+}
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({
+  children,
+  href,
+  type = 'button',
+  disabled,
+  onClick,
+  variant = 'primary',
+  size = 'md',
+  className = '',
+  trailingIcon,
+}, ref) {
   const classes = `inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:cursor-not-allowed disabled:opacity-60 ${SIZE_CLASS[size]} ${VARIANT_CLASS[variant]} ${className}`
   const content = (
     <>
@@ -52,7 +59,7 @@ export function Button({
 
   if (!href) {
     return (
-      <button type={type} disabled={disabled} onClick={onClick} className={classes}>
+      <button ref={ref} type={type} disabled={disabled} onClick={onClick} className={classes}>
         {content}
       </button>
     )
@@ -63,4 +70,4 @@ export function Button({
       {content}
     </Link>
   )
-}
+})

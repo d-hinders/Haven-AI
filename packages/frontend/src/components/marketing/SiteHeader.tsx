@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { HavenMark } from '@/components/brand/HavenMark'
 import { Button } from '../ui/Button'
 
 const NAV = [
@@ -54,12 +55,7 @@ export function SiteHeader() {
             onDarkSection ? 'text-white' : 'text-[var(--v2-ink)]'
           }`}
         >
-          <span
-            aria-hidden
-            className={`inline-block w-5 h-5 rounded-md transition-colors ${
-              onDarkSection ? 'bg-white/20 ring-1 ring-white/30' : 'bg-[var(--v2-brand)]'
-            }`}
-          />
+          <HavenMark tone={onDarkSection ? 'inverse' : 'brand'} />
           Haven
         </Link>
 

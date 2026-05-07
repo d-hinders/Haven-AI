@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { HavenMark } from '@/components/brand/HavenMark'
 
 const COLS = [
   {
@@ -31,7 +32,7 @@ export function SiteFooter() {
       <div className="max-w-6xl mx-auto px-6 py-14 grid grid-cols-2 md:grid-cols-4 gap-10">
         <div className="col-span-2 md:col-span-1">
           <Link href="/" className="flex items-center gap-2 text-[15px] font-semibold text-[var(--v2-ink)]">
-            <span aria-hidden className="inline-block w-5 h-5 rounded-md bg-[var(--v2-brand)]" />
+            <HavenMark />
             Haven
           </Link>
           <p className="mt-3 text-[13px] text-[var(--v2-ink-3)] leading-relaxed max-w-[220px]">

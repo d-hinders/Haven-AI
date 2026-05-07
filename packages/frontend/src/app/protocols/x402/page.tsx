@@ -115,7 +115,7 @@ export default function X402() {
       <Section
         eyebrow="In code"
         title="One call to authorize. Haven does the rest."
-        lede="Forward the 402 challenge. Haven checks the rules, signs from the Safe, and returns the proof you attach to the retry."
+        lede="Forward the 402 challenge. Haven checks the rules, signs from your Haven account, and returns the proof you attach to the retry."
         className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
       >
         <CodeBlock filename="x402-client.ts" language="ts">{`const challenge = await fetch(url).then(r => r.json())

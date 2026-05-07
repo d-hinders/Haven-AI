@@ -310,18 +310,18 @@ export default function DashboardOnboardingGuide({
   onDismiss,
 }: Props) {
   return (
-    <div className="relative mb-6 overflow-hidden rounded-2xl border border-[var(--v2-border)]">
+    <div className="relative mb-6 overflow-hidden rounded-2xl border border-[#CFE7FF]">
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            'linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%)',
+            'linear-gradient(90deg, #F2F8FF 0%, #EAF6FF 52%, #F5FCFF 100%)',
         }}
       />
-      <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.12),transparent_58%)] pointer-events-none" />
+      <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.22),transparent_58%)] pointer-events-none" />
 
       <div className="relative p-4">
-        <div className="flex flex-col gap-3 border-b border-[var(--v2-border)] pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-[#CFE7FF] pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <StepTracker stage={stage} />
           </div>

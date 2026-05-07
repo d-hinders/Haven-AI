@@ -127,6 +127,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [showCredential, setShowCredential] = useState(false)
   const [credentialCopied, setCredentialCopied] = useState(false)
+  const [delegateCopied, setDelegateCopied] = useState(false)
 
   const isActive = agent?.status === 'active'
   const isPaused = agent?.status === 'paused'
@@ -165,11 +166,25 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
 
   const currentAgent = agent
+  const fullCredential = currentAgent.api_key?.trim() || null
+  const credentialPrefix =
+    currentAgent.api_key_prefix ?? (fullCredential ? fullCredential.slice(0, 12) : null)
+  const maskedCredential = credentialPrefix
+    ? `${credentialPrefix}${'•'.repeat(12)}`
+    : 'Credential shown only when created'
 
-  function copyCredential() {
-    navigator.clipboard.writeText(currentAgent.api_key)
+  async function copyCredential() {
+    if (!fullCredential) return
+    await navigator.clipboard.writeText(fullCredential)
     setCredentialCopied(true)
     setTimeout(() => setCredentialCopied(false), 2000)
+  }
+
+  async function copyDelegateAddress() {
+    if (!currentAgent.delegate_address) return
+    await navigator.clipboard.writeText(currentAgent.delegate_address)
+    setDelegateCopied(true)
+    setTimeout(() => setDelegateCopied(false), 2000)
   }
 
   async function handlePause() {
@@ -417,7 +432,7 @@ export default function AgentDetailClient({ agentId }: Props) {
           {!isRevoked ? (
             <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
               <div className="px-5 py-4 border-b border-[var(--v2-border)]">
-                <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Haven credential</h2>
+                <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent credential</h2>
               </div>
               <div className="p-5">
                 <p className="text-sm text-[var(--v2-ink-2)]">
@@ -425,21 +440,30 @@ export default function AgentDetailClient({ agentId }: Props) {
                 </p>
                 <div className="mt-4 flex items-center gap-2">
                   <code className="min-w-0 flex-1 truncate rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs font-mono text-[var(--v2-ink-2)]">
-                    {showCredential ? currentAgent.api_key : `sk_agent_${'*'.repeat(16)}`}
+                    {fullCredential && showCredential ? fullCredential : maskedCredential}
                   </code>
-                  <button
-                    onClick={() => setShowCredential((value) => !value)}
-                    className="text-xs font-medium text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)]"
-                  >
-                    {showCredential ? 'Hide' : 'Show'}
-                  </button>
-                  <button
-                    onClick={copyCredential}
-                    className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
-                  >
-                    {credentialCopied ? 'Copied' : 'Copy'}
-                  </button>
+                  {fullCredential ? (
+                    <>
+                      <button
+                        onClick={() => setShowCredential((value) => !value)}
+                        className="text-xs font-medium text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)]"
+                      >
+                        {showCredential ? 'Hide' : 'Show'}
+                      </button>
+                      <button
+                        onClick={() => void copyCredential()}
+                        className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+                      >
+                        {credentialCopied ? 'Copied' : 'Copy'}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
+                {!fullCredential ? (
+                  <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                    For security, Haven only shows the full agent credential when you create the agent. If you lose it, create a new agent or rotate the credential.
+                  </p>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -452,7 +476,17 @@ export default function AgentDetailClient({ agentId }: Props) {
               {currentAgent.delegate_address ? (
                 <>
                   <p className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">Delegate address</p>
-                  <code className="mt-3 block text-sm text-[var(--v2-ink)] break-all">{currentAgent.delegate_address}</code>
+                  <div className="mt-3 flex items-start gap-2">
+                    <code className="min-w-0 flex-1 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs font-mono text-[var(--v2-ink)] break-all">
+                      {currentAgent.delegate_address}
+                    </code>
+                    <button
+                      onClick={() => void copyDelegateAddress()}
+                      className="shrink-0 rounded-md border border-[var(--v2-border-strong)] bg-white px-3 py-2 text-xs font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)]"
+                    >
+                      {delegateCopied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
                   <p className="mt-4 text-xs text-[var(--v2-ink-2)]">
                     If this delegate is ever compromised, revoke this agent and create a new one.
                   </p>

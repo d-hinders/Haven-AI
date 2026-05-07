@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, type KeyboardEvent, type MouseEvent } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -21,6 +21,7 @@ import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
+import { entityCardClassName } from './ui/entityCardStyles'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -79,9 +80,8 @@ function timeUntil(date: Date): string {
 function BotIcon({ size = 15 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="11" width="18" height="10" rx="2" />
-      <circle cx="12" cy="5" r="2" />
-      <path d="M12 7v4" />
+      <rect x="5" y="8" width="14" height="10" rx="3" />
+      <path d="M12 5v3M9.5 12h.01M14.5 12h.01M9 16h6" />
     </svg>
   )
 }
@@ -239,6 +239,22 @@ function AgentCard({
     onDelete(agent)
   }
 
+  function openDetails() {
+    onViewDetails(agent)
+  }
+
+  function handleCardKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      openDetails()
+    }
+  }
+
+  function stopCardClick(event: MouseEvent) {
+    event.stopPropagation()
+  }
+
   // Merge on-chain + DB allowance data: on-chain is primary, DB fills gaps
   const displayAllowances = useMemo(() => {
     if (onChainAllowances && onChainAllowances.length > 0) {
@@ -264,16 +280,18 @@ function AgentCard({
 
   return (
     <>
-    <div className={`rounded-[10px] border bg-white p-4 shadow-[var(--v2-shadow-card)] transition-colors ${
-      isRevoked
-        ? 'border-[var(--v2-border)] opacity-80'
-        : 'border-[var(--v2-border)] hover:border-[var(--v2-border-strong)]'
-    }`}>
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={openDetails}
+      onKeyDown={handleCardKeyDown}
+      aria-label={`View ${agent.name}`}
+      className={`${entityCardClassName({ muted: isRevoked })} cursor-pointer`}
+    >
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3 mb-4">
           <div
-            className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+            className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
               isActive
                 ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                 : isPaused
@@ -283,9 +301,9 @@ function AgentCard({
           >
             <BotIcon size={17} />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)] truncate">
                 {agent.name}
               </h3>
               <span
@@ -313,21 +331,6 @@ function AgentCard({
               </p>
             )}
           </div>
-        </div>
-        <button
-          onClick={() => onViewDetails(agent)}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
-            isRevoked
-              ? 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]'
-              : 'border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] hover:bg-[var(--v2-brand)]/15'
-          }`}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-          View details
-        </button>
       </div>
 
       {isPaused && (
@@ -370,7 +373,7 @@ function AgentCard({
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-2 pt-3 border-t border-[var(--v2-border)]">
+      <div className="flex items-center gap-2 pt-3 border-t border-[var(--v2-border)]" onClick={stopCardClick}>
         {isOperational && (
           <>
             <button
@@ -808,7 +811,7 @@ export default function AgentPanel() {
         <div className="space-y-4">
           {/* Managed agents */}
           {visibleAgents.length > 0 && (
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid items-start gap-4 lg:grid-cols-2">
               {visibleAgents.map((agent) => {
                 const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
                 const chainData = delegateKey
@@ -861,7 +864,7 @@ export default function AgentPanel() {
           )}
 
           {showRevokedAgents && (
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid items-start gap-4 lg:grid-cols-2">
               {revokedAgents.map((agent) => (
                 <AgentCard
                   key={agent.id}

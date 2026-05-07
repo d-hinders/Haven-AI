@@ -15,6 +15,7 @@ import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import NetworkPill from '@/components/NetworkPill'
 import { truncate } from '@/lib/format'
+import { entityCardClassName } from '@/components/ui/entityCardStyles'
 
 // ── Add Safe Modal ──────────────────────────────────────────────────
 
@@ -467,11 +468,7 @@ function SafeCard({
       href={`/accounts/${safe.id}`}
       onClick={onClick}
       aria-label={`${safe.name} \u2014 ${truncate(safe.safe_address)}`}
-      className={`group relative block rounded-lg border p-5 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 ${
-        isActive
-          ? 'border-indigo-500/30 bg-indigo-500/[0.03] hover:-translate-y-0.5 hover:shadow-[0_16px_34px_-28px_rgba(79,70,229,0.55)]'
-          : 'border-[var(--v2-border)] bg-white hover:-translate-y-0.5 hover:border-[var(--v2-brand)]/35 hover:bg-[var(--v2-surface)] hover:shadow-[0_16px_34px_-28px_rgba(42,51,90,0.35)]'
-      }`}
+      className={`block ${entityCardClassName({ selected: isActive })}`}
     >
       {/* Default action — stop link navigation for nested buttons. */}
       <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">

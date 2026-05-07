@@ -164,7 +164,7 @@ function ConnectedAgentsSection({
 }) {
   return (
     <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
+      <div className="flex items-center justify-between border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
         <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Connected agents</h2>
         <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
           View all
@@ -290,7 +290,7 @@ function TransactionsSection({
 }) {
   return (
     <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
+      <div className="flex items-center justify-between border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
         <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Recent transactions</h2>
         <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
           View all
@@ -380,7 +380,6 @@ export default function DashboardClient() {
     [activeSafe, safes],
   )
 
-  const [guideSafeId, setGuideSafeId] = useState<string | null>(null)
   const [createAgentOpen, setCreateAgentOpen] = useState(false)
   const [createAgentPreset, setCreateAgentPreset] = useState<'demo' | null>(null)
   const [pickerAction, setPickerAction] = useState<'send' | 'receive' | null>(null)
@@ -389,11 +388,6 @@ export default function DashboardClient() {
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [actionSafeId, setActionSafeId] = useState<string | null>(null)
   const [isGuideDismissed, setIsGuideDismissed] = useState(false)
-
-  useEffect(() => {
-    if (guideSafeId && safes.some((safe) => safe.id === guideSafeId)) return
-    setGuideSafeId(defaultSafe?.id ?? null)
-  }, [defaultSafe?.id, guideSafeId, safes])
 
   useEffect(() => {
     if (actionSafeId && safes.some((safe) => safe.id === actionSafeId)) return
@@ -520,8 +514,6 @@ export default function DashboardClient() {
         <DashboardOnboardingGuide
           stage={onboardingStage}
           safes={safes}
-          selectedSafeId={guideSafeId}
-          onSelectSafe={setGuideSafeId}
           onAddAgent={() => openCreateAgent(null)}
           onDismiss={dismissOnboardingGuide}
         />
@@ -629,7 +621,7 @@ export default function DashboardClient() {
           setCreateAgentOpen(false)
           setCreateAgentPreset(null)
         }}
-        safeId={guideSafeId}
+        safeId={defaultSafe?.id ?? null}
         preset={createAgentPreset}
         onCreated={() => {
           refreshDashboardData()

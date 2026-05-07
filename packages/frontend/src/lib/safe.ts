@@ -5,7 +5,7 @@ import {
   type PublicClient,
   keccak256,
 } from 'viem'
-import { getChainConfig } from './chains'
+import { DEFAULT_CHAIN_ID, getChainConfig } from './chains'
 import { api } from './api'
 import type { HavenUserSigner } from './signer'
 
@@ -56,7 +56,7 @@ const PROXY_FACTORY_ABI = [
 export type DeployStage = 'signing' | 'confirming' | 'registering'
 
 /**
- * Deploy a new Safe on the specified chain (default: Gnosis Chain).
+ * Deploy a new Safe on the specified chain.
  *
  * The connected wallet becomes the sole owner with a threshold of 1.
  * Returns the deployed Safe address.
@@ -64,7 +64,7 @@ export type DeployStage = 'signing' | 'confirming' | 'registering'
 async function deploySafeWithEoa(
   signer: HavenUserSigner,
   publicClient: PublicClient,
-  chainId: number = 100,
+  chainId: number = DEFAULT_CHAIN_ID,
   onProgress?: (stage: DeployStage, data?: { txHash?: Hash }) => void,
 ): Promise<{ safeAddress: Address; txHash: Hash }> {
   if (signer.type !== 'eoa') {
@@ -156,7 +156,7 @@ async function deploySafeWithPasskey(
 export async function deploySafe(
   signer: HavenUserSigner,
   publicClient: PublicClient,
-  chainId: number = 100,
+  chainId: number = DEFAULT_CHAIN_ID,
   onProgress?: (stage: DeployStage, data?: { txHash?: Hash }) => void,
 ): Promise<{ safeAddress: Address; txHash: Hash }> {
   if (signer.type === 'eoa') {

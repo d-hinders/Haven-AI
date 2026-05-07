@@ -102,7 +102,7 @@ const CHAINS: Record<number, FrontendChainConfig> = {
 
 export const SUPPORTED_CHAINS = Object.values(CHAINS)
 export const SUPPORTED_CHAIN_IDS = Object.keys(CHAINS).map(Number)
-export const DEFAULT_CHAIN_ID = 100
+export const DEFAULT_CHAIN_ID = BASE_CONFIG.chainId
 
 export function getChainConfig(chainId: number): FrontendChainConfig {
   const chain = CHAINS[chainId]

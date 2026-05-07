@@ -9,7 +9,7 @@ import { deploySafe, type DeployStage } from '@/lib/safe'
 import { useActiveSigner } from '@/lib/signer'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, usePublicClient } from 'wagmi'
-import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import NetworkGate from '@/components/NetworkGate'
 import { SigningStatus } from '@/components/SigningStatus'
 import PasskeyEnrollFlow from './PasskeyEnrollFlow'
@@ -33,7 +33,7 @@ export default function OnboardingClient() {
   const [error, setError] = useState('')
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
-  const [selectedChainId, setSelectedChainId] = useState(100)
+  const [selectedChainId, setSelectedChainId] = useState(DEFAULT_CHAIN_ID)
   const publicClient = usePublicClient({ chainId: selectedChainId })
   const signer = useActiveSigner({ chainId: selectedChainId })
 
@@ -212,8 +212,8 @@ export default function OnboardingClient() {
                   </div>
                   {index < progressSteps.length - 1 && (
                     <div
-                      className={`w-12 h-px transition-colors duration-300 ${
-                        currentIndex > index ? 'bg-[var(--v2-success)]/30' : 'bg-[var(--v2-border)]'
+                      className={`h-px w-12 shrink-0 transition-colors duration-300 ${
+                        currentIndex > index ? 'bg-[var(--v2-success)]/45' : 'bg-[var(--v2-border)]'
                       }`}
                     />
                   )}
@@ -248,24 +248,31 @@ export default function OnboardingClient() {
               </div>
 
               <button
+                type="button"
                 onClick={() => {
                   setSignerMode('passkey')
                   setError('')
                   setStep('deploy')
                 }}
-                className="w-full rounded-xl border border-[var(--v2-brand)]/25 bg-[var(--v2-brand-soft)] px-5 py-4 text-left transition-all hover:border-[var(--v2-brand)]/40 hover:bg-[var(--v2-brand-soft)]"
+                className="group w-full rounded-xl border-2 border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] px-5 py-4 text-left shadow-[var(--v2-shadow-button)] transition-all duration-150 hover:-translate-y-0.5 hover:border-[var(--v2-brand-strong)] hover:bg-white hover:shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
               >
-                <div className="text-sm font-semibold text-[var(--v2-ink)]">Use Face ID / Touch ID</div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-[var(--v2-ink)]">Use Face ID / Touch ID</div>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--v2-brand)] ring-1 ring-[var(--v2-brand)]/20 group-hover:bg-[var(--v2-brand-soft)]">
+                    Default
+                  </span>
+                </div>
                 <div className="mt-1 text-xs text-[var(--v2-ink-2)]">Fastest option. Creates a secure passkey.</div>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   setSignerMode('eoa')
                   setError('')
                   setStep('connect')
                 }}
-                className="w-full rounded-xl border border-[var(--v2-border)] bg-white px-5 py-4 text-left transition-colors hover:border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]"
+                className="w-full rounded-xl border border-[var(--v2-border-strong)] bg-white px-5 py-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-[var(--v2-brand)]/45 hover:bg-[var(--v2-surface)] hover:shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
               >
                 <div className="text-sm font-semibold text-[var(--v2-ink)]">Connect a wallet instead</div>
                 <div className="mt-1 text-xs text-[var(--v2-ink-3)]">Use an existing crypto wallet.</div>

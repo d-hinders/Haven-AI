@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
-import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { getChainConfig } from '@/lib/chains'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { UserSafe } from '@/context/AuthContext'
 
 type Stage = 'fund' | 'add-agent'
@@ -10,10 +11,17 @@ type Stage = 'fund' | 'add-agent'
 interface Props {
   stage: Stage
   safes: UserSafe[]
-  selectedSafeId: string | null
-  onSelectSafe: (id: string) => void
   onAddAgent: () => void
   onDismiss: () => void
+}
+
+function getDefaultSafe(safes: UserSafe[]): UserSafe | null {
+  return safes.find((entry) => entry.is_default) ?? safes[0] ?? null
+}
+
+function compactAddress(address: string): string {
+  if (address.length <= 18) return address
+  return `${address.slice(0, 8)}...${address.slice(-6)}`
 }
 
 function StepTracker({ stage }: { stage: Stage }) {
@@ -89,16 +97,18 @@ function CopyButton({ text }: { text: string }) {
 
   return (
     <button
+      type="button"
       onClick={copy}
-      title="Copy address"
-      className="rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+      aria-label="Copy deposit address"
+      title="Copy deposit address"
+      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--v2-border-strong)] bg-white text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-button)] transition-colors hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
     >
       {copied ? (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--v2-success)]">
           <polyline points="20 6 9 17 4 12" />
         </svg>
       ) : (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
           <rect x="9" y="9" width="13" height="13" rx="2" />
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
         </svg>
@@ -109,19 +119,19 @@ function CopyButton({ text }: { text: string }) {
 
 function FundingPanel({
   safes,
-  selectedSafeId,
-  onSelectSafe,
 }: {
   safes: UserSafe[]
-  selectedSafeId: string | null
-  onSelectSafe: (id: string) => void
 }) {
-  const safe = safes.find((entry) => entry.id === selectedSafeId) ?? safes[0] ?? null
+  const defaultSafe = getDefaultSafe(safes)
+  const [selectedSafeId, setSelectedSafeId] = useState(defaultSafe?.id ?? '')
+  const safe = safes.find((entry) => entry.id === selectedSafeId) ?? defaultSafe
   const chainConfig = safe ? getChainConfig(safe.chain_id) : null
   const tokens = chainConfig ? Object.values(chainConfig.tokens) : []
 
   const [showQr, setShowQr] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+
+  useEscapeToClose(showQr, () => setShowQr(false))
 
   useEffect(() => {
     if (!safe?.safe_address || !showQr) {
@@ -132,7 +142,7 @@ function FundingPanel({
     let cancelled = false
     QRCode.toDataURL(safe.safe_address, {
       margin: 1,
-      width: 160,
+      width: 280,
       color: { dark: '#171A2F', light: '#FFFFFF' },
     })
       .then((url) => {
@@ -151,106 +161,115 @@ function FundingPanel({
     setShowQr(false)
   }, [safe?.id])
 
+  useEffect(() => {
+    if (!defaultSafe) return
+    if (selectedSafeId && safes.some((entry) => entry.id === selectedSafeId)) return
+    setSelectedSafeId(defaultSafe.id)
+  }, [defaultSafe, safes, selectedSafeId])
+
   if (!safe || !chainConfig) return null
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr),180px] lg:items-start">
+    <>
+      <div className="grid gap-6 lg:grid-cols-[minmax(270px,0.55fr)_minmax(520px,1fr)_220px] lg:items-center">
+      <div>
+        <h3 className="mb-4 text-[30px] font-semibold leading-[1.14] tracking-tight text-[var(--v2-ink)] sm:text-[34px]">
+          Add funds to start using Haven
+        </h3>
+        <p className="max-w-[280px] text-[15px] leading-relaxed text-[var(--v2-ink-2)]">
+          Send a supported token to your Haven account on{' '}
+          <span className="font-semibold text-[var(--v2-ink)]">{chainConfig.name}</span>.
+        </p>
+      </div>
+
       <div className="space-y-3">
-        <div>
-          <h3 className="mb-1.5 text-2xl font-semibold leading-tight tracking-tight text-[var(--v2-ink)] sm:text-[28px]">
-            Add funds to start using Haven
-          </h3>
-          <p className="text-[13px] text-[var(--v2-ink-2)]">
-            Send a supported token to your Haven account on{' '}
-            <span className="text-[var(--v2-ink)]">{chainConfig.name}</span>.
-          </p>
-        </div>
-
-        <div>
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-[var(--v2-ink-3)]">
-            Account
-          </p>
-          {safes.length > 1 ? (
-            <select
-              value={safe.id}
-              onChange={(e) => onSelectSafe(e.target.value)}
-              className="w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3.5 py-2.5 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)]/50"
-            >
-              {safes.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3.5 py-2.5 text-sm text-[var(--v2-ink)]">
-              {safe.name}
-            </div>
-          )}
-        </div>
-
-        <div>
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-[var(--v2-ink-3)]">
-            Deposit address
-          </p>
-          <div className="flex flex-col gap-2.5 sm:flex-row">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3.5 py-2.5">
-              <code className="min-w-0 flex-1 truncate text-[11px] text-[var(--v2-ink)]">
-                {safe.safe_address}
-              </code>
-              <CopyButton text={safe.safe_address} />
-              <a
-                href={getExplorerUrl(safe.chain_id, 'address', safe.safe_address)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="View on explorer"
-                className="rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-              >
-                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+        <div className="grid overflow-hidden rounded-xl border border-[var(--v2-border-strong)] bg-white shadow-[0_10px_28px_rgba(16,24,40,0.06),var(--v2-shadow-card)] sm:grid-cols-[minmax(190px,0.72fr)_minmax(0,1fr)_auto] sm:items-stretch">
+          <div className="min-w-0 px-5 py-6">
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--v2-ink-3)]">
+              Account
+            </p>
+            {safes.length > 1 ? (
+              <div className="relative mt-3">
+                <select
+                  value={safe.id}
+                  onChange={(event) => setSelectedSafeId(event.target.value)}
+                  className="w-full min-w-0 cursor-pointer appearance-none bg-transparent pr-6 text-[15px] font-semibold text-[var(--v2-ink)] outline-none"
+                >
+                  {safes.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </option>
+                  ))}
+                </select>
+                <svg
+                  aria-hidden="true"
+                  className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--v2-ink-2)]"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
                 </svg>
-              </a>
-            </div>
+              </div>
+            ) : (
+              <p className="mt-3 truncate text-[15px] font-semibold text-[var(--v2-ink)]">{safe.name}</p>
+            )}
+          </div>
 
+          <div className="min-w-0 border-t border-[var(--v2-border)] px-5 py-6 sm:border-l sm:border-t-0">
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--v2-ink-3)]">
+              Address
+            </p>
+            <div className="mt-3 flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                onClick={() => navigator.clipboard.writeText(safe.safe_address)}
+                title="Copy deposit address"
+                className="min-w-0 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              >
+                <code className="block truncate text-[15px] font-semibold text-[var(--v2-ink)]">
+                  {compactAddress(safe.safe_address)}
+                </code>
+              </button>
+              <CopyButton text={safe.safe_address} />
+            </div>
+          </div>
+
+          <div className="flex border-t border-[var(--v2-border)] p-5 sm:border-l sm:border-t-0 sm:items-center">
             <button
-              onClick={() => setShowQr((value) => !value)}
-              className="inline-flex items-center justify-center rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-2.5 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface-2)]"
+              type="button"
+              onClick={() => setShowQr(true)}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-[var(--v2-border-strong)] bg-white px-4 text-[14px] font-semibold text-[var(--v2-ink)] shadow-[var(--v2-shadow-button)] transition-colors hover:bg-[var(--v2-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
-              {showQr ? 'Hide QR code' : 'Show QR code'}
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h2m4 0h-1m-5 3h6m-6 3h2m4 0h-1" />
+              </svg>
+              QR Code
             </button>
           </div>
         </div>
-
-        {showQr && qrDataUrl && (
-          <div className="w-fit rounded-xl border border-[var(--v2-border)] bg-white p-2.5">
-            <img
-              src={qrDataUrl}
-              alt="Deposit address QR code"
-              className="h-[112px] w-[112px] rounded-lg"
-            />
-          </div>
-        )}
       </div>
 
-      <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 lg:min-h-full lg:rounded-none lg:border-l lg:border-r-0 lg:border-y-0 lg:bg-transparent lg:py-0.5 lg:pl-4 lg:pr-0">
-        <div className="space-y-3">
+      <div className="border-t border-[var(--v2-border)] pt-4 lg:min-h-full lg:border-l lg:border-t-0 lg:py-2 lg:pl-6">
+        <div className="space-y-5">
           <div className="flex items-start gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)] shadow-[var(--v2-shadow-card)]">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2l7 4v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-4z" />
                 <path d="M9 10h6M9 14h6" />
               </svg>
             </div>
             <div>
-              <p className="text-xs text-[var(--v2-ink-2)]">Network</p>
-              <p className="mt-0.5 text-sm font-medium text-[var(--v2-ink)]">{chainConfig.name}</p>
+              <p className="text-[13px] text-[var(--v2-ink-2)]">Network</p>
+              <p className="mt-1 text-[15px] font-semibold text-[var(--v2-ink)]">{chainConfig.name}</p>
             </div>
           </div>
 
           <div className="h-px bg-[var(--v2-surface-2)]" />
 
           <div className="flex items-start gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)] shadow-[var(--v2-shadow-card)]">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 7v10" />
@@ -258,8 +277,8 @@ function FundingPanel({
               </svg>
             </div>
             <div>
-              <p className="text-xs text-[var(--v2-ink-2)]">Supported tokens</p>
-              <p className="mt-0.5 text-sm font-medium text-[var(--v2-ink)]">
+              <p className="text-[13px] text-[var(--v2-ink-2)]">Supported tokens</p>
+              <p className="mt-1 text-[15px] font-semibold text-[var(--v2-ink)]">
                 {tokens.map((token) => token.symbol).join(', ')}
               </p>
             </div>
@@ -267,6 +286,60 @@ function FundingPanel({
         </div>
       </div>
     </div>
+    {showQr && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="funding-qr-title"
+        className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+      >
+        <div
+          className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm"
+          onClick={() => setShowQr(false)}
+        />
+        <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+          <div className="flex items-center justify-between border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-6 py-4">
+            <div className="min-w-0">
+              <h2 id="funding-qr-title" className="text-base font-semibold text-[var(--v2-ink)]">
+                Deposit QR code
+              </h2>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                Scan to fund {safe.name} on {chainConfig.name}.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowQr(false)}
+              aria-label="Close QR code"
+              className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="flex flex-col items-center px-6 py-6">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt="Deposit address QR code"
+                className="h-[280px] w-[280px] rounded-xl border border-[var(--v2-border)] bg-white p-2"
+              />
+            ) : (
+              <div className="h-[280px] w-[280px] animate-pulse rounded-xl bg-[var(--v2-surface-2)]" />
+            )}
+            <div className="mt-4 flex max-w-full items-start gap-2 rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+              <code className="min-w-0 flex-1 break-all text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                {safe.safe_address}
+              </code>
+              <CopyButton text={safe.safe_address} />
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }
 
@@ -304,8 +377,6 @@ function AddAgentPanel({
 export default function DashboardOnboardingGuide({
   stage,
   safes,
-  selectedSafeId,
-  onSelectSafe,
   onAddAgent,
   onDismiss,
 }: Props) {
@@ -343,8 +414,6 @@ export default function DashboardOnboardingGuide({
           {stage === 'fund' && (
             <FundingPanel
               safes={safes}
-              selectedSafeId={selectedSafeId}
-              onSelectSafe={onSelectSafe}
             />
           )}
           {stage === 'add-agent' && <AddAgentPanel onAddAgent={onAddAgent} />}

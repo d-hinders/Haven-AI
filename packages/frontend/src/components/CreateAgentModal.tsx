@@ -287,10 +287,10 @@ export default function CreateAgentModal({
   // moves the visibility forward.)
 
   function deployBlockReason(): string | null {
-    if (!signer) return 'Connect a wallet or enrolled passkey to sign the Safe transaction.'
+    if (!signer) return 'Connect a wallet or enrolled passkey to approve this change.'
     if (!publicClient) return 'No RPC client for this chain. Refresh the page.'
     if (!safeDetails)
-      return 'Safe details are still loading — or the Haven backend is unreachable. Make sure it is running on port 3001.'
+      return 'Account details are still loading — or the Haven backend is unreachable. Make sure it is running on port 3001.'
     return null
   }
 
@@ -565,21 +565,21 @@ export default function CreateAgentModal({
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/40 backdrop-blur-sm">
       {/* Backdrop click to close (disabled during execution) */}
       <div
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div className="relative bg-[#0e0e0e] border border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)]">
           <div>
             <h2 className="text-sm font-semibold">Connect agent</h2>
-            <p className="text-xs text-zinc-600 mt-0.5">
-              {step === 'details' && "Name the agent you'll hand these credentials to"}
-              {step === 'policy' && 'Set spending limits — token, amount, frequency'}
-              {step === 'key' && 'Choose the signing key the agent will use'}
+            <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
+              {step === 'details' && "Name the agent you'll connect"}
+              {step === 'policy' && 'Set agent budget — token, amount, frequency'}
+              {step === 'key' && 'Choose the credential the agent will use'}
               {step === 'review' && 'Review and connect the agent'}
               {step === 'executing' && 'Connecting agent...'}
               {step === 'done' && 'Credentials ready to hand off'}
@@ -589,7 +589,7 @@ export default function CreateAgentModal({
             onClick={handleClose}
             disabled={step === 'executing' && execStatus !== 'error'}
             aria-label="Close"
-            className="p-1 -mr-1 rounded-md text-zinc-700 hover:text-zinc-400 hover:bg-white/[0.04] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -600,7 +600,7 @@ export default function CreateAgentModal({
 
         {/* Step indicators */}
         {step !== 'executing' && step !== 'done' && (
-          <div className="flex items-center gap-2 px-6 py-3 border-b border-white/[0.04]">
+          <div className="flex items-center gap-2 px-6 py-3 border-b border-[var(--v2-border)]">
             {(['details', 'policy', 'key', 'review'] as const).map((s, i, arr) => (
               <div key={s} className="flex items-center gap-2">
                 <div
@@ -608,14 +608,14 @@ export default function CreateAgentModal({
                     s === step
                       ? 'bg-indigo-500 text-white'
                       : arr.indexOf(step as typeof arr[number]) > i
-                        ? 'bg-indigo-500/20 text-indigo-400'
-                        : 'bg-white/[0.04] text-zinc-600'
+                        ? 'bg-indigo-500/20 text-[var(--v2-brand)]'
+                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
                   }`}
                 >
                   {i + 1}
                 </div>
                 {i < arr.length - 1 && (
-                  <div className="w-8 h-px bg-white/[0.06]" />
+                  <div className="w-8 h-px bg-[var(--v2-surface-2)]" />
                 )}
               </div>
             ))}
@@ -627,29 +627,29 @@ export default function CreateAgentModal({
           {step === 'details' && (
             <div className="space-y-5">
               <div>
-                <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
+                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
                   Agent name
                 </label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Research Agent"
-                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
+                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all"
                 />
-                <p className="text-[10px] text-zinc-600 mt-1.5">
+                <p className="text-[10px] text-[var(--v2-ink-3)] mt-1.5">
                   Use the name of the agent you&apos;ll hand these credentials to (e.g. your Claude assistant, a scraping bot).
                 </p>
               </div>
               <div>
-                <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
-                  Description <span className="normal-case text-zinc-700">(optional)</span>
+                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
+                  Description <span className="normal-case text-[var(--v2-ink-3)]">(optional)</span>
                 </label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What does this agent do?"
                   rows={2}
-                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all resize-none"
+                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
                 />
               </div>
 
@@ -658,24 +658,24 @@ export default function CreateAgentModal({
                 disabled={!canProceedDetails()}
                 className="w-full text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
               >
-                Next: Policy
+                Next: rules
               </button>
             </div>
           )}
 
-          {/* ── STEP: Policy ──────────────────────────────── */}
+          {/* ── STEP: Rules ──────────────────────────────── */}
           {step === 'policy' && (
             <div className="space-y-5">
-              {/* Safe picker — only when the user has more than one Safe */}
+              {/* Account picker — only when the user has more than one account */}
               {userSafes.length > 1 && (
                 <div>
-                  <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
+                  <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
                     Spends from
                   </label>
                   <select
                     value={selectedSafeId ?? ''}
                     onChange={(e) => setSelectedSafeId(e.target.value)}
-                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
+                    className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all"
                   >
                     {userSafes.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -683,7 +683,7 @@ export default function CreateAgentModal({
                       </option>
                     ))}
                   </select>
-                  <p className="text-[10px] text-zinc-600 mt-1.5">
+                  <p className="text-[10px] text-[var(--v2-ink-3)] mt-1.5">
                     The agent will only be able to spend from this account.
                   </p>
                 </div>
@@ -695,19 +695,19 @@ export default function CreateAgentModal({
                   {allowances.map((a) => (
                     <div
                       key={a.tokenSymbol}
-                      className="flex items-center justify-between p-3 bg-white/[0.03] rounded-lg border border-white/[0.06]"
+                      className="flex items-center justify-between p-3 bg-[var(--v2-surface)] rounded-lg border border-[var(--v2-border)]"
                     >
                       <div>
-                        <span className="text-sm text-zinc-200 font-medium">
+                        <span className="text-sm text-[var(--v2-ink)] font-medium">
                           {a.amount} {a.tokenSymbol}
                         </span>
-                        <span className="text-xs text-zinc-600 ml-2">
+                        <span className="text-xs text-[var(--v2-ink-3)] ml-2">
                           {resetLabel(a.resetTimeMin)}
                         </span>
                       </div>
                       <button
                         onClick={() => handleRemoveAllowance(a.tokenSymbol)}
-                        className="text-zinc-700 hover:text-red-400 transition-colors"
+                        className="text-[var(--v2-ink-3)] hover:text-red-400 transition-colors"
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="3 6 5 6 21 6" />
@@ -723,15 +723,15 @@ export default function CreateAgentModal({
 
               {/* Add allowance form */}
               {availableTokens.length > 0 && (
-                <div className="space-y-3 p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
-                  <p className="text-[11px] text-zinc-500 uppercase tracking-wide">
+                <div className="space-y-3 p-4 bg-[var(--v2-surface)] rounded-xl border border-dashed border-[var(--v2-border)]">
+                  <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">
                     Add spending limit
                   </p>
                   <div className="grid grid-cols-3 gap-2">
                     <select
                       value={addToken}
                       onChange={(e) => setAddToken(e.target.value)}
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
                     >
                       {availableTokens.map((t) => (
                         <option key={t.symbol} value={t.symbol}>
@@ -746,12 +746,12 @@ export default function CreateAgentModal({
                       value={addAmount}
                       onChange={(e) => setAddAmount(e.target.value)}
                       placeholder="Amount"
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50"
                     />
                     <select
                       value={addReset}
                       onChange={(e) => setAddReset(Number(e.target.value))}
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
                     >
                       {RESET_PERIODS.map((p) => (
                         <option key={p.value} value={p.value}>
@@ -767,7 +767,7 @@ export default function CreateAgentModal({
                       Number(addAmount) <= 0 ||
                       !availableTokens.some((t) => t.symbol === addToken)
                     }
-                    className="w-full text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-30 disabled:cursor-not-allowed text-zinc-300 rounded-lg py-2 transition-colors"
+                    className="w-full text-xs font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--v2-ink)] rounded-lg py-2 transition-colors"
                   >
                     + Add limit
                   </button>
@@ -775,12 +775,12 @@ export default function CreateAgentModal({
               )}
 
               {allowances.length === 0 && (
-                <p className="text-xs text-zinc-600 text-center py-4">
+                <p className="text-xs text-[var(--v2-ink-3)] text-center py-4">
                   Add at least one spending limit to continue
                 </p>
               )}
 
-              <p className="text-[11px] text-zinc-600 leading-relaxed pt-2 border-t border-white/[0.06]">
+              <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed pt-2 border-t border-[var(--v2-border)]">
                 Payments that exceed these limits aren&apos;t rejected — they&apos;re queued
                 for your approval in the dashboard.
               </p>
@@ -788,7 +788,7 @@ export default function CreateAgentModal({
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('details')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
@@ -797,7 +797,7 @@ export default function CreateAgentModal({
                   disabled={allowances.length === 0}
                   className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
-                  Next: Delegate key
+                  Next: credential
                 </button>
               </div>
             </div>
@@ -806,10 +806,10 @@ export default function CreateAgentModal({
           {/* ── STEP: Key ─────────────────────────────────── */}
           {step === 'key' && (
             <div className="space-y-5">
-              {/* ── Delegate key mode selector ──────────── */}
+              {/* ── Credential mode selector ──────────── */}
               <div>
-                <label className="block text-[11px] text-zinc-500 mb-2 uppercase tracking-wide">
-                  Delegate key
+                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-2 uppercase tracking-wide">
+                  Agent credential
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -818,24 +818,24 @@ export default function CreateAgentModal({
                     className={`relative p-3 rounded-xl border text-left transition-all ${
                       keyMode === 'generate'
                         ? 'border-indigo-500/50 bg-indigo-500/5'
-                        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
+                        : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                        keyMode === 'generate' ? 'border-indigo-400' : 'border-zinc-700'
+                        keyMode === 'generate' ? 'border-indigo-400' : 'border-[var(--v2-border-strong)]'
                       }`}>
                         {keyMode === 'generate' && (
                           <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
                         )}
                       </div>
                       <span className={`text-xs font-medium ${
-                        keyMode === 'generate' ? 'text-zinc-200' : 'text-zinc-400'
+                        keyMode === 'generate' ? 'text-[var(--v2-ink)]' : 'text-[var(--v2-ink-2)]'
                       }`}>
                         Generate new
                       </span>
                     </div>
-                    <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
+                    <p className="text-[10px] text-[var(--v2-ink-3)] ml-5.5 pl-0.5">
                       Haven creates a keypair for you
                     </p>
                   </button>
@@ -845,24 +845,24 @@ export default function CreateAgentModal({
                     className={`relative p-3 rounded-xl border text-left transition-all ${
                       keyMode === 'existing'
                         ? 'border-indigo-500/50 bg-indigo-500/5'
-                        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
+                        : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                        keyMode === 'existing' ? 'border-indigo-400' : 'border-zinc-700'
+                        keyMode === 'existing' ? 'border-indigo-400' : 'border-[var(--v2-border-strong)]'
                       }`}>
                         {keyMode === 'existing' && (
                           <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
                         )}
                       </div>
                       <span className={`text-xs font-medium ${
-                        keyMode === 'existing' ? 'text-zinc-200' : 'text-zinc-400'
+                        keyMode === 'existing' ? 'text-[var(--v2-ink)]' : 'text-[var(--v2-ink-2)]'
                       }`}>
                         Use existing
                       </span>
                     </div>
-                    <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
+                    <p className="text-[10px] text-[var(--v2-ink-3)] ml-5.5 pl-0.5">
                       Provide your own wallet address
                     </p>
                   </button>
@@ -873,16 +873,16 @@ export default function CreateAgentModal({
               {keyMode === 'generate' && generatedPrivateKey && (
                 <div className="space-y-3">
                   <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                      Delegate address
+                    <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
+                      Credential address
                     </p>
                     <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs font-mono text-zinc-400 bg-white/[0.03] rounded-lg px-3 py-2 truncate">
+                      <code className="flex-1 text-xs font-mono text-[var(--v2-ink-2)] bg-[var(--v2-surface)] rounded-lg px-3 py-2 truncate">
                         {delegateAddress}
                       </code>
                       <button
                         onClick={() => copyToClipboard(delegateAddress, () => {})}
-                        className="flex-shrink-0 text-zinc-700 hover:text-zinc-400 transition-colors p-1"
+                        className="flex-shrink-0 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors p-1"
                         title="Copy address"
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -893,20 +893,20 @@ export default function CreateAgentModal({
                     </div>
                   </div>
 
-                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 flex items-start gap-2">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500 flex-shrink-0 mt-0.5">
+                  <div className="bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-lg px-3 py-2.5 flex items-start gap-2">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--v2-ink-3)] flex-shrink-0 mt-0.5">
                       <circle cx="12" cy="12" r="10" />
                       <line x1="12" y1="16" x2="12" y2="12" />
                       <line x1="12" y1="8" x2="12.01" y2="8" />
                     </svg>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed">
                       A fresh keypair was generated in your browser. Haven never sees the private key.
                     </p>
                   </div>
 
                   <button
                     onClick={handleGenerateKey}
-                    className="text-[11px] text-zinc-700 hover:text-zinc-400 transition-colors"
+                    className="text-[11px] text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors"
                   >
                     Generate a different key
                   </button>
@@ -920,15 +920,15 @@ export default function CreateAgentModal({
                     value={delegateAddress}
                     onChange={(e) => setDelegateAddress(e.target.value)}
                     placeholder="0x..."
-                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
+                    className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm font-mono text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all"
                   />
                   {delegateAddress && !isValidAddress(delegateAddress) && (
                     <p className="text-[11px] text-red-400">
                       Invalid Ethereum address
                     </p>
                   )}
-                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5">
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  <div className="bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-lg px-3 py-2.5">
+                    <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed">
                       Enter the public address of the wallet your agent will use for signing.
                       Make sure your agent has access to this wallet&apos;s private key — Haven will
                       never ask for it or store it.
@@ -940,7 +940,7 @@ export default function CreateAgentModal({
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('policy')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
@@ -959,45 +959,45 @@ export default function CreateAgentModal({
           {step === 'review' && (
             <div className="space-y-5">
               {/* Summary card */}
-              <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-3">
+              <div className="bg-[var(--v2-surface)] rounded-xl p-4 border border-[var(--v2-border)] space-y-3">
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
                     Agent
                   </p>
-                  <p className="text-sm text-zinc-200 font-medium">{name}</p>
+                  <p className="text-sm text-[var(--v2-ink)] font-medium">{name}</p>
                   {description && (
-                    <p className="text-xs text-zinc-500 mt-0.5">{description}</p>
+                    <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">{description}</p>
                   )}
                 </div>
                 {userSafes.length > 1 && selectedSafe && (
                   <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
+                    <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
                       Spends from
                     </p>
-                    <p className="text-sm text-zinc-200">
+                    <p className="text-sm text-[var(--v2-ink)]">
                       {selectedSafe.name}
-                      <span className="text-xs font-mono text-zinc-500 ml-2">
+                      <span className="text-xs font-mono text-[var(--v2-ink-3)] ml-2">
                         {truncate(selectedSafe.safe_address)}
                       </span>
-                      <span className="text-[10px] text-zinc-600 ml-2">
+                      <span className="text-[10px] text-[var(--v2-ink-3)] ml-2">
                         {getChainConfig(selectedSafe.chain_id).name}
                       </span>
                     </p>
                   </div>
                 )}
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                    Delegate
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
+                    Credential
                   </p>
-                  <p className="text-xs font-mono text-zinc-400">
+                  <p className="text-xs font-mono text-[var(--v2-ink-2)]">
                     {truncate(delegateAddress)}
                     {keyMode === 'generate' && (
-                      <span className="text-indigo-400/60 ml-2 font-sans">(generated)</span>
+                      <span className="text-[var(--v2-brand)]/60 ml-2 font-sans">(generated)</span>
                     )}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
                     Spending limits
                   </p>
                   <div className="space-y-1">
@@ -1006,10 +1006,10 @@ export default function CreateAgentModal({
                         key={a.tokenSymbol}
                         className="flex items-center justify-between text-xs"
                       >
-                        <span className="text-zinc-300">
+                        <span className="text-[var(--v2-ink)]">
                           {a.amount} {a.tokenSymbol}
                         </span>
-                        <span className="text-zinc-600">
+                        <span className="text-[var(--v2-ink-3)]">
                           {resetLabel(a.resetTimeMin)}
                         </span>
                       </div>
@@ -1020,7 +1020,7 @@ export default function CreateAgentModal({
 
               {(safeDetails?.threshold ?? 1) > 1 && (
                 <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/10 rounded-lg px-3 py-2">
-                  Multi-sig Safe ({safeDetails?.threshold}/{safeDetails?.owners?.length}) — this will be proposed for co-signer approval.
+                  This account requires {safeDetails?.threshold} of {safeDetails?.owners?.length} approvals. Haven will submit it for approval.
                 </div>
               )}
 
@@ -1033,7 +1033,7 @@ export default function CreateAgentModal({
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('key')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
@@ -1043,7 +1043,7 @@ export default function CreateAgentModal({
                       onClick={handleExecute}
                       disabled={!!deployBlockReason()}
                       title={deployBlockReason() ?? undefined}
-                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
+                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-[var(--v2-ink-3)] disabled:to-[var(--v2-ink-3)] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
                     >
                       Connect agent
                     </button>
@@ -1060,13 +1060,13 @@ export default function CreateAgentModal({
                 <>
                   <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
                   <div>
-                    <p className="text-sm text-zinc-200 font-medium">
+                    <p className="text-sm text-[var(--v2-ink)] font-medium">
                       {execStatus === 'checking' && 'Checking module status...'}
                       {execStatus === 'signing' && 'Awaiting signature...'}
                       {execStatus === 'executing' && 'Submitting to chain...'}
                       {execStatus === 'saving' && 'Saving agent...'}
                     </p>
-                    <div className="text-xs text-zinc-600 mt-1">
+                    <div className="text-xs text-[var(--v2-ink-3)] mt-1">
                       {execStatus === 'signing' ? (
                         <SigningStatus signer={signer} stage="signing" />
                       ) : execStatus === 'executing' ? (
@@ -1089,14 +1089,14 @@ export default function CreateAgentModal({
                     <p className="text-sm text-red-400 font-medium">
                       Setup failed
                     </p>
-                    <p className="text-xs text-zinc-600 mt-1 max-w-xs mx-auto">
+                    <p className="text-xs text-[var(--v2-ink-3)] mt-1 max-w-xs mx-auto">
                       {execError}
                     </p>
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={() => setStep('review')}
-                      className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                     >
                       Back
                     </button>
@@ -1121,10 +1121,10 @@ export default function CreateAgentModal({
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-zinc-200">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">
                   {execStatus === 'confirmed'
                     ? 'Agent added'
-                    : 'Agent pending co-signer approval'}
+                    : 'Agent pending approval'}
                 </p>
                 {txHash && (
                   <a
@@ -1135,7 +1135,7 @@ export default function CreateAgentModal({
                     }
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-2 mt-1 inline-block"
+                    className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] underline underline-offset-2 mt-1 inline-block"
                   >
                     {execStatus === 'confirmed' ? `View on ${getChainConfig(chainId).name} Explorer` : 'View in Safe{Wallet}'}
                   </a>
@@ -1152,10 +1152,10 @@ export default function CreateAgentModal({
                   </svg>
                   <div>
                     <p className="text-[11px] text-amber-400 uppercase tracking-wide font-medium">
-                      Agent handoff — save this now
+                      Agent credential — save this now
                     </p>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed mt-0.5">
-                      One file with credentials, Safe address, policy, and SDK quickstart.
+                    <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed mt-0.5">
+                      One file with credentials, account address, agent rules, and SDK quickstart.
                       {generatedPrivateKey ? ' Secrets cannot be shown again.' : ''}
                     </p>
                   </div>
@@ -1171,13 +1171,13 @@ export default function CreateAgentModal({
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  Download handoff file (.md)
+                  Download credential file (.md)
                 </button>
 
                 {/* Secondary: copy as .env */}
                 <button
                   onClick={handleCopyEnv}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-[var(--v2-ink)] bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
                   title="Copy just the environment variables for pasting into .env"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1193,7 +1193,7 @@ export default function CreateAgentModal({
                   open={showRawCreds}
                   onToggle={(e) => setShowRawCreds((e.currentTarget as HTMLDetailsElement).open)}
                 >
-                  <summary className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 rounded">
+                  <summary className="text-[11px] text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 rounded">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="transition-transform group-open:rotate-90">
                       <polyline points="9 18 15 12 9 6" />
                     </svg>
@@ -1202,17 +1202,17 @@ export default function CreateAgentModal({
                   <div className="mt-3 space-y-3">
                     {createdApiKey && (
                       <div className="space-y-1.5">
-                        <p className="text-[10px] text-zinc-600 uppercase tracking-wide">
+                        <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide">
                           API Key
-                          <span className="normal-case text-zinc-700 ml-1">— authenticates with Haven</span>
+                          <span className="normal-case text-[var(--v2-ink-3)] ml-1">— authenticates with Haven</span>
                         </p>
                         <div className="flex items-center gap-2">
-                          <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all">
+                          <code className="flex-1 text-xs font-mono text-[var(--v2-ink)] bg-[var(--v2-surface)] rounded-lg px-3 py-2 break-all">
                             {createdApiKey}
                           </code>
                           <button
                             onClick={() => copyToClipboard(createdApiKey, setCopiedApiKey)}
-                            className="flex-shrink-0 text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-2"
+                            className="flex-shrink-0 text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors px-2 py-2"
                           >
                             {copiedApiKey ? 'Copied!' : 'Copy'}
                           </button>
@@ -1221,17 +1221,17 @@ export default function CreateAgentModal({
                     )}
                     {generatedPrivateKey && (
                       <div className="space-y-1.5 pt-2 border-t border-amber-400/10">
-                        <p className="text-[10px] text-zinc-600 uppercase tracking-wide">
-                          Delegate Private Key
-                          <span className="normal-case text-zinc-700 ml-1">— signs transactions</span>
+                        <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide">
+                          Credential private key
+                          <span className="normal-case text-[var(--v2-ink-3)] ml-1">— signs transactions</span>
                         </p>
                         <div className="flex items-center gap-2">
-                          <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all">
+                          <code className="flex-1 text-xs font-mono text-[var(--v2-ink)] bg-[var(--v2-surface)] rounded-lg px-3 py-2 break-all">
                             {generatedPrivateKey}
                           </code>
                           <button
                             onClick={() => copyToClipboard(generatedPrivateKey, setCopiedDoneKey)}
-                            className="flex-shrink-0 text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-2"
+                            className="flex-shrink-0 text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors px-2 py-2"
                           >
                             {copiedDoneKey ? 'Copied!' : 'Copy'}
                           </button>
@@ -1244,7 +1244,7 @@ export default function CreateAgentModal({
 
               <button
                 onClick={handleClose}
-                className="w-full text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                className="w-full text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
               >
                 Done
               </button>

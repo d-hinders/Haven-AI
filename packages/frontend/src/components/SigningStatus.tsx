@@ -21,7 +21,7 @@ export function SigningStatus({ signer, stage, error }: SigningStatusProps) {
   } else if (stage === 'executing') {
     text =
       signer?.type === 'passkey'
-        ? 'Submitting via Haven relayer...'
+        ? 'Submitting via Haven...'
         : 'Submitting transaction...'
   } else if (stage === 'confirmed') {
     text = 'Confirmed.'
@@ -36,7 +36,7 @@ export function SigningStatus({ signer, stage, error }: SigningStatusProps) {
       ? 'text-red-400'
       : stage === 'confirmed'
         ? 'text-emerald-400'
-        : 'text-zinc-300'
+        : 'text-[var(--v2-ink)]'
 
   return <p className={`text-sm ${tone}`}>{text}</p>
 }

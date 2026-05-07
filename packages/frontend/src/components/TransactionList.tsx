@@ -50,14 +50,14 @@ export default function TransactionList({
         {[0, 1, 2, 3].map((i) => (
           <div
             key={i}
-            className="flex items-center gap-3 p-3 rounded-md bg-white/[0.02]"
+            className="flex items-center gap-3 p-3 rounded-md bg-[var(--v2-surface)]"
           >
-            <div className="w-7 h-7 rounded-full bg-white/[0.06] animate-pulse" />
+            <div className="w-7 h-7 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
             <div className="flex-1 space-y-2">
-              <div className="h-3 w-32 bg-white/[0.06] rounded animate-pulse" />
-              <div className="h-2 w-20 bg-white/[0.06] rounded animate-pulse" />
+              <div className="h-3 w-32 bg-[var(--v2-surface-2)] rounded animate-pulse" />
+              <div className="h-2 w-20 bg-[var(--v2-surface-2)] rounded animate-pulse" />
             </div>
-            <div className="h-4 w-16 bg-white/[0.06] rounded animate-pulse" />
+            <div className="h-4 w-16 bg-[var(--v2-surface-2)] rounded animate-pulse" />
           </div>
         ))}
       </div>
@@ -82,12 +82,12 @@ export default function TransactionList({
   // Empty state
   if (transactions.length === 0 && !loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-32 rounded-md border border-dashed border-white/[0.06]">
-        <span className="text-sm text-zinc-600 mb-1">
+      <div className="flex flex-col items-center justify-center h-32 rounded-md border border-dashed border-[var(--v2-border)]">
+        <span className="text-sm text-[var(--v2-ink-3)] mb-1">
           No transactions yet
         </span>
-        <span className="text-xs text-zinc-700">
-          Fund your Safe to get started
+        <span className="text-xs text-[var(--v2-ink-3)]">
+          Fund your Haven account to get started
         </span>
       </div>
     )
@@ -97,12 +97,12 @@ export default function TransactionList({
     <div>
       {/* Header with count and refresh */}
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs text-zinc-600">
+        <span className="text-xs text-[var(--v2-ink-3)]">
           {total} transaction{total !== 1 ? 's' : ''}
         </span>
         <button
           onClick={onRefresh}
-          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+          className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors"
         >
           Refresh
         </button>
@@ -116,14 +116,14 @@ export default function TransactionList({
             href={getExplorerUrl(chainId, 'tx', tx.hash)}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-3 p-3 rounded-md hover:bg-white/[0.03] transition-colors group"
+            className="flex items-center gap-3 p-3 rounded-md hover:bg-[var(--v2-surface)] transition-colors group"
           >
             {/* Direction icon */}
             <div
               className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
                 tx.direction === 'in'
                   ? 'bg-emerald-500/10 text-emerald-400'
-                  : 'bg-zinc-500/10 text-zinc-400'
+                  : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]'
               }`}
             >
               {tx.direction === 'in' ? '↓' : '↑'}
@@ -132,19 +132,19 @@ export default function TransactionList({
             {/* Details */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-[#ededed] truncate">
+                <span className="text-sm text-[var(--v2-ink)] truncate">
                   {tx.direction === 'in' ? 'From' : 'To'}{' '}
                   {(() => {
                     const addr = tx.direction === 'in' ? tx.from : tx.to
                     const name = resolveAddress?.(addr)
                     return name ? (
-                      <span className="text-zinc-300" title={addr}>{name}</span>
+                      <span className="text-[var(--v2-ink)]" title={addr}>{name}</span>
                     ) : (
-                      <span className="font-mono text-zinc-400">{truncate(addr)}</span>
+                      <span className="font-mono text-[var(--v2-ink-2)]">{truncate(addr)}</span>
                     )
                   })()}
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-white/[0.04] text-zinc-600 flex-shrink-0">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)] flex-shrink-0">
                   {TYPE_LABELS[tx.type] ?? tx.type}
                 </span>
                 {(() => {
@@ -164,7 +164,7 @@ export default function TransactionList({
                   </span>
                 )}
               </div>
-              <span className="text-xs text-zinc-600">
+              <span className="text-xs text-[var(--v2-ink-3)]">
                 {timeAgo(tx.timestamp)}
               </span>
             </div>
@@ -173,13 +173,13 @@ export default function TransactionList({
             <div className="text-right flex-shrink-0">
               <span
                 className={`text-sm font-medium ${
-                  tx.direction === 'in' ? 'text-emerald-400' : 'text-[#ededed]'
+                  tx.direction === 'in' ? 'text-emerald-400' : 'text-[var(--v2-ink)]'
                 }`}
               >
                 {tx.direction === 'in' ? '+' : '-'}
                 {tx.valueFormatted}
               </span>
-              <span className="block text-xs text-zinc-600">{tx.asset}</span>
+              <span className="block text-xs text-[var(--v2-ink-3)]">{tx.asset}</span>
             </div>
           </a>
         ))}
@@ -187,21 +187,21 @@ export default function TransactionList({
 
       {/* Pagination */}
       {pages > 1 && (
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/[0.06]">
+        <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--v2-border)]">
           <button
             onClick={() => onPageChange(page - 1)}
             disabled={page <= 1}
-            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
             ← Newer
           </button>
-          <span className="text-xs text-zinc-600">
+          <span className="text-xs text-[var(--v2-ink-3)]">
             Page {page} of {pages}
           </span>
           <button
             onClick={() => onPageChange(page + 1)}
             disabled={page >= pages}
-            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Older →
           </button>

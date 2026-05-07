@@ -11,7 +11,7 @@ import { deploySafe } from '@/lib/safe'
 import { useActiveSigner } from '@/lib/signer'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, usePublicClient } from 'wagmi'
-import { getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import NetworkPill from '@/components/NetworkPill'
 import { truncate } from '@/lib/format'
@@ -39,14 +39,14 @@ function AddSafeModal({
 
   // Import state
   const [importAddress, setImportAddress] = useState('')
-  const [importChainId, setImportChainId] = useState(100)
+  const [importChainId, setImportChainId] = useState(DEFAULT_CHAIN_ID)
 
   // Deploy state
   const [deployStep, setDeployStep] = useState<DeployStep>('name')
   const [deploying, setDeploying] = useState(false)
   const [deployedAddress, setDeployedAddress] = useState('')
   const [deployTxHash, setDeployTxHash] = useState('')
-  const [deployChainId, setDeployChainId] = useState(100)
+  const [deployChainId, setDeployChainId] = useState(DEFAULT_CHAIN_ID)
 
   const { address: walletAddress, isConnected, chain } = useAccount()
   const publicClient = usePublicClient({ chainId: deployChainId })
@@ -58,12 +58,12 @@ function AddSafeModal({
     setName('')
     setError('')
     setImportAddress('')
-    setImportChainId(100)
+    setImportChainId(DEFAULT_CHAIN_ID)
     setDeployStep('name')
     setDeploying(false)
     setDeployedAddress('')
     setDeployTxHash('')
-    setDeployChainId(100)
+    setDeployChainId(DEFAULT_CHAIN_ID)
   }
 
   const handleClose = () => {

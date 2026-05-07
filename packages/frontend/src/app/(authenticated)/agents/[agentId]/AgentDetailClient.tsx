@@ -432,7 +432,7 @@ export default function AgentDetailClient({ agentId }: Props) {
           {!isRevoked ? (
             <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
               <div className="px-5 py-4 border-b border-[var(--v2-border)]">
-                <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Haven credential</h2>
+                <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent credential</h2>
               </div>
               <div className="p-5">
                 <p className="text-sm text-[var(--v2-ink-2)]">
@@ -457,13 +457,11 @@ export default function AgentDetailClient({ agentId }: Props) {
                         {credentialCopied ? 'Copied' : 'Copy'}
                       </button>
                     </>
-                  ) : (
-                    <span className="text-xs font-medium text-[var(--v2-ink-3)]">Shown once</span>
-                  )}
+                  ) : null}
                 </div>
                 {!fullCredential ? (
                   <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                    For security, the full credential is only shown when the agent is created. Use the setup file you saved then, or create a new agent if you need a fresh credential.
+                    For security, Haven only shows the full agent credential when you create the agent. If you lose it, create a new agent or rotate the credential.
                   </p>
                 ) : null}
               </div>

@@ -1,16 +1,16 @@
-# Haven v2 redesign — implementation handoff
+# Haven redesign — implementation handoff
 
-This file is the work plan to graduate the v2 design preview into production. Hand to Codex one phase at a time.
+This file is historical project context for the v2 redesign migration. The migration phases are complete; use it only when you need to understand why specific implementation choices were made.
 
 **Reference:**
 - Production marketing routes: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`
-- Design system: `docs/design_system/DESIGN_SYSTEM_V2.md`
+- Design system: `docs/design_system/DESIGN_SYSTEM.md`
 - **Copy (authoritative):** `docs/design_system/UX_COPY_GUIDELINES.md` — read this before touching any user‑facing string
 - Product doctrine + IA + accessibility: `docs/UX_GUIDELINES.md`
 
-**Status:** Phase 0, Phase 0.5, Phase 1, and Phase 2 are implemented. Treat this handoff as project history plus a reference checklist; new work should start from `UX_GUIDELINES.md`, `DESIGN_SYSTEM_V2.md`, and `UX_COPY_GUIDELINES.md`.
+**Status:** Phase 0, Phase 0.5, Phase 1, Phase 2, and Phase 3 are implemented. New work should start from `UX_GUIDELINES.md`, `DESIGN_SYSTEM.md`, and `UX_COPY_GUIDELINES.md`.
 
-**Order of work:** Phase 0 → Phase 1 (marketing) → Phase 2 (app) → Phase 3 (cleanup). Don't start a phase until the previous one is verified by visual inspection and the test suite passes.
+**Original order of work:** Phase 0 → Phase 1 (marketing) → Phase 2 (app) → Phase 3 (cleanup).
 
 ---
 
@@ -275,12 +275,12 @@ Once 1.3–1.7 are verified visually:
 - `rm -rf packages/frontend/src/app/design`
 - `rm -rf packages/frontend/src/components/marketing/v2`
 
-Update `docs/DESIGN_SYSTEM_V2.md` Section 7 ("Where things live") so the "Today" column matches reality.
+Update `docs/DESIGN_SYSTEM.md` Section 7 ("Where things live") so the "Today" column matches reality.
 
 ### Task 1.9 — Update `docs/UX_GUIDELINES.md`
 
 Section 3 of `UX_GUIDELINES.md` ("Visual system") still describes the **dark surface tokens**. Either:
-- (a) Replace section 3 entirely with a pointer to `DESIGN_SYSTEM_V2.md`, **or**
+- (a) Replace section 3 entirely with a pointer to `DESIGN_SYSTEM.md`, **or**
 - (b) Keep both sets of tokens, label one "marketing (light)" and one "app (dark, deprecated)" until Phase 2 lands.
 
 Recommend (b) until Phase 2 begins so app contributors aren't confused.
@@ -301,7 +301,7 @@ Goal: bring the authenticated app onto the same light system. Bigger scope; tack
 
 ### Task 2.1 — Define dark→light token mappings for app
 
-Audit `(authenticated)/*` for hardcoded dark colours. Produce a mapping doc (append to `DESIGN_SYSTEM_V2.md`):
+Audit `(authenticated)/*` for hardcoded dark colours. Produce a mapping doc (append to `DESIGN_SYSTEM.md`):
 - `bg-[#0a0a0a]` → `bg-bg`
 - `bg-white/[0.02]` → `bg-surface`
 - `bg-white/[0.04]` → `bg-surface-2`
@@ -373,7 +373,7 @@ For each: replace inline class strings using the dark→light mapping. Replace g
 ### Task 2.6 — Update `UX_GUIDELINES.md`
 
 Now that the app is light:
-- Replace section 3 (visual system) with a one‑line pointer to `DESIGN_SYSTEM_V2.md`.
+- Replace section 3 (visual system) with a one‑line pointer to `DESIGN_SYSTEM.md`.
 - **Replace section 1 (Language & terminology) with a one‑line pointer to `UX_COPY_GUIDELINES.md`.** The terminology table in `UX_GUIDELINES.md` is now stale and conflicts with the copy guidelines — collapse it.
 - Walk through sections 4 (component patterns) and 5 (states) and update class examples to the new system.
 - IA (section 2), accessibility (section 7), and the parts of voice (section 6) that don't conflict with the copy guidelines — keep.
@@ -388,6 +388,8 @@ Now that the app is light:
 
 ## Phase 3 — Cleanup
 
+**Completed:** the production app no longer contains residual `bg-[#…]`, `text-zinc-*`, or `bg-zinc-*` app-surface classes. The `/v2` redirect and remaining unused dark-era components were removed. `DESIGN_SYSTEM_V2.md` was renamed to `DESIGN_SYSTEM.md`.
+
 ### Task 3.1 — Audit residual `bg-[#…]` literals
 Run `rg "bg-\[#" packages/frontend/src` and `rg "text-zinc-" packages/frontend/src`. Every remaining occurrence is either an intentional escape or an oversight. Convert or document.
 
@@ -395,9 +397,9 @@ Run `rg "bg-\[#" packages/frontend/src` and `rg "text-zinc-" packages/frontend/s
 Confirm `app/design/` and `components/marketing/v2/` are gone. If a primitives reference page was left in place for Phase 2, delete it now.
 
 ### Task 3.3 — Final docs pass
-- `DESIGN_SYSTEM_V2.md` — rename to `DESIGN_SYSTEM.md` (drop the version suffix once it's the only system). Update Section 7 to reflect the post‑migration file layout.
+- `DESIGN_SYSTEM.md` — renamed from `DESIGN_SYSTEM_V2.md` after it became the only system. Section 7 reflects the post‑migration file layout.
 - `UX_GUIDELINES.md` — final read‑through.
-- Add a one‑page `CONTRIBUTING_DESIGN.md` if helpful, with the "do / don't" condensed list (max one accent word, no gradient buttons, etc.).
+- A separate `CONTRIBUTING_DESIGN.md` was not added; the condensed do/don't guidance now lives in `UX_GUIDELINES.md` plus `DESIGN_SYSTEM.md`.
 
 ---
 

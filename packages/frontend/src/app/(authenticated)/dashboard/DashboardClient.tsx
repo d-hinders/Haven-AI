@@ -527,7 +527,10 @@ export default function DashboardClient() {
         />
       )}
 
-      <div className="relative mb-6 overflow-hidden rounded-[24px] border border-[#E7E9F2] bg-[#F7F5FF] shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]">
+      <div
+        className="relative mb-6 overflow-hidden rounded-[24px] border shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]"
+        style={{ borderColor: '#E7E9F2', backgroundColor: '#F7F5FF' }}
+      >
         <div
           className="absolute inset-0 pointer-events-none"
           style={{

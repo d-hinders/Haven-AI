@@ -589,7 +589,7 @@ export default function CreateAgentModal({
             onClick={handleClose}
             disabled={step === 'executing' && execStatus !== 'error'}
             aria-label="Close"
-            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -634,7 +634,7 @@ export default function CreateAgentModal({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Research Agent"
-                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all"
+                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all"
                 />
                 <p className="text-[10px] text-[var(--v2-ink-3)] mt-1.5">
                   Use the name of the agent you&apos;ll hand these credentials to (e.g. your Claude assistant, a scraping bot).
@@ -649,7 +649,7 @@ export default function CreateAgentModal({
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What does this agent do?"
                   rows={2}
-                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
+                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
                 />
               </div>
 
@@ -675,7 +675,7 @@ export default function CreateAgentModal({
                   <select
                     value={selectedSafeId ?? ''}
                     onChange={(e) => setSelectedSafeId(e.target.value)}
-                    className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all"
+                    className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all"
                   >
                     {userSafes.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -731,7 +731,7 @@ export default function CreateAgentModal({
                     <select
                       value={addToken}
                       onChange={(e) => setAddToken(e.target.value)}
-                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)]/50"
                     >
                       {availableTokens.map((t) => (
                         <option key={t.symbol} value={t.symbol}>
@@ -746,12 +746,12 @@ export default function CreateAgentModal({
                       value={addAmount}
                       onChange={(e) => setAddAmount(e.target.value)}
                       placeholder="Amount"
-                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50"
                     />
                     <select
                       value={addReset}
                       onChange={(e) => setAddReset(Number(e.target.value))}
-                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)]/50"
                     >
                       {RESET_PERIODS.map((p) => (
                         <option key={p.value} value={p.value}>
@@ -767,7 +767,7 @@ export default function CreateAgentModal({
                       Number(addAmount) <= 0 ||
                       !availableTokens.some((t) => t.symbol === addToken)
                     }
-                    className="w-full text-xs font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--v2-ink)] rounded-lg py-2 transition-colors"
+                    className="w-full text-xs font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--v2-ink)] rounded-lg py-2 transition-colors"
                   >
                     + Add limit
                   </button>
@@ -788,7 +788,7 @@ export default function CreateAgentModal({
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('details')}
-                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
@@ -920,7 +920,7 @@ export default function CreateAgentModal({
                     value={delegateAddress}
                     onChange={(e) => setDelegateAddress(e.target.value)}
                     placeholder="0x..."
-                    className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm font-mono text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all"
+                    className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm font-mono text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all"
                   />
                   {delegateAddress && !isValidAddress(delegateAddress) && (
                     <p className="text-[11px] text-red-400">
@@ -940,7 +940,7 @@ export default function CreateAgentModal({
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('policy')}
-                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
@@ -1033,7 +1033,7 @@ export default function CreateAgentModal({
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('key')}
-                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
@@ -1096,7 +1096,7 @@ export default function CreateAgentModal({
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={() => setStep('review')}
-                      className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                     >
                       Back
                     </button>
@@ -1164,7 +1164,7 @@ export default function CreateAgentModal({
                 {/* Primary: download the markdown handoff */}
                 <button
                   onClick={handleDownloadHandoff}
-                  className="w-full flex items-center justify-center gap-2 bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white text-sm font-medium rounded-lg py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                  className="w-full flex items-center justify-center gap-2 bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white text-sm font-medium rounded-lg py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -1177,7 +1177,7 @@ export default function CreateAgentModal({
                 {/* Secondary: copy as .env */}
                 <button
                   onClick={handleCopyEnv}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-[var(--v2-ink)] bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-[var(--v2-ink)] bg-white hover:bg-[var(--v2-surface)] border border-[var(--v2-border-strong)] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
                   title="Copy just the environment variables for pasting into .env"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1193,7 +1193,7 @@ export default function CreateAgentModal({
                   open={showRawCreds}
                   onToggle={(e) => setShowRawCreds((e.currentTarget as HTMLDetailsElement).open)}
                 >
-                  <summary className="text-[11px] text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 rounded">
+                  <summary className="text-[11px] text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 rounded">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="transition-transform group-open:rotate-90">
                       <polyline points="9 18 15 12 9 6" />
                     </svg>
@@ -1244,7 +1244,7 @@ export default function CreateAgentModal({
 
               <button
                 onClick={handleClose}
-                className="w-full text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                className="w-full text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
               >
                 Done
               </button>

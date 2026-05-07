@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, type KeyboardEvent, type MouseEvent } fro
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
-import { useAgents, type Agent } from '@/hooks/useAgents'
+import { useAgents, type Agent, type AgentAllowance } from '@/hooks/useAgents'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import {
@@ -61,6 +61,17 @@ function formatAmount(raw: bigint, decimals: number): string {
   const fracPart = str.slice(str.length - decimals)
   const trimmed = fracPart.replace(/0+$/, '').padEnd(2, '0').slice(0, 6)
   return `${intPart}.${trimmed}`
+}
+
+function formatConfiguredAllowance(allowance: AgentAllowance, chainId: number): string {
+  try {
+    return formatAmount(
+      BigInt(allowance.allowance_amount),
+      tokenDecimals(allowance.token_address, chainId),
+    )
+  } catch {
+    return allowance.allowance_amount
+  }
 }
 
 /** Format relative time until a date */
@@ -187,6 +198,32 @@ function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
   )
 }
 
+function ConfiguredAllowanceRow({
+  allowance,
+  chainId,
+}: {
+  allowance: AgentAllowance
+  chainId: number
+}) {
+  const reset = resetLabel(allowance.reset_period_min).toLowerCase()
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium text-[var(--v2-ink-2)]">{allowance.token_symbol}</span>
+        <span className="text-right text-[var(--v2-ink-3)]">
+          {formatConfiguredAllowance(allowance, chainId)} {allowance.token_symbol}
+          {allowance.reset_period_min > 0 ? ` per ${reset}` : ''}
+        </span>
+      </div>
+      <div className="h-[3px] w-full rounded-full bg-[var(--v2-surface-2)]">
+        <div className="h-full w-full rounded-full bg-[var(--v2-brand)]/25" />
+      </div>
+      <p className="text-[10px] text-[var(--v2-ink-3)]">Configured in Haven</p>
+    </div>
+  )
+}
+
 // ── Agent card ─────────────────────────────────────────────────────
 
 function AgentCard({
@@ -260,9 +297,19 @@ function AgentCard({
     if (onChainAllowances && onChainAllowances.length > 0) {
       return onChainAllowances
     }
-    // No on-chain data yet — nothing to show
     return null
   }, [onChainAllowances])
+  const hasNetworkAllowances = !!displayAllowances && displayAllowances.length > 0
+  const hasConfiguredAllowances = agent.allowances.length > 0
+  const budgetSourceLabel = hasNetworkAllowances
+    ? 'network'
+    : hasConfiguredAllowances
+      ? 'configured'
+      : null
+  const showConfiguredFallback =
+    !onChainLoading &&
+    !hasNetworkAllowances &&
+    hasConfiguredAllowances
 
   // Tokens from DB that we haven't seen on-chain yet (shown as skeleton)
   const pendingDbTokens = useMemo(() => {
@@ -354,15 +401,25 @@ function AgentCard({
           <div className="space-y-2">
             <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide">
               Agent budget
-              <span className="text-[var(--v2-ink-3)] ml-1 normal-case">(network)</span>
+              {budgetSourceLabel ? (
+                <span className="text-[var(--v2-ink-3)] ml-1 normal-case">({budgetSourceLabel})</span>
+              ) : null}
             </p>
 
-            {displayAllowances && displayAllowances.length > 0 ? (
+            {hasNetworkAllowances ? (
               displayAllowances.map((info) => (
                 <AllowanceBar key={info.token} info={info} chainId={chainId} />
               ))
-            ) : !onChainLoading && (!displayAllowances || displayAllowances.length === 0) ? (
-              <p className="text-xs text-[var(--v2-ink-3)]">No network budget found</p>
+            ) : showConfiguredFallback ? (
+              agent.allowances.map((allowance) => (
+                <ConfiguredAllowanceRow
+                  key={allowance.id}
+                  allowance={allowance}
+                  chainId={chainId}
+                />
+              ))
+            ) : !onChainLoading ? (
+              <p className="text-xs text-[var(--v2-ink-3)]">No agent budget configured</p>
             ) : null}
 
             {pendingDbTokens.map((symbol) => (

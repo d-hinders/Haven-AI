@@ -271,7 +271,7 @@ export default function SendModal({
             <button
               onClick={onClose}
               aria-label="Close"
-              className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+              className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -427,7 +427,7 @@ export default function SendModal({
                   className={`w-full px-4 py-3 pr-16 bg-[var(--v2-surface-2)] border rounded-lg text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:ring-1 transition-colors font-mono ${
                     amountWarning
                       ? 'border-red-400/30 focus:border-red-400/40 focus:ring-red-400/20'
-                      : 'border-[var(--v2-border)] focus:border-indigo-500/50 focus:ring-indigo-500/30'
+                      : 'border-[var(--v2-border)] focus:border-[var(--v2-brand)]/50 focus:ring-[var(--v2-brand)]/30'
                   }`}
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[var(--v2-ink-3)]">
@@ -492,7 +492,7 @@ export default function SendModal({
                     setFormError('')
                   }}
                   placeholder="0x..."
-                  className="w-full px-4 py-3 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
+                  className="w-full px-4 py-3 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:ring-1 focus:ring-[var(--v2-brand)]/30 transition-colors font-mono"
                 />
               </div>
 
@@ -564,7 +564,7 @@ export default function SendModal({
                       value={contactSearch}
                       onChange={(e) => setContactSearch(e.target.value)}
                       placeholder="Search contacts..."
-                      className="w-full px-3 py-2 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-md text-xs text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/40"
+                      className="w-full px-3 py-2 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-md text-xs text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/40"
                     />
                   </div>
                   <div className="max-h-52 overflow-y-auto">

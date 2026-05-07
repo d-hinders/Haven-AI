@@ -41,14 +41,14 @@ function resolveTokenSymbol(address: string, chainId: number): string {
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    pending: 'bg-amber-500/10 text-amber-400',
-    approved: 'bg-blue-500/10 text-blue-400',
-    rejected: 'bg-red-500/10 text-red-400',
-    executed: 'bg-emerald-500/10 text-emerald-400',
+    pending: 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]',
+    approved: 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]',
+    rejected: 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]',
+    executed: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
     expired: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]',
   }
   const isPending = status === 'pending' || status === 'approved'
-  const dotColor = status === 'pending' ? 'bg-amber-400' : 'bg-blue-400'
+  const dotColor = status === 'pending' ? 'bg-[var(--v2-warning)]' : 'bg-[var(--v2-brand)]'
   return (
     <span className={`inline-flex items-center gap-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${styles[status] ?? styles.expired}`}>
       {isPending && (

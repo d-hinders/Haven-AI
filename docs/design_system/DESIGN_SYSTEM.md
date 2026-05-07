@@ -1,6 +1,6 @@
-# Haven Design System — v2 (Light)
+# Haven Design System
 
-This is the source of truth for the v2 visual language. Companion to `UX_GUIDELINES.md` (which documents product doctrine, vocabulary, and IA — those rules **still apply**). Where `UX_GUIDELINES.md` describes a dark surface system, **this document supersedes it**: the marketing site and (next) the app move to the light system below.
+This is the source of truth for Haven's current light visual language. Companion to `UX_GUIDELINES.md` (which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
 
 The production marketing routes are the live reference: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`. When in doubt, open the live route, inspect the element, and match the system here.
 
@@ -232,15 +232,18 @@ Tonally: marketing copy can be **slightly more inviting** to match the more ener
 | UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx` |
 | Marketing components | `packages/frontend/src/components/marketing/Section.tsx`, `StepList.tsx`, `HeroBackdrop.tsx`, `FlowCard.tsx`, `ProtocolPlayground.tsx` |
 | Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/protocols/*/page.tsx` |
-| Legacy redirect | `packages/frontend/src/app/v2/page.tsx` redirects to `/` |
+| Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
+| App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents |
+| App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
+| Transactions | `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
 
-The handoff plan in `docs/REDESIGN_HANDOFF.md` enumerates the migration tasks.
+The handoff plan in `docs/design_system/REDESIGN_HANDOFF.md` is now project history.
 
 ---
 
 ## 8. App Migration Mapping
 
-Phase 2 migrates the authenticated app from the old dark surface system onto the light v2 tokens. Use this mapping before touching page-level styling:
+The authenticated app has migrated from the old dark surface system onto the light v2 tokens. Use this mapping when cleaning up old surfaces or reviewing older branches:
 
 | Old dark token/class | Light v2 target | Notes |
 |---|---|---|

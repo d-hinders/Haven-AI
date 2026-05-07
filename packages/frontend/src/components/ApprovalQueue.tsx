@@ -45,7 +45,7 @@ function StatusBadge({ status }: { status: string }) {
     approved: 'bg-blue-500/10 text-blue-400',
     rejected: 'bg-red-500/10 text-red-400',
     executed: 'bg-emerald-500/10 text-emerald-400',
-    expired: 'bg-zinc-500/10 text-[var(--v2-ink-3)]',
+    expired: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]',
   }
   const isPending = status === 'pending' || status === 'approved'
   const dotColor = status === 'pending' ? 'bg-amber-400' : 'bg-blue-400'

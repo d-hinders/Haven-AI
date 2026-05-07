@@ -42,9 +42,10 @@ export function SiteHeader() {
   return (
     <header
       data-v2-header
+      style={onDarkSection ? { backgroundColor: 'rgba(30, 27, 75, 0.88)' } : undefined}
       className={`sticky top-0 z-30 backdrop-blur transition-colors duration-200 ${
         onDarkSection
-          ? 'bg-[#1e1b4b]/88 border-b border-transparent shadow-none'
+          ? 'border-b border-transparent shadow-none'
           : 'bg-white/95 border-b border-[var(--v2-border)]'
       }`}
     >

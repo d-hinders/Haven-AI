@@ -1,15 +1,15 @@
 # Haven UX Guidelines
 
-This is the durable product UX entrypoint for Haven. For the v2 redesign, it should be read together with the two canonical design-system docs:
+This is the durable product UX entrypoint for Haven. Read it together with the current design-system and copy docs:
 
-- Visual system: [DESIGN_SYSTEM_V2.md](./design_system/DESIGN_SYSTEM_V2.md)
+- Visual system: [DESIGN_SYSTEM.md](./design_system/DESIGN_SYSTEM.md)
 - UX copy: [UX_COPY_GUIDELINES.md](./design_system/UX_COPY_GUIDELINES.md)
 - Redesign implementation history: [REDESIGN_HANDOFF.md](./design_system/REDESIGN_HANDOFF.md)
 
 When these docs overlap, use this order of authority:
 
 1. `UX_COPY_GUIDELINES.md` for user-facing wording and terminology.
-2. `DESIGN_SYSTEM_V2.md` for visual tokens, components, layout, and interaction styling.
+2. `DESIGN_SYSTEM.md` for visual tokens, components, layout, and interaction styling.
 3. This file for product doctrine, IA, accessibility, and money-movement UX rules.
 
 The old dark app system is retired. Do not extend old dark token patterns, gradient buttons, glow shadows, or dark modal surfaces unless a future design-system doc explicitly reintroduces them.
@@ -67,7 +67,7 @@ Voice rules:
 
 ## 4. Visual System
 
-Use [DESIGN_SYSTEM_V2.md](./design_system/DESIGN_SYSTEM_V2.md) for exact tokens and classes.
+Use [DESIGN_SYSTEM.md](./design_system/DESIGN_SYSTEM.md) for exact tokens and classes.
 
 Core rules:
 

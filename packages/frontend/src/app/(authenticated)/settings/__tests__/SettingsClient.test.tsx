@@ -3,9 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
 const mockUsePreferences = vi.fn()
+const mockPush = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
+}))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockPush,
+  }),
 }))
 
 vi.mock('@/hooks/usePreferences', () => ({
@@ -18,6 +25,7 @@ describe('SettingsClient', () => {
   beforeEach(() => {
     mockUseAuth.mockReset()
     mockUsePreferences.mockReset()
+    mockPush.mockReset()
 
     mockUsePreferences.mockReturnValue({
       currency: 'USD',
@@ -33,6 +41,8 @@ describe('SettingsClient', () => {
         wallet_address: null,
         safes: [],
       },
+      passkeys: [],
+      logout: vi.fn(),
     })
 
     render(<SettingsClient />)

@@ -5,6 +5,30 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { ApiRequestError } from '@/lib/api'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+
+function TrustRow({
+  title,
+  description,
+}: {
+  title: string
+  description: string
+}) {
+  return (
+    <div className="flex gap-3">
+      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--v2-success-soft)] text-[var(--v2-success)]">
+        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M3.5 8.5 6.5 11.5 12.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-[var(--v2-ink)]">{title}</p>
+        <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-3)]">{description}</p>
+      </div>
+    </div>
+  )
+}
 
 export default function SignupPage() {
   const { signup } = useAuth()
@@ -49,120 +73,137 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#ededed] flex flex-col">
-      {/* Subtle gradient background */}
+    <div className="min-h-screen bg-[var(--v2-bg)] text-[var(--v2-ink)] flex flex-col">
       <div
         className="pointer-events-none fixed inset-x-0 top-0 h-[500px] z-0"
         style={{
           background:
-            'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 70%)',
+            'radial-gradient(ellipse 80% 55% at 50% -10%, rgba(99,102,241,0.13) 0%, transparent 70%), radial-gradient(ellipse 70% 60% at 100% 10%, rgba(14,165,233,0.08) 0%, transparent 65%)',
         }}
       />
 
-      {/* Top bar */}
-      <div className="relative z-10 border-b border-white/[0.06] bg-[#0a0a0a]/80 backdrop-blur-md">
+      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
           <Link
             href="/"
-            className="text-[15px] font-semibold tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent"
+            className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
           >
+            <span className="h-5 w-5 rounded-md bg-[var(--v2-brand)]" aria-hidden="true" />
             Haven
           </Link>
         </div>
       </div>
 
-      {/* Form */}
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
-        <div className="w-full max-w-sm">
-          <h1 className="text-2xl font-bold tracking-tight mb-2">
-            Create your account
-          </h1>
-          <p className="text-sm text-zinc-500 mb-8">
-            Get started with Haven in minutes.
-          </p>
+        <div className="grid w-full max-w-4xl gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-[var(--v2-shadow-card)]">
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+              Create your account
+            </h1>
+            <p className="text-sm text-[var(--v2-ink-2)] mb-8">
+              Set up Haven, then create your first account with a passkey or connected wallet.
+            </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-4 py-3">
-                {error}
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+                  {error}
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="email"
+                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                >
+                  Email
+                </label>
+                <Input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                />
               </div>
-            )}
 
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-xs text-zinc-400 mb-1.5"
+              <div>
+                <label
+                  htmlFor="password"
+                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                >
+                  Password
+                </label>
+                <Input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Min 8 characters"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="confirm"
+                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                >
+                  Confirm password
+                </label>
+                <Input
+                  id="confirm"
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repeat password"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                disabled={submitting}
+                className="w-full"
               >
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
-                placeholder="you@example.com"
+                {submitting ? 'Creating account...' : 'Create account'}
+              </Button>
+            </form>
+
+            <p className="mt-6 text-center text-sm text-[var(--v2-ink-2)]">
+              Already have an account?{' '}
+              <Link
+                href="/login"
+                className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
+              >
+                Log in
+              </Link>
+            </p>
+          </div>
+
+          <div className="rounded-[14px] border border-[var(--v2-border)] bg-white/85 p-6 shadow-[var(--v2-shadow-card)]">
+            <p className="text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]">
+              What happens next
+            </p>
+            <div className="mt-5 space-y-5">
+              <TrustRow
+                title="Create an account wallet"
+                description="Use a passkey or wallet to create the account that will hold funds."
+              />
+              <TrustRow
+                title="You stay in control"
+                description="Haven applies rules for agents; it does not hold unrestricted payment credentials."
+              />
+              <TrustRow
+                title="Start with clear limits"
+                description="Connect agents only after you choose budgets, networks, and spend rules."
               />
             </div>
-
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-xs text-zinc-400 mb-1.5"
-              >
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
-                placeholder="Min 8 characters"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="confirm"
-                className="block text-xs text-zinc-400 mb-1.5"
-              >
-                Confirm password
-              </label>
-              <input
-                id="confirm"
-                type="password"
-                required
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
-                placeholder="Repeat password"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {submitting ? 'Creating account...' : 'Create account'}
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-sm text-zinc-500">
-            Already have an account?{' '}
-            <Link
-              href="/login"
-              className="text-indigo-400 hover:text-indigo-300 transition-colors"
-            >
-              Log in
-            </Link>
-          </p>
+          </div>
         </div>
       </div>
     </div>

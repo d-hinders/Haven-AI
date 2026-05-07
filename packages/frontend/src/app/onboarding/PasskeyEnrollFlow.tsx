@@ -222,8 +222,8 @@ export default function PasskeyEnrollFlow({
       {stage === 'idle' && (
         <div className="space-y-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight mb-2">Use Face ID or Touch ID</h1>
-            <p className="text-sm text-zinc-500 leading-relaxed">
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Use Face ID or Touch ID</h1>
+            <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
               Create a secure passkey to approve actions in your Haven account.
             </p>
           </div>
@@ -232,7 +232,7 @@ export default function PasskeyEnrollFlow({
             onClick={() => {
               void start()
             }}
-            className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+            className="w-full py-2.5 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)]"
           >
             Continue with Face ID / Touch ID
           </button>
@@ -242,8 +242,8 @@ export default function PasskeyEnrollFlow({
       {stage !== 'idle' && (
         <div className="space-y-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight mb-2">Setting up your Haven account</h1>
-            <p className="text-sm text-zinc-500 leading-relaxed">
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Setting up your Haven account</h1>
+            <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
               We&apos;re creating your passkey signer and deploying your account now.
             </p>
           </div>
@@ -259,35 +259,35 @@ export default function PasskeyEnrollFlow({
                 key={item.id}
                 className={`flex items-center gap-3 px-3 py-3 rounded-md border transition-colors duration-300 ${
                   isActive
-                    ? 'border-indigo-500/40 bg-indigo-500/[0.06]'
+                    ? 'border-[var(--v2-brand)]/35 bg-[var(--v2-brand-soft)]'
                     : isDone
-                      ? 'border-emerald-500/20 bg-emerald-500/[0.04]'
-                      : 'border-white/[0.05] bg-white/[0.01]'
+                      ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)]'
+                      : 'border-[var(--v2-border)] bg-white'
                 }`}
               >
                 <div
                   className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium shrink-0 ${
                     isActive
-                      ? 'bg-indigo-500/20 text-indigo-300'
+                      ? 'bg-white text-[var(--v2-brand)]'
                       : isDone
-                        ? 'bg-emerald-500/15 text-emerald-400'
-                        : 'bg-white/[0.04] text-zinc-600'
+                        ? 'bg-white text-[var(--v2-success)]'
+                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
                   }`}
                 >
-                  {isDone ? '✓' : isActive ? <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" /> : index + 1}
+                  {isDone ? '✓' : isActive ? <span className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" /> : index + 1}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className={`text-xs font-medium ${isActive ? 'text-indigo-200' : isDone ? 'text-emerald-300/80' : 'text-zinc-500'}`}>
+                  <div className={`text-xs font-medium ${isActive ? 'text-[var(--v2-brand)]' : isDone ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink-3)]'}`}>
                     {item.label}
                   </div>
                   {(isActive || stage === 'error') && (
-                    <div className="text-[11px] text-zinc-500 mt-0.5">
+                    <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5">
                       {stage === 'error' ? error : item.hint}
                     </div>
                   )}
                 </div>
                 {isActive && (
-                  <div className="w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin shrink-0" />
+                  <div className="w-3 h-3 border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] rounded-full animate-spin shrink-0" />
                 )}
               </div>
             )
@@ -297,14 +297,14 @@ export default function PasskeyEnrollFlow({
 
       {stage === 'error' && (
         <div className="space-y-4">
-          <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-4 py-3">
+          <div className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
             {error}
           </div>
           <button
             onClick={() => {
               void start()
             }}
-            className="w-full py-2.5 rounded-md border border-white/[0.08] bg-white/[0.02] text-zinc-200 text-sm font-medium hover:bg-white/[0.05] transition-colors"
+            className="w-full py-2.5 rounded-md border border-[var(--v2-border-strong)] bg-white text-[var(--v2-ink)] text-sm font-medium hover:bg-[var(--v2-surface)] transition-colors"
           >
             Try again
           </button>

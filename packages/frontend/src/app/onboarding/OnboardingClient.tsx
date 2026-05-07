@@ -152,10 +152,10 @@ export default function OnboardingClient() {
 
   if (loading || !user) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--v2-bg)] flex items-center justify-center">
         <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-          <span className="text-sm text-zinc-500">Loading...</span>
+          <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
+          <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
         </div>
       </div>
     )
@@ -172,29 +172,30 @@ export default function OnboardingClient() {
   const completionTxLabel = isPasskeyOnboarding ? 'Setup transaction' : 'Transaction'
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#ededed] flex flex-col">
+    <div className="min-h-screen bg-[var(--v2-bg)] text-[var(--v2-ink)] flex flex-col">
       <div
         className="pointer-events-none fixed inset-x-0 top-0 h-[500px] z-0"
         style={{
           background:
-            'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 70%)',
+            'radial-gradient(ellipse 80% 55% at 50% -10%, rgba(99,102,241,0.13) 0%, transparent 70%), radial-gradient(ellipse 70% 60% at 100% 10%, rgba(14,165,233,0.08) 0%, transparent 65%)',
         }}
       />
 
-      <div className="relative z-10 border-b border-white/[0.06] bg-[#0a0a0a]/80 backdrop-blur-md">
+      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link
             href="/"
-            className="text-[15px] font-semibold tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent"
+            className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
           >
+            <span className="h-5 w-5 rounded-md bg-[var(--v2-brand)]" aria-hidden="true" />
             Haven
           </Link>
-          <span className="text-xs text-zinc-600">{user.email}</span>
+          <span className="text-xs text-[var(--v2-ink-3)]">{user.email}</span>
         </div>
       </div>
 
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
-        <div className="w-full max-w-md">
+        <div className="w-full max-w-xl rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-[var(--v2-shadow-card)]">
           <div className="flex items-center gap-3 mb-10">
             {progressSteps.map((currentStep, index) => {
               const currentIndex = progressSteps.findIndex((progressStep) => progressStep === step)
@@ -205,10 +206,10 @@ export default function OnboardingClient() {
                   <div
                     className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border transition-colors duration-300 ${
                       isActive
-                        ? 'border-indigo-500 bg-indigo-500/20 text-indigo-300'
+                        ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                         : isCompleted
-                          ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
-                          : 'border-white/[0.08] text-zinc-600'
+                          ? 'border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+                          : 'border-[var(--v2-border)] text-[var(--v2-ink-3)]'
                     }`}
                   >
                     {isCompleted ? '✓' : index + 1}
@@ -216,7 +217,7 @@ export default function OnboardingClient() {
                   {index < progressSteps.length - 1 && (
                     <div
                       className={`w-12 h-px transition-colors duration-300 ${
-                        currentIndex > index ? 'bg-emerald-500/30' : 'bg-white/[0.06]'
+                        currentIndex > index ? 'bg-[var(--v2-success)]/30' : 'bg-[var(--v2-border)]'
                       }`}
                     />
                   )}
@@ -228,22 +229,22 @@ export default function OnboardingClient() {
           {step === 'choose-signer' && (
             <div className="space-y-6">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight mb-2">Set up your Haven account</h1>
-                <p className="text-sm text-zinc-500 leading-relaxed">
+                <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Set up your Haven account</h1>
+                <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
                   Choose the network for your account, then pick how you want to approve
                   payments and changes.
                 </p>
               </div>
 
-              <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-4">
-                <span className="block text-xs text-zinc-500 mb-2">Network</span>
+              <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+                <span className="block text-xs font-medium text-[var(--v2-ink-2)] mb-2">Network</span>
                 <select
                   value={selectedChainId}
                   onChange={(e) => setSelectedChainId(Number(e.target.value))}
-                  className="w-full bg-transparent text-sm text-zinc-200 outline-none cursor-pointer"
+                  className="w-full bg-transparent text-sm text-[var(--v2-ink)] outline-none cursor-pointer"
                 >
                   {SUPPORTED_CHAINS.map((chain) => (
-                    <option key={chain.chainId} value={chain.chainId} className="bg-[#0a0a0a]">
+                    <option key={chain.chainId} value={chain.chainId}>
                       {chain.name}
                     </option>
                   ))}
@@ -256,10 +257,10 @@ export default function OnboardingClient() {
                   setError('')
                   setStep('deploy')
                 }}
-                className="w-full rounded-xl border border-indigo-500/25 bg-gradient-to-r from-indigo-500/20 to-violet-600/15 px-5 py-4 text-left hover:border-indigo-400/40 hover:bg-indigo-500/[0.08] transition-all"
+                className="w-full rounded-xl border border-[var(--v2-brand)]/25 bg-[var(--v2-brand-soft)] px-5 py-4 text-left transition-all hover:border-[var(--v2-brand)]/40 hover:bg-[var(--v2-brand-soft)]"
               >
-                <div className="text-sm font-semibold text-zinc-100">Use Face ID / Touch ID</div>
-                <div className="mt-1 text-xs text-zinc-400">Fastest option. Creates a secure passkey.</div>
+                <div className="text-sm font-semibold text-[var(--v2-ink)]">Use Face ID / Touch ID</div>
+                <div className="mt-1 text-xs text-[var(--v2-ink-2)]">Fastest option. Creates a secure passkey.</div>
               </button>
 
               <button
@@ -268,18 +269,18 @@ export default function OnboardingClient() {
                   setError('')
                   setStep('connect')
                 }}
-                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.02] px-5 py-4 text-left hover:bg-white/[0.05] transition-colors"
+                className="w-full rounded-xl border border-[var(--v2-border)] bg-white px-5 py-4 text-left transition-colors hover:border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]"
               >
-                <div className="text-sm font-semibold text-zinc-100">Connect a wallet instead</div>
-                <div className="mt-1 text-xs text-zinc-500">Use an existing crypto wallet.</div>
+                <div className="text-sm font-semibold text-[var(--v2-ink)]">Connect a wallet instead</div>
+                <div className="mt-1 text-xs text-[var(--v2-ink-3)]">Use an existing crypto wallet.</div>
               </button>
             </div>
           )}
 
           {step === 'connect' && signerMode === 'eoa' && (
             <div>
-              <h1 className="text-2xl font-bold tracking-tight mb-2">Connect your wallet</h1>
-              <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
+              <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Connect your wallet</h1>
+              <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
                 Connect a browser wallet to get started. This wallet will become the owner of your
                 Safe smart account — giving you full custody of your funds.
               </p>
@@ -289,17 +290,17 @@ export default function OnboardingClient() {
 
           {step === 'deploy' && signerMode === 'eoa' && (
             <div>
-              <h1 className="text-2xl font-bold tracking-tight mb-2">Deploy your Safe</h1>
-              <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
+              <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Deploy your Safe</h1>
+              <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
                 Deploy a Safe smart account on your chosen network. Your connected wallet will be
                 the sole owner with full control. Haven never holds signing authority.
               </p>
 
-              <div className="mb-4 p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
+              <div className="mb-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="block text-xs text-zinc-500 mb-1">Connected wallet</span>
-                    <span className="text-sm font-mono text-zinc-300">
+                    <span className="block text-xs text-[var(--v2-ink-3)] mb-1">Connected wallet</span>
+                    <span className="text-sm font-mono text-[var(--v2-ink)]">
                       {address?.slice(0, 6)}...{address?.slice(-4)}
                     </span>
                   </div>
@@ -307,7 +308,7 @@ export default function OnboardingClient() {
                     {({ openAccountModal }) => (
                       <button
                         onClick={openAccountModal}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                        className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
                       >
                         Change
                       </button>
@@ -316,15 +317,15 @@ export default function OnboardingClient() {
                 </div>
               </div>
 
-              <div className="mb-6 p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
-                <span className="block text-xs text-zinc-500 mb-2">Network</span>
+              <div className="mb-6 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+                <span className="block text-xs text-[var(--v2-ink-3)] mb-2">Network</span>
                 <select
                   value={selectedChainId}
                   onChange={(e) => setSelectedChainId(Number(e.target.value))}
-                  className="w-full bg-transparent text-sm text-zinc-200 outline-none cursor-pointer"
+                  className="w-full bg-transparent text-sm text-[var(--v2-ink)] outline-none cursor-pointer"
                 >
                   {SUPPORTED_CHAINS.map((chain) => (
-                    <option key={chain.chainId} value={chain.chainId} className="bg-[#0a0a0a]">
+                    <option key={chain.chainId} value={chain.chainId}>
                       {chain.name}
                     </option>
                   ))}
@@ -332,7 +333,7 @@ export default function OnboardingClient() {
               </div>
 
               {error && (
-                <div className="mb-6 text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-4 py-3">
+                <div className="mb-6 rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                   {error}
                 </div>
               )}
@@ -341,7 +342,7 @@ export default function OnboardingClient() {
                 <button
                   onClick={handleDeploy}
                   disabled={deploying}
-                  className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full py-2.5 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {deploying ? (
                     <span className="flex items-center justify-center gap-2">
@@ -376,29 +377,29 @@ export default function OnboardingClient() {
                         key={item.id}
                         className={`flex items-center gap-3 px-3 py-2.5 rounded-md border transition-colors duration-300 ${
                           isActive
-                            ? 'border-indigo-500/40 bg-indigo-500/[0.06]'
+                            ? 'border-[var(--v2-brand)]/35 bg-[var(--v2-brand-soft)]'
                             : isDone
-                              ? 'border-emerald-500/20 bg-emerald-500/[0.04]'
-                              : 'border-white/[0.05] bg-white/[0.01]'
+                              ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)]'
+                              : 'border-[var(--v2-border)] bg-white'
                         }`}
                       >
                         <div
                           className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium shrink-0 ${
                             isActive
-                              ? 'bg-indigo-500/20 text-indigo-300'
+                              ? 'bg-white text-[var(--v2-brand)]'
                               : isDone
-                                ? 'bg-emerald-500/15 text-emerald-400'
-                                : 'bg-white/[0.04] text-zinc-600'
+                                ? 'bg-white text-[var(--v2-success)]'
+                                : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
                           }`}
                         >
-                          {isDone ? '✓' : isActive ? <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" /> : index + 1}
+                          {isDone ? '✓' : isActive ? <span className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" /> : index + 1}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className={`text-xs font-medium ${isActive ? 'text-indigo-200' : isDone ? 'text-emerald-300/80' : 'text-zinc-500'}`}>
+                          <div className={`text-xs font-medium ${isActive ? 'text-[var(--v2-brand)]' : isDone ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink-3)]'}`}>
                             {item.label}
                           </div>
                           {isActive && (
-                            <div className="text-[11px] text-zinc-500 mt-0.5">
+                            <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5">
                               {item.id === 'signing' ? (
                                 <SigningStatus signer={signer} stage="signing" />
                               ) : item.id === 'confirming' ? (
@@ -410,7 +411,7 @@ export default function OnboardingClient() {
                           )}
                         </div>
                         {isActive && (
-                          <div className="w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin shrink-0" />
+                          <div className="w-3 h-3 border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] rounded-full animate-spin shrink-0" />
                         )}
                       </div>
                     )
@@ -433,31 +434,31 @@ export default function OnboardingClient() {
 
           {step === 'done' && (
             <div>
-              <h1 className="text-2xl font-bold tracking-tight mb-2">{completionTitle}</h1>
-              <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
+              <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">{completionTitle}</h1>
+              <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
                 {completionDescription}
               </p>
 
               <div className="mb-6 space-y-3">
-                <div className="p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
-                  <span className="block text-xs text-zinc-500 mb-1">{completionAddressLabel}</span>
+                <div className="p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+                  <span className="block text-xs text-[var(--v2-ink-3)] mb-1">{completionAddressLabel}</span>
                   <a
                     href={getExplorerUrl(selectedChainId, 'address', safeAddress)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all"
+                    className="text-sm font-mono text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors break-all"
                   >
                     {safeAddress}
                   </a>
                 </div>
                 {txHash && txHash !== EMPTY_TX_HASH && (
-                  <div className="p-4 rounded-md border border-white/[0.06] bg-white/[0.02]">
-                    <span className="block text-xs text-zinc-500 mb-1">{completionTxLabel}</span>
+                  <div className="p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+                    <span className="block text-xs text-[var(--v2-ink-3)] mb-1">{completionTxLabel}</span>
                     <a
                       href={getExplorerUrl(selectedChainId, 'tx', txHash)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all"
+                      className="text-sm font-mono text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors break-all"
                     >
                       {txHash.slice(0, 20)}...{txHash.slice(-8)}
                     </a>
@@ -467,7 +468,7 @@ export default function OnboardingClient() {
 
               <button
                 onClick={() => router.push('/dashboard')}
-                className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+                className="w-full py-2.5 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)]"
               >
                 Go to Dashboard
               </button>

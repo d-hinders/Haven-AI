@@ -99,13 +99,11 @@ export default function AccountDetailClient() {
   const {
     transactions,
     loadingInitial: txLoading,
-    loadingMore,
     error: txError,
     total,
     hasMore,
-    loadMore,
     refresh: refetchTx,
-  } = useTransactionsFeed({ safeId }, 25)
+  } = useTransactionsFeed({ safeId }, 10)
 
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
   const [renameOpen, setRenameOpen] = useState(false)
@@ -203,6 +201,9 @@ export default function AccountDetailClient() {
               </Button>
             </>
           )}
+          <Button variant="ghost" size="sm" onClick={() => setRenameOpen(true)}>
+            Edit
+          </Button>
         </div>
       </div>
 
@@ -309,12 +310,9 @@ export default function AccountDetailClient() {
           <h2 className="text-xs text-[var(--v2-ink-3)] uppercase tracking-widest">
             Account details
           </h2>
-          <Button variant="ghost" size="sm" onClick={() => setRenameOpen(true)}>
-            Edit
-          </Button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
           {/* Address */}
           <div>
             <p className="text-xs text-[var(--v2-ink-3)] mb-1">Account address</p>
@@ -348,18 +346,6 @@ export default function AccountDetailClient() {
                 {details.threshold} of {details.owners.length} owner
                 {details.owners.length !== 1 ? 's' : ''}
               </span>
-            ) : (
-              <span className="text-sm text-[var(--v2-ink-3)]">—</span>
-            )}
-          </div>
-
-          {/* Nonce */}
-          <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Nonce</p>
-            {detailsLoading ? (
-              <div className="h-5 w-12 bg-[var(--v2-surface-2)] rounded animate-pulse" />
-            ) : details ? (
-              <span className="text-sm text-[var(--v2-ink)]">{details.nonce}</span>
             ) : (
               <span className="text-sm text-[var(--v2-ink-3)]">—</span>
             )}
@@ -462,21 +448,14 @@ export default function AccountDetailClient() {
         safeNamesByAddress={safeNamesByAddress}
         hasActiveFilters={false}
       />
-      {transactions.length > 0 && (
+      {transactions.length > 0 && hasMore && (
         <div className="mt-5 flex justify-center">
-          {hasMore ? (
-            <button
-              onClick={() => void loadMore()}
-              disabled={loadingMore}
-              className="inline-flex h-10 items-center justify-center rounded-md border border-[var(--v2-border-strong)] bg-white px-4 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loadingMore ? 'Loading...' : 'Load more transactions'}
-            </button>
-          ) : (
-            <p className="text-xs text-[var(--v2-ink-3)]">
-              You have reached the end of this account history.
-            </p>
-          )}
+          <Link
+            href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
+            className="inline-flex h-10 items-center justify-center rounded-md border border-[var(--v2-border-strong)] bg-white px-4 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)]"
+          >
+            View all
+          </Link>
         </div>
       )}
 

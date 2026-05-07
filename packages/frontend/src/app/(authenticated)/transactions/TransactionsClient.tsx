@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
@@ -12,9 +13,15 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 
 export default function TransactionsClient() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
-  const [filters, setFilters] = useState<TransactionFilterState>({})
+  const [filters, setFilters] = useState<TransactionFilterState>(() => ({
+    safeId: searchParams.get('safeId') ?? undefined,
+    agentId: searchParams.get('agentId') ?? undefined,
+    tokenKey: searchParams.get('tokenKey') ?? undefined,
+  }))
   const {
     safes,
     agents,
@@ -46,6 +53,17 @@ export default function TransactionsClient() {
   const failedSafeNames = failedSafeIds
     .map((id) => safeNamesById.get(id))
     .filter((name): name is string => Boolean(name))
+  const handleFilterChange = (nextFilters: TransactionFilterState) => {
+    setFilters(nextFilters)
+
+    const params = new URLSearchParams()
+    if (nextFilters.safeId) params.set('safeId', nextFilters.safeId)
+    if (nextFilters.agentId) params.set('agentId', nextFilters.agentId)
+    if (nextFilters.tokenKey) params.set('tokenKey', nextFilters.tokenKey)
+
+    const query = params.toString()
+    router.replace(query ? `/transactions?${query}` : '/transactions', { scroll: false })
+  }
 
   if (!hasSafes) {
     return (
@@ -92,7 +110,7 @@ export default function TransactionsClient() {
         tokens={tokens}
         loading={filtersLoading}
         error={filtersError}
-        onChange={setFilters}
+        onChange={handleFilterChange}
       />
 
       <div className="mt-5 mb-3 flex items-center justify-between gap-4">

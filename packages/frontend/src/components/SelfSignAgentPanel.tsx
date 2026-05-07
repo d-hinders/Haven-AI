@@ -227,15 +227,15 @@ function CreateSelfSignModal({
   // ── Render ─────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/50 backdrop-blur-sm">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative bg-[#0e0e0e] border border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)]">
           <div>
             <h2 className="text-sm font-semibold">New Self-Sign Agent</h2>
-            <p className="text-xs text-zinc-600 mt-0.5">
+            <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
               {step === 'details' && 'Agent identity and delegate key'}
               {step === 'allowances' && 'Configure spending limits'}
               {step === 'review' && 'Review and create'}
@@ -243,14 +243,14 @@ function CreateSelfSignModal({
           </div>
           <button
             onClick={onClose}
-            className="p-1 -mr-1 rounded-md text-zinc-700 hover:text-zinc-400 hover:bg-white/[0.04] transition-colors"
+            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] transition-colors"
           >
             <CloseIcon />
           </button>
         </div>
 
         {/* Step indicators */}
-        <div className="flex items-center gap-2 px-6 py-3 border-b border-white/[0.04]">
+        <div className="flex items-center gap-2 px-6 py-3 border-b border-[var(--v2-border)]">
           {(['details', 'allowances', 'review'] as const).map((s, i) => (
             <div key={s} className="flex items-center gap-2">
               <div
@@ -258,13 +258,13 @@ function CreateSelfSignModal({
                   s === step
                     ? 'bg-indigo-500 text-white'
                     : ['details', 'allowances', 'review'].indexOf(step) > i
-                      ? 'bg-indigo-500/20 text-indigo-400'
-                      : 'bg-white/[0.04] text-zinc-600'
+                      ? 'bg-indigo-500/20 text-[var(--v2-brand)]'
+                      : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
                 }`}
               >
                 {i + 1}
               </div>
-              {i < 2 && <div className="w-8 h-px bg-white/[0.06]" />}
+              {i < 2 && <div className="w-8 h-px bg-[var(--v2-surface-2)]" />}
             </div>
           ))}
         </div>
@@ -275,31 +275,31 @@ function CreateSelfSignModal({
           {step === 'details' && (
             <div className="space-y-5">
               <div>
-                <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">Agent name</label>
+                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">Agent name</label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Research Agent"
-                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
+                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
-                  Description <span className="normal-case text-zinc-700">(optional)</span>
+                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
+                  Description <span className="normal-case text-[var(--v2-ink-3)]">(optional)</span>
                 </label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What does this agent do?"
                   rows={2}
-                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all resize-none"
+                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
                 />
               </div>
 
               {/* Key mode selector */}
               <div>
-                <label className="block text-[11px] text-zinc-500 mb-2 uppercase tracking-wide">Delegate key</label>
+                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-2 uppercase tracking-wide">Delegate key</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(['generate', 'existing'] as const).map((mode) => (
                     <button
@@ -309,20 +309,20 @@ function CreateSelfSignModal({
                       className={`relative p-3 rounded-xl border text-left transition-all ${
                         keyMode === mode
                           ? 'border-indigo-500/50 bg-indigo-500/5'
-                          : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
+                          : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                          keyMode === mode ? 'border-indigo-400' : 'border-zinc-700'
+                          keyMode === mode ? 'border-indigo-400' : 'border-[var(--v2-border-strong)]'
                         }`}>
                           {keyMode === mode && <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                         </div>
-                        <span className={`text-xs font-medium ${keyMode === mode ? 'text-zinc-200' : 'text-zinc-400'}`}>
+                        <span className={`text-xs font-medium ${keyMode === mode ? 'text-[var(--v2-ink)]' : 'text-[var(--v2-ink-2)]'}`}>
                           {mode === 'generate' ? 'Generate new' : 'Use existing'}
                         </span>
                       </div>
-                      <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
+                      <p className="text-[10px] text-[var(--v2-ink-3)] ml-5.5 pl-0.5">
                         {mode === 'generate' ? 'Haven creates a keypair for you' : 'Provide your own wallet address'}
                       </p>
                     </button>
@@ -334,14 +334,14 @@ function CreateSelfSignModal({
               {keyMode === 'generate' && generatedPrivateKey && (
                 <div className="space-y-3">
                   <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Delegate address</p>
+                    <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Delegate address</p>
                     <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs font-mono text-zinc-400 bg-white/[0.03] rounded-lg px-3 py-2 truncate">
+                      <code className="flex-1 text-xs font-mono text-[var(--v2-ink-2)] bg-[var(--v2-surface)] rounded-lg px-3 py-2 truncate">
                         {delegateAddress}
                       </code>
                       <button
                         onClick={() => copyToClipboard(delegateAddress, () => {})}
-                        className="flex-shrink-0 text-zinc-700 hover:text-zinc-400 transition-colors p-1"
+                        className="flex-shrink-0 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors p-1"
                       >
                         <CopyIcon size={13} />
                       </button>
@@ -357,12 +357,12 @@ function CreateSelfSignModal({
                       </svg>
                       <p className="text-[11px] text-amber-400 uppercase tracking-wide font-medium">Private key — save this now</p>
                     </div>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed">
                       Generated in your browser and never stored by Haven. Your agent needs this key to sign requests.
                       If you lose it you&apos;ll need to revoke this agent and create a new one.
                     </p>
                     <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all select-all">
+                      <code className="flex-1 text-xs font-mono text-[var(--v2-ink)] bg-[var(--v2-surface)] rounded-lg px-3 py-2 break-all select-all">
                         {showPrivateKey
                           ? generatedPrivateKey
                           : `${generatedPrivateKey.slice(0, 10)}${'•'.repeat(32)}${generatedPrivateKey.slice(-6)}`}
@@ -370,13 +370,13 @@ function CreateSelfSignModal({
                       <div className="flex flex-col gap-1 flex-shrink-0">
                         <button
                           onClick={() => setShowPrivateKey(!showPrivateKey)}
-                          className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors px-2 py-1"
+                          className="text-[10px] text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors px-2 py-1"
                         >
                           {showPrivateKey ? 'Hide' : 'Show'}
                         </button>
                         <button
                           onClick={() => copyToClipboard(generatedPrivateKey, setCopiedPrivateKey)}
-                          className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-1"
+                          className="text-[10px] text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors px-2 py-1"
                         >
                           {copiedPrivateKey ? 'Copied!' : 'Copy'}
                         </button>
@@ -391,7 +391,7 @@ function CreateSelfSignModal({
                           onChange={(e) => setKeySaved(e.target.checked)}
                           className="sr-only peer"
                         />
-                        <div className="w-4 h-4 rounded border-2 border-zinc-700 peer-checked:border-indigo-500 peer-checked:bg-indigo-500 transition-all flex items-center justify-center">
+                        <div className="w-4 h-4 rounded border-2 border-[var(--v2-border-strong)] peer-checked:border-indigo-500 peer-checked:bg-indigo-500 transition-all flex items-center justify-center">
                           {keySaved && (
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="20 6 9 17 4 12" />
@@ -399,7 +399,7 @@ function CreateSelfSignModal({
                           )}
                         </div>
                       </div>
-                      <span className="text-[11px] text-zinc-400 group-hover:text-zinc-300 transition-colors leading-relaxed">
+                      <span className="text-[11px] text-[var(--v2-ink-2)] group-hover:text-[var(--v2-ink)] transition-colors leading-relaxed">
                         I have securely saved this private key and understand it cannot be recovered
                       </span>
                     </label>
@@ -407,7 +407,7 @@ function CreateSelfSignModal({
 
                   <button
                     onClick={handleGenerateKey}
-                    className="text-[11px] text-zinc-700 hover:text-zinc-400 transition-colors"
+                    className="text-[11px] text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors"
                   >
                     Generate a different key
                   </button>
@@ -421,13 +421,13 @@ function CreateSelfSignModal({
                     value={delegateAddress}
                     onChange={(e) => setDelegateAddress(e.target.value)}
                     placeholder="0x..."
-                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
+                    className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm font-mono text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50 focus:bg-[var(--v2-surface-2)] transition-all"
                   />
                   {delegateAddress && !isValidAddress(delegateAddress) && (
                     <p className="text-[11px] text-red-400">Invalid Ethereum address</p>
                   )}
-                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5">
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  <div className="bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-lg px-3 py-2.5">
+                    <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed">
                       Enter the public address of the wallet your agent will use for signing.
                       Haven will never ask for or store the private key.
                     </p>
@@ -438,7 +438,7 @@ function CreateSelfSignModal({
               <button
                 onClick={() => setStep('allowances')}
                 disabled={!canProceedDetails()}
-                className="w-full text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                className="w-full text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
               >
                 Next: Spending Limits
               </button>
@@ -454,19 +454,19 @@ function CreateSelfSignModal({
                   {allowances.map((a) => (
                     <div
                       key={a.tokenSymbol}
-                      className="flex items-center justify-between p-3 bg-white/[0.03] rounded-lg border border-white/[0.06]"
+                      className="flex items-center justify-between p-3 bg-[var(--v2-surface)] rounded-lg border border-[var(--v2-border)]"
                     >
                       <div>
-                        <span className="text-sm text-zinc-200 font-medium">
+                        <span className="text-sm text-[var(--v2-ink)] font-medium">
                           {a.amount} {a.tokenSymbol}
                         </span>
-                        <span className="text-xs text-zinc-600 ml-2">
+                        <span className="text-xs text-[var(--v2-ink-3)] ml-2">
                           {resetLabel(a.resetTimeMin)}
                         </span>
                       </div>
                       <button
                         onClick={() => handleRemoveAllowance(a.tokenSymbol)}
-                        className="text-zinc-700 hover:text-red-400 transition-colors"
+                        className="text-[var(--v2-ink-3)] hover:text-red-400 transition-colors"
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="3 6 5 6 21 6" />
@@ -480,13 +480,13 @@ function CreateSelfSignModal({
 
               {/* Add allowance form */}
               {availableTokens.length > 0 && (
-                <div className="space-y-3 p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
-                  <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Add spending limit</p>
+                <div className="space-y-3 p-4 bg-[var(--v2-surface)] rounded-xl border border-dashed border-[var(--v2-border)]">
+                  <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">Add spending limit</p>
                   <div className="grid grid-cols-3 gap-2">
                     <select
                       value={addToken}
                       onChange={(e) => setAddToken(e.target.value)}
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
                     >
                       {availableTokens.map((t) => (
                         <option key={t.symbol} value={t.symbol}>{t.symbol}</option>
@@ -499,12 +499,12 @@ function CreateSelfSignModal({
                       value={addAmount}
                       onChange={(e) => setAddAmount(e.target.value)}
                       placeholder="Amount"
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50"
                     />
                     <select
                       value={addReset}
                       onChange={(e) => setAddReset(Number(e.target.value))}
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
+                      className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
                     >
                       {RESET_PERIODS.map((p) => (
                         <option key={p.value} value={p.value}>{p.label}</option>
@@ -514,7 +514,7 @@ function CreateSelfSignModal({
                   <button
                     onClick={handleAddAllowance}
                     disabled={!addAmount || Number(addAmount) <= 0 || !availableTokens.some((t) => t.symbol === addToken)}
-                    className="w-full text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-30 disabled:cursor-not-allowed text-zinc-300 rounded-lg py-2 transition-colors"
+                    className="w-full text-xs font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--v2-ink)] rounded-lg py-2 transition-colors"
                   >
                     + Add limit
                   </button>
@@ -522,12 +522,12 @@ function CreateSelfSignModal({
               )}
 
               {allowances.length === 0 && (
-                <p className="text-xs text-zinc-600 text-center py-4">
+                <p className="text-xs text-[var(--v2-ink-3)] text-center py-4">
                   Add at least one spending limit to continue
                 </p>
               )}
 
-              <p className="text-[11px] text-zinc-600 leading-relaxed pt-2 border-t border-white/[0.06]">
+              <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed pt-2 border-t border-[var(--v2-border)]">
                 Payments above the on-chain limit are queued for your approval in the
                 dashboard — the agent always has an escape hatch.
               </p>
@@ -535,14 +535,14 @@ function CreateSelfSignModal({
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('details')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
                 <button
                   onClick={() => setStep('review')}
                   disabled={allowances.length === 0}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   Next: Review
                 </button>
@@ -553,35 +553,35 @@ function CreateSelfSignModal({
           {/* ── STEP 3: Review ────────────────────────────── */}
           {step === 'review' && (
             <div className="space-y-5">
-              <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-3">
+              <div className="bg-[var(--v2-surface)] rounded-xl p-4 border border-[var(--v2-border)] space-y-3">
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Agent</p>
-                  <p className="text-sm text-zinc-200 font-medium">{name}</p>
-                  {description && <p className="text-xs text-zinc-500 mt-0.5">{description}</p>}
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Agent</p>
+                  <p className="text-sm text-[var(--v2-ink)] font-medium">{name}</p>
+                  {description && <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">{description}</p>}
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Delegate address</p>
-                  <p className="text-xs font-mono text-zinc-400">
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Delegate address</p>
+                  <p className="text-xs font-mono text-[var(--v2-ink-2)]">
                     {truncate(delegateAddress)}
                     {keyMode === 'generate' && (
-                      <span className="text-indigo-400/60 ml-2 font-sans">(generated)</span>
+                      <span className="text-[var(--v2-brand)]/60 ml-2 font-sans">(generated)</span>
                     )}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Spending limits</p>
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Spending limits</p>
                   <div className="space-y-1">
                     {allowances.map((a) => (
                       <div key={a.tokenSymbol} className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-300">{a.amount} {a.tokenSymbol}</span>
-                        <span className="text-zinc-600">{resetLabel(a.resetTimeMin)}</span>
+                        <span className="text-[var(--v2-ink)]">{a.amount} {a.tokenSymbol}</span>
+                        <span className="text-[var(--v2-ink-3)]">{resetLabel(a.resetTimeMin)}</span>
                       </div>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Authentication</p>
-                  <p className="text-xs text-zinc-500">EIP-191 personal_sign — no API key stored</p>
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Authentication</p>
+                  <p className="text-xs text-[var(--v2-ink-3)]">EIP-191 personal_sign — no API key stored</p>
                 </div>
               </div>
 
@@ -595,14 +595,14 @@ function CreateSelfSignModal({
                 <button
                   onClick={() => setStep('allowances')}
                   disabled={loading}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-30 text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-30 text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
                 <button
                   onClick={handleSubmit}
                   disabled={loading}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   {loading ? 'Creating…' : 'Create Agent'}
                 </button>
@@ -638,45 +638,45 @@ function AgentCard({
   }
 
   return (
-    <div className={`bg-white/[0.02] border rounded-xl p-5 hover:border-white/[0.1] transition-all space-y-3 ${isActive ? 'border-white/[0.06]' : 'border-white/[0.04] opacity-60'}`}>
+    <div className={`bg-[var(--v2-surface)] border rounded-xl p-5 hover:border-[var(--v2-border-strong)] transition-all space-y-3 ${isActive ? 'border-[var(--v2-border)]' : 'border-[var(--v2-border)] opacity-60'}`}>
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-3 min-w-0">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-indigo-500/10 text-indigo-400' : 'bg-white/[0.04] text-zinc-600'}`}>
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-indigo-500/10 text-[var(--v2-brand)]' : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'}`}>
             <ShieldIcon size={17} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-zinc-200 truncate">{agent.name}</h3>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)] truncate">{agent.name}</h3>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
-                isActive ? 'bg-emerald-500/10 text-emerald-400' : agent.status === 'revoked' ? 'bg-red-500/10 text-red-400' : 'bg-zinc-800 text-zinc-500'
+                isActive ? 'bg-emerald-500/10 text-emerald-400' : agent.status === 'revoked' ? 'bg-red-500/10 text-red-400' : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
               }`}>
                 {agent.status}
               </span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-zinc-800/80 text-zinc-500 flex-shrink-0">
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-[var(--v2-surface-2)]/80 text-[var(--v2-ink-3)] flex-shrink-0">
                 self-sign
               </span>
             </div>
             {agent.safe_name && (
-              <p className="text-xs text-zinc-500 mt-0.5"><span className="text-zinc-600">Account:</span> {agent.safe_name}</p>
+              <p className="text-xs text-[var(--v2-ink-3)] mt-0.5"><span className="text-[var(--v2-ink-3)]">Account:</span> {agent.safe_name}</p>
             )}
             {agent.description && (
-              <p className="text-xs text-zinc-600 mt-0.5">{agent.description}</p>
+              <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">{agent.description}</p>
             )}
           </div>
         </div>
       </div>
 
       {/* Delegate address */}
-      <div className="bg-zinc-800/40 rounded-lg px-3 py-2">
+      <div className="bg-[var(--v2-surface-2)]/40 rounded-lg px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <p className="text-[10px] text-zinc-600 mb-0.5 uppercase tracking-wide">Delegate</p>
-            <p className="font-mono text-xs text-zinc-400">{agent.delegate_address}</p>
+            <p className="text-[10px] text-[var(--v2-ink-3)] mb-0.5 uppercase tracking-wide">Delegate</p>
+            <p className="font-mono text-xs text-[var(--v2-ink-2)]">{agent.delegate_address}</p>
           </div>
           <button
             onClick={copyAddress}
-            className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0"
+            className="p-1.5 rounded text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors flex-shrink-0"
             title="Copy address"
           >
             {copied ? <span className="text-emerald-400 text-xs">✓</span> : <CopyIcon />}
@@ -685,7 +685,7 @@ function AgentCard({
       </div>
 
       {/* Auth info */}
-      <div className="flex items-center gap-1.5 text-xs text-zinc-600">
+      <div className="flex items-center gap-1.5 text-xs text-[var(--v2-ink-3)]">
         <ShieldIcon size={12} />
         <span>Authenticates via EIP-191 personal_sign — no API key stored</span>
       </div>
@@ -693,15 +693,15 @@ function AgentCard({
       {/* Spending limits */}
       {isActive && agent.allowances.length > 0 && (
         <div>
-          <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1.5">Spending limits</p>
+          <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1.5">Spending limits</p>
           <div className="space-y-1">
             {agent.allowances.map((a) => (
-              <div key={a.token_address} className="flex items-center justify-between bg-zinc-800/40 rounded-lg px-3 py-1.5 text-xs">
-                <span className="text-zinc-300 font-medium">{a.token_symbol}</span>
-                <span className="text-zinc-500 font-mono">
+              <div key={a.token_address} className="flex items-center justify-between bg-[var(--v2-surface-2)]/40 rounded-lg px-3 py-1.5 text-xs">
+                <span className="text-[var(--v2-ink)] font-medium">{a.token_symbol}</span>
+                <span className="text-[var(--v2-ink-3)] font-mono">
                   {a.allowance_amount}
                   {a.reset_period_min > 0 && (
-                    <span className="text-zinc-700"> / {resetLabel(a.reset_period_min).toLowerCase()}</span>
+                    <span className="text-[var(--v2-ink-3)]"> / {resetLabel(a.reset_period_min).toLowerCase()}</span>
                   )}
                 </span>
               </div>
@@ -712,25 +712,25 @@ function AgentCard({
 
       {/* Actions */}
       {isActive && (
-        <div className="flex items-center gap-2 pt-3 border-t border-white/[0.05]">
+        <div className="flex items-center gap-2 pt-3 border-t border-[var(--v2-border)]">
           {confirmRevoke ? (
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-zinc-500">Revoke agent?</span>
+              <span className="text-[var(--v2-ink-3)]">Revoke agent?</span>
               <button onClick={() => { onRevoke(); setConfirmRevoke(false) }} className="text-red-400 hover:text-red-300 font-medium transition-colors">Yes</button>
-              <button onClick={() => setConfirmRevoke(false)} className="text-zinc-600 hover:text-zinc-400 transition-colors">No</button>
+              <button onClick={() => setConfirmRevoke(false)} className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors">No</button>
             </div>
           ) : (
-            <button onClick={() => setConfirmRevoke(true)} className="text-xs text-zinc-600 hover:text-amber-400 transition-colors">Revoke</button>
+            <button onClick={() => setConfirmRevoke(true)} className="text-xs text-[var(--v2-ink-3)] hover:text-amber-400 transition-colors">Revoke</button>
           )}
-          <span className="text-zinc-800">|</span>
+          <span className="text-[var(--v2-ink-3)]">|</span>
           {confirmDelete ? (
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-zinc-500">Delete?</span>
+              <span className="text-[var(--v2-ink-3)]">Delete?</span>
               <button onClick={() => { onDelete(); setConfirmDelete(false) }} className="text-red-400 hover:text-red-300 font-medium transition-colors">Yes</button>
-              <button onClick={() => setConfirmDelete(false)} className="text-zinc-600 hover:text-zinc-400 transition-colors">No</button>
+              <button onClick={() => setConfirmDelete(false)} className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors">No</button>
             </div>
           ) : (
-            <button onClick={() => setConfirmDelete(true)} className="text-xs text-zinc-600 hover:text-red-400 transition-colors">Delete</button>
+            <button onClick={() => setConfirmDelete(true)} className="text-xs text-[var(--v2-ink-3)] hover:text-red-400 transition-colors">Delete</button>
           )}
         </div>
       )}
@@ -766,7 +766,7 @@ export default function SelfSignAgentPanel() {
             <ShieldIcon size={16} />
             <h2 className="text-sm font-semibold">Self-Sign Agents</h2>
           </div>
-          <p className="text-xs text-zinc-500 max-w-md">
+          <p className="text-xs text-[var(--v2-ink-3)] max-w-md">
             Agents that authenticate by signing requests with their Ethereum private key.
             No API key is stored — identity is proven cryptographically.
           </p>
@@ -782,19 +782,19 @@ export default function SelfSignAgentPanel() {
 
       {/* How it works */}
       <div className="border border-zinc-800 rounded-xl p-4 bg-zinc-900/40">
-        <p className="text-xs font-medium text-zinc-400 mb-2 flex items-center gap-1.5">
+        <p className="text-xs font-medium text-[var(--v2-ink-2)] mb-2 flex items-center gap-1.5">
           <KeyIcon size={13} />
           How self-sign authentication works
         </p>
-        <ol className="text-xs text-zinc-500 space-y-1 list-decimal list-inside">
+        <ol className="text-xs text-[var(--v2-ink-3)] space-y-1 list-decimal list-inside">
           <li>Register the agent&apos;s Ethereum address and spending limits here</li>
           <li>The agent signs each API request with that wallet&apos;s private key</li>
           <li>Backend recovers the signer address from the EIP-191 signature</li>
           <li>If it matches the registered address → request is authorized</li>
         </ol>
         <div className="mt-3 pt-3 border-t border-zinc-800">
-          <p className="text-xs text-zinc-600 font-mono">Headers required per request:</p>
-          <div className="mt-1 space-y-0.5 font-mono text-xs text-zinc-500">
+          <p className="text-xs text-[var(--v2-ink-3)] font-mono">Headers required per request:</p>
+          <div className="mt-1 space-y-0.5 font-mono text-xs text-[var(--v2-ink-3)]">
             <p>X-Agent-Address: 0x...</p>
             <p>X-Agent-Signature: 0x... (EIP-191)</p>
             <p>X-Agent-Timestamp: 1714000000 (Unix seconds)</p>
@@ -811,12 +811,12 @@ export default function SelfSignAgentPanel() {
 
       {/* Agent list */}
       {loading ? (
-        <div className="text-sm text-zinc-500 py-8 text-center">Loading agents…</div>
+        <div className="text-sm text-[var(--v2-ink-3)] py-8 text-center">Loading agents…</div>
       ) : agents.length === 0 ? (
         <div className="text-center py-12 border border-dashed border-zinc-800 rounded-xl">
           <ShieldIcon size={24} />
-          <p className="mt-3 text-sm text-zinc-500">No self-sign agents yet</p>
-          <p className="text-xs text-zinc-600 mt-1">
+          <p className="mt-3 text-sm text-[var(--v2-ink-3)]">No self-sign agents yet</p>
+          <p className="text-xs text-[var(--v2-ink-3)] mt-1">
             Create one to let an Ethereum wallet authenticate without an API key
           </p>
         </div>

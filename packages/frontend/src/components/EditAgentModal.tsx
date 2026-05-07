@@ -232,27 +232,27 @@ export default function EditAgentModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/50 backdrop-blur-sm">
       <div
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div className="relative bg-[#0e0e0e] border border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)]">
           <div>
             <h2 className="text-sm font-semibold">Edit Agent: {agent.name}</h2>
-            <p className="text-xs text-zinc-600 mt-0.5">
-              {step === 'form' && 'Add or update a spending limit'}
-              {step === 'review' && 'Review on-chain changes'}
-              {step === 'executing' && 'Updating on-chain...'}
-              {step === 'done' && 'Allowance updated'}
+            <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
+              {step === 'form' && 'Add or update an agent budget'}
+              {step === 'review' && 'Review rule changes'}
+              {step === 'executing' && 'Updating rules...'}
+              {step === 'done' && 'Agent budget updated'}
             </p>
           </div>
           <button
             onClick={handleClose}
             disabled={step === 'executing' && execStatus !== 'error'}
-            className="text-zinc-700 hover:text-zinc-400 disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 -mr-1"
+            className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 -mr-1"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -268,17 +268,17 @@ export default function EditAgentModal({
               {/* Existing allowances summary */}
               {existingOnChainAllowances && existingOnChainAllowances.length > 0 && (
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-2">
-                    Current on-chain allowances
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-2">
+                    Current agent budgets
                   </p>
                   <div className="space-y-1">
                     {existingOnChainAllowances.map((a) => {
                       const sym = tokenSymbolFromAddr(a.token, chainId)
                       const dec = tokenDecimalsFromAddr(a.token, chainId)
                       return (
-                        <div key={a.token} className="flex items-center justify-between text-xs p-2 bg-white/[0.03] rounded-lg border border-white/[0.06]">
-                          <span className="text-zinc-300 font-medium">{sym}</span>
-                          <span className="text-zinc-500">{formatAmountShort(a.amount, dec)} / {resetLabel(a.resetTimeMin).toLowerCase()}</span>
+                        <div key={a.token} className="flex items-center justify-between text-xs p-2 bg-[var(--v2-surface)] rounded-lg border border-[var(--v2-border)]">
+                          <span className="text-[var(--v2-ink)] font-medium">{sym}</span>
+                          <span className="text-[var(--v2-ink-3)]">{formatAmountShort(a.amount, dec)} / {resetLabel(a.resetTimeMin).toLowerCase()}</span>
                         </div>
                       )
                     })}
@@ -287,15 +287,15 @@ export default function EditAgentModal({
               )}
 
               {/* Add / update allowance */}
-              <div className="space-y-3 p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">
-                  {isExistingToken ? 'Update spending limit' : 'Add new spending limit'}
+              <div className="space-y-3 p-4 bg-[var(--v2-surface)] rounded-xl border border-dashed border-[var(--v2-border)]">
+                <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">
+                  {isExistingToken ? 'Update agent budget' : 'Add new agent budget'}
                 </p>
                 <div className="grid grid-cols-3 gap-2">
                   <select
                     value={selectedToken}
                     onChange={(e) => setSelectedToken(e.target.value)}
-                    className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
+                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
                   >
                     {availableTokens.map((t) => (
                       <option key={t.symbol} value={t.symbol}>
@@ -310,12 +310,12 @@ export default function EditAgentModal({
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="Amount"
-                    className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
+                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50"
                   />
                   <select
                     value={resetTimeMin}
                     onChange={(e) => setResetTimeMin(Number(e.target.value))}
-                    className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
+                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
                   >
                     {RESET_PERIODS.map((p) => (
                       <option key={p.value} value={p.value}>
@@ -326,27 +326,27 @@ export default function EditAgentModal({
                 </div>
                 {isExistingToken && (
                   <p className="text-[11px] text-amber-400/70">
-                    This will replace the existing {selectedToken} allowance on-chain
+                    This will replace the existing {selectedToken} budget for this agent.
                   </p>
                 )}
               </div>
 
-              <p className="text-[11px] text-zinc-600 leading-relaxed">
-                Payments that exceed the on-chain limit are queued for your approval in
+              <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed">
+                Payments that exceed this agent budget are queued for your approval in
                 the dashboard — no separate threshold to configure.
               </p>
 
               <div className="flex gap-3">
                 <button
                   onClick={handleClose}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => setStep('review')}
                   disabled={!amount || Number(amount) <= 0}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   Review
                 </button>
@@ -357,44 +357,44 @@ export default function EditAgentModal({
           {/* ── STEP: Review ──────────────────────────── */}
           {step === 'review' && (
             <div className="space-y-5">
-              <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-3">
+              <div className="bg-[var(--v2-surface)] rounded-xl p-4 border border-[var(--v2-border)] space-y-3">
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Agent</p>
-                  <p className="text-sm text-zinc-200 font-medium">{agent.name}</p>
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Agent</p>
+                  <p className="text-sm text-[var(--v2-ink)] font-medium">{agent.name}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Delegate</p>
-                  <p className="text-xs font-mono text-zinc-400">{truncate(agent.delegate_address!)}</p>
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Credential</p>
+                  <p className="text-xs font-mono text-[var(--v2-ink-2)]">{truncate(agent.delegate_address!)}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                    {isExistingToken ? 'Update allowance' : 'New allowance'}
+                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
+                    {isExistingToken ? 'Updated budget' : 'New budget'}
                   </p>
-                  <p className="text-sm text-zinc-200">
+                  <p className="text-sm text-[var(--v2-ink)]">
                     {amount} {selectedToken}
-                    <span className="text-zinc-600 ml-2">{resetLabel(resetTimeMin)}</span>
+                    <span className="text-[var(--v2-ink-3)] ml-2">{resetLabel(resetTimeMin)}</span>
                   </p>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">On-chain action</p>
-                <p className="flex items-center gap-2 text-xs text-zinc-400">
+                <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">On-chain action</p>
+                <p className="flex items-center gap-2 text-xs text-[var(--v2-ink-2)]">
                   <span className="w-1 h-1 rounded-full bg-indigo-400" />
-                  {isExistingToken ? 'Update' : 'Set'} {amount} {selectedToken} allowance for {truncate(agent.delegate_address!)} ({resetLabel(resetTimeMin).toLowerCase()})
+                  {isExistingToken ? 'Update' : 'Set'} {amount} {selectedToken} budget for {truncate(agent.delegate_address!)} ({resetLabel(resetTimeMin).toLowerCase()})
                 </p>
               </div>
 
               {(safeDetails?.threshold ?? 1) > 1 && (
                 <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/10 rounded-lg px-3 py-2">
-                  Multi-sig Safe ({safeDetails?.threshold}/{safeDetails?.owners?.length}) — this will be proposed for co-signer approval.
+                  This account requires {safeDetails?.threshold} of {safeDetails?.owners?.length} approvals. Haven will submit it for approval.
                 </div>
               )}
 
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('form')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
@@ -402,9 +402,9 @@ export default function EditAgentModal({
                   <NetworkGate requiredChainId={chainId}>
                     <button
                       onClick={handleExecute}
-                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20"
+                      className="w-full text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white rounded-xl py-2.5 transition-colors shadow-[var(--v2-shadow-button)]"
                     >
-                      {isExistingToken ? 'Update Allowance' : 'Add Allowance'}
+                      {isExistingToken ? 'Update budget' : 'Add budget'}
                     </button>
                   </NetworkGate>
                 </div>
@@ -419,12 +419,12 @@ export default function EditAgentModal({
                 <>
                   <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
                   <div>
-                    <p className="text-sm text-zinc-200 font-medium">
+                    <p className="text-sm text-[var(--v2-ink)] font-medium">
                       {execStatus === 'signing' && 'Awaiting signature...'}
-                      {execStatus === 'executing' && 'Executing on-chain...'}
+                      {execStatus === 'executing' && 'Submitting update...'}
                       {execStatus === 'saving' && 'Saving to Haven...'}
                     </p>
-                    <div className="text-xs text-zinc-600 mt-1">
+                    <div className="text-xs text-[var(--v2-ink-3)] mt-1">
                       {execStatus === 'signing' ? (
                         <SigningStatus signer={signer} stage="signing" />
                       ) : execStatus === 'executing' ? (
@@ -445,18 +445,18 @@ export default function EditAgentModal({
                   </div>
                   <div>
                     <p className="text-sm text-red-400 font-medium">Update failed</p>
-                    <p className="text-xs text-zinc-600 mt-1 max-w-xs mx-auto">{execError}</p>
+                    <p className="text-xs text-[var(--v2-ink-3)] mt-1 max-w-xs mx-auto">{execError}</p>
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={() => setStep('review')}
-                      className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                     >
                       Back
                     </button>
                     <button
                       onClick={handleExecute}
-                      className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white rounded-xl py-2.5 transition-colors"
                     >
                       Retry
                     </button>
@@ -475,12 +475,12 @@ export default function EditAgentModal({
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-zinc-200">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">
                   {execStatus === 'confirmed'
-                    ? 'Allowance updated successfully'
+                    ? 'Agent budget updated'
                     : 'Update proposed for approval'}
                 </p>
-                <p className="text-xs text-zinc-500 mt-1">
+                <p className="text-xs text-[var(--v2-ink-3)] mt-1">
                   {amount} {selectedToken} — {resetLabel(resetTimeMin).toLowerCase()}
                 </p>
                 {txHash && (
@@ -492,7 +492,7 @@ export default function EditAgentModal({
                     }
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-2 mt-1 inline-block"
+                    className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] underline underline-offset-2 mt-1 inline-block"
                   >
                     {execStatus === 'confirmed' ? 'View on Explorer' : 'View in Safe{Wallet}'}
                   </a>
@@ -500,7 +500,7 @@ export default function EditAgentModal({
               </div>
               <button
                 onClick={handleClose}
-                className="w-full text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                className="w-full text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
               >
                 Done
               </button>

@@ -201,7 +201,7 @@ describe('ApprovalQueue', () => {
     expect(approveButtons[0]).toBeDisabled()
     expect(approveButtons[1]).not.toBeDisabled()
 
-    expect(screen.getByText('This Safe uses a passkey on another device.')).toBeInTheDocument()
+    expect(screen.getByText('This account uses a passkey on another device.')).toBeInTheDocument()
 
     fireEvent.click(approveButtons[1])
 

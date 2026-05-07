@@ -40,7 +40,7 @@ function StepTracker({ stage }: { stage: Stage }) {
                   ? 'border-emerald-500/20 bg-emerald-500/12 text-emerald-300'
                   : step.state === 'active'
                     ? 'border-indigo-400/30 bg-indigo-500 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]'
-                    : 'border-white/[0.08] bg-white/[0.03] text-zinc-500'
+                    : 'border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink-3)]'
               }`}
             >
               {step.state === 'done' ? (
@@ -54,10 +54,10 @@ function StepTracker({ stage }: { stage: Stage }) {
             <span
               className={`text-[12px] font-medium ${
                 step.state === 'done'
-                  ? 'text-zinc-200'
+                  ? 'text-[var(--v2-ink)]'
                   : step.state === 'active'
-                    ? 'text-zinc-100'
-                    : 'text-zinc-500'
+                    ? 'text-[var(--v2-ink)]'
+                    : 'text-[var(--v2-ink-3)]'
               }`}
             >
               {step.label}
@@ -68,7 +68,7 @@ function StepTracker({ stage }: { stage: Stage }) {
               {step.state === 'done' ? (
                 <div className="h-px bg-indigo-400/60" />
               ) : (
-                <div className="border-t border-dashed border-white/[0.10]" />
+                <div className="border-t border-dashed border-[var(--v2-border-strong)]" />
               )}
             </div>
           )}
@@ -91,7 +91,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       onClick={copy}
       title="Copy address"
-      className="rounded p-1 text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+      className="rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
     >
       {copied ? (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
@@ -133,7 +133,7 @@ function FundingPanel({
     QRCode.toDataURL(safe.safe_address, {
       margin: 1,
       width: 160,
-      color: { dark: '#ededed', light: '#0e0e0e' },
+      color: { dark: '#171A2F', light: '#FFFFFF' },
     })
       .then((url) => {
         if (!cancelled) setQrDataUrl(url)
@@ -157,24 +157,24 @@ function FundingPanel({
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr),180px] lg:items-start">
       <div className="space-y-3">
         <div>
-          <h3 className="mb-1.5 text-2xl font-semibold leading-tight tracking-tight text-zinc-50 sm:text-[28px]">
+          <h3 className="mb-1.5 text-2xl font-semibold leading-tight tracking-tight text-[var(--v2-ink)] sm:text-[28px]">
             Add funds to start using Haven
           </h3>
-          <p className="text-[13px] text-zinc-300">
+          <p className="text-[13px] text-[var(--v2-ink-2)]">
             Send a supported token to your Haven account on{' '}
-            <span className="text-zinc-100">{chainConfig.name}</span>.
+            <span className="text-[var(--v2-ink)]">{chainConfig.name}</span>.
           </p>
         </div>
 
         <div>
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-[var(--v2-ink-3)]">
             Account
           </p>
           {safes.length > 1 ? (
             <select
               value={safe.id}
               onChange={(e) => onSelectSafe(e.target.value)}
-              className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-indigo-400/50"
+              className="w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3.5 py-2.5 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-400/50"
             >
               {safes.map((entry) => (
                 <option key={entry.id} value={entry.id}>
@@ -183,19 +183,19 @@ function FundingPanel({
               ))}
             </select>
           ) : (
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-sm text-zinc-200">
+            <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3.5 py-2.5 text-sm text-[var(--v2-ink)]">
               {safe.name}
             </div>
           )}
         </div>
 
         <div>
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-[var(--v2-ink-3)]">
             Deposit address
           </p>
           <div className="flex flex-col gap-2.5 sm:flex-row">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5">
-              <code className="min-w-0 flex-1 truncate text-[11px] text-zinc-100">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3.5 py-2.5">
+              <code className="min-w-0 flex-1 truncate text-[11px] text-[var(--v2-ink)]">
                 {safe.safe_address}
               </code>
               <CopyButton text={safe.safe_address} />
@@ -204,7 +204,7 @@ function FundingPanel({
                 target="_blank"
                 rel="noopener noreferrer"
                 title="View on explorer"
-                className="rounded p-1 text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                className="rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
               >
                 <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
@@ -214,7 +214,7 @@ function FundingPanel({
 
             <button
               onClick={() => setShowQr((value) => !value)}
-              className="inline-flex items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-zinc-200 transition-colors hover:bg-white/[0.06]"
+              className="inline-flex items-center justify-center rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-2.5 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface-2)]"
             >
               {showQr ? 'Hide QR code' : 'Show QR code'}
             </button>
@@ -222,7 +222,7 @@ function FundingPanel({
         </div>
 
         {showQr && qrDataUrl && (
-          <div className="w-fit rounded-xl border border-white/[0.08] bg-black/25 p-2.5">
+          <div className="w-fit rounded-xl border border-[var(--v2-border)] bg-white p-2.5">
             <img
               src={qrDataUrl}
               alt="Deposit address QR code"
@@ -232,25 +232,25 @@ function FundingPanel({
         )}
       </div>
 
-      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3 lg:min-h-full lg:rounded-none lg:border-l lg:border-r-0 lg:border-y-0 lg:bg-transparent lg:py-0.5 lg:pl-4 lg:pr-0">
+      <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 lg:min-h-full lg:rounded-none lg:border-l lg:border-r-0 lg:border-y-0 lg:bg-transparent lg:py-0.5 lg:pl-4 lg:pr-0">
         <div className="space-y-3">
           <div className="flex items-start gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.03] text-zinc-300">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)]">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2l7 4v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-4z" />
                 <path d="M9 10h6M9 14h6" />
               </svg>
             </div>
             <div>
-              <p className="text-xs text-zinc-400">Network</p>
-              <p className="mt-0.5 text-sm font-medium text-zinc-100">{chainConfig.name}</p>
+              <p className="text-xs text-[var(--v2-ink-2)]">Network</p>
+              <p className="mt-0.5 text-sm font-medium text-[var(--v2-ink)]">{chainConfig.name}</p>
             </div>
           </div>
 
-          <div className="h-px bg-white/[0.06]" />
+          <div className="h-px bg-[var(--v2-surface-2)]" />
 
           <div className="flex items-start gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.03] text-zinc-300">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)]">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 7v10" />
@@ -258,8 +258,8 @@ function FundingPanel({
               </svg>
             </div>
             <div>
-              <p className="text-xs text-zinc-400">Supported tokens</p>
-              <p className="mt-0.5 text-sm font-medium text-zinc-100">
+              <p className="text-xs text-[var(--v2-ink-2)]">Supported tokens</p>
+              <p className="mt-0.5 text-sm font-medium text-[var(--v2-ink)]">
                 {tokens.map((token) => token.symbol).join(', ')}
               </p>
             </div>
@@ -278,10 +278,10 @@ function AddAgentPanel({
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="mb-1.5 text-xl font-semibold tracking-tight text-zinc-50">
+        <h3 className="mb-1.5 text-xl font-semibold tracking-tight text-[var(--v2-ink)]">
           Connect your first agent
         </h3>
-        <p className="max-w-2xl text-[13px] text-zinc-300">
+        <p className="max-w-2xl text-[13px] text-[var(--v2-ink-2)]">
           Give an agent access to spend from your Haven account with clear limits
           that you control.
         </p>
@@ -289,7 +289,7 @@ function AddAgentPanel({
 
       <button
         onClick={onAddAgent}
-        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:from-indigo-400 hover:to-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+        className="inline-flex items-center gap-2 rounded-xl bg-[var(--v2-brand)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -310,18 +310,18 @@ export default function DashboardOnboardingGuide({
   onDismiss,
 }: Props) {
   return (
-    <div className="relative mb-6 overflow-hidden rounded-2xl border border-white/[0.06]">
+    <div className="relative mb-6 overflow-hidden rounded-2xl border border-[var(--v2-border)]">
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            'linear-gradient(135deg, rgba(99,102,241,0.10) 0%, rgba(79,70,229,0.07) 42%, rgba(12,12,16,0.98) 100%)',
+            'linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%)',
         }}
       />
-      <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(129,140,248,0.18),transparent_58%)] pointer-events-none" />
+      <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.12),transparent_58%)] pointer-events-none" />
 
       <div className="relative p-4">
-        <div className="flex flex-col gap-3 border-b border-white/[0.06] pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-[var(--v2-border)] pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <StepTracker stage={stage} />
           </div>
@@ -329,7 +329,7 @@ export default function DashboardOnboardingGuide({
           <button
             type="button"
             onClick={onDismiss}
-            className="inline-flex items-center gap-2 self-start rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/[0.08] hover:text-white"
+            className="inline-flex items-center gap-2 self-start rounded-full border border-[var(--v2-border)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--v2-ink-2)] transition-colors hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]"
             aria-label="Dismiss onboarding guide"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

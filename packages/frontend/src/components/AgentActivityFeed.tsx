@@ -43,24 +43,24 @@ function StatCard({
 }) {
   if (items.length === 0) {
     return (
-      <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
-        <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">{label}</p>
-        <p className="text-xs text-zinc-700">No activity</p>
+      <div className="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
+        <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">{label}</p>
+        <p className="text-xs text-[var(--v2-ink-3)]">No activity</p>
       </div>
     )
   }
 
   return (
-    <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
-      <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-2">{label}</p>
+    <div className="p-3 rounded-lg bg-[var(--v2-surface)] border border-[var(--v2-border)]">
+      <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-2">{label}</p>
       {items.map((item) => (
         <div key={item.token} className="flex items-center justify-between mb-1 last:mb-0">
-          <span className="text-xs text-zinc-400">{item.token}</span>
+          <span className="text-xs text-[var(--v2-ink-2)]">{item.token}</span>
           <div className="text-right">
-            <span className="text-xs text-zinc-200 font-medium">
+            <span className="text-xs text-[var(--v2-ink)] font-medium">
               {Number(item.total_spent).toFixed(2)}
             </span>
-            <span className="text-[10px] text-zinc-700 ml-1">
+            <span className="text-[10px] text-[var(--v2-ink-3)] ml-1">
               ({item.tx_count} tx{item.tx_count !== 1 ? 's' : ''})
             </span>
           </div>
@@ -88,14 +88,14 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
         <div className="flex items-center gap-2">
           <button
             onClick={onClose}
-            className="text-zinc-600 hover:text-zinc-400 transition-colors"
+            className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
           </button>
-          <h3 className="text-sm font-semibold text-zinc-200">{agentName}</h3>
-          <span className="text-[10px] text-zinc-700">Activity</span>
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{agentName}</h3>
+          <span className="text-[10px] text-[var(--v2-ink-3)]">Activity</span>
         </div>
       </div>
 
@@ -104,10 +104,10 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-2">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="h-16 bg-white/[0.02] border border-white/[0.06] rounded-lg animate-pulse" />
+              <div key={i} className="h-16 bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-lg animate-pulse" />
             ))}
           </div>
-          <div className="h-32 bg-white/[0.02] border border-white/[0.06] rounded-lg animate-pulse" />
+          <div className="h-32 bg-[var(--v2-surface)] border border-[var(--v2-border)] rounded-lg animate-pulse" />
         </div>
       )}
 
@@ -136,14 +136,14 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
       {/* Activity feed */}
       {!loading && (
         <div>
-          <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-2">
+          <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-2">
             Recent Activity
           </p>
 
           {activity.length === 0 ? (
-            <div className="text-center py-6 rounded-lg border border-dashed border-white/[0.06]">
-              <p className="text-xs text-zinc-500">No activity yet</p>
-              <p className="text-[10px] text-zinc-700 mt-1">
+            <div className="text-center py-6 rounded-lg border border-dashed border-[var(--v2-border)]">
+              <p className="text-xs text-[var(--v2-ink-3)]">No activity yet</p>
+              <p className="text-[10px] text-[var(--v2-ink-3)] mt-1">
                 Your agent&apos;s payments will appear here.
               </p>
             </div>
@@ -152,13 +152,13 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
               {activity.map((item) => (
                 <div
                   key={`${item.type}-${item.id}`}
-                  className="flex items-center justify-between p-2.5 rounded-lg hover:bg-white/[0.02] transition-colors"
+                  className="flex items-center justify-between p-2.5 rounded-lg hover:bg-[var(--v2-surface)] transition-colors"
                 >
                   <div className="flex items-center gap-2.5">
                     <StatusDot status={item.status} />
                     <div>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-zinc-300 font-medium">
+                        <span className="text-xs text-[var(--v2-ink)] font-medium">
                           {item.amount} {item.token}
                         </span>
                         {item.type === 'approval' && (
@@ -172,17 +172,17 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 text-[10px] text-zinc-700">
+                      <div className="flex items-center gap-1 text-[10px] text-[var(--v2-ink-3)]">
                         <span>to {truncate(item.to)}</span>
                         {item.x402_resource_url && (
                           <>
-                            <span className="text-zinc-800">·</span>
+                            <span className="text-[var(--v2-ink-3)]">·</span>
                             <span className="max-w-[150px] truncate text-violet-400/60">{item.x402_resource_url}</span>
                           </>
                         )}
                         {item.reason && (
                           <>
-                            <span className="text-zinc-800">·</span>
+                            <span className="text-[var(--v2-ink-3)]">·</span>
                             <span className="max-w-[120px] truncate">{item.reason}</span>
                           </>
                         )}
@@ -195,13 +195,13 @@ export default function AgentActivityFeed({ agentId, agentName, onClose }: Props
                         href={item.explorer_url ?? '#'}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[10px] text-indigo-400 hover:text-indigo-300"
+                        className="text-[10px] text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
                       >
                         tx
                       </a>
                     )}
                     <span
-                      className="text-[10px] text-zinc-800"
+                      className="text-[10px] text-[var(--v2-ink-3)]"
                       title={new Date(item.created_at).toLocaleString()}
                     >
                       {timeAgo(item.created_at)}

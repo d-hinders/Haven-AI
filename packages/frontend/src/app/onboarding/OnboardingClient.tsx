@@ -162,13 +162,9 @@ export default function OnboardingClient() {
   }
 
   const isPasskeyOnboarding = signerMode === 'passkey'
-  const completionTitle = isPasskeyOnboarding
-    ? 'Your Haven account is ready'
-    : 'Safe deployed'
-  const completionDescription = isPasskeyOnboarding
-    ? `Your account is live on ${getChainConfig(selectedChainId).name}. You can now add funds, create agent budgets, and start making payments.`
-    : `Your non-custodial smart account is live on ${getChainConfig(selectedChainId).name}. You can now create agents with spending policies and start transacting.`
-  const completionAddressLabel = isPasskeyOnboarding ? 'Account address' : 'Safe address'
+  const completionTitle = 'Your Haven account is ready'
+  const completionDescription = `Your account is live on ${getChainConfig(selectedChainId).name}. You can now add funds, create agent budgets, and start making payments.`
+  const completionAddressLabel = 'Account address'
   const completionTxLabel = isPasskeyOnboarding ? 'Setup transaction' : 'Transaction'
 
   return (
@@ -281,8 +277,8 @@ export default function OnboardingClient() {
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Connect your wallet</h1>
               <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
-                Connect a browser wallet to get started. This wallet will become the owner of your
-                Safe smart account — giving you full custody of your funds.
+                Connect a browser wallet to get started. This wallet will approve payments and
+                changes for your Haven account.
               </p>
               <ConnectButton />
             </div>
@@ -290,10 +286,10 @@ export default function OnboardingClient() {
 
           {step === 'deploy' && signerMode === 'eoa' && (
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Deploy your Safe</h1>
+              <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Create your Haven account</h1>
               <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
-                Deploy a Safe smart account on your chosen network. Your connected wallet will be
-                the sole owner with full control. Haven never holds signing authority.
+                Create your Haven account on your chosen network. Your connected wallet will approve
+                payments and changes. Haven never holds signing authority.
               </p>
 
               <div className="mb-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
@@ -350,10 +346,10 @@ export default function OnboardingClient() {
                       {deployStage === 'signing' && 'Waiting for signature...'}
                       {deployStage === 'confirming' && 'Confirming on-chain...'}
                       {deployStage === 'registering' && 'Finalizing...'}
-                      {!deployStage && 'Deploying Safe...'}
+                      {!deployStage && 'Creating account...'}
                     </span>
                   ) : (
-                    'Deploy Safe'
+                    'Create account'
                   )}
                 </button>
               </NetworkGate>
@@ -405,7 +401,7 @@ export default function OnboardingClient() {
                               ) : item.id === 'confirming' ? (
                                 'Waiting for block inclusion'
                               ) : (
-                                'Linking Safe to your account'
+                                'Linking your account to Haven'
                               )}
                             </div>
                           )}

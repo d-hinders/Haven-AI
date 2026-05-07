@@ -63,11 +63,11 @@ function stageHint(stage: Stage): string {
     case 'registering':
       return 'Linking your wallet to your Haven account.'
     case 'done':
-      return 'Your passkey-backed Safe is ready.'
+      return 'Your Haven account is ready.'
     case 'error':
       return 'You can retry from this browser whenever you are ready.'
     default:
-      return 'Face ID / Touch ID will be used as the owner of your Safe.'
+      return 'Face ID / Touch ID will approve payments and changes for this account.'
   }
 }
 
@@ -244,7 +244,7 @@ export default function PasskeyEnrollFlow({
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Setting up your Haven account</h1>
             <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-              We&apos;re creating your passkey signer and deploying your account now.
+              We&apos;re creating your passkey and setting up your account now.
             </p>
           </div>
 

@@ -565,7 +565,7 @@ export default function CreateAgentModal({
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/50 backdrop-blur-sm">
       {/* Backdrop click to close (disabled during execution) */}
       <div
         className="absolute inset-0"
@@ -656,7 +656,7 @@ export default function CreateAgentModal({
               <button
                 onClick={() => setStep('policy')}
                 disabled={!canProceedDetails()}
-                className="w-full text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                className="w-full text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
               >
                 Next: rules
               </button>
@@ -795,7 +795,7 @@ export default function CreateAgentModal({
                 <button
                   onClick={() => setStep('key')}
                   disabled={allowances.length === 0}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   Next: credential
                 </button>
@@ -947,7 +947,7 @@ export default function CreateAgentModal({
                 <button
                   onClick={() => setStep('review')}
                   disabled={!canProceedKey()}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   Next: Review
                 </button>
@@ -1043,7 +1043,7 @@ export default function CreateAgentModal({
                       onClick={handleExecute}
                       disabled={!!deployBlockReason()}
                       title={deployBlockReason() ?? undefined}
-                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-[var(--v2-ink-3)] disabled:to-[var(--v2-ink-3)] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
+                      className="w-full text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors shadow-[var(--v2-shadow-button)] disabled:shadow-none"
                     >
                       Connect agent
                     </button>
@@ -1102,7 +1102,7 @@ export default function CreateAgentModal({
                     </button>
                     <button
                       onClick={handleExecute}
-                      className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white rounded-xl py-2.5 transition-colors"
                     >
                       Retry
                     </button>
@@ -1164,7 +1164,7 @@ export default function CreateAgentModal({
                 {/* Primary: download the markdown handoff */}
                 <button
                   onClick={handleDownloadHandoff}
-                  className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                  className="w-full flex items-center justify-center gap-2 bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white text-sm font-medium rounded-lg py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

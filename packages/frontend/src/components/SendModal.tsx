@@ -68,6 +68,8 @@ export default function SendModal({
     chainId,
   })
   const blockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
+  const needsConnectedWallet = operationGate.kind === 'no_signer'
+  const signingUnavailable = blockedByOtherDevice || needsConnectedWallet
 
   // Build token list from chain config
   const chainConfig = getChainConfig(chainId)
@@ -116,6 +118,10 @@ export default function SendModal({
     safeOptions.find((safe) => safe.id === selectedSafeOptionId) ?? null
   const threshold = safeDetails?.threshold ?? 1
   const isMultiSig = threshold > 1
+  const gasPaidByLabel =
+    signer?.type === 'passkey'
+      ? `Haven${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
+      : `Your signing wallet${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
 
   // Reset everything when the modal opens or the selected account changes.
   useEffect(() => {
@@ -188,10 +194,18 @@ export default function SendModal({
       setFormError('Could not load this account. Try again in a moment.')
       return
     }
+    if (needsConnectedWallet) {
+      setFormError('Connect wallet to send from this account.')
+      return
+    }
     if (validate()) setStep('review')
   }
 
   const handleConfirm = async () => {
+    if (needsConnectedWallet) {
+      setFormError('Connect wallet to send from this account.')
+      return
+    }
     if (blockedByOtherDevice || !signer || !tokenConfig) return
 
     setStep('executing')
@@ -239,7 +253,7 @@ export default function SendModal({
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm"
         onClick={step === 'executing' ? undefined : onClose}
       />
 
@@ -604,6 +618,12 @@ export default function SendModal({
               <PasskeyOtherDeviceNotice />
             )}
 
+            {needsConnectedWallet && (
+              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                Connect wallet to send from this account.
+              </div>
+            )}
+
             {formError && (
               <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
                 {formError}
@@ -621,8 +641,8 @@ export default function SendModal({
             {/* Continue button */}
             <button
               onClick={handleReview}
-              disabled={!amount || !recipient || contextLoading || !!contextError || !safeDetails || blockedByOtherDevice}
-              className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={!amount || !recipient || contextLoading || !!contextError || !safeDetails || signingUnavailable}
+              className="w-full py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
             >
               Continue
             </button>
@@ -678,16 +698,11 @@ export default function SendModal({
                 <span className="text-xs text-[var(--v2-ink-3)]">Network</span>
                 <span className="text-sm text-[var(--v2-ink-2)]">{getChainConfig(chainId).name}</span>
               </div>
-              <div className="h-px bg-[var(--v2-surface-2)]" />
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-[var(--v2-ink-3)]">Gas paid by</span>
-                <span className="text-sm text-[var(--v2-ink-2)]">
-                  {signer?.type === 'passkey'
-                    ? `Haven${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
-                    : `Your signing wallet${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`}
-                </span>
-              </div>
             </div>
+
+            <p className="text-[11px] text-[var(--v2-ink-3)]">
+              Gas paid by {gasPaidByLabel}.
+            </p>
 
             {isMultiSig && (
               <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-4 py-3">
@@ -697,6 +712,12 @@ export default function SendModal({
 
             {blockedByOtherDevice && (
               <PasskeyOtherDeviceNotice />
+            )}
+
+            {needsConnectedWallet && (
+              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                Connect wallet to send from this account.
+              </div>
             )}
 
             <div className="flex gap-3">
@@ -710,8 +731,8 @@ export default function SendModal({
                 <NetworkGate requiredChainId={chainId}>
                   <button
                     onClick={handleConfirm}
-                    disabled={blockedByOtherDevice}
-                    className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={signingUnavailable || !signer || !tokenConfig}
+                    className="w-full py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
                   >
                     {isMultiSig ? 'Approve proposal' : 'Approve and send'}
                   </button>
@@ -769,7 +790,7 @@ export default function SendModal({
                 )}
                 <button
                   onClick={handleDone}
-                  className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200"
+                  className="w-full py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)]"
                 >
                   Done
                 </button>
@@ -803,7 +824,7 @@ export default function SendModal({
                 </a>
                 <button
                   onClick={handleDone}
-                  className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200"
+                  className="w-full py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)]"
                 >
                   Done
                 </button>
@@ -830,7 +851,7 @@ export default function SendModal({
                   </button>
                   <button
                     onClick={() => { reset(); setStep('form') }}
-                    className="flex-1 py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200"
+                    className="flex-1 py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)]"
                   >
                     Try again
                   </button>

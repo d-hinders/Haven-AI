@@ -289,7 +289,7 @@ function AddAgentPanel({
 
       <button
         onClick={onAddAgent}
-        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:from-indigo-400 hover:to-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+        className="inline-flex items-center gap-2 rounded-xl bg-[var(--v2-brand)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" />

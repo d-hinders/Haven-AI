@@ -227,7 +227,7 @@ function CreateSelfSignModal({
   // ── Render ─────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/50 backdrop-blur-sm">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
 
@@ -438,7 +438,7 @@ function CreateSelfSignModal({
               <button
                 onClick={() => setStep('allowances')}
                 disabled={!canProceedDetails()}
-                className="w-full text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                className="w-full text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
               >
                 Next: Spending Limits
               </button>
@@ -542,7 +542,7 @@ function CreateSelfSignModal({
                 <button
                   onClick={() => setStep('review')}
                   disabled={allowances.length === 0}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   Next: Review
                 </button>
@@ -602,7 +602,7 @@ function CreateSelfSignModal({
                 <button
                   onClick={handleSubmit}
                   disabled={loading}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   {loading ? 'Creating…' : 'Create Agent'}
                 </button>

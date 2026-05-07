@@ -15,7 +15,7 @@ export default function AddFundsModal({ open, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div
-        className="absolute inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm"
         onClick={onClose}
       />
 
@@ -50,7 +50,7 @@ export default function AddFundsModal({ open, onClose }: Props) {
           <button
             type="button"
             onClick={onClose}
-            className="mt-6 inline-flex items-center justify-center px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+            className="mt-6 inline-flex items-center justify-center px-4 py-2 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)]"
           >
             Close
           </button>

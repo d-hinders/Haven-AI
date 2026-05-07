@@ -14,7 +14,7 @@ export default function ComingSoonModal({ open, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
-      <div className="absolute inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] overflow-hidden">
         <div className="px-6 py-6">
           <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-4">
@@ -28,7 +28,7 @@ export default function ComingSoonModal({ open, onClose }: Props) {
           </p>
           <button
             onClick={onClose}
-            className="mt-6 w-full rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-3 text-sm font-medium text-white hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+            className="mt-6 w-full rounded-lg bg-[var(--v2-brand)] px-4 py-3 text-sm font-medium text-white hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)]"
           >
             Close
           </button>

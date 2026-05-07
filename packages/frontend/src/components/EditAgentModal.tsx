@@ -232,7 +232,7 @@ export default function EditAgentModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/50 backdrop-blur-sm">
       <div
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
@@ -346,7 +346,7 @@ export default function EditAgentModal({
                 <button
                   onClick={() => setStep('review')}
                   disabled={!amount || Number(amount) <= 0}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
                 >
                   Review
                 </button>
@@ -402,7 +402,7 @@ export default function EditAgentModal({
                   <NetworkGate requiredChainId={chainId}>
                     <button
                       onClick={handleExecute}
-                      className="w-full text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20"
+                      className="w-full text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white rounded-xl py-2.5 transition-colors shadow-[var(--v2-shadow-button)]"
                     >
                       {isExistingToken ? 'Update budget' : 'Add budget'}
                     </button>
@@ -456,7 +456,7 @@ export default function EditAgentModal({
                     </button>
                     <button
                       onClick={handleExecute}
-                      className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white rounded-xl py-2.5 transition-colors"
                     >
                       Retry
                     </button>

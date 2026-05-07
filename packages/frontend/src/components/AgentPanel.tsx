@@ -347,28 +347,7 @@ function AgentCard({
       )}
 
       {isOperational && (
-        <div className={`mb-3 grid gap-4 ${agent.delegate_address ? 'md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]' : ''}`}>
-          {agent.delegate_address ? (
-            <div>
-              <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
-                Delegate
-              </p>
-              <p className="text-xs font-mono text-[var(--v2-ink-2)]">
-                {truncate(agent.delegate_address)}
-                <button
-                  onClick={() => navigator.clipboard.writeText(agent.delegate_address!)}
-                  className="ml-2 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors"
-                  title="Copy address"
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="9" y="9" width="13" height="13" rx="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                </button>
-              </p>
-            </div>
-          ) : null}
-
+        <div className="mb-3">
           <div className="space-y-2">
             <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide">
               Agent budget
@@ -826,31 +805,35 @@ export default function AgentPanel() {
 
       {/* Agent list */}
       {(agents.length > 0 || unmanagedDelegates.length > 0) && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {/* Managed agents */}
-          {visibleAgents.map((agent) => {
-            const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
-            const chainData = delegateKey
-              ? onChainData.get(delegateKey)?.allowances ?? null
-              : null
+          {visibleAgents.length > 0 && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {visibleAgents.map((agent) => {
+                const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
+                const chainData = delegateKey
+                  ? onChainData.get(delegateKey)?.allowances ?? null
+                  : null
 
-            return (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                onChainAllowances={chainData}
-                onChainLoading={onChainLoading}
-                onViewDetails={handleViewDetails}
-                onEdit={setEditAgent}
-                onPause={handlePause}
-                onResume={handleResume}
-                onRevoke={handleRevoke}
-                onDelete={handleDelete}
-                busyAction={busyAgentId === agent.id ? busyAction : null}
-                chainId={chainId}
-              />
-            )
-          })}
+                return (
+                  <AgentCard
+                    key={agent.id}
+                    agent={agent}
+                    onChainAllowances={chainData}
+                    onChainLoading={onChainLoading}
+                    onViewDetails={handleViewDetails}
+                    onEdit={setEditAgent}
+                    onPause={handlePause}
+                    onResume={handleResume}
+                    onRevoke={handleRevoke}
+                    onDelete={handleDelete}
+                    busyAction={busyAgentId === agent.id ? busyAction : null}
+                    chainId={chainId}
+                  />
+                )
+              })}
+            </div>
+          )}
 
           {revokedAgents.length > 0 && (
             <div className="pt-1">
@@ -877,22 +860,26 @@ export default function AgentPanel() {
             </div>
           )}
 
-          {showRevokedAgents && revokedAgents.map((agent) => (
-            <AgentCard
-              key={agent.id}
-              agent={agent}
-              onChainAllowances={null}
-              onChainLoading={false}
-              onViewDetails={handleViewDetails}
-              onEdit={setEditAgent}
-              onPause={handlePause}
-              onResume={handleResume}
-              onRevoke={handleRevoke}
-              onDelete={handleDelete}
-              busyAction={busyAgentId === agent.id ? busyAction : null}
-              chainId={chainId}
-            />
-          ))}
+          {showRevokedAgents && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {revokedAgents.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  onChainAllowances={null}
+                  onChainLoading={false}
+                  onViewDetails={handleViewDetails}
+                  onEdit={setEditAgent}
+                  onPause={handlePause}
+                  onResume={handleResume}
+                  onRevoke={handleRevoke}
+                  onDelete={handleDelete}
+                  busyAction={busyAgentId === agent.id ? busyAction : null}
+                  chainId={chainId}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Unmanaged network delegates */}
           {unmanagedDelegates.map((d) => (

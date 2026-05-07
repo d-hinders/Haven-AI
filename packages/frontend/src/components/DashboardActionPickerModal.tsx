@@ -27,7 +27,7 @@ export default function DashboardActionPickerModal({
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
-      <div className="absolute inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <div>

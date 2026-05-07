@@ -64,7 +64,7 @@ export default function PortfolioHero({
                 type="button"
                 onClick={onSend}
                 disabled={sendDisabled}
-                className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:from-indigo-500 disabled:hover:to-violet-600"
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--v2-brand)] disabled:shadow-none"
               >
                 Send
               </button>

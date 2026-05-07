@@ -70,7 +70,7 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
-      <div className="absolute inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-sm mx-4 bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">
@@ -246,7 +246,7 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
-      <div className="absolute inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-sm mx-4 bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)] p-5">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-9 h-9 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">

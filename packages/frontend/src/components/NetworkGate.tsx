@@ -70,12 +70,12 @@ export default function NetworkGate({
         type="button"
         onClick={() => switchChain({ chainId: requiredChainId })}
         disabled={isPending}
-        className="w-full px-4 py-2 rounded-md text-sm font-medium bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+        className="w-full px-4 py-2 rounded-md text-sm font-medium bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] border border-[var(--v2-warning)]/25 hover:border-[var(--v2-warning)]/40 hover:bg-[var(--v2-warning-soft)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-warning)]/30"
       >
         {isPending ? `Switching to ${chainName}…` : `Switch wallet to ${chainName}`}
       </button>
       {error && (
-        <p className="mt-2 text-xs text-red-400">
+        <p className="mt-2 text-xs text-[var(--v2-danger)]">
           Could not switch network: {error.message}
         </p>
       )}

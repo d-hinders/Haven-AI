@@ -295,7 +295,7 @@ export default function EditAgentModal({
                   <select
                     value={selectedToken}
                     onChange={(e) => setSelectedToken(e.target.value)}
-                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
+                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)]/50"
                   >
                     {availableTokens.map((t) => (
                       <option key={t.symbol} value={t.symbol}>
@@ -310,12 +310,12 @@ export default function EditAgentModal({
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="Amount"
-                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-indigo-500/50"
+                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50"
                   />
                   <select
                     value={resetTimeMin}
                     onChange={(e) => setResetTimeMin(Number(e.target.value))}
-                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-500/50"
+                    className="bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg px-3 py-2 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)]/50"
                   >
                     {RESET_PERIODS.map((p) => (
                       <option key={p.value} value={p.value}>
@@ -339,7 +339,7 @@ export default function EditAgentModal({
               <div className="flex gap-3">
                 <button
                   onClick={handleClose}
-                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Cancel
                 </button>
@@ -394,7 +394,7 @@ export default function EditAgentModal({
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep('form')}
-                  className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                  className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                 >
                   Back
                 </button>
@@ -450,7 +450,7 @@ export default function EditAgentModal({
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={() => setStep('review')}
-                      className="flex-1 text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                     >
                       Back
                     </button>
@@ -500,7 +500,7 @@ export default function EditAgentModal({
               </div>
               <button
                 onClick={handleClose}
-                className="w-full text-sm font-medium bg-[var(--v2-surface-2)] hover:bg-[var(--v2-surface-2)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                className="w-full text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
               >
                 Done
               </button>

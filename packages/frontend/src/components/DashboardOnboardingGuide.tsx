@@ -91,7 +91,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       onClick={copy}
       title="Copy address"
-      className="rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+      className="rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
     >
       {copied ? (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
@@ -174,7 +174,7 @@ function FundingPanel({
             <select
               value={safe.id}
               onChange={(e) => onSelectSafe(e.target.value)}
-              className="w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3.5 py-2.5 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-indigo-400/50"
+              className="w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3.5 py-2.5 text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)]/50"
             >
               {safes.map((entry) => (
                 <option key={entry.id} value={entry.id}>
@@ -204,7 +204,7 @@ function FundingPanel({
                 target="_blank"
                 rel="noopener noreferrer"
                 title="View on explorer"
-                className="rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+                className="rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
                 <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
@@ -289,7 +289,7 @@ function AddAgentPanel({
 
       <button
         onClick={onAddAgent}
-        className="inline-flex items-center gap-2 rounded-xl bg-[var(--v2-brand)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+        className="inline-flex items-center gap-2 rounded-xl bg-[var(--v2-brand)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--v2-brand-strong)] shadow-[var(--v2-shadow-button)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" />

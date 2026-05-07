@@ -1,36 +1,21 @@
 export function HeroBackdrop({ variant = 'default' }: { variant?: 'default' | 'soft' }) {
+  const indigoOpacity = variant === 'soft' ? 0.28 : 0.32
+
   return (
-    <div aria-hidden className="v2-mesh-drift pointer-events-none absolute -inset-16 overflow-hidden">
+    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden bg-[var(--v2-bg)]">
       <div
-        className="absolute -top-32 -left-32 w-[680px] h-[680px] rounded-full blur-3xl"
+        className="v2-mesh-drift absolute -inset-8"
         style={{
           background:
-            variant === 'soft'
-              ? 'radial-gradient(circle, rgba(99,102,241,0.55) 0%, transparent 65%)'
-              : 'radial-gradient(circle, rgba(99,102,241,0.55) 0%, transparent 60%)',
+            `radial-gradient(ellipse 54% 62% at 4% 18%, rgba(99,102,241,${indigoOpacity}) 0%, rgba(99,102,241,0) 62%), ` +
+            'radial-gradient(ellipse 50% 58% at 96% 18%, rgba(244,114,182,0.28) 0%, rgba(244,114,182,0) 62%), ' +
+            'radial-gradient(ellipse 52% 52% at 52% 56%, rgba(56,189,248,0.26) 0%, rgba(56,189,248,0) 64%), ' +
+            'radial-gradient(ellipse 34% 36% at 27% 25%, rgba(251,191,36,0.16) 0%, rgba(251,191,36,0) 60%), ' +
+            'linear-gradient(180deg, rgba(255,255,255,0.88) 0%, rgba(255,255,255,0.96) 72%, #ffffff 100%)',
         }}
       />
       <div
-        className="absolute -top-10 right-[-120px] w-[560px] h-[560px] rounded-full blur-3xl"
-        style={{
-          background: 'radial-gradient(circle, rgba(244,114,182,0.55) 0%, transparent 60%)',
-        }}
-      />
-      <div
-        className="absolute top-[140px] left-[38%] w-[460px] h-[460px] rounded-full blur-3xl opacity-90"
-        style={{
-          background: 'radial-gradient(circle, rgba(56,189,248,0.50) 0%, transparent 60%)',
-        }}
-      />
-      <div
-        className="absolute top-[60px] left-[18%] w-[300px] h-[300px] rounded-full blur-3xl opacity-80"
-        style={{
-          background: 'radial-gradient(circle, rgba(251,191,36,0.30) 0%, transparent 60%)',
-        }}
-      />
-      {/* Fine grid texture for depth */}
-      <div
-        className="absolute inset-0 opacity-[0.35] mix-blend-multiply"
+        className="absolute inset-0 opacity-[0.28]"
         style={{
           backgroundImage:
             'radial-gradient(circle, rgba(26,31,54,0.08) 1px, transparent 1px)',

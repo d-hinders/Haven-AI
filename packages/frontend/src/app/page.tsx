@@ -8,7 +8,7 @@ import { StepList } from '@/components/marketing/StepList'
 import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { FlowCard } from '@/components/marketing/FlowCard'
 
-const INTEGRATIONS = ['Safe', 'Gnosis Chain', 'x402', 'Stripe MPP', 'USDC', 'EURe']
+const INTEGRATIONS = ['Base', 'Gnosis Chain', 'x402', 'Stripe MPP', 'USDC', 'EURe']
 
 const PROBLEM_CARDS = [
   {

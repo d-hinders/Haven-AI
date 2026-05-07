@@ -287,7 +287,7 @@ export default function CreateAgentModal({
   // moves the visibility forward.)
 
   function deployBlockReason(): string | null {
-    if (!signer) return 'Connect a wallet or enrolled passkey to approve this change.'
+    if (!signer) return 'Connect a wallet or use a passkey on this device to approve this change.'
     if (!publicClient) return 'No RPC client for this chain. Refresh the page.'
     if (!safeDetails)
       return 'Account details are still loading — or the Haven backend is unreachable. Make sure it is running on port 3001.'

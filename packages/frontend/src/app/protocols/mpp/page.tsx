@@ -31,7 +31,7 @@ const TONE_DOT: Record<string, string> = {
 }
 
 const RAILS = [
-  { name: 'Stablecoin', detail: 'USDC on Base, Gnosis. Settled on‑chain from your Safe.', status: 'Live today' },
+  { name: 'Stablecoin', detail: 'USDC on Base, Gnosis. Settled on‑chain from your Haven account.', status: 'Live today' },
   { name: 'Cards & wallets', detail: 'Visa, Mastercard, Apple Pay, Google Pay via Stripe SPT.', status: 'Coming soon' },
   { name: 'BNPL', detail: 'Buy now, pay later flows via Stripe Shared Payment Tokens.', status: 'Coming soon' },
 ]
@@ -63,7 +63,7 @@ export default function MPP() {
         </h1>
         <p className="text-[17px] leading-relaxed text-[var(--v2-ink-2)] max-w-[640px]">
           An agent subscribes to a SaaS tool. Haven checks the payment against your agent rules and
-          settles in USDC straight from your Safe — no card details in agent memory, no
+          settles in USDC straight from your Haven account — no card details in agent memory, no
           unrestricted credentials, full audit trail.
         </p>
         </div>
@@ -93,7 +93,7 @@ export default function MPP() {
               </p>
               <p>
                 Haven supports the stablecoin path: agents settle USDC directly to merchants from
-                your Safe, gated by the same rules, approval, and audit model that wraps x402.
+                your Haven account, gated by the same rules, approval, and audit model that wraps x402.
                 SPT‑backed fiat rails are on the roadmap.
               </p>
             </div>

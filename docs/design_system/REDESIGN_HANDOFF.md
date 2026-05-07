@@ -3,10 +3,12 @@
 This file is the work plan to graduate the v2 design preview into production. Hand to Codex one phase at a time.
 
 **Reference:**
-- Live mockups: `packages/frontend/src/app/design/v2/*` and `packages/frontend/src/components/marketing/v2/*`
-- Design system: `docs/DESIGN_SYSTEM_V2.md`
-- **Copy (authoritative):** `docs/UX_COPY_GUIDELINES.md` — read this before touching any user‑facing string
-- Product doctrine + IA + accessibility (still authoritative): `docs/UX_GUIDELINES.md` (its vocabulary table is **superseded** by `UX_COPY_GUIDELINES.md` — see `DESIGN_SYSTEM_V2.md` section 6 for the resolution)
+- Production marketing routes: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`
+- Design system: `docs/design_system/DESIGN_SYSTEM_V2.md`
+- **Copy (authoritative):** `docs/design_system/UX_COPY_GUIDELINES.md` — read this before touching any user‑facing string
+- Product doctrine + IA + accessibility: `docs/UX_GUIDELINES.md`
+
+**Status:** Phase 0, Phase 0.5, Phase 1, and Phase 2 are implemented. Treat this handoff as project history plus a reference checklist; new work should start from `UX_GUIDELINES.md`, `DESIGN_SYSTEM_V2.md`, and `UX_COPY_GUIDELINES.md`.
 
 **Order of work:** Phase 0 → Phase 1 (marketing) → Phase 2 (app) → Phase 3 (cleanup). Don't start a phase until the previous one is verified by visual inspection and the test suite passes.
 

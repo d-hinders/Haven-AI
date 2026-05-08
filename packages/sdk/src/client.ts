@@ -19,7 +19,7 @@ import {
   HavenTimeoutError,
 } from './types.js'
 import {
-  parsePaymentRequired,
+  parsePaymentRequiredResponse,
   selectPaymentOption,
   encodePaymentProof,
 } from './x402.js'
@@ -39,10 +39,17 @@ const DEFAULT_REQUEST_TIMEOUT = 30_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
+function chainIdFromNetwork(network: string | undefined): number | undefined {
+  if (!network?.startsWith('eip155:')) return undefined
+  const chainId = Number(network.slice('eip155:'.length))
+  return Number.isFinite(chainId) ? chainId : undefined
+}
+
 export class HavenClient {
   private readonly apiKey: string
   private readonly delegateKey: string | undefined
   private readonly baseUrl: string
+  private readonly x402Wallet: string | undefined
   private readonly requestTimeout: number
   private readonly confirmationTimeout: number
   private readonly pollingInterval: number
@@ -54,6 +61,7 @@ export class HavenClient {
     this.apiKey = config.apiKey
     this.delegateKey = config.delegateKey
     this.baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
+    this.x402Wallet = config.x402Wallet
     this.requestTimeout = config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
     this.pollingInterval = config.pollingInterval ?? DEFAULT_POLLING_INTERVAL
@@ -248,6 +256,9 @@ export class HavenClient {
         to: raw.to ?? '',
         resourceUrl: paymentRequired.resource.url,
         explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) : ''),
+        accepted: option,
+        payer: raw.payer ?? raw.safe_address,
+        chainId: raw.chain_id ?? chainIdFromNetwork(option.network),
       }
     }
 
@@ -280,6 +291,9 @@ export class HavenClient {
       to: execResult.to ?? raw.to ?? '',
       resourceUrl: paymentRequired.resource.url,
       explorerUrl: execResult.explorer_url ?? (execResult.tx_hash ? buildExplorerUrl(execResult.chain_id, execResult.tx_hash) : ''),
+      accepted: option,
+      payer: raw.payer ?? raw.safe_address ?? raw.sign_data?.components.safe,
+      chainId: execResult.chain_id ?? raw.chain_id ?? chainIdFromNetwork(option.network),
     }
   }
 
@@ -297,8 +311,10 @@ export class HavenClient {
    * Requires `delegateKey` to be set in the client config.
    */
   async fetch(url: string, init?: RequestInit): Promise<Response> {
+    const initialInit = this.withX402Wallet(init)
+
     // 1. Make the original request
-    const response = await globalThis.fetch(url, init)
+    const response = await globalThis.fetch(url, initialInit)
 
     // 2. Not a 402 — return as-is
     if (response.status !== 402) return response
@@ -306,7 +322,7 @@ export class HavenClient {
     // 3. Parse x402 payment requirements
     let paymentRequired: X402PaymentRequired
     try {
-      paymentRequired = parsePaymentRequired(response)
+      paymentRequired = await parsePaymentRequiredResponse(response)
     } catch {
       // Not an x402 402 — return original response
       return response
@@ -316,13 +332,27 @@ export class HavenClient {
     const receipt = await this.authorizeX402(paymentRequired)
 
     // 5. Retry with payment proof
-    const retryHeaders = new Headers(init?.headers)
+    const retryHeaders = new Headers(initialInit?.headers)
     retryHeaders.set('PAYMENT-SIGNATURE', encodePaymentProof(receipt))
 
     return globalThis.fetch(url, {
-      ...init,
+      ...initialInit,
       headers: retryHeaders,
     })
+  }
+
+  private withX402Wallet(init?: RequestInit): RequestInit | undefined {
+    if (!this.x402Wallet) return init
+
+    const headers = new Headers(init?.headers)
+    if (!headers.has('x402-wallet')) {
+      headers.set('x402-wallet', this.x402Wallet)
+    }
+
+    return {
+      ...init,
+      headers,
+    }
   }
 
   // ── Tool Execution (for agent frameworks) ────────────────────────
@@ -405,6 +435,8 @@ export class HavenClient {
           to: receipt.to,
           resource_url: receipt.resourceUrl,
           explorer_url: receipt.explorerUrl,
+          payer: receipt.payer,
+          chain_id: receipt.chainId,
         }
       } catch (err) {
         return {

@@ -3,6 +3,7 @@
  *
  * Provides:
  * - parsePaymentRequired() — extract payment requirements from a 402 response
+ * - parsePaymentRequiredResponse() — async parser with JSON body fallback
  * - encodePaymentProof()   — encode a receipt as a PAYMENT-SIGNATURE header
  *
  * The main authorizeX402() and fetchWithPayment() are methods on HavenClient
@@ -10,6 +11,25 @@
  */
 
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
+
+function decodeBase64Json<T>(value: string, label: string): T {
+  try {
+    return JSON.parse(atob(value)) as T
+  } catch {
+    throw new Error(`Failed to decode ${label}`)
+  }
+}
+
+function isPaymentRequired(value: unknown): value is X402PaymentRequired {
+  const candidate = value as Partial<X402PaymentRequired> | null
+  return (
+    !!candidate &&
+    typeof candidate === 'object' &&
+    typeof candidate.x402Version === 'number' &&
+    !!candidate.resource &&
+    Array.isArray(candidate.accepts)
+  )
+}
 
 // ── Supported networks (CAIP-2 chain IDs) ────────────────────────
 
@@ -59,27 +79,44 @@ export function parsePaymentRequired(response: Response): X402PaymentRequired {
   // v2: PAYMENT-REQUIRED header
   const v2Header = response.headers.get('PAYMENT-REQUIRED')
   if (v2Header) {
-    try {
-      return JSON.parse(atob(v2Header)) as X402PaymentRequired
-    } catch {
-      throw new Error('Failed to decode PAYMENT-REQUIRED header')
-    }
+    return decodeBase64Json<X402PaymentRequired>(v2Header, 'PAYMENT-REQUIRED header')
   }
 
   // v1: X-PAYMENT header
   const v1Header = response.headers.get('X-PAYMENT')
   if (v1Header) {
-    try {
-      return JSON.parse(atob(v1Header)) as X402PaymentRequired
-    } catch {
-      throw new Error('Failed to decode X-PAYMENT header')
-    }
+    return decodeBase64Json<X402PaymentRequired>(v1Header, 'X-PAYMENT header')
   }
 
   throw new Error(
     'No x402 payment headers found in 402 response. ' +
     'Expected PAYMENT-REQUIRED (v2) or X-PAYMENT (v1) header.',
   )
+}
+
+/**
+ * Parse an HTTP 402 response into x402 PaymentRequired data.
+ *
+ * Soundside and other Bazaar-style MCP endpoints return the PaymentRequired
+ * object in the JSON body, while older Haven demos and many x402 examples use
+ * base64 headers. This keeps the synchronous header parser intact and adds the
+ * body fallback needed for those endpoints.
+ */
+export async function parsePaymentRequiredResponse(
+  response: Response,
+): Promise<X402PaymentRequired> {
+  try {
+    return parsePaymentRequired(response)
+  } catch (headerErr) {
+    try {
+      const body = await response.clone().json()
+      if (isPaymentRequired(body)) return body
+    } catch {
+      // Fall through to the original, more specific header error below.
+    }
+
+    throw headerErr
+  }
 }
 
 /**
@@ -126,13 +163,22 @@ export function encodePaymentProof(receipt: {
   token: string
   amount: string
   to: string
+  resourceUrl?: string
+  accepted?: X402PaymentOption
+  payer?: string
+  chainId?: number
 }): string {
   const payload = {
     x402Version: 2,
+    resource: receipt.resourceUrl ? { url: receipt.resourceUrl } : undefined,
+    accepted: receipt.accepted,
     payload: {
+      type: 'haven_tx_hash',
       txHash: receipt.txHash,
       paymentId: receipt.paymentId,
       settledVia: 'haven',
+      payer: receipt.payer,
+      chainId: receipt.chainId,
     },
   }
   return btoa(JSON.stringify(payload))

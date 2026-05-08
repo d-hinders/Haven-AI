@@ -10,6 +10,9 @@ export interface HavenClientConfig {
   /** Haven API base URL (default: http://localhost:3001) */
   baseUrl?: string
 
+  /** Optional wallet identity to send as the x402-wallet header. */
+  x402Wallet?: string
+
   /** Timeout in ms for individual HTTP requests (default: 30000) */
   requestTimeout?: number
 
@@ -141,6 +144,9 @@ export interface X402Receipt {
   to: string
   resourceUrl: string
   explorerUrl: string
+  accepted?: X402PaymentOption
+  payer?: string
+  chainId?: number
 }
 
 /** @internal */
@@ -150,6 +156,8 @@ export interface RawX402AuthorizeResponse {
   status: string
   tx_hash?: string
   chain_id?: number
+  safe_address?: string
+  payer?: string
   token?: string
   amount?: string
   to?: string

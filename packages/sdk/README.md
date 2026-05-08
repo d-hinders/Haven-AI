@@ -100,11 +100,11 @@ const response = await haven.fetch('https://paid-api.example.com/data')
 const data = await response.json()
 
 // Manual — parse and authorize the 402 yourself
-import { parsePaymentRequired } from '@haven_ai/sdk'
+import { parsePaymentRequiredResponse } from '@haven_ai/sdk'
 
 const apiResponse = await fetch('https://paid-api.example.com/data')
 if (apiResponse.status === 402) {
-  const paymentRequired = parsePaymentRequired(apiResponse)
+  const paymentRequired = await parsePaymentRequiredResponse(apiResponse)
   const receipt = await haven.authorizeX402(paymentRequired)
   console.log(receipt.explorerUrl)
 }

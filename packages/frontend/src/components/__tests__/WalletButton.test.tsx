@@ -211,6 +211,37 @@ describe('WalletButton', () => {
     expect(screen.getByRole('button', { name: 'Switch wallet' })).toBeInTheDocument()
   })
 
+  it('shows a passkey unavailable note in the connected-wallet dropdown', () => {
+    setConnectedWallet()
+    mocks.useAuth.mockReturnValue({
+      activeSafe: ACTIVE_SAFE,
+      passkeys: [
+        {
+          id: 'passkey-1',
+          credential_id: 'credential-1',
+          signer_address: PASSKEY_ADDRESS,
+          chain_id: ACTIVE_SAFE.chain_id,
+          safe_address: ACTIVE_SAFE.safe_address,
+          created_at: '2026-05-05T00:00:00.000Z',
+        },
+      ],
+    })
+    mocks.useActiveSigner.mockReturnValue({
+      type: 'eoa',
+      address: EOA_ADDRESS,
+      walletClient: {},
+    })
+
+    render(<WalletButton />)
+
+    fireEvent.click(screen.getByRole('button', { name: '0x5555…5555' }))
+
+    expect(
+      screen.getByText('This account uses a passkey that is not available here.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Connected wallet')).toBeInTheDocument()
+  })
+
   it('shows Wrong network only when EOA is the active approval method', () => {
     setConnectedWallet({
       chain: { id: 999, name: 'Unsupported Chain', unsupported: true },

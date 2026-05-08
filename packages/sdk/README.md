@@ -155,6 +155,7 @@ const haven = new HavenClient({
   apiKey: 'sk_agent_xxx',          // required — Haven agent API key
   delegateKey: '0x...',             // optional — enables .pay() and .sign()
   baseUrl: 'http://localhost:3001', // default
+  x402Wallet: '0x...',              // optional — sent as x402-wallet for wallet-scoped resources
   requestTimeout: 30000,           // per-request timeout (ms)
   confirmationTimeout: 90000,      // polling timeout (ms)
   pollingInterval: 3000,           // polling interval (ms)

@@ -156,6 +156,30 @@ interface V2TokenTransfer {
   }
 }
 
+interface SafeTransferPage {
+  count: number
+  next: string | null
+  previous: string | null
+  results: SafeTransfer[]
+}
+
+export interface SafeTransfer {
+  type: 'ETHER_TRANSFER' | 'ERC20_TRANSFER' | 'ERC721_TRANSFER' | string
+  executionDate: string
+  blockNumber: number
+  transactionHash: string
+  from: string | null
+  to: string | null
+  value: string | null
+  tokenAddress: string | null
+  tokenInfo?: {
+    address: string
+    name: string
+    symbol: string
+    decimals: number
+  } | null
+}
+
 async function fetchFromV2<T>(
   chainId: number,
   resource: string,
@@ -173,6 +197,26 @@ async function fetchFromV2<T>(
   }
   const data = (await response.json()) as V2Page<T>
   return data.items ?? []
+}
+
+export async function fetchSafeServiceTransfers(
+  chainId: number,
+  address: string,
+  offset = 50,
+): Promise<SafeTransfer[]> {
+  const chain = getChain(chainId)
+  const url = new URL(
+    `${chain.safeTxServiceUrl.replace(/\/$/, '')}/api/v1/safes/${address}/transfers/`,
+  )
+  url.searchParams.set('limit', String(offset))
+
+  const response = await fetch(url.toString())
+  if (!response.ok) {
+    throw new Error(`Safe Transaction Service error (chain ${chainId}): ${response.status}`)
+  }
+
+  const data = (await response.json()) as SafeTransferPage
+  return data.results ?? []
 }
 
 function isoToUnix(iso: string): string {

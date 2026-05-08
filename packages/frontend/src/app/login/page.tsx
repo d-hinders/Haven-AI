@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext'
 import { ApiRequestError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { HavenMark } from '@/components/brand/HavenMark'
 
 function LoginForm() {
   const { login, user, loading } = useAuth()
@@ -147,7 +148,7 @@ export default function LoginPage() {
             href="/"
             className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
           >
-            <span className="h-5 w-5 rounded-md bg-[var(--v2-brand)]" aria-hidden="true" />
+            <HavenMark />
             Haven
           </Link>
         </div>

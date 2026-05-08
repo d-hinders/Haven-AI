@@ -1,6 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from 'react'
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
 import { useAccount, useDisconnect } from 'wagmi'
 import type { Address } from 'viem'
@@ -11,6 +18,47 @@ import { useActiveSigner } from '@/lib/signer'
 
 function shortAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
+}
+
+const AVATAR_PALETTES = [
+  ['#4f46e5', '#06b6d4', '#14b8a6'],
+  ['#0f766e', '#22c55e', '#facc15'],
+  ['#7c3aed', '#ec4899', '#f97316'],
+  ['#2563eb', '#8b5cf6', '#f43f5e'],
+  ['#0891b2', '#0ea5e9', '#6366f1'],
+  ['#059669', '#84cc16', '#06b6d4'],
+] as const
+
+function hashAddress(address: string): number {
+  let hash = 0
+  for (const char of address.toLowerCase()) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  }
+  return hash
+}
+
+function getAvatarStyle(address: string): CSSProperties {
+  const hash = hashAddress(address)
+  const palette = AVATAR_PALETTES[hash % AVATAR_PALETTES.length]
+  const angle = hash % 360
+  const stripeAngle = (hash >> 3) % 180
+
+  return {
+    backgroundImage: [
+      `repeating-linear-gradient(${stripeAngle}deg, rgba(255,255,255,0.18) 0 2px, transparent 2px 5px)`,
+      `linear-gradient(${angle}deg, ${palette[0]}, ${palette[1]} 52%, ${palette[2]})`,
+    ].join(', '),
+  }
+}
+
+function AddressAvatar({ address }: { address: string }) {
+  return (
+    <span
+      aria-hidden
+      className="h-5 w-5 shrink-0 overflow-hidden rounded-full border border-white/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)]"
+      style={getAvatarStyle(address)}
+    />
+  )
 }
 
 interface AddressSection {
@@ -293,10 +341,7 @@ export default function WalletButton() {
                 aria-expanded={popoverOpen}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
-                <span
-                  aria-hidden
-                  className="w-5 h-5 rounded-full bg-[var(--v2-success)]"
-                />
+                <AddressAvatar address={passkeySigner.address} />
                 <span>Passkey ready</span>
               </button>
 
@@ -361,13 +406,10 @@ export default function WalletButton() {
                 <img
                   src={account.ensAvatar}
                   alt=""
-                  className="w-5 h-5 rounded-full"
+                  className="h-5 w-5 shrink-0 rounded-full"
                 />
               ) : (
-                <span
-                  aria-hidden
-                  className="w-5 h-5 rounded-full bg-[var(--v2-brand)]"
-                />
+                <AddressAvatar address={account.address} />
               )}
               <span className="font-mono">
                 {account.ensName ?? shortAddress(account.address)}

@@ -14,7 +14,7 @@ export default function ComingSoonModal({ open, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
-      <div className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
       <div className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] overflow-hidden">
         <div className="px-6 py-6">
           <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-4">

@@ -176,18 +176,18 @@ function FundingPanel({
 
         <div className="grid gap-10 lg:pl-8">
           <div className="min-w-0">
-            <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--v2-ink-2)]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--v2-ink-2)]">
               Account
             </p>
-            <p className="mt-3 truncate text-[18px] font-medium text-[var(--v2-ink)]">{safe.name}</p>
+            <p className="mt-2 truncate text-[15px] font-medium text-[var(--v2-ink)]">{safe.name}</p>
           </div>
 
           <div className="min-w-0">
-            <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--v2-ink-2)]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--v2-ink-2)]">
               Address
             </p>
-            <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3">
-              <code className="min-w-0 max-w-full truncate text-[18px] font-medium text-[var(--v2-ink)]">
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
+              <code className="min-w-0 max-w-full truncate text-[15px] font-medium text-[var(--v2-ink)]">
                 {compactAddress(safe.safe_address)}
               </code>
               <div className="flex items-center gap-2">
@@ -218,8 +218,8 @@ function FundingPanel({
                 </svg>
               </div>
               <div>
-                <p className="text-[15px] text-[var(--v2-ink-2)]">Network</p>
-                <p className="mt-1 text-[18px] font-semibold text-[var(--v2-ink)]">{chainConfig.name}</p>
+                <p className="text-[12px] text-[var(--v2-ink-2)]">Network</p>
+                <p className="mt-1 text-[15px] font-semibold text-[var(--v2-ink)]">{chainConfig.name}</p>
               </div>
             </div>
 
@@ -234,8 +234,8 @@ function FundingPanel({
                 </svg>
               </div>
               <div>
-                <p className="text-[15px] text-[var(--v2-ink-2)]">Supported tokens</p>
-                <p className="mt-1 text-[18px] font-semibold text-[var(--v2-ink)]">
+                <p className="text-[12px] text-[var(--v2-ink-2)]">Supported tokens</p>
+                <p className="mt-1 text-[15px] font-semibold text-[var(--v2-ink)]">
                   {tokens.map((token) => token.symbol).join(', ')}
                 </p>
               </div>
@@ -251,7 +251,7 @@ function FundingPanel({
         className="fixed inset-0 z-[110] flex items-center justify-center p-4"
       >
         <div
-          className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm"
+          className="absolute inset-0 v2-modal-backdrop"
           onClick={() => setShowQr(false)}
         />
         <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">

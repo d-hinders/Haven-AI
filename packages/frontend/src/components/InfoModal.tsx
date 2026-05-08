@@ -97,7 +97,7 @@ export default function InfoModal({ open, onClose, pages }: Props) {
   const isLast = page === pages.length - 1
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 v2-modal-backdrop">
       <div className="bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)] flex-shrink-0">

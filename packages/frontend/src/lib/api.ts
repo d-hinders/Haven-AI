@@ -43,6 +43,30 @@ export interface ListPasskeysResponse {
   }>
 }
 
+export interface OwnerAccount {
+  id: string
+  safe_address: string
+  chain_id: number
+  name: string
+}
+
+export interface OwnerAlias {
+  owner_address: string
+  name: string | null
+  accounts: OwnerAccount[]
+}
+
+export interface OwnersResponse {
+  owners: OwnerAlias[]
+  partialFailure: boolean
+  failedSafeIds: string[]
+}
+
+export interface UpdateOwnerAliasResponse {
+  owner_address: string
+  name: string
+}
+
 export interface ExecSafeBody {
   chain_id: number
   safe_address: string

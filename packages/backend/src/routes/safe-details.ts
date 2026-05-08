@@ -1,27 +1,9 @@
 import { FastifyInstance } from 'fastify'
-import { ethers } from 'ethers'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
-import { getProvider } from '../lib/allowance-module.js'
-import { createCache } from '../lib/cache.js'
+import { getSafeDetails } from '../lib/safe-details.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
-
-// Minimal Safe ABI for reading state
-const SAFE_ABI = [
-  'function getOwners() view returns (address[])',
-  'function getThreshold() view returns (uint256)',
-  'function nonce() view returns (uint256)',
-]
-
-interface SafeDetails {
-  address: string
-  owners: string[]
-  threshold: number
-  nonce: number
-}
-
-const safeDetailsCache = createCache<SafeDetails>(30_000)
 
 export default async function safeDetailRoutes(
   app: FastifyInstance,
@@ -48,25 +30,7 @@ export default async function safeDetailRoutes(
       }
 
       const chainId = userResult.rows[0].chain_id
-      const cacheKey = `safe-details:${chainId}:${safeAddress.toLowerCase()}`
-
-      return safeDetailsCache.getOrFetch(cacheKey, async () => {
-        const provider = getProvider(chainId)
-        const safeContract = new ethers.Contract(safeAddress, SAFE_ABI, provider)
-
-        const [owners, threshold, nonce] = await Promise.all([
-          safeContract.getOwners() as Promise<string[]>,
-          safeContract.getThreshold() as Promise<bigint>,
-          safeContract.nonce() as Promise<bigint>,
-        ])
-
-        return {
-          address: safeAddress,
-          owners: owners.map((o: string) => o),
-          threshold: Number(threshold),
-          nonce: Number(nonce),
-        }
-      })
+      return getSafeDetails(safeAddress, chainId)
     },
   )
 }

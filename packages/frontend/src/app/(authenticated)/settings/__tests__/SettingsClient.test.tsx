@@ -3,11 +3,16 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
+const mockUseOwnerDirectory = vi.fn()
 const mockUsePreferences = vi.fn()
 const mockPush = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
+}))
+
+vi.mock('@/context/OwnerDirectoryContext', () => ({
+  useOwnerDirectory: () => mockUseOwnerDirectory(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -49,6 +54,15 @@ describe('SettingsClient', () => {
       currency: 'USD',
       setCurrency: vi.fn(),
       saving: false,
+    })
+    mockUseOwnerDirectory.mockReturnValue({
+      owners: [],
+      loading: false,
+      error: null,
+      partialFailure: false,
+      failedSafeIds: [],
+      renameOwner: vi.fn(),
+      clearOwner: vi.fn(),
     })
   })
 
@@ -100,5 +114,60 @@ describe('SettingsClient', () => {
       expect(mockApiPut).toHaveBeenCalledWith('/user/profile', { name: 'Grace Hopper' })
     })
     expect(updateUser).toHaveBeenCalledWith({ name: 'Grace Hopper' })
+  })
+
+  it('shows account owners and saves an owner alias', async () => {
+    const user = userEvent.setup()
+    const renameOwner = vi.fn().mockResolvedValue(undefined)
+    mockUseOwnerDirectory.mockReturnValue({
+      owners: [
+        {
+          owner_address: '0x5555555555555555555555555555555555555555',
+          name: null,
+          accounts: [
+            {
+              id: 'safe-1',
+              safe_address: '0x1111111111111111111111111111111111111111',
+              chain_id: 100,
+              name: 'Main account',
+            },
+          ],
+        },
+      ],
+      loading: false,
+      error: null,
+      partialFailure: false,
+      failedSafeIds: [],
+      renameOwner,
+      clearOwner: vi.fn(),
+    })
+    mockUseAuth.mockReturnValue({
+      user: {
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        wallet_address: '0x5555555555555555555555555555555555555555',
+        safes: [],
+      },
+      passkeys: [],
+      logout: vi.fn(),
+      updateUser: vi.fn(),
+    })
+
+    render(<SettingsClient />)
+
+    expect(screen.getByText('Account owners')).toBeInTheDocument()
+    expect(screen.getByText('Connected wallet')).toBeInTheDocument()
+    expect(screen.getByText('Main account · Gnosis Chain')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Name' }))
+    await user.type(screen.getByLabelText('Name for 0x5555...5555'), ' Ledger   main ')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(renameOwner).toHaveBeenCalledWith(
+        '0x5555555555555555555555555555555555555555',
+        'Ledger main',
+      )
+    })
   })
 })

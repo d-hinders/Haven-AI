@@ -27,7 +27,7 @@ export interface ChainConfig {
   explorerApiUrl: string     // e.g. https://api.etherscan.io/v2/api
   explorerApiKey: string     // empty allowed for Blockscout
   explorerApiProvider: ExplorerApiProvider
-  safeTxServiceUrl: string   // e.g. https://safe-transaction-gnosis-chain.safe.global
+  safeTxServiceUrl: string   // e.g. https://api.safe.global/tx-service/gno
   contracts: {
     safeProxyFactory: string
     safeSingletonL2: string
@@ -79,7 +79,7 @@ const GNOSIS: ChainConfig = {
   explorerApiUrl: 'https://api.etherscan.io/v2/api',
   explorerApiKey: config.gnosisscanApiKey,
   explorerApiProvider: 'etherscan-v2',
-  safeTxServiceUrl: 'https://safe-transaction-gnosis-chain.safe.global',
+  safeTxServiceUrl: 'https://api.safe.global/tx-service/gno',
   contracts: {
     safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
     safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
@@ -126,7 +126,7 @@ const BASE: ChainConfig = {
   explorerApiUrl: 'https://base.blockscout.com/api/v2',
   explorerApiKey: '',
   explorerApiProvider: 'blockscout-v2',
-  safeTxServiceUrl: 'https://safe-transaction-base.safe.global',
+  safeTxServiceUrl: 'https://api.safe.global/tx-service/base',
   contracts: {
     // Base uses EIP-155 variant addresses for Safe v1.3.0
     safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',

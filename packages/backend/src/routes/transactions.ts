@@ -5,6 +5,7 @@ import {
   fetchNormalTransactions,
   fetchInternalTransactions,
   fetchERC20Transfers,
+  fetchSafeServiceTransfers,
 } from '../lib/explorer-api.js'
 import { getChain } from '../lib/chains.js'
 import { formatTokenValue } from '../lib/tokens.js'
@@ -118,6 +119,22 @@ function parseTokenKey(tokenKey: string | undefined): ParsedTokenFilter | null {
   return { chainId, address: assetPart.toLowerCase() }
 }
 
+function parseIsoTimestamp(iso: string): number {
+  const ms = Date.parse(iso)
+  return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000)
+}
+
+function transactionDedupKey(tx: Transaction): string {
+  return [
+    tx.hash,
+    tx.type,
+    tx.from.toLowerCase(),
+    tx.to.toLowerCase(),
+    tx.value,
+    tx.tokenAddress?.toLowerCase() ?? 'native',
+  ].join(':')
+}
+
 export async function fetchSafeTransactions({
   safeId,
   safeAddress,
@@ -160,6 +177,9 @@ export async function fetchSafeTransactions({
     )
     const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(
       logFail('erc20'),
+    )
+    const safeTransfers = await fetchSafeServiceTransfers(chainId, safeAddress).catch(
+      logFail('safe-transfers'),
     )
 
     const transactions: Transaction[] = []
@@ -225,15 +245,62 @@ export async function fetchSafeTransactions({
       })
     }
 
+    for (const transfer of safeTransfers) {
+      if (transfer.type === 'ETHER_TRANSFER') {
+        if (!transfer.value || transfer.value === '0') continue
+
+        transactions.push({
+          hash: transfer.transactionHash,
+          type: 'native',
+          from: transfer.from ?? '',
+          to: transfer.to ?? '',
+          value: transfer.value,
+          valueFormatted: formatTokenValue(transfer.value, nativeToken.decimals),
+          asset: nativeToken.symbol,
+          decimals: nativeToken.decimals,
+          direction: transfer.to?.toLowerCase() === addrLower ? 'in' : 'out',
+          timestamp: parseIsoTimestamp(transfer.executionDate),
+          blockNumber: transfer.blockNumber,
+          isError: false,
+        })
+      }
+
+      if (transfer.type === 'ERC20_TRANSFER') {
+        if (!transfer.value || !transfer.tokenAddress) continue
+
+        const knownToken = chain.tokenByAddress[transfer.tokenAddress.toLowerCase()]
+        const symbol =
+          knownToken?.symbol ?? transfer.tokenInfo?.symbol ?? transfer.tokenAddress
+        const decimals = knownToken?.decimals ?? transfer.tokenInfo?.decimals ?? 18
+
+        transactions.push({
+          hash: transfer.transactionHash,
+          type: 'erc20',
+          from: transfer.from ?? '',
+          to: transfer.to ?? '',
+          value: transfer.value,
+          valueFormatted: formatTokenValue(transfer.value, decimals),
+          asset: symbol,
+          decimals,
+          direction: transfer.to?.toLowerCase() === addrLower ? 'in' : 'out',
+          timestamp: parseIsoTimestamp(transfer.executionDate),
+          blockNumber: transfer.blockNumber,
+          isError: false,
+          tokenAddress: transfer.tokenAddress,
+          tokenSymbol: symbol,
+        })
+      }
+    }
+
     transactions.sort(compareTransactions)
 
     const seen = new Set<string>()
     const deduped = transactions.filter((tx) => {
-        const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}`
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      })
+      const key = transactionDedupKey(tx)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
 
     txCache.set(cacheKey, deduped)
 
@@ -427,7 +494,7 @@ export default async function transactionRoutes(
 
     const seen = new Set<string>()
     const deduped = merged.filter((tx) => {
-      const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}:${tx.safeAddress.toLowerCase()}`
+      const key = `${transactionDedupKey(tx)}:${tx.safeAddress.toLowerCase()}`
       if (seen.has(key)) return false
       seen.add(key)
       return true

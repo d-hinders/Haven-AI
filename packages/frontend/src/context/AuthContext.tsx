@@ -28,6 +28,7 @@ export interface UserSafe {
 
 export interface User {
   id: string
+  name: string | null
   email: string
   wallet_address: string | null
   safe_address: string | null
@@ -48,7 +49,7 @@ interface AuthState {
   activeSafe: UserSafe | null
   passkeys: ListPasskeysResponse['passkeys']
   setActiveSafe: (safe: UserSafe) => void
-  signup: (email: string, password: string) => Promise<User>
+  signup: (name: string, email: string, password: string) => Promise<User>
   login: (email: string, password: string) => Promise<User>
   logout: () => void
   updateUser: (partial: Partial<User>) => void
@@ -161,8 +162,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [hydratePasskeys, syncActiveSafe])
 
   const signup = useCallback(
-    async (email: string, password: string): Promise<User> => {
+    async (name: string, email: string, password: string): Promise<User> => {
       const res = await api.post<AuthResponse>('/auth/signup', {
+        name,
         email,
         password,
       })

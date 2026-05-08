@@ -9,6 +9,15 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { HavenMark } from '@/components/brand/HavenMark'
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const MAX_EMAIL_LENGTH = 255
+const MIN_PASSWORD_LENGTH = 8
+const MAX_PASSWORD_LENGTH = 128
+const MAX_NAME_LENGTH = 80
+const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
+
+type FieldErrors = Partial<Record<'name' | 'email' | 'password' | 'confirmPassword', string>>
+
 function TrustRow({
   title,
   description,
@@ -34,29 +43,59 @@ function TrustRow({
 export default function SignupPage() {
   const { signup } = useAuth()
   const router = useRouter()
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
+
+  function validateForm(): { valid: boolean; name: string; email: string } {
+    const nextErrors: FieldErrors = {}
+    const normalizedName = name.trim().replace(/\s+/g, ' ')
+    const normalizedEmail = email.trim().toLowerCase()
+
+    if (!normalizedName) {
+      nextErrors.name = 'Enter your name.'
+    } else if (normalizedName.length > MAX_NAME_LENGTH || CONTROL_CHAR_RE.test(name)) {
+      nextErrors.name = 'Use 80 characters or fewer.'
+    }
+
+    if (!normalizedEmail) {
+      nextErrors.email = 'Enter your email address.'
+    } else if (normalizedEmail.length > MAX_EMAIL_LENGTH || !EMAIL_RE.test(normalizedEmail)) {
+      nextErrors.email = 'Enter a valid email address.'
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      nextErrors.password = 'Use at least 8 characters.'
+    } else if (password.length > MAX_PASSWORD_LENGTH) {
+      nextErrors.password = 'Use 128 characters or fewer.'
+    }
+
+    if (password !== confirmPassword) {
+      nextErrors.confirmPassword = 'Passwords do not match.'
+    }
+
+    setFieldErrors(nextErrors)
+    return {
+      valid: Object.keys(nextErrors).length === 0,
+      name: normalizedName,
+      email: normalizedEmail,
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters')
-      return
-    }
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match')
-      return
-    }
+    const validation = validateForm()
+    if (!validation.valid) return
 
     setSubmitting(true)
     try {
-      const u = await signup(email, password)
+      const u = await signup(validation.name, validation.email, password)
       if (u.safe_address) {
         router.push('/dashboard')
       } else {
@@ -105,12 +144,40 @@ export default function SignupPage() {
               Set up Haven, then create your first account with a passkey or connected wallet.
             </p>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} noValidate className="space-y-4">
               {error && (
                 <div className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                   {error}
                 </div>
               )}
+
+              <div>
+                <label
+                  htmlFor="name"
+                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                >
+                  Name
+                </label>
+                <Input
+                  id="name"
+                  type="text"
+                  required
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value)
+                    setFieldErrors((prev) => ({ ...prev, name: undefined }))
+                  }}
+                  placeholder="Your name"
+                  aria-invalid={Boolean(fieldErrors.name)}
+                  aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+                />
+                {fieldErrors.name && (
+                  <p id="name-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                    {fieldErrors.name}
+                  </p>
+                )}
+              </div>
 
               <div>
                 <label
@@ -125,9 +192,19 @@ export default function SignupPage() {
                   required
                   autoComplete="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value)
+                    setFieldErrors((prev) => ({ ...prev, email: undefined }))
+                  }}
                   placeholder="you@example.com"
+                  aria-invalid={Boolean(fieldErrors.email)}
+                  aria-describedby={fieldErrors.email ? 'email-error' : undefined}
                 />
+                {fieldErrors.email && (
+                  <p id="email-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                    {fieldErrors.email}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -143,9 +220,23 @@ export default function SignupPage() {
                   required
                   autoComplete="new-password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      password: undefined,
+                      confirmPassword: undefined,
+                    }))
+                  }}
                   placeholder="Min 8 characters"
+                  aria-invalid={Boolean(fieldErrors.password)}
+                  aria-describedby={fieldErrors.password ? 'password-error' : undefined}
                 />
+                {fieldErrors.password && (
+                  <p id="password-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                    {fieldErrors.password}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -161,9 +252,19 @@ export default function SignupPage() {
                   required
                   autoComplete="new-password"
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value)
+                    setFieldErrors((prev) => ({ ...prev, confirmPassword: undefined }))
+                  }}
                   placeholder="Repeat password"
+                  aria-invalid={Boolean(fieldErrors.confirmPassword)}
+                  aria-describedby={fieldErrors.confirmPassword ? 'confirm-error' : undefined}
                 />
+                {fieldErrors.confirmPassword && (
+                  <p id="confirm-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                    {fieldErrors.confirmPassword}
+                  </p>
+                )}
               </div>
 
               <Button

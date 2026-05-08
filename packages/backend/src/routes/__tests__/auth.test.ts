@@ -34,28 +34,40 @@ describe('Auth routes', () => {
       mockQuery.mockResolvedValueOnce({ rows: [] })
       // Second query: insert user
       mockQuery.mockResolvedValueOnce({
-        rows: [{ id: 'user-1', email: 'test@example.com', created_at: new Date().toISOString() }],
+        rows: [{ id: 'user-1', name: 'Ada Lovelace', email: 'test@example.com', created_at: new Date().toISOString() }],
       })
 
       const response = await app.inject({
         method: 'POST',
         url: '/auth/signup',
-        payload: { email: 'test@example.com', password: 'password123' },
+        payload: { name: ' Ada Lovelace ', email: ' Test@Example.com ', password: 'password123' },
       })
 
       expect(response.statusCode).toBe(201)
       const body = response.json()
       expect(body.token).toBeDefined()
       expect(body.user.id).toBe('user-1')
+      expect(body.user.name).toBe('Ada Lovelace')
       expect(body.user.email).toBe('test@example.com')
       expect(body.user.safes).toEqual([])
+    })
+
+    it('returns 400 for invalid name', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/signup',
+        payload: { name: 'Bad\nName', email: 'test@example.com', password: 'password123' },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe('Enter a name using 80 characters or fewer')
     })
 
     it('returns 400 for missing email', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/auth/signup',
-        payload: { password: 'password123' },
+        payload: { name: 'Ada Lovelace', password: 'password123' },
       })
 
       expect(response.statusCode).toBe(400)
@@ -66,7 +78,22 @@ describe('Auth routes', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/auth/signup',
-        payload: { email: 'not-an-email', password: 'password123' },
+        payload: { name: 'Ada Lovelace', email: 'not-an-email', password: 'password123' },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe('Invalid email address')
+    })
+
+    it('returns 400 for overlong email', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/signup',
+        payload: {
+          name: 'Ada Lovelace',
+          email: `${'a'.repeat(245)}@example.com`,
+          password: 'password123',
+        },
       })
 
       expect(response.statusCode).toBe(400)
@@ -77,11 +104,26 @@ describe('Auth routes', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/auth/signup',
-        payload: { email: 'test@example.com', password: 'short' },
+        payload: { name: 'Ada Lovelace', email: 'test@example.com', password: 'short' },
       })
 
       expect(response.statusCode).toBe(400)
       expect(response.json().error).toBe('Password must be at least 8 characters')
+    })
+
+    it('returns 400 for overlong password', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/signup',
+        payload: {
+          name: 'Ada Lovelace',
+          email: 'test@example.com',
+          password: 'a'.repeat(129),
+        },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe('Password must be 128 characters or fewer')
     })
 
     it('returns 409 when email already exists', async () => {
@@ -90,7 +132,7 @@ describe('Auth routes', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/auth/signup',
-        payload: { email: 'existing@example.com', password: 'password123' },
+        payload: { name: 'Ada Lovelace', email: 'existing@example.com', password: 'password123' },
       })
 
       expect(response.statusCode).toBe(409)
@@ -107,6 +149,7 @@ describe('Auth routes', () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{
           id: 'user-1',
+          name: 'Ada Lovelace',
           email: 'test@example.com',
           password_hash: testPasswordHash,
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
@@ -126,6 +169,7 @@ describe('Auth routes', () => {
       expect(body.token).toBeDefined()
       expect(typeof body.token).toBe('string')
       expect(body.user.id).toBe('user-1')
+      expect(body.user.name).toBe('Ada Lovelace')
       expect(body.user.email).toBe('test@example.com')
       expect(body.user.wallet_address).toBe('0x1234567890abcdef1234567890abcdef12345678')
       expect(body.user.safes).toEqual([])
@@ -150,6 +194,7 @@ describe('Auth routes', () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{
           id: 'user-1',
+          name: null,
           email: 'test@example.com',
           password_hash: testPasswordHash,
           wallet_address: null,
@@ -180,6 +225,7 @@ describe('Auth routes', () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{
           id: 'user-1',
+          name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
           safe_address: null,
@@ -197,6 +243,7 @@ describe('Auth routes', () => {
       expect(response.statusCode).toBe(200)
       const body = response.json()
       expect(body.id).toBe('user-1')
+      expect(body.name).toBe('Ada Lovelace')
       expect(body.email).toBe('test@example.com')
       expect(body.safes).toEqual([])
     })

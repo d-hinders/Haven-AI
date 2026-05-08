@@ -5,8 +5,14 @@ import { authMiddleware } from '../middleware/auth.js'
 
 const SALT_ROUNDS = 10
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const MAX_EMAIL_LENGTH = 255
+const MIN_PASSWORD_LENGTH = 8
+const MAX_PASSWORD_LENGTH = 128
+const MAX_NAME_LENGTH = 80
+const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 
 interface SignupBody {
+  name: string
   email: string
   password: string
 }
@@ -16,22 +22,62 @@ interface LoginBody {
   password: string
 }
 
+function normalizeEmail(email: unknown): string | null {
+  if (typeof email !== 'string') return null
+
+  const normalized = email.trim().toLowerCase()
+  if (
+    normalized.length === 0 ||
+    normalized.length > MAX_EMAIL_LENGTH ||
+    !EMAIL_RE.test(normalized)
+  ) {
+    return null
+  }
+
+  return normalized
+}
+
+function normalizeName(name: unknown): string | null {
+  if (typeof name !== 'string') return null
+
+  const normalized = name.trim().replace(/\s+/g, ' ')
+  if (
+    normalized.length === 0 ||
+    normalized.length > MAX_NAME_LENGTH ||
+    CONTROL_CHAR_RE.test(name)
+  ) {
+    return null
+  }
+
+  return normalized
+}
+
 export default async function authRoutes(app: FastifyInstance): Promise<void> {
   // POST /auth/signup
   app.post<{ Body: SignupBody }>('/signup', async (request, reply) => {
-    const { email, password } = request.body
+    const { name, email, password } = request.body
+    const normalizedName = normalizeName(name)
+    const normalizedEmail = normalizeEmail(email)
 
-    if (!email || !EMAIL_RE.test(email)) {
+    if (!normalizedName) {
+      return reply.code(400).send({ error: 'Enter a name using 80 characters or fewer' })
+    }
+
+    if (!normalizedEmail) {
       return reply.code(400).send({ error: 'Invalid email address' })
     }
 
-    if (!password || password.length < 8) {
+    if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
       return reply.code(400).send({ error: 'Password must be at least 8 characters' })
+    }
+
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      return reply.code(400).send({ error: 'Password must be 128 characters or fewer' })
     }
 
     // Check for existing user
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [
-      email.toLowerCase(),
+      normalizedEmail,
     ])
     if (existing.rows.length > 0) {
       return reply.code(409).send({ error: 'An account with this email already exists' })
@@ -40,8 +86,8 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
 
     const result = await pool.query(
-      'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at',
-      [email.toLowerCase(), passwordHash],
+      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at',
+      [normalizedName, normalizedEmail, passwordHash],
     )
 
     const user = result.rows[0]
@@ -55,6 +101,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       token,
       user: {
         id: user.id,
+        name: user.name,
         email: user.email,
         wallet_address: null,
         safe_address: null,
@@ -67,14 +114,15 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
   // POST /auth/login
   app.post<{ Body: LoginBody }>('/login', async (request, reply) => {
     const { email, password } = request.body
+    const normalizedEmail = normalizeEmail(email)
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       return reply.code(400).send({ error: 'Email and password are required' })
     }
 
     const result = await pool.query(
-      'SELECT id, email, password_hash, wallet_address, safe_address, currency_preference FROM users WHERE email = $1',
-      [email.toLowerCase()],
+      'SELECT id, name, email, password_hash, wallet_address, safe_address, currency_preference FROM users WHERE email = $1',
+      [normalizedEmail],
     )
 
     if (result.rows.length === 0) {
@@ -104,6 +152,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       token,
       user: {
         id: user.id,
+        name: user.name,
         email: user.email,
         wallet_address: user.wallet_address,
         safe_address: user.safe_address,
@@ -118,7 +167,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     const { sub } = request.user as { sub: string }
 
     const result = await pool.query(
-      'SELECT id, email, wallet_address, safe_address, currency_preference, created_at FROM users WHERE id = $1',
+      'SELECT id, name, email, wallet_address, safe_address, currency_preference, created_at FROM users WHERE id = $1',
       [sub],
     )
 

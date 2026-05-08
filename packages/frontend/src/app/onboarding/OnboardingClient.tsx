@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { api } from '@/lib/api'
 import { deploySafe, type DeployStage } from '@/lib/safe'
+import { displayName } from '@/lib/user'
 import { useActiveSigner } from '@/lib/signer'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, usePublicClient } from 'wagmi'
@@ -163,6 +164,7 @@ export default function OnboardingClient() {
   }
 
   const isPasskeyOnboarding = signerMode === 'passkey'
+  const name = displayName(user)
   const completionTitle = 'Your Haven account is ready'
   const completionDescription = `Your account is live on ${getChainConfig(selectedChainId).name}. You can now add funds, create agent budgets, and start making payments.`
   const completionAddressLabel = 'Account address'
@@ -187,7 +189,7 @@ export default function OnboardingClient() {
             <HavenMark />
             Haven
           </Link>
-          <span className="text-xs text-[var(--v2-ink-3)]">{user.email}</span>
+          <span className="text-xs text-[var(--v2-ink-3)]">{name}</span>
         </div>
       </div>
 
@@ -226,10 +228,9 @@ export default function OnboardingClient() {
           {step === 'choose-signer' && (
             <div className="space-y-6">
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Set up your Haven account</h1>
+                <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Welcome, {name}</h1>
                 <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-                  Choose the network for your account, then pick how you want to approve
-                  payments and changes.
+                  Choose a network, then pick how you want to approve payments and changes.
                 </p>
               </div>
 

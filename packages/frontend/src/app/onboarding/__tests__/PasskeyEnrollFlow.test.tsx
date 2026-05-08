@@ -35,6 +35,7 @@ import PasskeyEnrollFlow from '@/app/onboarding/PasskeyEnrollFlow'
 
 const mockUser = {
   id: 'user-1',
+  name: 'Ada Lovelace',
   email: 'passkey@example.com',
   wallet_address: null,
   safe_address: null,
@@ -98,6 +99,10 @@ describe('PasskeyEnrollFlow', () => {
     }))
 
     expect(mockCreatePasskey).toHaveBeenCalledTimes(1)
+    expect(mockCreatePasskey).toHaveBeenCalledWith(expect.objectContaining({
+      userName: 'passkey@example.com',
+      userDisplayName: 'Ada Lovelace',
+    }))
     expect(mockEnrollPasskey).toHaveBeenCalledWith({
       credential_id: 'credential-123',
       public_key_x: createdPasskey.publicKey.x,

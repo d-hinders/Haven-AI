@@ -12,6 +12,7 @@ import { useAccount, usePublicClient } from 'wagmi'
 import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import NetworkGate from '@/components/NetworkGate'
 import { SigningStatus } from '@/components/SigningStatus'
+import { HavenMark } from '@/components/brand/HavenMark'
 import PasskeyEnrollFlow from './PasskeyEnrollFlow'
 import type { User } from '@/context/AuthContext'
 
@@ -183,7 +184,7 @@ export default function OnboardingClient() {
             href="/"
             className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
           >
-            <span className="h-5 w-5 rounded-md bg-[var(--v2-brand)]" aria-hidden="true" />
+            <HavenMark />
             Haven
           </Link>
           <span className="text-xs text-[var(--v2-ink-3)]">{user.email}</span>

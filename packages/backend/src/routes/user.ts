@@ -6,6 +6,7 @@ import { getSafeDetails } from '../lib/safe-details.js'
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
+const OWNER_FETCH_CONCURRENCY = 4
 
 interface WalletBody {
   wallet_address: string
@@ -75,31 +76,34 @@ async function getCurrentOwnerDirectory(userId: string) {
   }>()
   const failedSafeIds: string[] = []
 
-  const results = await Promise.allSettled(
-    safes.map(async (safe) => ({
-      safe,
-      details: await getSafeDetails(safe.safe_address, safe.chain_id),
-    })),
-  )
+  for (let index = 0; index < safes.length; index += OWNER_FETCH_CONCURRENCY) {
+    const batch = safes.slice(index, index + OWNER_FETCH_CONCURRENCY)
+    const results = await Promise.allSettled(
+      batch.map(async (safe) => ({
+        safe,
+        details: await getSafeDetails(safe.safe_address, safe.chain_id),
+      })),
+    )
 
-  for (let index = 0; index < results.length; index += 1) {
-    const result = results[index]
-    if (result.status === 'rejected') {
-      failedSafeIds.push(safes[index].id)
-      continue
-    }
+    for (let resultIndex = 0; resultIndex < results.length; resultIndex += 1) {
+      const result = results[resultIndex]
+      if (result.status === 'rejected') {
+        failedSafeIds.push(batch[resultIndex].id)
+        continue
+      }
 
-    const { safe, details } = result.value
-    for (const owner of details.owners) {
-      const normalizedOwner = owner.toLowerCase()
-      const existing = ownerMap.get(normalizedOwner)
-      if (existing) {
-        existing.accounts.push(safe)
-      } else {
-        ownerMap.set(normalizedOwner, {
-          owner_address: normalizedOwner,
-          accounts: [safe],
-        })
+      const { safe, details } = result.value
+      for (const owner of details.owners) {
+        const normalizedOwner = owner.toLowerCase()
+        const existing = ownerMap.get(normalizedOwner)
+        if (existing) {
+          existing.accounts.push(safe)
+        } else {
+          ownerMap.set(normalizedOwner, {
+            owner_address: normalizedOwner,
+            accounts: [safe],
+          })
+        }
       }
     }
   }

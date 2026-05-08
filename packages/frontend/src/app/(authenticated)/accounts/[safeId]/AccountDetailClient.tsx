@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
+import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { useBalances } from '@/hooks/useBalances'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { usePortfolio } from '@/hooks/usePortfolio'
@@ -53,6 +54,7 @@ export default function AccountDetailClient() {
   const safeId = params.safeId as string
 
   const { user, activeSafe, setActiveSafe, loading: authLoading } = useAuth()
+  const { getOwnerAlias } = useOwnerDirectory()
   const { renameSafe, removeSafe, loading: safesLoading } = useUserSafes()
   const { currency } = usePreferences()
   const { contacts, resolveAddress } = useContacts()
@@ -366,14 +368,20 @@ export default function AccountDetailClient() {
               {details.owners.map((owner) => {
                 const isYou =
                   user?.wallet_address?.toLowerCase() === owner.toLowerCase()
+                const ownerAlias = getOwnerAlias(owner)
                 return (
                   <div
                     key={owner}
-                    className="flex items-center gap-2 py-1.5"
+                    className="flex flex-wrap items-center gap-2 py-1.5"
                   >
-                    <span className="text-sm font-mono text-[var(--v2-ink)]">
-                      {truncate(owner)}
+                    <span className={ownerAlias ? 'text-sm font-medium text-[var(--v2-ink)]' : 'text-sm font-mono text-[var(--v2-ink)]'}>
+                      {ownerAlias ?? truncate(owner)}
                     </span>
+                    {ownerAlias && (
+                      <span className="text-xs font-mono text-[var(--v2-ink-3)]">
+                        {truncate(owner)}
+                      </span>
+                    )}
                     <CopyButton text={owner} />
                     <a
                       href={getExplorerUrl(chainId, 'address', owner)}

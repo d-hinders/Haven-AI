@@ -15,6 +15,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { useActiveSigner } from '@/lib/signer'
+import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 
 function shortAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
@@ -65,6 +66,7 @@ interface AddressSection {
   label: string
   address: string
   chainName?: string
+  displayName?: string | null
 }
 
 interface PopoverProps {
@@ -140,9 +142,16 @@ function WalletPopover({
     <div className={border ? 'pt-4 mt-4 border-t border-[var(--v2-border)]' : undefined}>
       <div className="text-xs text-[var(--v2-ink-3)] mb-1">{section.label}</div>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-mono text-[var(--v2-ink)]">
-          {shortAddress(section.address)}
-        </span>
+        <div className="min-w-0">
+          {section.displayName ? (
+            <div className="truncate text-sm font-medium text-[var(--v2-ink)]">
+              {section.displayName}
+            </div>
+          ) : null}
+          <span className="text-sm font-mono text-[var(--v2-ink)]">
+            {shortAddress(section.address)}
+          </span>
+        </div>
         <button
           type="button"
           onClick={() => handleCopy(section.address)}
@@ -239,6 +248,7 @@ export default function WalletButton() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const { activeSafe, passkeys } = useAuth()
+  const { getOwnerAlias } = useOwnerDirectory()
   const activeSafeAddress = activeSafe?.safe_address as Address | undefined
   const activeSigner = useActiveSigner({
     safeAddress: activeSafeAddress,
@@ -322,12 +332,14 @@ export default function WalletButton() {
         }
 
         if (passkeySigner) {
+          const passkeyAlias = getOwnerAlias(passkeySigner.address)
           const connectedWallet =
             connected && account
               ? {
                   label: 'Connected wallet',
                   address: account.address,
                   chainName: chain?.name,
+                  displayName: getOwnerAlias(account.address),
                 }
               : undefined
 
@@ -342,7 +354,7 @@ export default function WalletButton() {
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
                 <AddressAvatar address={passkeySigner.address} />
-                <span>Passkey ready</span>
+                <span>{passkeyAlias ?? 'Passkey ready'}</span>
               </button>
 
               <WalletPopover
@@ -350,6 +362,7 @@ export default function WalletButton() {
                   label: 'Passkey',
                   address: passkeySigner.address,
                   chainName: safeChainName,
+                  displayName: passkeyAlias,
                 }}
                 secondary={connectedWallet}
                 open={popoverOpen}
@@ -391,6 +404,8 @@ export default function WalletButton() {
           )
         }
 
+        const accountAlias = getOwnerAlias(account.address)
+
         return (
           <div className="relative">
             <button
@@ -411,8 +426,8 @@ export default function WalletButton() {
               ) : (
                 <AddressAvatar address={account.address} />
               )}
-              <span className="font-mono">
-                {account.ensName ?? shortAddress(account.address)}
+              <span className={accountAlias ? undefined : 'font-mono'}>
+                {accountAlias ?? account.ensName ?? shortAddress(account.address)}
               </span>
             </button>
 
@@ -421,6 +436,7 @@ export default function WalletButton() {
                 label: 'Connected wallet',
                 address: account.address,
                 chainName: chain.name,
+                displayName: accountAlias ?? account.ensName,
               }}
               unavailablePasskey={passkeyUnavailableOnDevice}
               open={popoverOpen}

@@ -122,9 +122,7 @@ function FundingPanel({
 }: {
   safes: UserSafe[]
 }) {
-  const defaultSafe = getDefaultSafe(safes)
-  const [selectedSafeId, setSelectedSafeId] = useState(defaultSafe?.id ?? '')
-  const safe = safes.find((entry) => entry.id === selectedSafeId) ?? defaultSafe
+  const safe = getDefaultSafe(safes)
   const chainConfig = safe ? getChainConfig(safe.chain_id) : null
   const tokens = chainConfig ? Object.values(chainConfig.tokens) : []
 
@@ -161,132 +159,91 @@ function FundingPanel({
     setShowQr(false)
   }, [safe?.id])
 
-  useEffect(() => {
-    if (!defaultSafe) return
-    if (selectedSafeId && safes.some((entry) => entry.id === selectedSafeId)) return
-    setSelectedSafeId(defaultSafe.id)
-  }, [defaultSafe, safes, selectedSafeId])
-
   if (!safe || !chainConfig) return null
 
   return (
     <>
-      <div className="grid gap-6 lg:grid-cols-[minmax(270px,0.55fr)_minmax(520px,1fr)_220px] lg:items-center">
-      <div>
-        <h3 className="mb-4 text-[30px] font-semibold leading-[1.14] tracking-tight text-[var(--v2-ink)] sm:text-[34px]">
-          Add funds to start using Haven
-        </h3>
-        <p className="max-w-[280px] text-[15px] leading-relaxed text-[var(--v2-ink-2)]">
-          Send a supported token to your Haven account on{' '}
-          <span className="font-semibold text-[var(--v2-ink)]">{chainConfig.name}</span>.
-        </p>
-      </div>
+      <div className="grid gap-8 lg:grid-cols-[minmax(280px,0.7fr)_minmax(340px,0.82fr)_minmax(220px,0.52fr)] lg:items-center">
+        <div>
+          <h3 className="mb-5 text-[34px] font-semibold leading-[1.12] tracking-tight text-[var(--v2-ink)] lg:text-[38px]">
+            Add funds to start using Haven
+          </h3>
+          <p className="max-w-[315px] text-[16px] leading-relaxed text-[var(--v2-ink-2)]">
+            Send a supported token to your Haven account on{' '}
+            <span className="font-semibold text-[var(--v2-ink)]">{chainConfig.name}</span>.
+          </p>
+        </div>
 
-      <div className="space-y-3">
-        <div className="grid overflow-hidden rounded-xl border border-[var(--v2-border-strong)] bg-white shadow-[0_10px_28px_rgba(16,24,40,0.06),var(--v2-shadow-card)] sm:grid-cols-[minmax(190px,0.72fr)_minmax(0,1fr)_auto] sm:items-stretch">
-          <div className="min-w-0 px-5 py-6">
-            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--v2-ink-3)]">
+        <div className="grid gap-10 lg:pl-8">
+          <div className="min-w-0">
+            <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--v2-ink-2)]">
               Account
             </p>
-            {safes.length > 1 ? (
-              <div className="relative mt-3">
-                <select
-                  value={safe.id}
-                  onChange={(event) => setSelectedSafeId(event.target.value)}
-                  className="w-full min-w-0 cursor-pointer appearance-none bg-transparent pr-6 text-[15px] font-semibold text-[var(--v2-ink)] outline-none"
-                >
-                  {safes.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.name}
-                    </option>
-                  ))}
-                </select>
-                <svg
-                  aria-hidden="true"
-                  className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--v2-ink-2)]"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
-                </svg>
-              </div>
-            ) : (
-              <p className="mt-3 truncate text-[15px] font-semibold text-[var(--v2-ink)]">{safe.name}</p>
-            )}
+            <p className="mt-3 truncate text-[18px] font-medium text-[var(--v2-ink)]">{safe.name}</p>
           </div>
 
-          <div className="min-w-0 border-t border-[var(--v2-border)] px-5 py-6 sm:border-l sm:border-t-0">
-            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--v2-ink-3)]">
+          <div className="min-w-0">
+            <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--v2-ink-2)]">
               Address
             </p>
-            <div className="mt-3 flex min-w-0 items-center gap-3">
-              <button
-                type="button"
-                onClick={() => navigator.clipboard.writeText(safe.safe_address)}
-                title="Copy deposit address"
-                className="min-w-0 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-              >
-                <code className="block truncate text-[15px] font-semibold text-[var(--v2-ink)]">
-                  {compactAddress(safe.safe_address)}
-                </code>
-              </button>
-              <CopyButton text={safe.safe_address} />
+            <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3">
+              <code className="min-w-0 max-w-full truncate text-[18px] font-medium text-[var(--v2-ink)]">
+                {compactAddress(safe.safe_address)}
+              </code>
+              <div className="flex items-center gap-2">
+                <CopyButton text={safe.safe_address} />
+                <button
+                  type="button"
+                  onClick={() => setShowQr(true)}
+                  aria-label="Show deposit address QR code"
+                  title="Show QR code"
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--v2-border-strong)] bg-white text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-button)] transition-colors hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                >
+                  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h2m4 0h-1m-5 3h6m-6 3h2m4 0h-1" />
+                  </svg>
+                </button>
+              </div>
             </div>
-          </div>
-
-          <div className="flex border-t border-[var(--v2-border)] p-5 sm:border-l sm:border-t-0 sm:items-center">
-            <button
-              type="button"
-              onClick={() => setShowQr(true)}
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-[var(--v2-border-strong)] bg-white px-4 text-[14px] font-semibold text-[var(--v2-ink)] shadow-[var(--v2-shadow-button)] transition-colors hover:bg-[var(--v2-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-            >
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h2m4 0h-1m-5 3h6m-6 3h2m4 0h-1" />
-              </svg>
-              QR Code
-            </button>
           </div>
         </div>
-      </div>
 
-      <div className="border-t border-[var(--v2-border)] pt-4 lg:min-h-full lg:border-l lg:border-t-0 lg:py-2 lg:pl-6">
-        <div className="space-y-5">
-          <div className="flex items-start gap-2.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)] shadow-[var(--v2-shadow-card)]">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2l7 4v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-4z" />
-                <path d="M9 10h6M9 14h6" />
-              </svg>
+        <div className="border-t border-[var(--v2-border)] pt-6 lg:min-h-full lg:border-t-0 lg:py-3 lg:pl-8">
+          <div className="space-y-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-[var(--v2-border)] bg-white/70 text-[var(--v2-ink)] shadow-[var(--v2-shadow-card)]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2l7 4v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-4z" />
+                  <path d="M9 10h6M9 14h6" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-[15px] text-[var(--v2-ink-2)]">Network</p>
+                <p className="mt-1 text-[18px] font-semibold text-[var(--v2-ink)]">{chainConfig.name}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-[13px] text-[var(--v2-ink-2)]">Network</p>
-              <p className="mt-1 text-[15px] font-semibold text-[var(--v2-ink)]">{chainConfig.name}</p>
-            </div>
-          </div>
 
-          <div className="h-px bg-[var(--v2-surface-2)]" />
+            <div className="h-px bg-[var(--v2-surface-2)]" />
 
-          <div className="flex items-start gap-2.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)] shadow-[var(--v2-shadow-card)]">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v10" />
-                <path d="M15 9.5c0-1.38-1.34-2.5-3-2.5s-3 1.12-3 2.5 1.34 2.5 3 2.5 3 1.12 3 2.5-1.34 2.5-3 2.5-3-1.12-3-2.5" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-[13px] text-[var(--v2-ink-2)]">Supported tokens</p>
-              <p className="mt-1 text-[15px] font-semibold text-[var(--v2-ink)]">
-                {tokens.map((token) => token.symbol).join(', ')}
-              </p>
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-[var(--v2-border)] bg-white/70 text-[var(--v2-ink)] shadow-[var(--v2-shadow-card)]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v10" />
+                  <path d="M15 9.5c0-1.38-1.34-2.5-3-2.5s-3 1.12-3 2.5 1.34 2.5 3 2.5 3 1.12 3 2.5-1.34 2.5-3 2.5-3-1.12-3-2.5" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-[15px] text-[var(--v2-ink-2)]">Supported tokens</p>
+                <p className="mt-1 text-[18px] font-semibold text-[var(--v2-ink)]">
+                  {tokens.map((token) => token.symbol).join(', ')}
+                </p>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-    {showQr && (
+      {showQr && (
       <div
         role="dialog"
         aria-modal="true"
@@ -320,6 +277,21 @@ function FundingPanel({
           </div>
 
           <div className="flex flex-col items-center px-6 py-6">
+            <div className="mb-4 grid w-full grid-cols-2 gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--v2-ink-3)]">
+                  Account
+                </p>
+                <p className="mt-1 truncate text-sm font-medium text-[var(--v2-ink)]">{safe.name}</p>
+              </div>
+              <div className="min-w-0 border-l border-[var(--v2-border)] pl-3">
+                <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--v2-ink-3)]">
+                  Network
+                </p>
+                <p className="mt-1 truncate text-sm font-medium text-[var(--v2-ink)]">{chainConfig.name}</p>
+              </div>
+            </div>
+
             {qrDataUrl ? (
               <img
                 src={qrDataUrl}
@@ -329,11 +301,16 @@ function FundingPanel({
             ) : (
               <div className="h-[280px] w-[280px] animate-pulse rounded-xl bg-[var(--v2-surface-2)]" />
             )}
-            <div className="mt-4 flex max-w-full items-start gap-2 rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-              <code className="min-w-0 flex-1 break-all text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                {safe.safe_address}
-              </code>
-              <CopyButton text={safe.safe_address} />
+            <div className="mt-4 w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+              <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--v2-ink-3)]">
+                Deposit address
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 break-all text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                  {safe.safe_address}
+                </code>
+                <CopyButton text={safe.safe_address} />
+              </div>
             </div>
           </div>
         </div>

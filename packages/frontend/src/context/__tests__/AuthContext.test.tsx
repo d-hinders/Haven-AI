@@ -39,6 +39,7 @@ const mockApi = api as unknown as {
 
 const mockUser = {
   id: 'user-1',
+  name: 'Ada Lovelace',
   email: 'test@example.com',
   wallet_address: null,
   safe_address: null,
@@ -113,10 +114,11 @@ describe('AuthContext', () => {
 
     let response: unknown
     await act(async () => {
-      response = await result.current.signup('test@example.com', 'password')
+      response = await result.current.signup('Ada Lovelace', 'test@example.com', 'password')
     })
 
     expect(mockApi.post).toHaveBeenCalledWith('/auth/signup', {
+      name: 'Ada Lovelace',
       email: 'test@example.com',
       password: 'password',
     })

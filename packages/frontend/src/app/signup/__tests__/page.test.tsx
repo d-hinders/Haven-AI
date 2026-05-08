@@ -58,6 +58,7 @@ describe('SignupPage', () => {
   it('renders form fields', () => {
     render(<SignupPage />)
 
+    expect(screen.getByLabelText('Name')).toBeInTheDocument()
     expect(screen.getByLabelText('Email')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toBeInTheDocument()
     expect(screen.getByLabelText('Confirm password')).toBeInTheDocument()
@@ -68,12 +69,13 @@ describe('SignupPage', () => {
     const user = userEvent.setup()
     render(<SignupPage />)
 
+    await user.type(screen.getByLabelText('Name'), 'Ada Lovelace')
     await user.type(screen.getByLabelText('Email'), 'test@example.com')
     await user.type(screen.getByLabelText('Password'), 'password123')
     await user.type(screen.getByLabelText('Confirm password'), 'different123')
     await user.click(screen.getByRole('button', { name: 'Create account' }))
 
-    expect(screen.getByText('Passwords do not match')).toBeInTheDocument()
+    expect(screen.getByText('Passwords do not match.')).toBeInTheDocument()
     expect(mockSignup).not.toHaveBeenCalled()
   })
 
@@ -81,12 +83,29 @@ describe('SignupPage', () => {
     const user = userEvent.setup()
     render(<SignupPage />)
 
+    await user.type(screen.getByLabelText('Name'), 'Ada Lovelace')
     await user.type(screen.getByLabelText('Email'), 'test@example.com')
     await user.type(screen.getByLabelText('Password'), 'short')
     await user.type(screen.getByLabelText('Confirm password'), 'short')
     await user.click(screen.getByRole('button', { name: 'Create account' }))
 
-    expect(screen.getByText('Password must be at least 8 characters')).toBeInTheDocument()
+    expect(screen.getByText('Use at least 8 characters.')).toBeInTheDocument()
+    expect(mockSignup).not.toHaveBeenCalled()
+  })
+
+  it('shows error for invalid name and email', async () => {
+    const user = userEvent.setup()
+    render(<SignupPage />)
+
+    await user.type(screen.getByLabelText('Name'), 'Bad{Name}')
+    await user.clear(screen.getByLabelText('Name'))
+    await user.type(screen.getByLabelText('Email'), 'not-an-email')
+    await user.type(screen.getByLabelText('Password'), 'password123')
+    await user.type(screen.getByLabelText('Confirm password'), 'password123')
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+
+    expect(screen.getByText('Enter your name.')).toBeInTheDocument()
+    expect(screen.getByText('Enter a valid email address.')).toBeInTheDocument()
     expect(mockSignup).not.toHaveBeenCalled()
   })
 })

@@ -2,12 +2,18 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
+import { api, ApiRequestError } from '@/lib/api'
+import { displayName } from '@/lib/user'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+
+const MAX_NAME_LENGTH = 80
+const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 
 function formatDate(value?: string): string {
   if (!value) return 'Not available'
@@ -138,15 +144,62 @@ function SafeLink({ safe }: { safe: UserSafe }) {
 
 export default function SettingsClient() {
   const router = useRouter()
-  const { user, passkeys = [], logout } = useAuth()
+  const { user, passkeys = [], logout, updateUser } = useAuth()
   const { currency, setCurrency, saving } = usePreferences()
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [nameError, setNameError] = useState('')
+  const [nameSaved, setNameSaved] = useState(false)
+  const [savingName, setSavingName] = useState(false)
 
   const hasWallet = Boolean(user?.wallet_address)
   const hasPasskey = passkeys.length > 0
 
+  useEffect(() => {
+    if (!editingName) {
+      setNameDraft(user?.name ?? '')
+    }
+  }, [editingName, user?.name])
+
+  function validateName(value: string): string | null {
+    const normalized = value.trim().replace(/\s+/g, ' ')
+
+    if (!normalized) return null
+    if (normalized.length > MAX_NAME_LENGTH || CONTROL_CHAR_RE.test(value)) return null
+
+    return normalized
+  }
+
   function handleLogout() {
     logout()
     router.push('/login')
+  }
+
+  async function saveName() {
+    const normalizedName = validateName(nameDraft)
+    setNameSaved(false)
+
+    if (!normalizedName) {
+      setNameError('Enter a name using 80 characters or fewer.')
+      return
+    }
+
+    setSavingName(true)
+    setNameError('')
+    try {
+      const updated = await api.put<{ name: string }>('/user/profile', { name: normalizedName })
+      updateUser({ name: updated.name })
+      setEditingName(false)
+      setNameSaved(true)
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        setNameError(err.message)
+      } else {
+        setNameError('We could not save your name. Please try again.')
+      }
+    } finally {
+      setSavingName(false)
+    }
   }
 
   return (
@@ -168,6 +221,71 @@ export default function SettingsClient() {
           title="Profile"
           description="Basic information for your Haven account."
         >
+          <div className="px-6 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">Name</p>
+                {editingName ? (
+                  <div className="mt-2 max-w-sm">
+                    <Input
+                      value={nameDraft}
+                      onChange={(e) => {
+                        setNameDraft(e.target.value)
+                        setNameError('')
+                        setNameSaved(false)
+                      }}
+                      autoComplete="name"
+                      aria-label="Name"
+                      aria-invalid={Boolean(nameError)}
+                      aria-describedby={nameError ? 'settings-name-error' : undefined}
+                    />
+                    {nameError ? (
+                      <p id="settings-name-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                        {nameError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
+                    <p className="mt-1 text-sm text-[var(--v2-ink-2)]">{displayName(user)}</p>
+                    {nameSaved ? (
+                      <p className="mt-1 text-xs text-[var(--v2-success)]">Name updated.</p>
+                    ) : null}
+                  </>
+                )}
+              </div>
+              {editingName ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    variant="tertiary"
+                    size="sm"
+                    disabled={savingName}
+                    onClick={() => {
+                      setEditingName(false)
+                      setNameDraft(user?.name ?? '')
+                      setNameError('')
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button size="sm" disabled={savingName} onClick={() => void saveName()}>
+                    {savingName ? 'Saving...' : 'Save'}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEditingName(true)
+                    setNameSaved(false)
+                  }}
+                >
+                  Edit
+                </Button>
+              )}
+            </div>
+          </div>
           <SettingRow
             label="Email"
             value={user?.email ?? 'Not available'}

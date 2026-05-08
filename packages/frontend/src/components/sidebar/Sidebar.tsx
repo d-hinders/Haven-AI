@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import { displayName, userInitial as getUserInitial } from '@/lib/user'
 import { HavenMark } from '@/components/brand/HavenMark'
 
 interface NavItem {
@@ -68,7 +69,8 @@ export default function Sidebar() {
   const { user, logout } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
 
-  const userInitial = user?.email?.charAt(0).toUpperCase() ?? '?'
+  const name = displayName(user)
+  const userInitial = getUserInitial(user)
 
   return (
     <>
@@ -162,9 +164,9 @@ export default function Sidebar() {
               <div className="flex-1 min-w-0">
                 <p
                   className="text-sm text-[var(--v2-ink)] truncate"
-                  title={user?.email ?? undefined}
+                  title={name}
                 >
-                  {user?.email}
+                  {name}
                 </p>
               </div>
               <button

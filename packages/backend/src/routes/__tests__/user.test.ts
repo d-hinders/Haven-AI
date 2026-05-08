@@ -30,6 +30,62 @@ describe('User routes', () => {
     return app.jwt.sign(payload, { expiresIn: '1h' })
   }
 
+  // --- PUT /user/profile ---
+  describe('PUT /user/profile', () => {
+    it('updates the user name for valid input + valid JWT', async () => {
+      const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+
+      mockQuery.mockResolvedValueOnce({
+        rows: [{
+          id: 'user-1',
+          name: 'Ada Lovelace',
+          email: 'test@example.com',
+          wallet_address: null,
+          safe_address: null,
+          currency_preference: 'USD',
+          created_at: '2025-01-01T00:00:00.000Z',
+        }],
+      })
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/user/profile',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { name: ' Ada   Lovelace ' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const body = response.json()
+      expect(body.id).toBe('user-1')
+      expect(body.name).toBe('Ada Lovelace')
+    })
+
+    it('returns 400 for invalid name', async () => {
+      const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/user/profile',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { name: 'Bad\nName' },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe('Enter a name using 80 characters or fewer')
+    })
+
+    it('returns 401 without auth', async () => {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/user/profile',
+        payload: { name: 'Ada Lovelace' },
+      })
+
+      expect(response.statusCode).toBe(401)
+      expect(response.json().error).toBe('Unauthorized')
+    })
+  })
+
   // --- PUT /user/wallet ---
   describe('PUT /user/wallet', () => {
     it('returns updated user for valid address + valid JWT', async () => {

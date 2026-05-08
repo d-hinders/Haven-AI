@@ -5,6 +5,7 @@ import type { Address, Hash } from 'viem'
 import type { User } from '@/context/AuthContext'
 import { api, ApiRequestError, type ListPasskeysResponse } from '@/lib/api'
 import { base64UrlEncode, createPasskey, PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
+import { displayName } from '@/lib/user'
 import {
   PASSKEY_SCHEMA_VERSION,
   rememberPasskeyCredentialOnDevice,
@@ -113,7 +114,7 @@ export default function PasskeyEnrollFlow({
       const createdPasskey = await createPasskey({
         userId: getRandomUserId(),
         userName: user.email,
-        userDisplayName: user.email,
+        userDisplayName: displayName(user),
       })
 
       let signerAddress = ''

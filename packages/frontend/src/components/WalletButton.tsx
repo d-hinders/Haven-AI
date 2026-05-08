@@ -1,18 +1,28 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
 import { useAccount, useDisconnect } from 'wagmi'
+import type { Address } from 'viem'
+import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { SUPPORTED_CHAIN_IDS } from '@/lib/chains'
+import { getChainConfig, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
+import { useActiveSigner } from '@/lib/signer'
 
 function shortAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
-interface PopoverProps {
+interface AddressSection {
+  label: string
   address: string
-  chainName: string | undefined
+  chainName?: string
+}
+
+interface PopoverProps {
+  primary: AddressSection
+  secondary?: AddressSection
+  unavailablePasskey?: boolean
   open: boolean
   onClose: () => void
   /**
@@ -23,22 +33,27 @@ interface PopoverProps {
    * still connected, and the popover unmounts as soon as we disconnect.
    */
   onSwitchWallet: () => void
+  onConnectWallet: () => void
+  hasConnectedWallet: boolean
   switching: boolean
-  anchorRef: React.RefObject<HTMLButtonElement | null>
+  anchorRef: RefObject<HTMLButtonElement | null>
 }
 
 function WalletPopover({
-  address,
-  chainName,
+  primary,
+  secondary,
+  unavailablePasskey = false,
   open,
   onClose,
   onSwitchWallet,
+  onConnectWallet,
+  hasConnectedWallet,
   switching,
   anchorRef,
 }: PopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null)
   const { disconnectAsync } = useDisconnect()
-  const [copied, setCopied] = useState(false)
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
 
   useEscapeToClose(open, onClose)
 
@@ -63,15 +78,39 @@ function WalletPopover({
 
   if (!open) return null
 
-  const handleCopy = async () => {
+  const handleCopy = async (address: string) => {
     try {
       await navigator.clipboard.writeText(address)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
+      setCopiedAddress(address)
+      window.setTimeout(() => setCopiedAddress(null), 1500)
     } catch {
       /* ignore */
     }
   }
+
+  const renderAddressSection = (section: AddressSection, border = false) => (
+    <div className={border ? 'pt-4 mt-4 border-t border-[var(--v2-border)]' : undefined}>
+      <div className="text-xs text-[var(--v2-ink-3)] mb-1">{section.label}</div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-mono text-[var(--v2-ink)]">
+          {shortAddress(section.address)}
+        </span>
+        <button
+          type="button"
+          onClick={() => handleCopy(section.address)}
+          className="px-2 py-1 rounded-md text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+        >
+          {copiedAddress === section.address ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      {section.chainName && (
+        <div className="mt-3 text-xs text-[var(--v2-ink-3)]">
+          Network:{' '}
+          <span className="text-[var(--v2-ink)]">{section.chainName}</span>
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div
@@ -81,25 +120,13 @@ function WalletPopover({
       className="absolute right-0 top-full mt-2 w-72 z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)] overflow-hidden"
     >
       <div className="p-4 border-b border-[var(--v2-border)]">
-        <div className="text-xs text-[var(--v2-ink-3)] mb-1">Connected wallet</div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-mono text-[var(--v2-ink)]">
-            {shortAddress(address)}
-          </span>
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="px-2 py-1 rounded-md text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </button>
-        </div>
-        {chainName && (
-          <div className="mt-3 text-xs text-[var(--v2-ink-3)]">
-            Network:{' '}
-            <span className="text-[var(--v2-ink)]">{chainName}</span>
-          </div>
+        {unavailablePasskey && (
+          <p className="mb-4 text-xs text-[var(--v2-ink-3)]">
+            This account uses a passkey that is not available here.
+          </p>
         )}
+        {renderAddressSection(primary)}
+        {secondary && renderAddressSection(secondary, true)}
       </div>
 
       <div className="p-2">
@@ -108,30 +135,50 @@ function WalletPopover({
           disabled={switching}
           onClick={() => {
             onClose()
-            onSwitchWallet()
+            if (hasConnectedWallet) {
+              onSwitchWallet()
+            } else {
+              onConnectWallet()
+            }
           }}
           className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
         >
-          {switching ? 'Disconnecting…' : 'Switch wallet'}
+          {switching
+            ? 'Disconnecting…'
+            : hasConnectedWallet
+              ? 'Switch wallet'
+              : 'Connect wallet instead'}
         </button>
-        <button
-          type="button"
-          disabled={switching}
-          onClick={async () => {
-            onClose()
-            try {
-              await disconnectAsync()
-            } catch {
-              /* ignore */
-            }
-          }}
-          className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30"
-        >
-          Disconnect
-        </button>
+        {hasConnectedWallet && (
+          <button
+            type="button"
+            disabled={switching}
+            onClick={async () => {
+              onClose()
+              try {
+                await disconnectAsync()
+              } catch {
+                /* ignore */
+              }
+            }}
+            className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30"
+          >
+            Disconnect
+          </button>
+        )}
       </div>
     </div>
   )
+}
+
+function getSafeChainName(chainId?: number): string | undefined {
+  if (chainId === undefined) return undefined
+
+  try {
+    return getChainConfig(chainId).name
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -143,6 +190,25 @@ function WalletPopover({
 export default function WalletButton() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
+  const { activeSafe, passkeys } = useAuth()
+  const activeSafeAddress = activeSafe?.safe_address as Address | undefined
+  const activeSigner = useActiveSigner({
+    safeAddress: activeSafeAddress,
+    chainId: activeSafe?.chain_id,
+  })
+  const passkeySigner = activeSigner?.type === 'passkey' ? activeSigner : null
+  const passkeyUnavailableOnDevice = useMemo(() => {
+    const safeAddress = activeSafe?.safe_address.toLowerCase()
+    if (!safeAddress || activeSafe?.chain_id === undefined || passkeySigner) {
+      return false
+    }
+
+    return passkeys.some(
+      (passkey) =>
+        passkey.chain_id === activeSafe.chain_id &&
+        passkey.safe_address?.toLowerCase() === safeAddress,
+    )
+  }, [activeSafe?.chain_id, activeSafe?.safe_address, passkeySigner, passkeys])
 
   // "Switch wallet" flow: disconnect, then open the connect modal once
   // wagmi has committed isConnected=false. Driven from the parent so the
@@ -194,6 +260,62 @@ export default function WalletButton() {
               aria-hidden
               style={{ opacity: 0, pointerEvents: 'none', userSelect: 'none' }}
             />
+          )
+        }
+
+        const safeChainName = getSafeChainName(activeSafe?.chain_id)
+        const openWalletConnect = () => {
+          if (openConnectModalHook) {
+            openConnectModalHook()
+            return
+          }
+
+          openConnectModal?.()
+        }
+
+        if (passkeySigner) {
+          const connectedWallet =
+            connected && account
+              ? {
+                  label: 'Connected wallet',
+                  address: account.address,
+                  chainName: chain?.name,
+                }
+              : undefined
+
+          return (
+            <div className="relative">
+              <button
+                ref={triggerRef}
+                type="button"
+                onClick={() => setPopoverOpen((v) => !v)}
+                aria-haspopup="dialog"
+                aria-expanded={popoverOpen}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              >
+                <span
+                  aria-hidden
+                  className="w-5 h-5 rounded-full bg-[var(--v2-success)]"
+                />
+                <span>Passkey ready</span>
+              </button>
+
+              <WalletPopover
+                primary={{
+                  label: 'Passkey',
+                  address: passkeySigner.address,
+                  chainName: safeChainName,
+                }}
+                secondary={connectedWallet}
+                open={popoverOpen}
+                onClose={() => setPopoverOpen(false)}
+                onSwitchWallet={handleSwitchWallet}
+                onConnectWallet={openWalletConnect}
+                hasConnectedWallet={connected}
+                switching={pendingSwitch}
+                anchorRef={triggerRef}
+              />
+            </div>
           )
         }
 
@@ -253,11 +375,17 @@ export default function WalletButton() {
             </button>
 
             <WalletPopover
-              address={account.address}
-              chainName={chain.name}
+              primary={{
+                label: 'Connected wallet',
+                address: account.address,
+                chainName: chain.name,
+              }}
+              unavailablePasskey={passkeyUnavailableOnDevice}
               open={popoverOpen}
               onClose={() => setPopoverOpen(false)}
               onSwitchWallet={handleSwitchWallet}
+              onConnectWallet={openWalletConnect}
+              hasConnectedWallet={connected}
               switching={pendingSwitch}
               anchorRef={triggerRef}
             />

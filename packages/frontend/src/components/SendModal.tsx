@@ -253,7 +253,7 @@ export default function SendModal({
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm"
+        className="absolute inset-0 v2-modal-backdrop"
         onClick={step === 'executing' ? undefined : onClose}
       />
 

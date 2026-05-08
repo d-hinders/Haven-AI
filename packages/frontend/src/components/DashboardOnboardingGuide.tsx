@@ -251,7 +251,7 @@ function FundingPanel({
         className="fixed inset-0 z-[110] flex items-center justify-center p-4"
       >
         <div
-          className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm"
+          className="absolute inset-0 v2-modal-backdrop"
           onClick={() => setShowQr(false)}
         />
         <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">

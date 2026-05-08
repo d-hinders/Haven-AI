@@ -42,12 +42,9 @@ function getAvatarStyle(address: string): CSSProperties {
   const palette = AVATAR_PALETTES[hash % AVATAR_PALETTES.length]
   const angle = hash % 360
   const stripeAngle = (hash >> 3) % 180
-  const x = 28 + (hash % 44)
-  const y = 24 + ((hash >> 5) % 48)
 
   return {
     backgroundImage: [
-      `radial-gradient(circle at ${x}% ${y}%, rgba(255,255,255,0.92) 0 8%, transparent 9%)`,
       `repeating-linear-gradient(${stripeAngle}deg, rgba(255,255,255,0.18) 0 2px, transparent 2px 5px)`,
       `linear-gradient(${angle}deg, ${palette[0]}, ${palette[1]} 52%, ${palette[2]})`,
     ].join(', '),

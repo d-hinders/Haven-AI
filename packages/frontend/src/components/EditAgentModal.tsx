@@ -232,7 +232,7 @@ export default function EditAgentModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--v2-ink)]/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 v2-modal-backdrop">
       <div
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}

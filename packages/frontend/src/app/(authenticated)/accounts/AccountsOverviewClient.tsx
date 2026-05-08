@@ -129,7 +129,7 @@ function AddSafeModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-[var(--v2-ink)]/50 backdrop-blur-sm" onClick={handleClose} />
+      <div className="absolute inset-0 v2-modal-backdrop" onClick={handleClose} />
       <div className="relative bg-white border border-[var(--v2-border)] rounded-xl w-full max-w-md shadow-[var(--v2-shadow-modal)] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-0">

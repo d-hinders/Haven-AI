@@ -3,14 +3,18 @@ import type { ReactNode } from 'react'
 export function ApprovalRequiredBanner({
   title = 'Approval required above budget',
   children,
+  density = 'normal',
 }: {
   title?: string
   children: ReactNode
+  density?: 'normal' | 'compact'
 }) {
+  const compact = density === 'compact'
+
   return (
-    <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-4">
+    <div className={`${compact ? 'p-3' : 'p-4'} rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)]`}>
       <div className="flex gap-3">
-        <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white text-[var(--v2-warning)] shadow-[var(--v2-shadow-card)]">
+        <div className={`${compact ? 'h-5 w-5' : 'h-6 w-6'} mt-0.5 flex flex-shrink-0 items-center justify-center rounded-full bg-white text-[var(--v2-warning)] shadow-[var(--v2-shadow-card)]`}>
           <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.7}>
             <path d="M8 4.5v4" strokeLinecap="round" />
             <path d="M8 11.25h.01" strokeLinecap="round" />
@@ -19,7 +23,9 @@ export function ApprovalRequiredBanner({
         </div>
         <div>
           <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
-          <div className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">{children}</div>
+          <div className={`${compact ? 'text-xs' : 'text-sm'} mt-1 leading-relaxed text-[var(--v2-ink-2)]`}>
+            {children}
+          </div>
         </div>
       </div>
     </div>

@@ -3,3 +3,4 @@ export { AgentRulesSummary, type AgentRuleSummaryItem } from './AgentRulesSummar
 export { ApprovalRequiredBanner } from './ApprovalRequiredBanner'
 export { WalletIdentityBlock } from './WalletIdentityBlock'
 export { RiskExplainer } from './RiskExplainer'
+export { CredentialHandoffCard } from './CredentialHandoffCard'

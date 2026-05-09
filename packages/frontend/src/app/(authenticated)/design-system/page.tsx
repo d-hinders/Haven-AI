@@ -13,6 +13,7 @@ import {
   AgentBudgetCard,
   AgentRulesSummary,
   ApprovalRequiredBanner,
+  CredentialHandoffCard,
   RiskExplainer,
   WalletIdentityBlock,
 } from '@/components/haven'
@@ -188,6 +189,30 @@ export default function DesignSystemPage() {
               'You can pause or revoke the agent from its detail page.',
               'Haven asks for approval before requests above the remaining budget are paid.',
             ]}
+          />
+        </div>
+      </Section>
+
+      <Section
+        title="Credential handoff"
+        description="Use a neutral card for the post-setup file. The full credential file should be the default because it includes the context an agent needs."
+      >
+        <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+          <CredentialHandoffCard
+            title="Save the credential file"
+            description="The file includes the Haven credential, agent budget, account context, and SDK quickstart."
+            primaryAction={<Button className="w-full">Download file</Button>}
+            secondaryAction={<Button className="w-full" variant="ghost">Copy file</Button>}
+            note="This credential is shown once. Save the file before closing."
+          />
+          <AgentBudgetCard
+            agentName="Research assistant"
+            walletName="Operating wallet"
+            amount="250 USDC"
+            resetPeriod="per day"
+            status="Connected"
+            statusTone="success"
+            density="compact"
           />
         </div>
       </Section>

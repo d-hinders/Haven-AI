@@ -9,6 +9,7 @@ export function AgentBudgetCard({
   resetPeriod,
   status = 'Draft',
   statusTone = 'brand',
+  density = 'normal',
   children,
 }: {
   agentName: string
@@ -17,27 +18,32 @@ export function AgentBudgetCard({
   resetPeriod: string
   status?: string
   statusTone?: 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
+  density?: 'normal' | 'compact'
   children?: ReactNode
 }) {
+  const compact = density === 'compact'
+
   return (
-    <Card hover={false} className="p-5">
+    <Card hover={false} className={compact ? 'p-4' : 'p-5'}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-medium text-[var(--v2-ink-3)]">Agent budget</p>
-          <h3 className="mt-1 text-base font-semibold text-[var(--v2-ink)]">{agentName}</h3>
+          <h3 className={`${compact ? 'mt-0.5 text-sm' : 'mt-1 text-base'} font-semibold text-[var(--v2-ink)]`}>
+            {agentName}
+          </h3>
         </div>
         <StatusBadge tone={statusTone}>{status}</StatusBadge>
       </div>
 
-      <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+      <div className={`${compact ? 'mt-3 p-3' : 'mt-5 p-4'} rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]`}>
         <p className="text-xs font-medium text-[var(--v2-ink-3)]">Can spend</p>
-        <p className="mt-1 text-2xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+        <p className={`${compact ? 'text-xl' : 'text-2xl'} mt-1 font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular`}>
           {amount}
         </p>
-        <p className="mt-1 text-sm text-[var(--v2-ink-2)]">{resetPeriod}</p>
+        <p className={`${compact ? 'text-xs' : 'text-sm'} mt-1 text-[var(--v2-ink-2)]`}>{resetPeriod}</p>
       </div>
 
-      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+      <dl className={`${compact ? 'mt-3 gap-2 text-xs' : 'mt-4 gap-3 text-sm'} grid sm:grid-cols-2`}>
         <div>
           <dt className="text-xs font-medium text-[var(--v2-ink-3)]">From wallet</dt>
           <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
@@ -48,7 +54,11 @@ export function AgentBudgetCard({
         </div>
       </dl>
 
-      {children && <div className="mt-4 border-t border-[var(--v2-border)] pt-4">{children}</div>}
+      {children && (
+        <div className={`${compact ? 'mt-3 pt-3' : 'mt-4 pt-4'} border-t border-[var(--v2-border)]`}>
+          {children}
+        </div>
+      )}
     </Card>
   )
 }

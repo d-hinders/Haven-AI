@@ -1144,7 +1144,7 @@ export default function CreateAgentModal({
 
               <CredentialHandoffCard
                 title="Save the credential file"
-                description="The file includes the Haven credential, agent budget, account context, and SDK quickstart your agent needs."
+                description="Download or copy this file before closing. Your agent needs it to make payments within the rules you set."
                 primaryAction={
                   <Button onClick={handleDownloadHandoff} className="w-full">
                     Download file
@@ -1155,7 +1155,8 @@ export default function CreateAgentModal({
                     {copiedHandoff ? 'Copied file' : 'Copy file'}
                   </Button>
                 }
-                note={generatedPrivateKey ? 'This credential is shown once. Save the file before closing.' : undefined}
+                note={generatedPrivateKey ? 'This credential is shown once. Haven cannot show it again after you close this window.' : undefined}
+                saved={credentialsSaved}
               />
 
               <button

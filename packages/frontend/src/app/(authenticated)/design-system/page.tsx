@@ -195,15 +195,15 @@ export default function DesignSystemPage() {
 
       <Section
         title="Credential handoff"
-        description="Use a neutral card for the post-setup file. The full credential file should be the default because it includes the context an agent needs."
+        description="Use an action-required card for post-setup credentials. The full credential file should be the default because it includes the context an agent needs."
       >
         <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
           <CredentialHandoffCard
             title="Save the credential file"
-            description="The file includes the Haven credential, agent budget, account context, and SDK quickstart."
+            description="Download or copy this file before closing. Your agent needs it to make payments within the rules you set."
             primaryAction={<Button className="w-full">Download file</Button>}
             secondaryAction={<Button className="w-full" variant="ghost">Copy file</Button>}
-            note="This credential is shown once. Save the file before closing."
+            note="This credential is shown once. Haven cannot show it again after the window closes."
           />
           <AgentBudgetCard
             agentName="Research assistant"

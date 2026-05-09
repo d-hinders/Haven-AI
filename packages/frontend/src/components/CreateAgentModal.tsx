@@ -1159,12 +1159,14 @@ export default function CreateAgentModal({
                 saved={credentialsSaved}
               />
 
-              <button
+              <Button
+                variant="ghost"
                 onClick={handleClose}
-                className="w-full text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
+                disabled={!credentialsSaved}
+                className="w-full"
               >
                 Done
-              </button>
+              </Button>
             </div>
           )}
         </div>

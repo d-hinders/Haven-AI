@@ -4,6 +4,8 @@ This is the durable product UX entrypoint for Haven. Read it together with the c
 
 - Visual system: [DESIGN_SYSTEM.md](./design_system/DESIGN_SYSTEM.md)
 - UX copy: [UX_COPY_GUIDELINES.md](./design_system/UX_COPY_GUIDELINES.md)
+- Screen recipes: [haven-screen-recipes.md](./ux/haven-screen-recipes.md)
+- AI review checklist: [haven-design-review.md](./ux/haven-design-review.md)
 - Redesign implementation history: [REDESIGN_HANDOFF.md](./design_system/REDESIGN_HANDOFF.md)
 
 When these docs overlap, use this order of authority:
@@ -11,6 +13,7 @@ When these docs overlap, use this order of authority:
 1. `UX_COPY_GUIDELINES.md` for user-facing wording and terminology.
 2. `DESIGN_SYSTEM.md` for visual tokens, components, layout, and interaction styling.
 3. This file for product doctrine, IA, accessibility, and money-movement UX rules.
+4. `haven-screen-recipes.md` for repeatable product structures and `haven-design-review.md` for closeout review.
 
 The old dark app system is retired. Do not extend old dark token patterns, gradient buttons, glow shadows, or dark modal surfaces unless a future design-system doc explicitly reintroduces them.
 

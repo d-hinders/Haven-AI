@@ -303,6 +303,12 @@ export default function CreateAgentModal({
     // Don't add duplicate tokens
     if (allowances.some((a) => a.tokenSymbol === addToken)) return
 
+    const nextToken = tokenOptions.find(
+      (t) =>
+        t.symbol !== addToken &&
+        !allowances.some((a) => a.tokenSymbol === t.symbol),
+    )
+
     setAllowances((prev) => [
       ...prev,
       {
@@ -314,10 +320,14 @@ export default function CreateAgentModal({
       },
     ])
     setAddAmount('')
+    setAddToken(nextToken?.symbol ?? '')
   }
 
   function handleRemoveAllowance(symbol: string) {
     setAllowances((prev) => prev.filter((a) => a.tokenSymbol !== symbol))
+    if (tokenOptions.some((t) => t.symbol === symbol)) {
+      setAddToken(symbol)
+    }
   }
 
   function resetLabel(mins: number) {
@@ -922,36 +932,6 @@ export default function CreateAgentModal({
                 )}
               </div>
 
-              {/* ── Generate mode ───────────────────────── */}
-              {keyMode === 'generate' && generatedPrivateKey && (
-                <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3">
-                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide">
-                    Credential address
-                  </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--v2-surface)] px-3 py-2 font-mono text-xs text-[var(--v2-ink-2)]">
-                      {delegateAddress}
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard(delegateAddress, () => {})}
-                      className="flex-shrink-0 rounded-md p-2 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-                      title="Copy address"
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" />
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                      </svg>
-                    </button>
-                  </div>
-                  <button
-                    onClick={handleGenerateKey}
-                    className="mt-2 text-[11px] text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink-2)]"
-                  >
-                    Create a different credential
-                  </button>
-                </div>
-              )}
-
               <div className="flex gap-3">
                 <Button
                   variant="ghost"
@@ -997,7 +977,7 @@ export default function CreateAgentModal({
                         ))}
                       </div>
                     ),
-                    helper: 'Over-budget requests wait for approval.',
+                    helper: 'Agents can still start larger payments, but you approve them manually.',
                   },
                   {
                     label: 'Credential',
@@ -1007,12 +987,16 @@ export default function CreateAgentModal({
                 ]}
               />
 
-              <ApprovalRequiredBanner density="compact">
-                Requests above the remaining agent budget wait for your approval before any money moves.
+              <ApprovalRequiredBanner
+                title="Payments above budget need approval"
+                density="compact"
+                tone="neutral"
+              >
+                Agents can still initiate payments above the remaining budget, but you will approve them manually before any money moves.
               </ApprovalRequiredBanner>
 
               {(safeDetails?.threshold ?? 1) > 1 && (
-                <ApprovalRequiredBanner title="More approvals needed" density="compact">
+                <ApprovalRequiredBanner title="More approvals needed" density="compact" tone="neutral">
                   This Haven account requires {safeDetails?.threshold} of {safeDetails?.owners?.length} approvals.
                   Haven will submit the agent rules for approval.
                 </ApprovalRequiredBanner>

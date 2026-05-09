@@ -180,8 +180,8 @@ export default function DesignSystemPage() {
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <ApprovalRequiredBanner>
-            This payment is above the agent budget. Review the request before any money moves.
+          <ApprovalRequiredBanner tone="neutral">
+            Agents can still initiate payments above the remaining budget, but you approve them manually before any money moves.
           </ApprovalRequiredBanner>
           <RiskExplainer
             items={[
@@ -292,8 +292,8 @@ export default function DesignSystemPage() {
               status="Connected"
               statusTone="success"
             />
-            <ApprovalRequiredBanner title="You stay in control">
-              Anything above 75 EURe waits for approval before it is paid.
+            <ApprovalRequiredBanner title="You stay in control" tone="neutral">
+              Anything above 75 EURe waits for your manual approval before it is paid.
             </ApprovalRequiredBanner>
           </div>
         </div>

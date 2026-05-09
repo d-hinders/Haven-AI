@@ -13,6 +13,7 @@ import {
   AgentBudgetCard,
   AgentRulesSummary,
   ApprovalRequiredBanner,
+  CredentialHandoffCard,
   RiskExplainer,
   WalletIdentityBlock,
 } from '@/components/haven'
@@ -179,8 +180,8 @@ export default function DesignSystemPage() {
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <ApprovalRequiredBanner>
-            This payment is above the agent budget. Review the request before any money moves.
+          <ApprovalRequiredBanner tone="neutral">
+            Agents can still initiate payments above the remaining budget, but you approve them manually before any money moves.
           </ApprovalRequiredBanner>
           <RiskExplainer
             items={[
@@ -188,6 +189,30 @@ export default function DesignSystemPage() {
               'You can pause or revoke the agent from its detail page.',
               'Haven asks for approval before requests above the remaining budget are paid.',
             ]}
+          />
+        </div>
+      </Section>
+
+      <Section
+        title="Credential handoff"
+        description="Use an action-required card for post-setup credentials. The full credential file should be the default because it includes the context an agent needs."
+      >
+        <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+          <CredentialHandoffCard
+            title="Save the credential file"
+            description="Download or copy this file before closing. Your agent needs it to make payments within the rules you set."
+            primaryAction={<Button className="w-full">Download file</Button>}
+            secondaryAction={<Button className="w-full" variant="ghost">Copy file</Button>}
+            note="This credential is shown once. Haven cannot show it again after the window closes."
+          />
+          <AgentBudgetCard
+            agentName="Research assistant"
+            walletName="Operating wallet"
+            amount="250 USDC"
+            resetPeriod="per day"
+            status="Connected"
+            statusTone="success"
+            density="compact"
           />
         </div>
       </Section>
@@ -267,8 +292,8 @@ export default function DesignSystemPage() {
               status="Connected"
               statusTone="success"
             />
-            <ApprovalRequiredBanner title="You stay in control">
-              Anything above 75 EURe waits for approval before it is paid.
+            <ApprovalRequiredBanner title="You stay in control" tone="neutral">
+              Anything above 75 EURe waits for your manual approval before it is paid.
             </ApprovalRequiredBanner>
           </div>
         </div>

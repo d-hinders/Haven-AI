@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { decodePayment } from 'x402/schemes'
 import { HavenClient } from './client.js'
 import {
   buildX402IdempotencyKey,
@@ -20,7 +19,7 @@ const accepted: X402PaymentOption = {
 }
 
 const paymentRequired: X402PaymentRequired = {
-  x402Version: 1,
+  x402Version: 2,
   error: 'Payment required',
   resource: {
     url: 'https://mcp.soundside.ai/mcp',
@@ -205,14 +204,13 @@ describe('x402 helpers', () => {
     const retryInit = fetchMock.mock.calls[3][1] as RequestInit
     const retryHeaders = new Headers(retryInit.headers)
     const x402Header = retryHeaders.get('X-PAYMENT') ?? ''
-    const payment = decodePayment(x402Header)
+    const payment = decodeHeader(x402Header)
 
     expect(retryHeaders.get('x402-wallet')).toBe(delegateAddress)
     expect(retryHeaders.has('PAYMENT-SIGNATURE')).toBe(false)
     expect(payment).toMatchObject({
-      x402Version: 1,
-      scheme: 'exact',
-      network: 'base',
+      x402Version: 2,
+      accepted,
       payload: {
         authorization: {
           from: delegateAddress,

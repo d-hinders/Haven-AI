@@ -1,4 +1,4 @@
-import { decodePayment, exact } from 'x402/schemes'
+import { exact } from 'x402/schemes'
 import { privateKeyToAccount } from 'viem/accounts'
 import { signHash, addressFromKey, verifySignature } from './signer.js'
 import type {
@@ -423,7 +423,19 @@ export class HavenClient {
     const account = privateKeyToAccount(this.delegateKey as `0x${string}`)
     const requirements = toStandardPaymentRequirements(paymentRequired, option)
 
-    return exact.evm.createPaymentHeader(account, paymentRequired.x402Version, requirements)
+    const header = await exact.evm.createPaymentHeader(
+      account,
+      paymentRequired.x402Version,
+      requirements,
+    )
+    if (paymentRequired.x402Version < 2) return header
+
+    const payment = decodeBase64Json<{ payload: unknown }>(header)
+    return btoa(JSON.stringify({
+      x402Version: paymentRequired.x402Version,
+      accepted: option,
+      payload: payment.payload,
+    }))
   }
 
   private cacheX402Receipt(
@@ -647,7 +659,9 @@ function sleep(ms: number): Promise<void> {
 
 function getPaymentHeaderValidBefore(paymentHeader: string): number {
   try {
-    const payment = decodePayment(paymentHeader)
+    const payment = decodeBase64Json<{ payload?: { authorization?: { validBefore?: string } } }>(
+      paymentHeader,
+    )
     const payload = payment.payload as { authorization?: { validBefore?: string } }
     const validBeforeSeconds = Number(payload.authorization?.validBefore)
     if (Number.isFinite(validBeforeSeconds)) return validBeforeSeconds * 1000
@@ -656,4 +670,8 @@ function getPaymentHeaderValidBefore(paymentHeader: string): number {
   }
 
   return 0
+}
+
+function decodeBase64Json<T>(value: string): T {
+  return JSON.parse(atob(value)) as T
 }

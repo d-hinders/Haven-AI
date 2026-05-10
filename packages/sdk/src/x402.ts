@@ -296,6 +296,7 @@ export function buildX402IdempotencyKey(
   const bucket = Math.floor(now / X402_IDEMPOTENCY_BUCKET_MS)
   const material = [
     paymentRequired.resource.url,
+    paymentRequired.resource.description ?? '',
     option.payTo.toLowerCase(),
     option.asset.toLowerCase(),
     option.amount,

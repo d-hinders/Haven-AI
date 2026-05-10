@@ -92,7 +92,7 @@ const result = await haven.waitForConfirmation(intent.paymentId)
 
 ## x402 Protocol Support
 
-Haven natively supports the [x402](https://x402.org) payment protocol. When an API returns HTTP 402, Haven evaluates the payment against policy, executes from the Safe, and retries automatically:
+Haven natively supports the [x402](https://x402.org) payment protocol. When an API returns HTTP 402, Haven evaluates the payment against policy, funds the agent delegate wallet from the Haven wallet, signs the merchant's standard x402 payment payload, and retries automatically:
 
 ```typescript
 // Automatic — fetch() intercepts 402, pays, and retries
@@ -106,11 +106,14 @@ const apiResponse = await fetch('https://paid-api.example.com/data')
 if (apiResponse.status === 402) {
   const paymentRequired = await parsePaymentRequiredResponse(apiResponse)
   const receipt = await haven.authorizeX402(paymentRequired)
+  // Retry with { 'X-PAYMENT': receipt.paymentHeader }
   console.log(receipt.explorerUrl)
 }
 ```
 
-Supported x402 networks: `eip155:100` (Gnosis Chain) and `eip155:8453` (Base).
+Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`) and send the payment as `X-PAYMENT`. Haven's older tx-hash proof helper remains exported for Haven-native integrations, but `haven.fetch()` does not send `PAYMENT-SIGNATURE`.
+
+For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet/Safe address should use a Haven-native flow instead of standard merchant x402.
 
 ## AI Agent Integration
 
@@ -146,7 +149,7 @@ for (const block of response.content) {
 |------|-------------|
 | `make_payment` | Send a payment from the Haven-managed Safe wallet |
 | `get_payment_status` | Check the status of a previously initiated payment |
-| `authorize_x402_payment` | Pay for an HTTP 402 resource via the x402 protocol |
+| `authorize_x402_payment` | Fund the agent wallet and return a payment header for an HTTP 402 resource |
 
 ## Configuration
 
@@ -155,7 +158,7 @@ const haven = new HavenClient({
   apiKey: 'sk_agent_xxx',          // required — Haven agent API key
   delegateKey: '0x...',             // optional — enables .pay() and .sign()
   baseUrl: 'http://localhost:3001', // default
-  x402Wallet: '0x...',              // optional — sent as x402-wallet for wallet-scoped resources
+  x402Wallet: '0x...',              // optional fallback when no delegate key is configured
   requestTimeout: 30000,           // per-request timeout (ms)
   confirmationTimeout: 90000,      // polling timeout (ms)
   pollingInterval: 3000,           // polling interval (ms)

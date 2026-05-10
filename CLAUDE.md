@@ -107,10 +107,13 @@ Credentials are portable:
 ### x402 Payment Flow
 ```
 Agent encounters HTTP 402 → forwards to Haven →
-Haven policy engine evaluates → Haven signs payment from Safe →
-Agent retries with proof → Service delivers resource →
+Haven policy engine evaluates → Haven funds the delegate wallet from the Safe →
+Agent signs a standard x402 EIP-3009 payment from the delegate wallet →
+Agent retries with X-PAYMENT → merchant facilitator settles to merchant →
 Haven logs receipt
 ```
+
+For standard merchant x402, the AllowanceModule transfer is `Safe → delegate EOA`; the merchant-facing settlement is then `delegate EOA → merchant` through EIP-3009. This keeps merchant verification protocol-native, but it means the delegate can briefly hold liquid Base USDC. Treat delegate keys as hot payment keys: rotate them after suspected exposure, keep x402 allowances small and reset-bound, and reconcile/sweep stranded delegate balances when a merchant verifies but does not settle before authorization expiry.
 
 ## API Surface (POC)
 
@@ -162,6 +165,7 @@ Multiple independent layers, all need to be compromised for funds to be at risk:
 3. **Credential scoping** — Time-bound, limited scope, independently revocable
 4. **Approval flows** — Human circuit breaker for high-value actions
 5. **Monitoring** — Full audit trail: who requested what, which policy evaluated, what happened
+6. **x402 hot-wallet minimization** — Standard x402 can temporarily fund the delegate EOA so merchants can settle EIP-3009 payments. Keep these balances transient, record the merchant address separately from the funding transfer address, and add reconciliation/sweep handling for stranded funds before scaling high-volume traffic.
 
 ## Phased Development Roadmap
 

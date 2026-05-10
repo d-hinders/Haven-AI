@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { decodePayment } from 'x402/schemes'
 import { HavenClient } from './client.js'
 import {
+  buildX402IdempotencyKey,
   encodePaymentProof,
   parsePaymentRequired,
   parsePaymentRequiredResponse,
@@ -18,7 +20,7 @@ const accepted: X402PaymentOption = {
 }
 
 const paymentRequired: X402PaymentRequired = {
-  x402Version: 2,
+  x402Version: 1,
   error: 'Payment required',
   resource: {
     url: 'https://mcp.soundside.ai/mcp',
@@ -27,6 +29,9 @@ const paymentRequired: X402PaymentRequired = {
   },
   accepts: [accepted],
 }
+
+const delegateAddress = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
+const safeAddress = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 
 function decodeHeader(header: string): unknown {
   return JSON.parse(atob(header))
@@ -57,7 +62,48 @@ describe('x402 helpers', () => {
     await expect(parsePaymentRequiredResponse(response)).resolves.toEqual(paymentRequired)
   })
 
-  it('encodes a Haven tx-hash proof with the selected x402 option', () => {
+  it('normalizes official x402 JSON bodies that keep resource fields on accepts', async () => {
+    const officialBody = {
+      x402Version: 1,
+      accepts: [
+        {
+          scheme: 'exact',
+          network: 'base',
+          maxAmountRequired: accepted.amount,
+          resource: paymentRequired.resource.url,
+          description: paymentRequired.resource.description,
+          mimeType: paymentRequired.resource.mimeType,
+          payTo: accepted.payTo,
+          maxTimeoutSeconds: accepted.maxTimeoutSeconds,
+          asset: accepted.asset,
+          extra: accepted.extra,
+        },
+      ],
+      error: 'X-PAYMENT header is required',
+    }
+    const response = new Response(JSON.stringify(officialBody), {
+      status: 402,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    await expect(parsePaymentRequiredResponse(response)).resolves.toMatchObject({
+      x402Version: 1,
+      resource: paymentRequired.resource,
+      accepts: [
+        {
+          ...accepted,
+          network: 'base',
+          amount: accepted.amount,
+          maxAmountRequired: accepted.amount,
+          resource: paymentRequired.resource.url,
+          description: paymentRequired.resource.description,
+          mimeType: paymentRequired.resource.mimeType,
+        },
+      ],
+    })
+  })
+
+  it('keeps the legacy Haven tx-hash proof encoder available', () => {
     const header = encodePaymentProof({
       txHash: '0xabc',
       paymentId: 'pay_123',
@@ -85,7 +131,7 @@ describe('x402 helpers', () => {
     })
   })
 
-  it('retries paid fetches with a Haven tx-hash proof', async () => {
+  it('funds the delegate wallet and retries paid fetches with a standard x402 header', async () => {
     const backendUrl = 'https://haven.example'
     const resourceUrl = paymentRequired.resource.url
     const fetchMock = vi
@@ -98,17 +144,17 @@ describe('x402 helpers', () => {
         payment_id: 'pay_123',
         status: 'pending_signature',
         chain_id: 8453,
-        safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+        safe_address: safeAddress,
         token: 'USDC',
         amount: '0.02',
-        to: accepted.payTo,
+        to: delegateAddress,
         resource_url: resourceUrl,
         sign_data: {
           hash: `0x${'11'.repeat(32)}`,
           components: {
-            safe: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+            safe: safeAddress,
             token: accepted.asset,
-            to: accepted.payTo,
+            to: delegateAddress,
             amount: accepted.amount,
             payment_token: '0x0000000000000000000000000000000000000000',
             payment: '0',
@@ -124,7 +170,7 @@ describe('x402 helpers', () => {
         chain_id: 8453,
         token: 'USDC',
         amount: '0.02',
-        to: accepted.payTo,
+        to: delegateAddress,
         explorer_url: 'https://basescan.org/tx/0xabc',
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
@@ -133,7 +179,7 @@ describe('x402 helpers', () => {
       apiKey: 'sk_agent_test',
       delegateKey: `0x${'01'.repeat(32)}`,
       baseUrl: backendUrl,
-      x402Wallet: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+      x402Wallet: safeAddress,
     })
 
     const response = await haven.fetch(resourceUrl, {
@@ -145,23 +191,73 @@ describe('x402 helpers', () => {
     expect(response.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(4)
 
+    const fundingInit = fetchMock.mock.calls[1][1] as RequestInit
+    expect(JSON.parse(fundingInit.body as string)).toMatchObject({
+      url: resourceUrl,
+      payTo: delegateAddress,
+      merchantPayTo: accepted.payTo,
+      amount: accepted.amount,
+      asset: accepted.asset,
+      network: accepted.network,
+      idempotencyKey: expect.stringMatching(/^x402:[0-9a-f]{16}$/),
+    })
+
     const retryInit = fetchMock.mock.calls[3][1] as RequestInit
     const retryHeaders = new Headers(retryInit.headers)
-    const proof = decodeHeader(retryHeaders.get('PAYMENT-SIGNATURE') ?? '')
+    const x402Header = retryHeaders.get('X-PAYMENT') ?? ''
+    const payment = decodePayment(x402Header)
 
-    expect(retryHeaders.get('x402-wallet')).toBe('0x135a9215604711AC70d970e12Caa812c53537EF4')
-    expect(proof).toMatchObject({
-      x402Version: 2,
-      resource: { url: resourceUrl },
-      accepted,
+    expect(retryHeaders.get('x402-wallet')).toBe(delegateAddress)
+    expect(retryHeaders.has('PAYMENT-SIGNATURE')).toBe(false)
+    expect(payment).toMatchObject({
+      x402Version: 1,
+      scheme: 'exact',
+      network: 'base',
       payload: {
-        type: 'haven_tx_hash',
-        txHash: '0xabc',
-        paymentId: 'pay_123',
-        settledVia: 'haven',
-        payer: '0x135a9215604711AC70d970e12Caa812c53537EF4',
-        chainId: 8453,
+        authorization: {
+          from: delegateAddress,
+          to: accepted.payTo,
+          value: accepted.amount,
+        },
       },
     })
+  })
+
+  it('does not fund the delegate wallet for unsupported Base assets', async () => {
+    const unsupportedPaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      accepts: [{
+        ...accepted,
+        asset: '0x0000000000000000000000000000000000000001',
+      }],
+    }
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(unsupportedPaymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    await expect(haven.fetch(paymentRequired.resource.url)).rejects.toThrow(
+      'No compatible payment option found',
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('builds deterministic x402 idempotency keys per 5-minute bucket', () => {
+    const now = 1778440000000
+    expect(buildX402IdempotencyKey(paymentRequired, accepted, now)).toBe(
+      buildX402IdempotencyKey(paymentRequired, accepted, now + 60_000),
+    )
+    expect(buildX402IdempotencyKey(paymentRequired, accepted, now)).not.toBe(
+      buildX402IdempotencyKey(paymentRequired, accepted, now + 300_000),
+    )
   })
 })

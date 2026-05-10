@@ -10,7 +10,12 @@
  * (see client.ts) since they need API access and signing.
  */
 
+import { createHash } from 'node:crypto'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
+import type { PaymentRequirements } from 'x402/types'
+
+const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+const X402_IDEMPOTENCY_BUCKET_MS = 300_000
 
 function decodeBase64Json<T>(value: string, label: string): T {
   try {
@@ -20,23 +25,91 @@ function decodeBase64Json<T>(value: string, label: string): T {
   }
 }
 
-function isPaymentRequired(value: unknown): value is X402PaymentRequired {
-  const candidate = value as Partial<X402PaymentRequired> | null
-  return (
-    !!candidate &&
-    typeof candidate === 'object' &&
-    typeof candidate.x402Version === 'number' &&
-    !!candidate.resource &&
-    Array.isArray(candidate.accepts)
-  )
+function normalizePaymentOption(value: unknown): X402PaymentOption | null {
+  const candidate = value as Partial<X402PaymentOption> | null
+  if (
+    !candidate ||
+    typeof candidate !== 'object' ||
+    typeof candidate.scheme !== 'string' ||
+    typeof candidate.network !== 'string' ||
+    typeof candidate.asset !== 'string' ||
+    typeof candidate.payTo !== 'string'
+  ) {
+    return null
+  }
+
+  const amount =
+    typeof candidate.amount === 'string'
+      ? candidate.amount
+      : typeof candidate.maxAmountRequired === 'string'
+        ? candidate.maxAmountRequired
+        : null
+
+  if (!amount) return null
+
+  return {
+    scheme: candidate.scheme,
+    network: candidate.network,
+    amount,
+    maxAmountRequired: candidate.maxAmountRequired,
+    resource: candidate.resource,
+    description: candidate.description,
+    mimeType: candidate.mimeType,
+    asset: candidate.asset,
+    payTo: candidate.payTo,
+    maxTimeoutSeconds: candidate.maxTimeoutSeconds ?? 30,
+    extra: candidate.extra,
+  }
 }
 
-// ── Supported networks (CAIP-2 chain IDs) ────────────────────────
+function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
+  const candidate = value as Partial<X402PaymentRequired> | null
+  if (
+    !candidate ||
+    typeof candidate !== 'object' ||
+    typeof candidate.x402Version !== 'number' ||
+    !Array.isArray(candidate.accepts)
+  ) {
+    return null
+  }
 
-/** CAIP-2 chain IDs that Haven supports for x402 payments. */
+  const accepts = candidate.accepts
+    .map((option) => normalizePaymentOption(option))
+    .filter((option): option is X402PaymentOption => !!option)
+
+  if (accepts.length === 0) return null
+
+  const first = accepts[0]
+  const resourceUrl = candidate.resource?.url ?? first.resource
+  if (!resourceUrl) return null
+
+  const resource = {
+    url: resourceUrl,
+    description: candidate.resource?.description ?? first.description,
+    mimeType: candidate.resource?.mimeType ?? first.mimeType,
+  }
+
+  return {
+    x402Version: candidate.x402Version,
+    resource,
+    accepts,
+    error: candidate.error,
+  }
+}
+
+// ── Supported networks ───────────────────────────────────────────
+
+/** Network identifiers that Haven can recognise in x402 payment requests. */
 export const SUPPORTED_X402_NETWORKS: Record<string, string> = {
   'eip155:100':  'Gnosis Chain',
   'eip155:8453': 'Base',
+  'base':        'Base',
+}
+
+/** Networks supported by the official x402 EIP-3009 exact scheme. */
+const STANDARD_X402_NETWORKS: Record<string, PaymentRequirements['network']> = {
+  'eip155:8453': 'base',
+  'base':        'base',
 }
 
 // ── Token address maps ────────────────────────────────────────────
@@ -64,6 +137,7 @@ const ALL_TOKENS: Record<string, { symbol: string; decimals: number }> = {
 const NETWORK_TOKENS: Record<string, Record<string, { symbol: string; decimals: number }>> = {
   'eip155:100':  GNOSIS_TOKENS,
   'eip155:8453': BASE_TOKENS,
+  'base':        BASE_TOKENS,
 }
 
 // ── Parser ───────────────────────────────────────────────────────
@@ -79,13 +153,19 @@ export function parsePaymentRequired(response: Response): X402PaymentRequired {
   // v2: PAYMENT-REQUIRED header
   const v2Header = response.headers.get('PAYMENT-REQUIRED')
   if (v2Header) {
-    return decodeBase64Json<X402PaymentRequired>(v2Header, 'PAYMENT-REQUIRED header')
+    const parsed = normalizePaymentRequired(
+      decodeBase64Json<unknown>(v2Header, 'PAYMENT-REQUIRED header'),
+    )
+    if (parsed) return parsed
   }
 
   // v1: X-PAYMENT header
   const v1Header = response.headers.get('X-PAYMENT')
   if (v1Header) {
-    return decodeBase64Json<X402PaymentRequired>(v1Header, 'X-PAYMENT header')
+    const parsed = normalizePaymentRequired(
+      decodeBase64Json<unknown>(v1Header, 'X-PAYMENT header'),
+    )
+    if (parsed) return parsed
   }
 
   throw new Error(
@@ -110,7 +190,8 @@ export async function parsePaymentRequiredResponse(
   } catch (headerErr) {
     try {
       const body = await response.clone().json()
-      if (isPaymentRequired(body)) return body
+      const parsed = normalizePaymentRequired(body)
+      if (parsed) return parsed
     } catch {
       // Fall through to the original, more specific header error below.
     }
@@ -149,6 +230,80 @@ export function selectPaymentOption(
 
   // No compatible option found
   return null
+}
+
+/**
+ * Select an option that can be paid with the official x402 EIP-3009 exact
+ * scheme. Haven's older tx-hash proof path can describe more networks; the
+ * merchant-verified path currently needs Base USDC.
+ */
+export function selectStandardPaymentOption(
+  accepts: X402PaymentOption[],
+): X402PaymentOption | null {
+  if (!accepts || accepts.length === 0) return null
+
+  for (const opt of accepts) {
+    if (
+      opt.scheme === 'exact' &&
+      opt.network in STANDARD_X402_NETWORKS &&
+      opt.asset.toLowerCase() === BASE_USDC_ADDRESS
+    ) {
+      return opt
+    }
+  }
+
+  return null
+}
+
+export function toStandardPaymentRequirements(
+  paymentRequired: X402PaymentRequired,
+  option: X402PaymentOption,
+): PaymentRequirements {
+  const network = STANDARD_X402_NETWORKS[option.network]
+  if (!network) {
+    throw new Error(`x402 exact payments are not supported on ${option.network}`)
+  }
+
+  if (option.scheme !== 'exact') {
+    throw new Error(`Unsupported x402 scheme: ${option.scheme}`)
+  }
+
+  return {
+    scheme: 'exact',
+    network,
+    maxAmountRequired: option.maxAmountRequired ?? option.amount,
+    resource: option.resource ?? paymentRequired.resource.url,
+    description:
+      option.description ??
+      paymentRequired.resource.description ??
+      'Haven x402 payment',
+    mimeType:
+      option.mimeType ??
+      paymentRequired.resource.mimeType ??
+      'application/octet-stream',
+    payTo: option.payTo,
+    asset: option.asset,
+    maxTimeoutSeconds: option.maxTimeoutSeconds,
+    extra: option.extra,
+  }
+}
+
+export function buildX402IdempotencyKey(
+  paymentRequired: X402PaymentRequired,
+  option: X402PaymentOption,
+  now = Date.now(),
+): string {
+  const bucket = Math.floor(now / X402_IDEMPOTENCY_BUCKET_MS)
+  const material = [
+    paymentRequired.resource.url,
+    option.payTo.toLowerCase(),
+    option.asset.toLowerCase(),
+    option.amount,
+    option.network,
+    bucket,
+  ].join('|')
+
+  return `x402:${createHash('sha256').update(material).digest('hex').slice(0, 16)}`
 }
 
 /**

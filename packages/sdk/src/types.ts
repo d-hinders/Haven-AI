@@ -126,8 +126,12 @@ export interface X402PaymentRequired {
 /** A single payment option from x402 PaymentRequired. */
 export interface X402PaymentOption {
   scheme: string             // "exact"
-  network: string            // CAIP-2 chain ID, e.g. "eip155:100"
+  network: string            // CAIP-2 chain ID or x402 network, e.g. "eip155:8453" or "base"
   amount: string             // Atomic units
+  maxAmountRequired?: string // Atomic units (official x402 field)
+  resource?: string
+  description?: string
+  mimeType?: string
   asset: string              // Token contract address
   payTo: string              // Recipient address
   maxTimeoutSeconds: number
@@ -145,6 +149,7 @@ export interface X402Receipt {
   resourceUrl: string
   explorerUrl: string
   accepted?: X402PaymentOption
+  paymentHeader?: string
   payer?: string
   chainId?: number
 }

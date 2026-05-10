@@ -10,10 +10,12 @@
  * (see client.ts) since they need API access and signing.
  */
 
+import { createHash } from 'node:crypto'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 import type { PaymentRequirements } from 'x402/types'
 
 const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+const X402_IDEMPOTENCY_BUCKET_MS = 300_000
 
 function decodeBase64Json<T>(value: string, label: string): T {
   try {
@@ -289,27 +291,19 @@ export function toStandardPaymentRequirements(
 export function buildX402IdempotencyKey(
   paymentRequired: X402PaymentRequired,
   option: X402PaymentOption,
+  now = Date.now(),
 ): string {
-  const bucketSeconds = Math.floor(Date.now() / 300_000)
+  const bucket = Math.floor(now / X402_IDEMPOTENCY_BUCKET_MS)
   const material = [
     paymentRequired.resource.url,
     option.payTo.toLowerCase(),
     option.asset.toLowerCase(),
     option.amount,
     option.network,
-    bucketSeconds,
+    bucket,
   ].join('|')
 
-  return `x402:${fnv1a(material)}`
-}
-
-function fnv1a(value: string): string {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0')
+  return `x402:${createHash('sha256').update(material).digest('hex').slice(0, 16)}`
 }
 
 /**

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { decodePayment } from 'x402/schemes'
 import { HavenClient } from './client.js'
 import {
+  buildX402IdempotencyKey,
   encodePaymentProof,
   parsePaymentRequired,
   parsePaymentRequiredResponse,
@@ -198,7 +199,7 @@ describe('x402 helpers', () => {
       amount: accepted.amount,
       asset: accepted.asset,
       network: accepted.network,
-      idempotencyKey: expect.stringMatching(/^x402:[0-9a-f]{8}$/),
+      idempotencyKey: expect.stringMatching(/^x402:[0-9a-f]{16}$/),
     })
 
     const retryInit = fetchMock.mock.calls[3][1] as RequestInit
@@ -248,5 +249,15 @@ describe('x402 helpers', () => {
       'No compatible payment option found',
     )
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('builds deterministic x402 idempotency keys per 5-minute bucket', () => {
+    const now = 1778440000000
+    expect(buildX402IdempotencyKey(paymentRequired, accepted, now)).toBe(
+      buildX402IdempotencyKey(paymentRequired, accepted, now + 60_000),
+    )
+    expect(buildX402IdempotencyKey(paymentRequired, accepted, now)).not.toBe(
+      buildX402IdempotencyKey(paymentRequired, accepted, now + 300_000),
+    )
   })
 })

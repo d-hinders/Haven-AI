@@ -271,6 +271,8 @@ export class HavenClient {
     // 2. Move the required USDC from the Haven wallet to the delegate EOA.
     // The merchant then verifies and settles the standard EIP-3009 x402
     // authorization signed by this same delegate wallet.
+    // Sign before funding so retries reuse one EIP-3009 nonce. If funding fails,
+    // the unused authorization simply expires via validBefore.
     const paymentHeader = await this.createStandardX402Header(paymentRequired, option)
     const raw = await this.post<RawX402AuthorizeResponse>('/x402', {
       url: paymentRequired.resource.url,
@@ -387,10 +389,27 @@ export class HavenClient {
     const retryHeaders = new Headers(initialInit?.headers)
     retryHeaders.set('X-PAYMENT', receipt.paymentHeader)
 
-    return globalThis.fetch(url, {
+    const retryResponse = await globalThis.fetch(url, {
       ...initialInit,
       headers: retryHeaders,
     })
+
+    if (retryResponse.status === 402) {
+      throw new HavenApiError(
+        'x402 retry was rejected after Haven funded the delegate wallet; reconciliation may be required.',
+        402,
+        {
+          marker: 'x402_retry_rejected_after_funding',
+          payment_id: receipt.paymentId,
+          tx_hash: receipt.txHash,
+          resource_url: receipt.resourceUrl,
+          merchant_to: receipt.merchantTo,
+          delegate_to: receipt.to,
+        },
+      )
+    }
+
+    return retryResponse
   }
 
   private async createStandardX402Header(

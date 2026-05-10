@@ -177,6 +177,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         `SELECT *
          FROM payment_intents
          WHERE agent_id = $1 AND x402_idempotency_key = $2
+           AND status NOT IN ('failed', 'expired')
          ORDER BY created_at DESC
          LIMIT 1`,
         [agent.id, idempotencyKey],
@@ -200,6 +201,38 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         })
       }
       if (existing?.status === 'pending_signature') {
+        let existingHash = existing.sign_hash
+        let existingNonce = existing.allowance_nonce
+        const refreshedAllowance = await getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          existing.token_address,
+        )
+
+        if (Number(refreshedAllowance.nonce) !== Number(existing.allowance_nonce)) {
+          existingNonce = refreshedAllowance.nonce
+          existingHash = await generateTransferHash(
+            agent.chain_id,
+            agent.safe_address,
+            existing.token_address,
+            existing.to_address,
+            BigInt(existing.amount_raw),
+            ZERO_ADDRESS,
+            0n,
+            refreshedAllowance.nonce,
+          )
+
+          await pool.query(
+            `UPDATE payment_intents
+             SET allowance_nonce = $1,
+                 sign_hash = $2,
+                 expires_at = NOW() + interval '10 minutes'
+             WHERE id = $3`,
+            [existingNonce, existingHash, existing.id],
+          )
+        }
+
         return reply.code(200).send({
           payment_id: existing.id,
           status: existing.status,
@@ -213,7 +246,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           merchant_to: existing.x402_merchant_address,
           resource_url: existing.x402_resource_url,
           sign_data: {
-            hash: existing.sign_hash,
+            hash: existingHash,
             components: {
               safe: existing.safe_address,
               token: existing.token_address,
@@ -221,7 +254,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
               amount: existing.amount_raw,
               payment_token: ZERO_ADDRESS,
               payment: '0',
-              nonce: existing.allowance_nonce,
+              nonce: existingNonce,
             },
             instructions:
               'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +

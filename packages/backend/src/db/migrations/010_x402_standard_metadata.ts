@@ -10,6 +10,7 @@ export async function up(client: PoolClient): Promise<void> {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_intents_x402_idempotency
       ON payment_intents(agent_id, x402_idempotency_key)
-      WHERE x402_idempotency_key IS NOT NULL;
+      WHERE x402_idempotency_key IS NOT NULL
+        AND status NOT IN ('failed', 'expired');
   `)
 }

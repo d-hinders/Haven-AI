@@ -19,7 +19,7 @@ const accepted: X402PaymentOption = {
 }
 
 const paymentRequired: X402PaymentRequired = {
-  x402Version: 2,
+  x402Version: 1,
   error: 'Payment required',
   resource: {
     url: 'https://mcp.soundside.ai/mcp',
@@ -102,7 +102,7 @@ describe('x402 helpers', () => {
     })
   })
 
-  it('encodes a Haven tx-hash proof with the selected x402 option', () => {
+  it('keeps the legacy Haven tx-hash proof encoder available', () => {
     const header = encodePaymentProof({
       txHash: '0xabc',
       paymentId: 'pay_123',
@@ -194,9 +194,11 @@ describe('x402 helpers', () => {
     expect(JSON.parse(fundingInit.body as string)).toMatchObject({
       url: resourceUrl,
       payTo: delegateAddress,
+      merchantPayTo: accepted.payTo,
       amount: accepted.amount,
       asset: accepted.asset,
       network: accepted.network,
+      idempotencyKey: expect.stringMatching(/^x402:[0-9a-f]{8}$/),
     })
 
     const retryInit = fetchMock.mock.calls[3][1] as RequestInit
@@ -205,7 +207,7 @@ describe('x402 helpers', () => {
     const payment = decodePayment(x402Header)
 
     expect(retryHeaders.get('x402-wallet')).toBe(delegateAddress)
-    expect(retryHeaders.get('PAYMENT-SIGNATURE')).toBe(x402Header)
+    expect(retryHeaders.has('PAYMENT-SIGNATURE')).toBe(false)
     expect(payment).toMatchObject({
       x402Version: 1,
       scheme: 'exact',
@@ -218,5 +220,33 @@ describe('x402 helpers', () => {
         },
       },
     })
+  })
+
+  it('does not fund the delegate wallet for unsupported Base assets', async () => {
+    const unsupportedPaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      accepts: [{
+        ...accepted,
+        asset: '0x0000000000000000000000000000000000000001',
+      }],
+    }
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(unsupportedPaymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    await expect(haven.fetch(paymentRequired.resource.url)).rejects.toThrow(
+      'No compatible payment option found',
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

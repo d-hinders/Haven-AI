@@ -96,7 +96,8 @@ const GET_STATUS_DESCRIPTION =
 const AUTHORIZE_X402_DESCRIPTION =
   'Authorize payment for an HTTP 402 (Payment Required) response. ' +
   'When a paid API returns 402 with x402 payment requirements, use this tool to fund the agent wallet and get a merchant payment header. ' +
-  'Haven evaluates the payment against policy before moving funds from the Haven wallet.'
+  'Haven evaluates the payment against policy before moving funds from the Haven wallet. ' +
+  'Use the returned payment_header as the X-PAYMENT header on the retry request.'
 
 // ── Claude (Anthropic) format ────────────────────────────────────
 

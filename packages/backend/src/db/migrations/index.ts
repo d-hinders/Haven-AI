@@ -9,6 +9,7 @@ import * as userPasskeys from './006_user_passkeys.js'
 import * as accountDefaultName from './007_account_default_name.js'
 import * as userName from './008_user_name.js'
 import * as ownerAliases from './009_owner_aliases.js'
+import * as x402StandardMetadata from './010_x402_standard_metadata.js'
 
 export interface Migration {
   version: string
@@ -31,4 +32,5 @@ export const migrations: Migration[] = [
   accountDefaultName,
   userName,
   ownerAliases,
+  x402StandardMetadata,
 ]

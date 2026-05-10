@@ -150,6 +150,7 @@ export interface X402Receipt {
   explorerUrl: string
   accepted?: X402PaymentOption
   paymentHeader?: string
+  merchantTo?: string | null
   payer?: string
   chainId?: number
 }
@@ -166,6 +167,7 @@ export interface RawX402AuthorizeResponse {
   token?: string
   amount?: string
   to?: string
+  merchant_to?: string | null
   resource_url?: string
   explorer_url?: string
   expires_at?: string

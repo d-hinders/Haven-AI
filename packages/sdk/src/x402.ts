@@ -13,6 +13,8 @@
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 import type { PaymentRequirements } from 'x402/types'
 
+const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+
 function decodeBase64Json<T>(value: string, label: string): T {
   try {
     return JSON.parse(atob(value)) as T
@@ -239,14 +241,13 @@ export function selectStandardPaymentOption(
   if (!accepts || accepts.length === 0) return null
 
   for (const opt of accepts) {
-    if (opt.network in STANDARD_X402_NETWORKS) {
-      const networkTokens = NETWORK_TOKENS[opt.network]
-      if (networkTokens?.[opt.asset.toLowerCase()]) return opt
+    if (
+      opt.scheme === 'exact' &&
+      opt.network in STANDARD_X402_NETWORKS &&
+      opt.asset.toLowerCase() === BASE_USDC_ADDRESS
+    ) {
+      return opt
     }
-  }
-
-  for (const opt of accepts) {
-    if (opt.network in STANDARD_X402_NETWORKS) return opt
   }
 
   return null
@@ -283,6 +284,32 @@ export function toStandardPaymentRequirements(
     maxTimeoutSeconds: option.maxTimeoutSeconds,
     extra: option.extra,
   }
+}
+
+export function buildX402IdempotencyKey(
+  paymentRequired: X402PaymentRequired,
+  option: X402PaymentOption,
+): string {
+  const bucketSeconds = Math.floor(Date.now() / 300_000)
+  const material = [
+    paymentRequired.resource.url,
+    option.payTo.toLowerCase(),
+    option.asset.toLowerCase(),
+    option.amount,
+    option.network,
+    bucketSeconds,
+  ].join('|')
+
+  return `x402:${fnv1a(material)}`
+}
+
+function fnv1a(value: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
 /**

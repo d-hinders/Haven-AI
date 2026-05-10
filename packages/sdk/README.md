@@ -111,7 +111,9 @@ if (apiResponse.status === 402) {
 }
 ```
 
-Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`). The `x402-wallet` identity for automatic retries is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment.
+Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`) and send the payment as `X-PAYMENT`. Haven's older tx-hash proof helper remains exported for Haven-native integrations, but `haven.fetch()` does not send `PAYMENT-SIGNATURE`.
+
+For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet/Safe address should use a Haven-native flow instead of standard merchant x402.
 
 ## AI Agent Integration
 
@@ -147,7 +149,7 @@ for (const block of response.content) {
 |------|-------------|
 | `make_payment` | Send a payment from the Haven-managed Safe wallet |
 | `get_payment_status` | Check the status of a previously initiated payment |
-| `authorize_x402_payment` | Pay for an HTTP 402 resource via the x402 protocol |
+| `authorize_x402_payment` | Fund the agent wallet and return a payment header for an HTTP 402 resource |
 
 ## Configuration
 

@@ -22,12 +22,14 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 interface X402AuthorizeBody {
   url: string
   payTo: string
+  merchantPayTo?: string
   amount: string          // atomic units
   asset: string           // token contract address
-  network: string         // CAIP-2 chain ID
+  network: string         // CAIP-2 chain ID or x402 network name
   description?: string
   maxTimeoutSeconds?: number
   category?: string       // api_access, data, compute
+  idempotencyKey?: string
   signature?: string      // delegate signature (optional — enables one-shot authorize+execute)
 }
 
@@ -50,6 +52,15 @@ function isValidAddress(addr: string): boolean {
  */
 function normaliseAddress(addr: string): string {
   return ethers.getAddress(addr.toLowerCase())
+}
+
+function chainIdFromX402Network(network: string): number | null {
+  if (network === 'base') return 8453
+  if (network.startsWith('eip155:')) {
+    const chainId = Number(network.slice('eip155:'.length))
+    return Number.isInteger(chainId) ? chainId : null
+  }
+  return null
 }
 
 /** Resolve a token from its contract address for a specific chain. */
@@ -76,8 +87,18 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
    */
   app.post<{ Body: X402AuthorizeBody }>('/', async (request, reply) => {
     const agent = request.agent as AgentContext
-    const { url, amount, asset, network, description, category, signature } = request.body
+    const {
+      url,
+      amount,
+      asset,
+      network,
+      description,
+      category,
+      idempotencyKey,
+      signature,
+    } = request.body
     let { payTo } = request.body
+    let { merchantPayTo } = request.body
 
     // 1. Validate inputs
     if (!url || typeof url !== 'string') {
@@ -96,7 +117,29 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Asset (token address) is required' })
     }
     if (!network || typeof network !== 'string') {
-      return reply.code(400).send({ error: 'Network (CAIP-2 chain ID) is required' })
+      return reply.code(400).send({ error: 'Network is required' })
+    }
+    const requestedChainId = chainIdFromX402Network(network)
+    if (!requestedChainId) {
+      return reply.code(400).send({ error: `Unsupported x402 network: ${network}` })
+    }
+    if (requestedChainId !== agent.chain_id) {
+      return reply.code(400).send({
+        error: `x402 network ${network} does not match agent chain ${agent.chain_id}`,
+      })
+    }
+    if (merchantPayTo !== undefined) {
+      if (!merchantPayTo || !isValidAddress(merchantPayTo)) {
+        return reply.code(400).send({ error: 'Valid merchantPayTo address is required' })
+      }
+      merchantPayTo = normaliseAddress(merchantPayTo)
+    }
+    if (idempotencyKey !== undefined && (
+      typeof idempotencyKey !== 'string' ||
+      idempotencyKey.length === 0 ||
+      idempotencyKey.length > 128
+    )) {
+      return reply.code(400).send({ error: 'idempotencyKey must be a non-empty string up to 128 characters' })
     }
 
     // 2. Resolve token from asset address
@@ -128,6 +171,72 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
     // Human-readable amount for storage
     const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
+
+    if (idempotencyKey) {
+      const existingResult = await pool.query(
+        `SELECT *
+         FROM payment_intents
+         WHERE agent_id = $1 AND x402_idempotency_key = $2
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [agent.id, idempotencyKey],
+      )
+      const existing = existingResult.rows[0]
+      if (existing?.status === 'confirmed' && existing.tx_hash) {
+        return reply.code(200).send({
+          success: true,
+          payment_id: existing.id,
+          status: existing.status,
+          tx_hash: existing.tx_hash,
+          chain_id: existing.chain_id ?? agent.chain_id,
+          safe_address: existing.safe_address,
+          payer: existing.safe_address,
+          token: existing.token_symbol,
+          amount: existing.amount_human,
+          to: existing.to_address,
+          merchant_to: existing.x402_merchant_address,
+          resource_url: existing.x402_resource_url,
+          explorer_url: getExplorerUrl(existing.chain_id ?? agent.chain_id, 'tx', existing.tx_hash),
+        })
+      }
+      if (existing?.status === 'pending_signature') {
+        return reply.code(200).send({
+          payment_id: existing.id,
+          status: existing.status,
+          expires_at: existing.expires_at,
+          chain_id: existing.chain_id ?? agent.chain_id,
+          safe_address: existing.safe_address,
+          payer: existing.safe_address,
+          token: existing.token_symbol,
+          amount: existing.amount_human,
+          to: existing.to_address,
+          merchant_to: existing.x402_merchant_address,
+          resource_url: existing.x402_resource_url,
+          sign_data: {
+            hash: existing.sign_hash,
+            components: {
+              safe: existing.safe_address,
+              token: existing.token_address,
+              to: existing.to_address,
+              amount: existing.amount_raw,
+              payment_token: ZERO_ADDRESS,
+              payment: '0',
+              nonce: existing.allowance_nonce,
+            },
+            instructions:
+              'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
+              'Then POST /payments/' + existing.id + '/sign with { signature } to execute.',
+          },
+        })
+      }
+      if (existing) {
+        return reply.code(409).send({
+          payment_id: existing.id,
+          status: existing.status,
+          error: 'x402 payment already in progress',
+        })
+      }
+    }
 
     // 4. Policy check: agent must have this token in the on-chain allowance config
     const dbAllowance = await pool.query(
@@ -179,7 +288,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     const effective = computeEffectiveAllowance(onChainAllowance)
     if (amountRaw > effective.remaining) {
       const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
-      const approvalReason = `x402 payment for ${url}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
+      const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''
+      const approvalReason = `x402 payment for ${url}${merchantPart}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
 
       const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
         `INSERT INTO approval_requests (
@@ -232,16 +342,16 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
         to_address, amount_raw, amount_human, delegate_address,
         allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
-        expires_at
+        x402_merchant_address, x402_idempotency_key, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
-        'x402', $13, $14, NOW() + interval '10 minutes')
+        'x402', $13, $14, $15, $16, NOW() + interval '10 minutes')
       RETURNING *`,
       [
         agent.id, agent.user_id, agent.safe_address, agent.chain_id,
         tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
         amountRaw.toString(), amountHuman, agent.delegate_address,
         onChainAllowance.nonce, signHash,
-        url, category ?? null,
+        url, category ?? null, merchantPayTo?.toLowerCase() ?? null, idempotencyKey ?? null,
       ],
     )
     const intent = intentResult.rows[0]
@@ -314,6 +424,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           token: tokenConfig.symbol,
           amount: amountHuman,
           to: payTo.toLowerCase(),
+          merchant_to: merchantPayTo?.toLowerCase() ?? null,
           resource_url: url,
           explorer_url: getExplorerUrl(agent.chain_id, 'tx', txHash),
         })
@@ -344,6 +455,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       token: tokenConfig.symbol,
       amount: amountHuman,
       to: payTo.toLowerCase(),
+      merchant_to: merchantPayTo?.toLowerCase() ?? null,
       resource_url: url,
       sign_data: {
         hash: signHash,

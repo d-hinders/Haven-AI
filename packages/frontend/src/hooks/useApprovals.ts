@@ -8,12 +8,15 @@ export interface ApprovalRequest {
   agent_id: string
   agent_name: string
   safe_address: string
+  chain_id: number
   token_symbol: string
   token_address: string
   to_address: string
   amount_raw: string
   amount_human: string
   reason: string | null
+  source: string
+  x402_resource_url: string | null
   status: string
   tx_hash: string | null
   reviewed_at: string | null
@@ -23,21 +26,25 @@ export interface ApprovalRequest {
 
 interface ApprovalsResponse {
   approvals: ApprovalRequest[]
-  pending_count: number
+  actionable_count?: number
+  pending_count?: number
 }
 
 export function useApprovals(pollInterval = 15000) {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
-  const [pendingCount, setPendingCount] = useState(0)
+  const [actionableCount, setActionableCount] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchApprovals = useCallback(async () => {
     try {
+      setError(null)
       const data = await api.get<ApprovalsResponse>('/approvals?status=all')
       setApprovals(data.approvals)
-      setPendingCount(data.pending_count)
-    } catch {
-      // Silently fail — user might not be logged in
+      setActionableCount(data.actionable_count ?? data.pending_count ?? 0)
+    } catch (err) {
+      console.error('Could not load approvals:', err)
+      setError('Could not load approvals. Try again in a moment.')
     } finally {
       setLoading(false)
     }
@@ -62,6 +69,11 @@ export function useApprovals(pollInterval = 15000) {
     await fetchApprovals()
   }, [fetchApprovals])
 
+  const markProposed = useCallback(async (id: string) => {
+    await api.post(`/approvals/${id}/proposed`)
+    await fetchApprovals()
+  }, [fetchApprovals])
+
   const markExecuted = useCallback(async (id: string, txHash: string) => {
     await api.post(`/approvals/${id}/executed`, { tx_hash: txHash })
     await fetchApprovals()
@@ -69,10 +81,12 @@ export function useApprovals(pollInterval = 15000) {
 
   return {
     approvals,
-    pendingCount,
+    actionableCount,
     loading,
+    error,
     approve,
     reject,
+    markProposed,
     markExecuted,
     refetch: fetchApprovals,
   }

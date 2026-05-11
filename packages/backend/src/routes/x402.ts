@@ -327,14 +327,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
         `INSERT INTO approval_requests (
           agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, reason, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
+          to_address, amount_raw, amount_human, reason, source, x402_resource_url, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'x402', $11, 'pending',
           NOW() + interval '24 hours')
         RETURNING id, status, expires_at`,
         [
           agent.id, agent.user_id, agent.safe_address, agent.chain_id,
           tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
-          amountRaw.toString(), amountHuman, approvalReason,
+          amountRaw.toString(), amountHuman, approvalReason, url,
         ],
       )
       const approval = approvalResult.rows[0]

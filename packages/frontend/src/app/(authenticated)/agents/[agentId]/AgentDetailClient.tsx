@@ -46,7 +46,7 @@ function statusTone(status: AgentStatus | string): 'success' | 'warning' | 'dang
 }
 
 function activityStatusLabel(status: string): string {
-  if (status === 'confirmed' || status === 'executed') return 'Settled'
+  if (status === 'confirmed' || status === 'executed') return 'Sent'
   if (status === 'pending' || status === 'pending_approval') return 'Needs approval'
   if (status === 'failed') return 'Failed'
   if (status === 'rejected') return 'Rejected'
@@ -54,7 +54,7 @@ function activityStatusLabel(status: string): string {
 }
 
 function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
-  if (status === 'confirmed' || status === 'executed') return 'success'
+  if (status === 'confirmed' || status === 'executed') return 'neutral'
   if (status === 'pending' || status === 'pending_approval') return 'warning'
   if (status === 'failed' || status === 'rejected') return 'danger'
   return 'neutral'

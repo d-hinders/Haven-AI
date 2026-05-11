@@ -102,7 +102,7 @@ export default function DesignSystemPage() {
               <Button variant="danger">Danger</Button>
             </div>
             <div className="mt-5 flex flex-wrap items-center gap-2">
-              <StatusBadge tone="success">Settled</StatusBadge>
+              <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs approval</StatusBadge>
               <StatusBadge tone="danger">Failed</StatusBadge>
               <StatusBadge tone="brand">Connected</StatusBadge>
@@ -227,37 +227,25 @@ export default function DesignSystemPage() {
             </div>
             <AgentActivityRow
               title="Agent payment"
-              description="Paid API provider"
+              description={<MovementExample from="Research assistant" to="API provider" />}
               amount="-12.00 USDC"
-              status="Settled"
-              statusTone="success"
-              details={[
-                { label: 'Recipient', value: 'API provider' },
-                { label: 'Source', value: 'Research assistant' },
-              ]}
+              status="Sent"
+              statusTone="neutral"
             />
             <AgentActivityRow
               title="Approval request"
-              description="Cloud inference request"
+              description={<MovementExample from="Research assistant" to="Cloud vendor" />}
               amount="-320.00 USDC"
               status="Needs approval"
               statusTone="warning"
-              details={[
-                { label: 'Recipient', value: 'Cloud vendor' },
-                { label: 'Source', value: 'Research assistant' },
-              ]}
             />
             <AgentActivityRow
               title="Payment rejected"
-              description="The request was blocked by your agent rules"
+              description={<MovementExample from="Research assistant" to="Unknown vendor" />}
               amount="-80.00 USDC"
               amountTone="danger"
               status="Failed"
               statusTone="danger"
-              details={[
-                { label: 'Recipient', value: 'Unknown vendor' },
-                { label: 'Source', value: 'Research assistant' },
-              ]}
             />
           </Card>
         </div>

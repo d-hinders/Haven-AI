@@ -4,6 +4,7 @@ import type { FastifyBaseLogger } from 'fastify'
 import pool from '../../db.js'
 
 const SAFE_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'
+const LOWERCASE_SAFE_ADDRESS = SAFE_ADDRESS.toLowerCase()
 const SENDER = '0x55C9d84427756D6f82480427Bb778F6dc0cC755E'
 const TX_HASH = '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1'
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
@@ -22,6 +23,7 @@ afterEach(() => {
 
 describe('fetchSafeTransactions', () => {
   it('uses Safe Transaction Service transfers when Base Blockscout address history is empty', async () => {
+    let safeServiceUrl = ''
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString()
 
@@ -34,6 +36,7 @@ describe('fetchSafeTransactions', () => {
       }
 
       if (url.includes('/api/v1/safes/') && url.includes('/transfers/')) {
+        safeServiceUrl = url
         return jsonResponse({
           count: 1,
           next: null,
@@ -67,7 +70,7 @@ describe('fetchSafeTransactions', () => {
 
     const result = await fetchSafeTransactions({
       safeId: 'safe-id',
-      safeAddress: SAFE_ADDRESS,
+      safeAddress: LOWERCASE_SAFE_ADDRESS,
       chainId: 8453,
       log: { warn: vi.fn() } as unknown as FastifyBaseLogger,
       fresh: true,
@@ -96,6 +99,7 @@ describe('fetchSafeTransactions', () => {
         'https://api.safe.global/tx-service/base/api/v1/safes/',
       ),
     )
+    expect(safeServiceUrl).toContain(`/safes/${SAFE_ADDRESS}/transfers/`)
   })
 })
 

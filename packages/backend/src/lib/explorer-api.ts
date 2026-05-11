@@ -13,6 +13,7 @@
  *
  * The chain registry picks one per chain.
  */
+import { getAddress } from 'ethers'
 import { getChain } from './chains.js'
 
 // ── Normalized tx shapes (Etherscan-compatible) ───────────────────
@@ -205,8 +206,9 @@ export async function fetchSafeServiceTransfers(
   offset = 50,
 ): Promise<SafeTransfer[]> {
   const chain = getChain(chainId)
+  const checksumAddress = toChecksumAddress(address)
   const url = new URL(
-    `${chain.safeTxServiceUrl.replace(/\/$/, '')}/api/v1/safes/${address}/transfers/`,
+    `${chain.safeTxServiceUrl.replace(/\/$/, '')}/api/v1/safes/${checksumAddress}/transfers/`,
   )
   url.searchParams.set('limit', String(offset))
 
@@ -217,6 +219,14 @@ export async function fetchSafeServiceTransfers(
 
   const data = (await response.json()) as SafeTransferPage
   return data.results ?? []
+}
+
+function toChecksumAddress(address: string): string {
+  try {
+    return getAddress(address)
+  } catch {
+    return address
+  }
 }
 
 function isoToUnix(iso: string): string {

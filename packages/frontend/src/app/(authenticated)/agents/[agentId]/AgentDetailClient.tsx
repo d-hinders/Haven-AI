@@ -7,7 +7,7 @@ import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type AgentStatus } from '@/hooks/useAgents'
-import { useAgentActivity } from '@/hooks/useAgentActivity'
+import { useAgentActivity, type ActivityItem } from '@/hooks/useAgentActivity'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
@@ -57,6 +57,21 @@ function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 
   if (status === 'pending' || status === 'pending_approval') return 'warning'
   if (status === 'failed' || status === 'rejected') return 'danger'
   return 'neutral'
+}
+
+function activityTitle(item: ActivityItem): string {
+  if (item.type === 'approval') return 'Approval request'
+  if (item.status === 'failed') return 'Payment failed'
+  if (item.status === 'rejected') return 'Payment rejected'
+  return 'Agent payment'
+}
+
+function activityDescription(item: ActivityItem): string {
+  if (item.reason) return item.reason
+  if (item.x402_resource_url) return 'External resource request.'
+  return item.type === 'approval'
+    ? 'This request needs approval before any money moves.'
+    : 'Payment activity from this agent.'
 }
 
 function formatAllowanceAmount(amount: string, decimals: number): string {
@@ -505,12 +520,17 @@ export default function AgentDetailClient({ agentId }: Props) {
                 {activity.map((item) => (
                   <AgentActivityRow
                     key={`${item.type}-${item.id}`}
-                    title={`${item.type === 'approval' ? 'Approval request' : 'Payment'} to ${truncate(item.to)}`}
-                    description={item.reason || item.x402_resource_url || 'Agent activity'}
-                    amount={`${item.amount} ${item.token}`}
+                    title={activityTitle(item)}
+                    description={activityDescription(item)}
+                    amount={`-${item.amount} ${item.token}`}
+                    amountTone={item.status === 'failed' || item.status === 'rejected' ? 'danger' : 'neutral'}
                     status={activityStatusLabel(item.status)}
                     statusTone={activityStatusTone(item.status)}
                     timestamp={timeAgo(item.created_at)}
+                    details={[
+                      { label: 'Recipient', value: truncate(item.to) },
+                      { label: 'Source', value: item.source ?? 'Agent' },
+                    ]}
                     action={
                       item.tx_hash && item.explorer_url ? (
                         <a

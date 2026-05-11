@@ -239,10 +239,10 @@ function ConnectedAgentsSection({
   )
 }
 
-function transactionTitle(tx: AggregatedTransaction, resolveAddress: (address: string) => string | null): string {
-  if (tx.agentName) return tx.agentName
-  const counterparty = tx.direction === 'in' ? tx.from : tx.to
-  return resolveAddress(counterparty) ?? truncate(counterparty)
+function transactionTitle(tx: AggregatedTransaction): string {
+  if (tx.direction === 'in') return 'Received payment'
+  if (tx.agentName) return 'Agent payment'
+  return 'Payment sent'
 }
 
 function transactionSubtitle(tx: AggregatedTransaction, resolveAddress: (address: string) => string | null): string {
@@ -323,7 +323,7 @@ function TransactionsSection({
                 <TransactionDirectionIcon direction={tx.direction} />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-[var(--v2-ink)]">
-                    {transactionTitle(tx, resolveAddress)}
+                    {transactionTitle(tx)}
                   </p>
                   <p className="mt-1 truncate text-xs text-[var(--v2-ink-3)]">
                     {transactionSubtitle(tx, resolveAddress)}

@@ -94,6 +94,8 @@ Structure:
 Money and risk clarity:
 - Each row should show amount, token, direction/status, and whether it was automatic or required approval.
 - Technical hashes stay in detail surfaces.
+- Prefer `AgentActivityRow` for agent-specific lists. The primary row title should be `Agent payment`, `Approval request`, `Payment rejected`, or similar human event copy, not a raw recipient address.
+- Put recipient, source, and links in row metadata or detail actions.
 
 ## Policy Violation
 
@@ -122,6 +124,8 @@ Structure:
 Money and risk clarity:
 - Show amount, token, status, counterparty, account, and date.
 - Use external links for details, but do not make hashes the primary labels.
+- Prefer `TransactionActivityRow` for history lists. It should show what happened first, then Haven wallet, initiator, counterparty, amount, status, and time.
+- Use `Payment sent`, `Received payment`, `Agent payment`, and `Payment failed` before using technical transaction language.
 
 ## Account Detail
 

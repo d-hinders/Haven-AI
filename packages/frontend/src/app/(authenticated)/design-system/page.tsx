@@ -16,6 +16,7 @@ import {
   ApprovalRequiredBanner,
   CredentialHandoffCard,
   RiskExplainer,
+  TransactionActivityRow,
   WalletIdentityBlock,
 } from '@/components/haven'
 
@@ -208,28 +209,104 @@ export default function DesignSystemPage() {
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recent agent activity</h3>
             </div>
             <AgentActivityRow
-              title="Paid API provider"
-              description="Research assistant used the Operating wallet"
+              title="Agent payment"
+              description="Paid API provider"
               amount="-12.00 USDC"
               status="Settled"
               statusTone="success"
+              details={[
+                { label: 'Recipient', value: 'API provider' },
+                { label: 'Source', value: 'Research assistant' },
+              ]}
             />
             <AgentActivityRow
-              title="Cloud inference request"
-              description="Above the remaining daily budget"
+              title="Approval request"
+              description="Cloud inference request"
               amount="-320.00 USDC"
               status="Needs approval"
               statusTone="warning"
+              details={[
+                { label: 'Recipient', value: 'Cloud vendor' },
+                { label: 'Source', value: 'Research assistant' },
+              ]}
             />
             <AgentActivityRow
-              title="Rejected vendor payment"
+              title="Payment rejected"
               description="The request was blocked by your agent rules"
               amount="-80.00 USDC"
+              amountTone="danger"
               status="Failed"
               statusTone="danger"
+              details={[
+                { label: 'Recipient', value: 'Unknown vendor' },
+                { label: 'Source', value: 'Research assistant' },
+              ]}
             />
           </Card>
         </div>
+      </Section>
+
+      <Section
+        title="Transaction history"
+        description="Full history rows lead with what happened, keep raw hashes out of the primary label, and show wallet, initiator, counterparty, amount, status, and time."
+      >
+        <Card hover={false} className="overflow-hidden">
+          <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-3">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+              <span>Activity</span>
+              <span className="text-right">Amount</span>
+            </div>
+          </div>
+          <div className="divide-y divide-[var(--v2-border)]">
+            <TransactionActivityRow
+              title="Received payment"
+              description="From Acme Operations to Operating wallet"
+              amount="+500.00 USDC"
+              amountTone="success"
+              status="Received"
+              statusTone="success"
+              timestamp="12m ago"
+              direction="in"
+              details={[
+                { label: 'Haven wallet', value: 'Operating wallet' },
+                { label: 'Initiator', value: 'External sender' },
+                { label: 'Counterparty', value: 'Acme Operations' },
+              ]}
+              action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
+            />
+            <TransactionActivityRow
+              title="Agent payment"
+              description="To API provider from Operating wallet"
+              amount="-12.00 USDC"
+              status="Sent"
+              statusTone="brand"
+              timestamp="1h ago"
+              direction="out"
+              details={[
+                { label: 'Haven wallet', value: 'Operating wallet' },
+                { label: 'Initiator', value: 'Agent: Research assistant' },
+                { label: 'Counterparty', value: 'API provider' },
+              ]}
+              action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
+            />
+            <TransactionActivityRow
+              title="Payment failed"
+              description="To Unknown vendor from Operating wallet"
+              amount="-80.00 USDC"
+              amountTone="danger"
+              status="Failed"
+              statusTone="danger"
+              timestamp="Yesterday"
+              direction="out"
+              details={[
+                { label: 'Haven wallet', value: 'Operating wallet' },
+                { label: 'Initiator', value: 'You' },
+                { label: 'Counterparty', value: 'Unknown vendor' },
+              ]}
+              action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
+            />
+          </div>
+        </Card>
       </Section>
 
       <Section

@@ -48,3 +48,27 @@ Before completing UI work:
 - Review copy against `docs/design_system/UX_COPY_GUIDELINES.md`.
 - Review the changed UX against `docs/ux/haven-design-review.md`.
 - Run relevant frontend tests or build checks when practical.
+
+## Agentic Workflow
+
+When a user asks to build a feature, improve a UX flow from feedback, or fix a bug from a report, use `docs/ai-agent-workflow.md`.
+
+If the user asks to "use the defined agents", "use the Haven agents", or otherwise wants agentic delivery, act as the captain:
+
+- Use `haven-workflow-coordinator` to choose the workflow, agent plan, file ownership boundaries, and expected checks when the work is non-trivial.
+- Use `haven-explorer` for read-only discovery before implementation unless the change is trivial.
+- Use `haven-ui-worker` and `haven-backend-worker` only for clean, bounded, disjoint implementation slices.
+- Keep shared files, gravity files, git hygiene, final integration, and product judgment in the captain session.
+- Use `haven-reviewer` for final product, UX, security, regression, and test review when the change touches user-facing UX, money movement, agent authority, shared behavior, or meaningful risk.
+
+Gravity files the captain should usually own:
+
+- package files
+- lockfiles
+- global styles
+- Tailwind config
+- shared UI primitives
+- route and layout shells
+- generated files
+- central API clients
+- central shared types

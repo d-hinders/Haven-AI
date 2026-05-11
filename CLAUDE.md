@@ -208,3 +208,9 @@ Multiple independent layers, all need to be compromised for funds to be at risk:
 - Environment config via `.env` files (never commit secrets)
 - Use conventional commit messages
 - Document public API endpoints with JSDoc or OpenAPI
+
+## Agentic Development Workflow
+
+Use `docs/ai-agent-workflow.md` for feature delivery, UX feedback iteration, and bug fixing. When the user asks to use the defined Haven agents, keep the main interactive session as captain and use the project agents in `.claude/agents/` for workflow coordination, discovery, bounded implementation, and review.
+
+The captain owns product judgment, shared files, gravity files, git hygiene, final integration, and verification. Use workers only for clean, disjoint slices with explicit file ownership.

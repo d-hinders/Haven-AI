@@ -23,6 +23,7 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
+import { TransactionActivityRow } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -241,40 +242,27 @@ function ConnectedAgentsSection({
 
 function transactionTitle(tx: AggregatedTransaction): string {
   if (tx.direction === 'in') return 'Received payment'
-  if (tx.agentName) return 'Agent payment'
-  return 'Payment sent'
+  if (tx.agentName) return `Agent payment by ${tx.agentName}`
+  return 'Payment sent by you'
 }
 
-function transactionSubtitle(tx: AggregatedTransaction, resolveAddress: (address: string) => string | null): string {
+function transactionMovement(tx: AggregatedTransaction, resolveAddress: (address: string) => string | null) {
   const counterparty = tx.direction === 'in' ? tx.from : tx.to
   const label = resolveAddress(counterparty) ?? truncate(counterparty)
-
-  if (tx.agentName) {
-    return `${tx.direction === 'in' ? 'Received from' : 'Paid'} ${label}`
-  }
-
-  return `${tx.direction === 'in' ? 'From' : 'To'} ${label}`
-}
-
-function TransactionDirectionIcon({ direction }: { direction: AggregatedTransaction['direction'] }) {
-  const incoming = direction === 'in'
+  const from = tx.direction === 'in' ? label : tx.safeName
+  const to = tx.direction === 'in' ? tx.safeName : label
 
   return (
-    <span
-      aria-hidden="true"
-      className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border ${
-        incoming
-          ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-          : 'border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-      }`}
-    >
-      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        {incoming ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
-        ) : (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0l-5 5m5-5l5 5" />
-        )}
-      </svg>
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="min-w-0">
+        <span className="text-[var(--v2-ink-3)]">From </span>
+        <span className="font-medium text-[var(--v2-ink)]">{from}</span>
+      </span>
+      <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
+      <span className="min-w-0">
+        <span className="text-[var(--v2-ink-3)]">To </span>
+        <span className="font-medium text-[var(--v2-ink)]">{to}</span>
+      </span>
     </span>
   )
 }
@@ -317,26 +305,18 @@ function TransactionsSection({
             <Link
               key={`${tx.hash}-${tx.type}-${tx.safeId}`}
               href="/transactions"
-              className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-[var(--v2-surface)] transition-colors"
+              className="block"
             >
-              <div className="flex min-w-0 items-center gap-3">
-                <TransactionDirectionIcon direction={tx.direction} />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-[var(--v2-ink)]">
-                    {transactionTitle(tx)}
-                  </p>
-                  <p className="mt-1 truncate text-xs text-[var(--v2-ink-3)]">
-                    {transactionSubtitle(tx, resolveAddress)}
-                  </p>
-                </div>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <p className={`text-sm font-medium ${tx.direction === 'in' ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink)]'}`}>
-                  {tx.direction === 'in' ? '+' : '-'}
-                  {tx.valueFormatted} {tx.asset}
-                </p>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{timeAgo(tx.timestamp * 1000)}</p>
-              </div>
+              <TransactionActivityRow
+                title={transactionTitle(tx)}
+                description={transactionMovement(tx, resolveAddress)}
+                amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
+                amountTone={tx.direction === 'in' ? 'success' : 'neutral'}
+                status={tx.direction === 'in' ? 'Received' : 'Sent'}
+                statusTone={tx.direction === 'in' ? 'success' : 'neutral'}
+                timestamp={timeAgo(tx.timestamp * 1000)}
+                direction={tx.direction}
+              />
             </Link>
           ))}
         </div>

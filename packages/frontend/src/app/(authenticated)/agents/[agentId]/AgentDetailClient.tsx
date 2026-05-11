@@ -28,6 +28,7 @@ import {
   AgentBudgetCard,
   AgentRulesSummary,
   ApprovalRequiredBanner,
+  ExternalDetailsLink,
 } from '@/components/haven'
 
 function statusLabel(status: AgentStatus | string): string {
@@ -66,12 +67,20 @@ function activityTitle(item: ActivityItem): string {
   return 'Agent payment'
 }
 
-function activityDescription(item: ActivityItem): string {
-  if (item.reason) return item.reason
-  if (item.x402_resource_url) return 'External resource request.'
-  return item.type === 'approval'
-    ? 'This request needs approval before any money moves.'
-    : 'Payment activity from this agent.'
+function activityMovement(item: ActivityItem) {
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="min-w-0">
+        <span className="text-[var(--v2-ink-3)]">From </span>
+        <span className="font-medium text-[var(--v2-ink)]">{item.source ?? 'Agent'}</span>
+      </span>
+      <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
+      <span className="min-w-0">
+        <span className="text-[var(--v2-ink-3)]">To </span>
+        <span className="font-medium text-[var(--v2-ink)]">{truncate(item.to)}</span>
+      </span>
+    </span>
+  )
 }
 
 function formatAllowanceAmount(amount: string, decimals: number): string {
@@ -521,26 +530,15 @@ export default function AgentDetailClient({ agentId }: Props) {
                   <AgentActivityRow
                     key={`${item.type}-${item.id}`}
                     title={activityTitle(item)}
-                    description={activityDescription(item)}
+                    description={activityMovement(item)}
                     amount={`-${item.amount} ${item.token}`}
                     amountTone={item.status === 'failed' || item.status === 'rejected' ? 'danger' : 'neutral'}
                     status={activityStatusLabel(item.status)}
                     statusTone={activityStatusTone(item.status)}
                     timestamp={timeAgo(item.created_at)}
-                    details={[
-                      { label: 'Recipient', value: truncate(item.to) },
-                      { label: 'Source', value: item.source ?? 'Agent' },
-                    ]}
                     action={
                       item.tx_hash && item.explorer_url ? (
-                        <a
-                          href={item.explorer_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-                        >
-                          View
-                        </a>
+                        <ExternalDetailsLink href={item.explorer_url} />
                       ) : undefined
                     }
                   />

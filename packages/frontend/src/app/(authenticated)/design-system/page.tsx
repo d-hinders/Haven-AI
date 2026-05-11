@@ -15,6 +15,7 @@ import {
   AgentRulesSummary,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
+  ExternalDetailsLink,
   RiskExplainer,
   TransactionActivityRow,
   WalletIdentityBlock,
@@ -283,7 +284,7 @@ export default function DesignSystemPage() {
               statusTone="success"
               timestamp="12m ago"
               direction="in"
-              action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
+              action={<ExternalDetailsLink href="#" />}
             />
             <TransactionActivityRow
               title="Agent payment by Research assistant"
@@ -293,7 +294,7 @@ export default function DesignSystemPage() {
               statusTone="neutral"
               timestamp="1h ago"
               direction="out"
-              action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
+              action={<ExternalDetailsLink href="#" />}
             />
             <TransactionActivityRow
               title="Payment sent by you"
@@ -304,7 +305,7 @@ export default function DesignSystemPage() {
               statusTone="danger"
               timestamp="Yesterday"
               direction="out"
-              action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
+              action={<ExternalDetailsLink href="#" />}
             />
           </div>
         </Card>

@@ -7,7 +7,7 @@ import type { AggregatedTransaction } from '@/types/transactions'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { TransactionActivityRow } from '@/components/haven'
+import { ExternalDetailsLink, TransactionActivityRow } from '@/components/haven'
 
 interface TransactionsTableProps {
   transactions: AggregatedTransaction[]
@@ -92,16 +92,7 @@ export default function TransactionsTable({
             statusTone={tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'}
             timestamp={timeAgo(tx.timestamp * 1000)}
             direction={tx.direction}
-            action={
-              <a
-                href={getExplorerUrl(tx.chainId, 'tx', tx.hash)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
-              >
-                Details
-              </a>
-            }
+            action={<ExternalDetailsLink href={getExplorerUrl(tx.chainId, 'tx', tx.hash)} />}
           />
         ))}
       </div>

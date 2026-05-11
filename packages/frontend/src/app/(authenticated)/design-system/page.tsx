@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
+  AgentActivityRow,
   AgentBudgetCard,
   AgentRulesSummary,
   ApprovalRequiredBanner,
@@ -37,33 +38,6 @@ function Section({
       </div>
       {children}
     </section>
-  )
-}
-
-function TransactionActivityRow({
-  title,
-  description,
-  amount,
-  status,
-}: {
-  title: string
-  description: string
-  amount: string
-  status: 'Settled' | 'Needs approval' | 'Failed'
-}) {
-  const tone = status === 'Settled' ? 'success' : status === 'Needs approval' ? 'warning' : 'danger'
-
-  return (
-    <div className="flex items-center justify-between gap-4 border-b border-[var(--v2-border)] px-5 py-4 last:border-b-0">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{title}</p>
-          <StatusBadge tone={tone}>{status}</StatusBadge>
-        </div>
-        <p className="mt-1 truncate text-xs text-[var(--v2-ink-2)]">{description}</p>
-      </div>
-      <p className="flex-shrink-0 text-sm font-semibold text-[var(--v2-ink)] v2-tabular">{amount}</p>
-    </div>
   )
 }
 
@@ -233,23 +207,26 @@ export default function DesignSystemPage() {
             <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recent agent activity</h3>
             </div>
-            <TransactionActivityRow
+            <AgentActivityRow
               title="Paid API provider"
               description="Research assistant used the Operating wallet"
               amount="-12.00 USDC"
               status="Settled"
+              statusTone="success"
             />
-            <TransactionActivityRow
+            <AgentActivityRow
               title="Cloud inference request"
               description="Above the remaining daily budget"
               amount="-320.00 USDC"
               status="Needs approval"
+              statusTone="warning"
             />
-            <TransactionActivityRow
+            <AgentActivityRow
               title="Rejected vendor payment"
               description="The request was blocked by your agent rules"
               amount="-80.00 USDC"
               status="Failed"
+              statusTone="danger"
             />
           </Card>
         </div>

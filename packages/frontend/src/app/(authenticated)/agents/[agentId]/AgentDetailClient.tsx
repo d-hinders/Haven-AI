@@ -20,6 +20,15 @@ import EditAgentModal from '@/components/EditAgentModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import {
+  AgentActivityRow,
+  AgentBudgetCard,
+  AgentRulesSummary,
+  ApprovalRequiredBanner,
+} from '@/components/haven'
 
 function statusLabel(status: AgentStatus | string): string {
   if (status === 'active') return 'Connected'
@@ -28,11 +37,26 @@ function statusLabel(status: AgentStatus | string): string {
   return status
 }
 
-function statusClasses(status: AgentStatus | string): string {
-  if (status === 'active') return 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-  if (status === 'paused') return 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
-  if (status === 'revoked') return 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
-  return 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
+function statusTone(status: AgentStatus | string): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'active') return 'success'
+  if (status === 'paused') return 'warning'
+  if (status === 'revoked') return 'danger'
+  return 'neutral'
+}
+
+function activityStatusLabel(status: string): string {
+  if (status === 'confirmed' || status === 'executed') return 'Settled'
+  if (status === 'pending' || status === 'pending_approval') return 'Needs approval'
+  if (status === 'failed') return 'Failed'
+  if (status === 'rejected') return 'Rejected'
+  return statusLabel(status)
+}
+
+function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'confirmed' || status === 'executed') return 'success'
+  if (status === 'pending' || status === 'pending_approval') return 'warning'
+  if (status === 'failed' || status === 'rejected') return 'danger'
+  return 'neutral'
 }
 
 function formatAllowanceAmount(amount: string, decimals: number): string {
@@ -57,6 +81,15 @@ function resetLabel(resetPeriodMin: number): string {
   return RESET_PERIODS.find((item) => item.value === resetPeriodMin)?.label ?? `${resetPeriodMin}m`
 }
 
+function budgetPeriodLabel(resetPeriodMin: number): string {
+  const label = resetLabel(resetPeriodMin).toLowerCase()
+  if (label === 'one-time') return 'total budget'
+  if (label === 'daily') return 'per day'
+  if (label === 'weekly') return 'per week'
+  if (label === 'monthly') return 'per month'
+  return `every ${label}`
+}
+
 function StatBlock({
   label,
   value,
@@ -67,11 +100,11 @@ function StatBlock({
   helper?: string
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
-      <p className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">{label}</p>
-      <p className="mt-3 text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">{value}</p>
+    <Card hover={false} className="p-4">
+      <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">{value}</p>
       {helper ? <p className="mt-2 text-xs text-[var(--v2-ink-2)]">{helper}</p> : null}
-    </div>
+    </Card>
   )
 }
 
@@ -153,7 +186,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     return (
       <div className="max-w-3xl">
         <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-          ← Back to Agents
+          Back to agents
         </Link>
         <div className="mt-6 rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-[var(--v2-shadow-card)]">
           <h1 className="text-xl font-semibold text-[var(--v2-ink)]">Agent not found</h1>
@@ -172,6 +205,37 @@ export default function AgentDetailClient({ agentId }: Props) {
   const maskedCredential = credentialPrefix
     ? `${credentialPrefix}${'•'.repeat(12)}`
     : 'Credential shown only when created'
+  const walletName = currentAgent.safe_name ?? safe?.name ?? 'Unassigned Haven wallet'
+  const networkName = chainConfig?.name ?? 'Unknown network'
+  const budgetLines = currentAgent.allowances.map((allowance) => {
+    const decimals =
+      chainConfig &&
+      Object.values(chainConfig.tokens).find((token) => token.symbol === allowance.token_symbol)?.decimals
+    const amount = formatAllowanceAmount(allowance.allowance_amount, decimals ?? 18)
+    return {
+      id: allowance.id,
+      label: `${amount} ${allowance.token_symbol} ${budgetPeriodLabel(allowance.reset_period_min)}`,
+      token: allowance.token_symbol,
+      amount,
+      period: budgetPeriodLabel(allowance.reset_period_min),
+    }
+  })
+  const budgetAmountSummary =
+    budgetLines.length === 0
+      ? 'No budget set'
+      : budgetLines.length === 1
+        ? `${budgetLines[0].amount} ${budgetLines[0].token}`
+        : `${budgetLines.length} budgets set`
+  const budgetPeriodSummary =
+    budgetLines.length === 0
+      ? 'Add an agent budget'
+      : budgetLines.length === 1
+        ? budgetLines[0].period
+        : budgetLines.map((line) => line.label).join(' • ')
+  const approvalCopy =
+    budgetLines.length === 0
+      ? 'No automatic spending is configured for this agent.'
+      : 'Payments within budget can run automatically. Larger payments need your manual approval.'
 
   async function copyCredential() {
     if (!fullCredential) return
@@ -266,37 +330,37 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
 
   return (
-    <div className="max-w-5xl">
+    <div className="mx-auto max-w-6xl">
       <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-        ← Back to Agents
+        Back to agents
       </Link>
 
-      <div
-        className="relative mt-5 overflow-hidden rounded-[24px] border shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]"
-        style={{ borderColor: '#E7E9F2', backgroundColor: '#F7F5FF' }}
-      >
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              'linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%)',
-          }}
-        />
-        <div className="relative flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
+      <Card hover={false} className="mt-5 p-5 md:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">{currentAgent.name}</h1>
-              <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusClasses(currentAgent.status)}`}>
+              <StatusBadge tone={statusTone(currentAgent.status)}>
                 {statusLabel(currentAgent.status)}
-              </span>
+              </StatusBadge>
             </div>
-            {currentAgent.description ? (
-              <p className="mt-3 text-sm text-[var(--v2-ink-2)] max-w-2xl">{currentAgent.description}</p>
-            ) : null}
-            <div className="mt-4 flex flex-wrap gap-4 text-sm text-[var(--v2-ink-3)]">
-              <span>Account: <span className="text-[var(--v2-ink)]">{currentAgent.safe_name ?? safe?.name ?? 'Unassigned'}</span></span>
-              {chainConfig ? <span>Network: <span className="text-[var(--v2-ink)]">{chainConfig.name}</span></span> : null}
-            </div>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
+              {currentAgent.description || 'This agent can make payments within the rules you set.'}
+            </p>
+            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+              <div>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
+                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
+                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{networkName}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
+                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
+              </div>
+            </dl>
           </div>
 
           <div className="flex flex-wrap gap-3">
@@ -307,32 +371,6 @@ export default function AgentDetailClient({ agentId }: Props) {
                 variant="ghost"
               >
                 Edit
-              </Button>
-            ) : null}
-            {isActive ? (
-              <Button
-                onClick={() => void handlePause()}
-                disabled={pendingAction !== null}
-                variant="ghost"
-              >
-                {pendingAction === 'pause' ? 'Pausing...' : 'Pause'}
-              </Button>
-            ) : null}
-            {isPaused ? (
-              <Button
-                onClick={() => void handleResume()}
-                disabled={pendingAction !== null}
-              >
-                {pendingAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
-              </Button>
-            ) : null}
-            {!isRevoked ? (
-              <Button
-                onClick={() => setConfirmAction('revoke')}
-                disabled={pendingAction !== null || revokeBlockedByOtherDevice}
-                variant="danger"
-              >
-                Revoke
               </Button>
             ) : (
               <Button
@@ -345,18 +383,17 @@ export default function AgentDetailClient({ agentId }: Props) {
             )}
           </div>
         </div>
-      </div>
+      </Card>
 
       {revokeBlockedByOtherDevice ? (
         <PasskeyOtherDeviceNotice className="mt-4" />
       ) : null}
 
       {isPaused ? (
-        <div className="mt-4 rounded-xl border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3">
-          <p className="text-sm font-medium text-[var(--v2-warning)]">Paused in Haven</p>
-          <p className="mt-1 text-sm text-[var(--v2-warning)]">
-            New agent payments are blocked until you resume this agent. Existing network permissions stay in place.
-          </p>
+        <div className="mt-4">
+          <ApprovalRequiredBanner title="Paused in Haven" tone="neutral" density="compact">
+            New agent payments are blocked until you resume this agent. Existing wallet rules stay in place.
+          </ApprovalRequiredBanner>
         </div>
       ) : null}
 
@@ -385,174 +422,235 @@ export default function AgentDetailClient({ agentId }: Props) {
         />
       </div>
 
-      <div className="mt-6 grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-6">
-        <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-          <div className="px-5 py-4 border-b border-[var(--v2-border)]">
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent budget</h2>
-          </div>
-          {currentAgent.allowances.length === 0 ? (
-            <div className="p-6 text-center">
-              <p className="text-sm text-[var(--v2-ink)]">No agent budget configured</p>
-              {!isRevoked ? (
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="mt-3 text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-                >
-                  Add a spend limit in Edit
-                </button>
-              ) : (
-                <p className="mt-2 text-xs text-[var(--v2-ink-2)]">This agent can no longer be edited because it has been revoked.</p>
-              )}
-            </div>
-          ) : (
-            <div className="divide-y divide-[var(--v2-border)]">
-              {currentAgent.allowances.map((allowance) => {
-                const decimals =
-                  chainConfig &&
-                  Object.values(chainConfig.tokens).find((token) => token.symbol === allowance.token_symbol)?.decimals
-
-                return (
-                  <div key={allowance.id} className="px-5 py-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-medium text-[var(--v2-ink)]">{allowance.token_symbol}</p>
-                        <p className="mt-1 text-xs text-[var(--v2-ink-2)]">
-                          Resets: {resetLabel(allowance.reset_period_min)}
-                        </p>
-                      </div>
-                      <p className="text-sm font-medium text-[var(--v2-ink)]">
-                        {formatAllowanceAmount(allowance.allowance_amount, decimals ?? 18)} {allowance.token_symbol}
-                      </p>
+      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
+          <AgentRulesSummary
+            title="Agent rules"
+            description="A quick view of what this agent can do and how you stay in control."
+            items={[
+              {
+                label: 'Who can spend',
+                value: currentAgent.name,
+                helper: currentAgent.description || undefined,
+              },
+              {
+                label: 'From wallet',
+                value: `${walletName} on ${networkName}`,
+                helper: 'Payments come from this Haven wallet only.',
+              },
+              {
+                label: 'Agent budget',
+                value:
+                  budgetLines.length > 0 ? (
+                    <div className="space-y-1">
+                      {budgetLines.map((line) => (
+                        <div key={line.id}>{line.label}</div>
+                      ))}
                     </div>
+                  ) : (
+                    'No budget set'
+                  ),
+                helper: approvalCopy,
+              },
+              {
+                label: 'Stop access',
+                value: isRevoked ? 'Revoked' : isPaused ? 'Paused in Haven' : 'Pause or revoke anytime',
+                helper: isRevoked
+                  ? 'This agent can no longer make requests through Haven.'
+                  : 'Pause blocks new requests in Haven. Revoke removes the agent budget from the Haven wallet.',
+              },
+            ]}
+          />
+
+          {budgetLines.length > 0 ? (
+            <AgentBudgetCard
+              agentName={currentAgent.name}
+              walletName={walletName}
+              amount={budgetAmountSummary}
+              resetPeriod={budgetPeriodSummary}
+              status={statusLabel(currentAgent.status)}
+              statusTone={statusTone(currentAgent.status)}
+              density="compact"
+            >
+              <div className="space-y-2">
+                {budgetLines.map((line) => (
+                  <div key={line.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-2">
+                    <p className="text-sm font-medium text-[var(--v2-ink)] v2-tabular">{line.amount} {line.token}</p>
+                    <p className="text-xs text-[var(--v2-ink-2)]">{line.period}</p>
                   </div>
-                )
-              })}
-            </div>
+                ))}
+              </div>
+            </AgentBudgetCard>
+          ) : (
+            <EmptyState
+              title="No agent budget set"
+              body={isRevoked ? 'This agent has been revoked and can no longer be edited.' : 'Add an agent budget before this agent can make automatic payments.'}
+              action={!isRevoked ? <Button size="sm" onClick={() => setEditOpen(true)}>Add budget</Button> : undefined}
+            />
           )}
+
+          <Card hover={false} className="overflow-hidden">
+            <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Recent activity</h2>
+              <p className="mt-1 text-xs text-[var(--v2-ink-2)]">Payments and approval requests from this agent.</p>
+            </div>
+
+            {activityLoading ? (
+              <div className="p-5 space-y-3">
+                {[0, 1, 2].map((index) => (
+                  <div key={index} className="h-14 rounded-lg bg-[var(--v2-surface-2)] animate-pulse" />
+                ))}
+              </div>
+            ) : activity.length === 0 ? (
+              <EmptyState
+                className="m-5"
+                title="No activity yet"
+                body="Payments, approvals, and confirmations for this agent will appear here."
+              />
+            ) : (
+              <div>
+                {activity.map((item) => (
+                  <AgentActivityRow
+                    key={`${item.type}-${item.id}`}
+                    title={`${item.type === 'approval' ? 'Approval request' : 'Payment'} to ${truncate(item.to)}`}
+                    description={item.reason || item.x402_resource_url || 'Agent activity'}
+                    amount={`${item.amount} ${item.token}`}
+                    status={activityStatusLabel(item.status)}
+                    statusTone={activityStatusTone(item.status)}
+                    timestamp={timeAgo(item.created_at)}
+                    action={
+                      item.tx_hash && item.explorer_url ? (
+                        <a
+                          href={item.explorer_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
+                        >
+                          View
+                        </a>
+                      ) : undefined
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </Card>
         </div>
 
-        <div className="space-y-6">
-          {!isRevoked ? (
-            <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--v2-border)]">
-                <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent credential</h2>
-              </div>
-              <div className="p-5">
-                <p className="text-sm text-[var(--v2-ink-2)]">
-                  Add this credential to your agent so it can make payments within the rules you set.
-                </p>
-                <div className="mt-4 flex items-center gap-2">
-                  <code className="min-w-0 flex-1 truncate rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs font-mono text-[var(--v2-ink-2)]">
-                    {fullCredential && showCredential ? fullCredential : maskedCredential}
-                  </code>
-                  {fullCredential ? (
-                    <>
-                      <button
-                        onClick={() => setShowCredential((value) => !value)}
-                        className="text-xs font-medium text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-ink)]"
-                      >
-                        {showCredential ? 'Hide' : 'Show'}
-                      </button>
-                      <button
-                        onClick={() => void copyCredential()}
-                        className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
-                      >
-                        {credentialCopied ? 'Copied' : 'Copy'}
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-                {!fullCredential ? (
-                  <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                    For security, Haven only shows the full agent credential when you create the agent. If you lose it, create a new agent or rotate the credential.
-                  </p>
-                ) : null}
-              </div>
+        <aside className="space-y-6">
+          <Card hover={false} className="p-5">
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent access</h2>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+              {isRevoked
+                ? 'This agent no longer has access through Haven.'
+                : isPaused
+                  ? 'Paused agents cannot start new payments through Haven.'
+                  : 'Pause new requests or revoke the agent budget if you need to stop access.'}
+            </p>
+            <div className="mt-4 grid gap-2">
+              {isActive ? (
+                <Button
+                  onClick={() => void handlePause()}
+                  disabled={pendingAction !== null}
+                  variant="ghost"
+                  className="w-full"
+                >
+                  {pendingAction === 'pause' ? 'Pausing...' : 'Pause requests'}
+                </Button>
+              ) : null}
+              {isPaused ? (
+                <Button
+                  onClick={() => void handleResume()}
+                  disabled={pendingAction !== null}
+                  className="w-full"
+                >
+                  {pendingAction === 'resume' ? 'Resuming...' : 'Resume requests'}
+                </Button>
+              ) : null}
+              {!isRevoked ? (
+                <Button
+                  onClick={() => setConfirmAction('revoke')}
+                  disabled={pendingAction !== null || revokeBlockedByOtherDevice}
+                  variant="danger"
+                  className="w-full"
+                >
+                  Revoke agent budget
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => setConfirmAction('delete')}
+                  disabled={pendingAction !== null}
+                  variant="danger"
+                  className="w-full"
+                >
+                  Delete agent
+                </Button>
+              )}
             </div>
+          </Card>
+
+          {!isRevoked ? (
+            <Card hover={false} className="p-5">
+              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Haven credential</h2>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+                Your agent uses this credential to request payments through Haven.
+              </p>
+              <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+                <code className="block truncate font-mono text-xs text-[var(--v2-ink-2)]">
+                  {fullCredential && showCredential ? fullCredential : maskedCredential}
+                </code>
+                {fullCredential ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setShowCredential((value) => !value)}
+                    >
+                      {showCredential ? 'Hide' : 'Show'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void copyCredential()}>
+                      {credentialCopied ? 'Copied' : 'Copy'}
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                    Haven only shows the full credential when you create the agent. If you lose it, create a new agent or rotate the credential.
+                  </p>
+                )}
+              </div>
+            </Card>
           ) : null}
 
-          <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-            <div className="px-5 py-4 border-b border-[var(--v2-border)]">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Delegate</h2>
-            </div>
-            <div className="p-5">
-              {currentAgent.delegate_address ? (
-                <>
-                  <p className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">Delegate address</p>
-                  <div className="mt-3 flex items-start gap-2">
-                    <code className="min-w-0 flex-1 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs font-mono text-[var(--v2-ink)] break-all">
-                      {currentAgent.delegate_address}
-                    </code>
-                    <button
-                      onClick={() => void copyDelegateAddress()}
-                      className="shrink-0 rounded-md border border-[var(--v2-border-strong)] bg-white px-3 py-2 text-xs font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)]"
-                    >
-                      {delegateCopied ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-                  <p className="mt-4 text-xs text-[var(--v2-ink-2)]">
-                    If this delegate is ever compromised, revoke this agent and create a new one.
-                  </p>
-                </>
-              ) : (
-                <p className="text-sm text-[var(--v2-ink-2)]">This agent does not currently expose a delegate address.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-6 rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-        <div className="px-5 py-4 border-b border-[var(--v2-border)]">
-          <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Recent activity</h2>
-        </div>
-
-        {activityLoading ? (
-          <div className="p-5 space-y-3">
-            {[0, 1, 2].map((index) => (
-              <div key={index} className="h-14 rounded-lg bg-[var(--v2-surface-2)] animate-pulse" />
-            ))}
-          </div>
-        ) : activity.length === 0 ? (
-          <div className="p-6 text-center">
-            <p className="text-sm text-[var(--v2-ink)]">No activity yet</p>
-            <p className="mt-2 text-xs text-[var(--v2-ink-2)]">Payments, approvals, and confirmations for this agent will appear here.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-[var(--v2-border)]">
-            {activity.map((item) => (
-              <div key={`${item.type}-${item.id}`} className="flex items-center justify-between gap-4 px-5 py-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      {item.amount} {item.token}
-                    </p>
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${statusClasses(item.status)}`}>
-                      {statusLabel(item.status)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-[var(--v2-ink-2)] truncate">
-                    {item.type === 'approval' ? 'Approval' : 'Payment'} to {truncate(item.to)}
-                    {item.reason ? ` • ${item.reason}` : ''}
-                  </p>
+          <Card hover={false} className="p-5">
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Advanced details</h2>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+              Technical identifiers are shown here for recovery and debugging.
+            </p>
+            {currentAgent.delegate_address ? (
+              <div className="mt-4">
+                <p className="text-xs font-medium text-[var(--v2-ink-3)]">Credential address</p>
+                <div className="mt-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+                  <code className="block break-all font-mono text-xs text-[var(--v2-ink)]">
+                    {currentAgent.delegate_address}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void copyDelegateAddress()}
+                    className="mt-3"
+                  >
+                    {delegateCopied ? 'Copied' : 'Copy address'}
+                  </Button>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  {item.tx_hash && item.explorer_url ? (
-                    <a
-                      href={item.explorer_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-                    >
-                      View tx
-                    </a>
-                  ) : null}
-                  <p className="mt-1 text-xs text-[var(--v2-ink-2)]">{timeAgo(item.created_at)}</p>
-                </div>
+                <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                  If this credential address is ever compromised, revoke this agent and create a new one.
+                </p>
               </div>
-            ))}
-          </div>
-        )}
+            ) : (
+              <p className="mt-4 text-sm text-[var(--v2-ink-2)]">This agent does not currently expose a credential address.</p>
+            )}
+          </Card>
+        </aside>
       </div>
 
       <ConfirmDialog
@@ -560,7 +658,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         onCancel={() => setConfirmAction(null)}
         onConfirm={handleRevoke}
         title="Revoke this agent?"
-        body="This removes the agent's ability to spend through Haven. Network access will be revoked, and the agent will need a new setup if you want to use it again."
+        body="This removes the agent budget from the Haven wallet. The agent will need a new setup if you want to use it again."
         confirmLabel="Revoke agent"
         loading={pendingAction === 'revoke'}
       />

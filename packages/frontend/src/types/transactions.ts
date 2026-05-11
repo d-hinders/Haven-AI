@@ -14,6 +14,9 @@ export interface Transaction {
   tokenAddress?: string
   tokenSymbol?: string
   agentName?: string
+  source?: 'direct' | 'x402'
+  x402ResourceUrl?: string | null
+  x402MerchantAddress?: string | null
 }
 
 export interface AggregatedTransaction extends Transaction {

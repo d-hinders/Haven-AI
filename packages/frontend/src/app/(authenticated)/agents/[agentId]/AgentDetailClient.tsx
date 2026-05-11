@@ -61,26 +61,41 @@ function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 
 }
 
 function activityTitle(item: ActivityItem): string {
+  if (item.source === 'x402') return 'x402 payment'
   if (item.type === 'approval') return 'Approval request'
   if (item.status === 'failed') return 'Payment failed'
   if (item.status === 'rejected') return 'Payment rejected'
   return 'Agent payment'
 }
 
-function activityMovement(item: ActivityItem) {
+function activityMovement(item: ActivityItem, walletName: string) {
+  const recipient = item.source === 'x402'
+    ? x402MerchantLabel(item.x402_resource_url) ?? truncate(item.to)
+    : truncate(item.to)
+
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <span className="min-w-0">
         <span className="text-[var(--v2-ink-3)]">From </span>
-        <span className="font-medium text-[var(--v2-ink)]">{item.source ?? 'Agent'}</span>
+        <span className="font-medium text-[var(--v2-ink)]">{walletName}</span>
       </span>
       <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
       <span className="min-w-0">
         <span className="text-[var(--v2-ink-3)]">To </span>
-        <span className="font-medium text-[var(--v2-ink)]">{truncate(item.to)}</span>
+        <span className="font-medium text-[var(--v2-ink)]">{recipient}</span>
       </span>
     </span>
   )
+}
+
+function x402MerchantLabel(resourceUrl?: string | null): string | null {
+  if (!resourceUrl) return null
+
+  try {
+    return new URL(resourceUrl).hostname
+  } catch {
+    return null
+  }
 }
 
 function formatAllowanceAmount(amount: string, decimals: number): string {
@@ -530,7 +545,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                   <AgentActivityRow
                     key={`${item.type}-${item.id}`}
                     title={activityTitle(item)}
-                    description={activityMovement(item)}
+                    description={activityMovement(item, walletName)}
                     amount={`-${item.amount} ${item.token}`}
                     amountTone={item.status === 'failed' || item.status === 'rejected' ? 'danger' : 'neutral'}
                     status={activityStatusLabel(item.status)}

@@ -8,6 +8,7 @@ import {
   type EnrichedTransaction,
   enrichTransactionsWithAgents,
   fetchSafeTransactions,
+  mergeX402Transactions,
 } from './transactions.js'
 
 const AGENT_PREVIEW_LIMIT = 6
@@ -281,10 +282,16 @@ export default async function dashboardRoutes(
       )
     })
 
-    mergedTransactions.sort(compareTransactions)
+    const visibleTransactions = await mergeX402Transactions(
+      sub,
+      safes,
+      mergedTransactions,
+    )
+
+    visibleTransactions.sort(compareTransactions)
 
     const seen = new Set<string>()
-    const dedupedTransactions = mergedTransactions.filter((tx) => {
+    const dedupedTransactions = visibleTransactions.filter((tx) => {
       const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}:${tx.safeAddress.toLowerCase()}`
       if (seen.has(key)) return false
       seen.add(key)
@@ -352,6 +359,9 @@ export default async function dashboardRoutes(
         safeName: tx.safeName,
         agentId: tx.agentId,
         agentName: tx.agentName,
+        source: tx.source,
+        x402ResourceUrl: tx.x402ResourceUrl,
+        x402MerchantAddress: tx.x402MerchantAddress,
       })),
     }
   })

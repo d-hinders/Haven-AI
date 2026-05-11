@@ -242,13 +242,17 @@ function ConnectedAgentsSection({
 
 function transactionTitle(tx: AggregatedTransaction): string {
   if (tx.direction === 'in') return 'Received payment'
+  if (tx.source === 'x402' && tx.agentName) return `x402 payment by ${tx.agentName}`
+  if (tx.source === 'x402') return 'x402 payment'
   if (tx.agentName) return `Agent payment by ${tx.agentName}`
   return 'Payment sent by you'
 }
 
 function transactionMovement(tx: AggregatedTransaction, resolveAddress: (address: string) => string | null) {
   const counterparty = tx.direction === 'in' ? tx.from : tx.to
-  const label = resolveAddress(counterparty) ?? truncate(counterparty)
+  const label = tx.source === 'x402'
+    ? x402MerchantLabel(tx) ?? truncate(counterparty)
+    : resolveAddress(counterparty) ?? truncate(counterparty)
   const from = tx.direction === 'in' ? label : tx.safeName
   const to = tx.direction === 'in' ? tx.safeName : label
 
@@ -265,6 +269,16 @@ function transactionMovement(tx: AggregatedTransaction, resolveAddress: (address
       </span>
     </span>
   )
+}
+
+function x402MerchantLabel(tx: AggregatedTransaction): string | null {
+  if (!tx.x402ResourceUrl) return null
+
+  try {
+    return new URL(tx.x402ResourceUrl).hostname
+  } catch {
+    return null
+  }
 }
 
 function TransactionsSection({

@@ -226,7 +226,7 @@ export default function DesignSystemPage() {
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recent agent activity</h3>
             </div>
             <AgentActivityRow
-              title="Agent payment"
+              title="x402 payment"
               description={<MovementExample from="Research assistant" to="API provider" />}
               amount="-12.00 USDC"
               status="Sent"
@@ -275,7 +275,7 @@ export default function DesignSystemPage() {
               action={<ExternalDetailsLink href="#" />}
             />
             <TransactionActivityRow
-              title="Agent payment by Research assistant"
+              title="x402 payment by Research assistant"
               description={<MovementExample from="Operating wallet" to="API provider" />}
               amount="-12.00 USDC"
               status="Sent"

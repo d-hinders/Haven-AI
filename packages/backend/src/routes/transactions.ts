@@ -30,6 +30,9 @@ export interface Transaction {
   isError: boolean
   tokenAddress?: string
   tokenSymbol?: string
+  source?: 'direct' | 'x402'
+  x402ResourceUrl?: string | null
+  x402MerchantAddress?: string | null
 }
 
 interface UserSafeRow {
@@ -52,6 +55,26 @@ interface PaymentIntentAgentRow {
   tx_hash: string
   agent_id: string
   agent_name: string
+}
+
+interface X402PaymentIntentRow {
+  id: string
+  tx_hash: string
+  agent_id: string
+  agent_name: string
+  safe_id: string
+  safe_address: string
+  safe_name: string
+  chain_id: number
+  token_symbol: string
+  token_address: string
+  to_address: string
+  amount_raw: string
+  amount_human: string
+  x402_merchant_address: string | null
+  x402_resource_url: string | null
+  confirmed_at: string | null
+  created_at: string
 }
 
 interface FetchSafeTransactionsParams {
@@ -375,6 +398,102 @@ export async function enrichTransactionsWithAgents(
   }
 }
 
+export async function fetchConfirmedX402Transactions(
+  userId: string,
+  safes: UserSafeRow[],
+): Promise<EnrichedTransaction[]> {
+  if (safes.length === 0) return []
+
+  const safeIds = safes.map((safe) => safe.id)
+  const result = await pool.query<X402PaymentIntentRow>(
+    `SELECT pi.id,
+            pi.tx_hash,
+            pi.agent_id,
+            a.name AS agent_name,
+            us.id AS safe_id,
+            us.safe_address,
+            us.name AS safe_name,
+            COALESCE(pi.chain_id, us.chain_id) AS chain_id,
+            pi.token_symbol,
+            pi.token_address,
+            pi.to_address,
+            pi.amount_raw,
+            pi.amount_human,
+            pi.x402_merchant_address,
+            pi.x402_resource_url,
+            pi.confirmed_at,
+            pi.created_at
+     FROM payment_intents pi
+     JOIN agents a ON a.id = pi.agent_id
+     JOIN user_safes us
+       ON us.user_id = pi.user_id
+      AND us.id = ANY($2)
+      AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+      AND us.chain_id = COALESCE(pi.chain_id, us.chain_id)
+     WHERE pi.user_id = $1
+       AND pi.source = 'x402'
+       AND pi.status = 'confirmed'
+       AND pi.tx_hash IS NOT NULL
+     ORDER BY COALESCE(pi.confirmed_at, pi.created_at) DESC`,
+    [userId, safeIds],
+  )
+
+  return result.rows.map((row) => {
+    const chain = getChain(row.chain_id)
+    const tokenAddress = row.token_address.toLowerCase()
+    const tokenConfig =
+      chain.tokenByAddress[tokenAddress] ??
+      Object.values(chain.tokens).find((token) => token.symbol === row.token_symbol)
+    const merchantAddress = row.x402_merchant_address ?? row.to_address
+
+    return {
+      hash: row.tx_hash,
+      type: 'erc20',
+      from: row.safe_address,
+      to: merchantAddress,
+      value: row.amount_raw,
+      valueFormatted: row.amount_human,
+      asset: row.token_symbol,
+      decimals: tokenConfig?.decimals ?? 18,
+      direction: 'out',
+      timestamp: parseIsoTimestamp(row.confirmed_at ?? row.created_at),
+      blockNumber: 0,
+      isError: false,
+      tokenAddress: row.token_address,
+      tokenSymbol: row.token_symbol,
+      source: 'x402',
+      x402ResourceUrl: row.x402_resource_url,
+      x402MerchantAddress: row.x402_merchant_address,
+      chainId: row.chain_id,
+      safeId: row.safe_id,
+      safeAddress: row.safe_address,
+      safeName: row.safe_name,
+      agentId: row.agent_id,
+      agentName: row.agent_name,
+    }
+  })
+}
+
+export async function mergeX402Transactions(
+  userId: string,
+  safes: UserSafeRow[],
+  transactions: EnrichedTransaction[],
+): Promise<EnrichedTransaction[]> {
+  const x402Transactions = await fetchConfirmedX402Transactions(userId, safes)
+  if (x402Transactions.length === 0) return transactions
+
+  const x402FundingKeys = new Set(
+    x402Transactions.map((tx) => `${tx.hash.toLowerCase()}:${tx.safeId}`),
+  )
+
+  return [
+    ...transactions.filter(
+      (tx) => !x402FundingKeys.has(`${tx.hash.toLowerCase()}:${tx.safeId}`),
+    ),
+    ...x402Transactions,
+  ]
+}
+
 export default async function transactionRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -490,10 +609,12 @@ export default async function transactionRoutes(
       }
     }
 
-    merged.sort(compareEnrichedTransactions)
+    const mergedWithX402 = await mergeX402Transactions(sub, safes, merged)
+
+    mergedWithX402.sort(compareEnrichedTransactions)
 
     const seen = new Set<string>()
-    const deduped = merged.filter((tx) => {
+    const deduped = mergedWithX402.filter((tx) => {
       const key = `${transactionDedupKey(tx)}:${tx.safeAddress.toLowerCase()}`
       if (seen.has(key)) return false
       seen.add(key)
@@ -673,20 +794,33 @@ export default async function transactionRoutes(
       fresh,
     })
 
-    const total = allTransactions.length
-    const start = (page - 1) * limit
-    const paginated = allTransactions.slice(start, start + limit)
-
-    const enriched = await enrichTransactionsWithAgents(
+    const userSafe = {
+      id: safeId,
+      safe_address: safeAddress,
+      chain_id: chainId,
+      name: '',
+    }
+    const enrichedAllTransactions = await mergeX402Transactions(
       sub,
-      paginated.map((tx) => ({
+      [userSafe],
+      allTransactions.map((tx) => ({
         ...tx,
         chainId,
         safeId,
         safeAddress,
-        // These aggregated-only fields are stripped back off before responding.
         safeName: '',
       })),
+    )
+
+    enrichedAllTransactions.sort(compareEnrichedTransactions)
+
+    const total = enrichedAllTransactions.length
+    const start = (page - 1) * limit
+    const paginated = enrichedAllTransactions.slice(start, start + limit)
+
+    const enriched = await enrichTransactionsWithAgents(
+      sub,
+      paginated,
     )
 
     return {

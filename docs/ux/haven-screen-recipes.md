@@ -126,6 +126,7 @@ Money and risk clarity:
 - Use external links for details, but do not make hashes the primary labels.
 - Prefer `TransactionActivityRow` for history lists. It should show what happened first, then Haven wallet, initiator, counterparty, amount, status, and time.
 - Use `Payment sent by you`, `Received payment`, and `Agent payment by [agent name]` before using technical transaction language.
+- For x402 payments, collapse the internal Safe-to-agent funding step into one merchant-facing row such as `x402 payment by [agent name]`.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
 - Keep the amount side to two rows: amount first, then time plus an external-details icon when a transaction link exists.
 

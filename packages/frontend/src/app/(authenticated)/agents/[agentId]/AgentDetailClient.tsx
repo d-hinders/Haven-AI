@@ -449,15 +449,8 @@ export default function AgentDetailClient({ agentId }: Props) {
                     </div>
                   ) : (
                     'No budget set'
-                  ),
+                ),
                 helper: approvalCopy,
-              },
-              {
-                label: 'Stop access',
-                value: isRevoked ? 'Revoked' : isPaused ? 'Paused in Haven' : 'Pause or revoke anytime',
-                helper: isRevoked
-                  ? 'This agent can no longer make requests through Haven.'
-                  : 'Pause blocks new requests in Haven. Revoke removes the agent budget from the Haven wallet.',
               },
             ]}
           />

@@ -3,7 +3,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
 type AmountTone = 'success' | 'danger' | 'neutral'
-type Direction = 'in' | 'out' | 'neutral'
+export type TransactionActivityDirection = 'in' | 'out' | 'neutral'
 
 export interface TransactionActivityDetail {
   label: string
@@ -35,7 +35,7 @@ export function TransactionActivityRow({
   status?: string
   statusTone?: StatusTone
   timestamp?: string
-  direction?: Direction
+  direction?: TransactionActivityDirection
   details?: TransactionActivityDetail[]
   action?: ReactNode
 }) {
@@ -98,7 +98,7 @@ export function ExternalDetailsLink({ href, label = 'Open externally' }: { href:
   )
 }
 
-function DirectionMark({ direction }: { direction: Direction }) {
+function DirectionMark({ direction }: { direction: TransactionActivityDirection }) {
   const classes =
     direction === 'in'
       ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
@@ -117,7 +117,10 @@ function DirectionMark({ direction }: { direction: Direction }) {
         ) : direction === 'out' ? (
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0l-5 5m5-5l5 5" />
         ) : (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l2.5 2.5" />
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l2.5 2.5" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </>
         )}
       </svg>
     </span>

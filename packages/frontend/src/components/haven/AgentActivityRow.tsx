@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react'
-import { TransactionActivityRow, type TransactionActivityDetail } from './TransactionActivityRow'
+import {
+  TransactionActivityRow,
+  type TransactionActivityDetail,
+  type TransactionActivityDirection,
+} from './TransactionActivityRow'
 
 export function AgentActivityRow({
   title,
@@ -9,6 +13,7 @@ export function AgentActivityRow({
   status,
   statusTone,
   timestamp,
+  direction = 'out',
   details,
   action,
 }: {
@@ -19,6 +24,7 @@ export function AgentActivityRow({
   status: string
   statusTone: 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
   timestamp?: string
+  direction?: TransactionActivityDirection
   details?: TransactionActivityDetail[]
   action?: ReactNode
 }) {
@@ -31,7 +37,7 @@ export function AgentActivityRow({
       status={status}
       statusTone={statusTone}
       timestamp={timestamp}
-      direction="neutral"
+      direction={direction}
       details={details}
       action={action}
     />

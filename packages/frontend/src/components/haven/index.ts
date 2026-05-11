@@ -3,6 +3,7 @@ export { AgentActivityRow } from './AgentActivityRow'
 export {
   ExternalDetailsLink,
   TransactionActivityRow,
+  type TransactionActivityDirection,
   type TransactionActivityDetail,
 } from './TransactionActivityRow'
 export { AgentRulesSummary, type AgentRuleSummaryItem } from './AgentRulesSummary'

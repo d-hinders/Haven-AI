@@ -34,12 +34,16 @@ function SendDetail({
   label,
   value,
   subValue,
+  copyValue,
+  copyLabel,
   mono = false,
   subMono = false,
 }: {
   label: string
   value: string
   subValue?: string
+  copyValue?: string
+  copyLabel?: string
   mono?: boolean
   subMono?: boolean
 }) {
@@ -50,8 +54,23 @@ function SendDetail({
         {value}
       </dd>
       {subValue && (
-        <dd className={`mt-0.5 truncate text-[11px] text-[var(--v2-ink-3)] ${subMono ? 'font-mono' : ''}`}>
-          {subValue}
+        <dd className="mt-0.5 flex min-w-0 items-center gap-1.5">
+          <span className={`truncate text-[11px] text-[var(--v2-ink-3)] ${subMono ? 'font-mono' : ''}`}>
+            {subValue}
+          </span>
+          {copyValue && (
+            <button
+              type="button"
+              aria-label={copyLabel ?? `Copy ${label.toLowerCase()}`}
+              onClick={() => { void navigator.clipboard?.writeText(copyValue) }}
+              className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 8.25V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.25" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8Z" />
+              </svg>
+            </button>
+          )}
         </dd>
       )}
     </div>
@@ -118,7 +137,7 @@ export default function SendModal({
   contextLoading = false,
   contextError = null,
 }: SendModalProps) {
-  const safeAddressForHooks = safeAddress ? (safeAddress as Address) : undefined
+  const safeAddressForHooks = safeAddress as Address
   const { status, txHash, error, send, reset } = useSendTransaction({
     safeAddress: safeAddressForHooks,
     chainId,
@@ -191,7 +210,7 @@ export default function SendModal({
       : `Your wallet${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
   const approvalMethodLabel =
     signer?.type === 'passkey'
-      ? 'Face ID / Touch ID'
+      ? 'Device approval'
       : signer?.type === 'eoa'
         ? 'Your wallet'
         : 'Approval method'
@@ -200,7 +219,7 @@ export default function SendModal({
       ? 'Reading account status...'
       : status === 'signing'
         ? signer?.type === 'passkey'
-          ? 'Approve this payment with Face ID or Touch ID.'
+          ? 'Approve this payment with your device.'
           : 'Approve this payment in your wallet.'
         : status === 'executing'
           ? isMultiSig
@@ -336,7 +355,7 @@ export default function SendModal({
     idle: '',
     building: 'Preparing payment...',
     signing:
-      signer?.type === 'passkey' ? 'Waiting for Face ID or Touch ID...' : 'Waiting for wallet approval...',
+      signer?.type === 'passkey' ? 'Waiting for device approval...' : 'Waiting for wallet approval...',
     executing: isMultiSig ? 'Submitting for approval...' : `Sending on ${getChainConfig(chainId).name}...`,
     confirmed: 'Payment sent',
     proposed: 'Payment submitted',
@@ -753,7 +772,7 @@ export default function SendModal({
                     {amount} {selectedToken}
                   </p>
                 </div>
-                <StatusBadge tone={isMultiSig ? 'warning' : 'neutral'}>
+                <StatusBadge tone="neutral">
                   {isMultiSig ? 'Needs approval' : 'Ready to send'}
                 </StatusBadge>
               </div>
@@ -766,6 +785,8 @@ export default function SendModal({
                     label="Recipient"
                     value={recipientLabel}
                     subValue={recipientDetailSubValue}
+                    copyValue={selectedContactName ? recipient : undefined}
+                    copyLabel="Copy recipient address"
                     subMono
                   />
                   <SendDetail label="Network" value={getChainConfig(chainId).name} />
@@ -874,6 +895,7 @@ export default function SendModal({
                   href={`https://app.safe.global/transactions/queue?safe=${chainConfig.shortName}:${safeAddress}`}
                   target="_blank"
                   rel="noopener noreferrer"
+                  title="Opens app.safe.global"
                   className="mb-6 inline-flex items-center gap-1 text-xs text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
                 >
                   View advanced approval details

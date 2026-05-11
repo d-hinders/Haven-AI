@@ -92,6 +92,7 @@ describe('SendModal', () => {
     expect(screen.getAllByText('Operating wallet').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Alice').length).toBeGreaterThan(0)
     expect(screen.getByText('0x2222...2222')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy recipient address' })).toBeInTheDocument()
     expect(screen.getByText('Approve with')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve and send' })).toBeInTheDocument()
   })
@@ -156,5 +157,59 @@ describe('SendModal', () => {
 
     expect(onSuccess).toHaveBeenCalledOnce()
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('shows submitted copy for multi-approval payments and refreshes on done', async () => {
+    const onClose = vi.fn()
+    const onSuccess = vi.fn()
+    mockUseSendTransaction.mockReturnValue({
+      status: 'proposed',
+      txHash: '0xsafetx',
+      error: null,
+      send: vi.fn().mockResolvedValue(undefined),
+      reset: vi.fn(),
+    })
+
+    render(
+      <SendModal
+        {...defaultProps}
+        onClose={onClose}
+        onSuccess={onSuccess}
+        safeDetails={{
+          ...defaultProps.safeDetails,
+          threshold: 2,
+          owners: ['0xowner1', '0xowner2'],
+        }}
+      />,
+    )
+
+    expect(await screen.findByText('Payment submitted')).toBeInTheDocument()
+    expect(screen.getByText(/No money has moved yet/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+
+    expect(onSuccess).toHaveBeenCalledOnce()
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('shows a friendly error result and lets the user try again', async () => {
+    const reset = vi.fn()
+    mockUseSendTransaction.mockReturnValue({
+      status: 'error',
+      txHash: null,
+      error: 'We could not send this payment. Check your approval method, then try again.',
+      send: vi.fn().mockResolvedValue(undefined),
+      reset,
+    })
+
+    render(<SendModal {...defaultProps} />)
+
+    expect(await screen.findByText('Payment was not sent')).toBeInTheDocument()
+    expect(screen.getByText('We could not send this payment. Check your approval method, then try again.')).toBeInTheDocument()
+
+    reset.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(reset).toHaveBeenCalledOnce()
+    expect(screen.getByRole('heading', { name: 'Send payment' })).toBeInTheDocument()
   })
 })

@@ -27,14 +27,14 @@ interface UseSendTransactionReturn {
   status: SendStatus
   txHash: string | null
   error: string | null
-  send: (params: SendParams, safeAddress: Address, threshold: number, signer: Address, chainId?: number) => Promise<void>
+  send: (params: SendParams, safeAddress: Address, threshold: number, signer: Address, chainId: number) => Promise<void>
   reset: () => void
 }
 
 export function useSendTransaction(args: {
-  safeAddress?: Address
-  chainId?: number
-} = {}): UseSendTransactionReturn {
+  safeAddress: Address
+  chainId: number
+}): UseSendTransactionReturn {
   const [status, setStatus] = useState<SendStatus>('idle')
   const [txHash, setTxHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -57,7 +57,7 @@ export function useSendTransaction(args: {
       safeAddress: Address,
       threshold: number,
       _owner: Address,
-      chainId: number = 100,
+      chainId: number,
     ) => {
       if (!signer || !publicClient) {
         setError('No approval method is available for this Haven wallet.')
@@ -102,6 +102,8 @@ export function useSendTransaction(args: {
           setStatus('proposed')
         }
       } catch (err: unknown) {
+        console.error('[Haven] Send payment failed:', err)
+
         // User rejected in wallet
         if (
           err instanceof Error &&
@@ -111,7 +113,7 @@ export function useSendTransaction(args: {
         ) {
           setError(
             signer.type === 'passkey'
-              ? 'Face ID or Touch ID was cancelled'
+              ? 'Device approval was cancelled.'
               : 'Payment was cancelled in your wallet.',
           )
         } else {

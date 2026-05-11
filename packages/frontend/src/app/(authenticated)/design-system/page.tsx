@@ -292,7 +292,7 @@ export default function DesignSystemPage() {
               </div>
               <div>
                 <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Approve with</dt>
-                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Face ID / Touch ID</dd>
+                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Device approval</dd>
               </div>
             </dl>
           </div>

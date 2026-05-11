@@ -2,12 +2,13 @@
 
 import type { ReactNode } from 'react'
 import { getExplorerUrl } from '@/lib/chains'
+import { parseX402Hostname } from '@/lib/transaction-labels'
 import { timeAgo, truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { ExternalDetailsLink, TransactionActivityRow } from '@/components/haven'
+import { ExternalDetailsLink, TransactionActivityRow, TransactionMovement } from '@/components/haven'
 
 interface TransactionsTableProps {
   transactions: AggregatedTransaction[]
@@ -140,19 +141,7 @@ function transactionMovement(
   const from = tx.direction === 'in' ? counterparty : tx.safeName
   const to = tx.direction === 'in' ? tx.safeName : counterparty
 
-  return (
-    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="min-w-0">
-        <span className="text-[var(--v2-ink-3)]">From </span>
-        <span className="font-medium text-[var(--v2-ink)]">{from}</span>
-      </span>
-      <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
-      <span className="min-w-0">
-        <span className="text-[var(--v2-ink-3)]">To </span>
-        <span className="font-medium text-[var(--v2-ink)]">{to}</span>
-      </span>
-    </span>
-  )
+  return <TransactionMovement from={from} to={to} />
 }
 
 function counterpartyLabel(
@@ -161,7 +150,7 @@ function counterpartyLabel(
   safeNamesByAddress?: Map<string, string>,
 ): string {
   if (tx.source === 'x402') {
-    return x402MerchantLabel(tx) ?? truncate(tx.to)
+    return parseX402Hostname(tx.x402ResourceUrl) ?? truncate(tx.to)
   }
 
   const address = tx.direction === 'in' ? tx.from : tx.to
@@ -169,14 +158,4 @@ function counterpartyLabel(
   const contactName = resolveAddress?.(address)
 
   return safeName ?? contactName ?? truncate(address)
-}
-
-function x402MerchantLabel(tx: AggregatedTransaction): string | null {
-  if (!tx.x402ResourceUrl) return null
-
-  try {
-    return new URL(tx.x402ResourceUrl).hostname
-  } catch {
-    return null
-  }
 }

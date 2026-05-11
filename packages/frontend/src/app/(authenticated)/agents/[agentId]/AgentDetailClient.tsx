@@ -13,6 +13,7 @@ import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
+import { parseX402Hostname } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
@@ -29,6 +30,7 @@ import {
   AgentRulesSummary,
   ApprovalRequiredBanner,
   ExternalDetailsLink,
+  TransactionMovement,
 } from '@/components/haven'
 
 function statusLabel(status: AgentStatus | string): string {
@@ -60,8 +62,10 @@ function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 
   return 'neutral'
 }
 
-function activityTitle(item: ActivityItem): string {
-  if (item.source === 'x402') return 'x402 payment'
+function activityTitle(item: ActivityItem, agentName?: string): string {
+  if (item.source === 'x402') {
+    return agentName ? `x402 payment by ${agentName}` : 'x402 payment'
+  }
   if (item.type === 'approval') return 'Approval request'
   if (item.status === 'failed') return 'Payment failed'
   if (item.status === 'rejected') return 'Payment rejected'
@@ -70,32 +74,10 @@ function activityTitle(item: ActivityItem): string {
 
 function activityMovement(item: ActivityItem, walletName: string) {
   const recipient = item.source === 'x402'
-    ? x402MerchantLabel(item.x402_resource_url) ?? truncate(item.to)
+    ? parseX402Hostname(item.x402_resource_url) ?? truncate(item.to)
     : truncate(item.to)
 
-  return (
-    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="min-w-0">
-        <span className="text-[var(--v2-ink-3)]">From </span>
-        <span className="font-medium text-[var(--v2-ink)]">{walletName}</span>
-      </span>
-      <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
-      <span className="min-w-0">
-        <span className="text-[var(--v2-ink-3)]">To </span>
-        <span className="font-medium text-[var(--v2-ink)]">{recipient}</span>
-      </span>
-    </span>
-  )
-}
-
-function x402MerchantLabel(resourceUrl?: string | null): string | null {
-  if (!resourceUrl) return null
-
-  try {
-    return new URL(resourceUrl).hostname
-  } catch {
-    return null
-  }
+  return <TransactionMovement from={walletName} to={recipient} />
 }
 
 function formatAllowanceAmount(amount: string, decimals: number): string {
@@ -544,7 +526,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 {activity.map((item) => (
                   <AgentActivityRow
                     key={`${item.type}-${item.id}`}
-                    title={activityTitle(item)}
+                    title={activityTitle(item, currentAgent.name)}
                     description={activityMovement(item, walletName)}
                     amount={`-${item.amount} ${item.token}`}
                     amountTone={item.status === 'failed' || item.status === 'rejected' ? 'danger' : 'neutral'}

@@ -13,6 +13,7 @@ interface PaymentRow {
   chain_id: number
   token_symbol: string
   token_address: string
+  amount_raw: string
   amount_human: string
   to_address: string
   status: string
@@ -80,6 +81,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               COALESCE(us.chain_id, pi.chain_id, 100) AS chain_id,
               pi.token_symbol,
               pi.token_address,
+              pi.amount_raw,
               pi.amount_human,
               pi.to_address,
               pi.status,
@@ -114,6 +116,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         type: 'payment' as const,
         id: p.id,
         token: p.token_symbol,
+        amount_raw: p.amount_raw,
         amount: p.amount_human,
         to: p.to_address,
         status: p.status,
@@ -258,6 +261,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               COALESCE(us.chain_id, pi.chain_id, 100) AS chain_id,
               pi.token_symbol,
               pi.token_address,
+              pi.amount_raw,
               pi.amount_human,
               pi.to_address,
               pi.status,
@@ -294,6 +298,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         agent_id: p.agent_id,
         agent_name: agentNames.get(p.agent_id) ?? 'Unknown',
         token: p.token_symbol,
+        amount_raw: p.amount_raw,
         amount: p.amount_human,
         to: p.to_address,
         status: p.status,

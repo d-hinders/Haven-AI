@@ -15,12 +15,12 @@ function jsonResponse(body: unknown): Response {
   })
 }
 
-describe('fetchSafeTransactions', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-    vi.unstubAllGlobals()
-  })
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
+describe('fetchSafeTransactions', () => {
   it('uses Safe Transaction Service transfers when Base Blockscout address history is empty', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString()
@@ -97,7 +97,9 @@ describe('fetchSafeTransactions', () => {
       ),
     )
   })
+})
 
+describe('mergeX402Transactions', () => {
   it('normalizes x402 funding intents into merchant-facing transactions', async () => {
     vi.spyOn(pool, 'query').mockResolvedValueOnce({
       rows: [

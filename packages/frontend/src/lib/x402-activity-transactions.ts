@@ -41,6 +41,7 @@ interface X402ActivityItem {
   agent_name?: string
   token: string
   token_address?: string | null
+  amount_raw?: string | null
   amount: string
   to: string
   status: string
@@ -66,6 +67,8 @@ export async function fetchX402ActivityTransactions(
   filters: TransactionFilterState = {},
 ): Promise<AggregatedTransaction[]> {
   try {
+    // Temporary PR-preview bridge: remove this fan-out once the deployed backend
+    // serves normalized x402 rows from /transactions and /dashboard/overview.
     const [activityResponse, agentsResponse, userResponse] = await Promise.all([
       api.get<AgentActivityResponse>('/agent-activity/feed?limit=100'),
       api.get<{ agents: AgentResponse[] }>('/agents'),
@@ -156,13 +159,15 @@ function buildX402ActivityTransactions(
     }
 
     const timestamp = parseActivityTimestamp(item.confirmed_at ?? item.created_at)
+    const safeAddress = item.safe_address ?? agent?.safe_address ?? safe?.safe_address
+    if (!safeAddress) return []
 
     return [{
       hash: item.tx_hash,
       type: 'erc20',
-      from: item.safe_address ?? agent?.safe_address ?? safe?.safe_address ?? '',
+      from: safeAddress,
       to: item.x402_merchant_address ?? item.to,
-      value: item.amount,
+      value: item.amount_raw ?? '',
       valueFormatted: item.amount,
       asset: item.token,
       decimals: resolveTokenDecimals(tokenAddress, chainId) ?? 18,
@@ -176,7 +181,7 @@ function buildX402ActivityTransactions(
       agentName: item.agent_name ?? agent?.name,
       chainId,
       safeId,
-      safeAddress: item.safe_address ?? agent?.safe_address ?? safe?.safe_address ?? '',
+      safeAddress,
       safeName: item.safe_name ?? agent?.safe_name ?? safe?.name ?? 'Haven wallet',
       source: 'x402',
       x402ResourceUrl: item.x402_resource_url,

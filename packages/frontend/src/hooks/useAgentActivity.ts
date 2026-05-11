@@ -10,6 +10,7 @@ export interface ActivityItem {
   agent_name?: string
   token: string
   token_address?: string | null
+  amount_raw?: string | null
   amount: string
   to: string
   reason?: string | null

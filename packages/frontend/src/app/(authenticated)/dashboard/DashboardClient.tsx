@@ -14,6 +14,7 @@ import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
+import { parseX402Hostname } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import CreateAgentModal from '@/components/CreateAgentModal'
@@ -23,7 +24,7 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
-import { TransactionActivityRow } from '@/components/haven'
+import { TransactionActivityRow, TransactionMovement } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -251,34 +252,12 @@ function transactionTitle(tx: AggregatedTransaction): string {
 function transactionMovement(tx: AggregatedTransaction, resolveAddress: (address: string) => string | null) {
   const counterparty = tx.direction === 'in' ? tx.from : tx.to
   const label = tx.source === 'x402'
-    ? x402MerchantLabel(tx) ?? truncate(counterparty)
+    ? parseX402Hostname(tx.x402ResourceUrl) ?? truncate(counterparty)
     : resolveAddress(counterparty) ?? truncate(counterparty)
   const from = tx.direction === 'in' ? label : tx.safeName
   const to = tx.direction === 'in' ? tx.safeName : label
 
-  return (
-    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="min-w-0">
-        <span className="text-[var(--v2-ink-3)]">From </span>
-        <span className="font-medium text-[var(--v2-ink)]">{from}</span>
-      </span>
-      <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
-      <span className="min-w-0">
-        <span className="text-[var(--v2-ink-3)]">To </span>
-        <span className="font-medium text-[var(--v2-ink)]">{to}</span>
-      </span>
-    </span>
-  )
-}
-
-function x402MerchantLabel(tx: AggregatedTransaction): string | null {
-  if (!tx.x402ResourceUrl) return null
-
-  try {
-    return new URL(tx.x402ResourceUrl).hostname
-  } catch {
-    return null
-  }
+  return <TransactionMovement from={from} to={to} />
 }
 
 function TransactionsSection({

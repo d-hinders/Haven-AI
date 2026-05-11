@@ -88,14 +88,13 @@ export function useTransactionsFeed(
         const pageTransactions = offset === 0
           ? mergeTransactionsWithX402Activity(data.transactions, x402Transactions)
           : data.transactions
-        const additionalX402Count = pageTransactions.length - data.transactions.length
 
         setTransactions((prev) =>
           append
             ? mergeTransactionsWithX402Activity(prev, pageTransactions)
             : pageTransactions,
         )
-        setTotal(data.total + Math.max(0, additionalX402Count))
+        setTotal(data.total)
         setHasMore(data.hasMore)
         setPartialFailure(data.partialFailure)
         setFailedSafeIds(data.failedSafeIds)

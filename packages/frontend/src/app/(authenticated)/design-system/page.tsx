@@ -18,6 +18,7 @@ import {
   ExternalDetailsLink,
   RiskExplainer,
   TransactionActivityRow,
+  TransactionMovement,
   WalletIdentityBlock,
 } from '@/components/haven'
 
@@ -57,19 +58,7 @@ function LoadingCard() {
 }
 
 function MovementExample({ from, to }: { from: string; to: string }) {
-  return (
-    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span>
-        <span className="text-[var(--v2-ink-3)]">From </span>
-        <span className="font-medium text-[var(--v2-ink)]">{from}</span>
-      </span>
-      <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
-      <span>
-        <span className="text-[var(--v2-ink-3)]">To </span>
-        <span className="font-medium text-[var(--v2-ink)]">{to}</span>
-      </span>
-    </span>
-  )
+  return <TransactionMovement from={from} to={to} />
 }
 
 export default function DesignSystemPage() {

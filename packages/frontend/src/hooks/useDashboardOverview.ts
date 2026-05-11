@@ -22,16 +22,10 @@ export function useDashboardOverview() {
         response.transactions,
         x402Transactions,
       )
-      const additionalX402Count = transactions.length - response.transactions.length
 
       setData({
         ...response,
         transactions,
-        metrics: {
-          ...response.metrics,
-          successfulTransactions:
-            response.metrics.successfulTransactions + Math.max(0, additionalX402Count),
-        },
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard overview')

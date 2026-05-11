@@ -6,6 +6,7 @@ export {
   type TransactionActivityDirection,
   type TransactionActivityDetail,
 } from './TransactionActivityRow'
+export { TransactionMovement } from './TransactionMovement'
 export { AgentRulesSummary, type AgentRuleSummaryItem } from './AgentRulesSummary'
 export { ApprovalRequiredBanner } from './ApprovalRequiredBanner'
 export { WalletIdentityBlock } from './WalletIdentityBlock'

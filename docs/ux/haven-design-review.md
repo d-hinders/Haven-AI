@@ -21,6 +21,7 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 
 - Existing primitives in `packages/frontend/src/components/ui` are reused before adding new styles.
 - Haven-domain components in `packages/frontend/src/components/haven` are reused for agent budget, wallet identity, approvals, and risk explanations.
+- Activity and history surfaces reuse `AgentActivityRow` or `TransactionActivityRow` before creating one-off transaction rows.
 - Cards, buttons, inputs, shadows, radii, and typography match `docs/design_system/DESIGN_SYSTEM.md`.
 - No new gradient buttons, glow shadows, dark app surfaces, or one-off card styles were introduced.
 - Dense app surfaces use compact headings and readable spacing, not marketing hero typography.

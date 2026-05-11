@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
+import {
+  fetchX402ActivityTransactions,
+  mergeTransactionsWithX402Activity,
+} from '@/lib/x402-activity-transactions'
 import type {
   AggregatedTransaction,
   TransactionFilterState,
@@ -75,11 +79,20 @@ export function useTransactionsFeed(
         const data = await api.get<TransactionsFeedResponse>(
           `/transactions?${toQueryString(filtersRef.current, offset, limit, fresh)}`,
         )
+        const x402Transactions = offset === 0
+          ? await fetchX402ActivityTransactions(filtersRef.current)
+          : []
 
         if (requestId !== requestIdRef.current) return
 
+        const pageTransactions = offset === 0
+          ? mergeTransactionsWithX402Activity(data.transactions, x402Transactions)
+          : data.transactions
+
         setTransactions((prev) =>
-          append ? [...prev, ...data.transactions] : data.transactions,
+          append
+            ? mergeTransactionsWithX402Activity(prev, pageTransactions)
+            : pageTransactions,
         )
         setTotal(data.total)
         setHasMore(data.hasMore)

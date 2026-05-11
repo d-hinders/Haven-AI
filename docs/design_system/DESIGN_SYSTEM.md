@@ -235,7 +235,8 @@ Tonally: marketing copy can be **slightly more inviting** to match the more ener
 | Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
-| Transactions | `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
+| Agent activity rows | `packages/frontend/src/components/haven/AgentActivityRow.tsx` |
+| Transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, composed by `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
 
 The handoff plan in `docs/design_system/REDESIGN_HANDOFF.md` is now project history.
 

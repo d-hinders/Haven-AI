@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchSafeTransactions } from '../transactions.js'
+import { fetchSafeTransactions, mergeX402Transactions } from '../transactions.js'
 import type { FastifyBaseLogger } from 'fastify'
+import pool from '../../db.js'
 
 const SAFE_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 const SENDER = '0x55C9d84427756D6f82480427Bb778F6dc0cC755E'
@@ -14,11 +15,12 @@ function jsonResponse(body: unknown): Response {
   })
 }
 
-describe('fetchSafeTransactions', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
+describe('fetchSafeTransactions', () => {
   it('uses Safe Transaction Service transfers when Base Blockscout address history is empty', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString()
@@ -94,5 +96,81 @@ describe('fetchSafeTransactions', () => {
         'https://api.safe.global/tx-service/base/api/v1/safes/',
       ),
     )
+  })
+})
+
+describe('mergeX402Transactions', () => {
+  it('normalizes x402 funding intents into merchant-facing transactions', async () => {
+    vi.spyOn(pool, 'query').mockResolvedValueOnce({
+      rows: [
+        {
+          id: 'payment-id',
+          tx_hash: TX_HASH,
+          agent_id: 'agent-id',
+          agent_name: 'Research assistant',
+          safe_id: 'safe-id',
+          safe_address: SAFE_ADDRESS,
+          safe_name: 'Main wallet',
+          chain_id: 8453,
+          token_symbol: 'USDC',
+          token_address: USDC_ADDRESS,
+          to_address: '0x1111111111111111111111111111111111111111',
+          amount_raw: '20000',
+          amount_human: '0.02',
+          x402_merchant_address: '0x2222222222222222222222222222222222222222',
+          x402_resource_url: 'https://api.example.com/data',
+          confirmed_at: '2026-05-08T11:50:10Z',
+          created_at: '2026-05-08T11:49:55Z',
+        },
+      ],
+    } as never)
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{
+        id: 'safe-id',
+        safe_address: SAFE_ADDRESS,
+        chain_id: 8453,
+        name: 'Main wallet',
+      }],
+      [{
+        hash: TX_HASH,
+        type: 'erc20',
+        from: SAFE_ADDRESS,
+        to: '0x1111111111111111111111111111111111111111',
+        value: '20000',
+        valueFormatted: '0.02',
+        asset: 'USDC',
+        decimals: 6,
+        direction: 'out',
+        timestamp: 1778240999,
+        blockNumber: 45725826,
+        isError: false,
+        tokenAddress: USDC_ADDRESS,
+        tokenSymbol: 'USDC',
+        chainId: 8453,
+        safeId: 'safe-id',
+        safeAddress: SAFE_ADDRESS,
+        safeName: 'Main wallet',
+      }],
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      hash: TX_HASH,
+      from: SAFE_ADDRESS,
+      to: '0x2222222222222222222222222222222222222222',
+      value: '20000',
+      valueFormatted: '0.02',
+      asset: 'USDC',
+      direction: 'out',
+      source: 'x402',
+      x402ResourceUrl: 'https://api.example.com/data',
+      x402MerchantAddress: '0x2222222222222222222222222222222222222222',
+      safeId: 'safe-id',
+      safeName: 'Main wallet',
+      agentId: 'agent-id',
+      agentName: 'Research assistant',
+    })
   })
 })

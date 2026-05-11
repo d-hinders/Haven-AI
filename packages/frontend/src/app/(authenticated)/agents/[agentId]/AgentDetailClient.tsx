@@ -7,12 +7,13 @@ import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type AgentStatus } from '@/hooks/useAgents'
-import { useAgentActivity } from '@/hooks/useAgentActivity'
+import { useAgentActivity, type ActivityItem } from '@/hooks/useAgentActivity'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
+import { parseX402Hostname } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
@@ -28,6 +29,8 @@ import {
   AgentBudgetCard,
   AgentRulesSummary,
   ApprovalRequiredBanner,
+  ExternalDetailsLink,
+  TransactionMovement,
 } from '@/components/haven'
 
 function statusLabel(status: AgentStatus | string): string {
@@ -45,7 +48,7 @@ function statusTone(status: AgentStatus | string): 'success' | 'warning' | 'dang
 }
 
 function activityStatusLabel(status: string): string {
-  if (status === 'confirmed' || status === 'executed') return 'Settled'
+  if (status === 'confirmed' || status === 'executed') return 'Sent'
   if (status === 'pending' || status === 'pending_approval') return 'Needs approval'
   if (status === 'failed') return 'Failed'
   if (status === 'rejected') return 'Rejected'
@@ -53,10 +56,28 @@ function activityStatusLabel(status: string): string {
 }
 
 function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
-  if (status === 'confirmed' || status === 'executed') return 'success'
+  if (status === 'confirmed' || status === 'executed') return 'neutral'
   if (status === 'pending' || status === 'pending_approval') return 'warning'
   if (status === 'failed' || status === 'rejected') return 'danger'
   return 'neutral'
+}
+
+function activityTitle(item: ActivityItem, agentName?: string): string {
+  if (item.source === 'x402') {
+    return agentName ? `x402 payment by ${agentName}` : 'x402 payment'
+  }
+  if (item.type === 'approval') return 'Approval request'
+  if (item.status === 'failed') return 'Payment failed'
+  if (item.status === 'rejected') return 'Payment rejected'
+  return 'Agent payment'
+}
+
+function activityMovement(item: ActivityItem, walletName: string) {
+  const recipient = item.source === 'x402'
+    ? parseX402Hostname(item.x402_resource_url) ?? truncate(item.to)
+    : truncate(item.to)
+
+  return <TransactionMovement from={walletName} to={recipient} />
 }
 
 function formatAllowanceAmount(amount: string, decimals: number): string {
@@ -505,22 +526,16 @@ export default function AgentDetailClient({ agentId }: Props) {
                 {activity.map((item) => (
                   <AgentActivityRow
                     key={`${item.type}-${item.id}`}
-                    title={`${item.type === 'approval' ? 'Approval request' : 'Payment'} to ${truncate(item.to)}`}
-                    description={item.reason || item.x402_resource_url || 'Agent activity'}
-                    amount={`${item.amount} ${item.token}`}
+                    title={activityTitle(item, currentAgent.name)}
+                    description={activityMovement(item, walletName)}
+                    amount={`-${item.amount} ${item.token}`}
+                    amountTone={item.status === 'failed' || item.status === 'rejected' ? 'danger' : 'neutral'}
                     status={activityStatusLabel(item.status)}
                     statusTone={activityStatusTone(item.status)}
                     timestamp={timeAgo(item.created_at)}
                     action={
                       item.tx_hash && item.explorer_url ? (
-                        <a
-                          href={item.explorer_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-                        >
-                          View
-                        </a>
+                        <ExternalDetailsLink href={item.explorer_url} />
                       ) : undefined
                     }
                   />

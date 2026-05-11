@@ -432,7 +432,7 @@ export default function AccountDetailClient() {
       {/* Full transaction history */}
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-[var(--v2-ink)]">
-          Transactions
+          Transaction history
         </h2>
       </div>
       <div className="mb-3 flex items-center justify-between gap-4">

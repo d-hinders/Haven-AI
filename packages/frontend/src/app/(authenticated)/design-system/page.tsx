@@ -15,7 +15,10 @@ import {
   AgentRulesSummary,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
+  ExternalDetailsLink,
   RiskExplainer,
+  TransactionActivityRow,
+  TransactionMovement,
   WalletIdentityBlock,
 } from '@/components/haven'
 
@@ -54,6 +57,10 @@ function LoadingCard() {
   )
 }
 
+function MovementExample({ from, to }: { from: string; to: string }) {
+  return <TransactionMovement from={from} to={to} />
+}
+
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
 
@@ -84,7 +91,7 @@ export default function DesignSystemPage() {
               <Button variant="danger">Danger</Button>
             </div>
             <div className="mt-5 flex flex-wrap items-center gap-2">
-              <StatusBadge tone="success">Settled</StatusBadge>
+              <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs approval</StatusBadge>
               <StatusBadge tone="danger">Failed</StatusBadge>
               <StatusBadge tone="brand">Connected</StatusBadge>
@@ -208,28 +215,77 @@ export default function DesignSystemPage() {
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recent agent activity</h3>
             </div>
             <AgentActivityRow
-              title="Paid API provider"
-              description="Research assistant used the Operating wallet"
+              title="x402 payment"
+              description={<MovementExample from="Research assistant" to="API provider" />}
               amount="-12.00 USDC"
-              status="Settled"
-              statusTone="success"
+              status="Sent"
+              statusTone="neutral"
             />
             <AgentActivityRow
-              title="Cloud inference request"
-              description="Above the remaining daily budget"
+              title="Approval request"
+              description={<MovementExample from="Research assistant" to="Cloud vendor" />}
               amount="-320.00 USDC"
               status="Needs approval"
               statusTone="warning"
             />
             <AgentActivityRow
-              title="Rejected vendor payment"
-              description="The request was blocked by your agent rules"
+              title="Payment rejected"
+              description={<MovementExample from="Research assistant" to="Unknown vendor" />}
               amount="-80.00 USDC"
+              amountTone="danger"
               status="Failed"
               statusTone="danger"
             />
           </Card>
         </div>
+      </Section>
+
+      <Section
+        title="Transaction history"
+        description="Full history rows lead with what happened, keep raw hashes out of the primary label, and show the money path without repeating metadata."
+      >
+        <Card hover={false} className="overflow-hidden">
+          <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-3">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+              <span>Activity</span>
+              <span className="text-right">Amount</span>
+            </div>
+          </div>
+          <div className="divide-y divide-[var(--v2-border)]">
+            <TransactionActivityRow
+              title="Received payment"
+              description={<MovementExample from="Acme Operations" to="Operating wallet" />}
+              amount="+500.00 USDC"
+              amountTone="success"
+              status="Received"
+              statusTone="success"
+              timestamp="12m ago"
+              direction="in"
+              action={<ExternalDetailsLink href="#" />}
+            />
+            <TransactionActivityRow
+              title="x402 payment by Research assistant"
+              description={<MovementExample from="Operating wallet" to="API provider" />}
+              amount="-12.00 USDC"
+              status="Sent"
+              statusTone="neutral"
+              timestamp="1h ago"
+              direction="out"
+              action={<ExternalDetailsLink href="#" />}
+            />
+            <TransactionActivityRow
+              title="Payment sent by you"
+              description={<MovementExample from="Operating wallet" to="Unknown vendor" />}
+              amount="-80.00 USDC"
+              amountTone="danger"
+              status="Failed"
+              statusTone="danger"
+              timestamp="Yesterday"
+              direction="out"
+              action={<ExternalDetailsLink href="#" />}
+            />
+          </div>
+        </Card>
       </Section>
 
       <Section

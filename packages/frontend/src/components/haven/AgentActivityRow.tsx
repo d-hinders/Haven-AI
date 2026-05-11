@@ -1,37 +1,45 @@
 import type { ReactNode } from 'react'
-import { StatusBadge } from '@/components/ui/StatusBadge'
+import {
+  TransactionActivityRow,
+  type TransactionActivityDetail,
+  type TransactionActivityDirection,
+} from './TransactionActivityRow'
 
 export function AgentActivityRow({
   title,
   description,
   amount,
+  amountTone,
   status,
   statusTone,
   timestamp,
+  direction = 'out',
+  details,
   action,
 }: {
   title: string
   description: ReactNode
   amount: string
+  amountTone?: 'success' | 'danger' | 'neutral'
   status: string
   statusTone: 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
   timestamp?: string
+  direction?: TransactionActivityDirection
+  details?: TransactionActivityDetail[]
   action?: ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-[var(--v2-border)] px-5 py-4 last:border-b-0">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{title}</p>
-          <StatusBadge tone={statusTone}>{status}</StatusBadge>
-        </div>
-        <div className="mt-1 truncate text-xs text-[var(--v2-ink-2)]">{description}</div>
-      </div>
-      <div className="flex-shrink-0 text-right">
-        <p className="text-sm font-semibold text-[var(--v2-ink)] v2-tabular">{amount}</p>
-        {action ? <div className="mt-1">{action}</div> : null}
-        {timestamp ? <p className="mt-1 text-xs text-[var(--v2-ink-2)]">{timestamp}</p> : null}
-      </div>
-    </div>
+    <TransactionActivityRow
+      title={title}
+      description={description}
+      amount={amount}
+      amountTone={amountTone}
+      status={status}
+      statusTone={statusTone}
+      timestamp={timestamp}
+      direction={direction}
+      details={details}
+      action={action}
+    />
   )
 }

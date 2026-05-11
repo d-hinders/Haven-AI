@@ -69,8 +69,8 @@ export default function TransactionsClient() {
     return (
       <div className="max-w-5xl">
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-1">Transactions</h1>
-          <p className="text-sm text-[var(--v2-ink-2)]">All activity across your Haven accounts</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-1">Transaction history</h1>
+          <p className="text-sm text-[var(--v2-ink-2)]">Payments and account activity across your Haven wallets.</p>
         </div>
 
         <EmptyState
@@ -86,8 +86,8 @@ export default function TransactionsClient() {
     <div className="max-w-6xl">
       <div className="mb-8">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-1">Transactions</h1>
-          <p className="text-sm text-[var(--v2-ink-2)]">All activity across your Haven accounts</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-1">Transaction history</h1>
+          <p className="text-sm text-[var(--v2-ink-2)]">Payments and account activity across your Haven wallets.</p>
         </div>
       </div>
 
@@ -139,13 +139,14 @@ export default function TransactionsClient() {
       {transactions.length > 0 && (
         <div className="mt-5 flex items-center justify-center">
           {hasMore ? (
-            <button
+            <Button
+              variant="ghost"
               onClick={() => void loadMore()}
               disabled={loadingMore}
-              className="inline-flex min-w-36 items-center justify-center rounded-md border border-[var(--v2-border-strong)] bg-white px-4 py-2 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-w-36"
             >
               {loadingMore ? 'Loading...' : 'Load more'}
-            </button>
+            </Button>
           ) : (
             <span className="text-xs text-[var(--v2-ink-3)]">You&apos;ve reached the end.</span>
           )}

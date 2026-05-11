@@ -47,6 +47,7 @@ const defaultProps = {
     {
       symbol: 'ETH',
       name: 'ETH',
+      address: null,
       balance: '5000000000000000000',
       formatted: '5',
       decimals: 18,

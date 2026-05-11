@@ -1,4 +1,5 @@
 export { AgentBudgetCard } from './AgentBudgetCard'
+export { AgentActivityRow } from './AgentActivityRow'
 export { AgentRulesSummary, type AgentRuleSummaryItem } from './AgentRulesSummary'
 export { ApprovalRequiredBanner } from './ApprovalRequiredBanner'
 export { WalletIdentityBlock } from './WalletIdentityBlock'

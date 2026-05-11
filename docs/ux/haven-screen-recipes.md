@@ -125,7 +125,8 @@ Money and risk clarity:
 - Show amount, token, status, counterparty, account, and date.
 - Use external links for details, but do not make hashes the primary labels.
 - Prefer `TransactionActivityRow` for history lists. It should show what happened first, then Haven wallet, initiator, counterparty, amount, status, and time.
-- Use `Payment sent`, `Received payment`, `Agent payment`, and `Payment failed` before using technical transaction language.
+- Use `Payment sent by you`, `Received payment`, and `Agent payment by [agent name]` before using technical transaction language.
+- Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
 
 ## Account Detail
 

@@ -49,7 +49,7 @@ export function TransactionActivityRow({
             {status ? <StatusBadge tone={statusTone}>{status}</StatusBadge> : null}
           </div>
           {description ? (
-            <div className="mt-1 truncate text-xs text-[var(--v2-ink-2)]">{description}</div>
+            <div className="mt-1 text-xs text-[var(--v2-ink-2)]">{description}</div>
           ) : null}
           {details.length > 0 ? (
             <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--v2-ink-3)]">
@@ -82,7 +82,7 @@ function DirectionMark({ direction }: { direction: Direction }) {
     direction === 'in'
       ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
       : direction === 'out'
-        ? 'border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+        ? 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]'
         : 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
 
   return (

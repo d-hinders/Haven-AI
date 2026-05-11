@@ -55,6 +55,22 @@ function LoadingCard() {
   )
 }
 
+function MovementExample({ from, to }: { from: string; to: string }) {
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span>
+        <span className="text-[var(--v2-ink-3)]">From </span>
+        <span className="font-medium text-[var(--v2-ink)]">{from}</span>
+      </span>
+      <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
+      <span>
+        <span className="text-[var(--v2-ink-3)]">To </span>
+        <span className="font-medium text-[var(--v2-ink)]">{to}</span>
+      </span>
+    </span>
+  )
+}
+
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
 
@@ -248,7 +264,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="Full history rows lead with what happened, keep raw hashes out of the primary label, and show wallet, initiator, counterparty, amount, status, and time."
+        description="Full history rows lead with what happened, keep raw hashes out of the primary label, and show the money path without repeating metadata."
       >
         <Card hover={false} className="overflow-hidden">
           <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-3">
@@ -260,49 +276,34 @@ export default function DesignSystemPage() {
           <div className="divide-y divide-[var(--v2-border)]">
             <TransactionActivityRow
               title="Received payment"
-              description="From Acme Operations to Operating wallet"
+              description={<MovementExample from="Acme Operations" to="Operating wallet" />}
               amount="+500.00 USDC"
               amountTone="success"
               status="Received"
               statusTone="success"
               timestamp="12m ago"
               direction="in"
-              details={[
-                { label: 'Haven wallet', value: 'Operating wallet' },
-                { label: 'Initiator', value: 'External sender' },
-                { label: 'Counterparty', value: 'Acme Operations' },
-              ]}
               action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
             />
             <TransactionActivityRow
-              title="Agent payment"
-              description="To API provider from Operating wallet"
+              title="Agent payment by Research assistant"
+              description={<MovementExample from="Operating wallet" to="API provider" />}
               amount="-12.00 USDC"
               status="Sent"
-              statusTone="brand"
+              statusTone="neutral"
               timestamp="1h ago"
               direction="out"
-              details={[
-                { label: 'Haven wallet', value: 'Operating wallet' },
-                { label: 'Initiator', value: 'Agent: Research assistant' },
-                { label: 'Counterparty', value: 'API provider' },
-              ]}
               action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
             />
             <TransactionActivityRow
-              title="Payment failed"
-              description="To Unknown vendor from Operating wallet"
+              title="Payment sent by you"
+              description={<MovementExample from="Operating wallet" to="Unknown vendor" />}
               amount="-80.00 USDC"
               amountTone="danger"
               status="Failed"
               statusTone="danger"
               timestamp="Yesterday"
               direction="out"
-              details={[
-                { label: 'Haven wallet', value: 'Operating wallet' },
-                { label: 'Initiator', value: 'You' },
-                { label: 'Counterparty', value: 'Unknown vendor' },
-              ]}
               action={<span className="text-xs font-medium text-[var(--v2-brand)]">Details</span>}
             />
           </div>

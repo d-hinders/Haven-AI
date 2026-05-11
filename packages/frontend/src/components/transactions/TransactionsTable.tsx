@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { getExplorerUrl } from '@/lib/chains'
 import { timeAgo, truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -84,18 +85,13 @@ export default function TransactionsTable({
           <TransactionActivityRow
             key={`${tx.safeId}:${tx.hash}:${tx.type}:${index}`}
             title={transactionTitle(tx)}
-            description={transactionDescription(tx, resolveAddress, safeNamesByAddress)}
+            description={transactionMovement(tx, resolveAddress, safeNamesByAddress)}
             amount={transactionAmount(tx)}
             amountTone={tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'}
             status={transactionStatus(tx)}
-            statusTone={tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'brand'}
+            statusTone={tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'}
             timestamp={timeAgo(tx.timestamp * 1000)}
             direction={tx.direction}
-            details={[
-              { label: 'Haven wallet', value: tx.safeName },
-              { label: 'Initiator', value: initiatorLabel(tx) },
-              { label: 'Counterparty', value: counterpartyLabel(tx, resolveAddress, safeNamesByAddress) },
-            ]}
             action={
               <a
                 href={getExplorerUrl(tx.chainId, 'tx', tx.hash)}
@@ -127,10 +123,9 @@ function TransactionActivitySkeleton() {
 }
 
 function transactionTitle(tx: AggregatedTransaction): string {
-  if (tx.isError) return tx.direction === 'in' ? 'Incoming payment failed' : 'Payment failed'
   if (tx.direction === 'in') return 'Received payment'
-  if (tx.agentName) return 'Agent payment'
-  return 'Payment sent'
+  if (tx.agentName) return `Agent payment by ${tx.agentName}`
+  return 'Payment sent by you'
 }
 
 function transactionStatus(tx: AggregatedTransaction): string {
@@ -143,24 +138,28 @@ function transactionAmount(tx: AggregatedTransaction): string {
   return `${sign}${tx.valueFormatted} ${tx.asset}`
 }
 
-function transactionDescription(
+function transactionMovement(
   tx: AggregatedTransaction,
   resolveAddress?: (address: string) => string | null,
   safeNamesByAddress?: Map<string, string>,
-): string {
+): ReactNode {
   const counterparty = counterpartyLabel(tx, resolveAddress, safeNamesByAddress)
+  const from = tx.direction === 'in' ? counterparty : tx.safeName
+  const to = tx.direction === 'in' ? tx.safeName : counterparty
 
-  if (tx.direction === 'in') {
-    return `From ${counterparty} to ${tx.safeName}`
-  }
-
-  return `To ${counterparty} from ${tx.safeName}`
-}
-
-function initiatorLabel(tx: AggregatedTransaction): string {
-  if (tx.direction === 'in') return 'External sender'
-  if (tx.agentName) return `Agent: ${tx.agentName}`
-  return 'You'
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="min-w-0">
+        <span className="text-[var(--v2-ink-3)]">From </span>
+        <span className="font-medium text-[var(--v2-ink)]">{from}</span>
+      </span>
+      <span aria-hidden="true" className="text-[var(--v2-ink-3)]">→</span>
+      <span className="min-w-0">
+        <span className="text-[var(--v2-ink-3)]">To </span>
+        <span className="font-medium text-[var(--v2-ink)]">{to}</span>
+      </span>
+    </span>
+  )
 }
 
 function counterpartyLabel(

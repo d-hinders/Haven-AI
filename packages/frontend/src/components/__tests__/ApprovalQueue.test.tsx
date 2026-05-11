@@ -106,12 +106,15 @@ describe('ApprovalQueue', () => {
           agent_id: 'agent-1',
           agent_name: 'Blocked agent',
           safe_address: '0x1111111111111111111111111111111111111111',
+          chain_id: 100,
           token_symbol: 'xDAI',
           token_address: '0x0000000000000000000000000000000000000000',
           to_address: '0x3333333333333333333333333333333333333333',
           amount_raw: '1000000000000000000',
           amount_human: '1',
           reason: null,
+          source: 'direct',
+          x402_resource_url: null,
           status: 'pending',
           tx_hash: null,
           reviewed_at: null,
@@ -123,12 +126,15 @@ describe('ApprovalQueue', () => {
           agent_id: 'agent-2',
           agent_name: 'Accessible agent',
           safe_address: '0x2222222222222222222222222222222222222222',
+          chain_id: 8453,
           token_symbol: 'ETH',
           token_address: '0x0000000000000000000000000000000000000000',
           to_address: '0x4444444444444444444444444444444444444444',
           amount_raw: '2000000000000000000',
           amount_human: '2',
           reason: 'Payment',
+          source: 'direct',
+          x402_resource_url: null,
           status: 'pending',
           tx_hash: null,
           reviewed_at: null,
@@ -136,10 +142,12 @@ describe('ApprovalQueue', () => {
           expires_at: '2026-05-05T11:05:00.000Z',
         },
       ],
-      pendingCount: 2,
+      actionableCount: 2,
       loading: false,
+      error: null,
       approve: vi.fn().mockResolvedValue({}),
       reject: vi.fn().mockResolvedValue(undefined),
+      markProposed: vi.fn().mockResolvedValue(undefined),
       markExecuted: vi.fn().mockResolvedValue(undefined),
       refetch: vi.fn().mockResolvedValue(undefined),
     })
@@ -196,7 +204,7 @@ describe('ApprovalQueue', () => {
   it('gates and executes approvals per approval safe instead of the active safe', async () => {
     render(<ApprovalQueue />)
 
-    const approveButtons = screen.getAllByRole('button', { name: 'Approve & Execute' })
+    const approveButtons = screen.getAllByRole('button', { name: 'Approve payment' })
     expect(approveButtons).toHaveLength(2)
     expect(approveButtons[0]).toBeDisabled()
     expect(approveButtons[1]).not.toBeDisabled()
@@ -220,5 +228,71 @@ describe('ApprovalQueue', () => {
       expect.anything(),
       8453,
     )
+  })
+
+  it('submits multi-approval requests instead of marking them sent', async () => {
+    mockUseSafeDetails.mockReturnValue({
+      details: {
+        address: '0x2222222222222222222222222222222222222222',
+        threshold: 2,
+        owners: ['0xowner', '0xother'],
+        nonce: 1,
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<ApprovalQueue />)
+
+    const submitButtons = screen.getAllByRole('button', { name: 'Approve and submit' })
+    expect(submitButtons[0]).toBeDisabled()
+    expect(submitButtons[1]).not.toBeDisabled()
+
+    fireEvent.click(submitButtons[1])
+
+    await waitFor(() => {
+      const { approve, markProposed } = mockUseApprovals.mock.results[0].value
+      expect(approve).toHaveBeenCalledWith('approval-2')
+      expect(markProposed).toHaveBeenCalledWith('approval-2')
+    })
+
+    expect(mockProposeSafeTx).toHaveBeenCalledWith(
+      '0x2222222222222222222222222222222222222222',
+      expect.anything(),
+      '0xhash',
+      '0xsig',
+      '0x5555555555555555555555555555555555555555',
+      8453,
+    )
+    expect(mockExecuteSafeTx).not.toHaveBeenCalled()
+  })
+
+  it('completes an already-approved request without approving it again', async () => {
+    const baseHookValue = mockUseApprovals()
+    const approve = vi.fn().mockResolvedValue({})
+    const markExecuted = vi.fn().mockResolvedValue(undefined)
+    mockUseApprovals.mockReturnValue({
+      ...baseHookValue,
+      approvals: [
+        {
+          ...baseHookValue.approvals[1],
+          status: 'approved',
+        },
+      ],
+      actionableCount: 1,
+      approve,
+      markExecuted,
+    })
+
+    render(<ApprovalQueue />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Complete payment' }))
+
+    await waitFor(() => {
+      expect(approve).not.toHaveBeenCalled()
+      expect(markExecuted).toHaveBeenCalledWith('approval-2', '0xtx')
+    })
+    expect(mockExecuteSafeTx).toHaveBeenCalled()
   })
 })

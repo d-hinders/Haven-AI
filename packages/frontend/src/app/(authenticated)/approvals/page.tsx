@@ -18,7 +18,7 @@ export default function ApprovalsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight mb-1">Approvals</h1>
         <p className="text-sm text-[var(--v2-ink-3)]">
-          Review agent-initiated payments that need your approval before Haven can continue.
+          Review agent payments that need your approval before any money moves.
         </p>
       </div>
 

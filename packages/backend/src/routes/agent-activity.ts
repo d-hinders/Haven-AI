@@ -32,6 +32,8 @@ interface ApprovalRow {
   amount_human: string
   to_address: string
   reason: string | null
+  source: string | null
+  x402_resource_url: string | null
   status: string
   tx_hash: string | null
   created_at: string
@@ -102,7 +104,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Fetch approval requests
     const approvals = await pool.query<ApprovalRow>(
-      `SELECT id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason, status, tx_hash, created_at
+      `SELECT id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason,
+              COALESCE(source, 'direct') AS source, x402_resource_url, status, tx_hash, created_at
        FROM approval_requests
        WHERE agent_id = $1
        ORDER BY created_at DESC
@@ -142,8 +145,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         reason: a.reason,
         status: a.status,
         tx_hash: a.tx_hash,
-        source: 'direct' as const,
-        x402_resource_url: null,
+        source: a.source ?? 'direct',
+        x402_resource_url: a.x402_resource_url,
         explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
         created_at: a.created_at,
       })),
@@ -206,7 +209,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
       // Pending approvals count
       const pendingApprovals = await pool.query<{ count: string }>(
         `SELECT COUNT(*) as count FROM approval_requests
-         WHERE agent_id = $1 AND status = 'pending'`,
+         WHERE agent_id = $1 AND status IN ('pending', 'approved')`,
         [id],
       )
 
@@ -282,7 +285,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Recent approval requests
     const approvals = await pool.query<ApprovalRow & { agent_id: string }>(
-      `SELECT id, agent_id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason, status, tx_hash, created_at
+      `SELECT id, agent_id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason,
+              COALESCE(source, 'direct') AS source, x402_resource_url, status, tx_hash, created_at
        FROM approval_requests
        WHERE agent_id = ANY($1)
        ORDER BY created_at DESC
@@ -326,8 +330,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         reason: a.reason,
         status: a.status,
         tx_hash: a.tx_hash,
-        source: 'direct' as const,
-        x402_resource_url: null,
+        source: a.source ?? 'direct',
+        x402_resource_url: a.x402_resource_url,
         explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
         created_at: a.created_at,
       })),
@@ -337,7 +341,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     // Pending approvals count
     const pendingResult = await pool.query<{ count: string }>(
       `SELECT COUNT(*) as count FROM approval_requests
-       WHERE user_id = $1 AND status = 'pending'`,
+       WHERE user_id = $1 AND status IN ('pending', 'approved')`,
       [sub],
     )
 

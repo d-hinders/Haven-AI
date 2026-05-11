@@ -403,6 +403,7 @@ export default function DashboardClient() {
   const monthlySpend = currency === 'EUR'
     ? (overview?.metrics.monthlyAgentSpendEur ?? 0)
     : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
+  const approvalActionCount = overview?.actionableApprovals ?? overview?.pendingApprovals ?? 0
 
   function refreshDashboardData() {
     refetchOverview()
@@ -468,20 +469,20 @@ export default function DashboardClient() {
         </div>
       )}
 
-      {(overview?.pendingApprovals ?? 0) > 0 && (
+      {approvalActionCount > 0 ? (
         <div className="mb-6 flex items-center gap-3 rounded-xl border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3">
           <svg className="w-4 h-4 text-[var(--v2-warning)] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <circle cx="12" cy="12" r="10" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4M12 16h.01" />
           </svg>
           <p className="text-sm text-[var(--v2-warning)]">
-            {overview?.pendingApprovals} payment{overview?.pendingApprovals === 1 ? '' : 's'} pending your approval
+            {approvalActionCount} agent payment{approvalActionCount === 1 ? '' : 's'} need your action
           </p>
-          <Link href="/agents" className="ml-auto text-sm font-medium text-[var(--v2-warning)] hover:underline transition-colors">
-            Review
+          <Link href="/approvals" className="ml-auto text-sm font-medium text-[var(--v2-warning)] hover:underline transition-colors">
+            Open approvals
           </Link>
         </div>
-      )}
+      ) : null}
 
       {onboardingStage && !requiresOtherDevice && !isGuideDismissed && (
         <DashboardOnboardingGuide

@@ -71,14 +71,19 @@ Money and risk clarity:
 Use when a payment request needs human approval.
 
 Structure:
-1. Header with the payment amount and status.
-2. Payment intent card showing recipient, reason/source, Haven wallet, network, and agent.
-3. Risk explainer showing why approval is required.
-4. Primary action: `Approve payment`; secondary action: `Reject`.
+1. Header explaining that agent payments wait here before money moves.
+2. Payment request card with the amount and token as the dominant information.
+3. Money path using `TransactionMovement`: From Haven wallet -> To recipient or merchant.
+4. Compact context for agent, network, wallet, and source.
+5. Neutral `ApprovalRequiredBanner` explaining why review is needed.
+6. Primary action: `Approve payment`; secondary action: `Reject`.
 
 Money and risk clarity:
 - Make the amount and token the dominant information.
 - Explain whether approval is required because the request exceeds the remaining budget.
+- If the request is approved but not sent, keep it actionable with `Complete payment` and explain that the payment has not moved yet.
+- If the account needs more than one approval, use `Approve and submit`, then move the request to a submitted/waiting state instead of leaving it in the active approval queue.
+- For x402 approvals, show the merchant hostname when available instead of leading with a raw address.
 - Include externally verifiable transaction links after execution, not before they exist.
 
 ## Agent Activity

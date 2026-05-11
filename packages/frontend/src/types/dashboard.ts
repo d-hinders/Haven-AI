@@ -35,6 +35,7 @@ export interface DashboardOverviewResponse {
     successfulTransactions: number
     activeAccounts: number
   }
+  actionableApprovals?: number
   pendingApprovals: number
   agents: DashboardAgentPreview[]
   transactions: AggregatedTransaction[]

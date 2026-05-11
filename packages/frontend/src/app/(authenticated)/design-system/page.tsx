@@ -199,6 +199,68 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Approvals and pending actions"
+        description="Approval requests lead with the money, show who asked, and make the wallet-to-recipient path readable before the user approves or rejects."
+      >
+        <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+          <Card hover={false} className="overflow-hidden border-[var(--v2-warning)]/25">
+            <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge tone="warning">Needs approval</StatusBadge>
+                  <StatusBadge>x402 payment</StatusBadge>
+                </div>
+                <span className="text-xs text-[var(--v2-ink-3)]">Expires in 1 hour</span>
+              </div>
+            </div>
+            <div className="space-y-5 p-5">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.9fr)]">
+                <div>
+                  <p className="text-xs font-medium text-[var(--v2-ink-3)]">Payment request</p>
+                  <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                    48.00 USDC
+                  </p>
+                  <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+                    Research assistant asked to send this payment. Nothing moves until you approve it.
+                  </p>
+                </div>
+                <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+                  <TransactionMovement from="Operating wallet" to="api.vendor.com" />
+                  <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Agent</dt>
+                      <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Research assistant</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Network</dt>
+                      <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+              <ApprovalRequiredBanner title="Approval required" tone="neutral" density="compact">
+                This payment is above the remaining agent budget.
+              </ApprovalRequiredBanner>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="ghost" size="sm">Reject</Button>
+                <Button size="sm">Approve payment</Button>
+              </div>
+            </div>
+          </Card>
+
+          <div className="space-y-4">
+            <ApprovalRequiredBanner title="Approved, not sent yet" tone="neutral" density="compact">
+              This request was approved but still needs to be completed before the payment is sent.
+            </ApprovalRequiredBanner>
+            <EmptyState
+              title="No payments need approval"
+              body="When an agent asks to spend above its budget, the request will appear here before any money moves."
+            />
+          </div>
+        </div>
+      </Section>
+
+      <Section
         title="Wallet and activity"
         description="Wallet identity and activity rows should make account context readable without making raw addresses the primary object."
       >

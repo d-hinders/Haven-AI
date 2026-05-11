@@ -10,6 +10,7 @@ import * as accountDefaultName from './007_account_default_name.js'
 import * as userName from './008_user_name.js'
 import * as ownerAliases from './009_owner_aliases.js'
 import * as x402StandardMetadata from './010_x402_standard_metadata.js'
+import * as approvalRequestSource from './011_approval_request_source.js'
 
 export interface Migration {
   version: string
@@ -33,4 +34,5 @@ export const migrations: Migration[] = [
   userName,
   ownerAliases,
   x402StandardMetadata,
+  approvalRequestSource,
 ]

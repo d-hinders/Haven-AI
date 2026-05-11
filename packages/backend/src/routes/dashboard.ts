@@ -96,7 +96,7 @@ export default async function dashboardRoutes(
   app.get('/overview', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const [safeResult, agentResult, pendingApprovalsResult] = await Promise.all([
+    const [safeResult, agentResult, actionableApprovalsResult] = await Promise.all([
       pool.query<UserSafeRow>(
         `SELECT id, safe_address, chain_id, name, is_default
          FROM user_safes
@@ -122,7 +122,7 @@ export default async function dashboardRoutes(
       pool.query<{ count: string }>(
         `SELECT COUNT(*) AS count
          FROM approval_requests
-         WHERE user_id = $1 AND status = 'pending'`,
+         WHERE user_id = $1 AND status IN ('pending', 'approved')`,
         [sub],
       ),
     ])
@@ -324,7 +324,8 @@ export default async function dashboardRoutes(
         successfulTransactions,
         activeAccounts: safes.length,
       },
-      pendingApprovals: Number(pendingApprovalsResult.rows[0]?.count ?? '0'),
+      actionableApprovals: Number(actionableApprovalsResult.rows[0]?.count ?? '0'),
+      pendingApprovals: Number(actionableApprovalsResult.rows[0]?.count ?? '0'),
       agents: agents.slice(0, AGENT_PREVIEW_LIMIT).map((agent) => ({
         id: agent.id,
         name: agent.name,

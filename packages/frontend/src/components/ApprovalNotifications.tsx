@@ -3,19 +3,19 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApprovals } from '@/hooks/useApprovals'
-import { truncate, timeAgo } from '@/lib/format'
+import { approvalRecipientLabel, approvalSourceLabel } from '@/lib/approval-labels'
+import { timeAgo } from '@/lib/format'
 
 export default function ApprovalNotifications() {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const { approvals, pendingCount, loading } = useApprovals()
+  const { approvals, actionableCount, loading } = useApprovals()
 
   const pendingApprovals = useMemo(
-    () => approvals.filter((approval) => approval.status === 'pending'),
+    () => approvals.filter((approval) => approval.status === 'pending' || approval.status === 'approved'),
     [approvals],
   )
-
   useEffect(() => {
     if (!open) return
 
@@ -52,9 +52,9 @@ export default function ApprovalNotifications() {
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Notifications${pendingCount > 0 ? `, ${pendingCount} pending approvals` : ''}`}
+        aria-label={`Notifications${actionableCount > 0 ? `, ${actionableCount} payments need action` : ''}`}
         className={`relative inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 ${
-          pendingCount > 0
+          actionableCount > 0
             ? 'border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] hover:border-[var(--v2-warning)]/40'
             : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]'
         }`}
@@ -63,9 +63,9 @@ export default function ApprovalNotifications() {
           <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
           <path d="M9 17a3 3 0 0 0 6 0" />
         </svg>
-        {pendingCount > 0 && (
+        {actionableCount > 0 && (
           <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[var(--v2-warning)] text-white text-[10px] font-bold flex items-center justify-center shadow-[var(--v2-shadow-button)]">
-            {pendingCount > 99 ? '99+' : pendingCount}
+            {actionableCount > 99 ? '99+' : actionableCount}
           </span>
         )}
       </button>
@@ -82,14 +82,14 @@ export default function ApprovalNotifications() {
             <div>
               <p className="text-sm font-semibold text-[var(--v2-ink)]">Approvals</p>
               <p className="text-[11px] text-[var(--v2-ink-3)]">
-                {pendingCount > 0
-                  ? `${pendingCount} transaction${pendingCount === 1 ? '' : 's'} waiting for your review`
-                  : 'No transactions waiting for approval'}
+                {actionableCount > 0
+                  ? `${actionableCount} payment${actionableCount === 1 ? '' : 's'} need your action`
+                  : 'No payments need action'}
               </p>
             </div>
-            {pendingCount > 0 && (
+            {actionableCount > 0 && (
               <span className="text-[10px] px-2 py-1 rounded-full font-semibold bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]">
-                {pendingCount} pending
+                {actionableCount} waiting
               </span>
             )}
           </div>
@@ -115,10 +115,23 @@ export default function ApprovalNotifications() {
                   <circle cx="12" cy="12" r="10" />
                 </svg>
               </div>
-              <p className="text-sm font-medium text-[var(--v2-ink)]">You&apos;re all caught up</p>
-              <p className="text-xs text-[var(--v2-ink-2)] mt-1 leading-relaxed max-w-[240px] mx-auto">
-                New agent transactions that need manual approval will appear here.
+              <p className="text-sm font-medium text-[var(--v2-ink)]">
+                {actionableCount > 0 ? 'Open approvals for the full queue' : "You're all caught up"}
               </p>
+              <p className="text-xs text-[var(--v2-ink-2)] mt-1 leading-relaxed max-w-[240px] mx-auto">
+                {actionableCount > 0
+                  ? 'There are more requests than this preview can show.'
+                  : 'Agent payments above budget will appear here before any money moves.'}
+              </p>
+              {actionableCount > 0 ? (
+                <Link
+                  href="/approvals"
+                  onClick={() => setOpen(false)}
+                  className="mt-4 inline-flex items-center justify-center rounded-md border border-[var(--v2-border-strong)] bg-white px-3.5 py-2 text-xs font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)]"
+                >
+                  Open approvals
+                </Link>
+              ) : null}
             </div>
           ) : (
             <>
@@ -140,14 +153,20 @@ export default function ApprovalNotifications() {
                         </p>
                       </div>
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] font-semibold flex-shrink-0">
-                        Pending
+                        {approval.status === 'approved' ? 'Complete' : 'Review'}
                       </span>
                     </div>
                     <p className="text-sm text-[var(--v2-ink)]">
                       {approval.amount_human} {approval.token_symbol}
                     </p>
                     <p className="text-xs text-[var(--v2-ink-3)] mt-1">
-                      To {truncate(approval.to_address)}
+                      To {approvalRecipientLabel({
+                        reason: approval.reason,
+                        source: approval.source,
+                        x402ResourceUrl: approval.x402_resource_url,
+                        toAddress: approval.to_address,
+                      })}
+                      {approvalSourceLabel({ reason: approval.reason, source: approval.source }) ? ' · x402' : ''}
                     </p>
                   </Link>
                 ))}

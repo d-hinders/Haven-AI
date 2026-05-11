@@ -13,7 +13,14 @@ import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
 import NetworkGate from './NetworkGate'
 import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
-import { SigningStatus } from './SigningStatus'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import {
+  ApprovalRequiredBanner,
+  ExternalDetailsLink,
+  TransactionMovement,
+} from '@/components/haven'
 
 interface SendSafeOption {
   id: string
@@ -23,11 +30,63 @@ interface SendSafeOption {
   isDefault: boolean
 }
 
+function SendDetail({
+  label,
+  value,
+  subValue,
+  mono = false,
+  subMono = false,
+}: {
+  label: string
+  value: string
+  subValue?: string
+  mono?: boolean
+  subMono?: boolean
+}) {
+  return (
+    <div>
+      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">{label}</dt>
+      <dd className={`mt-1 truncate text-sm font-medium text-[var(--v2-ink)] ${mono ? 'font-mono' : ''}`}>
+        {value}
+      </dd>
+      {subValue && (
+        <dd className={`mt-0.5 truncate text-[11px] text-[var(--v2-ink-3)] ${subMono ? 'font-mono' : ''}`}>
+          {subValue}
+        </dd>
+      )}
+    </div>
+  )
+}
+
+function ResultIcon({ tone }: { tone: 'success' | 'warning' | 'danger' }) {
+  const toneClass =
+    tone === 'success'
+      ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+      : tone === 'warning'
+        ? 'border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
+        : 'border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
+
+  return (
+    <div className={`mb-5 flex h-14 w-14 items-center justify-center rounded-full border ${toneClass}`}>
+      <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={tone === 'warning' ? 1.5 : 2}>
+        {tone === 'success' ? (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+        ) : tone === 'warning' ? (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+        ) : (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        )}
+      </svg>
+    </div>
+  )
+}
+
 // ── Props ────────────────────────────────────────────────────────────
 interface SendModalProps {
   open: boolean
   onClose: () => void
   safeAddress: string
+  safeName?: string
   safeDetails: SafeDetails | null
   balances: BalanceItem[]
   onSuccess?: () => void
@@ -46,6 +105,7 @@ export default function SendModal({
   open,
   onClose,
   safeAddress,
+  safeName,
   safeDetails,
   balances,
   onSuccess,
@@ -58,13 +118,17 @@ export default function SendModal({
   contextLoading = false,
   contextError = null,
 }: SendModalProps) {
-  const { status, txHash, error, send, reset } = useSendTransaction()
+  const safeAddressForHooks = safeAddress ? (safeAddress as Address) : undefined
+  const { status, txHash, error, send, reset } = useSendTransaction({
+    safeAddress: safeAddressForHooks,
+    chainId,
+  })
   const signer = useActiveSigner({
-    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    safeAddress: safeAddressForHooks,
     chainId,
   })
   const operationGate = useSafeOperationGate({
-    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    safeAddress: safeAddressForHooks,
     chainId,
   })
   const blockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
@@ -116,12 +180,33 @@ export default function SendModal({
   const tokenConfig = chainTokens[selectedToken]
   const selectedSafeOption =
     safeOptions.find((safe) => safe.id === selectedSafeOptionId) ?? null
+  const walletName = selectedSafeOption?.name ?? safeName ?? 'Haven wallet'
+  const recipientLabel = selectedContactName ?? truncate(recipient)
+  const recipientDetailSubValue = selectedContactName ? truncate(recipient) : undefined
   const threshold = safeDetails?.threshold ?? 1
   const isMultiSig = threshold > 1
   const gasPaidByLabel =
     signer?.type === 'passkey'
       ? `Haven${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
-      : `Your signing wallet${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
+      : `Your wallet${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
+  const approvalMethodLabel =
+    signer?.type === 'passkey'
+      ? 'Face ID / Touch ID'
+      : signer?.type === 'eoa'
+        ? 'Your wallet'
+        : 'Approval method'
+  const progressHelp =
+    status === 'building'
+      ? 'Reading account status...'
+      : status === 'signing'
+        ? signer?.type === 'passkey'
+          ? 'Approve this payment with Face ID or Touch ID.'
+          : 'Approve this payment in your wallet.'
+        : status === 'executing'
+          ? isMultiSig
+            ? 'Submitting this payment for approval.'
+            : 'Sending this payment from your Haven wallet.'
+          : null
 
   // Reset everything when the modal opens or the selected account changes.
   useEffect(() => {
@@ -171,7 +256,7 @@ export default function SendModal({
     }
 
     if (!isValidAddress(recipient)) {
-      setFormError('Invalid Ethereum address')
+      setFormError('Enter a valid wallet address')
       return false
     }
 
@@ -226,6 +311,15 @@ export default function SendModal({
     onClose()
   }
 
+  const handleRequestClose = () => {
+    if (step === 'result' && (status === 'confirmed' || status === 'proposed')) {
+      handleDone()
+      return
+    }
+
+    onClose()
+  }
+
   const handleSelectContact = (contact: Contact) => {
     setRecipient(contact.address)
     setSelectedContactName(contact.name)
@@ -240,13 +334,13 @@ export default function SendModal({
   // ── Status labels ────────────────────────────────────────────────
   const statusLabel: Record<SendStatus, string> = {
     idle: '',
-    building: 'Preparing transaction...',
+    building: 'Preparing payment...',
     signing:
       signer?.type === 'passkey' ? 'Waiting for Face ID or Touch ID...' : 'Waiting for wallet approval...',
-    executing: isMultiSig ? 'Submitting proposal...' : `Confirming on ${getChainConfig(chainId).name}...`,
-    confirmed: 'Transaction confirmed!',
-    proposed: 'Transaction proposed!',
-    error: 'Transaction failed',
+    executing: isMultiSig ? 'Submitting for approval...' : `Sending on ${getChainConfig(chainId).name}...`,
+    confirmed: 'Payment sent',
+    proposed: 'Payment submitted',
+    error: 'Payment failed',
   }
 
   return (
@@ -254,22 +348,22 @@ export default function SendModal({
       {/* Backdrop */}
       <div
         className="absolute inset-0 v2-modal-backdrop"
-        onClick={step === 'executing' ? undefined : onClose}
+        onClick={step === 'executing' ? undefined : handleRequestClose}
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-md mx-4 bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)] overflow-hidden">
+      <div className="relative w-full max-w-md mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">
-            {step === 'form' && 'Send tokens'}
-            {step === 'review' && 'Review transaction'}
+            {step === 'form' && 'Send payment'}
+            {step === 'review' && 'Review payment'}
             {step === 'executing' && 'Processing'}
-            {step === 'result' && (status === 'error' ? 'Failed' : 'Complete')}
+            {step === 'result' && (status === 'error' ? 'Payment failed' : 'Payment complete')}
           </h2>
           {step !== 'executing' && (
             <button
-              onClick={onClose}
+              onClick={handleRequestClose}
               aria-label="Close"
               className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
@@ -296,7 +390,7 @@ export default function SendModal({
                           {selectedSafeOption.name}
                         </span>
                         {selectedSafeOption.isDefault && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-[var(--v2-brand)] font-medium">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
                             Default
                           </span>
                         )}
@@ -320,7 +414,7 @@ export default function SendModal({
                           onClick={() => onSelectSafeOption?.(safe.id)}
                           className={`w-full rounded-lg border px-4 py-3 text-left transition-all duration-150 ${
                             isSelected
-                              ? 'border-indigo-500/50 bg-indigo-500/10'
+                              ? 'border-[var(--v2-brand)]/50 bg-[var(--v2-brand-soft)]'
                               : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
                           }`}
                         >
@@ -331,7 +425,7 @@ export default function SendModal({
                             {safe.isDefault && (
                               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                                 isSelected
-                                  ? 'bg-indigo-400/15 text-[var(--v2-brand)]'
+                                  ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                                   : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]'
                               }`}>
                                 Default
@@ -357,12 +451,12 @@ export default function SendModal({
             {(contextLoading || contextError) && (
               <div className={`rounded-lg px-4 py-3 text-xs border ${
                 contextError
-                  ? 'text-red-400 bg-red-400/10 border-red-400/20'
+                  ? 'text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border-[var(--v2-danger)]/20'
                   : 'text-[var(--v2-ink-2)] bg-[var(--v2-surface)] border-[var(--v2-border)]'
               }`}>
                 {contextError
                   ? 'We could not load this account right now. Try again in a moment.'
-                  : 'Loading this account’s balances and signing details...'}
+                  : 'Loading this account’s balances and approval details...'}
               </div>
             )}
 
@@ -381,7 +475,7 @@ export default function SendModal({
                       onClick={() => { setSelectedToken(t.symbol); setFormError('') }}
                       className={`p-3 rounded-lg border text-left transition-all duration-150 ${
                         isActive
-                          ? 'border-indigo-500/50 bg-indigo-500/10'
+                          ? 'border-[var(--v2-brand)]/50 bg-[var(--v2-brand-soft)]'
                           : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
                       }`}
                     >
@@ -411,7 +505,7 @@ export default function SendModal({
                 )}
               </div>
               <div className="relative">
-                <input
+                <Input
                   type="text"
                   inputMode="decimal"
                   value={amount}
@@ -424,10 +518,10 @@ export default function SendModal({
                     }
                   }}
                   placeholder="0.00"
-                  className={`w-full px-4 py-3 pr-16 bg-[var(--v2-surface-2)] border rounded-lg text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:ring-1 transition-colors font-mono ${
+                  className={`py-3 pr-16 bg-[var(--v2-surface-2)] rounded-lg font-mono ${
                     amountWarning
-                      ? 'border-red-400/30 focus:border-red-400/40 focus:ring-red-400/20'
-                      : 'border-[var(--v2-border)] focus:border-[var(--v2-brand)]/50 focus:ring-[var(--v2-brand)]/30'
+                      ? 'border-[var(--v2-danger)]/30 focus:border-[var(--v2-danger)]/40 focus:ring-[var(--v2-danger)]/20'
+                      : ''
                   }`}
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[var(--v2-ink-3)]">
@@ -435,7 +529,7 @@ export default function SendModal({
                 </span>
               </div>
               {amountWarning && (
-                <p className="mt-2 text-xs text-red-400">
+                <p className="mt-2 text-xs text-[var(--v2-danger)]">
                   {amountWarning}
                 </p>
               )}
@@ -463,8 +557,8 @@ export default function SendModal({
                 {/* Selected contact badge */}
                 {selectedContactName && (
                   <div className="flex items-center gap-2 mb-1.5">
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-md">
-                      <div className="w-4 h-4 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                    <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 rounded-md">
+                      <div className="w-4 h-4 rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center">
                         <span className="text-[9px] font-semibold text-[var(--v2-brand)]">
                           {selectedContactName.slice(0, 2).toUpperCase()}
                         </span>
@@ -483,7 +577,7 @@ export default function SendModal({
                   </div>
                 )}
 
-                <input
+                <Input
                   type="text"
                   value={recipient}
                   onChange={(e) => {
@@ -492,7 +586,7 @@ export default function SendModal({
                     setFormError('')
                   }}
                   placeholder="0x..."
-                  className="w-full px-4 py-3 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-lg text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:ring-1 focus:ring-[var(--v2-brand)]/30 transition-colors font-mono"
+                  className="py-3 bg-[var(--v2-surface-2)] rounded-lg font-mono"
                 />
               </div>
 
@@ -525,11 +619,11 @@ export default function SendModal({
                           onClick={() => handleSelectContact(contact)}
                           className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
                             isSelected
-                              ? 'border-indigo-500/40 bg-indigo-500/12 text-[var(--v2-brand)]'
+                              ? 'border-[var(--v2-brand)]/40 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                               : 'border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)]'
                           }`}
                         >
-                          <span className="w-5 h-5 rounded-full bg-indigo-500/15 text-[10px] font-semibold text-[var(--v2-brand)] flex items-center justify-center">
+                          <span className="w-5 h-5 rounded-full bg-[var(--v2-brand-soft)] text-[10px] font-semibold text-[var(--v2-brand)] flex items-center justify-center">
                             {contact.name.slice(0, 2).toUpperCase()}
                           </span>
                           <span className="text-xs font-medium">{contact.name}</span>
@@ -582,11 +676,11 @@ export default function SendModal({
                             onClick={() => handleSelectContact(contact)}
                             className={`w-full flex items-center gap-2.5 px-3 py-3 transition-colors text-left ${
                               isSelected
-                                ? 'bg-indigo-500/10'
+                                ? 'bg-[var(--v2-brand-soft)]'
                                 : 'hover:bg-[var(--v2-surface-2)]'
                             }`}
                           >
-                            <div className="w-7 h-7 rounded-full bg-indigo-500/15 flex items-center justify-center flex-shrink-0">
+                            <div className="w-7 h-7 rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center flex-shrink-0">
                               <span className="text-[10px] font-semibold text-[var(--v2-brand)]">
                                 {contact.name.slice(0, 2).toUpperCase()}
                               </span>
@@ -600,7 +694,7 @@ export default function SendModal({
                               </p>
                             </div>
                             {isSelected && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-[var(--v2-brand)] font-medium">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
                                 Selected
                               </span>
                             )}
@@ -625,89 +719,69 @@ export default function SendModal({
             )}
 
             {formError && (
-              <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
+              <div className="text-sm text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border border-[var(--v2-danger)]/20 rounded-lg px-4 py-3">
                 {formError}
               </div>
             )}
 
             {/* Multi-sig notice */}
             {isMultiSig && (
-              <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-4 py-3">
-                This account requires {threshold} of {safeDetails?.owners.length ?? '?'} approvals.
-                Haven will submit your approval as a proposal.
-              </div>
+              <ApprovalRequiredBanner title="Additional approval required" tone="neutral" density="compact">
+                This Haven account needs {threshold} approvals. This payment will be submitted for approval before it can be sent.
+              </ApprovalRequiredBanner>
             )}
 
             {/* Continue button */}
-            <button
+            <Button
               onClick={handleReview}
               disabled={!amount || !recipient || contextLoading || !!contextError || !safeDetails || signingUnavailable}
-              className="w-full py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+              className="w-full"
             >
               Continue
-            </button>
+            </Button>
           </div>
         )}
 
         {/* ── STEP 2: Review ──────────────────────────────────────── */}
         {step === 'review' && (
           <div className="p-6 space-y-5">
-            <div className="space-y-4 bg-[var(--v2-surface)] rounded-lg p-4 border border-[var(--v2-border)]">
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-[var(--v2-ink-3)]">Sending</span>
-                <span className="text-sm font-medium text-[var(--v2-ink)] font-mono">
-                  {amount} {selectedToken}
-                </span>
-              </div>
-              <div className="h-px bg-[var(--v2-surface-2)]" />
-              <div className="flex justify-between items-start">
-                <span className="text-xs text-[var(--v2-ink-3)]">To</span>
-                <div className="text-right">
-                  {selectedContactName && (
-                    <p className="text-sm font-medium text-[var(--v2-ink)] mb-0.5">{selectedContactName}</p>
-                  )}
-                  <span className="text-sm text-[var(--v2-ink-2)] font-mono">
-                    {truncate(recipient)}
-                    <button
-                      onClick={() => navigator.clipboard.writeText(recipient)}
-                      className="ml-2 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors inline"
-                    >
-                      <svg className="w-3 h-3 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                      </svg>
-                    </button>
-                  </span>
+            <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
+                  <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                    {amount} {selectedToken}
+                  </p>
                 </div>
+                <StatusBadge tone={isMultiSig ? 'warning' : 'neutral'}>
+                  {isMultiSig ? 'Needs approval' : 'Ready to send'}
+                </StatusBadge>
               </div>
-              <div className="h-px bg-[var(--v2-surface-2)]" />
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-[var(--v2-ink-3)]">From account</span>
-                <div className="text-right">
-                  {selectedSafeOption && (
-                    <p className="text-sm font-medium text-[var(--v2-ink)] mb-0.5">
-                      {selectedSafeOption.name}
-                    </p>
-                  )}
-                  <span className="text-sm text-[var(--v2-ink-2)] font-mono">
-                    {truncate(safeAddress)}
-                  </span>
-                </div>
-              </div>
-              <div className="h-px bg-[var(--v2-surface-2)]" />
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-[var(--v2-ink-3)]">Network</span>
-                <span className="text-sm text-[var(--v2-ink-2)]">{getChainConfig(chainId).name}</span>
+
+              <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
+                <TransactionMovement from={walletName} to={recipientLabel} />
+                <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <SendDetail label="Haven wallet" value={walletName} />
+                  <SendDetail
+                    label="Recipient"
+                    value={recipientLabel}
+                    subValue={recipientDetailSubValue}
+                    subMono
+                  />
+                  <SendDetail label="Network" value={getChainConfig(chainId).name} />
+                  <SendDetail label="Approve with" value={approvalMethodLabel} />
+                </dl>
               </div>
             </div>
 
-            <p className="text-[11px] text-[var(--v2-ink-3)]">
-              Gas paid by {gasPaidByLabel}.
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              Network fees are paid by {gasPaidByLabel}.
             </p>
 
             {isMultiSig && (
-              <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-4 py-3">
-                This will propose the transaction. It needs {threshold} of {safeDetails?.owners.length ?? '?'} owner approvals before execution.
-              </div>
+              <ApprovalRequiredBanner title="Payment will wait for approval" tone="neutral" density="compact">
+                This Haven account needs {threshold} approvals. After you approve, the payment will wait for the remaining approval before money moves.
+              </ApprovalRequiredBanner>
             )}
 
             {blockedByOtherDevice && (
@@ -721,21 +795,22 @@ export default function SendModal({
             )}
 
             <div className="flex gap-3">
-              <button
+              <Button
+                variant="ghost"
                 onClick={() => setStep('form')}
-                className="flex-1 py-3 rounded-lg border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
+                className="flex-1"
               >
                 Back
-              </button>
+              </Button>
               <div className="flex-1">
                 <NetworkGate requiredChainId={chainId}>
-                  <button
+                  <Button
                     onClick={handleConfirm}
                     disabled={signingUnavailable || !signer || !tokenConfig}
-                    className="w-full py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+                    className="w-full"
                   >
-                    {isMultiSig ? 'Approve proposal' : 'Approve and send'}
-                  </button>
+                    {isMultiSig ? 'Approve and submit' : 'Approve and send'}
+                  </Button>
                 </NetworkGate>
               </div>
             </div>
@@ -748,16 +823,12 @@ export default function SendModal({
             {/* Spinner */}
             <div className="relative mb-6">
               <div className="w-14 h-14 rounded-full border-2 border-[var(--v2-border)]" />
-              <div className="absolute inset-0 w-14 h-14 rounded-full border-2 border-transparent border-t-indigo-500 animate-spin" />
+              <div className="absolute inset-0 w-14 h-14 rounded-full border-2 border-transparent border-t-[var(--v2-brand)] animate-spin" />
             </div>
             <p className="text-sm text-[var(--v2-ink)] mb-1">{statusLabel[status]}</p>
-            {status === 'building' ? (
-              <p className="text-xs text-[var(--v2-ink-3)]">Reading account status...</p>
-            ) : status === 'signing' || status === 'executing' ? (
-              <div className="text-xs text-[var(--v2-ink-3)]">
-                <SigningStatus signer={signer} stage={status} />
-              </div>
-            ) : null}
+            {progressHelp && (
+              <p className="text-xs text-[var(--v2-ink-3)]">{progressHelp}</p>
+            )}
           </div>
         )}
 
@@ -766,95 +837,80 @@ export default function SendModal({
           <div className="p-6 flex flex-col items-center py-10">
             {status === 'confirmed' && (
               <>
-                <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-5">
-                  <svg className="w-7 h-7 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                </div>
-                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Transaction confirmed</p>
-                <p className="text-xs text-[var(--v2-ink-3)] mb-5">
-                  {amount} {selectedToken} sent to {selectedContactName ?? truncate(recipient)}
+                <ResultIcon tone="success" />
+                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Payment sent</p>
+                <p className="text-xs text-[var(--v2-ink-3)] mb-5 text-center">
+                  {amount} {selectedToken} was sent from {walletName} to {recipientLabel}.
                 </p>
                 {txHash && (
-                  <a
-                    href={getExplorerUrl(chainId, 'tx', txHash)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors mb-6 flex items-center gap-1"
-                  >
-                    View on {getChainConfig(chainId).name} Explorer
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                    </svg>
-                  </a>
+                  <div className="mb-6 flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
+                    <span>Payment receipt</span>
+                    <ExternalDetailsLink
+                      href={getExplorerUrl(chainId, 'tx', txHash)}
+                      label="Open payment externally"
+                    />
+                  </div>
                 )}
-                <button
+                <Button
                   onClick={handleDone}
-                  className="w-full py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)]"
+                  className="w-full"
                 >
                   Done
-                </button>
+                </Button>
               </>
             )}
 
             {status === 'proposed' && (
               <>
-                <div className="w-14 h-14 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-5">
-                  <svg className="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Transaction proposed</p>
+                <ResultIcon tone="warning" />
+                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Payment submitted</p>
                 <p className="text-xs text-[var(--v2-ink-3)] mb-2 text-center">
-                  {amount} {selectedToken} to {selectedContactName ?? truncate(recipient)}
+                  {amount} {selectedToken} from {walletName} to {recipientLabel}.
                 </p>
                 <p className="text-xs text-[var(--v2-ink-3)] mb-5 text-center">
-                  Waiting for {threshold - 1} more approval{threshold - 1 !== 1 ? 's' : ''} to send.
+                  No money has moved yet. This payment needs {threshold - 1} more approval{threshold - 1 !== 1 ? 's' : ''} before it can be sent.
                 </p>
                 <a
                   href={`https://app.safe.global/transactions/queue?safe=${chainConfig.shortName}:${safeAddress}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors mb-6 flex items-center gap-1"
+                  className="mb-6 inline-flex items-center gap-1 text-xs text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
                 >
-                  View in Safe{'{Wallet}'}
+                  View advanced approval details
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                   </svg>
                 </a>
-                <button
+                <Button
                   onClick={handleDone}
-                  className="w-full py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)]"
+                  className="w-full"
                 >
                   Done
-                </button>
+                </Button>
               </>
             )}
 
             {status === 'error' && (
               <>
-                <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-5">
-                  <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </div>
-                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Transaction failed</p>
+                <ResultIcon tone="danger" />
+                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Payment was not sent</p>
                 <p className="text-xs text-[var(--v2-ink-3)] mb-6 text-center max-w-xs">
-                  {error ?? 'An unexpected error occurred'}
+                  {error ?? 'Check your approval method, then try again.'}
                 </p>
                 <div className="flex gap-3 w-full">
-                  <button
+                  <Button
+                    variant="ghost"
                     onClick={onClose}
-                    className="flex-1 py-3 rounded-lg border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
+                    className="flex-1"
                   >
                     Cancel
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => { reset(); setStep('form') }}
-                    className="flex-1 py-3 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)]"
+                    className="flex-1"
                   >
                     Try again
-                  </button>
+                  </Button>
                 </div>
               </>
             )}

@@ -3,7 +3,6 @@
 import { useState, useCallback } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
-import { useAuth } from '@/context/AuthContext'
 import { useActiveSigner } from '@/lib/signer'
 import {
   buildSafeTx,
@@ -32,16 +31,18 @@ interface UseSendTransactionReturn {
   reset: () => void
 }
 
-export function useSendTransaction(): UseSendTransactionReturn {
+export function useSendTransaction(args: {
+  safeAddress?: Address
+  chainId?: number
+} = {}): UseSendTransactionReturn {
   const [status, setStatus] = useState<SendStatus>('idle')
   const [txHash, setTxHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const { activeSafe } = useAuth()
-  const publicClient = usePublicClient({ chainId: activeSafe?.chain_id })
+  const publicClient = usePublicClient({ chainId: args.chainId })
   const signer = useActiveSigner({
-    safeAddress: activeSafe?.safe_address as Address | undefined,
-    chainId: activeSafe?.chain_id,
+    safeAddress: args.safeAddress,
+    chainId: args.chainId,
   })
 
   const reset = useCallback(() => {
@@ -59,7 +60,7 @@ export function useSendTransaction(): UseSendTransactionReturn {
       chainId: number = 100,
     ) => {
       if (!signer || !publicClient) {
-        setError('No signer available')
+        setError('No approval method is available for this Haven wallet.')
         setStatus('error')
         return
       }
@@ -111,10 +112,10 @@ export function useSendTransaction(): UseSendTransactionReturn {
           setError(
             signer.type === 'passkey'
               ? 'Face ID or Touch ID was cancelled'
-              : 'Transaction rejected in wallet',
+              : 'Payment was cancelled in your wallet.',
           )
         } else {
-          setError(err instanceof Error ? err.message : 'Transaction failed')
+          setError('We could not send this payment. Check your approval method, then try again.')
         }
         setStatus('error')
       }

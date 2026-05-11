@@ -71,6 +71,7 @@ export default function DashboardSendModal({
       open={open}
       onClose={onClose}
       safeAddress={selectedSafe.safe_address}
+      safeName={selectedSafe.name}
       safeDetails={safeDetails}
       balances={balances}
       onSuccess={onSuccess}

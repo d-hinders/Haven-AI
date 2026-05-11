@@ -388,11 +388,20 @@ export default function DashboardClient() {
   })
   const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
   const sendModalDataEnabled = sendOpen && Boolean(selectedActionSafe)
-  const { balances: selectedSafeBalances, refetch: refetchSelectedBalances } = useBalances(
+  const {
+    balances: selectedSafeBalances,
+    loading: selectedSafeBalancesLoading,
+    error: selectedSafeBalancesError,
+    refetch: refetchSelectedBalances,
+  } = useBalances(
     selectedActionSafe?.safe_address ?? null,
     { enabled: sendModalDataEnabled },
   )
-  const { details: selectedSafeDetails } = useSafeDetails(
+  const {
+    details: selectedSafeDetails,
+    loading: selectedSafeDetailsLoading,
+    error: selectedSafeDetailsError,
+  } = useSafeDetails(
     selectedActionSafe?.safe_address ?? null,
     { enabled: sendModalDataEnabled },
   )
@@ -614,6 +623,7 @@ export default function DashboardClient() {
         open={sendOpen && Boolean(selectedActionSafe)}
         onClose={() => setSendOpen(false)}
         safeAddress={selectedActionSafe?.safe_address ?? ''}
+        safeName={selectedActionSafe?.name}
         safeDetails={selectedSafeDetails}
         balances={selectedSafeBalances}
         onSuccess={() => {
@@ -623,6 +633,8 @@ export default function DashboardClient() {
         contacts={contacts}
         resolveAddress={resolveAddress}
         chainId={selectedActionSafe?.chain_id ?? 100}
+        contextLoading={selectedSafeBalancesLoading || selectedSafeDetailsLoading}
+        contextError={selectedSafeBalancesError ?? selectedSafeDetailsError}
       />
 
       <ReceiveFundsModal

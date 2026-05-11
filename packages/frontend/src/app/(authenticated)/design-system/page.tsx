@@ -261,6 +261,52 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Manual payment review"
+        description="Manual sends use the same money-first review structure as approvals: amount first, then the wallet-to-recipient path and approval context."
+      >
+        <Card hover={false} className="max-w-xl p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                125.00 USDC
+              </p>
+            </div>
+            <StatusBadge>Ready to send</StatusBadge>
+          </div>
+          <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+            <TransactionMovement from="Operating wallet" to="Acme Services" />
+            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div>
+                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
+                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Operating wallet</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Recipient</dt>
+                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Acme Services</dd>
+                <dd className="mt-0.5 text-[11px] text-[var(--v2-ink-3)] v2-mono">0x7a58...91c2</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Network</dt>
+                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Approve with</dt>
+                <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Device approval</dd>
+              </div>
+            </dl>
+          </div>
+          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+            Network fees are paid by Haven (ETH).
+          </p>
+          <div className="mt-5 flex gap-3">
+            <Button variant="ghost" className="flex-1">Back</Button>
+            <Button className="flex-1">Approve and send</Button>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
         title="Wallet and activity"
         description="Wallet identity and activity rows should make account context readable without making raw addresses the primary object."
       >

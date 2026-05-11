@@ -66,6 +66,24 @@ Money and risk clarity:
 - Include a clear revoke path.
 - Avoid `generate credentials` and `hand the credential`; use `connect your agent`.
 
+## Send Payment
+
+Use when the user manually sends funds from a Haven wallet.
+
+Structure:
+1. Form step for Haven wallet, token, amount, and recipient.
+2. Review step with the amount and token as the dominant information.
+3. Money path using `TransactionMovement`: From Haven wallet -> To recipient or contact.
+4. Compact context for network and approval method.
+5. Primary action: `Approve and send`; secondary action: `Back`.
+
+Money and risk clarity:
+- Show the selected Haven wallet before money moves.
+- Show the recipient as a contact name when available; keep raw addresses subordinate.
+- Explain whether the payment will be sent immediately or submitted for additional approval.
+- For multi-approval accounts, say no money moves until the remaining approvals are complete.
+- Result states should say `Payment sent`, `Payment submitted`, or `Payment was not sent`.
+
 ## Approve Payment
 
 Use when a payment request needs human approval.

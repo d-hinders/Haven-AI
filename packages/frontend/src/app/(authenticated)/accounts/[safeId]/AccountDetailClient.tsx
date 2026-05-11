@@ -471,6 +471,7 @@ export default function AccountDetailClient() {
         open={sendOpen && Boolean(safeAddress)}
         onClose={() => setSendOpen(false)}
         safeAddress={safeAddress ?? ''}
+        safeName={safe.name}
         safeDetails={details}
         balances={balances}
         onSuccess={handleSendSuccess}

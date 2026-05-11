@@ -9,6 +9,7 @@ export interface ActivityItem {
   agent_id?: string
   agent_name?: string
   token: string
+  token_address?: string | null
   amount: string
   to: string
   reason?: string | null
@@ -16,7 +17,13 @@ export interface ActivityItem {
   tx_hash: string | null
   source?: string
   x402_resource_url?: string | null
+  x402_merchant_address?: string | null
+  chain_id?: number | null
+  safe_id?: string | null
+  safe_address?: string | null
+  safe_name?: string | null
   explorer_url: string | null
+  confirmed_at?: string | null
   created_at: string
 }
 

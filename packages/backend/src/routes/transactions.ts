@@ -389,8 +389,8 @@ export async function enrichTransactionsWithAgents(
       const agent = agentByTxHash.get(tx.hash.toLowerCase())
       return {
         ...tx,
-        agentId: agent?.id,
-        agentName: agent?.name,
+        agentId: agent?.id ?? tx.agentId,
+        agentName: agent?.name ?? tx.agentName,
       }
     })
   } catch {
@@ -428,8 +428,13 @@ export async function fetchConfirmedX402Transactions(
      JOIN user_safes us
        ON us.user_id = pi.user_id
       AND us.id = ANY($2)
-      AND LOWER(us.safe_address) = LOWER(pi.safe_address)
-      AND us.chain_id = COALESCE(pi.chain_id, us.chain_id)
+      AND (
+        us.id = a.safe_id
+        OR (
+          LOWER(us.safe_address) = LOWER(pi.safe_address)
+          AND us.chain_id = COALESCE(pi.chain_id, us.chain_id)
+        )
+      )
      WHERE pi.user_id = $1
        AND pi.source = 'x402'
        AND pi.status = 'confirmed'
@@ -738,6 +743,28 @@ export default async function transactionRoutes(
           isNative: false,
         })
       }
+    }
+
+    try {
+      const x402Transactions = await fetchConfirmedX402Transactions(sub, safeResult.rows)
+      for (const tx of x402Transactions) {
+        if (tx.type !== 'erc20' || !tx.tokenAddress) continue
+        const key = `${tx.chainId}:${tx.tokenAddress.toLowerCase()}`
+        if (tokenOptions.has(key)) continue
+
+        tokenOptions.set(key, {
+          key,
+          symbol: tx.asset,
+          address: tx.tokenAddress.toLowerCase(),
+          chainId: tx.chainId,
+          isNative: false,
+        })
+      }
+    } catch (err) {
+      request.log.warn(
+        { err },
+        'Transaction filter x402 token collection failed',
+      )
     }
 
     const tokens = Array.from(tokenOptions.values()).sort((a, b) => {

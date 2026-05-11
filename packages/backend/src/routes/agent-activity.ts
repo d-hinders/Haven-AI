@@ -7,14 +7,19 @@ import { getExplorerUrl } from '../lib/chains.js'
 
 interface PaymentRow {
   id: string
+  safe_id: string | null
+  safe_address: string | null
+  safe_name: string | null
   chain_id: number
   token_symbol: string
+  token_address: string
   amount_human: string
   to_address: string
   status: string
   tx_hash: string | null
   source: string | null
   x402_resource_url: string | null
+  x402_merchant_address: string | null
   created_at: string
   confirmed_at: string | null
 }
@@ -68,10 +73,27 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Fetch payments
     const payments = await pool.query<PaymentRow>(
-      `SELECT id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, status, tx_hash, source, x402_resource_url, created_at, confirmed_at
-       FROM payment_intents
-       WHERE agent_id = $1
-       ORDER BY created_at DESC
+      `SELECT pi.id,
+              a.safe_id,
+              COALESCE(us.safe_address, pi.safe_address) AS safe_address,
+              us.name AS safe_name,
+              COALESCE(us.chain_id, pi.chain_id, 100) AS chain_id,
+              pi.token_symbol,
+              pi.token_address,
+              pi.amount_human,
+              pi.to_address,
+              pi.status,
+              pi.tx_hash,
+              pi.source,
+              pi.x402_resource_url,
+              pi.x402_merchant_address,
+              pi.created_at,
+              pi.confirmed_at
+       FROM payment_intents pi
+       JOIN agents a ON a.id = pi.agent_id
+       LEFT JOIN user_safes us ON us.id = a.safe_id
+       WHERE pi.agent_id = $1
+       ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`,
       [id, limit, offset],
     )
@@ -98,7 +120,14 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         tx_hash: p.tx_hash,
         source: p.source ?? 'direct',
         x402_resource_url: p.x402_resource_url,
+        x402_merchant_address: p.x402_merchant_address,
+        chain_id: p.chain_id,
+        token_address: p.token_address,
+        safe_id: p.safe_id,
+        safe_address: p.safe_address,
+        safe_name: p.safe_name,
         explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+        confirmed_at: p.confirmed_at,
         created_at: p.created_at,
       })),
       ...approvals.rows.map((a) => ({
@@ -221,10 +250,28 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Recent payments across all agents
     const payments = await pool.query<PaymentRow & { agent_id: string }>(
-      `SELECT id, agent_id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, status, tx_hash, source, x402_resource_url, created_at, confirmed_at
-       FROM payment_intents
-       WHERE agent_id = ANY($1)
-       ORDER BY created_at DESC
+      `SELECT pi.id,
+              pi.agent_id,
+              a.safe_id,
+              COALESCE(us.safe_address, pi.safe_address) AS safe_address,
+              us.name AS safe_name,
+              COALESCE(us.chain_id, pi.chain_id, 100) AS chain_id,
+              pi.token_symbol,
+              pi.token_address,
+              pi.amount_human,
+              pi.to_address,
+              pi.status,
+              pi.tx_hash,
+              pi.source,
+              pi.x402_resource_url,
+              pi.x402_merchant_address,
+              pi.created_at,
+              pi.confirmed_at
+       FROM payment_intents pi
+       JOIN agents a ON a.id = pi.agent_id
+       LEFT JOIN user_safes us ON us.id = a.safe_id
+       WHERE pi.agent_id = ANY($1)
+       ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`,
       [agentIds, limit, offset],
     )
@@ -253,7 +300,14 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         tx_hash: p.tx_hash,
         source: p.source ?? 'direct',
         x402_resource_url: p.x402_resource_url,
+        x402_merchant_address: p.x402_merchant_address,
+        chain_id: p.chain_id,
+        token_address: p.token_address,
+        safe_id: p.safe_id,
+        safe_address: p.safe_address,
+        safe_name: p.safe_name,
         explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+        confirmed_at: p.confirmed_at,
         created_at: p.created_at,
       })),
       ...approvals.rows.map((a) => ({

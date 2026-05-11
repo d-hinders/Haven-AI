@@ -50,15 +50,15 @@ export default function DashboardActionPickerModal({
             <button
               key={safe.id}
               onClick={() => onSelect(safe.id)}
-              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-left hover:border-indigo-500/30 hover:bg-[var(--v2-brand-soft)] transition-colors"
+              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)]"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-[var(--v2-ink)] truncate">{safe.name}</span>
                     {safe.is_default && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-[var(--v2-brand)]">
-                        default
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
+                        Default
                       </span>
                     )}
                   </div>

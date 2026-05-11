@@ -307,6 +307,52 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Receive funds"
+        description="Manual funding surfaces must make the Haven wallet, network, supported tokens, and copy action obvious before the user sends anything on-chain."
+      >
+        <Card hover={false} className="max-w-xl p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--v2-ink)]">Operating wallet</p>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base</p>
+            </div>
+            <StatusBadge>On-chain receive</StatusBadge>
+          </div>
+          <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>
+            <p className="mt-2 break-all font-mono text-sm text-[var(--v2-ink)]">{sampleAddress}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button size="sm">Copy address</Button>
+              <Button variant="ghost" size="sm">Show QR code</Button>
+              <div className="flex items-center gap-2 pl-1 text-xs text-[var(--v2-ink-3)]">
+                <span>Explorer</span>
+                <ExternalDetailsLink href="#" label="Open wallet address externally" />
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
+            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Supported on Base</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {['ETH', 'USDC'].map((token) => (
+                <span
+                  key={token}
+                  className="rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2.5 py-1 text-xs font-medium text-[var(--v2-ink-2)]"
+                >
+                  {token}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+            <p className="text-sm font-semibold text-[var(--v2-ink)]">Before you send</p>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              Use the Base network, send only supported tokens, and wait for the on-chain transfer to confirm.
+            </p>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
         title="Wallet and activity"
         description="Wallet identity and activity rows should make account context readable without making raw addresses the primary object."
       >

@@ -84,6 +84,24 @@ Money and risk clarity:
 - For multi-approval accounts, say no money moves until the remaining approvals are complete.
 - Result states should say `Payment sent`, `Payment submitted`, or `Payment was not sent`.
 
+## Receive Funds
+
+Use when the user manually funds a Haven wallet with an on-chain transfer.
+
+Structure:
+1. Header that makes this a manual on-chain receive flow.
+2. Haven wallet summary with account name and network.
+3. Address block with copy as the primary action, plus optional QR code and explorer link.
+4. Supported tokens for the selected network.
+5. Short checklist explaining network, token, and confirmation requirements.
+
+Money and risk clarity:
+- Show the exact Haven wallet and network before the address.
+- Make it clear users must send on the same network shown in the modal.
+- Say Add funds is the future fiat on-ramp path; do not imply it works in the POC.
+- Keep raw address visible because receiving funds requires it, but label it as the Haven wallet address.
+- Do not imply Haven holds custody or can recover funds sent on the wrong network.
+
 ## Approve Payment
 
 Use when a payment request needs human approval.

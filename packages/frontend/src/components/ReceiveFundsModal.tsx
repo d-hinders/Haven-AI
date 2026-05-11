@@ -5,11 +5,19 @@ import QRCode from 'qrcode'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { UserSafe } from '@/context/AuthContext'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { ExternalDetailsLink } from '@/components/haven'
 
 interface Props {
   open: boolean
   safe: UserSafe | null
   onClose: () => void
+}
+
+function shortAddress(address: string): string {
+  if (address.length <= 14) return address
+  return `${address.slice(0, 8)}...${address.slice(-6)}`
 }
 
 export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
@@ -55,7 +63,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   const supportedTokens = Object.values(chainConfig.tokens)
 
   function copyAddress() {
-    navigator.clipboard.writeText(safeAddress)
+    void navigator.clipboard.writeText(safeAddress)
     setCopied(true)
     setTimeout(() => setCopied(false), 1800)
   }
@@ -63,88 +71,95 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
-      <div className="relative w-full max-w-lg mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
+      <div className="relative mx-4 max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-border)] px-6 py-4">
           <div>
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">Receive funds</h2>
-            <p className="text-xs text-[var(--v2-ink-3)] mt-1">
-              Share this account&apos;s deposit address on {chainConfig.name}.
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+              Send supported tokens to this Haven wallet on {chainConfig.name}.
             </p>
           </div>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="p-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            className="-mr-1 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
-          <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <p className="text-sm font-medium text-[var(--v2-ink)]">{safe.name}</p>
-              {safe.is_default && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
-                  default
-                </span>
-              )}
+        <div className="space-y-5 p-6">
+          <Card hover={false} className="p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-semibold text-[var(--v2-ink)]">{safe.name}</p>
+                  {safe.is_default && (
+                    <span className="rounded-full bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--v2-brand)]">
+                      Default
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{chainConfig.name}</p>
+              </div>
+              <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-1 text-[11px] font-medium text-[var(--v2-ink-2)]">
+                On-chain receive
+              </span>
             </div>
-            <p className="text-xs text-[var(--v2-ink-3)]">{chainConfig.name}</p>
-          </div>
+          </Card>
 
-          <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-2">Account address</p>
-            <code className="block text-sm text-[var(--v2-ink)] break-all">{safeAddress}</code>
-            <div className="flex flex-wrap gap-2 mt-4">
-              <button
-                onClick={copyAddress}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--v2-border-strong)] bg-white px-3 py-2 text-xs font-medium text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
-              >
-                {copied ? 'Copied' : 'Copy address'}
-              </button>
-              <a
-                href={getExplorerUrl(safe.chain_id, 'address', safeAddress)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--v2-border-strong)] bg-white px-3 py-2 text-xs font-medium text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
-              >
-                View on explorer
-              </a>
-              <button
-                onClick={() => setShowQr((value) => !value)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)] px-3 py-2 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors"
-              >
+          <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>
+            <code className="mt-2 block break-all font-mono text-sm text-[var(--v2-ink)]">
+              {safeAddress}
+            </code>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button onClick={copyAddress} size="sm">
+                {copied ? 'Address copied' : 'Copy address'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowQr((value) => !value)}>
                 {showQr ? 'Hide QR code' : 'Show QR code'}
-              </button>
+              </Button>
+              <div className="flex items-center gap-2 pl-1 text-xs text-[var(--v2-ink-3)]">
+                <span>Explorer</span>
+                <ExternalDetailsLink
+                  href={getExplorerUrl(safe.chain_id, 'address', safeAddress)}
+                  label="Open wallet address externally"
+                />
+              </div>
             </div>
           </div>
 
           {showQr && (
-            <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4 flex flex-col items-center">
-              {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt="Deposit address QR code"
-                  className="w-[220px] h-[220px] rounded-lg border border-[var(--v2-border)]"
-                />
-              ) : (
-                <div className="w-[220px] h-[220px] rounded-lg bg-[var(--v2-surface-2)] animate-pulse" />
-              )}
+            <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
+              <div className="flex flex-col items-center">
+                {qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt={`QR code for ${safe.name} on ${chainConfig.name}`}
+                    className="h-[220px] w-[220px] rounded-lg border border-[var(--v2-border)]"
+                  />
+                ) : (
+                  <div className="h-[220px] w-[220px] animate-pulse rounded-lg bg-[var(--v2-surface-2)]" />
+                )}
+                <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
+                  QR code for {shortAddress(safeAddress)}
+                </p>
+              </div>
             </div>
           )}
 
-          <div>
-            <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-2">
-              Supported tokens on {chainConfig.name}
+          <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
+            <p className="text-xs font-medium text-[var(--v2-ink-3)]">
+              Supported on {chainConfig.name}
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap gap-2">
               {supportedTokens.map((token) => (
                 <span
                   key={token.symbol}
-                  className="rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-[11px] text-[var(--v2-ink-2)]"
+                  className="rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2.5 py-1 text-xs font-medium text-[var(--v2-ink-2)]"
                 >
                   {token.symbol}
                 </span>
@@ -152,9 +167,14 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
             </div>
           </div>
 
-          <p className="text-xs text-[var(--v2-ink-3)]">
-            Deposits arrive directly on-chain. Fiat on-ramp and guided funding will live under Add funds soon.
-          </p>
+          <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+            <p className="text-sm font-semibold text-[var(--v2-ink)]">Before you send</p>
+            <ul className="mt-3 space-y-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              <li>Use the {chainConfig.name} network.</li>
+              <li>Send only the supported tokens listed above.</li>
+              <li>Funds arrive after the on-chain transfer is confirmed.</li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>

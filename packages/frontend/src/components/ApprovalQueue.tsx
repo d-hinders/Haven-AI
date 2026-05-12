@@ -31,6 +31,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Skeleton } from '@/components/ui/Skeleton'
 import {
   ApprovalRequiredBanner,
   ExternalDetailsLink,
@@ -509,13 +510,13 @@ function ApprovalSkeleton() {
   return (
     <Card hover={false} className="p-5">
       <div className="flex items-center justify-between">
-        <div className="h-5 w-28 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
-        <div className="h-3 w-20 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+        <Skeleton className="h-5 w-28 rounded-full" />
+        <Skeleton variant="text" className="h-3 w-20" />
       </div>
-      <div className="mt-5 h-8 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+      <Skeleton className="mt-5 h-8 w-44" />
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <div className="h-16 rounded-[10px] bg-[var(--v2-surface)] animate-pulse" />
-        <div className="h-16 rounded-[10px] bg-[var(--v2-surface)] animate-pulse" />
+        <Skeleton className="h-16 rounded-[10px] bg-[var(--v2-surface)]" />
+        <Skeleton className="h-16 rounded-[10px] bg-[var(--v2-surface)]" />
       </div>
     </Card>
   )

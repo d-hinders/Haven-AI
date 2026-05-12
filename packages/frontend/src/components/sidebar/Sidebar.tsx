@@ -77,6 +77,8 @@ const baseNavItems: NavItem[] = [
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
 ]
 
+const DESKTOP_BREAKPOINT_PX = 1024
+
 function NavLink({
   item,
   active,
@@ -119,7 +121,9 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuth()
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < DESKTOP_BREAKPOINT_PX,
+  )
   const [menuOpen, setMenuOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)

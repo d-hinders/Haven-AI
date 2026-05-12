@@ -646,6 +646,7 @@ export default function DashboardClient() {
       <ComingSoonModal
         open={comingSoonOpen}
         onClose={() => setComingSoonOpen(false)}
+        onReceive={() => setReceiveOpen(true)}
       />
     </div>
   )

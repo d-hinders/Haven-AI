@@ -41,12 +41,12 @@ export default function ComingSoonModal({ open, onClose, onReceive }: Props) {
           </p>
           <div className="mt-6 flex gap-3">
             {onReceive && (
-              <Button variant="ghost" onClick={handleReceiveInstead} className="flex-1">
-                Receive instead
+              <Button variant="ghost" onClick={onClose} className="flex-1">
+                Close
               </Button>
             )}
-            <Button onClick={onClose} className="flex-1">
-              Close
+            <Button onClick={onReceive ? handleReceiveInstead : onClose} className="flex-1">
+              {onReceive ? 'Receive instead' : 'Close'}
             </Button>
           </div>
         </div>

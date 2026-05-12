@@ -324,10 +324,9 @@ export default function DesignSystemPage() {
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button size="sm">Copy address</Button>
               <Button variant="ghost" size="sm">Show QR code</Button>
-              <div className="flex items-center gap-2 pl-1 text-xs text-[var(--v2-ink-3)]">
-                <span>Explorer</span>
-                <ExternalDetailsLink href="#" label="Open wallet address externally" />
-              </div>
+              <Button variant="ghost" size="sm" href="#" target="_blank" rel="noopener noreferrer">
+                View on explorer
+              </Button>
             </div>
           </div>
           <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4">

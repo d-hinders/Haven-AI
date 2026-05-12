@@ -3,21 +3,16 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { truncate } from '@/lib/format'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { UserSafe } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { ExternalDetailsLink } from '@/components/haven'
 
 interface Props {
   open: boolean
   safe: UserSafe | null
   onClose: () => void
-}
-
-function shortAddress(address: string): string {
-  if (address.length <= 14) return address
-  return `${address.slice(0, 8)}...${address.slice(-6)}`
 }
 
 export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
@@ -122,13 +117,15 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
               <Button variant="ghost" size="sm" onClick={() => setShowQr((value) => !value)}>
                 {showQr ? 'Hide QR code' : 'Show QR code'}
               </Button>
-              <div className="flex items-center gap-2 pl-1 text-xs text-[var(--v2-ink-3)]">
-                <span>Explorer</span>
-                <ExternalDetailsLink
-                  href={getExplorerUrl(safe.chain_id, 'address', safeAddress)}
-                  label="Open wallet address externally"
-                />
-              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                href={getExplorerUrl(safe.chain_id, 'address', safeAddress)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View on explorer
+              </Button>
             </div>
           </div>
 
@@ -145,7 +142,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                   <div className="h-[220px] w-[220px] animate-pulse rounded-lg bg-[var(--v2-surface-2)]" />
                 )}
                 <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
-                  QR code for {shortAddress(safeAddress)}
+                  QR code for {truncate(safeAddress)}
                 </p>
               </div>
             </div>

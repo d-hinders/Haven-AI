@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { forwardRef } from 'react'
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from 'react'
 
 type Variant = 'primary' | 'ghost' | 'tertiary' | 'danger'
 type Size = 'sm' | 'md' | 'lg'
@@ -25,6 +25,8 @@ const VARIANT_CLASS: Record<Variant, string> = {
 type ButtonProps = {
   children: ReactNode
   href?: string
+  target?: AnchorHTMLAttributes<HTMLAnchorElement>['target']
+  rel?: AnchorHTMLAttributes<HTMLAnchorElement>['rel']
   type?: ButtonHTMLAttributes<HTMLButtonElement>['type']
   disabled?: boolean
   onClick?: ButtonHTMLAttributes<HTMLButtonElement>['onClick']
@@ -37,6 +39,8 @@ type ButtonProps = {
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({
   children,
   href,
+  target,
+  rel,
   type = 'button',
   disabled,
   onClick,
@@ -66,7 +70,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   }
 
   return (
-    <Link href={href} className={classes}>
+    <Link href={href} target={target} rel={rel} className={classes}>
       {content}
     </Link>
   )

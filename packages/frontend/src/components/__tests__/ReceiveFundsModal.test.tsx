@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UserSafe } from '@/context/AuthContext'
 
 vi.mock('qrcode', () => ({
@@ -14,6 +14,7 @@ vi.mock('@/hooks/useEscapeToClose', () => ({
 
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
+import AddFundsModal from '@/components/AddFundsModal'
 
 const SAFE: UserSafe = {
   id: 'safe-id',
@@ -25,17 +26,29 @@ const SAFE: UserSafe = {
 }
 
 describe('ReceiveFundsModal', () => {
+  const originalClipboard = navigator.clipboard
+  let writeText: ReturnType<typeof vi.fn>
+
   beforeEach(() => {
     vi.clearAllMocks()
-    Object.assign(navigator, {
-      clipboard: {
-        writeText: vi.fn().mockResolvedValue(undefined),
-      },
+    writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+  })
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: originalClipboard,
     })
   })
 
   it('shows the on-chain receive context, network, address, and supported tokens', () => {
-    render(<ReceiveFundsModal open safe={SAFE} onClose={vi.fn()} />)
+    const onClose = vi.fn()
+
+    render(<ReceiveFundsModal open safe={SAFE} onClose={onClose} />)
 
     expect(screen.getByRole('heading', { name: 'Receive funds' })).toBeInTheDocument()
     expect(screen.getByText('Based')).toBeInTheDocument()
@@ -45,6 +58,8 @@ describe('ReceiveFundsModal', () => {
     expect(screen.getByText('USDC')).toBeInTheDocument()
     expect(screen.getByText('Before you send')).toBeInTheDocument()
     expect(screen.getByText('Use the Base network.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View on explorer' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('copies the receive address and can reveal a QR code', async () => {
@@ -52,7 +67,7 @@ describe('ReceiveFundsModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy address' }))
 
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(SAFE.safe_address)
+    expect(writeText).toHaveBeenCalledWith(SAFE.safe_address)
     expect(screen.getByRole('button', { name: 'Address copied' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Show QR code' }))
@@ -72,6 +87,18 @@ describe('ComingSoonModal', () => {
 
     expect(screen.getByRole('heading', { name: 'Add funds is coming soon' })).toBeInTheDocument()
     expect(screen.getByText('A guided fiat on-ramp is planned after the POC.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Receive instead' }))
+
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(onReceive).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the Receive handoff when rendered through AddFundsModal', () => {
+    const onClose = vi.fn()
+    const onReceive = vi.fn()
+
+    render(<AddFundsModal open onClose={onClose} onReceive={onReceive} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Receive instead' }))
 

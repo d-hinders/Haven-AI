@@ -109,7 +109,7 @@ function NavLink({
       </span>
       <span className="flex-1">{item.label}</span>
       {item.badge && (
-        <span className="text-[10px] font-semibold leading-none px-1.5 py-0.5 rounded-full bg-[var(--v2-brand)] text-white">
+        <span className="text-[10px] font-semibold leading-none px-1.5 py-0.5 rounded-full bg-[var(--v2-brand)] text-white v2-tabular">
           {item.badge}
         </span>
       )}

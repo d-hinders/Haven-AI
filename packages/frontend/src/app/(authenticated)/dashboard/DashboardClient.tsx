@@ -24,6 +24,7 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { TransactionActivityRow, TransactionMovement } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -679,12 +680,7 @@ export default function DashboardClient() {
 
   return (
     <div className="max-w-6xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">Dashboard</h1>
-        <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
-          Your money, agents, and actions at a glance.
-        </p>
-      </div>
+      <PageHeader title="Dashboard" subtitle="Your money, agents, and actions at a glance." />
 
       {onboardingStage && !requiresOtherDevice && !isGuideDismissed && (
         <DashboardOnboardingGuide

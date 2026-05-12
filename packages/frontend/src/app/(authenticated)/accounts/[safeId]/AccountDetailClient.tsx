@@ -19,6 +19,7 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { ExternalDetailsLink } from '@/components/haven'
@@ -233,36 +234,31 @@ export default function AccountDetailClient() {
 
   return (
     <div className="max-w-5xl space-y-6">
-      {/* Header */}
-      <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">{safe.name}</h1>
+      <PageHeader
+        title={safe.name}
+        subtitle="Control the funds, agent access, and recent activity for this Haven wallet."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
             {safe.is_default && (user?.safes?.length ?? 0) > 1 ? (
               <StatusBadge tone="brand">Default</StatusBadge>
             ) : null}
             <StatusBadge>{chain.name}</StatusBadge>
+            {safeAddress && (
+              <>
+                <Button onClick={() => setSendOpen(true)}>
+                  Send
+                </Button>
+                <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
+                  Receive
+                </Button>
+              </>
+            )}
+            <Button variant="ghost" onClick={() => setRenameOpen(true)}>
+              Edit
+            </Button>
           </div>
-          <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Control the funds, agent access, and recent activity for this Haven wallet.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {safeAddress && (
-            <>
-              <Button onClick={() => setSendOpen(true)}>
-                Send
-              </Button>
-              <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
-                Receive
-              </Button>
-            </>
-          )}
-          <Button variant="ghost" onClick={() => setRenameOpen(true)}>
-            Edit
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       <Card hover={false} className="overflow-hidden">
         <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-5 sm:px-6">
@@ -272,7 +268,7 @@ export default function AccountDetailClient() {
               {portfolioLoading ? (
                 <div className="mt-3 h-9 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse" />
               ) : balanceUnavailable ? (
-                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink-3)]">
+                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">
                   Unavailable
                 </p>
               ) : (
@@ -338,10 +334,10 @@ export default function AccountDetailClient() {
                     className="grid grid-cols-3 gap-4 px-2 py-2 rounded-md hover:bg-[var(--v2-surface)] transition-colors"
                   >
                     <span className="text-sm text-[var(--v2-ink)]">{item.symbol}</span>
-                    <span className="text-sm text-[var(--v2-ink-2)] text-right font-mono">
+                    <span className="text-sm text-[var(--v2-ink-2)] text-right font-mono v2-tabular">
                       {item.formatted}
                     </span>
-                    <span className="text-sm text-[var(--v2-ink)] text-right">
+                    <span className="text-sm text-[var(--v2-ink)] text-right v2-tabular">
                       {formatFiatValue(fiatValue, currency)}
                     </span>
                   </div>
@@ -517,7 +513,7 @@ export default function AccountDetailClient() {
             </p>
           </div>
           {!txLoading && transactions.length > 0 ? (
-            <p className="text-xs text-[var(--v2-ink-3)]">Showing {transactions.length} of {total}</p>
+            <p className="text-xs text-[var(--v2-ink-3)]">Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span></p>
           ) : null}
         </div>
         <TransactionsTable

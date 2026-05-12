@@ -64,7 +64,7 @@ export default function ApprovalNotifications() {
           <path d="M9 17a3 3 0 0 0 6 0" />
         </svg>
         {actionableCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[var(--v2-warning)] text-white text-[10px] font-bold flex items-center justify-center shadow-[var(--v2-shadow-button)]">
+          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[var(--v2-warning)] text-white text-[10px] font-bold flex items-center justify-center shadow-[var(--v2-shadow-button)] v2-tabular">
             {actionableCount > 99 ? '99+' : actionableCount}
           </span>
         )}
@@ -88,7 +88,7 @@ export default function ApprovalNotifications() {
               </p>
             </div>
             {actionableCount > 0 && (
-              <span className="text-[10px] px-2 py-1 rounded-full font-semibold bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]">
+              <span className="text-[10px] px-2 py-1 rounded-full font-semibold bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] v2-tabular">
                 {actionableCount} waiting
               </span>
             )}
@@ -157,7 +157,7 @@ export default function ApprovalNotifications() {
                       </span>
                     </div>
                     <p className="text-sm text-[var(--v2-ink)]">
-                      {approval.amount_human} {approval.token_symbol}
+                      <span className="v2-tabular">{approval.amount_human}</span> {approval.token_symbol}
                     </p>
                     <p className="text-xs text-[var(--v2-ink-3)] mt-1">
                       To {approvalRecipientLabel({

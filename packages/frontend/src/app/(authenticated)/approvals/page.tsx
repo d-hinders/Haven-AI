@@ -1,6 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const ApprovalQueue = dynamic(() => import('@/components/ApprovalQueue'), {
   ssr: false,
@@ -15,12 +16,10 @@ const ApprovalQueue = dynamic(() => import('@/components/ApprovalQueue'), {
 export default function ApprovalsPage() {
   return (
     <div className="max-w-5xl">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight mb-1">Approvals</h1>
-        <p className="text-sm text-[var(--v2-ink-3)]">
-          Review agent payments that need your approval before any money moves.
-        </p>
-      </div>
+      <PageHeader
+        title="Approvals"
+        subtitle="Review agent payments that need your approval before any money moves."
+      />
 
       <ApprovalQueue />
     </div>

@@ -66,10 +66,15 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
-      <div className="relative mx-4 max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="receive-funds-title"
+        className="relative mx-4 max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]"
+      >
         <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-border)] px-6 py-4">
           <div>
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Receive funds</h2>
+            <h2 id="receive-funds-title" className="text-base font-semibold text-[var(--v2-ink)]">Receive funds</h2>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
               Send supported tokens to this Haven wallet on {chainConfig.name}.
             </p>

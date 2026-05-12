@@ -155,6 +155,89 @@ export interface X402Receipt {
   chainId?: number
 }
 
+// ── Machine Payment Types ───────────────────────────────────────
+
+export type MachinePaymentRail =
+  | 'x402'
+  | 'mpp_demo'
+  | 'mpp_crypto'
+  | 'stripe_deposit'
+  | 'spt'
+
+export interface MachinePaymentChallenge {
+  rail: MachinePaymentRail
+  version: string
+  challengeId: string
+  resource: string
+  description: string
+  network: {
+    chainId: number
+    name: 'base'
+  }
+  asset: {
+    symbol: 'USDC'
+    address: string
+    decimals: 6
+  }
+  amount: {
+    display: string
+    atomic: string
+  }
+  recipient: string
+  expiresAt: string
+  metadata?: Record<string, unknown>
+}
+
+export interface MachinePaymentReceipt {
+  success: boolean
+  rail: MachinePaymentRail
+  paymentId: string
+  challengeId: string
+  txHash: string
+  token: string
+  amount: string
+  to: string
+  resourceUrl: string
+  explorerUrl: string
+  payer?: string
+  chainId?: number
+  proofHeader: string
+}
+
+/** @internal */
+export interface RawMachinePaymentAuthorizeResponse {
+  success?: boolean
+  payment_id: string
+  status: string
+  tx_hash?: string
+  chain_id?: number
+  safe_address?: string
+  payer?: string
+  token?: string
+  amount?: string
+  to?: string
+  merchant_to?: string | null
+  resource_url?: string
+  rail?: string
+  challenge_id?: string
+  explorer_url?: string
+  expires_at?: string
+  sign_data?: {
+    hash: string
+    components: {
+      safe: string
+      token: string
+      to: string
+      amount: string
+      payment_token: string
+      payment: string
+      nonce: number
+    }
+    instructions: string
+  }
+  error?: string
+}
+
 /** @internal */
 export interface RawX402AuthorizeResponse {
   success?: boolean

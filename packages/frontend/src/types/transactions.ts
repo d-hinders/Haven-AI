@@ -14,7 +14,7 @@ export interface Transaction {
   tokenAddress?: string
   tokenSymbol?: string
   agentName?: string
-  source?: 'direct' | 'x402'
+  source?: 'direct' | 'x402' | 'mpp_demo'
   x402ResourceUrl?: string | null
   x402MerchantAddress?: string | null
 }

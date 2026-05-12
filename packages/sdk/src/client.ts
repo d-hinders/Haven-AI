@@ -15,6 +15,9 @@ import type {
   X402PaymentOption,
   X402Receipt,
   RawX402AuthorizeResponse,
+  MachinePaymentChallenge,
+  MachinePaymentReceipt,
+  RawMachinePaymentAuthorizeResponse,
 } from './types.js'
 import {
   HavenApiError,
@@ -27,6 +30,11 @@ import {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
 } from './x402.js'
+import {
+  buildMachinePaymentIdempotencyKey,
+  encodeMachinePaymentProof,
+  parseMachinePaymentChallengeResponse,
+} from './mpp.js'
 
 const DEFAULT_BASE_URL = 'http://localhost:3001'
 
@@ -60,6 +68,7 @@ export class HavenClient {
   private readonly pollingInterval: number
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
   private readonly x402ReceiptCache = new Map<string, { expiresAt: number; receipt: X402Receipt }>()
+  private readonly inFlightMachinePayments = new Map<string, Promise<MachinePaymentReceipt>>()
 
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
@@ -372,8 +381,14 @@ export class HavenClient {
     try {
       paymentRequired = await parsePaymentRequiredResponse(response)
     } catch {
-      // Not an x402 402 — return original response
-      return response
+      let challenge: MachinePaymentChallenge
+      try {
+        challenge = await parseMachinePaymentChallengeResponse(response)
+      } catch {
+        // Not a Haven machine-payment 402 — return original response
+        return response
+      }
+      return this.fetchWithMachinePayment(url, initialInit, challenge)
     }
 
     // 4. Pay through Haven
@@ -405,6 +420,107 @@ export class HavenClient {
           resource_url: receipt.resourceUrl,
           merchant_to: receipt.merchantTo,
           delegate_to: receipt.to,
+        },
+      )
+    }
+
+    return retryResponse
+  }
+
+  async authorizeMachinePayment(
+    challenge: MachinePaymentChallenge,
+  ): Promise<MachinePaymentReceipt> {
+    if (!this.delegateKey) {
+      throw new HavenSigningError(
+        'delegateKey is required for machine payments. Pass it in the HavenClient config.',
+      )
+    }
+
+    if (challenge.rail !== 'mpp_demo') {
+      throw new HavenApiError(`Unsupported machine payment rail: ${challenge.rail}`, 400)
+    }
+
+    const idempotencyKey = buildMachinePaymentIdempotencyKey(challenge)
+    const inFlight = this.inFlightMachinePayments.get(idempotencyKey)
+    if (inFlight) return inFlight
+
+    const promise = this.authorizeMppDemoPayment(challenge, idempotencyKey)
+    this.inFlightMachinePayments.set(idempotencyKey, promise)
+
+    try {
+      return await promise
+    } finally {
+      this.inFlightMachinePayments.delete(idempotencyKey)
+    }
+  }
+
+  private async authorizeMppDemoPayment(
+    challenge: MachinePaymentChallenge,
+    idempotencyKey: string,
+  ): Promise<MachinePaymentReceipt> {
+    const raw = await this.post<RawMachinePaymentAuthorizeResponse>(
+      '/machine-payments/authorize',
+      { challenge, idempotencyKey },
+    )
+
+    if (raw.status === 'pending_approval') {
+      throw new HavenApiError(
+        `Machine payment exceeds the on-chain allowance and was queued for owner approval (payment_id: ${raw.payment_id}).`,
+        202,
+        raw,
+      )
+    }
+
+    if (raw.success && raw.tx_hash) {
+      return this.mapMachinePaymentReceipt(challenge, raw, raw.tx_hash)
+    }
+
+    if (!raw.sign_data?.hash) {
+      throw new HavenApiError('No sign_hash returned from machine payment authorization', 500, raw)
+    }
+
+    const sig = signHash(this.delegateKey!, raw.sign_data.hash)
+    const execResult = await this.post<RawSignResponse>(
+      `/payments/${raw.payment_id}/sign`,
+      { signature: sig },
+    )
+
+    if (execResult.status !== 'confirmed' || !execResult.tx_hash) {
+      throw new HavenApiError(
+        execResult.error ?? `Machine payment ${execResult.status}`,
+        502,
+        execResult,
+      )
+    }
+
+    return this.mapMachinePaymentReceipt(challenge, raw, execResult.tx_hash, execResult)
+  }
+
+  private async fetchWithMachinePayment(
+    url: string,
+    initialInit: RequestInit | undefined,
+    challenge: MachinePaymentChallenge,
+  ): Promise<Response> {
+    const receipt = await this.authorizeMachinePayment(challenge)
+
+    const retryHeaders = new Headers(initialInit?.headers)
+    retryHeaders.set('MACHINE-PAYMENT-PROOF', receipt.proofHeader)
+
+    const retryResponse = await globalThis.fetch(url, {
+      ...initialInit,
+      headers: retryHeaders,
+    })
+
+    if (retryResponse.status === 402) {
+      throw new HavenApiError(
+        'Machine payment retry was rejected after Haven sent the payment.',
+        402,
+        {
+          marker: 'machine_payment_retry_rejected_after_payment',
+          payment_id: receipt.paymentId,
+          tx_hash: receipt.txHash,
+          resource_url: receipt.resourceUrl,
+          rail: receipt.rail,
         },
       )
     }
@@ -446,6 +562,36 @@ export class HavenClient {
     const expiresAt = getPaymentHeaderValidBefore(paymentHeader)
     if (expiresAt > Date.now()) {
       this.x402ReceiptCache.set(idempotencyKey, { expiresAt, receipt })
+    }
+  }
+
+  private mapMachinePaymentReceipt(
+    challenge: MachinePaymentChallenge,
+    raw: RawMachinePaymentAuthorizeResponse,
+    txHash: string,
+    execResult?: RawSignResponse,
+  ): MachinePaymentReceipt {
+    const receiptWithoutHeader = {
+      success: true,
+      rail: challenge.rail,
+      paymentId: raw.payment_id,
+      challengeId: challenge.challengeId,
+      txHash,
+      token: execResult?.token ?? raw.token ?? challenge.asset.symbol,
+      amount: execResult?.amount ?? raw.amount ?? challenge.amount.display,
+      to: execResult?.to ?? raw.to ?? challenge.recipient,
+      resourceUrl: raw.resource_url ?? challenge.resource,
+      explorerUrl:
+        execResult?.explorer_url ??
+        raw.explorer_url ??
+        buildExplorerUrl(execResult?.chain_id ?? raw.chain_id ?? challenge.network.chainId, txHash),
+      payer: raw.payer ?? raw.safe_address,
+      chainId: execResult?.chain_id ?? raw.chain_id ?? challenge.network.chainId,
+    }
+
+    return {
+      ...receiptWithoutHeader,
+      proofHeader: encodeMachinePaymentProof(receiptWithoutHeader),
     }
   }
 
@@ -549,6 +695,34 @@ export class HavenClient {
           explorer_url: receipt.explorerUrl,
           payment_header: receipt.paymentHeader,
           merchant_to: receipt.merchantTo,
+          payer: receipt.payer,
+          chain_id: receipt.chainId,
+        }
+      } catch (err) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        }
+      }
+    }
+
+    if (toolName === 'authorize_machine_payment') {
+      const { challenge } = input as { challenge: MachinePaymentChallenge }
+
+      try {
+        const receipt = await this.authorizeMachinePayment(challenge)
+        return {
+          success: true,
+          payment_id: receipt.paymentId,
+          tx_hash: receipt.txHash,
+          token: receipt.token,
+          amount: receipt.amount,
+          to: receipt.to,
+          resource_url: receipt.resourceUrl,
+          explorer_url: receipt.explorerUrl,
+          proof_header: receipt.proofHeader,
+          rail: receipt.rail,
+          challenge_id: receipt.challengeId,
           payer: receipt.payer,
           chain_id: receipt.chainId,
         }

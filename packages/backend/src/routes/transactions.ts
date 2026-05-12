@@ -30,7 +30,7 @@ export interface Transaction {
   isError: boolean
   tokenAddress?: string
   tokenSymbol?: string
-  source?: 'direct' | 'x402'
+  source?: string
   x402ResourceUrl?: string | null
   x402MerchantAddress?: string | null
 }
@@ -55,6 +55,9 @@ interface PaymentIntentAgentRow {
   tx_hash: string
   agent_id: string
   agent_name: string
+  source: string | null
+  payment_resource_url: string | null
+  merchant_address: string | null
 }
 
 interface X402PaymentIntentRow {
@@ -368,7 +371,12 @@ export async function enrichTransactionsWithAgents(
 
   try {
     const piResult = await pool.query<PaymentIntentAgentRow>(
-      `SELECT LOWER(pi.tx_hash) AS tx_hash, pi.agent_id, a.name AS agent_name
+      `SELECT LOWER(pi.tx_hash) AS tx_hash,
+              pi.agent_id,
+              a.name AS agent_name,
+              COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
+              COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS payment_resource_url,
+              COALESCE(pi.merchant_address, pi.x402_merchant_address) AS merchant_address
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
        WHERE LOWER(pi.tx_hash) = ANY($1)
@@ -377,11 +385,17 @@ export async function enrichTransactionsWithAgents(
       [txHashes, userId],
     )
 
-    const agentByTxHash = new Map<string, { id: string; name: string }>()
+    const agentByTxHash = new Map<
+      string,
+      { id: string; name: string; source: string | null; resourceUrl: string | null; merchantAddress: string | null }
+    >()
     for (const row of piResult.rows) {
       agentByTxHash.set(row.tx_hash, {
         id: row.agent_id,
         name: row.agent_name,
+        source: row.source,
+        resourceUrl: row.payment_resource_url,
+        merchantAddress: row.merchant_address,
       })
     }
 
@@ -391,6 +405,9 @@ export async function enrichTransactionsWithAgents(
         ...tx,
         agentId: agent?.id ?? tx.agentId,
         agentName: agent?.name ?? tx.agentName,
+        source: agent?.source ?? tx.source,
+        x402ResourceUrl: agent?.resourceUrl ?? tx.x402ResourceUrl,
+        x402MerchantAddress: agent?.merchantAddress ?? tx.x402MerchantAddress,
       }
     })
   } catch {

@@ -166,7 +166,9 @@ export default function ApprovalNotifications() {
                         x402ResourceUrl: approval.x402_resource_url,
                         toAddress: approval.to_address,
                       })}
-                      {approvalSourceLabel({ reason: approval.reason, source: approval.source }) ? ' · x402' : ''}
+                      {approvalSourceLabel({ reason: approval.reason, source: approval.source })
+                        ? ` · ${approvalSourceLabel({ reason: approval.reason, source: approval.source })}`
+                        : ''}
                     </p>
                   </Link>
                 ))}

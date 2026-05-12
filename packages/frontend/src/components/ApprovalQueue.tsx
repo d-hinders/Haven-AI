@@ -480,7 +480,7 @@ function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge tone={statusTone(approval.status)}>{statusLabel(approval.status)}</StatusBadge>
           <p className="truncate text-sm font-medium text-[var(--v2-ink)]">
-            {approval.amount_human} {approval.token_symbol}
+            <span className="v2-tabular">{approval.amount_human}</span> {approval.token_symbol}
           </p>
         </div>
         <p className="mt-1 text-xs text-[var(--v2-ink-2)]">
@@ -569,7 +569,7 @@ export default function ApprovalQueue() {
           </div>
           {actionableApprovals.length > 0 ? (
             <StatusBadge tone="warning">
-              {actionableApprovals.length} waiting
+              <span className="v2-tabular">{actionableApprovals.length}</span> waiting
             </StatusBadge>
           ) : null}
         </div>

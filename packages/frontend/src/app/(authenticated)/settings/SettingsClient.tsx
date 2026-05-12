@@ -12,6 +12,7 @@ import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
@@ -418,17 +419,15 @@ export default function SettingsClient() {
 
   return (
     <div className="max-w-5xl">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight mb-1">Settings</h1>
-          <p className="text-sm text-[var(--v2-ink-3)]">
-            Manage your profile, sign-in methods, approvers, and recovery context.
-          </p>
-        </div>
-        <Button variant="ghost" onClick={handleLogout}>
-          Sign out
-        </Button>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="Manage your profile, sign-in methods, approvers, and recovery context."
+        actions={
+          <Button variant="ghost" onClick={handleLogout}>
+            Sign out
+          </Button>
+        }
+      />
 
       <div className="grid gap-6">
         <Section

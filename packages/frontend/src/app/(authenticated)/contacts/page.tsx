@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 function ContactIcon() {
   return (
@@ -307,17 +308,15 @@ export default function ContactsPage() {
 
   return (
     <div className="max-w-5xl">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">Contacts</h1>
-          <p className="mt-1 max-w-xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Save recipients you pay often so payment reviews show names instead of only wallet addresses.
-          </p>
-        </div>
-        <Button onClick={() => setShowAdd(true)} className="sm:flex-shrink-0">
-          Add contact
-        </Button>
-      </div>
+      <PageHeader
+        title="Contacts"
+        subtitle="Save recipients you pay often so payment reviews show names instead of only wallet addresses."
+        actions={
+          <Button onClick={() => setShowAdd(true)}>
+            Add contact
+          </Button>
+        }
+      />
 
       {contacts.length > 0 && (
         <div className="relative mb-4">

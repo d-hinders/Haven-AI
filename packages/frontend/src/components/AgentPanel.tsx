@@ -148,7 +148,10 @@ function AllowanceBar({
           )}
         </span>
         <span className="text-[var(--v2-ink-3)]">
-          {formatAmount(remaining, decimals)} / {formatAmount(total, decimals)} remaining
+          <span className="v2-tabular">{formatAmount(remaining, decimals)}</span>
+          {' / '}
+          <span className="v2-tabular">{formatAmount(total, decimals)}</span>
+          {' remaining'}
           {info.resetTimeMin > 0 && (
             <span className="text-[var(--v2-ink-3)] ml-1">
               per {resetLabel(info.resetTimeMin).toLowerCase()}
@@ -212,7 +215,8 @@ function ConfiguredAllowanceRow({
       <div className="flex items-center justify-between gap-3 text-xs">
         <span className="font-medium text-[var(--v2-ink-2)]">{allowance.token_symbol}</span>
         <span className="text-right text-[var(--v2-ink-3)]">
-          {formatConfiguredAllowance(allowance, chainId)} {allowance.token_symbol}
+          <span className="v2-tabular">{formatConfiguredAllowance(allowance, chainId)}</span>
+          {` ${allowance.token_symbol}`}
           {allowance.reset_period_min > 0 ? ` per ${reset}` : ''}
         </span>
       </div>
@@ -915,7 +919,7 @@ export default function AgentPanel() {
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
                 {showRevokedAgents ? 'Hide revoked agents' : 'Show revoked agents'}
-                <span className="text-[var(--v2-ink-3)]">({revokedAgents.length})</span>
+                <span className="text-[var(--v2-ink-3)] v2-tabular">({revokedAgents.length})</span>
               </button>
             </div>
           )}

@@ -11,6 +11,7 @@ import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 export default function TransactionsClient() {
   const router = useRouter()
@@ -68,10 +69,10 @@ export default function TransactionsClient() {
   if (!hasSafes) {
     return (
       <div className="max-w-5xl">
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-1">Transaction history</h1>
-          <p className="text-sm text-[var(--v2-ink-2)]">Payments and account activity across your Haven wallets.</p>
-        </div>
+        <PageHeader
+          title="Transaction history"
+          subtitle="Payments and account activity across your Haven wallets."
+        />
 
         <EmptyState
           title="No accounts linked yet"
@@ -84,12 +85,10 @@ export default function TransactionsClient() {
 
   return (
     <div className="max-w-6xl">
-      <div className="mb-8">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-1">Transaction history</h1>
-          <p className="text-sm text-[var(--v2-ink-2)]">Payments and account activity across your Haven wallets.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Transaction history"
+        subtitle="Payments and account activity across your Haven wallets."
+      />
 
       {partialFailure && (
         <div className="mb-4 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
@@ -117,11 +116,11 @@ export default function TransactionsClient() {
         <span className="text-xs text-[var(--v2-ink-3)]">
           {loadingInitial
             ? 'Loading transactions...'
-            : `${total} transaction${total !== 1 ? 's' : ''}`}
+            : <><span className="v2-tabular">{total}</span> transaction{total !== 1 ? 's' : ''}</>}
         </span>
         {!loadingInitial && transactions.length > 0 && (
           <span className="text-xs text-[var(--v2-ink-3)]">
-            Showing {transactions.length} of {total}
+            Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span>
           </span>
         )}
       </div>

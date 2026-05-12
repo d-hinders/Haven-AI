@@ -21,6 +21,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
@@ -349,35 +350,13 @@ export default function AgentDetailClient({ agentId }: Props) {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Card hover={false} className="p-5 md:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">{currentAgent.name}</h1>
-              <StatusBadge tone={statusTone(currentAgent.status)}>
-                {statusLabel(currentAgent.status)}
-              </StatusBadge>
-            </div>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              {currentAgent.description || 'This agent can make payments within the rules you set.'}
-            </p>
-            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
-                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{networkName}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
-                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
+      <PageHeader
+        title={currentAgent.name}
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <StatusBadge tone={statusTone(currentAgent.status)}>
+              {statusLabel(currentAgent.status)}
+            </StatusBadge>
             {!isRevoked ? (
               <Button
                 onClick={() => setEditOpen(true)}
@@ -396,7 +375,27 @@ export default function AgentDetailClient({ agentId }: Props) {
               </Button>
             )}
           </div>
-        </div>
+        }
+      />
+
+      <Card hover={false} className="p-5 md:p-6">
+        <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          {currentAgent.description || 'This agent can make payments within the rules you set.'}
+        </p>
+        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
+            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
+            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{networkName}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
+            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
+          </div>
+        </dl>
       </Card>
 
       {revokeBlockedByOtherDevice ? (

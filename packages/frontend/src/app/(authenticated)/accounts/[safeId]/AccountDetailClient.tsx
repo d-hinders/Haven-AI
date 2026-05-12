@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { ExternalDetailsLink, WalletIdentityBlock } from '@/components/haven'
+import { ExternalDetailsLink } from '@/components/haven'
 import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -274,9 +274,8 @@ export default function AccountDetailClient() {
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
-        <Card hover={false} className="overflow-hidden">
-          <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-5 sm:px-6">
+      <Card hover={false} className="overflow-hidden">
+        <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]">Total balance</p>
@@ -298,7 +297,7 @@ export default function AccountDetailClient() {
           </div>
         </div>
 
-          <div className="p-4 sm:p-5">
+        <div className="p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Token balances</h2>
             <button
@@ -360,42 +359,8 @@ export default function AccountDetailClient() {
               })}
             </>
           )}
-          </div>
-        </Card>
-
-        <div className="space-y-4">
-          <WalletIdentityBlock
-            name={safe.name}
-            network={chain.name}
-            address={safeAddress ?? undefined}
-            balance={portfolioLoading || balanceUnavailable ? undefined : formattedTotal}
-          />
-
-          <Card hover={false} className="p-5">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M12 3.75l7.5 3v5.25c0 4.25-2.85 8.06-7.5 9-4.65-.94-7.5-4.75-7.5-9V6.75l7.5-3Z" />
-                </svg>
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-[var(--v2-ink)]">Account control</p>
-                <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-                  {detailsLoading ? 'Loading approval details...' : approvalCopy}
-                </p>
-                <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  Haven cannot move funds on its own. Payments and account changes need approval from the methods that control this wallet.
-                </p>
-                {detailsError ? (
-                  <Button variant="ghost" size="sm" className="mt-4" onClick={refetchDetails}>
-                    Retry approval details
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </Card>
         </div>
-      </div>
+      </Card>
 
       <Card hover={false} className="p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -472,7 +437,7 @@ export default function AccountDetailClient() {
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
           {/* Address */}
           <div>
             <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
@@ -508,12 +473,6 @@ export default function AccountDetailClient() {
             ) : (
               <span className="text-sm text-[var(--v2-ink-3)]">—</span>
             )}
-          </div>
-
-          {/* Network */}
-          <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Network</p>
-            <span className="text-sm text-[var(--v2-ink)]">{getChainConfig(chainId).name}</span>
           </div>
         </div>
 

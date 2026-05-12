@@ -142,7 +142,7 @@ function OwnerRow({
   onClear,
 }: {
   owner: OwnerAlias
-  type: 'Passkey' | 'Connected wallet' | 'Approval method'
+  type: 'Passkey' | 'Connected wallet' | 'Wallet'
   onRename: (ownerAddress: string, name: string) => Promise<void>
   onClear: (ownerAddress: string) => Promise<void>
 }) {
@@ -170,7 +170,7 @@ function OwnerRow({
       await onRename(owner.owner_address, normalized)
       setEditing(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not save this approval method name.')
+      setError(err instanceof Error ? err.message : 'We could not save this approver name.')
     } finally {
       setSaving(false)
     }
@@ -183,7 +183,7 @@ function OwnerRow({
       await onClear(owner.owner_address)
       setEditing(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not clear this approval method name.')
+      setError(err instanceof Error ? err.message : 'We could not clear this approver name.')
     } finally {
       setSaving(false)
     }
@@ -214,7 +214,7 @@ function OwnerRow({
                 {owner.name ?? truncate(owner.owner_address)}
               </p>
             )}
-            <StatusPill tone={type === 'Approval method' ? 'neutral' : 'brand'}>{type}</StatusPill>
+            <StatusPill tone={type === 'Wallet' ? 'neutral' : 'brand'}>{type}</StatusPill>
           </div>
           {!editing && owner.name ? (
             <p className="mt-1 font-mono text-xs text-[var(--v2-ink-3)]">
@@ -360,14 +360,14 @@ export default function SettingsClient() {
           ? { label: 'Listed', tone: 'success' as const }
           : { label: 'Needs review', tone: 'warning' as const }
   const approvalAccessDetail = ownersLoading
-    ? 'Checking approval methods for your linked Haven accounts.'
+    ? 'Checking approvers for your linked Haven accounts.'
     : ownersError || ownersPartialFailure
-      ? 'Some approval methods could not be verified. Review the approval methods section below.'
+      ? 'Some approvers could not be verified. Review the approvers section below.'
       : linkedAccounts.length === 0
         ? 'Create or import a Haven account before relying on Haven for payments.'
         : verifiedAccountCount === linkedAccounts.length
-          ? 'Haven listed approval methods for your linked accounts. Keep access to every method needed to approve payments.'
-          : 'Review approval methods before relying on these accounts for payments.'
+          ? 'Haven listed approvers for your linked accounts. Keep access to every wallet or passkey needed to approve payments.'
+          : 'Review approvers before relying on these accounts for payments.'
 
   useEffect(() => {
     if (!editingName) {
@@ -422,7 +422,7 @@ export default function SettingsClient() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight mb-1">Settings</h1>
           <p className="text-sm text-[var(--v2-ink-3)]">
-            Manage your profile, sign-in methods, approval methods, and recovery context.
+            Manage your profile, sign-in methods, approvers, and recovery context.
           </p>
         </div>
         <Button variant="ghost" onClick={handleLogout}>
@@ -575,33 +575,33 @@ export default function SettingsClient() {
           description="Understand what to keep available before you rely on a Haven account for payments."
         >
           <SettingRow
-            label="Approval method access"
+            label="Approver access"
             detail={approvalAccessDetail}
             value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
           />
           <SettingRow
             label="Recovery limitations"
-            detail="Haven can help you find account details, but it cannot bypass your approval methods or recover funds sent on the wrong network."
+            detail="Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network."
           />
           <SettingRow
-            label="Backup approval method"
-            detail="Adding backup approval methods is not available yet."
+            label="Backup approver"
+            detail="Adding backup approvers is not available yet."
             action={<StatusPill>Coming soon</StatusPill>}
           />
         </Section>
 
         <Section
-          title="Approval methods"
+          title="Approvers"
           description="Name the wallets and passkeys that approve actions for your linked Haven accounts."
         >
           <div className="px-6 py-4">
             {ownersLoading ? (
-              <p className="text-sm text-[var(--v2-ink-3)]">Loading approval methods...</p>
+              <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
             ) : owners.length > 0 ? (
               <div className="space-y-3">
                 {ownersPartialFailure ? (
                   <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
-                    Some approval methods could not be refreshed. Showing the methods Haven could verify.
+                    Some approvers could not be refreshed. Showing the wallets and passkeys Haven could verify.
                   </div>
                 ) : null}
                 {ownersError ? (
@@ -615,7 +615,7 @@ export default function SettingsClient() {
                     ? 'Passkey'
                     : walletAddress === normalizedOwner
                       ? 'Connected wallet'
-                      : 'Approval method'
+                      : 'Wallet'
 
                   return (
                     <OwnerRow
@@ -634,7 +634,7 @@ export default function SettingsClient() {
               </div>
             ) : (
               <p className="text-sm text-[var(--v2-ink-3)]">
-                Link a Haven account to review and name its approval methods.
+                Link a Haven account to review and name its approvers.
               </p>
             )}
           </div>

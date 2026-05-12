@@ -63,8 +63,8 @@ function formatFiatValue(value: number, currency: 'USD' | 'EUR'): string {
 
 function approvalSummary(threshold?: number, ownerCount?: number): string {
   if (!threshold || !ownerCount) return 'Loading approval details'
-  if (threshold === 1 && ownerCount === 1) return 'One approval method controls this account'
-  return `${threshold} of ${ownerCount} approval methods required`
+  const approverLabel = ownerCount === 1 ? 'approver' : 'approvers'
+  return `${threshold} of ${ownerCount} ${approverLabel} required`
 }
 
 function formatResetPeriod(minutes: number): string {
@@ -95,7 +95,7 @@ export default function AccountDetailClient() {
   const router = useRouter()
   const safeId = params.safeId as string
 
-  const { user, activeSafe, setActiveSafe, loading: authLoading } = useAuth()
+  const { user, activeSafe, setActiveSafe, loading: authLoading, passkeys = [] } = useAuth()
   const { getOwnerAlias } = useOwnerDirectory()
   const { renameSafe, removeSafe, loading: safesLoading } = useUserSafes()
   const { currency } = usePreferences()
@@ -119,6 +119,15 @@ export default function AccountDetailClient() {
   for (const account of user?.safes ?? []) {
     safeNamesByAddress.set(account.safe_address.toLowerCase(), account.name)
   }
+  const passkeyAddresses = new Set(
+    passkeys
+      .filter(
+        (passkey) =>
+          passkey.chain_id === chainId &&
+          (!safeAddress || passkey.safe_address?.toLowerCase() === safeAddress.toLowerCase()),
+      )
+      .map((passkey) => passkey.signer_address.toLowerCase()),
+  )
 
   // Build linked-agent list
   const safeAgents = agents.filter((a) => a.safe_id === safeId)
@@ -259,7 +268,7 @@ export default function AccountDetailClient() {
               </Button>
             </>
           )}
-          <Button variant="ghost" size="sm" onClick={() => setRenameOpen(true)}>
+          <Button variant="ghost" onClick={() => setRenameOpen(true)}>
             Edit
           </Button>
         </div>
@@ -478,7 +487,7 @@ export default function AccountDetailClient() {
 
           {/* Threshold */}
           <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Approvals</p>
+            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Required approvals</p>
             {detailsLoading ? (
               <div className="h-5 w-24 bg-[var(--v2-surface-2)] rounded animate-pulse" />
             ) : details ? (
@@ -508,14 +517,16 @@ export default function AccountDetailClient() {
           </div>
         </div>
 
-        {/* Owners */}
+        {/* Approvers */}
         {details && details.owners.length > 0 && (
           <div className="mt-6 pt-5 border-t border-[var(--v2-border)]">
-            <p className="text-xs text-[var(--v2-ink-3)] mb-3">Approval methods</p>
+            <p className="text-xs text-[var(--v2-ink-3)] mb-3">Approvers</p>
             <div className="space-y-2">
               {details.owners.map((owner) => {
+                const normalizedOwner = owner.toLowerCase()
                 const isYou =
-                  user?.wallet_address?.toLowerCase() === owner.toLowerCase()
+                  user?.wallet_address?.toLowerCase() === normalizedOwner || passkeyAddresses.has(normalizedOwner)
+                const approverType = passkeyAddresses.has(normalizedOwner) ? 'Passkey' : 'Wallet'
                 const ownerAlias = getOwnerAlias(owner)
                 return (
                   <div
@@ -531,7 +542,8 @@ export default function AccountDetailClient() {
                       </span>
                     )}
                     <CopyButton text={owner} />
-                    <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approval method externally" />
+                    <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />
+                    <StatusBadge>{approverType}</StatusBadge>
                     {isYou && (
                       <StatusBadge tone="brand">You</StatusBadge>
                     )}

@@ -99,6 +99,7 @@ describe('AccountDetailClient', () => {
       activeSafe: SAFE,
       setActiveSafe: vi.fn(),
       loading: false,
+      passkeys: [],
     })
     mockUseOwnerDirectory.mockReturnValue({
       getOwnerAlias: (address: string) =>
@@ -180,12 +181,13 @@ describe('AccountDetailClient', () => {
     expect(screen.getByText('Control the funds, agent access, and recent activity for this Haven wallet.')).toBeInTheDocument()
     expect(screen.getAllByText('$42.00').length).toBeGreaterThan(0)
     expect(screen.getByText('Account control')).toBeInTheDocument()
-    expect(screen.getAllByText('One approval method controls this account').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('1 of 1 approver required').length).toBeGreaterThan(0)
     expect(screen.getByText('Agent access')).toBeInTheDocument()
     expect(screen.getByText('Research agent')).toBeInTheDocument()
     expect(screen.getByText('100 USDC per day')).toBeInTheDocument()
     expect(screen.getByText('Advanced account details')).toBeInTheDocument()
-    expect(screen.getByText('Approval methods')).toBeInTheDocument()
+    expect(screen.getByText('Approvers')).toBeInTheDocument()
+    expect(screen.getByText('Wallet')).toBeInTheDocument()
     expect(screen.getByText('Personal wallet')).toBeInTheDocument()
   })
 

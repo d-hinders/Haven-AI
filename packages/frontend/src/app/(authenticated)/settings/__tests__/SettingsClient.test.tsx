@@ -117,7 +117,7 @@ describe('SettingsClient', () => {
     expect(updateUser).toHaveBeenCalledWith({ name: 'Grace Hopper' })
   })
 
-  it('shows approval methods and saves an approval method alias', async () => {
+  it('shows approvers and saves an approver alias', async () => {
     const user = userEvent.setup()
     const renameOwner = vi.fn().mockResolvedValue(undefined)
     mockUseOwnerDirectory.mockReturnValue({
@@ -163,7 +163,7 @@ describe('SettingsClient', () => {
 
     render(<SettingsClient />)
 
-    expect(screen.getByText('Approval methods')).toBeInTheDocument()
+    expect(screen.getByText('Approvers')).toBeInTheDocument()
     expect(screen.getByText('Listed')).toBeInTheDocument()
     expect(screen.getAllByText('Connected wallet').length).toBeGreaterThan(0)
     expect(screen.getByText('Main account · Gnosis Chain')).toBeInTheDocument()

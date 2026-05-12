@@ -14,6 +14,8 @@ export interface Contact {
 interface UseContactsReturn {
   contacts: Contact[]
   loading: boolean
+  error: string | null
+  refetch: () => Promise<void>
   addContact: (name: string, address: string) => Promise<Contact>
   updateContact: (id: string, name: string) => Promise<Contact>
   deleteContact: (id: string) => Promise<void>
@@ -23,15 +25,31 @@ interface UseContactsReturn {
 export function useContacts(): UseContactsReturn {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadContacts = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await api.get<{ contacts: Contact[] }>('/contacts')
+      setContacts(res.contacts)
+    } catch {
+      setError('We could not load your contacts. Try again in a moment.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     const load = async () => {
+      setLoading(true)
+      setError(null)
       try {
         const res = await api.get<{ contacts: Contact[] }>('/contacts')
         if (!cancelled) setContacts(res.contacts)
       } catch {
-        // silently ignore — contacts are non-critical
+        if (!cancelled) setError('We could not load your contacts. Try again in a moment.')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -43,6 +61,7 @@ export function useContacts(): UseContactsReturn {
   const addContact = useCallback(async (name: string, address: string): Promise<Contact> => {
     const contact = await api.post<Contact>('/contacts', { name, address })
     setContacts((prev) => [...prev, contact].sort((a, b) => a.name.localeCompare(b.name)))
+    setError(null)
     return contact
   }, [])
 
@@ -51,12 +70,14 @@ export function useContacts(): UseContactsReturn {
     setContacts((prev) =>
       prev.map((c) => (c.id === id ? contact : c)).sort((a, b) => a.name.localeCompare(b.name)),
     )
+    setError(null)
     return contact
   }, [])
 
   const deleteContact = useCallback(async (id: string): Promise<void> => {
     await api.delete(`/contacts/${id}`)
     setContacts((prev) => prev.filter((c) => c.id !== id))
+    setError(null)
   }, [])
 
   const resolveAddress = useCallback(
@@ -67,5 +88,5 @@ export function useContacts(): UseContactsReturn {
     [contacts],
   )
 
-  return { contacts, loading, addContact, updateContact, deleteContact, resolveAddress }
+  return { contacts, loading, error, refetch: loadContacts, addContact, updateContact, deleteContact, resolveAddress }
 }

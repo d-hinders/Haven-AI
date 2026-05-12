@@ -322,7 +322,7 @@ export default function DashboardClient() {
   const { user, activeSafe } = useAuth()
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
-  const { contacts, resolveAddress } = useContacts()
+  const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, refetch: refetchAgents } = useAgents()
   const {
     balances,
@@ -631,6 +631,7 @@ export default function DashboardClient() {
           setSendOpen(false)
         }}
         contacts={contacts}
+        contactsError={contactsError}
         resolveAddress={resolveAddress}
         chainId={selectedActionSafe?.chain_id ?? 100}
         contextLoading={selectedSafeBalancesLoading || selectedSafeDetailsLoading}

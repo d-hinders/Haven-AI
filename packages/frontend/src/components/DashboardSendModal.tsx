@@ -11,6 +11,7 @@ interface Props {
   open: boolean
   onClose: () => void
   contacts?: Contact[]
+  contactsError?: string | null
   resolveAddress?: (address: string) => string | null
   onSuccess?: () => void
 }
@@ -19,6 +20,7 @@ export default function DashboardSendModal({
   open,
   onClose,
   contacts = [],
+  contactsError = null,
   resolveAddress,
   onSuccess,
 }: Props) {
@@ -76,6 +78,7 @@ export default function DashboardSendModal({
       balances={balances}
       onSuccess={onSuccess}
       contacts={contacts}
+      contactsError={contactsError}
       resolveAddress={resolveAddress}
       chainId={selectedSafe.chain_id}
       safeOptions={safeOptions}

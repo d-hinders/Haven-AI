@@ -15,6 +15,7 @@ export function useDashboardOverview() {
 
   const fetchOverview = useCallback(async () => {
     try {
+      setLoading(true)
       setError(null)
       const response = await api.get<DashboardOverviewResponse>('/dashboard/overview')
       const x402Transactions = await fetchX402ActivityTransactions()

@@ -11,7 +11,8 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w packages/frontend"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"

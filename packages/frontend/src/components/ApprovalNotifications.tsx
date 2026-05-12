@@ -136,40 +136,47 @@ export default function ApprovalNotifications() {
           ) : (
             <>
               <div className="relative max-h-[360px] overflow-y-auto p-2 space-y-2 bg-[var(--v2-surface)]">
-                {pendingApprovals.map((approval) => (
-                  <Link
-                    key={approval.id}
-                    href="/approvals"
-                    onClick={() => setOpen(false)}
-                    className="block rounded-xl border border-[var(--v2-border)] bg-white px-3 py-3 hover:border-[var(--v2-border-strong)] transition-all"
-                  >
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
-                          {approval.agent_name}
-                        </p>
-                        <p className="text-[11px] text-[var(--v2-ink-3)]">
-                          {timeAgo(approval.created_at)}
-                        </p>
+                {pendingApprovals.map((approval) => {
+                  const sourceLabel = approvalSourceLabel({
+                    reason: approval.reason,
+                    source: approval.source,
+                  })
+
+                  return (
+                    <Link
+                      key={approval.id}
+                      href="/approvals"
+                      onClick={() => setOpen(false)}
+                      className="block rounded-xl border border-[var(--v2-border)] bg-white px-3 py-3 hover:border-[var(--v2-border-strong)] transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
+                            {approval.agent_name}
+                          </p>
+                          <p className="text-[11px] text-[var(--v2-ink-3)]">
+                            {timeAgo(approval.created_at)}
+                          </p>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] font-semibold flex-shrink-0">
+                          {approval.status === 'approved' ? 'Complete' : 'Review'}
+                        </span>
                       </div>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] font-semibold flex-shrink-0">
-                        {approval.status === 'approved' ? 'Complete' : 'Review'}
-                      </span>
-                    </div>
-                    <p className="text-sm text-[var(--v2-ink)]">
-                      {approval.amount_human} {approval.token_symbol}
-                    </p>
-                    <p className="text-xs text-[var(--v2-ink-3)] mt-1">
-                      To {approvalRecipientLabel({
-                        reason: approval.reason,
-                        source: approval.source,
-                        x402ResourceUrl: approval.x402_resource_url,
-                        toAddress: approval.to_address,
-                      })}
-                      {approvalSourceLabel({ reason: approval.reason, source: approval.source }) ? ' · x402' : ''}
-                    </p>
-                  </Link>
-                ))}
+                      <p className="text-sm text-[var(--v2-ink)]">
+                        {approval.amount_human} {approval.token_symbol}
+                      </p>
+                      <p className="text-xs text-[var(--v2-ink-3)] mt-1">
+                        To {approvalRecipientLabel({
+                          reason: approval.reason,
+                          source: approval.source,
+                          x402ResourceUrl: approval.x402_resource_url,
+                          toAddress: approval.to_address,
+                        })}
+                        {sourceLabel ? ` · ${sourceLabel}` : ''}
+                      </p>
+                    </Link>
+                  )
+                })}
               </div>
               <div className="relative px-4 py-3 border-t border-[var(--v2-border)] bg-white">
                 <Link

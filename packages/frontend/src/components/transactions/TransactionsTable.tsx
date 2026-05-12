@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { getExplorerUrl } from '@/lib/chains'
-import { parseX402Hostname } from '@/lib/transaction-labels'
+import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { timeAgo, truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -116,8 +116,9 @@ function TransactionActivitySkeleton() {
 
 function transactionTitle(tx: AggregatedTransaction): string {
   if (tx.direction === 'in') return 'Received payment'
-  if (tx.source === 'x402' && tx.agentName) return `x402 payment by ${tx.agentName}`
-  if (tx.source === 'x402') return 'x402 payment'
+  const sourceTitle = paymentSourceTitle(tx.source)
+  if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
+  if (sourceTitle) return sourceTitle
   if (tx.agentName) return `Agent payment by ${tx.agentName}`
   return 'Payment sent by you'
 }
@@ -149,7 +150,7 @@ function counterpartyLabel(
   resolveAddress?: (address: string) => string | null,
   safeNamesByAddress?: Map<string, string>,
 ): string {
-  if (tx.source === 'x402') {
+  if (isMachinePaymentSource(tx.source)) {
     return parseX402Hostname(tx.x402ResourceUrl) ?? truncate(tx.to)
   }
 

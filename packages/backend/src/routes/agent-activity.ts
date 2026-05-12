@@ -21,6 +21,9 @@ interface PaymentRow {
   source: string | null
   x402_resource_url: string | null
   x402_merchant_address: string | null
+  payment_rail: string | null
+  payment_resource_url: string | null
+  merchant_address: string | null
   created_at: string
   confirmed_at: string | null
 }
@@ -34,6 +37,9 @@ interface ApprovalRow {
   reason: string | null
   source: string | null
   x402_resource_url: string | null
+  payment_rail: string | null
+  payment_resource_url: string | null
+  merchant_address: string | null
   status: string
   tx_hash: string | null
   created_at: string
@@ -88,9 +94,12 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.to_address,
               pi.status,
               pi.tx_hash,
-              pi.source,
-              pi.x402_resource_url,
-              pi.x402_merchant_address,
+              COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
+              COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
+              COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
+              pi.payment_rail,
+              pi.payment_resource_url,
+              pi.merchant_address,
               pi.created_at,
               pi.confirmed_at
        FROM payment_intents pi
@@ -105,7 +114,12 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     // Fetch approval requests
     const approvals = await pool.query<ApprovalRow>(
       `SELECT id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason,
-              COALESCE(source, 'direct') AS source, x402_resource_url, status, tx_hash, created_at
+              COALESCE(payment_rail, source, 'direct') AS source,
+              COALESCE(payment_resource_url, x402_resource_url) AS x402_resource_url,
+              payment_rail,
+              payment_resource_url,
+              merchant_address,
+              status, tx_hash, created_at
        FROM approval_requests
        WHERE agent_id = $1
        ORDER BY created_at DESC
@@ -269,9 +283,12 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.to_address,
               pi.status,
               pi.tx_hash,
-              pi.source,
-              pi.x402_resource_url,
-              pi.x402_merchant_address,
+              COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
+              COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
+              COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
+              pi.payment_rail,
+              pi.payment_resource_url,
+              pi.merchant_address,
               pi.created_at,
               pi.confirmed_at
        FROM payment_intents pi
@@ -286,7 +303,12 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     // Recent approval requests
     const approvals = await pool.query<ApprovalRow & { agent_id: string }>(
       `SELECT id, agent_id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason,
-              COALESCE(source, 'direct') AS source, x402_resource_url, status, tx_hash, created_at
+              COALESCE(payment_rail, source, 'direct') AS source,
+              COALESCE(payment_resource_url, x402_resource_url) AS x402_resource_url,
+              payment_rail,
+              payment_resource_url,
+              merchant_address,
+              status, tx_hash, created_at
        FROM approval_requests
        WHERE agent_id = ANY($1)
        ORDER BY created_at DESC

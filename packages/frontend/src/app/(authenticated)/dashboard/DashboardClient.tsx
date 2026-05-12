@@ -687,6 +687,85 @@ export default function DashboardClient() {
     setIsGuideDismissed(true)
   }
 
+  const heroPanel = (
+    <DashboardHero
+      loading={overviewInitialLoading}
+      unavailable={overviewUnavailable}
+      total={formatCurrency(totalFiat, currency)}
+      currency={currency}
+      changeAvailable={Boolean(overview?.change.available)}
+      changeAmount={changeAmount}
+      changePercent={changePercent}
+      hasAccounts={safes.length > 0}
+      requiresOtherDevice={requiresOtherDevice}
+      onSend={() => openHeroAction('send')}
+      onReceive={() => openHeroAction('receive')}
+      onAddFunds={() => openHeroAction('add-funds')}
+    />
+  )
+
+  const attentionPanel = (
+    <AttentionSection
+      approvalActionCount={approvalActionCount}
+      hasOverviewError={Boolean(overviewError)}
+      onRetry={refetchOverview}
+    />
+  )
+
+  const metricsGrid = (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <MetricCard
+        label="Agents connected"
+        value={String(overview?.metrics.connectedAgents ?? 0)}
+        href="/agents"
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+      />
+      <MetricCard
+        label="Monthly agent spend"
+        value={formatCompactCurrency(monthlySpend, currency)}
+        footer="Current calendar month"
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+      />
+      <MetricCard
+        label="Successful transactions"
+        value={String(overview?.metrics.successfulTransactions ?? 0)}
+        footer="All time"
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+      />
+      <MetricCard
+        label="Active accounts"
+        value={String(overview?.metrics.activeAccounts ?? safes.length)}
+        href="/accounts"
+        loading={false}
+      />
+    </div>
+  )
+
+  const activityGrid = (
+    <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
+      <ConnectedAgentsSection
+        agents={overview?.agents ?? []}
+        hasAnyAgents={agents.length > 0}
+        hasAccounts={safes.length > 0}
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+        onRetry={refetchOverview}
+        onConnectAgent={() => openCreateAgent(null)}
+      />
+      <TransactionsSection
+        transactions={overview?.transactions ?? []}
+        hasAccounts={safes.length > 0}
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+        onRetry={refetchOverview}
+        resolveAddress={resolveAddress}
+      />
+    </div>
+  )
+
   return (
     <div className="max-w-6xl">
       <div className="mb-8">
@@ -696,22 +775,14 @@ export default function DashboardClient() {
         </p>
       </div>
 
-      <div className={`mb-6 grid items-start gap-4 ${showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
-        <DashboardHero
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-          total={formatCurrency(totalFiat, currency)}
-          currency={currency}
-          changeAvailable={Boolean(overview?.change.available)}
-          changeAmount={changeAmount}
-          changePercent={changePercent}
-          hasAccounts={safes.length > 0}
-          requiresOtherDevice={requiresOtherDevice}
-          onSend={() => openHeroAction('send')}
-          onReceive={() => openHeroAction('receive')}
-          onAddFunds={() => openHeroAction('add-funds')}
-        />
-        {showOnboardingGuide && onboardingStage ? (
+      {showOnboardingGuide && onboardingStage ? (
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]">
+          <div className="min-w-0 space-y-6">
+            {heroPanel}
+            {hasAttention ? attentionPanel : null}
+            {metricsGrid}
+            {activityGrid}
+          </div>
           <DashboardOnboardingGuide
             stage={onboardingStage}
             safes={safes}
@@ -719,74 +790,17 @@ export default function DashboardClient() {
             onAddAgent={() => openCreateAgent(null)}
             onDismiss={dismissOnboardingGuide}
           />
-        ) : (
-          <AttentionSection
-            approvalActionCount={approvalActionCount}
-            hasOverviewError={Boolean(overviewError)}
-            onRetry={refetchOverview}
-          />
-        )}
-      </div>
-
-      {showOnboardingGuide && hasAttention ? (
-        <div className="mb-6">
-          <AttentionSection
-            approvalActionCount={approvalActionCount}
-            hasOverviewError={Boolean(overviewError)}
-            onRetry={refetchOverview}
-          />
         </div>
-      ) : null}
-
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label="Agents connected"
-          value={String(overview?.metrics.connectedAgents ?? 0)}
-          href="/agents"
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-        />
-        <MetricCard
-          label="Monthly agent spend"
-          value={formatCompactCurrency(monthlySpend, currency)}
-          footer="Current calendar month"
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-        />
-        <MetricCard
-          label="Successful transactions"
-          value={String(overview?.metrics.successfulTransactions ?? 0)}
-          footer="All time"
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-        />
-        <MetricCard
-          label="Active accounts"
-          value={String(overview?.metrics.activeAccounts ?? safes.length)}
-          href="/accounts"
-          loading={false}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
-        <ConnectedAgentsSection
-          agents={overview?.agents ?? []}
-          hasAnyAgents={agents.length > 0}
-          hasAccounts={safes.length > 0}
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-          onRetry={refetchOverview}
-          onConnectAgent={() => openCreateAgent(null)}
-        />
-        <TransactionsSection
-          transactions={overview?.transactions ?? []}
-          hasAccounts={safes.length > 0}
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-          onRetry={refetchOverview}
-          resolveAddress={resolveAddress}
-        />
-      </div>
+      ) : (
+        <div className="space-y-6">
+          <div className={`grid items-start gap-4 ${showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
+            {heroPanel}
+            {attentionPanel}
+          </div>
+          {metricsGrid}
+          {activityGrid}
+        </div>
+      )}
 
       <CreateAgentModal
         open={createAgentOpen}

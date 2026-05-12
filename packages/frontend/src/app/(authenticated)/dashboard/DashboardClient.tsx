@@ -581,26 +581,18 @@ export default function DashboardClient() {
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [actionSafeId, setActionSafeId] = useState<string | null>(null)
-  const [isGuideDismissed, setIsGuideDismissed] = useState(false)
+  const [dismissedGuideStage, setDismissedGuideStage] = useState<'fund' | 'add-agent' | null>(null)
 
   useEffect(() => {
     if (actionSafeId && safes.some((safe) => safe.id === actionSafeId)) return
     setActionSafeId(defaultSafe?.id ?? null)
   }, [actionSafeId, defaultSafe?.id, safes])
 
-  const onboardingDismissKey =
-    user && onboardingStage
-      ? `haven_dashboard_onboarding_dismissed:${user.id}:${onboardingStage}`
-      : null
-
   useEffect(() => {
-    if (!onboardingDismissKey) {
-      setIsGuideDismissed(false)
-      return
+    if (dismissedGuideStage && dismissedGuideStage !== onboardingStage) {
+      setDismissedGuideStage(null)
     }
-
-    setIsGuideDismissed(window.localStorage.getItem(onboardingDismissKey) === '1')
-  }, [onboardingDismissKey])
+  }, [dismissedGuideStage, onboardingStage])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
   const actionGate = useSafeOperationGate({
@@ -637,7 +629,9 @@ export default function DashboardClient() {
   const overviewInitialLoading = overviewLoading && !overview
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError || approvalActionCount > 0)
-  const showOnboardingGuide = Boolean(onboardingStage && !requiresOtherDevice && !isGuideDismissed)
+  const showOnboardingGuide = Boolean(
+    onboardingStage && !requiresOtherDevice && dismissedGuideStage !== onboardingStage,
+  )
   const showTopAside = hasAttention
 
   function refreshDashboardData() {
@@ -684,9 +678,7 @@ export default function DashboardClient() {
   }
 
   function dismissOnboardingGuide() {
-    if (!onboardingDismissKey) return
-    window.localStorage.setItem(onboardingDismissKey, '1')
-    setIsGuideDismissed(true)
+    setDismissedGuideStage(onboardingStage)
   }
 
   const heroPanel = (

@@ -636,7 +636,7 @@ export default function DashboardClient() {
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError || approvalActionCount > 0)
   const showOnboardingGuide = Boolean(onboardingStage && !requiresOtherDevice && !isGuideDismissed)
-  const showTopAside = showOnboardingGuide || hasAttention
+  const showTopAside = hasAttention
 
   function refreshDashboardData() {
     refetchOverview()
@@ -776,16 +776,11 @@ export default function DashboardClient() {
       </div>
 
       {showOnboardingGuide && onboardingStage ? (
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]">
-          <div className="min-w-0 space-y-6">
-            {heroPanel}
-            {hasAttention ? attentionPanel : null}
-            {metricsGrid}
-            {activityGrid}
-          </div>
+        <div className="space-y-6">
+          {heroPanel}
+          {hasAttention ? attentionPanel : null}
           <DashboardOnboardingGuide
             stage={onboardingStage}
-            safes={safes}
             onReceiveFunds={openReceiveForDefaultSafe}
             onAddAgent={() => openCreateAgent(null)}
             onDismiss={dismissOnboardingGuide}

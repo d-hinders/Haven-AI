@@ -225,7 +225,7 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
   })
 
-  it('shows the first-run guide when the account needs funds', () => {
+  it('shows a focused first-run guide instead of the full dashboard when the account needs funds', () => {
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],
       loading: false,
@@ -235,6 +235,9 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
 
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    expect(screen.queryByText('Agents connected')).not.toBeInTheDocument()
+    expect(screen.queryByText('Recent transactions')).not.toBeInTheDocument()
+    expect(screen.queryByText('Monthly agent spend')).not.toBeInTheDocument()
   })
 
   it('does not show the connect-agent guide before agents finish loading', () => {

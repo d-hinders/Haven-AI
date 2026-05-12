@@ -261,7 +261,7 @@ function DashboardHero({
 }) {
   return (
     <section
-      className="relative overflow-hidden rounded-[24px] border shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]"
+      className="relative overflow-hidden rounded-[24px] border shadow-[var(--v2-shadow-card-raised)]"
       style={{ borderColor: '#E7E9F2', backgroundColor: '#F7F5FF' }}
     >
       <div

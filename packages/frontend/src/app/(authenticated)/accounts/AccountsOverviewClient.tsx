@@ -17,6 +17,7 @@ import NetworkPill from '@/components/NetworkPill'
 import { truncate } from '@/lib/format'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 // ── Add Safe Modal ──────────────────────────────────────────────────
 
@@ -508,7 +509,7 @@ function SafeCard({
       {/* Fiat total */}
       <div className="mb-4">
         {portfolioLoading ? (
-          <div className="h-7 w-28 bg-[var(--v2-surface-2)] rounded animate-pulse" />
+          <Skeleton className="h-7 w-28" />
         ) : (
           <p className="text-xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
             {formatFiat(fiatTotal, currency)}

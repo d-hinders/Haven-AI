@@ -5,6 +5,7 @@ import QRCode from 'qrcode'
 import { getChainConfig } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { UserSafe } from '@/context/AuthContext'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 type Stage = 'fund' | 'add-agent'
 
@@ -299,7 +300,7 @@ function FundingPanel({
                 className="h-[280px] w-[280px] rounded-xl border border-[var(--v2-border)] bg-white p-2"
               />
             ) : (
-              <div className="h-[280px] w-[280px] animate-pulse rounded-xl bg-[var(--v2-surface-2)]" />
+              <Skeleton className="h-[280px] w-[280px] rounded-xl" />
             )}
             <div className="mt-4 w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
               <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--v2-ink-3)]">

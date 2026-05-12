@@ -8,6 +8,7 @@ import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { UserSafe } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 interface Props {
   open: boolean
@@ -144,7 +145,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                     className="h-[220px] w-[220px] rounded-lg border border-[var(--v2-border)]"
                   />
                 ) : (
-                  <div className="h-[220px] w-[220px] animate-pulse rounded-lg bg-[var(--v2-surface-2)]" />
+                  <Skeleton className="h-[220px] w-[220px] rounded-lg" />
                 )}
                 <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
                   QR code for {truncate(safeAddress)}

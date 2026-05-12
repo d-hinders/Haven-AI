@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApprovals } from '@/hooks/useApprovals'
 import { approvalRecipientLabel, approvalSourceLabel } from '@/lib/approval-labels'
 import { timeAgo } from '@/lib/format'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 export default function ApprovalNotifications() {
   const [open, setOpen] = useState(false)
@@ -101,9 +102,9 @@ export default function ApprovalNotifications() {
                   key={index}
                   className="rounded-xl border border-[var(--v2-border)] bg-white p-3"
                 >
-                  <div className="h-3 w-28 rounded bg-[var(--v2-surface-2)] animate-pulse mb-2" />
-                  <div className="h-2 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse mb-2" />
-                  <div className="h-2 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  <Skeleton variant="text" className="h-3 w-28 mb-2" />
+                  <Skeleton variant="text" className="h-2 w-44 mb-2" />
+                  <Skeleton variant="text" className="h-2 w-24" />
                 </div>
               ))}
             </div>

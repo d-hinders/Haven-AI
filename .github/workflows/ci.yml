@@ -5,6 +5,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      ui_suite:
+        description: Browser test suite to run
+        required: true
+        default: full
+        type: choice
+        options:
+          - desktop
+          - full
 
 jobs:
   ci:
@@ -68,8 +78,16 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: packages/frontend
 
-      - name: Run frontend browser tests
-        run: npm run test:e2e -w packages/frontend
+      - name: Run frontend browser smoke tests
+        if: github.event_name != 'workflow_dispatch' || inputs.ui_suite != 'full'
+        run: npm run test:e2e:desktop -w packages/frontend
+        env:
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Run full frontend browser tests
+        if: github.event_name == 'workflow_dispatch' && inputs.ui_suite == 'full'
+        run: npm run test:e2e:full -w packages/frontend
         env:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1

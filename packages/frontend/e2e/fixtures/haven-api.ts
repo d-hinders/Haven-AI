@@ -163,7 +163,15 @@ async function fulfillUnmockedRoute(route: Route, method: string, path: string) 
   )
 }
 
+async function mockWalletNoise(page: Page) {
+  await page.route(/https:\/\/(api\.web3modal\.org|pulse\.walletconnect\.org)\/.*/, async (route) => {
+    await fulfillJson(route, {})
+  })
+}
+
 export async function mockHavenApi(page: Page) {
+  await mockWalletNoise(page)
+
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -302,6 +310,8 @@ export async function seedAuthenticatedSession(page: Page) {
 const ignoredBrowserErrorPatterns = [
   /walletconnect/i,
   /wagmi/i,
+  /web3modal/i,
+  /reown/i,
   /failed to load resource.*\.well-known/i,
 ]
 
@@ -310,7 +320,8 @@ export function collectBrowserErrors(page: Page) {
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
-      errors.push(message.text())
+      const location = message.location()
+      errors.push(location.url ? `${message.text()} (${location.url})` : message.text())
     }
   })
 

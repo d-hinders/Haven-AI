@@ -239,8 +239,6 @@ function DashboardHero({
   changeAvailable,
   changeAmount,
   changePercent,
-  accountCount,
-  monthlySpend,
   hasAccounts,
   requiresOtherDevice,
   onSend,
@@ -254,8 +252,6 @@ function DashboardHero({
   changeAvailable: boolean
   changeAmount: number
   changePercent: number
-  accountCount: number
-  monthlySpend: string
   hasAccounts: boolean
   requiresOtherDevice: boolean
   onSend: () => void
@@ -263,8 +259,16 @@ function DashboardHero({
   onAddFunds: () => void
 }) {
   return (
-    <section className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
-      <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+    <section
+      className="relative overflow-hidden rounded-[24px] border shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]"
+      style={{ borderColor: '#E7E9F2', backgroundColor: '#F7F5FF' }}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{ background: 'linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%)' }}
+      />
+      <div className="relative grid gap-6 px-6 py-7 sm:px-8 sm:py-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div>
           <p className="text-sm font-medium text-[var(--v2-ink-2)]">Total balance</p>
           {loading ? (
@@ -311,32 +315,40 @@ function DashboardHero({
           </Button>
         )}
       </div>
-
-      <div className="grid border-t border-[var(--v2-border)] sm:grid-cols-2">
-        <DashboardFact label="Accounts" value={String(accountCount)} href="/accounts" />
-        <DashboardFact label="Agent spend this month" value={monthlySpend} />
-      </div>
     </section>
   )
 }
 
-function DashboardFact({
+function MetricCard({
   label,
   value,
+  footer,
   href,
+  loading,
+  unavailable,
 }: {
   label: string
   value: string
+  footer?: string
   href?: string
+  loading?: boolean
+  unavailable?: boolean
 }) {
   const content = (
     <>
       <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
-      <p className="mt-1 text-base font-semibold text-[var(--v2-ink)] v2-tabular">{value}</p>
+      {loading ? (
+        <div className="mt-3 h-7 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+      ) : (
+        <p className={`mt-2 text-2xl font-semibold tracking-tight v2-tabular ${unavailable ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-ink)]'}`}>
+          {unavailable ? 'Unavailable' : value}
+        </p>
+      )}
+      {footer ? <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{footer}</p> : null}
     </>
   )
 
-  const className = 'block border-t border-[var(--v2-border)] px-5 py-4 first:border-t-0 sm:border-l sm:border-t-0 sm:first:border-l-0 sm:px-6'
+  const className = 'block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]'
 
   if (href) {
     return (
@@ -692,8 +704,6 @@ export default function DashboardClient() {
           changeAvailable={Boolean(overview?.change.available)}
           changeAmount={changeAmount}
           changePercent={changePercent}
-          accountCount={overview?.metrics.activeAccounts ?? safes.length}
-          monthlySpend={overviewInitialLoading || overviewUnavailable ? '—' : formatCompactCurrency(monthlySpend, currency)}
           hasAccounts={safes.length > 0}
           requiresOtherDevice={requiresOtherDevice}
           onSend={() => openHeroAction('send')}
@@ -704,6 +714,36 @@ export default function DashboardClient() {
           approvalActionCount={approvalActionCount}
           hasOverviewError={Boolean(overviewError)}
           onRetry={refetchOverview}
+        />
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Agents connected"
+          value={String(overview?.metrics.connectedAgents ?? 0)}
+          href="/agents"
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
+        />
+        <MetricCard
+          label="Monthly agent spend"
+          value={formatCompactCurrency(monthlySpend, currency)}
+          footer="Current calendar month"
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
+        />
+        <MetricCard
+          label="Successful transactions"
+          value={String(overview?.metrics.successfulTransactions ?? 0)}
+          footer="All time"
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
+        />
+        <MetricCard
+          label="Active accounts"
+          value={String(overview?.metrics.activeAccounts ?? safes.length)}
+          href="/accounts"
+          loading={false}
         />
       </div>
 

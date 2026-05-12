@@ -159,7 +159,7 @@ describe('DashboardClient', () => {
     mockBaseState()
   })
 
-  it('leads with total balance, primary actions, attention, and compact facts', () => {
+  it('leads with total balance, primary actions, attention, and metric cards', () => {
     render(<DashboardClient />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
@@ -169,8 +169,11 @@ describe('DashboardClient', () => {
     expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
     expect(screen.getByText('Needs attention')).toBeInTheDocument()
     expect(screen.getByText('2 agent payments need your action')).toBeInTheDocument()
-    expect(screen.getByText('Agent spend this month')).toBeInTheDocument()
+    expect(screen.getByText('Agents connected')).toBeInTheDocument()
+    expect(screen.getByText('Monthly agent spend')).toBeInTheDocument()
     expect(screen.getByText('$42.00')).toBeInTheDocument()
+    expect(screen.getByText('Successful transactions')).toBeInTheDocument()
+    expect(screen.getByText('Active accounts')).toBeInTheDocument()
   })
 
   it('uses singular copy for one agent payment that needs action', () => {

@@ -1,4 +1,5 @@
 import type { Page, Route } from '@playwright/test'
+import { ACTIVE_SAFE_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/auth-storage'
 
 export const testSafeAddress = '0x1111111111111111111111111111111111111111'
 export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
@@ -154,6 +155,14 @@ async function fulfillJson(route: Route, json: JsonValue, status = 200) {
   })
 }
 
+async function fulfillUnmockedRoute(route: Route, method: string, path: string) {
+  await fulfillJson(
+    route,
+    { error: `Unmocked API route: ${method} ${path}` },
+    599,
+  )
+}
+
 export async function mockHavenApi(page: Page) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -256,6 +265,8 @@ export async function mockHavenApi(page: Page) {
     if (method === 'GET' && path === '/approvals') {
       await fulfillJson(route, {
         approvals: [approval],
+        // Dashboard reads actionable_count first, while older callers may
+        // still fall back to pending_count.
         actionable_count: 1,
         pending_count: 1,
       })
@@ -271,16 +282,28 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
-    await fulfillJson(route, {})
+    await fulfillUnmockedRoute(route, method, path)
   })
 }
 
 export async function seedAuthenticatedSession(page: Page) {
-  await page.addInitScript(() => {
-    window.localStorage.setItem('haven_token', 'e2e-token')
-    window.localStorage.setItem('haven_active_safe_id', 'safe-main')
-  })
+  await page.addInitScript(
+    ({ tokenKey, activeSafeKey }) => {
+      window.localStorage.setItem(tokenKey, 'e2e-token')
+      window.localStorage.setItem(activeSafeKey, 'safe-main')
+    },
+    {
+      tokenKey: AUTH_TOKEN_STORAGE_KEY,
+      activeSafeKey: ACTIVE_SAFE_STORAGE_KEY,
+    },
+  )
 }
+
+const ignoredBrowserErrorPatterns = [
+  /walletconnect/i,
+  /wagmi/i,
+  /failed to load resource.*\.well-known/i,
+]
 
 export function collectBrowserErrors(page: Page) {
   const errors: string[] = []
@@ -296,6 +319,23 @@ export function collectBrowserErrors(page: Page) {
   })
 
   return errors
+}
+
+export function unexpectedBrowserErrors(errors: string[]) {
+  return errors.filter(
+    (error) => !ignoredBrowserErrorPatterns.some((pattern) => pattern.test(error)),
+  )
+}
+
+export async function dismissMobileSidebar(page: Page) {
+  const viewport = page.viewportSize()
+  if (!viewport || viewport.width >= 1024) return
+
+  const closeButton = page.getByRole('button', { name: 'Close sidebar' })
+  if (await closeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await closeButton.click({ force: true })
+    await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
+  }
 }
 
 export async function expectNoHorizontalOverflow(page: Page) {

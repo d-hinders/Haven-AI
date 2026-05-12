@@ -63,11 +63,15 @@ const mainNav: NavItem[] = [
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
 ]
 
+const DESKTOP_BREAKPOINT_PX = 1024
+
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuth()
-  const [collapsed, setCollapsed] = useState(true)
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < DESKTOP_BREAKPOINT_PX,
+  )
 
   const name = displayName(user)
   const userInitial = getUserInitial(user)

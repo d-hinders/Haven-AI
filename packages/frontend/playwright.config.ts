@@ -2,6 +2,14 @@ import { defineConfig, devices } from '@playwright/test'
 
 const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 3000)
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${PORT}`
+const webServerCommand = process.env.CI
+  ? [
+      'mkdir -p .next/standalone/packages/frontend/.next/static .next/standalone/packages/frontend/public',
+      'cp -R .next/static/. .next/standalone/packages/frontend/.next/static',
+      '[ ! -d public ] || cp -R public/. .next/standalone/packages/frontend/public',
+      'node .next/standalone/packages/frontend/server.js',
+    ].join(' && ')
+  : `npm run dev -- --hostname 127.0.0.1 --port ${PORT}`
 
 export default defineConfig({
   testDir: './e2e',
@@ -9,10 +17,10 @@ export default defineConfig({
   expect: {
     timeout: 15_000,
   },
-  fullyParallel: false,
+  fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 2 : 1,
+  retries: process.env.CI ? 1 : 0,
+  workers: process.env.CI ? 2 : undefined,
   outputDir: '../../output/playwright/test-results',
   reporter: [
     ['list'],
@@ -25,7 +33,7 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: `npm run dev -- --hostname 127.0.0.1 --port ${PORT}`,
+    command: webServerCommand,
     cwd: __dirname,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
@@ -33,6 +41,7 @@ export default defineConfig({
     env: {
       NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: 'playwright-placeholder',
       NEXT_TELEMETRY_DISABLED: '1',
+      HOSTNAME: '127.0.0.1',
       PORT: String(PORT),
     },
   },

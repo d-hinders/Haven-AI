@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api, type ListPasskeysResponse } from '@/lib/api'
+import { ACTIVE_SAFE_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
 import {
   PASSKEY_SCHEMA_VERSION,
   clearStoredPasskeySigner,
@@ -62,7 +63,7 @@ function resolveActiveSafe(safes: UserSafe[]): UserSafe | null {
   if (safes.length === 0) return null
 
   // Check localStorage for a previous selection
-  const storedId = localStorage.getItem('haven_active_safe_id')
+  const storedId = localStorage.getItem(ACTIVE_SAFE_STORAGE_KEY)
   if (storedId) {
     const found = safes.find((s) => s.id === storedId)
     if (found) return found
@@ -81,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setActiveSafe = useCallback((safe: UserSafe) => {
     setActiveSafeState(safe)
-    localStorage.setItem('haven_active_safe_id', safe.id)
+    localStorage.setItem(ACTIVE_SAFE_STORAGE_KEY, safe.id)
   }, [])
 
   // Sync activeSafe when user changes (e.g., after refresh or safe add/remove)
@@ -137,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // On mount, check for existing token
   useEffect(() => {
-    const stored = localStorage.getItem('haven_token')
+    const stored = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
     if (!stored) {
       setLoading(false)
       return
@@ -154,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         // Token invalid or expired
-        localStorage.removeItem('haven_token')
+        localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
         setToken(null)
         setPasskeys([])
       })
@@ -168,7 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         password,
       })
-      localStorage.setItem('haven_token', res.token)
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
       syncActiveSafe(res.user)
@@ -184,7 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         password,
       })
-      localStorage.setItem('haven_token', res.token)
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
       syncActiveSafe(res.user)
@@ -202,8 +203,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         chainId: safe.chain_id,
       })
     }
-    localStorage.removeItem('haven_token')
-    localStorage.removeItem('haven_active_safe_id')
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    localStorage.removeItem(ACTIVE_SAFE_STORAGE_KEY)
     setToken(null)
     setUser(null)
     setPasskeys([])

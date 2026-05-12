@@ -81,8 +81,9 @@ describe('SettingsClient', () => {
 
     render(<SettingsClient />)
 
-    expect(screen.getByText('Connected Wallet')).toBeInTheDocument()
+    expect(screen.getAllByText('Connected wallet').length).toBeGreaterThan(0)
     expect(screen.getByText('Passkey-managed account')).toBeInTheDocument()
+    expect(screen.getByText('Recovery and safety')).toBeInTheDocument()
   })
 
   it('shows and updates the user name', async () => {
@@ -116,7 +117,7 @@ describe('SettingsClient', () => {
     expect(updateUser).toHaveBeenCalledWith({ name: 'Grace Hopper' })
   })
 
-  it('shows account owners and saves an owner alias', async () => {
+  it('shows approvers and saves an approver alias', async () => {
     const user = userEvent.setup()
     const renameOwner = vi.fn().mockResolvedValue(undefined)
     mockUseOwnerDirectory.mockReturnValue({
@@ -146,7 +147,14 @@ describe('SettingsClient', () => {
         name: 'Ada Lovelace',
         email: 'ada@example.com',
         wallet_address: '0x5555555555555555555555555555555555555555',
-        safes: [],
+        safes: [
+          {
+            id: 'safe-1',
+            safe_address: '0x1111111111111111111111111111111111111111',
+            chain_id: 100,
+            name: 'Main account',
+          },
+        ],
       },
       passkeys: [],
       logout: vi.fn(),
@@ -155,8 +163,9 @@ describe('SettingsClient', () => {
 
     render(<SettingsClient />)
 
-    expect(screen.getByText('Account owners')).toBeInTheDocument()
-    expect(screen.getByText('Connected wallet')).toBeInTheDocument()
+    expect(screen.getByText('Approvers')).toBeInTheDocument()
+    expect(screen.getByText('Listed')).toBeInTheDocument()
+    expect(screen.getAllByText('Connected wallet').length).toBeGreaterThan(0)
     expect(screen.getByText('Main account · Gnosis Chain')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Name' }))

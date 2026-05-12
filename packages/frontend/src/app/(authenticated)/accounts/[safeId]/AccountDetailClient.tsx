@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
@@ -11,13 +11,17 @@ import { usePortfolio } from '@/hooks/usePortfolio'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
-import { useAgents } from '@/hooks/useAgents'
+import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import SendModal from '@/components/SendModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { ExternalDetailsLink } from '@/components/haven'
 import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -32,11 +36,12 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={copy}
-      className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors"
+      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
       title="Copy"
+      aria-label="Copy address"
     >
       {copied ? (
-        <svg className="w-3.5 h-3.5 text-emerald-400 animate-check-pop" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-3.5 h-3.5 text-[var(--v2-success)] animate-check-pop" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
         </svg>
       ) : (
@@ -48,17 +53,54 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+function formatFiatValue(value: number, currency: 'USD' | 'EUR'): string {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+  }).format(value)
+}
+
+function approvalSummary(threshold?: number, ownerCount?: number): string {
+  if (!threshold || !ownerCount) return 'Loading approval details'
+  const approverLabel = ownerCount === 1 ? 'approver' : 'approvers'
+  return `${threshold} of ${ownerCount} ${approverLabel} required`
+}
+
+function formatResetPeriod(minutes: number): string {
+  if (minutes === 1440) return 'per day'
+  if (minutes === 10080) return 'per week'
+  if (minutes === 43200) return 'per month'
+  return `every ${minutes} minutes`
+}
+
+function agentBudgetSummary(agent: Agent): string {
+  if (agent.status === 'revoked') return 'Access revoked'
+  const allowances = agent.allowances ?? []
+  if (allowances.length === 0) return 'No agent budget set'
+  if (allowances.length > 1) return `${allowances.length} agent budgets`
+
+  const allowance = allowances[0]
+  return `${allowance.allowance_amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
+}
+
+function agentStatusTone(status: Agent['status']): 'success' | 'warning' | 'neutral' {
+  if (status === 'active') return 'success'
+  if (status === 'paused') return 'warning'
+  return 'neutral'
+}
+
 export default function AccountDetailClient() {
   const params = useParams()
   const router = useRouter()
   const safeId = params.safeId as string
 
-  const { user, activeSafe, setActiveSafe, loading: authLoading } = useAuth()
+  const { user, activeSafe, setActiveSafe, loading: authLoading, passkeys = [] } = useAuth()
   const { getOwnerAlias } = useOwnerDirectory()
   const { renameSafe, removeSafe, loading: safesLoading } = useUserSafes()
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
-  const { agents } = useAgents()
+  const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
 
   // Find this Safe from user's list
   const safe = user?.safes?.find((s) => s.id === safeId)
@@ -77,11 +119,25 @@ export default function AccountDetailClient() {
   for (const account of user?.safes ?? []) {
     safeNamesByAddress.set(account.safe_address.toLowerCase(), account.name)
   }
+  const passkeyAddresses = new Set(
+    passkeys
+      .filter(
+        (passkey) =>
+          passkey.chain_id === chainId &&
+          (!safeAddress || passkey.safe_address?.toLowerCase() === safeAddress.toLowerCase()),
+      )
+      .map((passkey) => passkey.signer_address.toLowerCase()),
+  )
 
   // Build linked-agent list
-  const safeAgents = agents.filter((a) => a.safe_id === safeId && a.status === 'active')
+  const safeAgents = agents.filter((a) => a.safe_id === safeId)
 
-  const { details, loading: detailsLoading } = useSafeDetails(safeAddress)
+  const {
+    details,
+    loading: detailsLoading,
+    error: detailsError,
+    refetch: refetchDetails,
+  } = useSafeDetails(safeAddress)
 
   const {
     totalUsd,
@@ -108,6 +164,15 @@ export default function AccountDetailClient() {
   } = useTransactionsFeed({ safeId }, 10)
 
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
+  const chain = getChainConfig(chainId)
+  const formattedTotal = formatFiatValue(totalFiat, currency)
+  const balanceUnavailable = Boolean(portfolioError || balancesError)
+  const approvalMethodCount = details?.owners.length ?? 0
+  const approvalCopy = details
+    ? approvalSummary(details.threshold, approvalMethodCount)
+    : detailsError
+      ? 'Approval details could not be verified'
+      : 'Approval details unavailable'
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -152,7 +217,7 @@ export default function AccountDetailClient() {
   if (authLoading || !user) {
     return (
       <div className="max-w-5xl py-16 flex items-center justify-center gap-2">
-        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+        <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
         <span className="text-xs text-[var(--v2-ink-3)]">Loading account...</span>
       </div>
     )
@@ -170,29 +235,29 @@ export default function AccountDetailClient() {
   }
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-5xl space-y-6">
       <Link
         href="/accounts"
         className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
       >
-        ← Back to Accounts
+        ← Back to accounts
       </Link>
 
       {/* Header */}
-      <div className="mb-8 mt-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div>
-            <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <h1 className="text-2xl font-bold tracking-tight">{safe.name}</h1>
-              {safe.is_default && (user?.safes?.length ?? 0) > 1 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-[var(--v2-brand)] font-medium">
-                  default
-                </span>
-              )}
-            </div>
+      <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">{safe.name}</h1>
+            {safe.is_default && (user?.safes?.length ?? 0) > 1 ? (
+              <StatusBadge tone="brand">Default</StatusBadge>
+            ) : null}
+            <StatusBadge>{chain.name}</StatusBadge>
           </div>
+          <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            Control the funds, agent access, and recent activity for this Haven wallet.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {safeAddress && (
             <>
               <Button onClick={() => setSendOpen(true)}>
@@ -203,38 +268,37 @@ export default function AccountDetailClient() {
               </Button>
             </>
           )}
-          <Button variant="ghost" size="sm" onClick={() => setRenameOpen(true)}>
+          <Button variant="ghost" onClick={() => setRenameOpen(true)}>
             Edit
           </Button>
         </div>
       </div>
 
-      {/* Balances with fiat values */}
-      <div className="mb-6 overflow-hidden rounded-[16px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
-        <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-6 py-5">
+      <Card hover={false} className="overflow-hidden">
+        <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-widest text-[var(--v2-ink-3)]">Total balance</p>
+              <p className="text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]">Total balance</p>
               {portfolioLoading ? (
                 <div className="mt-3 h-9 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              ) : balanceUnavailable ? (
+                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink-3)]">
+                  Unavailable
+                </p>
               ) : (
-                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] tabular-nums">
-                  {new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
-                    style: 'currency',
-                    currency,
-                    minimumFractionDigits: 2,
-                  }).format(totalFiat)}
+                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                  {formattedTotal}
                 </p>
               )}
             </div>
-            <p className="max-w-sm text-sm leading-relaxed text-[var(--v2-ink-3)]">
-              Sum of all tokens held by this account, converted to {currency}.
+            <p className="max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
+              Sum of all tokens held by this Haven wallet, converted to {currency}.
             </p>
           </div>
         </div>
 
-        <div className="p-4">
-          <div className="mb-3 flex items-center justify-between gap-3 px-2">
+        <div className="p-4 sm:p-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Token balances</h2>
             <button
               onClick={handleBalancesRefresh}
@@ -254,20 +318,19 @@ export default function AccountDetailClient() {
               ))}
             </div>
           ) : balancesError || portfolioError ? (
-            <div className="flex min-h-28 flex-col items-center justify-center rounded-md border border-dashed border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] text-center">
-              <p className="mb-2 text-sm text-[var(--v2-danger)]">{portfolioError ?? balancesError}</p>
-              <button
-                onClick={handleBalancesRefresh}
-                className="text-xs font-medium text-[var(--v2-danger)] underline underline-offset-2 hover:opacity-80"
-              >
-                Retry
-              </button>
-            </div>
+            <EmptyState
+              title="Balances could not load"
+              body={portfolioError ?? balancesError}
+              className="py-8"
+              action={<Button variant="ghost" size="sm" onClick={handleBalancesRefresh}>Try again</Button>}
+            />
           ) : breakdown.length === 0 ? (
-            <div className="flex min-h-28 flex-col items-center justify-center rounded-md border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] text-center">
-              <p className="text-sm font-medium text-[var(--v2-ink)]">No token balances yet</p>
-              <p className="text-xs text-[var(--v2-ink-3)] mt-1">Receive funds to see tokens in this account.</p>
-            </div>
+            <EmptyState
+              title="No token balances yet"
+              body="Receive funds to see tokens in this Haven wallet."
+              className="py-8"
+              action={safeAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive funds</Button> : null}
+            />
           ) : (
             <>
               <div className="grid grid-cols-3 gap-4 text-xs text-[var(--v2-ink-3)] mb-2 px-2">
@@ -289,14 +352,7 @@ export default function AccountDetailClient() {
                       {item.formatted}
                     </span>
                     <span className="text-sm text-[var(--v2-ink)] text-right">
-                      {new Intl.NumberFormat(
-                        currency === 'EUR' ? 'de-DE' : 'en-US',
-                        {
-                          style: 'currency',
-                          currency,
-                          minimumFractionDigits: 2,
-                        },
-                      ).format(fiatValue)}
+                      {formatFiatValue(fiatValue, currency)}
                     </span>
                   </div>
                 )
@@ -304,70 +360,132 @@ export default function AccountDetailClient() {
             </>
           )}
         </div>
-      </div>
+      </Card>
+
+      <Card hover={false} className="p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent access</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
+              Connected agents can request payments from this Haven wallet when their status and agent budget allow it.
+            </p>
+          </div>
+          <Button href="/agents" variant="ghost" size="sm">
+            Manage agents
+          </Button>
+        </div>
+
+        {agentsLoading ? (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {[0, 1].map((item) => (
+              <div
+                key={item}
+                className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3"
+              >
+                <div className="h-4 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <div className="mt-2 h-3 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : agentsError ? (
+          <EmptyState
+            title="Agent access could not load"
+            body="Haven could not verify which agents can request payments from this wallet."
+            className="mt-5 py-8"
+            action={<Button variant="ghost" size="sm" onClick={refetchAgents}>Try again</Button>}
+          />
+        ) : safeAgents.length > 0 ? (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {safeAgents.map((agent) => (
+              <Link
+                key={agent.id}
+                href={`/agents/${agent.id}`}
+                className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 transition-colors hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
+                    <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                      {agentBudgetSummary(agent)}
+                    </p>
+                  </div>
+                  <StatusBadge tone={agentStatusTone(agent.status)}>
+                    {agent.status === 'active' ? 'Active' : agent.status === 'paused' ? 'Paused' : 'Revoked'}
+                  </StatusBadge>
+                </div>
+                <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+                  Review or stop this agent from its detail page.
+                </p>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="No agents connected"
+            body="Connect an agent when you want it to request payments from this Haven wallet."
+            className="mt-5 py-8"
+            action={<Button href="/agents" size="sm">Connect agent</Button>}
+          />
+        )}
+      </Card>
 
       {/* Account info */}
-      <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-6 mb-6 shadow-[var(--v2-shadow-card)]">
+      <Card hover={false} className="p-5 sm:p-6">
         <div className="mb-5 flex items-center justify-between gap-3">
-          <h2 className="text-xs text-[var(--v2-ink-3)] uppercase tracking-widest">
-            Account details
+          <h2 className="text-sm font-semibold text-[var(--v2-ink)]">
+            Advanced account details
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
           {/* Address */}
           <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Account address</p>
+            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
             <div className="flex items-center gap-2">
               <span className="text-sm font-mono text-[var(--v2-ink)]">
                 {safeAddress ? truncate(safeAddress) : '—'}
               </span>
               {safeAddress && <CopyButton text={safeAddress} />}
-              {safeAddress && (
-                <a
-                  href={getExplorerUrl(chainId, 'address', safeAddress!)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                  </svg>
-                </a>
-              )}
+              {safeAddress && <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', safeAddress)} label="Open wallet address externally" />}
             </div>
           </div>
 
           {/* Threshold */}
           <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Threshold</p>
+            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Required approvals</p>
             {detailsLoading ? (
               <div className="h-5 w-24 bg-[var(--v2-surface-2)] rounded animate-pulse" />
             ) : details ? (
               <span className="text-sm text-[var(--v2-ink)]">
-                {details.threshold} of {details.owners.length} owner
-                {details.owners.length !== 1 ? 's' : ''}
+                {approvalCopy}
+              </span>
+            ) : detailsError ? (
+              <span className="inline-flex flex-col items-start gap-2 text-sm text-[var(--v2-ink-2)]">
+                {approvalCopy}
+                <button
+                  type="button"
+                  onClick={refetchDetails}
+                  className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
+                >
+                  Try again
+                </button>
               </span>
             ) : (
               <span className="text-sm text-[var(--v2-ink-3)]">—</span>
             )}
           </div>
-
-          {/* Network */}
-          <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Network</p>
-            <span className="text-sm text-[var(--v2-ink)]">{getChainConfig(chainId).name}</span>
-          </div>
         </div>
 
-        {/* Owners */}
+        {/* Approvers */}
         {details && details.owners.length > 0 && (
           <div className="mt-6 pt-5 border-t border-[var(--v2-border)]">
-            <p className="text-xs text-[var(--v2-ink-3)] mb-3">Owners</p>
+            <p className="text-xs text-[var(--v2-ink-3)] mb-3">Approvers</p>
             <div className="space-y-2">
               {details.owners.map((owner) => {
+                const normalizedOwner = owner.toLowerCase()
                 const isYou =
-                  user?.wallet_address?.toLowerCase() === owner.toLowerCase()
+                  user?.wallet_address?.toLowerCase() === normalizedOwner || passkeyAddresses.has(normalizedOwner)
+                const approverType = passkeyAddresses.has(normalizedOwner) ? 'Passkey' : 'Wallet'
                 const ownerAlias = getOwnerAlias(owner)
                 return (
                   <div
@@ -383,20 +501,10 @@ export default function AccountDetailClient() {
                       </span>
                     )}
                     <CopyButton text={owner} />
-                    <a
-                      href={getExplorerUrl(chainId, 'address', owner)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                      </svg>
-                    </a>
+                    <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />
+                    <StatusBadge>{approverType}</StatusBadge>
                     {isYou && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-[var(--v2-brand)] font-medium">
-                        You
-                      </span>
+                      <StatusBadge tone="brand">You</StatusBadge>
                     )}
                   </div>
                 )
@@ -405,67 +513,40 @@ export default function AccountDetailClient() {
           </div>
         )}
 
-        {/* Linked agents */}
-        {safeAgents.length > 0 && (
-          <div className="mt-6 pt-5 border-t border-[var(--v2-border)]">
-            <p className="text-xs text-[var(--v2-ink-3)] mb-3">
-              Connected agents ({safeAgents.length})
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {safeAgents.map((agent) => (
-                <Link
-                  key={agent.id}
-                  href={`/agents/${agent.id}`}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--v2-surface)] border border-[var(--v2-border)] text-xs text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)] hover:text-[var(--v2-brand)]"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
-                  </svg>
-                  {agent.name}
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      </Card>
 
       {/* Full transaction history */}
-      <div className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">
-          Transaction history
-        </h2>
-      </div>
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <p className="text-sm text-[var(--v2-ink-3)]">
-          {txLoading
-            ? 'Loading transactions...'
-            : `${total} transaction${total !== 1 ? 's' : ''}`}
-        </p>
-        {!txLoading && transactions.length > 0 && (
-          <p className="text-xs text-[var(--v2-ink-3)]">
-            Showing {transactions.length} of {total}
-          </p>
-        )}
-      </div>
-      <TransactionsTable
-        transactions={transactions}
-        loading={txLoading}
-        error={txError}
-        onRefresh={() => void refetchTx()}
-        resolveAddress={resolveAddress}
-        safeNamesByAddress={safeNamesByAddress}
-        hasActiveFilters={false}
-      />
-      {transactions.length > 0 && hasMore && (
-        <div className="mt-5 flex justify-center">
-          <Link
-            href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
-            className="inline-flex h-10 items-center justify-center rounded-md border border-[var(--v2-border-strong)] bg-white px-4 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)]"
-          >
-            View all
-          </Link>
+      <div>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Transaction history</h2>
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              {txLoading
+                ? 'Loading activity...'
+                : `${total} transaction${total !== 1 ? 's' : ''} for this Haven wallet`}
+            </p>
+          </div>
+          {!txLoading && transactions.length > 0 ? (
+            <p className="text-xs text-[var(--v2-ink-3)]">Showing {transactions.length} of {total}</p>
+          ) : null}
         </div>
-      )}
+        <TransactionsTable
+          transactions={transactions}
+          loading={txLoading}
+          error={txError}
+          onRefresh={() => void refetchTx()}
+          resolveAddress={resolveAddress}
+          safeNamesByAddress={safeNamesByAddress}
+          hasActiveFilters={false}
+        />
+        {transactions.length > 0 && hasMore ? (
+          <div className="mt-5 flex justify-center">
+            <Button href={`/transactions?safeId=${encodeURIComponent(safeId)}`} variant="ghost">
+              View all
+            </Button>
+          </div>
+        ) : null}
+      </div>
 
       <SendModal
         open={sendOpen && Boolean(safeAddress)}
@@ -480,7 +561,7 @@ export default function AccountDetailClient() {
         resolveAddress={resolveAddress}
         chainId={chainId}
         contextLoading={detailsLoading}
-        contextError={null}
+        contextError={detailsError}
       />
       <ReceiveFundsModal
         open={receiveOpen}
@@ -526,11 +607,11 @@ function RenameModal({
   const [error, setError] = useState('')
   useEscapeToClose(true, onClose, { enabled: !loading })
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     const trimmed = name.trim()
     if (!trimmed) {
-      setError('Account name is required')
+      setError('Enter an account name.')
       return
     }
 
@@ -538,13 +619,13 @@ function RenameModal({
     try {
       await onRename(trimmed)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to rename account')
+      setError(err instanceof Error ? err.message : 'We could not rename this account.')
     }
   }
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
-      <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
+      <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
       <div className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
           <div>
@@ -553,8 +634,9 @@ function RenameModal({
           </div>
           <button
             onClick={onClose}
+            disabled={loading}
             aria-label="Close"
-            className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)]"
+            className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -576,11 +658,11 @@ function RenameModal({
             />
           </div>
           {error && (
-            <div className="rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm text-red-500">
+            <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
               {error}
             </div>
           )}
-          <div className="rounded-lg border border-red-500/15 bg-red-500/[0.04] px-3 py-3">
+          <div className="rounded-lg border border-[var(--v2-danger)]/15 bg-[var(--v2-danger-soft)] px-3 py-3">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-medium text-[var(--v2-ink)]">Delete account</p>
@@ -592,7 +674,7 @@ function RenameModal({
                 type="button"
                 onClick={onDelete}
                 disabled={loading}
-                className="rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--v2-danger)] transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--v2-danger)] transition-colors hover:bg-[var(--v2-danger)]/10 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Delete
               </button>

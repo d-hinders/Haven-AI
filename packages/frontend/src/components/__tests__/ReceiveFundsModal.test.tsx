@@ -86,7 +86,7 @@ describe('ComingSoonModal', () => {
     render(<ComingSoonModal open onClose={onClose} onReceive={onReceive} />)
 
     expect(screen.getByRole('heading', { name: 'Add funds is coming soon' })).toBeInTheDocument()
-    expect(screen.getByText('A guided fiat on-ramp is planned after the POC.')).toBeInTheDocument()
+    expect(screen.getByText('A guided fiat on-ramp is planned for a later release.')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Receive instead' }))
 

@@ -26,7 +26,7 @@ export default function ComingSoonModal({ open, onClose, onReceive }: Props) {
         <div className="border-b border-[var(--v2-border)] px-6 py-4">
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">Add funds is coming soon</h2>
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-            A guided fiat on-ramp is planned after the POC.
+            A guided fiat on-ramp is planned for a later release.
           </p>
         </div>
 

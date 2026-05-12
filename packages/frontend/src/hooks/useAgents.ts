@@ -45,13 +45,16 @@ interface CreateAgentParams {
 export function useAgents() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchAgents = useCallback(async () => {
     try {
+      setLoading(true)
+      setError(null)
       const res = await api.get<{ agents: Agent[] }>('/agents')
       setAgents(res.agents)
-    } catch {
-      // silently ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'We could not load connected agents.')
     } finally {
       setLoading(false)
     }
@@ -114,6 +117,7 @@ export function useAgents() {
   return {
     agents,
     loading,
+    error,
     createAgent,
     updateAgent,
     deleteAgent,

@@ -79,12 +79,13 @@ function StatusPill({
   tone = 'neutral',
 }: {
   children: ReactNode
-  tone?: 'neutral' | 'success' | 'brand'
+  tone?: 'neutral' | 'success' | 'brand' | 'warning'
 }) {
   const classes = {
     neutral: 'bg-[var(--v2-surface)] text-[var(--v2-ink-2)] border-[var(--v2-border)]',
     success: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)] border-[var(--v2-success)]/20',
     brand: 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] border-[var(--v2-brand)]/20',
+    warning: 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] border-[var(--v2-warning)]/20',
   }
 
   return (
@@ -141,7 +142,7 @@ function OwnerRow({
   onClear,
 }: {
   owner: OwnerAlias
-  type: 'Passkey' | 'Connected wallet' | 'Owner'
+  type: 'Passkey' | 'Connected wallet' | 'Approval method'
   onRename: (ownerAddress: string, name: string) => Promise<void>
   onClear: (ownerAddress: string) => Promise<void>
 }) {
@@ -169,7 +170,7 @@ function OwnerRow({
       await onRename(owner.owner_address, normalized)
       setEditing(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not save this owner name.')
+      setError(err instanceof Error ? err.message : 'We could not save this approval method name.')
     } finally {
       setSaving(false)
     }
@@ -182,7 +183,7 @@ function OwnerRow({
       await onClear(owner.owner_address)
       setEditing(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not clear this owner name.')
+      setError(err instanceof Error ? err.message : 'We could not clear this approval method name.')
     } finally {
       setSaving(false)
     }
@@ -213,7 +214,7 @@ function OwnerRow({
                 {owner.name ?? truncate(owner.owner_address)}
               </p>
             )}
-            <StatusPill tone={type === 'Owner' ? 'neutral' : 'brand'}>{type}</StatusPill>
+            <StatusPill tone={type === 'Approval method' ? 'neutral' : 'brand'}>{type}</StatusPill>
           </div>
           {!editing && owner.name ? (
             <p className="mt-1 font-mono text-xs text-[var(--v2-ink-3)]">
@@ -344,6 +345,29 @@ export default function SettingsClient() {
   const hasPasskey = passkeys.length > 0
   const passkeyAddresses = new Set(passkeys.map((passkey) => passkey.signer_address.toLowerCase()))
   const walletAddress = user?.wallet_address?.toLowerCase()
+  const linkedAccounts = user?.safes ?? []
+  const accountsWithVerifiedApprovalMethods = new Set(
+    owners.flatMap((owner) => owner.accounts.map((account) => account.id)),
+  )
+  const verifiedAccountCount = linkedAccounts.filter((safe) => accountsWithVerifiedApprovalMethods.has(safe.id)).length
+  const approvalAccessStatus = ownersLoading
+    ? { label: 'Checking', tone: 'neutral' as const }
+    : ownersError || ownersPartialFailure
+      ? { label: 'Needs review', tone: 'warning' as const }
+      : linkedAccounts.length === 0
+        ? { label: 'No accounts', tone: 'neutral' as const }
+        : verifiedAccountCount === linkedAccounts.length
+          ? { label: 'Listed', tone: 'success' as const }
+          : { label: 'Needs review', tone: 'warning' as const }
+  const approvalAccessDetail = ownersLoading
+    ? 'Checking approval methods for your linked Haven accounts.'
+    : ownersError || ownersPartialFailure
+      ? 'Some approval methods could not be verified. Review the approval methods section below.'
+      : linkedAccounts.length === 0
+        ? 'Create or import a Haven account before relying on Haven for payments.'
+        : verifiedAccountCount === linkedAccounts.length
+          ? 'Haven listed approval methods for your linked accounts. Keep access to every method needed to approve payments.'
+          : 'Review approval methods before relying on these accounts for payments.'
 
   useEffect(() => {
     if (!editingName) {
@@ -398,7 +422,7 @@ export default function SettingsClient() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight mb-1">Settings</h1>
           <p className="text-sm text-[var(--v2-ink-3)]">
-            Manage profile, security, and product preferences.
+            Manage your profile, sign-in methods, approval methods, and recovery context.
           </p>
         </div>
         <Button variant="ghost" onClick={handleLogout}>
@@ -521,18 +545,18 @@ export default function SettingsClient() {
         </Section>
 
         <Section
-          title="Security"
-          description="Review sign-in methods and account protection."
+          title="Sign-in and approvals"
+          description="Review how you sign in and how account actions are approved."
         >
           <SettingRow
-            label="Connected Wallet"
+            label="Connected wallet"
             value={hasWallet ? truncate(user!.wallet_address!) : 'Passkey-managed account'}
-            detail={hasWallet ? 'This wallet can approve wallet-owned account actions.' : 'This browser uses passkeys for account actions when available.'}
+            detail={hasWallet ? 'This wallet can approve actions for accounts it controls.' : 'This account uses passkeys for approvals when available.'}
           />
           <SettingRow
             label="Passkey status"
             value={hasPasskey ? <StatusPill tone="success">Enrolled</StatusPill> : <StatusPill>No passkey</StatusPill>}
-            detail={hasPasskey ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''} registered for Haven.` : 'Set up a passkey during onboarding for faster approvals.'}
+            detail={hasPasskey ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''} registered for approving actions in Haven.` : 'Set up a passkey during onboarding for faster approvals.'}
           />
           <SettingRow
             label="Password"
@@ -547,17 +571,37 @@ export default function SettingsClient() {
         </Section>
 
         <Section
-          title="Account owners"
-          description="Name the approval methods that control your linked Haven accounts."
+          title="Recovery and safety"
+          description="Understand what to keep available before you rely on a Haven account for payments."
+        >
+          <SettingRow
+            label="Approval method access"
+            detail={approvalAccessDetail}
+            value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
+          />
+          <SettingRow
+            label="Recovery limitations"
+            detail="Haven can help you find account details, but it cannot bypass your approval methods or recover funds sent on the wrong network."
+          />
+          <SettingRow
+            label="Backup approval method"
+            detail="Adding backup approval methods is not available yet."
+            action={<StatusPill>Coming soon</StatusPill>}
+          />
+        </Section>
+
+        <Section
+          title="Approval methods"
+          description="Name the wallets and passkeys that approve actions for your linked Haven accounts."
         >
           <div className="px-6 py-4">
             {ownersLoading ? (
-              <p className="text-sm text-[var(--v2-ink-3)]">Loading account owners...</p>
+              <p className="text-sm text-[var(--v2-ink-3)]">Loading approval methods...</p>
             ) : owners.length > 0 ? (
               <div className="space-y-3">
                 {ownersPartialFailure ? (
                   <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
-                    Some account owners could not be refreshed. Showing the owners Haven could verify.
+                    Some approval methods could not be refreshed. Showing the methods Haven could verify.
                   </div>
                 ) : null}
                 {ownersError ? (
@@ -571,7 +615,7 @@ export default function SettingsClient() {
                     ? 'Passkey'
                     : walletAddress === normalizedOwner
                       ? 'Connected wallet'
-                      : 'Owner'
+                      : 'Approval method'
 
                   return (
                     <OwnerRow
@@ -590,7 +634,7 @@ export default function SettingsClient() {
               </div>
             ) : (
               <p className="text-sm text-[var(--v2-ink-3)]">
-                Link an account to review and name its owners.
+                Link a Haven account to review and name its approval methods.
               </p>
             )}
           </div>

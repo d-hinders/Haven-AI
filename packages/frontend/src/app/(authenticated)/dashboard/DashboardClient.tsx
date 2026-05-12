@@ -171,7 +171,7 @@ function ConnectedAgentsSection({
             </p>
             <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
               {!hasAccounts
-                ? 'Create or import an account before connecting agents.'
+                ? 'Create a Haven account before connecting agents.'
                 : hasAnyAgents
                 ? 'Reconnect or create an agent to bring automated spending back online.'
                 : 'Create your first agent to give it payment credentials and spend limits.'}
@@ -311,7 +311,7 @@ function DashboardHero({
           )
         ) : (
           <Button href="/accounts" size="lg">
-            Create or import account
+            Create Haven account
           </Button>
         )}
       </div>
@@ -483,8 +483,8 @@ function TransactionsSection({
             <p className="text-sm text-[var(--v2-ink)]">No transactions yet</p>
             <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
               {hasAccounts
-                ? 'Fund an account or make your first payment to start building activity here.'
-                : 'Create or import an account to start tracking transactions.'}
+                ? 'Receive funds or make your first payment to start building activity here.'
+                : 'Create a Haven account to start tracking transactions.'}
             </p>
             <Link href={hasAccounts ? '/transactions' : '/accounts'} className="mt-4 inline-flex text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
               {hasAccounts ? 'Open transactions' : 'Go to accounts'}
@@ -540,7 +540,7 @@ export default function DashboardClient() {
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
-  const { agents, refetch: refetchAgents } = useAgents()
+  const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
   const {
     balances,
     loading: balancesLoading,
@@ -561,6 +561,8 @@ export default function DashboardClient() {
       ? null
       : !hasAnyBalance
         ? 'fund'
+        : agentsLoading
+          ? null
         : agents.length === 0
           ? 'add-agent'
           : null
@@ -633,6 +635,8 @@ export default function DashboardClient() {
   const overviewInitialLoading = overviewLoading && !overview
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError || approvalActionCount > 0)
+  const showOnboardingGuide = Boolean(onboardingStage && !requiresOtherDevice && !isGuideDismissed)
+  const showTopAside = showOnboardingGuide || hasAttention
 
   function refreshDashboardData() {
     refetchOverview()
@@ -664,6 +668,12 @@ export default function DashboardClient() {
     if (action === 'receive') setReceiveOpen(true)
   }
 
+  function openReceiveForDefaultSafe() {
+    if (!defaultSafe) return
+    setActionSafeId(defaultSafe.id)
+    setReceiveOpen(true)
+  }
+
   function handleActionSafeSelected(safeId: string) {
     setActionSafeId(safeId)
     if (pickerAction === 'send') setSendOpen(true)
@@ -686,16 +696,7 @@ export default function DashboardClient() {
         </p>
       </div>
 
-      {onboardingStage && !requiresOtherDevice && !isGuideDismissed && (
-        <DashboardOnboardingGuide
-          stage={onboardingStage}
-          safes={safes}
-          onAddAgent={() => openCreateAgent(null)}
-          onDismiss={dismissOnboardingGuide}
-        />
-      )}
-
-      <div className={`mb-6 grid gap-4 ${hasAttention ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
+      <div className={`mb-6 grid gap-4 ${showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
         <DashboardHero
           loading={overviewInitialLoading}
           unavailable={overviewUnavailable}
@@ -710,12 +711,32 @@ export default function DashboardClient() {
           onReceive={() => openHeroAction('receive')}
           onAddFunds={() => openHeroAction('add-funds')}
         />
-        <AttentionSection
-          approvalActionCount={approvalActionCount}
-          hasOverviewError={Boolean(overviewError)}
-          onRetry={refetchOverview}
-        />
+        {showOnboardingGuide && onboardingStage ? (
+          <DashboardOnboardingGuide
+            stage={onboardingStage}
+            safes={safes}
+            onReceiveFunds={openReceiveForDefaultSafe}
+            onAddAgent={() => openCreateAgent(null)}
+            onDismiss={dismissOnboardingGuide}
+          />
+        ) : (
+          <AttentionSection
+            approvalActionCount={approvalActionCount}
+            hasOverviewError={Boolean(overviewError)}
+            onRetry={refetchOverview}
+          />
+        )}
       </div>
+
+      {showOnboardingGuide && hasAttention ? (
+        <div className="mb-6">
+          <AttentionSection
+            approvalActionCount={approvalActionCount}
+            hasOverviewError={Boolean(overviewError)}
+            onRetry={refetchOverview}
+          />
+        </div>
+      ) : null}
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard

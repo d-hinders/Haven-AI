@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import {
   AgentActivityRow,
   AgentBudgetCard,
@@ -23,6 +24,14 @@ import {
 } from '@/components/haven'
 
 const sampleAddress = '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C'
+const sampleSafe = {
+  id: 'sample-safe',
+  name: 'Operating wallet',
+  safe_address: sampleAddress,
+  chain_id: 8453,
+  is_default: true,
+  created_at: '2026-05-12T00:00:00Z',
+}
 
 function Section({
   title,
@@ -119,6 +128,21 @@ export default function DesignSystemPage() {
               Open modal
             </Button>
           </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="First-run setup"
+        description="Dashboard setup guidance should act like a compact next-step panel. It points to the real Receive and Connect Agent flows instead of duplicating them inline."
+      >
+        <div className="max-w-sm">
+          <DashboardOnboardingGuide
+            stage="fund"
+            safes={[sampleSafe]}
+            onReceiveFunds={() => undefined}
+            onAddAgent={() => undefined}
+            onDismiss={() => undefined}
+          />
         </div>
       </Section>
 

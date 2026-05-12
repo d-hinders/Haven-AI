@@ -105,6 +105,7 @@ function mockBaseState() {
   })
   mockUseAgents.mockReturnValue({
     agents: [{ id: 'agent-1', name: 'Research agent' }],
+    loading: false,
     refetch: vi.fn(),
   })
   mockUseAggregatedBalances.mockReturnValue({
@@ -222,6 +223,30 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('No transactions yet')).not.toBeInTheDocument()
     expect(screen.queryByText('No connected agents right now')).not.toBeInTheDocument()
     expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
+  })
+
+  it('shows the first-run guide when the account needs funds', () => {
+    mockUseAggregatedBalances.mockReturnValue({
+      balances: [],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+  })
+
+  it('does not show the connect-agent guide before agents finish loading', () => {
+    mockUseAgents.mockReturnValue({
+      agents: [],
+      loading: true,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
   })
 
   it('does not show a zero balance when dashboard totals fail to load', () => {

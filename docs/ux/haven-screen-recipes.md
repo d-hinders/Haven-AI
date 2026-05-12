@@ -11,6 +11,30 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 - Money-changing screens need a review moment before execution.
 - Mobile layouts should keep the primary action reachable without compressing the risk summary.
 
+## First Run Setup
+
+Use after the user has created a Haven account and needs to finish the first usable path.
+
+Structure:
+1. Compact dashboard next-step panel, not a blocking modal, unless the user cannot safely do anything else.
+2. Progress list for `Create account`, `Receive funds`, `Connect agent`, and `Set budget`.
+3. Primary action routes into the real flow for the current step: `Receive funds` or `Connect first agent`.
+4. Small account context showing Haven wallet name and network.
+5. Short note explaining the next risk boundary.
+
+Money and risk clarity:
+- For receiving funds, show wallet and network before opening the address surface.
+- Do not duplicate the full receive address or QR code inside the dashboard panel; use the Receive flow for that.
+- For first agent setup, say the user will set an agent budget before the agent can spend.
+- Explain that payments above the budget wait for approval.
+- Avoid `import account` copy in the first-run path unless an existing-account flow is actually supported in the UI.
+
+States:
+- Loading balances: do not show a false zero or premature `Connect agent` step.
+- No funds: primary action is `Receive funds`.
+- Funded with no agents: primary action is `Connect first agent`.
+- Dismissed: keep the dashboard usable; other empty states should still offer the same next action.
+
 ## Agent Budget Setup
 
 Use when the user creates or edits what an agent may spend.

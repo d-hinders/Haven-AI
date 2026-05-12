@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 function ContactIcon() {
   return (
@@ -345,10 +346,10 @@ export default function ContactsPage() {
         <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
           {[0, 1, 2].map((item) => (
             <div key={item} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0">
-              <div className="h-9 w-9 flex-shrink-0 animate-pulse rounded-full bg-[var(--v2-surface-2)]" />
+              <Skeleton variant="circle" className="h-9 w-9 flex-shrink-0" />
               <div className="flex-1 space-y-2">
-                <div className="h-3 w-32 animate-pulse rounded bg-[var(--v2-surface-2)]" />
-                <div className="h-2 w-24 animate-pulse rounded bg-[var(--v2-surface-2)]" />
+                <Skeleton variant="text" className="h-3 w-32" />
+                <Skeleton variant="text" className="h-2 w-24" />
               </div>
             </div>
           ))}

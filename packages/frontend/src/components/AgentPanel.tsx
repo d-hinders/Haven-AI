@@ -22,6 +22,7 @@ import { useActiveSigner } from '@/lib/signer'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { entityCardClassName } from './ui/entityCardStyles'
+import { Skeleton } from './ui/Skeleton'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -845,13 +846,13 @@ export default function AgentPanel() {
               className="bg-white border border-[var(--v2-border)] rounded-[10px] p-5"
             >
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-9 h-9 rounded-xl bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton className="w-9 h-9 rounded-xl" />
                 <div className="space-y-2">
-                  <div className="h-3 w-32 bg-[var(--v2-surface-2)] rounded animate-pulse" />
-                  <div className="h-2 w-48 bg-[var(--v2-surface-2)] rounded animate-pulse" />
+                  <Skeleton variant="text" className="h-3 w-32" />
+                  <Skeleton variant="text" className="h-2 w-48" />
                 </div>
               </div>
-              <div className="h-2 w-full bg-[var(--v2-surface-2)] rounded animate-pulse" />
+              <Skeleton variant="text" className="h-2 w-full" />
             </div>
           ))}
         </div>

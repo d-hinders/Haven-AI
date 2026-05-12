@@ -24,6 +24,7 @@ import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Skeleton } from '@/components/ui/Skeleton'
 import {
   AgentActivityRow,
   AgentBudgetCard,
@@ -192,11 +193,11 @@ export default function AgentDetailClient({ agentId }: Props) {
     return (
       <div className="max-w-5xl">
         <div className="space-y-4">
-          <div className="h-6 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-          <div className="h-24 rounded-xl bg-[var(--v2-surface-2)] animate-pulse" />
+          <Skeleton variant="text" className="h-6 w-40" />
+          <Skeleton className="h-24 rounded-xl" />
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[0, 1, 2].map((index) => (
-              <div key={index} className="h-28 rounded-xl bg-[var(--v2-surface-2)] animate-pulse" />
+              <Skeleton key={index} className="h-28 rounded-xl" />
             ))}
           </div>
         </div>
@@ -504,7 +505,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             {activityLoading ? (
               <div className="p-5 space-y-3">
                 {[0, 1, 2].map((index) => (
-                  <div key={index} className="h-14 rounded-lg bg-[var(--v2-surface-2)] animate-pulse" />
+                  <Skeleton key={index} className="h-14 rounded-lg" />
                 ))}
               </div>
             ) : activity.length === 0 ? (

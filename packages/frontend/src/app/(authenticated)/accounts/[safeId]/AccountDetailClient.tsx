@@ -22,6 +22,7 @@ import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
 import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
@@ -260,13 +261,13 @@ export default function AccountDetailClient() {
         }
       />
 
-      <Card hover={false} className="overflow-hidden">
+      <Card hover={false} elevation="raised" className="overflow-hidden">
         <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]">Total balance</p>
               {portfolioLoading ? (
-                <div className="mt-3 h-9 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton className="mt-3 h-9 w-44" />
               ) : balanceUnavailable ? (
                 <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">
                   Unavailable

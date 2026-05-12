@@ -31,6 +31,7 @@ import SendModal from '@/components/SendModal'
 
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
 const RECIPIENT = '0x2222222222222222222222222222222222222222'
+const RECIPIENT_INPUT = 'Paste address or choose a saved recipient'
 
 const defaultProps = {
   open: true,
@@ -83,7 +84,7 @@ describe('SendModal', () => {
     render(<SendModal {...defaultProps} resolveAddress={resolveAddress} />)
 
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '2' } })
-    fireEvent.change(screen.getByPlaceholderText('0x...'), { target: { value: RECIPIENT } })
+    fireEvent.change(screen.getByPlaceholderText(RECIPIENT_INPUT), { target: { value: RECIPIENT } })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     expect(screen.getByRole('heading', { name: 'Review payment' })).toBeInTheDocument()
@@ -120,7 +121,7 @@ describe('SendModal', () => {
     render(<SendModal {...defaultProps} />)
 
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '1.5' } })
-    fireEvent.change(screen.getByPlaceholderText('0x...'), { target: { value: RECIPIENT } })
+    fireEvent.change(screen.getByPlaceholderText(RECIPIENT_INPUT), { target: { value: RECIPIENT } })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     fireEvent.click(screen.getByRole('button', { name: 'Approve and send' }))
 
@@ -137,6 +138,38 @@ describe('SendModal', () => {
         8453,
       )
     })
+  })
+
+  it('shows saved-recipient affordance when no contacts exist', () => {
+    render(<SendModal {...defaultProps} />)
+
+    expect(screen.getByText(/No saved recipients yet/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Add contacts' })).toHaveAttribute('href', '/contacts')
+  })
+
+  it('uses an explicit saved-recipient selection to fill the recipient address', () => {
+    render(
+      <SendModal
+        {...defaultProps}
+        contacts={[
+          {
+            id: 'contact-1',
+            name: 'Acme Services',
+            address: RECIPIENT,
+            created_at: '2026-05-12T00:00:00Z',
+            updated_at: '2026-05-12T00:00:00Z',
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Acme Services/ }))
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(screen.getByRole('heading', { name: 'Review payment' })).toBeInTheDocument()
+    expect(screen.getAllByText('Acme Services').length).toBeGreaterThan(0)
+    expect(screen.getByText('0x2222...2222')).toBeInTheDocument()
   })
 
   it('refreshes data when a completed payment is closed from the header', async () => {

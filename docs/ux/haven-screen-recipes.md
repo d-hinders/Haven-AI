@@ -102,6 +102,25 @@ Money and risk clarity:
 - Keep raw address visible because receiving funds requires it, but label it as the Haven wallet address.
 - Do not imply Haven holds custody or can recover funds sent on the wrong network.
 
+## Contacts And Recipient Selection
+
+Use when the user saves payment recipients or chooses who receives a manual payment.
+
+Structure:
+1. Header that frames contacts as saved recipients, not a technical address book.
+2. Searchable list with contact name first and recipient address subordinate.
+3. Add/edit modal with contact name and recipient address labels.
+4. Delete confirmation that says past payments are not affected.
+5. Send flow selector that lets users choose a saved recipient or paste an address directly.
+
+Money and risk clarity:
+- In Send, show the contact name as the primary recipient label and keep the raw address subordinate.
+- If contacts cannot load, say saved recipients are unavailable and that the user can still paste an address.
+- If no contacts are saved, offer a clear path to add contacts without blocking manual address entry.
+- Prevent duplicate saved recipient addresses; do not imply duplicate contacts can be created.
+- Keep contacts network-neutral in the POC; the Send flow must clearly show the network chosen by the selected Haven wallet before money moves.
+- Use `recipient address`, `wallet address`, and `Haven account`; avoid `Ethereum address` in primary product copy unless the network context specifically requires it.
+
 ## Approve Payment
 
 Use when a payment request needs human approval.

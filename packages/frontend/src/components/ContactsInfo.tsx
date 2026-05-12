@@ -9,8 +9,8 @@ const PAGES: InfoPage[] = [
     content: (
       <div className="space-y-5">
         <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-          Contacts let you <span className="text-[var(--v2-ink)]">label Ethereum addresses</span> with human-readable
-          names. Once saved, contact names replace raw addresses throughout Haven.
+          Contacts let you <span className="text-[var(--v2-ink)]">label recipient addresses</span> with human-readable
+          names. Once saved, contact names can replace raw addresses throughout Haven.
         </p>
 
         <div className="space-y-3">
@@ -19,10 +19,11 @@ const PAGES: InfoPage[] = [
               <span className="text-[10px] font-bold text-[var(--v2-brand)]">1</span>
             </div>
             <div>
-              <p className="text-xs text-[var(--v2-ink)] font-medium">Save addresses with names</p>
+              <p className="text-xs text-[var(--v2-ink)] font-medium">Save recipient addresses with names</p>
               <p className="text-[11px] text-[var(--v2-ink-3)] mt-0.5 leading-relaxed">
-                Add a contact by pasting an Ethereum address and giving it a name.
-                Each address can only be saved once per account.
+                Add a contact by pasting a wallet address and giving it a name.
+                Each address can only be saved once per Haven account.
+                The payment network is confirmed when you send.
               </p>
             </div>
           </div>
@@ -34,8 +35,8 @@ const PAGES: InfoPage[] = [
             <div>
               <p className="text-xs text-[var(--v2-ink)] font-medium">Names appear everywhere</p>
               <p className="text-[11px] text-[var(--v2-ink-3)] mt-0.5 leading-relaxed">
-                Transaction history, the send modal, and other views will show
-                the contact name instead of the raw <code className="text-[10px] bg-[var(--v2-surface-2)] px-1 rounded">0x...</code> address.
+                Transaction history, Send, and other views can show
+                the contact name with the raw <code className="text-[10px] bg-[var(--v2-surface-2)] px-1 rounded">0x...</code> address kept subordinate.
               </p>
             </div>
           </div>
@@ -47,8 +48,7 @@ const PAGES: InfoPage[] = [
             <div>
               <p className="text-xs text-[var(--v2-ink)] font-medium">Quick select when sending</p>
               <p className="text-[11px] text-[var(--v2-ink-3)] mt-0.5 leading-relaxed">
-                When sending a payment, start typing a contact name in the recipient field.
-                Haven will fill in the address for you.
+                When sending a payment, choose from saved recipients or paste a wallet address directly.
               </p>
             </div>
           </div>

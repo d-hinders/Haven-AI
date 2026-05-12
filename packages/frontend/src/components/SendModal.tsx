@@ -110,6 +110,7 @@ interface SendModalProps {
   balances: BalanceItem[]
   onSuccess?: () => void
   contacts?: Contact[]
+  contactsError?: string | null
   resolveAddress?: (address: string) => string | null
   chainId?: number
   safeOptions?: SendSafeOption[]
@@ -129,6 +130,7 @@ export default function SendModal({
   balances,
   onSuccess,
   contacts = [],
+  contactsError = null,
   resolveAddress,
   chainId = 100,
   safeOptions = [],
@@ -347,6 +349,12 @@ export default function SendModal({
     setFormError('')
   }
 
+  const handleRecipientChange = (value: string) => {
+    setRecipient(value)
+    setSelectedContactName(resolveAddress?.(value) ?? null)
+    setFormError('')
+  }
+
   // ── Don't render if closed ───────────────────────────────────────
   if (!open) return null
 
@@ -557,7 +565,7 @@ export default function SendModal({
             {/* Recipient */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-[var(--v2-ink-2)]">Recipient</label>
+                <label htmlFor="send-recipient" className="text-xs text-[var(--v2-ink-2)]">Recipient</label>
                 {contacts.length > 0 && (
                   <button
                     type="button"
@@ -567,7 +575,7 @@ export default function SendModal({
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                     </svg>
-                    Contacts
+                    Saved recipients
                   </button>
                 )}
               </div>
@@ -597,17 +605,35 @@ export default function SendModal({
                 )}
 
                 <Input
+                  id="send-recipient"
                   type="text"
                   value={recipient}
-                  onChange={(e) => {
-                    setRecipient(e.target.value)
-                    setSelectedContactName(resolveAddress?.(e.target.value) ?? null)
-                    setFormError('')
-                  }}
-                  placeholder="0x..."
+                  onChange={(e) => handleRecipientChange(e.target.value)}
+                  placeholder="Paste address or choose a saved recipient"
                   className="py-3 bg-[var(--v2-surface-2)] rounded-lg font-mono"
                 />
+                <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                  This payment will be sent on <span className="font-medium text-[var(--v2-ink-2)]">{chainConfig.name}</span>.
+                  Make sure the recipient accepts funds on this network.
+                </p>
               </div>
+
+              {contactsError && (
+                <div className="mt-3 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-3 py-2.5 text-xs leading-relaxed text-[var(--v2-warning)]">
+                  Saved recipients could not load. You can still paste a recipient address.
+                </div>
+              )}
+
+              {!contactsError && contacts.length === 0 && (
+                <div className="mt-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-3 text-xs leading-relaxed text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <span>No saved recipients yet. Add contacts for people or services you pay often.</span>
+                    <Button href="/contacts" variant="ghost" size="sm" className="sm:flex-shrink-0">
+                      Add contacts
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {contacts.length > 0 && !showContactPicker && (
                 <div className="mt-3">
@@ -671,12 +697,14 @@ export default function SendModal({
                     </button>
                   </div>
                   <div className="p-3 border-b border-[var(--v2-border)]">
+                    <label htmlFor="saved-recipient-search" className="sr-only">Search saved recipients</label>
                     <input
+                      id="saved-recipient-search"
                       type="text"
                       autoFocus
                       value={contactSearch}
                       onChange={(e) => setContactSearch(e.target.value)}
-                      placeholder="Search contacts..."
+                      placeholder="Search saved recipients"
                       className="w-full px-3 py-2 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-md text-xs text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/40"
                     />
                   </div>

@@ -57,7 +57,7 @@ export default function AccountDetailClient() {
   const { getOwnerAlias } = useOwnerDirectory()
   const { renameSafe, removeSafe, loading: safesLoading } = useUserSafes()
   const { currency } = usePreferences()
-  const { contacts, resolveAddress } = useContacts()
+  const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents } = useAgents()
 
   // Find this Safe from user's list
@@ -476,6 +476,7 @@ export default function AccountDetailClient() {
         balances={balances}
         onSuccess={handleSendSuccess}
         contacts={contacts}
+        contactsError={contactsError}
         resolveAddress={resolveAddress}
         chainId={chainId}
         contextLoading={detailsLoading}

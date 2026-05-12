@@ -307,6 +307,38 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Contacts and recipients"
+        description="Recipient surfaces show names first, keep wallet addresses subordinate, and preserve direct address entry for one-off payments."
+      >
+        <Card hover={false} className="max-w-xl overflow-hidden p-0">
+          <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Saved recipients</h3>
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Use names for people and services you pay often. Confirm the network in Send.</p>
+              </div>
+              <Button size="sm">Add contact</Button>
+            </div>
+          </div>
+          {[
+            ['Acme Services', '0x7a58...91c2'],
+            ['Research API', '0x31bc...8d04'],
+          ].map(([name, address]) => (
+            <div key={name} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-5 py-3 last:border-b-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)]">
+                <span className="text-xs font-semibold text-[var(--v2-brand)]">{name.slice(0, 2).toUpperCase()}</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{name}</p>
+                <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{address}</p>
+              </div>
+              <StatusBadge tone="neutral">Recipient</StatusBadge>
+            </div>
+          ))}
+        </Card>
+      </Section>
+
+      <Section
         title="Receive funds"
         description="Manual funding surfaces must make the Haven wallet, network, supported tokens, and copy action obvious before the user sends anything on-chain."
       >

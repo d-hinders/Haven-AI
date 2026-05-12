@@ -696,7 +696,7 @@ export default function DashboardClient() {
         </p>
       </div>
 
-      <div className={`mb-6 grid gap-4 ${showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
+      <div className={`mb-6 grid items-start gap-4 ${showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
         <DashboardHero
           loading={overviewInitialLoading}
           unavailable={overviewUnavailable}

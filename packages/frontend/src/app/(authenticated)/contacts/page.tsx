@@ -92,6 +92,7 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
       <form onSubmit={handleSubmit} className="space-y-4">
         <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
           Save a name for a recipient address so payment reviews can show who you are paying.
+          The payment network is chosen when you send from a Haven wallet.
         </p>
 
         <div>
@@ -226,7 +227,7 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
           className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75v7.5m4.5-7.5v7.5M4.5 6.75h15m-12 0 .75 12A2.25 2.25 0 0 0 10.5 21h3a2.25 2.25 0 0 0 2.25-2.25l.75-12m-6-3h3a1.5 1.5 0 0 1 1.5 1.5v1.5h-6v-1.5a1.5 1.5 0 0 1 1.5-1.5Z" />
           </svg>
         </button>
       </div>
@@ -391,7 +392,7 @@ export default function ContactsPage() {
         <EmptyState
           icon={<ContactIcon />}
           title="No saved recipients yet"
-          body="Add a contact for any wallet address you pay often. Haven will show the name in Send, approvals, and transaction history."
+          body="Add a contact for any wallet address you pay often. Haven will show the name in Send, approvals, and transaction history. You confirm the network when sending."
           action={<Button onClick={() => setShowAdd(true)}>Add your first contact</Button>}
         />
       )}

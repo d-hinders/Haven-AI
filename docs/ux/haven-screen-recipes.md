@@ -118,6 +118,7 @@ Money and risk clarity:
 - If contacts cannot load, say saved recipients are unavailable and that the user can still paste an address.
 - If no contacts are saved, offer a clear path to add contacts without blocking manual address entry.
 - Prevent duplicate saved recipient addresses; do not imply duplicate contacts can be created.
+- Keep contacts network-neutral in the POC; the Send flow must clearly show the network chosen by the selected Haven wallet before money moves.
 - Use `recipient address`, `wallet address`, and `Haven account`; avoid `Ethereum address` in primary product copy unless the network context specifically requires it.
 
 ## Approve Payment

@@ -315,7 +315,7 @@ export default function DesignSystemPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Saved recipients</h3>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Use names for people and services you pay often.</p>
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Use names for people and services you pay often. Confirm the network in Send.</p>
               </div>
               <Button size="sm">Add contact</Button>
             </div>

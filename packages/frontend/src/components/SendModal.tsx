@@ -620,6 +620,10 @@ export default function SendModal({
                   placeholder="Paste address or choose a saved recipient"
                   className="py-3 bg-[var(--v2-surface-2)] rounded-lg font-mono"
                 />
+                <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                  This payment will be sent on <span className="font-medium text-[var(--v2-ink-2)]">{chainConfig.name}</span>.
+                  Make sure the recipient accepts funds on this network.
+                </p>
               </div>
 
               {contactsError && (

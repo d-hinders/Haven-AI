@@ -23,6 +23,7 @@ const PAGES: InfoPage[] = [
               <p className="text-[11px] text-[var(--v2-ink-3)] mt-0.5 leading-relaxed">
                 Add a contact by pasting a wallet address and giving it a name.
                 Each address can only be saved once per Haven account.
+                The payment network is confirmed when you send.
               </p>
             </div>
           </div>

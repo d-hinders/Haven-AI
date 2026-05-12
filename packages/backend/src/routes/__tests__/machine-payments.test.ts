@@ -34,6 +34,7 @@ const AGENT = {
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const RECIPIENT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const SIGN_HASH = `0x${'11'.repeat(32)}`
+const PAYMENT_ID = '33333333-3333-3333-3333-333333333333'
 
 const challenge = {
   rail: 'mpp_demo',
@@ -70,6 +71,28 @@ describe('machine payment routes', () => {
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
   })
 
+  function pendingIntent(overrides: Record<string, unknown> = {}) {
+    return {
+      id: PAYMENT_ID,
+      status: 'pending_signature',
+      expires_at: '2099-01-01T00:10:00.000Z',
+      chain_id: 8453,
+      safe_address: AGENT.safe_address,
+      token_symbol: 'USDC',
+      token_address: USDC,
+      amount_human: '0.01',
+      amount_raw: '10000',
+      to_address: RECIPIENT.toLowerCase(),
+      merchant_address: RECIPIENT.toLowerCase(),
+      payment_resource_url: challenge.resource,
+      payment_rail: 'mpp_demo',
+      machine_challenge_id: challenge.challengeId,
+      sign_hash: SIGN_HASH,
+      allowance_nonce: 3,
+      ...overrides,
+    }
+  }
+
   it('creates an MPP demo payment intent with generic rail metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
@@ -78,26 +101,10 @@ describe('machine payment routes', () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({
-        rows: [{
-          id: '33333333-3333-3333-3333-333333333333',
-          status: 'pending_signature',
-          expires_at: '2099-01-01T00:10:00.000Z',
-          chain_id: 8453,
-          safe_address: AGENT.safe_address,
-          token_symbol: 'USDC',
-          token_address: USDC,
-          amount_human: '0.01',
-          amount_raw: '10000',
-          to_address: RECIPIENT.toLowerCase(),
-          merchant_address: RECIPIENT.toLowerCase(),
-          payment_resource_url: challenge.resource,
-          payment_rail: 'mpp_demo',
-          machine_challenge_id: challenge.challengeId,
-          sign_hash: SIGN_HASH,
-          allowance_nonce: 3,
-        }],
+        rows: [pendingIntent()],
       })
 
     const response = await app.inject({
@@ -109,7 +116,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(201)
     expect(response.json()).toMatchObject({
-      payment_id: '33333333-3333-3333-3333-333333333333',
+      payment_id: PAYMENT_ID,
       status: 'pending_signature',
       rail: 'mpp_demo',
       challenge_id: challenge.challengeId,
@@ -139,12 +146,162 @@ describe('machine payment routes', () => {
       3,
     )
 
-    const insertCall = mockQuery.mock.calls[3]
+    const insertCall = mockQuery.mock.calls[4]
     expect(insertCall[0]).toContain('payment_rail')
     expect(insertCall[0]).toContain('machine_challenge_id')
     expect(insertCall[0]).toContain('machine_idempotency_key')
     expect(insertCall[1]).toContain('mpp_demo')
     expect(insertCall[1]).toContain(challenge.challengeId)
     expect(insertCall[1]).toContain('mpp_demo:test')
+  })
+
+  it('returns a confirmed payment for idempotency replay', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [pendingIntent({
+          status: 'confirmed',
+          tx_hash: `0x${'ab'.repeat(32)}`,
+        })],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      success: true,
+      payment_id: PAYMENT_ID,
+      status: 'confirmed',
+      tx_hash: `0x${'ab'.repeat(32)}`,
+      rail: 'mpp_demo',
+      challenge_id: challenge.challengeId,
+    })
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+  })
+
+  it('queues over-allowance MPP demo payments for approval with rail metadata', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1n })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          status: 'pending',
+          token_symbol: 'USDC',
+          amount_human: '0.01',
+          expires_at: '2099-01-02T00:00:00.000Z',
+          tx_hash: null,
+          machine_challenge_id: challenge.challengeId,
+          payment_rail: 'mpp_demo',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-123',
+      status: 'pending_approval',
+      rail: 'mpp_demo',
+      challenge_id: challenge.challengeId,
+      token: 'USDC',
+      requested: '0.01',
+    })
+
+    const insertCall = mockQuery.mock.calls[4]
+    expect(insertCall[0]).toContain('machine_idempotency_key')
+    expect(insertCall[1]).toContain('mpp_demo:test')
+  })
+
+  it('returns a specific response for rejected approval retries', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          status: 'rejected',
+          token_symbol: 'USDC',
+          amount_human: '0.01',
+          expires_at: '2099-01-02T00:00:00.000Z',
+          tx_hash: null,
+          machine_challenge_id: challenge.challengeId,
+          payment_rail: 'mpp_demo',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-123',
+      status: 'rejected',
+      error: 'Payment was rejected by the account owner',
+    })
+  })
+
+  it('rejects expired challenges', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        challenge: { ...challenge, expiresAt: '2020-01-01T00:00:00.000Z' },
+        idempotencyKey: 'mpp_demo:test',
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('MPP demo challenge has expired')
+  })
+
+  it('rejects signatures from the wrong delegate', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce('0x0000000000000000000000000000000000000001')
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json()).toMatchObject({
+      error: 'Signature does not match delegate address',
+      recovered: '0x0000000000000000000000000000000000000001',
+    })
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 })

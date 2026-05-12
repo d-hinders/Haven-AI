@@ -376,6 +376,12 @@ export class HavenClient {
     // 2. Not a 402 — return as-is
     if (response.status !== 402) return response
 
+    const machineChallengeHeader = response.headers.get('MACHINE-PAYMENT-CHALLENGE')
+    if (machineChallengeHeader) {
+      const challenge = await parseMachinePaymentChallengeResponse(response)
+      return this.fetchWithMachinePayment(url, initialInit, challenge)
+    }
+
     // 3. Parse x402 payment requirements
     let paymentRequired: X402PaymentRequired
     try {

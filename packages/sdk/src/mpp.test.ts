@@ -44,15 +44,13 @@ describe('MPP demo helpers', () => {
     expect(parseMachinePaymentChallenge(response)).toEqual(challenge)
   })
 
-  it('builds deterministic idempotency keys per challenge and bucket', () => {
-    const now = 1778600000000
-    expect(buildMachinePaymentIdempotencyKey(challenge, now)).toBe(
-      buildMachinePaymentIdempotencyKey(challenge, now + 60_000),
+  it('builds deterministic idempotency keys per challenge', () => {
+    expect(buildMachinePaymentIdempotencyKey(challenge)).toBe(
+      buildMachinePaymentIdempotencyKey(challenge),
     )
-    expect(buildMachinePaymentIdempotencyKey(challenge, now)).not.toBe(
+    expect(buildMachinePaymentIdempotencyKey(challenge)).not.toBe(
       buildMachinePaymentIdempotencyKey(
         { ...challenge, challengeId: 'challenge-456' },
-        now,
       ),
     )
   })

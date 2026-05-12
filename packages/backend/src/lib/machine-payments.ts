@@ -69,6 +69,17 @@ interface PaymentIntentRow {
   expires_at: string
 }
 
+interface ApprovalRequestRow {
+  id: string
+  status: string
+  token_symbol: string
+  amount_human: string
+  expires_at: string
+  tx_hash: string | null
+  machine_challenge_id: string | null
+  payment_rail: string | null
+}
+
 export function isValidAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
@@ -137,6 +148,150 @@ function signData(intent: PaymentIntentRow, hash = intent.sign_hash, nonce = int
       'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
       `Then POST /payments/${intent.id}/sign with { signature } to execute, ` +
       'or re-call the rail authorization endpoint with the signature field included for one-shot execution.',
+  }
+}
+
+function pendingApprovalResponse(
+  approval: ApprovalRequestRow,
+  remainingHuman: string | null,
+  rail: MachinePaymentRail,
+) {
+  return {
+    statusCode: 202,
+    body: {
+      payment_id: approval.id,
+      status: 'pending_approval',
+      message: `Payment of ${approval.amount_human} ${approval.token_symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
+      remaining: remainingHuman,
+      requested: approval.amount_human,
+      token: approval.token_symbol,
+      expires_at: approval.expires_at,
+      rail,
+      challenge_id: approval.machine_challenge_id,
+    },
+  }
+}
+
+async function findExistingIntent(
+  agent: AgentContext,
+  rail: MachinePaymentRail,
+  idempotencyKey?: string | null,
+  challengeId?: string | null,
+): Promise<PaymentIntentRow | null> {
+  if (!idempotencyKey && !challengeId) return null
+
+  const result = await pool.query<PaymentIntentRow>(
+    `SELECT *
+     FROM payment_intents
+     WHERE agent_id = $1
+       AND status NOT IN ('failed', 'expired')
+       AND (
+         ($2::TEXT IS NOT NULL AND (
+           machine_idempotency_key = $2
+           OR x402_idempotency_key = $2
+         ))
+         OR (
+           $3::TEXT IS NOT NULL
+           AND machine_challenge_id = $3
+           AND payment_rail = $4
+         )
+       )
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [agent.id, idempotencyKey ?? null, challengeId ?? null, rail],
+  )
+
+  return result.rows[0] ?? null
+}
+
+async function findExistingApproval(
+  agent: AgentContext,
+  rail: MachinePaymentRail,
+  idempotencyKey?: string | null,
+  challengeId?: string | null,
+): Promise<ApprovalRequestRow | null> {
+  if (!idempotencyKey && !challengeId) return null
+
+  const result = await pool.query<ApprovalRequestRow>(
+    `SELECT id, status, token_symbol, amount_human, expires_at, tx_hash,
+            machine_challenge_id, payment_rail
+     FROM approval_requests
+     WHERE agent_id = $1
+       AND status <> 'expired'
+       AND (
+         ($2::TEXT IS NOT NULL AND machine_idempotency_key = $2)
+         OR (
+           $3::TEXT IS NOT NULL
+           AND machine_challenge_id = $3
+           AND payment_rail = $4
+         )
+       )
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [agent.id, idempotencyKey ?? null, challengeId ?? null, rail],
+  )
+
+  return result.rows[0] ?? null
+}
+
+async function returnExistingIntent(
+  existing: PaymentIntentRow,
+  agent: AgentContext,
+) {
+  if (existing.status === 'confirmed' && existing.tx_hash) {
+    return { statusCode: 200, body: machinePaymentResponse(existing, agent) }
+  }
+
+  if (existing.status === 'pending_signature') {
+    let existingHash = existing.sign_hash
+    let existingNonce = existing.allowance_nonce
+    const refreshedAllowance = await getTokenAllowance(
+      agent.chain_id,
+      agent.safe_address,
+      agent.delegate_address,
+      existing.token_address,
+    )
+
+    if (Number(refreshedAllowance.nonce) !== Number(existing.allowance_nonce)) {
+      existingNonce = refreshedAllowance.nonce
+      existingHash = await generateTransferHash(
+        agent.chain_id,
+        agent.safe_address,
+        existing.token_address,
+        existing.to_address,
+        BigInt(existing.amount_raw),
+        ZERO_ADDRESS,
+        0n,
+        refreshedAllowance.nonce,
+      )
+
+      await pool.query(
+        `UPDATE payment_intents
+         SET allowance_nonce = $1,
+             sign_hash = $2,
+             expires_at = NOW() + interval '10 minutes'
+         WHERE id = $3`,
+        [existingNonce, existingHash, existing.id],
+      )
+    }
+
+    return {
+      statusCode: 200,
+      body: {
+        ...machinePaymentResponse(existing, agent),
+        success: undefined,
+        sign_data: signData(existing, existingHash, existingNonce),
+      },
+    }
+  }
+
+  return {
+    statusCode: 409,
+    body: {
+      payment_id: existing.id,
+      status: existing.status,
+      error: 'Machine payment already submitted',
+    },
   }
 }
 
@@ -210,79 +365,23 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
 
   const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
 
-  if (idempotencyKey) {
-    const existingResult = await pool.query<PaymentIntentRow>(
-      `SELECT *
-       FROM payment_intents
-       WHERE agent_id = $1
-         AND (
-           machine_idempotency_key = $2
-           OR x402_idempotency_key = $2
-         )
-         AND status NOT IN ('failed', 'expired')
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [agent.id, idempotencyKey],
-    )
-    const existing = existingResult.rows[0]
+  const existingIntent = await findExistingIntent(agent, rail, idempotencyKey, challengeId)
+  if (existingIntent) return returnExistingIntent(existingIntent, agent)
 
-    if (existing?.status === 'confirmed' && existing.tx_hash) {
-      return { statusCode: 200, body: machinePaymentResponse(existing, agent) }
-    }
-
-    if (existing?.status === 'pending_signature') {
-      let existingHash = existing.sign_hash
-      let existingNonce = existing.allowance_nonce
-      const refreshedAllowance = await getTokenAllowance(
-        agent.chain_id,
-        agent.safe_address,
-        agent.delegate_address,
-        existing.token_address,
-      )
-
-      if (Number(refreshedAllowance.nonce) !== Number(existing.allowance_nonce)) {
-        existingNonce = refreshedAllowance.nonce
-        existingHash = await generateTransferHash(
-          agent.chain_id,
-          agent.safe_address,
-          existing.token_address,
-          existing.to_address,
-          BigInt(existing.amount_raw),
-          ZERO_ADDRESS,
-          0n,
-          refreshedAllowance.nonce,
-        )
-
-        await pool.query(
-          `UPDATE payment_intents
-           SET allowance_nonce = $1,
-               sign_hash = $2,
-               expires_at = NOW() + interval '10 minutes'
-           WHERE id = $3`,
-          [existingNonce, existingHash, existing.id],
-        )
-      }
-
-      return {
-        statusCode: 200,
-        body: {
-          ...machinePaymentResponse(existing, agent),
-          success: undefined,
-          sign_data: signData(existing, existingHash, existingNonce),
-        },
-      }
-    }
-
-    if (existing) {
+  const existingApproval = await findExistingApproval(agent, rail, idempotencyKey, challengeId)
+  if (existingApproval) {
+    if (existingApproval.status === 'rejected') {
       return {
         statusCode: 409,
         body: {
-          payment_id: existing.id,
-          status: existing.status,
-          error: 'Machine payment already in progress',
+          payment_id: existingApproval.id,
+          status: existingApproval.status,
+          error: 'Payment was rejected by the account owner',
         },
       }
     }
+
+    return pendingApprovalResponse(existingApproval, null, rail)
   }
 
   const dbAllowance = await pool.query<{ allowance_amount: string }>(
@@ -347,39 +446,52 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
         ? `x402 payment for ${resourceUrl}${merchantPart}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
         : `Machine payment demo for ${resourceUrl}${merchantPart} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
 
-    const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
+    const approvalResult = await pool.query<ApprovalRequestRow>(
       `INSERT INTO approval_requests (
         agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
         to_address, amount_raw, amount_human, reason, source, x402_resource_url,
         payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
-        machine_metadata, status, expires_at
+        machine_idempotency_key, machine_metadata, status, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, $16, $17, 'pending', NOW() + interval '24 hours')
-      RETURNING id, status, expires_at`,
+        $13, $14, $15, $16, $17, $18, 'pending', NOW() + interval '24 hours')
+      ON CONFLICT (agent_id, machine_idempotency_key)
+        WHERE machine_idempotency_key IS NOT NULL
+          AND status NOT IN ('expired')
+      DO NOTHING
+      RETURNING id, status, token_symbol, amount_human, expires_at, tx_hash,
+                machine_challenge_id, payment_rail`,
       [
         agent.id, agent.user_id, agent.safe_address, agent.chain_id,
         tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
         amountRaw.toString(), amountHuman, approvalReason, rail,
         rail === 'x402' ? resourceUrl : null,
         rail, resourceUrl, merchantPayTo?.toLowerCase() ?? null, challengeId ?? null,
-        metadata ? JSON.stringify(metadata) : null,
+        idempotencyKey ?? null, metadata ? JSON.stringify(metadata) : null,
       ],
     )
-    const approval = approvalResult.rows[0]
-    return {
-      statusCode: 202,
-      body: {
-        payment_id: approval.id,
-        status: 'pending_approval',
-        message: `Payment of ${amountHuman} ${tokenConfig.symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
-        remaining: remainingHuman,
-        requested: amountHuman,
-        token: tokenConfig.symbol,
-        expires_at: approval.expires_at,
-        rail,
-        challenge_id: challengeId ?? null,
-      },
+
+    let approval: ApprovalRequestRow | null = approvalResult.rows[0] ?? null
+    if (!approval) {
+      approval = await findExistingApproval(agent, rail, idempotencyKey, challengeId)
     }
+    if (!approval) {
+      return {
+        statusCode: 409,
+        body: { error: 'Machine payment approval already exists but could not be loaded' },
+      }
+    }
+    return pendingApprovalResponse(
+      {
+        ...approval,
+        token_symbol: tokenConfig.symbol,
+        amount_human: amountHuman,
+        tx_hash: null,
+        machine_challenge_id: challengeId ?? null,
+        payment_rail: rail,
+      },
+      remainingHuman,
+      rail,
+    )
   }
 
   let signHash: string
@@ -415,6 +527,10 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
       $18, $19, $20, $21, $22, $23, NOW() + interval '10 minutes')
+    ON CONFLICT (agent_id, machine_idempotency_key)
+      WHERE machine_idempotency_key IS NOT NULL
+        AND status NOT IN ('failed', 'expired')
+    DO NOTHING
     RETURNING *`,
     [
       agent.id, agent.user_id, agent.safe_address, agent.chain_id,
@@ -428,7 +544,15 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       idempotencyKey ?? null, metadata ? JSON.stringify(metadata) : null,
     ],
   )
-  const intent = intentResult.rows[0]
+  let intent = intentResult.rows[0]
+  if (!intent) {
+    const existing = await findExistingIntent(agent, rail, idempotencyKey, challengeId)
+    if (existing) return returnExistingIntent(existing, agent)
+    return {
+      statusCode: 409,
+      body: { error: 'Machine payment already exists but could not be loaded' },
+    }
+  }
 
   if (!signature) {
     return {

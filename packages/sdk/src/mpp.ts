@@ -4,8 +4,6 @@ import type {
   MachinePaymentReceipt,
 } from './types.js'
 
-const MACHINE_IDEMPOTENCY_BUCKET_MS = 300_000
-
 function decodeBase64Json<T>(value: string, label: string): T {
   try {
     return JSON.parse(atob(value)) as T
@@ -24,6 +22,7 @@ function normalizeChallenge(value: unknown): MachinePaymentChallenge | null {
     typeof candidate.challengeId !== 'string' ||
     typeof candidate.resource !== 'string' ||
     typeof candidate.description !== 'string' ||
+    // TODO: relax these checks when non-demo machine payment rails are added.
     candidate.network?.chainId !== 8453 ||
     candidate.network?.name !== 'base' ||
     candidate.asset?.symbol !== 'USDC' ||
@@ -85,9 +84,7 @@ export async function parseMachinePaymentChallengeResponse(
 
 export function buildMachinePaymentIdempotencyKey(
   challenge: MachinePaymentChallenge,
-  now = Date.now(),
 ): string {
-  const bucket = Math.floor(now / MACHINE_IDEMPOTENCY_BUCKET_MS)
   const material = [
     challenge.rail,
     challenge.challengeId,
@@ -96,7 +93,6 @@ export function buildMachinePaymentIdempotencyKey(
     challenge.asset.address.toLowerCase(),
     challenge.amount.atomic,
     challenge.network.chainId,
-    bucket,
   ].join('|')
 
   return `${challenge.rail}:${createHash('sha256').update(material).digest('hex').slice(0, 16)}`

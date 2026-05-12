@@ -2,7 +2,6 @@ import { randomUUID } from 'crypto'
 import { FastifyInstance, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
-import { config } from '../config.js'
 import { getExplorerUrl } from '../lib/chains.js'
 import { isValidAddress } from '../lib/machine-payments.js'
 
@@ -29,6 +28,7 @@ interface PaymentIntentReceiptRow {
   to_address: string
   amount_raw: string
   chain_id: number
+  confirmed_at: string | null
 }
 
 interface ExistingReceiptRow {
@@ -52,15 +52,6 @@ function parseB64Json<T>(value: string): T | null {
 function demoRecipient(): string | null {
   const configured = process.env.MPP_DEMO_RECIPIENT_ADDRESS
   if (configured && isValidAddress(configured)) return ethers.getAddress(configured.toLowerCase())
-
-  if (config.relayerPrivateKey) {
-    try {
-      return ethers.computeAddress(config.relayerPrivateKey)
-    } catch {
-      return null
-    }
-  }
-
   return null
 }
 
@@ -108,7 +99,7 @@ function marketSummary(payment: PaymentIntentReceiptRow, receiptId: string, reus
     payment_id: payment.id,
     txHash: payment.tx_hash,
     explorerUrl: getExplorerUrl(CHAIN_ID, 'tx', payment.tx_hash),
-    paidAt: new Date().toISOString(),
+    paidAt: payment.confirmed_at ?? new Date().toISOString(),
     summary: {
       headline: 'Stablecoin agent payments are moving from protocol experiments into usable product loops.',
       bullets: [
@@ -127,7 +118,7 @@ export default async function demoMppRoutes(app: FastifyInstance): Promise<void>
     if (!recipient) {
       return reply.code(503).send({
         error: 'MPP demo recipient is not configured',
-        detail: 'Set MPP_DEMO_RECIPIENT_ADDRESS or RELAYER_PRIVATE_KEY.',
+        detail: 'Set MPP_DEMO_RECIPIENT_ADDRESS.',
       })
     }
 
@@ -156,7 +147,7 @@ export default async function demoMppRoutes(app: FastifyInstance): Promise<void>
     }
 
     const paymentResult = await pool.query<PaymentIntentReceiptRow>(
-      `SELECT id, tx_hash, to_address, amount_raw, chain_id
+      `SELECT id, tx_hash, to_address, amount_raw, chain_id, confirmed_at
        FROM payment_intents
        WHERE id = $1
          AND tx_hash = $2
@@ -222,6 +213,8 @@ export default async function demoMppRoutes(app: FastifyInstance): Promise<void>
         rail, challenge_id, payment_intent_id, tx_hash, resource_url,
         recipient_address, amount_raw, chain_id
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (challenge_id)
+      DO NOTHING
       RETURNING id`,
       [
         RAIL,
@@ -235,6 +228,33 @@ export default async function demoMppRoutes(app: FastifyInstance): Promise<void>
       ],
     )
 
+    const receiptId = receiptResult.rows[0]?.id
+    if (!receiptId) {
+      const racedReceipt = await pool.query<ExistingReceiptRow>(
+        `SELECT id, payment_intent_id, tx_hash
+         FROM machine_payment_receipts
+         WHERE challenge_id = $1
+         LIMIT 1`,
+        [proof.challengeId],
+      )
+      const receipt = racedReceipt.rows[0]
+      if (receipt?.payment_intent_id === payment.id && receipt.tx_hash === payment.tx_hash) {
+        reply.header('MACHINE-PAYMENT-RESPONSE', b64({
+          success: true,
+          rail: RAIL,
+          challengeId: proof.challengeId,
+          paymentId: payment.id,
+          txHash: payment.tx_hash,
+          reused: true,
+        }))
+        return reply.code(200).send(marketSummary(payment, receipt.id, true))
+      }
+      return reply.code(409).send({
+        error: 'Machine payment challenge was already used',
+        challengeId: proof.challengeId,
+      })
+    }
+
     reply.header('MACHINE-PAYMENT-RESPONSE', b64({
       success: true,
       rail: RAIL,
@@ -242,7 +262,7 @@ export default async function demoMppRoutes(app: FastifyInstance): Promise<void>
       paymentId: payment.id,
       txHash: payment.tx_hash,
     }))
-    return reply.code(200).send(marketSummary(payment, receiptResult.rows[0].id))
+    return reply.code(200).send(marketSummary(payment, receiptId))
   })
 
   app.get('/', async (request) => {
@@ -255,7 +275,7 @@ export default async function demoMppRoutes(app: FastifyInstance): Promise<void>
       network: { chainId: CHAIN_ID, name: NETWORK_NAME },
       asset: { symbol: 'USDC', address: USDC_ADDRESS, decimals: USDC_DECIMALS },
       amount: { display: PRICE_DISPLAY, atomic: PRICE_ATOMIC },
-      recipient,
+      recipientConfigured: Boolean(recipient),
       challenge: recipient ? buildChallenge(resourceUrl, recipient) : null,
     }
   })

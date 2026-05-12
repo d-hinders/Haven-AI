@@ -71,9 +71,10 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(400).send({ error: validationError })
     }
 
-    const idempotencyKey =
-      request.body.idempotencyKey ??
-      `mpp_demo:${challenge.challengeId}:${agent.id}`
+    const idempotencyKey = request.body.idempotencyKey
+    if (!idempotencyKey || typeof idempotencyKey !== 'string') {
+      return reply.code(400).send({ error: 'idempotencyKey is required' })
+    }
 
     const result = await authorizeMachinePayment({
       agent,
@@ -89,6 +90,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       idempotencyKey,
       metadata: challenge.metadata,
       signature,
+      // TODO: add a per-rail rate limit before exposing machine payments beyond this internal demo.
     })
 
     return reply.code(result.statusCode).send(result.body)

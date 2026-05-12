@@ -17,6 +17,7 @@ export async function up(client: PoolClient): Promise<void> {
       ADD COLUMN IF NOT EXISTS payment_resource_url TEXT,
       ADD COLUMN IF NOT EXISTS merchant_address VARCHAR(42),
       ADD COLUMN IF NOT EXISTS machine_challenge_id VARCHAR(128),
+      ADD COLUMN IF NOT EXISTS machine_idempotency_key VARCHAR(128),
       ADD COLUMN IF NOT EXISTS machine_metadata JSONB;
 
     UPDATE payment_intents
@@ -55,5 +56,10 @@ export async function up(client: PoolClient): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_machine_payment_receipts_rail_created
       ON machine_payment_receipts(rail, created_at DESC);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_approval_requests_machine_idempotency
+      ON approval_requests(agent_id, machine_idempotency_key)
+      WHERE machine_idempotency_key IS NOT NULL
+        AND status NOT IN ('expired');
   `)
 }

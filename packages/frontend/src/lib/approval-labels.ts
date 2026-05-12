@@ -1,3 +1,5 @@
+import { isMachinePaymentSource } from './transaction-labels'
+
 const URL_RE = /https?:\/\/[^\s)]+/i
 const REMAINING_BUDGET_RE =
   /exceeds remaining (?:on-chain )?allowance|above the remaining budget|exceeds the remaining/i
@@ -13,9 +15,7 @@ export function approvalRecipientLabel({
   x402ResourceUrl?: string | null
   toAddress: string
 }): string {
-  const sourceHostname = source === 'x402' || source === 'mpp_demo'
-    ? hostnameFromUrl(x402ResourceUrl)
-    : null
+  const sourceHostname = isMachinePaymentSource(source) ? hostnameFromUrl(x402ResourceUrl) : null
   if (sourceHostname) return sourceHostname
 
   const hostname = hostnameFromReason(reason)

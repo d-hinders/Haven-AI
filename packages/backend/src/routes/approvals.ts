@@ -19,6 +19,9 @@ interface ApprovalRow {
   reason: string | null
   source: string
   x402_resource_url: string | null
+  payment_rail: string | null
+  payment_resource_url: string | null
+  merchant_address: string | null
   status: string
   tx_hash: string | null
   reviewed_at: string | null
@@ -67,8 +70,11 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
               amount_raw,
               amount_human,
               reason,
-              COALESCE(source, 'direct') AS source,
-              x402_resource_url,
+              COALESCE(payment_rail, source, 'direct') AS source,
+              COALESCE(payment_resource_url, x402_resource_url) AS x402_resource_url,
+              payment_rail,
+              payment_resource_url,
+              merchant_address,
               status,
               tx_hash,
               reviewed_at,

@@ -1,3 +1,5 @@
+import { isMachinePaymentSource } from './transaction-labels'
+
 const URL_RE = /https?:\/\/[^\s)]+/i
 const REMAINING_BUDGET_RE =
   /exceeds remaining (?:on-chain )?allowance|above the remaining budget|exceeds the remaining/i
@@ -13,7 +15,7 @@ export function approvalRecipientLabel({
   x402ResourceUrl?: string | null
   toAddress: string
 }): string {
-  const sourceHostname = source === 'x402' ? hostnameFromUrl(x402ResourceUrl) : null
+  const sourceHostname = isMachinePaymentSource(source) ? hostnameFromUrl(x402ResourceUrl) : null
   if (sourceHostname) return sourceHostname
 
   const hostname = hostnameFromReason(reason)
@@ -36,6 +38,10 @@ export function approvalReasonLabel({
     return 'This x402 payment needs your manual approval before any money moves.'
   }
 
+  if (source === 'mpp_demo' || reason?.toLowerCase().includes('machine payment demo')) {
+    return 'This machine payment demo needs your manual approval before any money moves.'
+  }
+
   return reason?.trim() || 'This payment needs your manual approval before any money moves.'
 }
 
@@ -47,6 +53,7 @@ export function approvalSourceLabel({
   source?: string | null
 }): string | null {
   if (source === 'x402' || reason?.toLowerCase().includes('x402 payment')) return 'x402 payment'
+  if (source === 'mpp_demo' || reason?.toLowerCase().includes('machine payment demo')) return 'Machine payment demo'
   return null
 }
 

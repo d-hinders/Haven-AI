@@ -84,6 +84,17 @@ const authorizeX402Schema = {
   required: ['url', 'payTo', 'amount', 'asset', 'network'] as const,
 }
 
+const authorizeMachinePaymentSchema = {
+  type: 'object' as const,
+  properties: {
+    challenge: {
+      type: 'object' as const,
+      description: 'Machine payment challenge returned by a Haven demo endpoint',
+    },
+  },
+  required: ['challenge'] as const,
+}
+
 const MAKE_PAYMENT_DESCRIPTION =
   'Send a payment from the Haven-managed Safe wallet. ' +
   "The payment will be validated against the agent's on-chain spending policy. " +
@@ -98,6 +109,10 @@ const AUTHORIZE_X402_DESCRIPTION =
   'When a paid API returns 402 with x402 payment requirements, use this tool to fund the agent wallet and get a merchant payment header. ' +
   'Haven evaluates the payment against policy before moving funds from the Haven wallet. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request.'
+
+const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =
+  'Authorize a Haven machine-payment challenge, currently for the internal MPP demo rail. ' +
+  'Haven checks the agent budget, sends the fixed USDC payment when allowed, and returns a proof header for the retry request.'
 
 // ── Claude (Anthropic) format ────────────────────────────────────
 
@@ -127,6 +142,11 @@ function claudeTools(): ClaudeTool[] {
       name: 'authorize_x402_payment',
       description: AUTHORIZE_X402_DESCRIPTION,
       input_schema: authorizeX402Schema,
+    },
+    {
+      name: 'authorize_machine_payment',
+      description: AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION,
+      input_schema: authorizeMachinePaymentSchema,
     },
   ]
 }
@@ -170,6 +190,14 @@ function openaiTools(): OpenAITool[] {
         name: 'authorize_x402_payment',
         description: AUTHORIZE_X402_DESCRIPTION,
         parameters: authorizeX402Schema,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'authorize_machine_payment',
+        description: AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION,
+        parameters: authorizeMachinePaymentSchema,
       },
     },
   ]

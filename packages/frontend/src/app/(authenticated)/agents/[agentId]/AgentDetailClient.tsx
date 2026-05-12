@@ -12,7 +12,7 @@ import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
-import { parseX402Hostname } from '@/lib/transaction-labels'
+import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
@@ -63,8 +63,9 @@ function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 
 }
 
 function activityTitle(item: ActivityItem, agentName?: string): string {
-  if (item.source === 'x402') {
-    return agentName ? `x402 payment by ${agentName}` : 'x402 payment'
+  const sourceTitle = paymentSourceTitle(item.source)
+  if (sourceTitle) {
+    return agentName ? `${sourceTitle} by ${agentName}` : sourceTitle
   }
   if (item.type === 'approval') return 'Approval request'
   if (item.status === 'failed') return 'Payment failed'
@@ -73,7 +74,7 @@ function activityTitle(item: ActivityItem, agentName?: string): string {
 }
 
 function activityMovement(item: ActivityItem, walletName: string) {
-  const recipient = item.source === 'x402'
+  const recipient = isMachinePaymentSource(item.source)
     ? parseX402Hostname(item.x402_resource_url) ?? truncate(item.to)
     : truncate(item.to)
 

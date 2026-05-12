@@ -22,6 +22,21 @@ Keep tiny changes in the captain session when they are low risk:
 
 Examples: copy fixes, small docs edits, a one-line display bug, or a local type cleanup. Even then, use judgment. If the tiny change touches money, permissions, approval states, or shared behavior, use the workflow.
 
+## Review Lessons From Recent PRs
+
+Use `docs/ai-review-patterns.md` as shared memory for recurring PR review issues that were relevant enough to fix.
+
+Before final review, the captain should do a risk-specific self-check based on the changed surface:
+
+- transactions and feeds: raw vs formatted values, totals, dedupe, pagination, source labels, and cross-surface consistency
+- approvals and pending actions: status transitions, migrations or constraints, post-action copy, expiry, notification counts, and single vs multi-approval behavior
+- send, receive, contacts, and other modals: primary action hierarchy, scroll, z-index, close behavior, typing behavior, duplicate handling, and network context
+- hooks, APIs, and shared utilities: required vs optional arguments, caller audits, response shape changes, fallback values, and non-happy-path tests
+
+After a Claude or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/ai-review-patterns.md` or the reviewer prompt. Do not add one-off preferences or obsolete implementation details.
+
+Workers can implement narrow slices, but the captain owns cross-surface consistency, shared abstractions, PR shape, final review judgment, and deciding which review comments become durable workflow memory.
+
 ## How To Create Or Invoke Agents
 
 In Claude Code, project agents live in `.claude/agents/`. Restart Claude Code after adding or editing these files, or use `/agents` to manage them interactively. Invoke one explicitly with prompts like `Use the haven-explorer agent...`.
@@ -112,6 +127,7 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 8. Run relevant build or test checks.
 9. Ask `haven-reviewer` for a final diff review when risk warrants it.
 10. Let the captain fix final issues, commit, push, and open the PR.
+11. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur.
 
 ## Files The Captain Should Usually Own
 
@@ -188,6 +204,7 @@ For UI work, enforce the Haven UI instructions from AGENTS.md:
 - hide technical wallet details from primary UX unless the surface is explicitly advanced or developer-facing
 - review copy against the UX copy guidelines
 - check mobile and desktop layouts when practical
+- use `docs/ai-review-patterns.md` for known reviewer traps before final review
 
 Before implementation, briefly tell me:
 - which agents you will use, if any

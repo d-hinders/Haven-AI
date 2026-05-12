@@ -25,12 +25,16 @@ Also inspect:
 - `packages/frontend/src/components/ui`
 - `packages/frontend/src/components/haven`
 - the route, component, API, test, and state-management files relevant to the requested feature
+- existing shared utilities, labels, row components, and nearby tests before suggesting new code
+- related surfaces that may need to stay aligned, especially dashboard, account detail, agent detail, transactions, approvals, contacts, and `/design-system`
 
 Return:
 - likely files to change
 - reusable primitives or Haven-domain components
+- existing utilities or tests that should be reused or extended
 - data/API flow notes
 - product and UX constraints
+- duplication or cross-surface consistency risks
 - relevant tests or build commands
 - risks, edge cases, and missing context
 

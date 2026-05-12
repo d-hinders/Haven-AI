@@ -27,6 +27,7 @@ Collaboration rules:
 - Create new files only when they are explicitly listed in your ownership scope.
 - Do not edit shared primitives, global styles, Tailwind config, package files, lockfiles, route shells, or central types unless they are explicitly in your ownership list.
 - If you need a shared change, report it instead of making it.
+- If the work changes a shared component, hook contract, route behavior, API payload, or cross-surface presentation, report the caller and surface impacts to the captain instead of silently widening scope.
 - Never revert edits made by others.
 - Do not run git mutation commands such as commit, push, branch, switch, reset, restore, or stash. The captain owns git hygiene.
 
@@ -50,5 +51,7 @@ Include empty, loading, error, and success states when the assigned surface can 
 Finish by reporting:
 - changed files
 - what was implemented
+- contract or caller impacts, if any
+- loading, empty, error, and success states handled, or why they do not apply
 - verification run
 - any shared change you recommend for the captain

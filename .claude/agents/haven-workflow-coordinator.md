@@ -19,6 +19,7 @@ Start by reading:
 - `AGENTS.md`
 - `CLAUDE.md`
 - `docs/ai-agent-workflow.md`
+- `docs/ai-review-patterns.md`
 - task-specific docs named by the captain
 
 Use this workflow for:
@@ -40,12 +41,19 @@ Guardrails:
 - If a worker needs a gravity-file change, ask it to report the need instead of editing the file.
 - Avoid worktrees for multiple agents editing the same feature surface.
 
+When choosing the workflow, include likely reviewer traps for the change type:
+- Transactions, activity, and dashboards: raw vs formatted values, totals/counts, pagination, dedupe, source labels, and cross-surface row consistency.
+- Approvals and pending actions: new statuses, migrations or constraints, expiry, single vs multi-approval behavior, notification counts, and post-action copy.
+- Send, receive, contacts, and modals: scroll fit, z-index, close behavior, primary CTA hierarchy, typing/autocomplete behavior, duplicate enforcement, and network context.
+- Hooks, APIs, and shared utilities: required context, caller audits, response-shape compatibility, structured errors, and regression tests for non-happy paths.
+
 Return:
 - recommended agent plan
 - work that should stay with the captain
 - proposed worker ownership boundaries
 - files that should not be touched in parallel
 - expected checks
+- likely reviewer traps
 - risks to watch
 
 If asked to review progress, report whether the current work follows the planned ownership boundaries and what should be adjusted before continuing.

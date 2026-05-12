@@ -29,6 +29,12 @@ Haven is a fintech product for agent payments. Every UX decision should reinforc
 
 Use technical infrastructure terms only when they add transparency for a technical or advanced context. Product surfaces should lead with what the user understands and controls.
 
+### First-Run Simplicity
+
+Brand-new users should not see the full operational dashboard until it helps them. A first-run state should lead with one balance or account status, one next setup action, and only the context needed to take that action.
+
+Avoid showing analytics cards, empty management panels, transaction previews, multi-step checklists, account/network summaries, or risk explainers all at once just because those components exist. Add detail progressively inside the relevant action flow, detail page, modal, or after the user dismisses setup.
+
 ---
 
 ## 2. Language

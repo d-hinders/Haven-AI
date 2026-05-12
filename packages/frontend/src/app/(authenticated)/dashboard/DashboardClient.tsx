@@ -172,7 +172,7 @@ function ConnectedAgentsSection({
             </p>
             <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
               {!hasAccounts
-                ? 'Create or import an account before connecting agents.'
+                ? 'Create a Haven account before connecting agents.'
                 : hasAnyAgents
                 ? 'Reconnect or create an agent to bring automated spending back online.'
                 : 'Create your first agent to give it payment credentials and spend limits.'}
@@ -312,7 +312,7 @@ function DashboardHero({
           )
         ) : (
           <Button href="/accounts" size="lg">
-            Create or import account
+            Create Haven account
           </Button>
         )}
       </div>
@@ -485,8 +485,8 @@ function TransactionsSection({
             <p className="text-sm text-[var(--v2-ink)]">No transactions yet</p>
             <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
               {hasAccounts
-                ? 'Fund an account or make your first payment to start building activity here.'
-                : 'Create or import an account to start tracking transactions.'}
+                ? 'Receive funds or make your first payment to start building activity here.'
+                : 'Create a Haven account to start tracking transactions.'}
             </p>
             <Link href={hasAccounts ? '/transactions' : '/accounts'} className="mt-4 inline-flex text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
               {hasAccounts ? 'Open transactions' : 'Go to accounts'}
@@ -542,7 +542,7 @@ export default function DashboardClient() {
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
-  const { agents, refetch: refetchAgents } = useAgents()
+  const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
   const {
     balances,
     loading: balancesLoading,
@@ -563,6 +563,8 @@ export default function DashboardClient() {
       ? null
       : !hasAnyBalance
         ? 'fund'
+        : agentsLoading
+          ? null
         : agents.length === 0
           ? 'add-agent'
           : null
@@ -579,26 +581,18 @@ export default function DashboardClient() {
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [actionSafeId, setActionSafeId] = useState<string | null>(null)
-  const [isGuideDismissed, setIsGuideDismissed] = useState(false)
+  const [dismissedGuideStage, setDismissedGuideStage] = useState<'fund' | 'add-agent' | null>(null)
 
   useEffect(() => {
     if (actionSafeId && safes.some((safe) => safe.id === actionSafeId)) return
     setActionSafeId(defaultSafe?.id ?? null)
   }, [actionSafeId, defaultSafe?.id, safes])
 
-  const onboardingDismissKey =
-    user && onboardingStage
-      ? `haven_dashboard_onboarding_dismissed:${user.id}:${onboardingStage}`
-      : null
-
   useEffect(() => {
-    if (!onboardingDismissKey) {
-      setIsGuideDismissed(false)
-      return
+    if (dismissedGuideStage && dismissedGuideStage !== onboardingStage) {
+      setDismissedGuideStage(null)
     }
-
-    setIsGuideDismissed(window.localStorage.getItem(onboardingDismissKey) === '1')
-  }, [onboardingDismissKey])
+  }, [dismissedGuideStage, onboardingStage])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
   const actionGate = useSafeOperationGate({
@@ -635,6 +629,10 @@ export default function DashboardClient() {
   const overviewInitialLoading = overviewLoading && !overview
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError || approvalActionCount > 0)
+  const showOnboardingGuide = Boolean(
+    onboardingStage && !requiresOtherDevice && dismissedGuideStage !== onboardingStage,
+  )
+  const showTopAside = hasAttention
 
   function refreshDashboardData() {
     refetchOverview()
@@ -666,6 +664,12 @@ export default function DashboardClient() {
     if (action === 'receive') setReceiveOpen(true)
   }
 
+  function openReceiveForDefaultSafe() {
+    if (!defaultSafe) return
+    setActionSafeId(defaultSafe.id)
+    setReceiveOpen(true)
+  }
+
   function handleActionSafeSelected(safeId: string) {
     setActionSafeId(safeId)
     if (pickerAction === 'send') setSendOpen(true)
@@ -674,95 +678,113 @@ export default function DashboardClient() {
   }
 
   function dismissOnboardingGuide() {
-    if (!onboardingDismissKey) return
-    window.localStorage.setItem(onboardingDismissKey, '1')
-    setIsGuideDismissed(true)
+    setDismissedGuideStage(onboardingStage)
   }
+
+  const heroPanel = (
+    <DashboardHero
+      loading={overviewInitialLoading}
+      unavailable={overviewUnavailable}
+      total={formatCurrency(totalFiat, currency)}
+      currency={currency}
+      changeAvailable={Boolean(overview?.change.available)}
+      changeAmount={changeAmount}
+      changePercent={changePercent}
+      hasAccounts={safes.length > 0}
+      requiresOtherDevice={requiresOtherDevice}
+      onSend={() => openHeroAction('send')}
+      onReceive={() => openHeroAction('receive')}
+      onAddFunds={() => openHeroAction('add-funds')}
+    />
+  )
+
+  const attentionPanel = (
+    <AttentionSection
+      approvalActionCount={approvalActionCount}
+      hasOverviewError={Boolean(overviewError)}
+      onRetry={refetchOverview}
+    />
+  )
+
+  const metricsGrid = (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <MetricCard
+        label="Agents connected"
+        value={String(overview?.metrics.connectedAgents ?? 0)}
+        href="/agents"
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+      />
+      <MetricCard
+        label="Monthly agent spend"
+        value={formatCompactCurrency(monthlySpend, currency)}
+        footer="Current calendar month"
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+      />
+      <MetricCard
+        label="Successful transactions"
+        value={String(overview?.metrics.successfulTransactions ?? 0)}
+        footer="All time"
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+      />
+      <MetricCard
+        label="Active accounts"
+        value={String(overview?.metrics.activeAccounts ?? safes.length)}
+        href="/accounts"
+        loading={false}
+      />
+    </div>
+  )
+
+  const activityGrid = (
+    <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
+      <ConnectedAgentsSection
+        agents={overview?.agents ?? []}
+        hasAnyAgents={agents.length > 0}
+        hasAccounts={safes.length > 0}
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+        onRetry={refetchOverview}
+        onConnectAgent={() => openCreateAgent(null)}
+      />
+      <TransactionsSection
+        transactions={overview?.transactions ?? []}
+        hasAccounts={safes.length > 0}
+        loading={overviewInitialLoading}
+        unavailable={overviewUnavailable}
+        onRetry={refetchOverview}
+        resolveAddress={resolveAddress}
+      />
+    </div>
+  )
 
   return (
     <div className="max-w-6xl">
       <PageHeader title="Dashboard" subtitle="Your money, agents, and actions at a glance." />
 
-      {onboardingStage && !requiresOtherDevice && !isGuideDismissed && (
-        <DashboardOnboardingGuide
-          stage={onboardingStage}
-          safes={safes}
-          onAddAgent={() => openCreateAgent(null)}
-          onDismiss={dismissOnboardingGuide}
-        />
+      {showOnboardingGuide && onboardingStage ? (
+        <div className="space-y-6">
+          {heroPanel}
+          {hasAttention ? attentionPanel : null}
+          <DashboardOnboardingGuide
+            stage={onboardingStage}
+            onReceiveFunds={openReceiveForDefaultSafe}
+            onAddAgent={() => openCreateAgent(null)}
+            onDismiss={dismissOnboardingGuide}
+          />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className={`grid items-start gap-4 ${showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
+            {heroPanel}
+            {attentionPanel}
+          </div>
+          {metricsGrid}
+          {activityGrid}
+        </div>
       )}
-
-      <div className={`mb-6 grid gap-4 ${hasAttention ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
-        <DashboardHero
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-          total={formatCurrency(totalFiat, currency)}
-          currency={currency}
-          changeAvailable={Boolean(overview?.change.available)}
-          changeAmount={changeAmount}
-          changePercent={changePercent}
-          hasAccounts={safes.length > 0}
-          requiresOtherDevice={requiresOtherDevice}
-          onSend={() => openHeroAction('send')}
-          onReceive={() => openHeroAction('receive')}
-          onAddFunds={() => openHeroAction('add-funds')}
-        />
-        <AttentionSection
-          approvalActionCount={approvalActionCount}
-          hasOverviewError={Boolean(overviewError)}
-          onRetry={refetchOverview}
-        />
-      </div>
-
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label="Agents connected"
-          value={String(overview?.metrics.connectedAgents ?? 0)}
-          href="/agents"
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-        />
-        <MetricCard
-          label="Monthly agent spend"
-          value={formatCompactCurrency(monthlySpend, currency)}
-          footer="Current calendar month"
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-        />
-        <MetricCard
-          label="Successful transactions"
-          value={String(overview?.metrics.successfulTransactions ?? 0)}
-          footer="All time"
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-        />
-        <MetricCard
-          label="Active accounts"
-          value={String(overview?.metrics.activeAccounts ?? safes.length)}
-          href="/accounts"
-          loading={false}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
-        <ConnectedAgentsSection
-          agents={overview?.agents ?? []}
-          hasAnyAgents={agents.length > 0}
-          hasAccounts={safes.length > 0}
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-          onRetry={refetchOverview}
-          onConnectAgent={() => openCreateAgent(null)}
-        />
-        <TransactionsSection
-          transactions={overview?.transactions ?? []}
-          hasAccounts={safes.length > 0}
-          loading={overviewInitialLoading}
-          unavailable={overviewUnavailable}
-          onRetry={refetchOverview}
-          resolveAddress={resolveAddress}
-        />
-      </div>
 
       <CreateAgentModal
         open={createAgentOpen}

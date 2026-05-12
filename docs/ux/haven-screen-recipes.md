@@ -11,6 +11,34 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 - Money-changing screens need a review moment before execution.
 - Mobile layouts should keep the primary action reachable without compressing the risk summary.
 
+## First-Run Dashboard
+
+Use after the user has created a Haven account but has not finished the first useful setup path.
+
+Structure:
+1. Normal dashboard header and balance hero.
+2. True attention/error state only if it needs action now.
+3. One focused next-step card with a single primary action: `Receive funds` or `Connect first agent`.
+4. Full dashboard metrics and activity only after setup is dismissed or the user has enough product activity for those sections to be meaningful.
+
+Money and risk clarity:
+- For the funding step, say that Receive shows the exact Haven wallet address and network. Do not show the raw address, token list, QR code, or network detail inline on the dashboard.
+- For the first-agent step, say the user will set a budget and add the Haven credential. Do not show budget/risk explainers, wallet summaries, or multi-step progress lists on the dashboard.
+- Keep the next step honest, but move explanatory detail into the Receive or Connect Agent flow.
+- Avoid `import account` copy in the first-run path unless an existing-account flow is actually supported in the UI.
+
+Avoid:
+- Sidebar setup tours competing with the dashboard.
+- Multi-step checklists for brand-new users.
+- Empty-state panels such as `No agents connected yet` beside the first setup CTA.
+- Repeating wallet, network, or activity facts that are not needed for the next action.
+
+States:
+- Loading balances: do not show a false zero or premature `Connect agent` step.
+- No funds: primary action is `Receive funds`.
+- Funded with no agents: primary action is `Connect first agent`.
+- Dismissed: keep the dashboard usable; other empty states should still offer the same next action.
+
 ## Agent Budget Setup
 
 Use when the user creates or edits what an agent may spend.

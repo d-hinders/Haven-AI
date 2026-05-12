@@ -6,6 +6,7 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 
 - The screen has one obvious primary action.
 - The user can tell what happens next.
+- First-run or onboarding-adjacent screens show only the next useful action and the minimum context needed for it; they do not expose normal dashboard density, empty management panels, or multi-step setup tours by default.
 - Money-moving or authority-changing screens answer:
   - Who can spend?
   - From which Haven wallet?

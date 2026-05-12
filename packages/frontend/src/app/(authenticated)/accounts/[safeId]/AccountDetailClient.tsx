@@ -227,22 +227,12 @@ export default function AccountDetailClient() {
     return (
       <div className="max-w-5xl py-16 text-center">
         <p className="text-sm text-[var(--v2-ink-3)]">Account not found</p>
-        <Link href="/accounts" className="text-sm text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] mt-2 inline-block">
-          Back to accounts
-        </Link>
       </div>
     )
   }
 
   return (
     <div className="max-w-5xl space-y-6">
-      <Link
-        href="/accounts"
-        className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-      >
-        ← Back to accounts
-      </Link>
-
       {/* Header */}
       <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>

@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { usePublicClient } from 'wagmi'
@@ -207,10 +206,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   if (!agent) {
     return (
       <div className="max-w-3xl">
-        <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-          Back to agents
-        </Link>
-        <div className="mt-6 rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-[var(--v2-shadow-card)]">
+        <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-[var(--v2-shadow-card)]">
           <h1 className="text-xl font-semibold text-[var(--v2-ink)]">Agent not found</h1>
           <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
             This agent may have been removed or you may no longer have access to it.
@@ -353,11 +349,7 @@ export default function AgentDetailClient({ agentId }: Props) {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-        Back to agents
-      </Link>
-
-      <Card hover={false} className="mt-5 p-5 md:p-6">
+      <Card hover={false} className="p-5 md:p-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-3">

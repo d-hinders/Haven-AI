@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -117,51 +117,21 @@ function buildSpendSummary(agent: DashboardAgentPreview): string {
   return summaries.join(' • ')
 }
 
-function MetricCard({
-  label,
-  value,
-  footer,
-  href,
-  loading,
-}: {
-  label: string
-  value: string
-  footer?: string
-  href?: string
-  loading: boolean
-}) {
-  return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]">
-      <p className="text-sm text-[var(--v2-ink-2)]">{label}</p>
-      {loading ? (
-        <div className="mt-4 h-8 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-      ) : (
-        <p className="mt-4 text-3xl font-semibold tracking-tight text-[var(--v2-ink)]">{value}</p>
-      )}
-      {href ? (
-        <Link
-          href={href}
-          className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-        >
-          View all
-          <span aria-hidden="true">→</span>
-        </Link>
-      ) : footer ? (
-        <p className="mt-4 text-sm text-[var(--v2-ink-3)]">{footer}</p>
-      ) : null}
-    </div>
-  )
-}
-
 function ConnectedAgentsSection({
   agents,
   hasAnyAgents,
   hasAccounts,
+  loading,
+  unavailable,
+  onRetry,
   onConnectAgent,
 }: {
   agents: DashboardAgentPreview[]
   hasAnyAgents: boolean
   hasAccounts: boolean
+  loading: boolean
+  unavailable: boolean
+  onRetry: () => void
   onConnectAgent: () => void
 }) {
   return (
@@ -173,7 +143,27 @@ function ConnectedAgentsSection({
         </Link>
       </div>
 
-      {agents.length === 0 ? (
+      {loading ? (
+        <div className="divide-y divide-[var(--v2-border)]">
+          {[0, 1, 2].map((item) => (
+            <div key={item} className="flex items-center gap-3 px-5 py-4">
+              <div className="h-10 w-10 rounded-xl bg-[var(--v2-surface-2)] animate-pulse" />
+              <div className="min-w-0 flex-1">
+                <div className="h-4 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <div className="mt-2 h-3 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : unavailable ? (
+        <div className="p-6">
+          <EmptyPreview
+            title="Agent preview unavailable"
+            body="Haven could not verify which agents are connected right now."
+            action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
+          />
+        </div>
+      ) : agents.length === 0 ? (
         <div className="p-6">
           <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
             <p className="text-sm text-[var(--v2-ink)]">
@@ -241,6 +231,186 @@ function ConnectedAgentsSection({
   )
 }
 
+function DashboardHero({
+  loading,
+  unavailable,
+  total,
+  currency,
+  changeAvailable,
+  changeAmount,
+  changePercent,
+  hasAccounts,
+  requiresOtherDevice,
+  onSend,
+  onReceive,
+  onAddFunds,
+}: {
+  loading: boolean
+  unavailable: boolean
+  total: string
+  currency: 'USD' | 'EUR'
+  changeAvailable: boolean
+  changeAmount: number
+  changePercent: number
+  hasAccounts: boolean
+  requiresOtherDevice: boolean
+  onSend: () => void
+  onReceive: () => void
+  onAddFunds: () => void
+}) {
+  return (
+    <section
+      className="relative overflow-hidden rounded-[24px] border shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]"
+      style={{ borderColor: '#E7E9F2', backgroundColor: '#F7F5FF' }}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{ background: 'linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%)' }}
+      />
+      <div className="relative grid gap-6 px-6 py-7 sm:px-8 sm:py-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div>
+          <p className="text-sm font-medium text-[var(--v2-ink-2)]">Total balance</p>
+          {loading ? (
+            <div className="mt-3 h-12 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+          ) : unavailable ? (
+            <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink-3)] sm:text-5xl">
+              Unavailable
+            </p>
+          ) : (
+            <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular sm:text-5xl">
+              {total}
+            </p>
+          )}
+          {changeAvailable ? (
+            <p className={`mt-3 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
+              {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
+            </p>
+          ) : (
+            <p className="mt-3 text-sm text-[var(--v2-ink-3)]">
+              Across all linked Haven accounts.
+            </p>
+          )}
+        </div>
+
+        {hasAccounts ? (
+          requiresOtherDevice ? (
+            <PasskeyOtherDeviceNotice className="max-w-sm" />
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={onSend} size="lg">
+                Send
+              </Button>
+              <Button onClick={onReceive} variant="ghost" size="lg">
+                Receive
+              </Button>
+              <Button onClick={onAddFunds} variant="ghost" size="lg">
+                Add funds
+              </Button>
+            </div>
+          )
+        ) : (
+          <Button href="/accounts" size="lg">
+            Create or import account
+          </Button>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function MetricCard({
+  label,
+  value,
+  footer,
+  href,
+  loading,
+  unavailable,
+}: {
+  label: string
+  value: string
+  footer?: string
+  href?: string
+  loading?: boolean
+  unavailable?: boolean
+}) {
+  const content = (
+    <>
+      <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
+      {loading ? (
+        <div className="mt-3 h-7 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+      ) : (
+        <p className={`mt-2 text-2xl font-semibold tracking-tight v2-tabular ${unavailable ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-ink)]'}`}>
+          {unavailable ? 'Unavailable' : value}
+        </p>
+      )}
+      {footer ? <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{footer}</p> : null}
+    </>
+  )
+
+  const className = 'block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]'
+
+  if (href) {
+    return (
+      <Link href={href} className={`${className} transition-colors hover:bg-[var(--v2-surface)]`}>
+        {content}
+      </Link>
+    )
+  }
+
+  return <div className={className}>{content}</div>
+}
+
+function AttentionSection({
+  approvalActionCount,
+  hasOverviewError,
+  onRetry,
+}: {
+  approvalActionCount: number
+  hasOverviewError: boolean
+  onRetry: () => void
+}) {
+  if (!hasOverviewError && approvalActionCount === 0) return null
+
+  return (
+    <section className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
+      <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Needs attention</h2>
+      </div>
+      <div className="divide-y divide-[var(--v2-border)]">
+        {hasOverviewError ? (
+          <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-[var(--v2-danger)]">Dashboard data could not load</p>
+              <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
+                Haven could not refresh balances, agents, and activity.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={onRetry}>
+              Try again
+            </Button>
+          </div>
+        ) : null}
+        {approvalActionCount > 0 ? (
+          <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-[var(--v2-ink)]">
+                {approvalActionCount} agent payment{approvalActionCount === 1 ? '' : 's'} {approvalActionCount === 1 ? 'needs' : 'need'} your action
+              </p>
+              <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
+                Review payments that are waiting before any money moves.
+              </p>
+            </div>
+            <Button href="/approvals" size="sm">
+              Open approvals
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
 function transactionTitle(tx: AggregatedTransaction): string {
   if (tx.direction === 'in') return 'Received payment'
   const sourceTitle = paymentSourceTitle(tx.source)
@@ -264,10 +434,16 @@ function transactionMovement(tx: AggregatedTransaction, resolveAddress: (address
 function TransactionsSection({
   transactions,
   hasAccounts,
+  loading,
+  unavailable,
+  onRetry,
   resolveAddress,
 }: {
   transactions: AggregatedTransaction[]
   hasAccounts: boolean
+  loading: boolean
+  unavailable: boolean
+  onRetry: () => void
   resolveAddress: (address: string) => string | null
 }) {
   return (
@@ -279,7 +455,30 @@ function TransactionsSection({
         </Link>
       </div>
 
-      {transactions.length === 0 ? (
+      {loading ? (
+        <div className="divide-y divide-[var(--v2-border)]">
+          {[0, 1, 2].map((item) => (
+            <div key={item} className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
+              <div className="flex items-start gap-3">
+                <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
+                <div>
+                  <div className="h-4 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  <div className="mt-2 h-3 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                </div>
+              </div>
+              <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse sm:justify-self-end" />
+            </div>
+          ))}
+        </div>
+      ) : unavailable ? (
+        <div className="p-6">
+          <EmptyPreview
+            title="Activity preview unavailable"
+            body="Haven could not refresh recent payments right now."
+            action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
+          />
+        </div>
+      ) : transactions.length === 0 ? (
         <div className="p-6">
           <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
             <p className="text-sm text-[var(--v2-ink)]">No transactions yet</p>
@@ -315,6 +514,24 @@ function TransactionsSection({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function EmptyPreview({
+  title,
+  body,
+  action,
+}: {
+  title: string
+  body: string
+  action?: ReactNode
+}) {
+  return (
+    <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
+      <p className="text-sm text-[var(--v2-ink)]">{title}</p>
+      <p className="mt-2 text-xs text-[var(--v2-ink-2)]">{body}</p>
+      {action ? <div className="mt-4">{action}</div> : null}
     </div>
   )
 }
@@ -414,6 +631,9 @@ export default function DashboardClient() {
     ? (overview?.metrics.monthlyAgentSpendEur ?? 0)
     : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
   const approvalActionCount = overview?.actionableApprovals ?? overview?.pendingApprovals ?? 0
+  const overviewInitialLoading = overviewLoading && !overview
+  const overviewUnavailable = Boolean(overviewError && !overview)
+  const hasAttention = Boolean(overviewError || approvalActionCount > 0)
 
   function refreshDashboardData() {
     refetchOverview()
@@ -462,37 +682,10 @@ export default function DashboardClient() {
     <div className="max-w-6xl">
       <div className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">Dashboard</h1>
-        <p className="mt-1 text-sm text-[var(--v2-ink-2)]">Overview across all accounts</p>
+        <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
+          Your money, agents, and actions at a glance.
+        </p>
       </div>
-
-      {overviewError && !overview && (
-        <div className="mb-6 rounded-xl border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-[var(--v2-danger)]">{overviewError}</p>
-            <button
-              onClick={refetchOverview}
-              className="text-sm font-medium text-[var(--v2-danger)] hover:underline transition-colors"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
-
-      {approvalActionCount > 0 ? (
-        <div className="mb-6 flex items-center gap-3 rounded-xl border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3">
-          <svg className="w-4 h-4 text-[var(--v2-warning)] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <circle cx="12" cy="12" r="10" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4M12 16h.01" />
-          </svg>
-          <p className="text-sm text-[var(--v2-warning)]">
-            {approvalActionCount} agent payment{approvalActionCount === 1 ? '' : 's'} need your action
-          </p>
-          <Link href="/approvals" className="ml-auto text-sm font-medium text-[var(--v2-warning)] hover:underline transition-colors">
-            Open approvals
-          </Link>
-        </div>
-      ) : null}
 
       {onboardingStage && !requiresOtherDevice && !isGuideDismissed && (
         <DashboardOnboardingGuide
@@ -503,85 +696,55 @@ export default function DashboardClient() {
         />
       )}
 
-      <div
-        className="relative mb-6 overflow-hidden rounded-[24px] border shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]"
-        style={{ borderColor: '#E7E9F2', backgroundColor: '#F7F5FF' }}
-      >
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              'linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%)',
-          }}
+      <div className={`mb-6 grid gap-4 ${hasAttention ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
+        <DashboardHero
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
+          total={formatCurrency(totalFiat, currency)}
+          currency={currency}
+          changeAvailable={Boolean(overview?.change.available)}
+          changeAmount={changeAmount}
+          changePercent={changePercent}
+          hasAccounts={safes.length > 0}
+          requiresOtherDevice={requiresOtherDevice}
+          onSend={() => openHeroAction('send')}
+          onReceive={() => openHeroAction('receive')}
+          onAddFunds={() => openHeroAction('add-funds')}
         />
-        <div className="relative px-6 py-7 sm:px-8 sm:py-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-sm font-medium text-[var(--v2-ink-2)] mb-3">Total balance</p>
-              {overviewLoading && !overview ? (
-                <div className="h-12 w-52 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-              ) : (
-                <p className="text-4xl sm:text-5xl font-semibold tracking-tight text-[var(--v2-ink)]">
-                  {formatCurrency(totalFiat, currency)}
-                </p>
-              )}
-
-              {overview?.change.available ? (
-                <p className={`mt-4 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
-                  {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
-                </p>
-              ) : null}
-            </div>
-
-            {safes.length === 0 ? (
-              <div className="flex flex-wrap gap-3">
-                <Button href="/accounts" size="lg">
-                  Create or import account
-                </Button>
-              </div>
-            ) : requiresOtherDevice ? (
-              <PasskeyOtherDeviceNotice className="max-w-sm" />
-            ) : (
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={() => openHeroAction('send')} size="lg">
-                  Send
-                </Button>
-                <Button onClick={() => openHeroAction('receive')} variant="ghost" size="lg">
-                  Receive
-                </Button>
-                <Button onClick={() => openHeroAction('add-funds')} variant="ghost" size="lg">
-                  Add funds
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
+        <AttentionSection
+          approvalActionCount={approvalActionCount}
+          hasOverviewError={Boolean(overviewError)}
+          onRetry={refetchOverview}
+        />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Agents connected"
           value={String(overview?.metrics.connectedAgents ?? 0)}
           href="/agents"
-          loading={overviewLoading && !overview}
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
         />
         <MetricCard
           label="Monthly agent spend"
           value={formatCompactCurrency(monthlySpend, currency)}
           footer="Current calendar month"
-          loading={overviewLoading && !overview}
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
         />
         <MetricCard
           label="Successful transactions"
           value={String(overview?.metrics.successfulTransactions ?? 0)}
           footer="All time"
-          loading={overviewLoading && !overview}
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
         />
         <MetricCard
           label="Active accounts"
           value={String(overview?.metrics.activeAccounts ?? safes.length)}
           href="/accounts"
-          loading={overviewLoading && !overview}
+          loading={false}
         />
       </div>
 
@@ -590,11 +753,17 @@ export default function DashboardClient() {
           agents={overview?.agents ?? []}
           hasAnyAgents={agents.length > 0}
           hasAccounts={safes.length > 0}
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
+          onRetry={refetchOverview}
           onConnectAgent={() => openCreateAgent(null)}
         />
         <TransactionsSection
           transactions={overview?.transactions ?? []}
           hasAccounts={safes.length > 0}
+          loading={overviewInitialLoading}
+          unavailable={overviewUnavailable}
+          onRetry={refetchOverview}
           resolveAddress={resolveAddress}
         />
       </div>

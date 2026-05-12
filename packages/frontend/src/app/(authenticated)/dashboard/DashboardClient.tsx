@@ -693,7 +693,7 @@ export default function DashboardClient() {
           changeAmount={changeAmount}
           changePercent={changePercent}
           accountCount={overview?.metrics.activeAccounts ?? safes.length}
-          monthlySpend={overviewUnavailable ? '—' : formatCompactCurrency(monthlySpend, currency)}
+          monthlySpend={overviewInitialLoading || overviewUnavailable ? '—' : formatCompactCurrency(monthlySpend, currency)}
           hasAccounts={safes.length > 0}
           requiresOtherDevice={requiresOtherDevice}
           onSend={() => openHeroAction('send')}

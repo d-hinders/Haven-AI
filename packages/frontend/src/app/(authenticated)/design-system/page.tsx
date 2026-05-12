@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import {
   AgentActivityRow,
   AgentBudgetCard,
@@ -119,6 +120,20 @@ export default function DesignSystemPage() {
               Open modal
             </Button>
           </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="First-run setup"
+        description="Dashboard setup guidance should stay sparse: one next step, one primary action, and no full dashboard density until the user dismisses setup."
+      >
+        <div className="max-w-3xl">
+          <DashboardOnboardingGuide
+            stage="fund"
+            onReceiveFunds={() => undefined}
+            onAddAgent={() => undefined}
+            onDismiss={() => undefined}
+          />
         </div>
       </Section>
 

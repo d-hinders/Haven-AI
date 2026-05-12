@@ -4,6 +4,14 @@ This repo uses one main session as the captain and a few narrow subagents as spe
 
 The captain is the main interactive session. It owns product judgment, git, shared files, final integration, and the branch or PR. Subagents are useful for isolated discovery, bounded implementation, and review.
 
+## Default Delegation Policy
+
+The captain decides whether the agentic flow is useful from the work itself. The user does not need to explicitly ask for agents, workers, subagents, or parallel delivery on every request.
+
+For non-trivial feature delivery, UX feedback iteration, and bug fixing, use `haven-workflow-coordinator` by default before other agents. If the coordinator recommends explorer, worker, or reviewer agents, apply that plan without asking for another permission step. Inform the user briefly which agents are being used, what stays with the captain, and what checks are expected.
+
+Skip subagents only when the work is trivial, when a tool or environment cannot support them, or when the coordinator decides the captain can deliver faster and safer alone. Do not say agents were skipped because the user did not explicitly ask for parallel agents.
+
 ## Recommended Sessions
 
 Use one main Codex or Claude Code session per feature branch. Keep that session as the captain.
@@ -118,7 +126,7 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 ## Default Feature Loop
 
 1. Start from a clean branch.
-2. Use `haven-workflow-coordinator` for non-trivial work to choose the agent plan and ownership boundaries.
+2. Use `haven-workflow-coordinator` for non-trivial work to choose the agent plan and ownership boundaries. This is a default workflow decision, not something that depends on the user explicitly asking for parallel agents.
 3. Use `haven-explorer` for terrain mapping unless the change is trivial.
 4. Have the captain make or approve the implementation plan.
 5. Use at most one or two workers in parallel, only with disjoint ownership.
@@ -169,7 +177,7 @@ You are the captain. Own product judgment, implementation strategy, shared files
 Follow the Haven agent workflow:
 
 1. If the work is trivial, keep it in the captain session and explain why.
-2. For non-trivial work, use haven-workflow-coordinator before any other agent to choose the agent plan, ownership boundaries, and expected checks.
+2. For non-trivial work, use haven-workflow-coordinator before any other agent to choose the agent plan, ownership boundaries, and expected checks. Do this by default; do not wait for the user to explicitly request agents or parallel workers.
 3. Use haven-explorer for read-only discovery before implementation unless the change is trivial.
 4. Decide whether this should stay in the captain session or be split across subagents.
 5. If using workers, define explicit file ownership before they edit anything.
@@ -212,7 +220,7 @@ Before implementation, briefly tell me:
 - any worker file ownership boundaries
 - what checks you expect to run
 
-Then proceed with the work unless you find a real blocker.
+Then proceed with the work unless you find a real blocker. This update is informational, not a request for permission to use the agentic workflow.
 ```
 
 ## Feature Delivery Prompt Template

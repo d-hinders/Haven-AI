@@ -53,13 +53,14 @@ Before completing UI work:
 
 When a user asks to build a feature, improve a UX flow from feedback, or fix a bug from a report, use `docs/ai-agent-workflow.md`.
 
-If the user asks to "use the defined agents", "use the Haven agents", or otherwise wants agentic delivery, act as the captain:
+Agentic delivery is the default decision path for non-trivial Haven work. The user does not need to explicitly ask to "use agents", "use workers", or "use parallel agents" on each request. Act as the captain, decide whether the agentic flow is useful from the task shape and risk, and proceed with it when it is the better workflow:
 
 - Use `haven-workflow-coordinator` to choose the workflow, agent plan, file ownership boundaries, and expected checks when the work is non-trivial.
 - Use `haven-explorer` for read-only discovery before implementation unless the change is trivial.
 - Use `haven-ui-worker` and `haven-backend-worker` only for clean, bounded, disjoint implementation slices.
 - Keep shared files, gravity files, git hygiene, final integration, and product judgment in the captain session.
 - Use `haven-reviewer` for final product, UX, security, regression, and test review when the change touches user-facing UX, money movement, agent authority, shared behavior, or meaningful risk.
+- Briefly tell the user which agents will be used and why, but do not ask for permission unless there is a real blocker, destructive action, credential risk, or tool limitation.
 
 Gravity files the captain should usually own:
 

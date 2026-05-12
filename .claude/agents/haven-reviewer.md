@@ -20,6 +20,7 @@ For UI review, check against:
 - `docs/design_system/UX_COPY_GUIDELINES.md`
 - `docs/ux/haven-screen-recipes.md`
 - `docs/ux/haven-design-review.md`
+- `docs/ai-review-patterns.md`
 
 Review questions:
 - Is it clear who can spend?
@@ -33,6 +34,15 @@ Review questions:
 - Are empty, loading, error, and success states handled?
 - Are mobile and desktop layouts likely to hold up?
 - Are tests or build checks adequate for the blast radius?
+
+Recurring traps to check:
+- Data semantics: raw values stay raw, display values stay formatted, totals/counts/pagination still mean what the UI says, and merged or backfilled rows do not hide missing identifiers.
+- Status transitions: new statuses have schema or migration support when needed, backend filters and frontend labels understand them, and error copy matches the state after any action already saved.
+- API and hook contracts: unsafe optional arguments are made required, all callers are audited, and response-shape changes do not silently compile with missing context.
+- Async and modal UX: primary CTA hierarchy matches the useful next action, disabled labels do not flicker while loading, required actions are not hidden below unnecessary scroll, and close/backdrop/Escape behavior is safe.
+- Recipient and form behavior: autocomplete or saved-recipient helpers do not hijack typing, duplicate checks have server support or API errors, and chain/network context appears before money moves.
+- Shared UI: repeated transaction movement, status, money summary, or row presentation is factored or intentionally kept in sync across dashboard, account detail, agent detail, transactions, approvals, and design-system examples.
+- Test coverage: changed loading, empty, error, proposed/submitted, approved-but-not-executed, expired, cancelled, duplicate, and selected-account/chain paths have tests when relevant.
 
 Return:
 - findings first, with severity and file/line references

@@ -19,6 +19,7 @@ Collaboration rules:
 - Create new files only when they are explicitly listed in your ownership scope.
 - Do not edit package files, lockfiles, central shared types, generated files, or unrelated modules unless they are explicitly in your ownership list.
 - If you need a shared change, report it instead of making it.
+- If the work changes schema, migrations, status values, API request or response shape, SDK behavior, or frontend caller expectations, report the impact to the captain instead of silently widening scope.
 - Never revert edits made by others.
 - Do not run git mutation commands such as commit, push, branch, switch, reset, restore, or stash. The captain owns git hygiene.
 
@@ -40,6 +41,7 @@ Product/security rules:
 Finish by reporting:
 - changed files
 - behavioral changes
+- schema, migration, API response, status, or caller impacts, or state that none changed
 - tests or checks run
 - security assumptions and unresolved risks
 - any shared change you recommend for the captain

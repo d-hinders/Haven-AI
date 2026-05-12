@@ -16,6 +16,8 @@ import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import NetworkPill from '@/components/NetworkPill'
 import { truncate } from '@/lib/format'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 // ── Add Safe Modal ──────────────────────────────────────────────────
 
@@ -507,9 +509,9 @@ function SafeCard({
       {/* Fiat total */}
       <div className="mb-4">
         {portfolioLoading ? (
-          <div className="h-7 w-28 bg-[var(--v2-surface-2)] rounded animate-pulse" />
+          <Skeleton className="h-7 w-28" />
         ) : (
-          <p className="text-xl font-semibold tracking-tight text-[var(--v2-ink)] tabular-nums">
+          <p className="text-xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
             {formatFiat(fiatTotal, currency)}
           </p>
         )}
@@ -551,15 +553,16 @@ export default function AccountsOverviewClient() {
 
   return (
     <div className="max-w-5xl">
-      {/* Header */}
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight mb-1">Accounts</h1>
-          <p className="text-sm text-[var(--v2-ink-3)]">
-            {safes.length} account{safes.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        {safes.length > 0 && (
+      <PageHeader
+        title="Accounts"
+        subtitle={
+          safes.length > 0 ? (
+            <>
+              <span className="v2-tabular">{safes.length}</span> {safes.length === 1 ? 'account' : 'accounts'} linked
+            </>
+          ) : undefined
+        }
+        actions={safes.length > 0 ? (
           <button
             onClick={() => setAddModalOpen(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
@@ -569,8 +572,8 @@ export default function AccountsOverviewClient() {
             </svg>
             Add Account
           </button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {/* Orphaned agents warning */}
       {orphanedAgents.length > 0 && (

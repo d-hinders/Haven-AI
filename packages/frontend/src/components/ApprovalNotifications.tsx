@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApprovals } from '@/hooks/useApprovals'
 import { approvalRecipientLabel, approvalSourceLabel } from '@/lib/approval-labels'
 import { timeAgo } from '@/lib/format'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 export default function ApprovalNotifications() {
   const [open, setOpen] = useState(false)
@@ -64,7 +65,7 @@ export default function ApprovalNotifications() {
           <path d="M9 17a3 3 0 0 0 6 0" />
         </svg>
         {actionableCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[var(--v2-warning)] text-white text-[10px] font-bold flex items-center justify-center shadow-[var(--v2-shadow-button)]">
+          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[var(--v2-warning)] text-white text-[10px] font-bold flex items-center justify-center shadow-[var(--v2-shadow-button)] v2-tabular">
             {actionableCount > 99 ? '99+' : actionableCount}
           </span>
         )}
@@ -88,7 +89,7 @@ export default function ApprovalNotifications() {
               </p>
             </div>
             {actionableCount > 0 && (
-              <span className="text-[10px] px-2 py-1 rounded-full font-semibold bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]">
+              <span className="text-[10px] px-2 py-1 rounded-full font-semibold bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] v2-tabular">
                 {actionableCount} waiting
               </span>
             )}
@@ -101,9 +102,9 @@ export default function ApprovalNotifications() {
                   key={index}
                   className="rounded-xl border border-[var(--v2-border)] bg-white p-3"
                 >
-                  <div className="h-3 w-28 rounded bg-[var(--v2-surface-2)] animate-pulse mb-2" />
-                  <div className="h-2 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse mb-2" />
-                  <div className="h-2 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  <Skeleton variant="text" className="h-3 w-28 mb-2" />
+                  <Skeleton variant="text" className="h-2 w-44 mb-2" />
+                  <Skeleton variant="text" className="h-2 w-24" />
                 </div>
               ))}
             </div>
@@ -136,40 +137,47 @@ export default function ApprovalNotifications() {
           ) : (
             <>
               <div className="relative max-h-[360px] overflow-y-auto p-2 space-y-2 bg-[var(--v2-surface)]">
-                {pendingApprovals.map((approval) => (
-                  <Link
-                    key={approval.id}
-                    href="/approvals"
-                    onClick={() => setOpen(false)}
-                    className="block rounded-xl border border-[var(--v2-border)] bg-white px-3 py-3 hover:border-[var(--v2-border-strong)] transition-all"
-                  >
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
-                          {approval.agent_name}
-                        </p>
-                        <p className="text-[11px] text-[var(--v2-ink-3)]">
-                          {timeAgo(approval.created_at)}
-                        </p>
+                {pendingApprovals.map((approval) => {
+                  const sourceLabel = approvalSourceLabel({
+                    reason: approval.reason,
+                    source: approval.source,
+                  })
+
+                  return (
+                    <Link
+                      key={approval.id}
+                      href="/approvals"
+                      onClick={() => setOpen(false)}
+                      className="block rounded-xl border border-[var(--v2-border)] bg-white px-3 py-3 hover:border-[var(--v2-border-strong)] transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
+                            {approval.agent_name}
+                          </p>
+                          <p className="text-[11px] text-[var(--v2-ink-3)]">
+                            {timeAgo(approval.created_at)}
+                          </p>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] font-semibold flex-shrink-0">
+                          {approval.status === 'approved' ? 'Complete' : 'Review'}
+                        </span>
                       </div>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] font-semibold flex-shrink-0">
-                        {approval.status === 'approved' ? 'Complete' : 'Review'}
-                      </span>
-                    </div>
-                    <p className="text-sm text-[var(--v2-ink)]">
-                      {approval.amount_human} {approval.token_symbol}
-                    </p>
-                    <p className="text-xs text-[var(--v2-ink-3)] mt-1">
-                      To {approvalRecipientLabel({
-                        reason: approval.reason,
-                        source: approval.source,
-                        x402ResourceUrl: approval.x402_resource_url,
-                        toAddress: approval.to_address,
-                      })}
-                      {approvalSourceLabel({ reason: approval.reason, source: approval.source }) ? ' · x402' : ''}
-                    </p>
-                  </Link>
-                ))}
+                      <p className="text-sm text-[var(--v2-ink)]">
+                        <span className="v2-tabular">{approval.amount_human}</span> {approval.token_symbol}
+                      </p>
+                      <p className="text-xs text-[var(--v2-ink-3)] mt-1">
+                        To {approvalRecipientLabel({
+                          reason: approval.reason,
+                          source: approval.source,
+                          x402ResourceUrl: approval.x402_resource_url,
+                          toAddress: approval.to_address,
+                        })}
+                        {sourceLabel ? ` · ${sourceLabel}` : ''}
+                      </p>
+                    </Link>
+                  )
+                })}
               </div>
               <div className="relative px-4 py-3 border-t border-[var(--v2-border)] bg-white">
                 <Link

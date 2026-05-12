@@ -12,7 +12,7 @@ import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
-import { parseX402Hostname } from '@/lib/transaction-labels'
+import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
@@ -21,8 +21,10 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Skeleton } from '@/components/ui/Skeleton'
 import {
   AgentActivityRow,
   AgentBudgetCard,
@@ -62,8 +64,9 @@ function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 
 }
 
 function activityTitle(item: ActivityItem, agentName?: string): string {
-  if (item.source === 'x402') {
-    return agentName ? `x402 payment by ${agentName}` : 'x402 payment'
+  const sourceTitle = paymentSourceTitle(item.source)
+  if (sourceTitle) {
+    return agentName ? `${sourceTitle} by ${agentName}` : sourceTitle
   }
   if (item.type === 'approval') return 'Approval request'
   if (item.status === 'failed') return 'Payment failed'
@@ -72,7 +75,7 @@ function activityTitle(item: ActivityItem, agentName?: string): string {
 }
 
 function activityMovement(item: ActivityItem, walletName: string) {
-  const recipient = item.source === 'x402'
+  const recipient = isMachinePaymentSource(item.source)
     ? parseX402Hostname(item.x402_resource_url) ?? truncate(item.to)
     : truncate(item.to)
 
@@ -190,11 +193,11 @@ export default function AgentDetailClient({ agentId }: Props) {
     return (
       <div className="max-w-5xl">
         <div className="space-y-4">
-          <div className="h-6 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-          <div className="h-24 rounded-xl bg-[var(--v2-surface-2)] animate-pulse" />
+          <Skeleton variant="text" className="h-6 w-40" />
+          <Skeleton className="h-24 rounded-xl" />
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[0, 1, 2].map((index) => (
-              <div key={index} className="h-28 rounded-xl bg-[var(--v2-surface-2)] animate-pulse" />
+              <Skeleton key={index} className="h-28 rounded-xl" />
             ))}
           </div>
         </div>
@@ -348,35 +351,13 @@ export default function AgentDetailClient({ agentId }: Props) {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Card hover={false} className="p-5 md:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">{currentAgent.name}</h1>
-              <StatusBadge tone={statusTone(currentAgent.status)}>
-                {statusLabel(currentAgent.status)}
-              </StatusBadge>
-            </div>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              {currentAgent.description || 'This agent can make payments within the rules you set.'}
-            </p>
-            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
-                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
-                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{networkName}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
-                <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
+      <PageHeader
+        title={currentAgent.name}
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <StatusBadge tone={statusTone(currentAgent.status)}>
+              {statusLabel(currentAgent.status)}
+            </StatusBadge>
             {!isRevoked ? (
               <Button
                 onClick={() => setEditOpen(true)}
@@ -395,7 +376,27 @@ export default function AgentDetailClient({ agentId }: Props) {
               </Button>
             )}
           </div>
-        </div>
+        }
+      />
+
+      <Card hover={false} className="p-5 md:p-6">
+        <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          {currentAgent.description || 'This agent can make payments within the rules you set.'}
+        </p>
+        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
+            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
+            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{networkName}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
+            <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
+          </div>
+        </dl>
       </Card>
 
       {revokeBlockedByOtherDevice ? (
@@ -504,7 +505,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             {activityLoading ? (
               <div className="p-5 space-y-3">
                 {[0, 1, 2].map((index) => (
-                  <div key={index} className="h-14 rounded-lg bg-[var(--v2-surface-2)] animate-pulse" />
+                  <Skeleton key={index} className="h-14 rounded-lg" />
                 ))}
               </div>
             ) : activity.length === 0 ? (

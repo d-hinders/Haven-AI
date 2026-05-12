@@ -14,7 +14,7 @@ import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
-import { parseX402Hostname } from '@/lib/transaction-labels'
+import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import CreateAgentModal from '@/components/CreateAgentModal'
@@ -24,6 +24,7 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { TransactionActivityRow, TransactionMovement } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -260,7 +261,7 @@ function DashboardHero({
 }) {
   return (
     <section
-      className="relative overflow-hidden rounded-[24px] border shadow-[0_10px_24px_-22px_rgba(16,24,40,0.18)]"
+      className="relative overflow-hidden rounded-[24px] border shadow-[var(--v2-shadow-card-raised)]"
       style={{ borderColor: '#E7E9F2', backgroundColor: '#F7F5FF' }}
     >
       <div
@@ -413,15 +414,16 @@ function AttentionSection({
 
 function transactionTitle(tx: AggregatedTransaction): string {
   if (tx.direction === 'in') return 'Received payment'
-  if (tx.source === 'x402' && tx.agentName) return `x402 payment by ${tx.agentName}`
-  if (tx.source === 'x402') return 'x402 payment'
+  const sourceTitle = paymentSourceTitle(tx.source)
+  if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
+  if (sourceTitle) return sourceTitle
   if (tx.agentName) return `Agent payment by ${tx.agentName}`
   return 'Payment sent by you'
 }
 
 function transactionMovement(tx: AggregatedTransaction, resolveAddress: (address: string) => string | null) {
   const counterparty = tx.direction === 'in' ? tx.from : tx.to
-  const label = tx.source === 'x402'
+  const label = isMachinePaymentSource(tx.source)
     ? parseX402Hostname(tx.x402ResourceUrl) ?? truncate(counterparty)
     : resolveAddress(counterparty) ?? truncate(counterparty)
   const from = tx.direction === 'in' ? label : tx.safeName
@@ -768,12 +770,7 @@ export default function DashboardClient() {
 
   return (
     <div className="max-w-6xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">Dashboard</h1>
-        <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
-          Your money, agents, and actions at a glance.
-        </p>
-      </div>
+      <PageHeader title="Dashboard" subtitle="Your money, agents, and actions at a glance." />
 
       {showOnboardingGuide && onboardingStage ? (
         <div className="space-y-6">

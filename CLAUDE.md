@@ -211,6 +211,6 @@ Multiple independent layers, all need to be compromised for funds to be at risk:
 
 ## Agentic Development Workflow
 
-Use `docs/ai-agent-workflow.md` for feature delivery, UX feedback iteration, and bug fixing. When the user asks to use the defined Haven agents, keep the main interactive session as captain and use the project agents in `.claude/agents/` for workflow coordination, discovery, bounded implementation, and review.
+Use `docs/ai-agent-workflow.md` for feature delivery, UX feedback iteration, and bug fixing. Agentic delivery is a default workflow decision for non-trivial Haven work, not an opt-in phrase the user must repeat. Keep the main interactive session as captain and use the project agents in `.claude/agents/` for workflow coordination, discovery, bounded implementation, and review when the task shape warrants it.
 
-The captain owns product judgment, shared files, gravity files, git hygiene, final integration, and verification. Use workers only for clean, disjoint slices with explicit file ownership.
+The captain owns product judgment, shared files, gravity files, git hygiene, final integration, and verification. Use workers only for clean, disjoint slices with explicit file ownership. Inform the user which agents are being used, but do not ask for permission unless there is a real blocker, destructive action, credential risk, or tool limitation.

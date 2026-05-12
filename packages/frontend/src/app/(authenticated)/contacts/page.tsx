@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 function ContactIcon() {
   return (
@@ -307,17 +309,15 @@ export default function ContactsPage() {
 
   return (
     <div className="max-w-5xl">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">Contacts</h1>
-          <p className="mt-1 max-w-xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Save recipients you pay often so payment reviews show names instead of only wallet addresses.
-          </p>
-        </div>
-        <Button onClick={() => setShowAdd(true)} className="sm:flex-shrink-0">
-          Add contact
-        </Button>
-      </div>
+      <PageHeader
+        title="Contacts"
+        subtitle="Save recipients you pay often so payment reviews show names instead of only wallet addresses."
+        actions={
+          <Button onClick={() => setShowAdd(true)}>
+            Add contact
+          </Button>
+        }
+      />
 
       {contacts.length > 0 && (
         <div className="relative mb-4">
@@ -346,10 +346,10 @@ export default function ContactsPage() {
         <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
           {[0, 1, 2].map((item) => (
             <div key={item} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0">
-              <div className="h-9 w-9 flex-shrink-0 animate-pulse rounded-full bg-[var(--v2-surface-2)]" />
+              <Skeleton variant="circle" className="h-9 w-9 flex-shrink-0" />
               <div className="flex-1 space-y-2">
-                <div className="h-3 w-32 animate-pulse rounded bg-[var(--v2-surface-2)]" />
-                <div className="h-2 w-24 animate-pulse rounded bg-[var(--v2-surface-2)]" />
+                <Skeleton variant="text" className="h-3 w-32" />
+                <Skeleton variant="text" className="h-2 w-24" />
               </div>
             </div>
           ))}

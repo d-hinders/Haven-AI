@@ -38,6 +38,7 @@ import {
   ApprovalRequiredBanner,
   CredentialHandoffCard,
 } from './haven'
+import { useToast } from './ui/Toast'
 
 
 interface AllowanceEntry {
@@ -92,6 +93,7 @@ export default function CreateAgentModal({
   preset = null,
   onCreated,
 }: Props) {
+  const { toast } = useToast()
   const { user, activeSafe } = useAuth()
   const userSafes = user?.safes ?? []
 
@@ -458,6 +460,7 @@ export default function CreateAgentModal({
       setCreatedAgentId(agent.id)
       setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
       setStep('done')
+      toast.success('Agent created')
       onCreated(agent)
     } catch (err: unknown) {
       console.error('[Haven] Agent setup error:', err)

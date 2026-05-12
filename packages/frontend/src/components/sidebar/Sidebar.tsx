@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext'
 import { displayName, userInitial as getUserInitial } from '@/lib/user'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { useApprovals } from '@/hooks/useApprovals'
+import { Tooltip } from '@/components/ui/Tooltip'
 
 interface NavItem {
   label: string
@@ -279,19 +280,21 @@ export default function Sidebar() {
 
               {/* Kebab trigger */}
               <div className="relative">
-                <button
-                  ref={triggerRef}
-                  type="button"
-                  onClick={() => setMenuOpen((v) => !v)}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  aria-label="User menu"
-                  className="w-7 h-7 flex items-center justify-center rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:outline-none transition-colors"
-                >
-                  <span className="inline-flex w-4 h-4 items-center justify-center">
-                    {icons.dotsVertical}
-                  </span>
-                </button>
+                <Tooltip label="Account menu" side="top">
+                  <button
+                    ref={triggerRef}
+                    type="button"
+                    onClick={() => setMenuOpen((v) => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    aria-label="User menu"
+                    className="w-7 h-7 flex items-center justify-center rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:outline-none transition-colors"
+                  >
+                    <span className="inline-flex w-4 h-4 items-center justify-center">
+                      {icons.dotsVertical}
+                    </span>
+                  </button>
+                </Tooltip>
 
                 {/* Kebab popover — opens upward */}
                 {menuOpen && (

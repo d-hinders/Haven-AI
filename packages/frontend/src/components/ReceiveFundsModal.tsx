@@ -9,6 +9,7 @@ import type { UserSafe } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { useToast } from '@/components/ui/Toast'
 
 interface Props {
   open: boolean
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
+  const { toast } = useToast()
   const [copied, setCopied] = useState(false)
   const [showQr, setShowQr] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
@@ -62,6 +64,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
     void navigator.clipboard.writeText(safeAddress)
     setCopied(true)
     setTimeout(() => setCopied(false), 1800)
+    toast.success('Address copied')
   }
 
   return (

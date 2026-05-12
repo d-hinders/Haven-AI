@@ -14,13 +14,14 @@ import type { Contact } from '@/hooks/useContacts'
 import NetworkGate from './NetworkGate'
 import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
   ApprovalRequiredBanner,
   ExternalDetailsLink,
   TransactionMovement,
 } from '@/components/haven'
+import { useToast } from '@/components/ui/Toast'
 
 interface SendSafeOption {
   id: string
@@ -47,6 +48,7 @@ function SendDetail({
   mono?: boolean
   subMono?: boolean
 }) {
+  const { toast } = useToast()
   return (
     <div>
       <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">{label}</dt>
@@ -62,7 +64,14 @@ function SendDetail({
             <button
               type="button"
               aria-label={copyLabel ?? `Copy ${label.toLowerCase()}`}
-              onClick={() => { void navigator.clipboard?.writeText(copyValue) }}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard?.writeText(copyValue)
+                  toast.success('Address copied')
+                } catch {
+                  toast.error('Copy failed')
+                }
+              }}
               className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
@@ -139,6 +148,7 @@ export default function SendModal({
   contextLoading = false,
   contextError = null,
 }: SendModalProps) {
+  const { toast } = useToast()
   const safeAddressForHooks = safeAddress as Address
   const { status, txHash, error, send, reset } = useSendTransaction({
     safeAddress: safeAddressForHooks,
@@ -175,6 +185,8 @@ export default function SendModal({
   const [recipient, setRecipient] = useState('')
   const [selectedContactName, setSelectedContactName] = useState<string | null>(null)
   const [formError, setFormError] = useState('')
+  const [amountError, setAmountError] = useState('')
+  const [recipientError, setRecipientError] = useState('')
   const [step, setStep] = useState<'form' | 'review' | 'executing' | 'result'>('form')
   const [showContactPicker, setShowContactPicker] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
@@ -237,6 +249,8 @@ export default function SendModal({
       setRecipient('')
       setSelectedContactName(null)
       setFormError('')
+      setAmountError('')
+      setRecipientError('')
       setStep('form')
       setShowContactPicker(false)
       setContactSearch('')
@@ -246,19 +260,26 @@ export default function SendModal({
 
   // Track send status to update step
   useEffect(() => {
-    if (status === 'confirmed' || status === 'proposed') {
+    if (status === 'confirmed') {
       setStep('result')
-    }
-    if (status === 'error') {
+      toast.success('Payment sent')
+    } else if (status === 'proposed') {
+      setStep('result')
+      toast.info('Payment queued for approval')
+    } else if (status === 'error') {
       // Stay on executing step to show error with retry
       setStep('result')
     }
-  }, [status])
+  }, [status, toast])
 
   // ── Validation ───────────────────────────────────────────────────
   const validate = useCallback((): boolean => {
+    setAmountError('')
+    setRecipientError('')
+    setFormError('')
+
     if (!amount || parseFloat(amount) <= 0) {
-      setFormError('Enter an amount greater than 0')
+      setAmountError('Enter an amount greater than 0')
       return false
     }
 
@@ -266,27 +287,26 @@ export default function SendModal({
       const bal = parseFloat(tokenBalance.formatted)
       const amt = parseFloat(amount)
       if (amt > bal) {
-        setFormError(`Insufficient balance. You have ${tokenBalance.formatted} ${selectedToken}`)
+        setAmountError(`Insufficient balance. You have ${tokenBalance.formatted} ${selectedToken}`)
         return false
       }
     }
 
     if (!recipient) {
-      setFormError('Enter a recipient address')
+      setRecipientError('Enter a recipient address')
       return false
     }
 
     if (!isValidAddress(recipient)) {
-      setFormError('Enter a valid wallet address')
+      setRecipientError('Enter a valid wallet address')
       return false
     }
 
     if (recipient.toLowerCase() === safeAddress.toLowerCase()) {
-      setFormError('Cannot send to the same account address')
+      setRecipientError('Cannot send to the same account address')
       return false
     }
 
-    setFormError('')
     return true
   }, [amount, recipient, safeAddress, selectedToken, tokenBalance])
 
@@ -353,6 +373,7 @@ export default function SendModal({
     setRecipient(value)
     setSelectedContactName(resolveAddress?.(value) ?? null)
     setFormError('')
+    setRecipientError('')
   }
 
   // ── Don't render if closed ───────────────────────────────────────
@@ -499,7 +520,7 @@ export default function SendModal({
                   return (
                     <button
                       key={t.symbol}
-                      onClick={() => { setSelectedToken(t.symbol); setFormError('') }}
+                      onClick={() => { setSelectedToken(t.symbol); setFormError(''); setAmountError('') }}
                       className={`p-3 rounded-lg border text-left transition-all duration-150 ${
                         isActive
                           ? 'border-[var(--v2-brand)]/50 bg-[var(--v2-brand-soft)]'
@@ -520,46 +541,33 @@ export default function SendModal({
 
             {/* Amount */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-[var(--v2-ink-2)]">Amount</label>
-                {tokenBalance && (
-                  <button
-                    onClick={() => setAmount(tokenBalance.formatted)}
-                    className="text-[11px] text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
-                  >
-                    Max: {tokenBalance.formatted}
-                  </button>
-                )}
-              </div>
-              <div className="relative">
-                <Input
-                  type="text"
-                  inputMode="decimal"
-                  value={amount}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    // Allow numbers and one decimal point
-                    if (/^\d*\.?\d*$/.test(v)) {
-                      setAmount(v)
-                      setFormError('')
-                    }
-                  }}
-                  placeholder="0.00"
-                  className={`py-3 pr-16 bg-[var(--v2-surface-2)] rounded-lg font-mono ${
-                    amountWarning
-                      ? 'border-[var(--v2-danger)]/30 focus:border-[var(--v2-danger)]/40 focus:ring-[var(--v2-danger)]/20'
-                      : ''
-                  }`}
-                />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[var(--v2-ink-3)]">
-                  {selectedToken}
-                </span>
-              </div>
-              {amountWarning && (
-                <p className="mt-2 text-xs text-[var(--v2-danger)]">
-                  {amountWarning}
-                </p>
-              )}
+              <label className="block text-xs text-[var(--v2-ink-2)] mb-2">Amount</label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => {
+                  const v = e.target.value
+                  // Allow numbers and one decimal point
+                  if (/^\d*\.?\d*$/.test(v)) {
+                    setAmount(v)
+                    setFormError('')
+                    setAmountError('')
+                  }
+                }}
+                placeholder="0.00"
+                invalid={Boolean(amountError)}
+                helperText={amountError || (amountWarning ? amountWarning : undefined)}
+                rightAction={
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-[var(--v2-ink-3)]">{selectedToken}</span>
+                    {tokenBalance && (
+                      <MaxButton onClick={() => setAmount(tokenBalance.formatted)} />
+                    )}
+                  </div>
+                }
+                className="py-3 bg-[var(--v2-surface-2)] rounded-lg font-mono"
+              />
             </div>
 
             {/* Recipient */}
@@ -610,6 +618,13 @@ export default function SendModal({
                   value={recipient}
                   onChange={(e) => handleRecipientChange(e.target.value)}
                   placeholder="Paste address or choose a saved recipient"
+                  invalid={Boolean(recipientError)}
+                  helperText={recipientError || undefined}
+                  rightAction={
+                    <PasteButton
+                      onPaste={(text) => handleRecipientChange(text)}
+                    />
+                  }
                   className="py-3 bg-[var(--v2-surface-2)] rounded-lg font-mono"
                 />
                 <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">

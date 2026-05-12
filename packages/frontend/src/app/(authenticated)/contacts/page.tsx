@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { Tooltip } from '@/components/ui/Tooltip'
 
 function ContactIcon() {
   return (
@@ -186,7 +187,9 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
-        <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
+        <Tooltip label={contact.address} mono>
+          <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
+        </Tooltip>
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-1">
@@ -274,7 +277,9 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
         </p>
         <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
           <p className="text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
-          <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
+          <Tooltip label={contact.address} mono>
+            <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
+          </Tooltip>
         </div>
         {error && (
           <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">

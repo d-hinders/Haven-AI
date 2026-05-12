@@ -1,4 +1,5 @@
 import { truncate } from '@/lib/format'
+import { Tooltip } from '@/components/ui/Tooltip'
 
 export function WalletIdentityBlock({
   name,
@@ -28,7 +29,9 @@ export function WalletIdentityBlock({
             </span>
           </div>
           {address && (
-            <p className="mt-1 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(address)}</p>
+            <Tooltip label={address} mono>
+              <p className="mt-1 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(address)}</p>
+            </Tooltip>
           )}
           {balance && <p className="mt-3 text-sm font-medium text-[var(--v2-ink)] v2-tabular">{balance}</p>}
         </div>

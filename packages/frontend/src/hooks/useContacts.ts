@@ -27,36 +27,25 @@ export function useContacts(): UseContactsReturn {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const loadContacts = useCallback(async (): Promise<void> => {
+  const loadContacts = useCallback(async (isCancelled: () => boolean = () => false): Promise<void> => {
+    if (isCancelled()) return
     setLoading(true)
     setError(null)
     try {
       const res = await api.get<{ contacts: Contact[] }>('/contacts')
-      setContacts(res.contacts)
+      if (!isCancelled()) setContacts(res.contacts)
     } catch {
-      setError('We could not load your contacts. Try again in a moment.')
+      if (!isCancelled()) setError('We could not load your contacts. Try again in a moment.')
     } finally {
-      setLoading(false)
+      if (!isCancelled()) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     let cancelled = false
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await api.get<{ contacts: Contact[] }>('/contacts')
-        if (!cancelled) setContacts(res.contacts)
-      } catch {
-        if (!cancelled) setError('We could not load your contacts. Try again in a moment.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
+    void loadContacts(() => cancelled)
     return () => { cancelled = true }
-  }, [])
+  }, [loadContacts])
 
   const addContact = useCallback(async (name: string, address: string): Promise<Contact> => {
     const contact = await api.post<Contact>('/contacts', { name, address })
@@ -88,5 +77,7 @@ export function useContacts(): UseContactsReturn {
     [contacts],
   )
 
-  return { contacts, loading, error, refetch: loadContacts, addContact, updateContact, deleteContact, resolveAddress }
+  const refetch = useCallback(() => loadContacts(), [loadContacts])
+
+  return { contacts, loading, error, refetch, addContact, updateContact, deleteContact, resolveAddress }
 }

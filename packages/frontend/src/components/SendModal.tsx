@@ -350,14 +350,6 @@ export default function SendModal({
   }
 
   const handleRecipientChange = (value: string) => {
-    const trimmedValue = value.trim()
-    const exactContact = contacts.find((contact) => contact.name.toLowerCase() === trimmedValue.toLowerCase())
-
-    if (exactContact) {
-      handleSelectContact(exactContact)
-      return
-    }
-
     setRecipient(value)
     setSelectedContactName(resolveAddress?.(value) ?? null)
     setFormError('')

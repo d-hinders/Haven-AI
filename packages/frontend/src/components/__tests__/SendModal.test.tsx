@@ -147,7 +147,7 @@ describe('SendModal', () => {
     expect(screen.getByRole('link', { name: 'Add contacts' })).toHaveAttribute('href', '/contacts')
   })
 
-  it('uses a saved recipient name to fill the recipient address', () => {
+  it('uses an explicit saved-recipient selection to fill the recipient address', () => {
     render(
       <SendModal
         {...defaultProps}
@@ -163,7 +163,7 @@ describe('SendModal', () => {
       />,
     )
 
-    fireEvent.change(screen.getByPlaceholderText(RECIPIENT_INPUT), { target: { value: 'Acme Services' } })
+    fireEvent.click(screen.getByRole('button', { name: /Acme Services/ }))
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 

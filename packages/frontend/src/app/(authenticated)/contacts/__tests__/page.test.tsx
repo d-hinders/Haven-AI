@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseContacts = vi.fn()
@@ -19,18 +19,19 @@ const CONTACT = {
 
 function setupContacts(overrides = {}) {
   const refetch = vi.fn().mockResolvedValue(undefined)
+  const addContact = vi.fn().mockResolvedValue(CONTACT)
   mockUseContacts.mockReturnValue({
     contacts: [],
     loading: false,
     error: null,
     refetch,
-    addContact: vi.fn().mockResolvedValue(CONTACT),
+    addContact,
     updateContact: vi.fn().mockResolvedValue(CONTACT),
     deleteContact: vi.fn().mockResolvedValue(undefined),
     resolveAddress: vi.fn(),
     ...overrides,
   })
-  return { refetch }
+  return { addContact, refetch }
 }
 
 describe('ContactsPage', () => {
@@ -62,6 +63,21 @@ describe('ContactsPage', () => {
 
     expect(screen.getByRole('dialog', { name: 'Add contact' })).toBeInTheDocument()
     expect(screen.getByLabelText('Recipient address')).toBeInTheDocument()
+  })
+
+  it('submits a new contact with trimmed values', async () => {
+    const { addContact } = setupContacts()
+
+    render(<ContactsPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add your first contact' }))
+    fireEvent.change(screen.getByLabelText('Contact name'), { target: { value: '  Acme Services  ' } })
+    fireEvent.change(screen.getByLabelText('Recipient address'), { target: { value: `  ${CONTACT.address}  ` } })
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Add contact' })).getByRole('button', { name: 'Add contact' }))
+
+    await waitFor(() => {
+      expect(addContact).toHaveBeenCalledWith('Acme Services', CONTACT.address)
+    })
   })
 
   it('renders saved recipients with visible row actions', () => {

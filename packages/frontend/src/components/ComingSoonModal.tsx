@@ -1,6 +1,8 @@
 'use client'
 
+import { useRef } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { Button } from '@/components/ui/Button'
 
 interface Props {
@@ -10,7 +12,9 @@ interface Props {
 }
 
 export default function ComingSoonModal({ open, onClose, onReceive }: Props) {
+  const panelRef = useRef<HTMLDivElement>(null)
   useEscapeToClose(open, onClose)
+  useFocusTrap(panelRef, open)
 
   if (!open) return null
 
@@ -22,9 +26,15 @@ export default function ComingSoonModal({ open, onClose, onReceive }: Props) {
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
-      <div className="relative mx-4 w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="coming-soon-title"
+        className="relative mx-4 w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]"
+      >
         <div className="border-b border-[var(--v2-border)] px-6 py-4">
-          <h2 className="text-base font-semibold text-[var(--v2-ink)]">Add funds is coming soon</h2>
+          <h2 id="coming-soon-title" className="text-base font-semibold text-[var(--v2-ink)]">Add funds is coming soon</h2>
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
             A guided fiat on-ramp is planned for a later release.
           </p>

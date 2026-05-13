@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate } from '@/lib/format'
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useToast } from '@/components/ui/Toast'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 interface Props {
   open: boolean
@@ -19,6 +20,8 @@ interface Props {
 
 export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   const { toast } = useToast()
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, open)
   const [copied, setCopied] = useState(false)
   const [showQr, setShowQr] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
@@ -71,6 +74,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="receive-funds-title"
@@ -140,7 +144,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
 
           {showQr && (
             <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
-              <div className="flex flex-col items-center">
+              <div role="status" aria-busy={!qrDataUrl} aria-live="polite" className="flex flex-col items-center">
                 {qrDataUrl ? (
                   <img
                     src={qrDataUrl}

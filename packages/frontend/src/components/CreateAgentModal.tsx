@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address, parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAddress } from 'viem/accounts'
@@ -39,6 +39,7 @@ import {
   CredentialHandoffCard,
 } from './haven'
 import { useToast } from './ui/Toast'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 
 interface AllowanceEntry {
@@ -94,6 +95,8 @@ export default function CreateAgentModal({
   onCreated,
 }: Props) {
   const { toast } = useToast()
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, open)
   const { user, activeSafe } = useAuth()
   const userSafes = user?.safes ?? []
 
@@ -617,7 +620,7 @@ export default function CreateAgentModal({
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Create agent" className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
           <div>

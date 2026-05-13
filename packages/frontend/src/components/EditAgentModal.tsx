@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address, parseUnits } from 'viem'
 import {
@@ -28,6 +28,7 @@ import { SigningStatus } from './SigningStatus'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -55,6 +56,8 @@ export default function EditAgentModal({
   existingOnChainAllowances,
   onUpdated,
 }: Props) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, open)
   const { activeSafe } = useAuth()
   const chainId = activeSafe?.chain_id ?? 100
   const chainTokens = getChainTokens(chainId)
@@ -270,7 +273,7 @@ export default function EditAgentModal({
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Edit agent" className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)]">
           <div>
@@ -285,6 +288,7 @@ export default function EditAgentModal({
           <button
             onClick={handleClose}
             disabled={step === 'executing' && execStatus !== 'error'}
+            aria-label="Close"
             className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 -mr-1"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -5,10 +5,13 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Input } from '@/components/ui/Input'
+import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
-import { Select } from '@/components/ui/Select'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { useToast } from '@/components/ui/Toast'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import {
   AgentActivityRow,
@@ -47,14 +50,17 @@ function Section({
 
 function LoadingCard() {
   return (
-    <Card hover={false} className="p-5">
-      <div className="h-4 w-28 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-      <div className="mt-5 h-8 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <div className="h-12 rounded-[10px] bg-[var(--v2-surface)] animate-pulse" />
-        <div className="h-12 rounded-[10px] bg-[var(--v2-surface)] animate-pulse" />
-      </div>
-    </Card>
+    <div role="status" aria-busy="true" aria-live="polite">
+      <Card hover={false} className="p-5">
+        <Skeleton variant="text" className="h-4 w-28" />
+        <Skeleton className="mt-5 h-8 w-40" />
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Skeleton className="h-12 rounded-[10px] bg-[var(--v2-surface)]" />
+          <Skeleton className="h-12 rounded-[10px] bg-[var(--v2-surface)]" />
+        </div>
+        <span className="sr-only">Loading example content</span>
+      </Card>
+    </div>
   )
 }
 
@@ -64,19 +70,21 @@ function MovementExample({ from, to }: { from: string; to: string }) {
 
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const [sampleAmount, setSampleAmount] = useState('')
+  const { toast } = useToast()
 
   return (
     <div className="mx-auto max-w-6xl space-y-10">
-      <div className="border-b border-[var(--v2-border)] pb-6">
-        <p className="text-xs font-medium text-[var(--v2-brand)]">Internal reference</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">
-          Haven design system
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          Use this page before changing product UX. It shows the primitives and Haven-specific
-          patterns Codex should compose instead of inventing new visual treatments.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Internal reference"
+        title="Haven design system"
+        subtitle="Use this page before changing product UX. It shows the primitives and Haven-specific patterns Codex should compose instead of inventing new visual treatments."
+        actions={
+          <Button variant="ghost" size="sm" onClick={() => toast.info('Use shared primitives before adding a new pattern.')}>
+            Show toast
+          </Button>
+        }
+      />
 
       <Section
         title="Primitives"
@@ -101,26 +109,59 @@ export default function DesignSystemPage() {
           </Card>
 
           <Card hover={false} className="p-5">
-            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Inputs and modal</h3>
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Inputs, feedback, and modal</h3>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="block text-xs font-medium text-[var(--v2-ink-3)]">
-                Agent name
-                <Input className="mt-1" defaultValue="Research assistant" />
+                Amount
+                <Input
+                  className="mt-1 v2-tabular"
+                  placeholder="0.00"
+                  value={sampleAmount}
+                  onChange={(event) => setSampleAmount(event.target.value)}
+                  rightAction={<MaxButton onClick={() => setSampleAmount('250.00')} />}
+                  helperText="Use Max when the full balance should be sent."
+                />
               </label>
               <label className="block text-xs font-medium text-[var(--v2-ink-3)]">
-                Budget period
-                <Select className="mt-1" defaultValue="day">
-                  <option value="day">Per day</option>
-                  <option value="week">Per week</option>
-                  <option value="month">Per month</option>
-                </Select>
+                Recipient address
+                <Input
+                  className="mt-1 font-mono"
+                  defaultValue=""
+                  placeholder="0x..."
+                  rightAction={<PasteButton onPaste={() => toast.success('Address pasted')} />}
+                  invalid
+                  helperText="Paste a valid wallet address."
+                />
               </label>
             </div>
-            <Button className="mt-4" variant="ghost" onClick={() => setModalOpen(true)}>
-              Open modal
-            </Button>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Tooltip label={sampleAddress} mono>
+                <button
+                  type="button"
+                  className="rounded font-mono text-xs text-[var(--v2-ink-2)] underline decoration-[var(--v2-border-strong)] underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                >
+                  0x8f4F...a6f4
+                </button>
+              </Tooltip>
+              <Button variant="ghost" size="sm" onClick={() => setModalOpen(true)}>
+                Open modal
+              </Button>
+              <Button size="sm" onClick={() => toast.success('Address copied')}>
+                Copy feedback
+              </Button>
+            </div>
           </Card>
         </div>
+
+        <Card hover={false} elevation="raised" className="p-5">
+          <p className="text-xs font-medium text-[var(--v2-ink-3)]">Raised card example</p>
+          <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+            $4,280.35
+          </p>
+          <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
+            Reserve raised elevation for page-anchor surfaces such as a balance hero or account total.
+          </p>
+        </Card>
       </Section>
 
       <Section
@@ -299,7 +340,7 @@ export default function DesignSystemPage() {
               <div>
                 <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Recipient</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Acme Services</dd>
-                <dd className="mt-0.5 text-[11px] text-[var(--v2-ink-3)] v2-mono">0x7a58...91c2</dd>
+                <dd className="mt-0.5 font-mono text-[11px] text-[var(--v2-ink-3)]">0x7a58...91c2</dd>
               </div>
               <div>
                 <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Network</dt>
@@ -332,7 +373,9 @@ export default function DesignSystemPage() {
                 <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Saved recipients</h3>
                 <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Use names for people and services you pay often. Confirm the network in Send.</p>
               </div>
-              <Button size="sm">Add contact</Button>
+              <Button size="sm" className="flex-shrink-0 whitespace-nowrap">
+                Add contact
+              </Button>
             </div>
           </div>
           {[
@@ -442,49 +485,116 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="Full history rows lead with what happened, keep raw hashes out of the primary label, and show the money path without repeating metadata."
+        description="The full transaction route uses a semantic sortable table. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
       >
         <Card hover={false} className="overflow-hidden">
-          <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-3">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
-              <span>Activity</span>
-              <span className="text-right">Amount</span>
-            </div>
-          </div>
-          <div className="divide-y divide-[var(--v2-border)]">
-            <TransactionActivityRow
-              title="Received payment"
-              description={<MovementExample from="Acme Operations" to="Operating wallet" />}
-              amount="+500.00 USDC"
-              amountTone="success"
-              status="Received"
-              statusTone="success"
-              timestamp="12m ago"
-              direction="in"
-              action={<ExternalDetailsLink href="#" />}
-            />
-            <TransactionActivityRow
-              title="x402 payment by Research assistant"
-              description={<MovementExample from="Operating wallet" to="API provider" />}
-              amount="-12.00 USDC"
-              status="Sent"
-              statusTone="neutral"
-              timestamp="1h ago"
-              direction="out"
-              action={<ExternalDetailsLink href="#" />}
-            />
-            <TransactionActivityRow
-              title="Payment sent by you"
-              description={<MovementExample from="Operating wallet" to="Unknown vendor" />}
-              amount="-80.00 USDC"
-              amountTone="danger"
-              status="Failed"
-              statusTone="danger"
-              timestamp="Yesterday"
-              direction="out"
-              action={<ExternalDetailsLink href="#" />}
-            />
-          </div>
+          <table className="w-full border-separate border-spacing-0">
+            <thead className="hidden md:table-header-group">
+              <tr>
+                <th className="w-10 border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3" scope="col">
+                  <span className="sr-only">Direction</span>
+                </th>
+                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
+                  Activity
+                </th>
+                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
+                  Initiator
+                </th>
+                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
+                  From / To
+                </th>
+                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="descending">
+                  <button
+                    type="button"
+                    aria-label="Sort by Date, currently descending"
+                    className="inline-flex items-center gap-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                  >
+                    Date
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </th>
+                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-right text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="none">
+                  <button
+                    type="button"
+                    aria-label="Sort by Amount, currently unsorted"
+                    className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                  >
+                    Amount
+                  </button>
+                </th>
+                <th className="w-8 border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3" scope="col">
+                  <span className="sr-only">External details</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
+              {[
+                {
+                  title: 'Received payment',
+                  from: 'Acme Operations',
+                  to: 'Operating wallet',
+                  initiator: 'You',
+                  date: '12m ago',
+                  amount: '+500.00 USDC',
+                  amountClass: 'text-[var(--v2-success)]',
+                  directionClass: 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
+                  direction: 'in',
+                },
+                {
+                  title: 'x402 payment by Research assistant',
+                  from: 'Operating wallet',
+                  to: 'API provider',
+                  initiator: 'Research assistant',
+                  date: '1h ago',
+                  amount: '-12.00 USDC',
+                  amountClass: 'text-[var(--v2-ink)]',
+                  directionClass: 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]',
+                  direction: 'out',
+                },
+              ].map((row) => (
+                <tr key={row.title}>
+                  <td className="px-4 py-4 align-middle">
+                    <span
+                      aria-hidden="true"
+                      className={`flex h-9 w-9 items-center justify-center rounded-[10px] border ${row.directionClass}`}
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                        {row.direction === 'in' ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0l-5 5m5-5l5 5" />
+                        )}
+                      </svg>
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 align-middle">
+                    <p className="text-sm font-semibold text-[var(--v2-ink)]">{row.title}</p>
+                    <div className="mt-1 md:hidden">
+                      <TransactionMovement from={row.from} to={row.to} />
+                    </div>
+                  </td>
+                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] md:table-cell">
+                    {row.initiator}
+                  </td>
+                  <td className="hidden px-4 py-4 align-middle md:table-cell">
+                    <TransactionMovement from={row.from} to={row.to} />
+                  </td>
+                  <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
+                    {row.date}
+                  </td>
+                  <td className="px-4 py-4 align-middle text-right">
+                    <p className={`text-sm font-semibold v2-tabular ${row.amountClass}`}>{row.amount}</p>
+                    <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
+                  </td>
+                  <td className="px-4 py-4 align-middle text-right">
+                    <ExternalDetailsLink href="#" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Card>
       </Section>
 
@@ -499,15 +609,11 @@ export default function DesignSystemPage() {
             body="Create a budget to let an agent make payments within rules you control."
             action={<Button size="sm">Create agent budget</Button>}
           />
-          <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] p-5">
-            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">We could not load this wallet</h3>
-            <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              Check your network connection, then try again. Existing agent budgets are unchanged.
-            </p>
-            <Button className="mt-4" size="sm" variant="ghost">
-              Try again
-            </Button>
-          </div>
+          <EmptyState
+            title="We could not load this wallet"
+            body="Check your network connection, then try again. Existing agent budgets are unchanged."
+            action={<Button size="sm" variant="ghost">Try again</Button>}
+          />
         </div>
       </Section>
 

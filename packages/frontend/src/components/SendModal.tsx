@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { type Address } from 'viem'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
@@ -22,6 +22,7 @@ import {
   TransactionMovement,
 } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 interface SendSafeOption {
   id: string
@@ -149,6 +150,8 @@ export default function SendModal({
   contextError = null,
 }: SendModalProps) {
   const { toast } = useToast()
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, open)
   const safeAddressForHooks = safeAddress as Address
   const { status, txHash, error, send, reset } = useSendTransaction({
     safeAddress: safeAddressForHooks,
@@ -400,7 +403,7 @@ export default function SendModal({
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-md mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)]">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Send payment" className="relative w-full max-w-md mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">

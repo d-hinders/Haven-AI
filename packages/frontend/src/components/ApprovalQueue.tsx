@@ -551,7 +551,7 @@ export default function ApprovalQueue() {
 
   if (loading) {
     return (
-      <div className="space-y-3">
+      <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading approvals" className="space-y-3">
         {[0, 1].map((index) => (
           <ApprovalSkeleton key={index} />
         ))}

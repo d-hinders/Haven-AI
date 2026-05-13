@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink, TransactionMovement } from '@/components/haven'
+import { Tooltip } from '@/components/ui/Tooltip'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,7 @@ function SortableHeader({
   column,
   sort,
   onSort,
+  loadedCount,
   className = '',
   align = 'left',
 }: {
@@ -99,6 +101,7 @@ function SortableHeader({
   column: SortColumn
   sort: SortState
   onSort: (col: SortColumn) => void
+  loadedCount: number
   className?: string
   align?: 'left' | 'right'
 }) {
@@ -109,17 +112,20 @@ function SortableHeader({
     : 'none'
   const buttonAlign = align === 'right' ? 'w-full justify-end' : ''
   const directionWord = active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'unsorted'
+  const tooltipLabel = `Sorts the ${loadedCount} loaded transaction${loadedCount === 1 ? '' : 's'} — use Load more to widen the set`
   return (
     <th className={`${TH_BASE} ${className}`} scope="col" aria-sort={ariaSort}>
-      <button
-        type="button"
-        onClick={() => onSort(column)}
-        aria-label={`Sort by ${label}, currently ${directionWord}`}
-        className={`inline-flex items-center gap-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-1 rounded ${buttonAlign}`}
-      >
-        {label}
-        <SortChevron active={active} ascending={ascending} />
-      </button>
+      <Tooltip label={tooltipLabel} side="bottom">
+        <button
+          type="button"
+          onClick={() => onSort(column)}
+          aria-label={`Sort by ${label}, currently ${directionWord}`}
+          className={`inline-flex items-center gap-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-1 rounded ${buttonAlign}`}
+        >
+          {label}
+          <SortChevron active={active} ascending={ascending} />
+        </button>
+      </Tooltip>
     </th>
   )
 }
@@ -253,6 +259,7 @@ export default function TransactionsTable({
               column="date"
               sort={sort}
               onSort={handleSort}
+              loadedCount={transactions.length}
               className="w-[90px] hidden md:table-cell"
             />
             {/* col6: amount (sortable) */}
@@ -261,6 +268,7 @@ export default function TransactionsTable({
               column="amount"
               sort={sort}
               onSort={handleSort}
+              loadedCount={transactions.length}
               className="w-[110px] text-right"
               align="right"
             />

@@ -135,10 +135,13 @@ function SortableHeader({
 function LoadingTable() {
   return (
     <Card hover={false} className="overflow-hidden">
-      <table className="w-full border-collapse">
+      <table className="w-full border-separate border-spacing-0">
         <tbody>
           {[0, 1, 2, 3].map((i) => (
-            <tr key={i} className="border-b border-[var(--v2-border)] last:border-b-0">
+            <tr
+              key={i}
+              className="[&>td]:border-b [&>td]:border-[var(--v2-border)] last:[&>td]:border-b-0"
+            >
               {/* col1: direction icon */}
               <td className="w-9 px-4 py-4">
                 <Skeleton className="h-9 w-9 rounded-[10px]" />
@@ -238,7 +241,7 @@ export default function TransactionsTable({
     // No `overflow-hidden` on the Card — sticky <thead> needs the nearest
     // scroll container to be the page's <main>, not this wrapper.
     <Card hover={false}>
-      <table className="w-full border-collapse">
+      <table className="w-full border-separate border-spacing-0">
         <thead className="hidden md:table-header-group">
           <tr>
             {/* col1: direction icon */}
@@ -309,7 +312,7 @@ export default function TransactionsTable({
               return (
                 <tr
                   key={`${tx.safeId}:${tx.hash}:${tx.type}:${index}`}
-                  className="hover:bg-[var(--v2-surface)] transition-colors border-b border-[var(--v2-border)] last:border-b-0"
+                  className="hover:bg-[var(--v2-surface)] transition-colors [&>td]:border-b [&>td]:border-[var(--v2-border)] last:[&>td]:border-b-0"
                 >
                   {/* col1: direction icon */}
                   <td className="w-9 px-4 py-4 text-center">

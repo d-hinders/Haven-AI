@@ -85,9 +85,10 @@ function SortChevron({ active, ascending }: { active: boolean; ascending: boolea
 
 // ─── Sticky thead ─────────────────────────────────────────────────────────────
 
-// Stickiness lives on <thead>; <th> cells just provide the surface + border.
+// Sticky + z-index live on both <thead> AND each <th> so the header
+// reliably paints above body rows in every table-layout browser.
 const TH_BASE =
-  'bg-[var(--v2-bg)] border-b border-[var(--v2-border)] text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)] px-4 py-3 font-medium'
+  'sticky top-0 z-20 bg-[var(--v2-bg)] border-b border-[var(--v2-border)] text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)] px-4 py-3 font-medium'
 
 function SortableHeader({
   label,

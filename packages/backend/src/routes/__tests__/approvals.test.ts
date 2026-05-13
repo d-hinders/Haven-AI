@@ -62,4 +62,17 @@ describe('approval routes', () => {
       error: 'Approval request not found or no longer actionable',
     })
   })
+
+  it('rejects malformed execution transaction hashes', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-1/executed',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { tx_hash: '0xabc' },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'Valid tx_hash is required' })
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
 })

@@ -235,7 +235,9 @@ export default function TransactionsTable({
   }
 
   return (
-    <Card hover={false} className="overflow-hidden">
+    // No `overflow-hidden` on the Card — sticky <thead> needs the nearest
+    // scroll container to be the page's <main>, not this wrapper.
+    <Card hover={false}>
       <table className="w-full border-collapse">
         <thead className="hidden md:table-header-group">
           <tr>

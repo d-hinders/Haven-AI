@@ -87,8 +87,10 @@ function SortChevron({ active, ascending }: { active: boolean; ascending: boolea
 
 // Sticky + z-index live on both <thead> AND each <th> so the header
 // reliably paints above body rows in every table-layout browser.
+// Negative top compensates for <main>'s p-6/lg:p-8 padding so the pinned
+// header sits flush against the TopBar instead of below the padding.
 const TH_BASE =
-  'sticky top-0 z-20 bg-[var(--v2-bg)] border-b border-[var(--v2-border)] text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)] px-4 py-3 font-medium'
+  'sticky -top-6 lg:-top-8 z-20 bg-[var(--v2-bg)] border-b border-[var(--v2-border)] text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)] px-4 py-3 font-medium'
 
 function SortableHeader({
   label,
@@ -244,7 +246,7 @@ export default function TransactionsTable({
     // scroll container to be the page's <main>, not this wrapper.
     <Card hover={false}>
       <table className="w-full border-separate border-spacing-0">
-        <thead className="hidden md:table-header-group sticky top-0 z-10">
+        <thead className="hidden md:table-header-group sticky -top-6 lg:-top-8 z-10">
           <tr>
             {/* col1: direction icon */}
             <th className={`${TH_BASE} w-9`} scope="col" />

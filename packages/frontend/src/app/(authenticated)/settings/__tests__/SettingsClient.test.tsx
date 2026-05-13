@@ -25,30 +25,14 @@ vi.mock('@/hooks/usePreferences', () => ({
   usePreferences: () => mockUsePreferences(),
 }))
 
-const mockApiPut = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/api', () => {
-  const ApiRequestError = class extends Error {
-    status: number
-    constructor(message: string, status: number) {
-      super(message)
-      this.name = 'ApiRequestError'
-      this.status = status
-    }
-  }
-  return {
-    api: { put: mockApiPut },
-    ApiRequestError,
-  }
-})
-
 import SettingsClient from '@/app/(authenticated)/settings/SettingsClient'
 
 describe('SettingsClient', () => {
   beforeEach(() => {
     mockUseAuth.mockReset()
+    mockUseOwnerDirectory.mockReset()
     mockUsePreferences.mockReset()
     mockPush.mockReset()
-    mockApiPut.mockReset()
 
     mockUsePreferences.mockReturnValue({
       currency: 'USD',
@@ -82,14 +66,11 @@ describe('SettingsClient', () => {
     render(<SettingsClient />)
 
     expect(screen.getAllByText('Connected wallet').length).toBeGreaterThan(0)
-    expect(screen.getByText('Passkey-managed account')).toBeInTheDocument()
+    expect(screen.getAllByText('Passkey-managed account').length).toBeGreaterThan(0)
     expect(screen.getByText('Recovery and safety')).toBeInTheDocument()
   })
 
-  it('shows and updates the user name', async () => {
-    const user = userEvent.setup()
-    const updateUser = vi.fn()
-    mockApiPut.mockResolvedValue({ name: 'Grace Hopper' })
+  it('links profile management to the profile page', () => {
     mockUseAuth.mockReturnValue({
       user: {
         name: 'Ada Lovelace',
@@ -99,22 +80,14 @@ describe('SettingsClient', () => {
       },
       passkeys: [],
       logout: vi.fn(),
-      updateUser,
+      updateUser: vi.fn(),
     })
 
     render(<SettingsClient />)
 
-    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Edit' }))
-    await user.clear(screen.getByLabelText('Name'))
-    await user.type(screen.getByLabelText('Name'), ' Grace   Hopper ')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() => {
-      expect(mockApiPut).toHaveBeenCalledWith('/user/profile', { name: 'Grace Hopper' })
-    })
-    expect(updateUser).toHaveBeenCalledWith({ name: 'Grace Hopper' })
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Profile' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View profile' })).toHaveAttribute('href', '/profile')
   })
 
   it('shows approvers and saves an approver alias', async () => {
@@ -163,8 +136,8 @@ describe('SettingsClient', () => {
 
     render(<SettingsClient />)
 
-    expect(screen.getByText('Approvers')).toBeInTheDocument()
-    expect(screen.getByText('Listed')).toBeInTheDocument()
+    expect(screen.getByText('Access and approvals')).toBeInTheDocument()
+    expect(screen.getAllByText('Listed').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Connected wallet').length).toBeGreaterThan(0)
     expect(screen.getByText('Main account · Gnosis Chain')).toBeInTheDocument()
 

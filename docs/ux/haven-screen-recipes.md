@@ -247,10 +247,13 @@ Use for sign-in, approval, recovery, and account preferences.
 
 Structure:
 1. Page header explaining the setting in user terms.
-2. Settings sections with one concept per card or row group.
-3. Clear destructive or recovery actions with confirmation.
-4. Success/error states close to the affected setting.
+2. A simple vertical list of settings sections. Do not make Settings feel like a dashboard.
+3. One concept per row group, with the current value and action on the same row when practical.
+4. Clear destructive or recovery actions with confirmation.
+5. Success/error states close to the affected setting.
 
 Money and risk clarity:
 - Use `sign-in method` and `approve actions`, not `signer` or `owner`.
 - Explain recovery limitations plainly without making the user feel at fault.
+- Keep personal profile details on `/profile`; Settings should focus on preferences, access, approvals, recovery, notifications, and data controls.
+- Avoid duplicating account summary facts already shown on Dashboard, Profile, or Account details.

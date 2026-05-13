@@ -114,11 +114,15 @@ export default function TransactionsClient() {
 
       <div className="mt-5 mb-3 flex items-center justify-between gap-4">
         <span className="text-xs text-[var(--v2-ink-3)]">
-          {loadingInitial
-            ? 'Loading transactions...'
-            : <><span className="v2-tabular">{total}</span> transaction{total !== 1 ? 's' : ''}</>}
+          {loadingInitial ? (
+            'Loading transactions...'
+          ) : (
+            <>
+              <span className="v2-tabular">{transactions.length}</span> transaction{transactions.length !== 1 ? 's' : ''}
+            </>
+          )}
         </span>
-        {!loadingInitial && transactions.length > 0 && (
+        {!loadingInitial && hasMore && transactions.length > 0 && (
           <span className="text-xs text-[var(--v2-ink-3)]">
             Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span>
           </span>

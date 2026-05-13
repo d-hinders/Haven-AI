@@ -140,12 +140,9 @@ function LoadingTable() {
   return (
     <Card hover={false} className="overflow-hidden">
       <table className="w-full border-separate border-spacing-0">
-        <tbody>
+        <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
           {[0, 1, 2, 3].map((i) => (
-            <tr
-              key={i}
-              className="[&>td]:border-b [&>td]:border-[var(--v2-border)] last:[&>td]:border-b-0"
-            >
+            <tr key={i}>
               {/* col1: direction icon */}
               <td className="w-9 px-4 py-4">
                 <Skeleton className="h-9 w-9 rounded-[10px]" />
@@ -286,7 +283,7 @@ export default function TransactionsTable({
           </tr>
         </thead>
 
-        <tbody>
+        <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
           {sorted.length === 0 ? (
             <tr>
               <td colSpan={7} className="py-16 text-center">
@@ -311,12 +308,14 @@ export default function TransactionsTable({
             sorted.map((tx, index) => {
               const amountTone: AmountTone = tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
               const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
-              const initiator = tx.agentName ?? (tx.direction === 'in' ? 'External' : 'You')
+              // Incoming transactions: leave initiator blank (no meaningful "who" — the originator is the sending wallet).
+              // Outgoing without an agent: surface as "You".
+              const initiator = tx.agentName ?? (tx.direction === 'in' ? '' : 'You')
 
               return (
                 <tr
                   key={`${tx.safeId}:${tx.hash}:${tx.type}:${index}`}
-                  className="hover:bg-[var(--v2-surface)] transition-colors [&>td]:border-b [&>td]:border-[var(--v2-border)] last:[&>td]:border-b-0"
+                  className="hover:bg-[var(--v2-surface)] transition-colors"
                 >
                   {/* col1: direction icon */}
                   <td className="w-9 px-4 py-4 text-center">

@@ -92,7 +92,7 @@ export function Input({
         </span>
       )}
       <input
-        className={`w-full rounded-md bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[var(--v2-surface)] disabled:text-[var(--v2-ink-3)] ${borderClass} ${leftIcon ? 'pl-9' : ''} ${rightAction ? 'pr-24' : ''} ${className}`}
+        className={`w-full rounded-md border bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[var(--v2-surface)] disabled:text-[var(--v2-ink-3)] ${borderClass} ${leftIcon ? 'pl-9' : ''} ${rightAction ? 'pr-24' : ''} ${className}`}
         {...props}
       />
       {rightAction && (

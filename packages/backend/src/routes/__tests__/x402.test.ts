@@ -64,6 +64,7 @@ describe('x402 routes', () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
       .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
       .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
@@ -119,9 +120,12 @@ describe('x402 routes', () => {
       7,
     )
 
-    const insertCall = mockQuery.mock.calls[5]
+    const insertCall = mockQuery.mock.calls[6]
     expect(insertCall[0]).toContain('x402_merchant_address')
     expect(insertCall[0]).toContain('x402_idempotency_key')
+    expect(insertCall[0]).toContain('payment_rail')
+    expect(insertCall[0]).toContain('merchant_address')
+    expect(insertCall[0]).toContain('machine_idempotency_key')
     expect(insertCall[1]).toContain(MERCHANT.toLowerCase())
     expect(insertCall[1]).toContain('x402:test')
   })
@@ -255,5 +259,160 @@ describe('x402 routes', () => {
       8,
     )
     expect(mockQuery.mock.calls[2][0]).toContain('UPDATE payment_intents')
+  })
+
+  it('queues over-allowance x402 payments once with rail metadata', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          status: 'pending',
+          token_symbol: 'USDC',
+          amount_human: '0.02',
+          expires_at: '2026-05-10T20:00:00.000Z',
+          machine_challenge_id: null,
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        category: 'data',
+        idempotencyKey: 'x402:approval',
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-123',
+      status: 'pending_approval',
+      remaining: '0.01',
+      requested: '0.02',
+      token: 'USDC',
+      rail: 'x402',
+      challenge_id: null,
+    })
+
+    const insertCall = mockQuery.mock.calls[6]
+    expect(insertCall[0]).toContain('payment_rail')
+    expect(insertCall[0]).toContain('payment_resource_url')
+    expect(insertCall[0]).toContain('merchant_address')
+    expect(insertCall[0]).toContain('machine_idempotency_key')
+    expect(insertCall[0]).toContain('ON CONFLICT (agent_id, machine_idempotency_key)')
+    expect(insertCall[1]).toContain('https://mcp.soundside.ai/mcp')
+    expect(insertCall[1]).toContain(MERCHANT.toLowerCase())
+    expect(insertCall[1]).toContain('x402:approval')
+    expect(insertCall[1]).toContain(JSON.stringify({
+      protocol: 'x402',
+      network: 'base',
+      category: 'data',
+      description: null,
+    }))
+  })
+
+  it('returns an existing pending approval for duplicate over-allowance idempotency keys', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          status: 'pending',
+          token_symbol: 'USDC',
+          amount_human: '0.02',
+          expires_at: '2026-05-10T20:00:00.000Z',
+          machine_challenge_id: null,
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:approval',
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-123',
+      status: 'pending_approval',
+      requested: '0.02',
+      token: 'USDC',
+      rail: 'x402',
+    })
+    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+  })
+
+  it('returns the existing approval when an over-allowance insert hits an idempotency conflict', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          status: 'pending',
+          token_symbol: 'USDC',
+          amount_human: '0.02',
+          expires_at: '2026-05-10T20:00:00.000Z',
+          machine_challenge_id: null,
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:approval',
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-123',
+      status: 'pending_approval',
+      remaining: '0.01',
+      rail: 'x402',
+    })
+    expect(mockQuery.mock.calls[7][0]).toContain('FROM approval_requests')
   })
 })

@@ -25,6 +25,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { Tooltip } from '@/components/ui/Tooltip'
 import {
   AgentActivityRow,
   AgentBudgetCard,
@@ -75,9 +76,16 @@ function activityTitle(item: ActivityItem, agentName?: string): string {
 }
 
 function activityMovement(item: ActivityItem, walletName: string) {
-  const recipient = isMachinePaymentSource(item.source)
-    ? parseX402Hostname(item.x402_resource_url) ?? truncate(item.to)
-    : truncate(item.to)
+  const isX402 = isMachinePaymentSource(item.source)
+  const hostname = isX402 ? parseX402Hostname(item.x402_resource_url) : null
+
+  const recipient = hostname ? (
+    hostname
+  ) : (
+    <Tooltip label={item.to} mono>
+      <span>{truncate(item.to)}</span>
+    </Tooltip>
+  )
 
   return <TransactionMovement from={walletName} to={recipient} />
 }

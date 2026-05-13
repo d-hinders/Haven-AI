@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -32,6 +32,7 @@ import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { Tooltip } from '@/components/ui/Tooltip'
 import {
   ApprovalRequiredBanner,
   ExternalDetailsLink,
@@ -78,7 +79,7 @@ function ApprovalDetail({
   value,
 }: {
   label: string
-  value: string
+  value: ReactNode
 }) {
   return (
     <div>
@@ -187,7 +188,14 @@ function ApprovalCard({
               <ApprovalDetail label="Agent" value={approval.agent_name} />
               <ApprovalDetail label="Network" value={networkName} />
               <ApprovalDetail label="Haven wallet" value={walletName} />
-              <ApprovalDetail label={sourceLabel ? 'Merchant' : 'Recipient'} value={recipient} />
+              <ApprovalDetail
+                label={sourceLabel ? 'Merchant' : 'Recipient'}
+                value={
+                  <Tooltip label={approval.to_address} mono>
+                    <span>{recipient}</span>
+                  </Tooltip>
+                }
+              />
             </dl>
           </div>
         </div>
@@ -485,7 +493,10 @@ function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
           </p>
         </div>
         <p className="mt-1 text-xs text-[var(--v2-ink-2)]">
-          {approval.agent_name} to {recipient}
+          {approval.agent_name} to{' '}
+          <Tooltip label={approval.to_address} mono>
+            <span>{recipient}</span>
+          </Tooltip>
         </p>
       </div>
       <div className="flex items-center justify-between gap-2 sm:justify-end">

@@ -24,16 +24,20 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
+import { useToast } from '@/components/ui/Toast'
 import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
+  const { toast } = useToast()
   const copy = async () => {
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+    toast.success('Address copied')
   }
   return (
     <button
@@ -429,9 +433,15 @@ export default function AccountDetailClient() {
           <div>
             <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-mono text-[var(--v2-ink)]">
-                {safeAddress ? truncate(safeAddress) : '—'}
-              </span>
+              {safeAddress ? (
+                <Tooltip label={safeAddress} mono>
+                  <span className="text-sm font-mono text-[var(--v2-ink)]">
+                    {truncate(safeAddress)}
+                  </span>
+                </Tooltip>
+              ) : (
+                <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
+              )}
               {safeAddress && <CopyButton text={safeAddress} />}
               {safeAddress && <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', safeAddress)} label="Open wallet address externally" />}
             </div>
@@ -479,13 +489,23 @@ export default function AccountDetailClient() {
                     key={owner}
                     className="flex flex-wrap items-center gap-2 py-1.5"
                   >
-                    <span className={ownerAlias ? 'text-sm font-medium text-[var(--v2-ink)]' : 'text-sm font-mono text-[var(--v2-ink)]'}>
-                      {ownerAlias ?? truncate(owner)}
-                    </span>
-                    {ownerAlias && (
-                      <span className="text-xs font-mono text-[var(--v2-ink-3)]">
-                        {truncate(owner)}
+                    {ownerAlias ? (
+                      <span className="text-sm font-medium text-[var(--v2-ink)]">
+                        {ownerAlias}
                       </span>
+                    ) : (
+                      <Tooltip label={owner} mono>
+                        <span className="text-sm font-mono text-[var(--v2-ink)]">
+                          {truncate(owner)}
+                        </span>
+                      </Tooltip>
+                    )}
+                    {ownerAlias && (
+                      <Tooltip label={owner} mono>
+                        <span className="text-xs font-mono text-[var(--v2-ink-3)]">
+                          {truncate(owner)}
+                        </span>
+                      </Tooltip>
                     )}
                     <CopyButton text={owner} />
                     <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />

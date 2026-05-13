@@ -85,8 +85,9 @@ function SortChevron({ active, ascending }: { active: boolean; ascending: boolea
 
 // ─── Sticky thead ─────────────────────────────────────────────────────────────
 
+// Stickiness lives on <thead>; <th> cells just provide the surface + border.
 const TH_BASE =
-  'sticky top-0 z-10 bg-[var(--v2-bg)] border-b border-[var(--v2-border)] text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)] px-4 py-3 font-medium'
+  'bg-[var(--v2-bg)] border-b border-[var(--v2-border)] text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)] px-4 py-3 font-medium'
 
 function SortableHeader({
   label,
@@ -242,7 +243,7 @@ export default function TransactionsTable({
     // scroll container to be the page's <main>, not this wrapper.
     <Card hover={false}>
       <table className="w-full border-separate border-spacing-0">
-        <thead className="hidden md:table-header-group">
+        <thead className="hidden md:table-header-group sticky top-0 z-10">
           <tr>
             {/* col1: direction icon */}
             <th className={`${TH_BASE} w-9`} scope="col" />

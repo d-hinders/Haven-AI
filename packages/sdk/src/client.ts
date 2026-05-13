@@ -51,6 +51,15 @@ const DEFAULT_REQUEST_TIMEOUT = 30_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
+const PAYMENT_STATE_STATUS_CODES: Record<string, number> = {
+  pending_approval: 202,
+  pending_signature: 409,
+  submitted: 409,
+  expired: 410,
+  failed: 502,
+  rejected: 409,
+}
+
 function chainIdFromNetwork(network: string | undefined): number | undefined {
   if (network === 'base') return 8453
   if (!network?.startsWith('eip155:')) return undefined
@@ -315,6 +324,8 @@ export class HavenClient {
       return receipt
     }
 
+    this.throwIfNonSignableAuthorizationState('x402 payment', raw)
+
     // 3. Sign the hash
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
@@ -328,11 +339,7 @@ export class HavenClient {
     )
 
     if (execResult.status !== 'confirmed') {
-      throw new HavenApiError(
-        execResult.error ?? `x402 payment ${execResult.status}`,
-        502,
-        execResult,
-      )
+      this.throwPaymentStateError('x402 payment', execResult)
     }
 
     const receipt = {
@@ -469,17 +476,11 @@ export class HavenClient {
       { challenge, idempotencyKey },
     )
 
-    if (raw.status === 'pending_approval') {
-      throw new HavenApiError(
-        `Machine payment exceeds the on-chain allowance and was queued for owner approval (payment_id: ${raw.payment_id}).`,
-        202,
-        raw,
-      )
-    }
-
     if (raw.success && raw.tx_hash) {
       return this.mapMachinePaymentReceipt(challenge, raw, raw.tx_hash)
     }
+
+    this.throwIfNonSignableAuthorizationState('Machine payment', raw)
 
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from machine payment authorization', 500, raw)
@@ -492,11 +493,7 @@ export class HavenClient {
     )
 
     if (execResult.status !== 'confirmed' || !execResult.tx_hash) {
-      throw new HavenApiError(
-        execResult.error ?? `Machine payment ${execResult.status}`,
-        502,
-        execResult,
-      )
+      this.throwPaymentStateError('Machine payment', execResult)
     }
 
     return this.mapMachinePaymentReceipt(challenge, raw, execResult.tx_hash, execResult)
@@ -599,6 +596,37 @@ export class HavenClient {
       ...receiptWithoutHeader,
       proofHeader: encodeMachinePaymentProof(receiptWithoutHeader),
     }
+  }
+
+  private throwIfNonSignableAuthorizationState(
+    label: string,
+    raw: RawMachinePaymentAuthorizeResponse | RawX402AuthorizeResponse,
+  ): void {
+    if (raw.status === 'pending_signature') return
+    this.throwPaymentStateError(label, raw)
+  }
+
+  private throwPaymentStateError(
+    label: string,
+    raw: RawMachinePaymentAuthorizeResponse | RawX402AuthorizeResponse | RawSignResponse,
+  ): never {
+    const statusCode = PAYMENT_STATE_STATUS_CODES[raw.status] ?? 502
+    const paymentId = raw.payment_id ? ` (payment_id: ${raw.payment_id})` : ''
+
+    if (raw.status === 'pending_approval') {
+      throw new HavenApiError(
+        `${label} exceeds the on-chain allowance and was queued for owner approval${paymentId}.`,
+        statusCode,
+        raw,
+      )
+    }
+
+    if (raw.status === 'expired') {
+      throw new HavenApiError(`${label} expired before it could be completed${paymentId}.`, statusCode, raw)
+    }
+
+    const message = raw.error ?? `${label} ${raw.status}${paymentId}`
+    throw new HavenApiError(message, statusCode, raw)
   }
 
   private x402PayerAddress(): string | undefined {

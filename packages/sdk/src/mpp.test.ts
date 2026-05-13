@@ -134,4 +134,84 @@ describe('MPP demo helpers', () => {
       chainId: 8453,
     })
   })
+
+  it('surfaces MPP approval queues as a 202 API error', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        status: 'pending_approval',
+        message: 'Queued for owner approval',
+        rail: 'mpp_demo',
+        challenge_id: challenge.challengeId,
+        token: 'USDC',
+        amount: '0.01',
+        expires_at: '2026-05-12T20:00:00.000Z',
+      }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven-api.example',
+    })
+
+    await expect(haven.authorizeMachinePayment(challenge)).rejects.toMatchObject({
+      statusCode: 202,
+      body: expect.objectContaining({
+        payment_id: 'approval-123',
+        status: 'pending_approval',
+      }),
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces expired MPP signing attempts as a 410 API error', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'pay_123',
+        status: 'pending_signature',
+        chain_id: 8453,
+        safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+        token: 'USDC',
+        amount: '0.01',
+        to: challenge.recipient,
+        resource_url: challenge.resource,
+        rail: 'mpp_demo',
+        challenge_id: challenge.challengeId,
+        sign_data: {
+          hash: `0x${'11'.repeat(32)}`,
+          components: {
+            safe: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+            token: challenge.asset.address,
+            to: challenge.recipient,
+            amount: challenge.amount.atomic,
+            payment_token: '0x0000000000000000000000000000000000000000',
+            payment: '0',
+            nonce: 1,
+          },
+          instructions: 'Sign with delegate key',
+        },
+      }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'pay_123',
+        status: 'expired',
+        error: 'Payment intent has expired',
+      }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven-api.example',
+    })
+
+    await expect(haven.authorizeMachinePayment(challenge)).rejects.toMatchObject({
+      statusCode: 410,
+      body: expect.objectContaining({
+        payment_id: 'pay_123',
+        status: 'expired',
+      }),
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
 })

@@ -249,6 +249,60 @@ describe('x402 helpers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('surfaces x402 approval queues as a 202 API error', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        status: 'pending_approval',
+        message: 'Queued for owner approval',
+        token: 'USDC',
+        amount: '0.02',
+        expires_at: '2026-05-10T20:00:00.000Z',
+      }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    await expect(haven.authorizeX402(paymentRequired)).rejects.toMatchObject({
+      statusCode: 202,
+      body: expect.objectContaining({
+        payment_id: 'approval-123',
+        status: 'pending_approval',
+      }),
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces expired x402 authorization replays as a 410 API error', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'pay_123',
+        status: 'expired',
+        token: 'USDC',
+        amount: '0.02',
+      }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    await expect(haven.authorizeX402(paymentRequired)).rejects.toMatchObject({
+      statusCode: 410,
+      body: expect.objectContaining({
+        payment_id: 'pay_123',
+        status: 'expired',
+      }),
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('builds deterministic x402 idempotency keys per 5-minute bucket', () => {
     const now = 1778440000000
     expect(buildX402IdempotencyKey(paymentRequired, accepted, now)).toBe(

@@ -1,18 +1,17 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { usePreferences } from '@/hooks/usePreferences'
-import { api, ApiRequestError, type OwnerAlias } from '@/lib/api'
-import { displayName } from '@/lib/user'
+import { type OwnerAlias } from '@/lib/api'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
@@ -30,13 +29,15 @@ function Section({
   title,
   description,
   children,
+  className = '',
 }: {
   title: string
   description?: string
   children: ReactNode
+  className?: string
 }) {
   return (
-    <section className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
+    <section className={`rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] ${className}`}>
       <div className="rounded-t-[10px] border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-6 py-5">
         <h2 className="text-[13px] font-semibold uppercase tracking-widest text-[var(--v2-ink)]">{title}</h2>
         {description ? (
@@ -45,6 +46,31 @@ function Section({
       </div>
       <div className="divide-y divide-[var(--v2-border)]">{children}</div>
     </section>
+  )
+}
+
+function SummaryCard({
+  label,
+  value,
+  detail,
+  badge,
+}: {
+  label: string
+  value: ReactNode
+  detail?: ReactNode
+  badge?: ReactNode
+}) {
+  return (
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
+        {badge}
+      </div>
+      <div className="mt-3 text-lg font-semibold text-[var(--v2-ink)]">{value}</div>
+      {detail ? (
+        <div className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">{detail}</div>
+      ) : null}
+    </div>
   )
 }
 
@@ -94,6 +120,10 @@ function StatusPill({
       {children}
     </span>
   )
+}
+
+function badgeToneFromStatus(tone: 'neutral' | 'success' | 'brand' | 'warning'): 'neutral' | 'success' | 'brand' | 'warning' {
+  return tone
 }
 
 function ComingSoonToggle({ label }: { label: string }) {
@@ -325,8 +355,7 @@ function validateOwnerName(value: string): string | null {
 }
 
 export default function SettingsClient() {
-  const router = useRouter()
-  const { user, passkeys = [], logout, updateUser } = useAuth()
+  const { user, passkeys = [] } = useAuth()
   const {
     owners,
     loading: ownersLoading,
@@ -336,11 +365,6 @@ export default function SettingsClient() {
     clearOwner,
   } = useOwnerDirectory()
   const { currency, setCurrency, saving } = usePreferences()
-  const [editingName, setEditingName] = useState(false)
-  const [nameDraft, setNameDraft] = useState('')
-  const [nameError, setNameError] = useState('')
-  const [nameSaved, setNameSaved] = useState(false)
-  const [savingName, setSavingName] = useState(false)
 
   const hasWallet = Boolean(user?.wallet_address)
   const hasPasskey = passkeys.length > 0
@@ -370,149 +394,57 @@ export default function SettingsClient() {
           ? 'Haven listed approvers for your linked accounts. Keep access to every wallet or passkey needed to approve payments.'
           : 'Review approvers before relying on these accounts for payments.'
 
-  useEffect(() => {
-    if (!editingName) {
-      setNameDraft(user?.name ?? '')
-    }
-  }, [editingName, user?.name])
-
-  function validateName(value: string): string | null {
-    const normalized = value.trim().replace(/\s+/g, ' ')
-
-    if (!normalized) return null
-    if (normalized.length > MAX_NAME_LENGTH || CONTROL_CHAR_RE.test(value)) return null
-
-    return normalized
-  }
-
-  function handleLogout() {
-    logout()
-    router.push('/login')
-  }
-
-  async function saveName() {
-    const normalizedName = validateName(nameDraft)
-    setNameSaved(false)
-
-    if (!normalizedName) {
-      setNameError('Enter a name using 80 characters or fewer.')
-      return
-    }
-
-    setSavingName(true)
-    setNameError('')
-    try {
-      const updated = await api.put<{ name: string }>('/user/profile', { name: normalizedName })
-      updateUser({ name: updated.name })
-      setEditingName(false)
-      setNameSaved(true)
-    } catch (err) {
-      if (err instanceof ApiRequestError) {
-        setNameError(err.message)
-      } else {
-        setNameError('We could not save your name. Please try again.')
-      }
-    } finally {
-      setSavingName(false)
-    }
-  }
+  const signInValue = hasPasskey
+    ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''}`
+    : hasWallet
+      ? 'Connected wallet'
+      : 'Passkey-managed account'
+  const approvalSummaryValue = linkedAccounts.length === 0
+    ? 'No accounts linked'
+    : ownersLoading
+      ? 'Checking access'
+    : `${verifiedAccountCount} of ${linkedAccounts.length} account${linkedAccounts.length !== 1 ? 's' : ''}`
+  const approvalSummaryDetail = linkedAccounts.length === 0
+    ? 'Create a Haven account before relying on agent payments.'
+    : ownersLoading
+      ? 'Haven is checking which wallets and passkeys can approve actions.'
+      : 'Approver access is checked for each Haven account.'
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-6xl">
       <PageHeader
         title="Settings"
-        subtitle="Manage your profile, sign-in methods, approvers, and recovery context."
+        subtitle="Configure how Haven displays values, approves actions, and keeps account access understandable."
         actions={
-          <Button variant="ghost" onClick={handleLogout}>
-            Sign out
+          <Button href="/profile" variant="ghost">
+            View profile
           </Button>
         }
       />
 
       <div className="grid gap-6">
-        <Section
-          title="Profile"
-          description="Basic information for your Haven account."
-        >
-          <div className="px-6 py-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-[var(--v2-ink)]">Name</p>
-                {editingName ? (
-                  <div className="mt-2 max-w-sm">
-                    <Input
-                      value={nameDraft}
-                      onChange={(e) => {
-                        setNameDraft(e.target.value)
-                        setNameError('')
-                        setNameSaved(false)
-                      }}
-                      autoComplete="name"
-                      aria-label="Name"
-                      aria-invalid={Boolean(nameError)}
-                      aria-describedby={nameError ? 'settings-name-error' : undefined}
-                    />
-                    {nameError ? (
-                      <p id="settings-name-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
-                        {nameError}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : (
-                  <>
-                    <p className="mt-1 text-sm text-[var(--v2-ink-2)]">{displayName(user)}</p>
-                    {nameSaved ? (
-                      <p className="mt-1 text-xs text-[var(--v2-success)]">Name updated.</p>
-                    ) : null}
-                  </>
-                )}
-              </div>
-              {editingName ? (
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    variant="tertiary"
-                    size="sm"
-                    disabled={savingName}
-                    onClick={() => {
-                      setEditingName(false)
-                      setNameDraft(user?.name ?? '')
-                      setNameError('')
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button size="sm" disabled={savingName} onClick={() => void saveName()}>
-                    {savingName ? 'Saving...' : 'Save'}
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setEditingName(true)
-                    setNameSaved(false)
-                  }}
-                >
-                  Edit
-                </Button>
-              )}
-            </div>
-          </div>
-          <SettingRow
-            label="Email"
-            value={user?.email ?? 'Not available'}
-            detail="Used for sign-in and account recovery support."
+        <div className="grid gap-4 md:grid-cols-3">
+          <SummaryCard
+            label="Display currency"
+            value={currency}
+            detail="Used for balances and spend summaries."
           />
-          <SettingRow
-            label="Account created"
-            value={formatDate(user?.created_at)}
+          <SummaryCard
+            label="Approve actions"
+            value={approvalSummaryValue}
+            detail={approvalSummaryDetail}
+            badge={<StatusBadge tone={badgeToneFromStatus(approvalAccessStatus.tone)}>{approvalAccessStatus.label}</StatusBadge>}
           />
-        </Section>
+          <SummaryCard
+            label="Sign-in method"
+            value={signInValue}
+            detail={hasPasskey ? 'Passkeys can approve actions quickly.' : 'Review access before relying on agent payments.'}
+          />
+        </div>
 
         <Section
           title="Preferences"
-          description="Personalize how values and updates appear across Haven."
+          description="Choose how Haven displays values and future alerts."
         >
           <SettingRow
             label="Preferred currency"
@@ -537,149 +469,6 @@ export default function SettingsClient() {
             )}
           />
           <SettingRow
-            label="Default landing page"
-            detail="Choose where Haven opens after sign-in."
-            action={<ComingSoonToggle label="Default landing page coming soon" />}
-          />
-        </Section>
-
-        <Section
-          title="Sign-in and approvals"
-          description="Review how you sign in and how account actions are approved."
-        >
-          <SettingRow
-            label="Connected wallet"
-            value={hasWallet ? truncate(user!.wallet_address!) : 'Passkey-managed account'}
-            detail={hasWallet ? 'This wallet can approve actions for accounts it controls.' : 'This account uses passkeys for approvals when available.'}
-          />
-          <SettingRow
-            label="Passkey status"
-            value={hasPasskey ? <StatusPill tone="success">Enrolled</StatusPill> : <StatusPill>No passkey</StatusPill>}
-            detail={hasPasskey ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''} registered for approving actions in Haven.` : 'Set up a passkey during onboarding for faster approvals.'}
-          />
-          <SettingRow
-            label="Password"
-            detail="Password changes are not available yet."
-            action={<StatusPill>Coming soon</StatusPill>}
-          />
-          <SettingRow
-            label="Active sessions"
-            detail="Review signed-in devices and revoke sessions."
-            action={<StatusPill>Coming soon</StatusPill>}
-          />
-        </Section>
-
-        <Section
-          title="Recovery and safety"
-          description="Understand what to keep available before you rely on a Haven account for payments."
-        >
-          <SettingRow
-            label="Approver access"
-            detail={approvalAccessDetail}
-            value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
-          />
-          <SettingRow
-            label="Recovery limitations"
-            detail="Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network."
-          />
-          <SettingRow
-            label="Backup approver"
-            detail="Adding backup approvers is not available yet."
-            action={<StatusPill>Coming soon</StatusPill>}
-          />
-        </Section>
-
-        <Section
-          title="Approvers"
-          description="Name the wallets and passkeys that approve actions for your linked Haven accounts."
-        >
-          <div className="px-6 py-4">
-            {ownersLoading ? (
-              <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
-            ) : owners.length > 0 ? (
-              <div className="space-y-3">
-                {ownersPartialFailure ? (
-                  <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
-                    Some approvers could not be refreshed. Showing the wallets and passkeys Haven could verify.
-                  </div>
-                ) : null}
-                {ownersError ? (
-                  <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-                    {ownersError}
-                  </div>
-                ) : null}
-                {owners.map((owner) => {
-                  const normalizedOwner = owner.owner_address.toLowerCase()
-                  const type = passkeyAddresses.has(normalizedOwner)
-                    ? 'Passkey'
-                    : walletAddress === normalizedOwner
-                      ? 'Connected wallet'
-                      : 'Wallet'
-
-                  return (
-                    <OwnerRow
-                      key={owner.owner_address}
-                      owner={owner}
-                      type={type}
-                      onRename={renameOwner}
-                      onClear={clearOwner}
-                    />
-                  )
-                })}
-              </div>
-            ) : ownersError ? (
-              <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-                {ownersError}
-              </div>
-            ) : (
-              <p className="text-sm text-[var(--v2-ink-3)]">
-                Link a Haven account to review and name its approvers.
-              </p>
-            )}
-          </div>
-        </Section>
-
-        <Section
-          title="Accounts & networks"
-          description="Your Haven accounts and the networks they use."
-        >
-          <div className="px-6 py-4">
-            {user?.safes?.length ? (
-              <div className="space-y-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      {user.safes.length} linked account{user.safes.length !== 1 ? 's' : ''}
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-                      Each account can hold funds and be linked to agents independently.
-                    </p>
-                  </div>
-                  <Button href="/accounts" variant="ghost" size="sm">Manage accounts</Button>
-                </div>
-                <div className="grid gap-3">
-                  {user.safes.map((safe) => (
-                    <SafeLink key={safe.id} safe={safe} />
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] px-4 py-6 text-center">
-                <p className="text-sm font-medium text-[var(--v2-ink)]">No accounts yet</p>
-                <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Create or import an account to start using Haven.</p>
-                <Button href="/accounts" size="sm" className="mt-4">
-                  Add account
-                </Button>
-              </div>
-            )}
-          </div>
-        </Section>
-
-        <Section
-          title="Notifications"
-          description="Choose what Haven should alert you about."
-        >
-          <SettingRow
             label="Approval alerts"
             detail="Get notified when a transaction needs approval."
             action={<ComingSoonToggle label="Approval alerts coming soon" />}
@@ -689,28 +478,152 @@ export default function SettingsClient() {
             detail="Receive updates when agents use their budget."
             action={<ComingSoonToggle label="Agent spend alerts coming soon" />}
           />
-          <SettingRow
-            label="Failed transaction alerts"
-            detail="Know when an on-chain transaction fails or expires."
-            action={<ComingSoonToggle label="Failed transaction alerts coming soon" />}
-          />
         </Section>
 
-        <Section
-          title="Data & privacy"
-          description="Export and privacy controls for your Haven activity."
-        >
-          <SettingRow
-            label="Export transactions"
-            detail="Download a CSV of account and agent activity."
-            action={<StatusPill>Coming soon</StatusPill>}
-          />
-          <SettingRow
-            label="Privacy controls"
-            detail="Manage analytics and product improvement preferences."
-            action={<StatusPill>Coming soon</StatusPill>}
-          />
-        </Section>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.95fr)]">
+          <Section
+            title="Access and approvals"
+            description="Review how account actions are approved, then name the approvers you recognize."
+            className="xl:row-span-2"
+          >
+            <SettingRow
+              label="Connected wallet"
+              value={hasWallet ? truncate(user!.wallet_address!) : 'Passkey-managed account'}
+              detail={hasWallet ? 'This wallet can approve actions for accounts it controls.' : 'This account uses passkeys for approvals when available.'}
+            />
+            <SettingRow
+              label="Passkey status"
+              value={hasPasskey ? <StatusPill tone="success">Enrolled</StatusPill> : <StatusPill>No passkey</StatusPill>}
+              detail={hasPasskey ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''} registered for approving actions in Haven.` : 'Set up a passkey during onboarding for faster approvals.'}
+            />
+            <SettingRow
+              label="Password"
+              detail="Password changes are not available yet."
+              action={<StatusPill>Coming soon</StatusPill>}
+            />
+            <SettingRow
+              label="Approver access"
+              detail={approvalAccessDetail}
+              value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
+            />
+            <div className="px-6 py-4">
+              {ownersLoading ? (
+                <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
+              ) : owners.length > 0 ? (
+                <div className="space-y-3">
+                  {ownersPartialFailure ? (
+                    <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
+                      Some approvers could not be refreshed. Showing the wallets and passkeys Haven could verify.
+                    </div>
+                  ) : null}
+                  {ownersError ? (
+                    <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+                      {ownersError}
+                    </div>
+                  ) : null}
+                  {owners.map((owner) => {
+                    const normalizedOwner = owner.owner_address.toLowerCase()
+                    const type = passkeyAddresses.has(normalizedOwner)
+                      ? 'Passkey'
+                      : walletAddress === normalizedOwner
+                        ? 'Connected wallet'
+                        : 'Wallet'
+
+                    return (
+                      <OwnerRow
+                        key={owner.owner_address}
+                        owner={owner}
+                        type={type}
+                        onRename={renameOwner}
+                        onClear={clearOwner}
+                      />
+                    )
+                  })}
+                </div>
+              ) : ownersError ? (
+                <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+                  {ownersError}
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--v2-ink-3)]">
+                  Link a Haven account to review and name its approvers.
+                </p>
+              )}
+            </div>
+          </Section>
+
+          <Section
+            title="Recovery and safety"
+            description="Know what Haven can and cannot recover."
+          >
+            <SettingRow
+              label="Recovery limitations"
+              detail="Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network."
+            />
+            <SettingRow
+              label="Backup approver"
+              detail="Adding backup approvers is not available yet."
+              action={<StatusPill>Coming soon</StatusPill>}
+            />
+            <SettingRow
+              label="Active sessions"
+              detail="Review signed-in devices and revoke sessions."
+              action={<StatusPill>Coming soon</StatusPill>}
+            />
+          </Section>
+
+          <Section
+            title="Accounts and networks"
+            description="Your Haven accounts and the networks they use."
+          >
+            <div className="px-6 py-4">
+              {user?.safes?.length ? (
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--v2-ink)]">
+                        {user.safes.length} linked account{user.safes.length !== 1 ? 's' : ''}
+                      </p>
+                      <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+                        Each account can hold funds and be linked to agents independently.
+                      </p>
+                    </div>
+                    <Button href="/accounts" variant="ghost" size="sm">Manage accounts</Button>
+                  </div>
+                  <div className="grid gap-3">
+                    {user.safes.map((safe) => (
+                      <SafeLink key={safe.id} safe={safe} />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] px-4 py-6 text-center">
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">No accounts yet</p>
+                  <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Create an account to start using Haven.</p>
+                  <Button href="/accounts" size="sm" className="mt-4">
+                    Add account
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Section>
+
+          <Section
+            title="Data and privacy"
+            description="Controls for activity history and product preferences."
+          >
+            <SettingRow
+              label="Export transactions"
+              detail="Download a CSV of account and agent activity."
+              action={<StatusPill>Coming soon</StatusPill>}
+            />
+            <SettingRow
+              label="Privacy controls"
+              detail="Manage analytics and product improvement preferences."
+              action={<StatusPill>Coming soon</StatusPill>}
+            />
+          </Section>
+        </div>
       </div>
     </div>
   )

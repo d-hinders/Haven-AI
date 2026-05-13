@@ -507,7 +507,7 @@ function SafeCard({
       </div>
 
       {/* Fiat total */}
-      <div className="mb-4">
+      <div className="mb-4" role="status" aria-busy={portfolioLoading} aria-live="polite">
         {portfolioLoading ? (
           <Skeleton className="h-7 w-28" />
         ) : (

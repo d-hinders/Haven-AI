@@ -1,7 +1,9 @@
 'use client'
 
+import { useRef } from 'react'
 import { getChainConfig } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 import type { UserSafe } from '@/context/AuthContext'
 
 interface Props {
@@ -19,7 +21,9 @@ export default function DashboardActionPickerModal({
   onClose,
   onSelect,
 }: Props) {
+  const panelRef = useRef<HTMLDivElement>(null)
   useEscapeToClose(open, onClose)
+  useFocusTrap(panelRef, open)
 
   if (!open) return null
 
@@ -28,7 +32,7 @@ export default function DashboardActionPickerModal({
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
-      <div className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] overflow-hidden">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Choose an action" className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <div>
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">{title}</h2>

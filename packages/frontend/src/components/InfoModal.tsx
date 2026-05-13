@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 // ── Shared visual components ──────────────────────────────────────
 
@@ -77,6 +78,7 @@ interface Props {
 
 export default function InfoModal({ open, onClose, pages }: Props) {
   const [page, setPage] = useState(0)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   const handleClose = useCallback(() => {
     setPage(0)
@@ -89,6 +91,7 @@ export default function InfoModal({ open, onClose, pages }: Props) {
   }, [open])
 
   useEscapeToClose(open, handleClose)
+  useFocusTrap(panelRef, open)
 
   if (!open || pages.length === 0) return null
 
@@ -98,11 +101,17 @@ export default function InfoModal({ open, onClose, pages }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 v2-modal-backdrop">
-      <div className="bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] flex flex-col">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="info-modal-title"
+        className="bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] flex flex-col"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)] flex-shrink-0">
           <div>
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">{current.title}</h2>
+            <h2 id="info-modal-title" className="text-sm font-semibold text-[var(--v2-ink)]">{current.title}</h2>
             <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">{current.subtitle}</p>
           </div>
           <button

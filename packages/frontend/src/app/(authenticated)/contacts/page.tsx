@@ -348,7 +348,13 @@ export default function ContactsPage() {
       )}
 
       {loading && (
-        <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
+        <div
+          role="status"
+          aria-busy="true"
+          aria-live="polite"
+          aria-label="Loading contacts"
+          className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]"
+        >
           {[0, 1, 2].map((item) => (
             <div key={item} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0">
               <Skeleton variant="circle" className="h-9 w-9 flex-shrink-0" />

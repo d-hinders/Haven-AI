@@ -1,8 +1,7 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useState, type ReactNode } from 'react'
-import { useAuth, type UserSafe } from '@/context/AuthContext'
+import { useAuth } from '@/context/AuthContext'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { type OwnerAlias } from '@/lib/api'
@@ -14,15 +13,6 @@ import { PageHeader } from '@/components/ui/PageHeader'
 
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
-
-function formatDate(value?: string): string {
-  if (!value) return 'Not available'
-  return new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  }).format(new Date(value))
-}
 
 function Section({
   title,
@@ -282,39 +272,6 @@ function OwnerRow({
   )
 }
 
-function SafeLink({ safe }: { safe: UserSafe }) {
-  const chain = getChainConfig(safe.chain_id ?? 100)
-
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={`/accounts/${safe.id}`}
-            className="text-sm font-medium text-[var(--v2-ink)] hover:text-[var(--v2-brand)]"
-          >
-            {safe.name}
-          </Link>
-        </div>
-        <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-          {chain.name} · <span className="font-mono">{truncate(safe.safe_address)}</span>
-        </p>
-        <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-          Added {formatDate(safe.created_at)}
-        </p>
-      </div>
-      <a
-        href={getExplorerUrl(safe.chain_id ?? 100, 'address', safe.safe_address)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
-      >
-        View on explorer
-      </a>
-    </div>
-  )
-}
-
 function validateOwnerName(value: string): string | null {
   const normalized = value.trim().replace(/\s+/g, ' ')
 
@@ -503,42 +460,6 @@ export default function SettingsClient() {
             detail="Review signed-in devices and revoke sessions."
             action={<StatusPill>Coming soon</StatusPill>}
           />
-        </Section>
-
-        <Section
-          title="Accounts and networks"
-          description="Your Haven accounts and the networks they use."
-        >
-          <div className="px-6 py-4">
-            {user?.safes?.length ? (
-              <div className="space-y-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      {user.safes.length} linked account{user.safes.length !== 1 ? 's' : ''}
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-                      Each account can hold funds and be linked to agents independently.
-                    </p>
-                  </div>
-                  <Button href="/accounts" variant="ghost" size="sm">Manage accounts</Button>
-                </div>
-                <div className="grid gap-3">
-                  {user.safes.map((safe) => (
-                    <SafeLink key={safe.id} safe={safe} />
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] px-4 py-6 text-center">
-                <p className="text-sm font-medium text-[var(--v2-ink)]">No accounts yet</p>
-                <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Create an account to start using Haven.</p>
-                <Button href="/accounts" size="sm" className="mt-4">
-                  Add account
-                </Button>
-              </div>
-            )}
-          </div>
         </Section>
 
         <Section

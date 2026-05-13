@@ -37,6 +37,7 @@ Good split examples:
 
 - Merge or rebase the latest `main` into the branch.
 - Confirm the branch still builds locally.
+- Run the relevant local checks from the command guide below.
 - Confirm the PR target is `main` if the work is meant to deploy after merge.
 - Confirm migrations are uniquely ordered and named.
 - Confirm the PR description explains:
@@ -48,8 +49,28 @@ Good split examples:
 
 - Re-check that the PR has no conflicts with `main`.
 - Re-check that the branch still builds after the latest `main` sync.
+- Re-run the relevant local checks if the branch changed after review.
 - If the PR started stacked, re-open or retarget it so the final merge path is into `main`.
 - Verify that merging this PR will trigger the expected deployment branch.
+
+## Local Check Commands
+
+Use the smallest reliable set that matches the change.
+
+| Change type | Commands |
+| --- | --- |
+| Docs or prompt-only | `git diff --check` |
+| Backend/API | `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` |
+| Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
+| SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, and `npm run build -w packages/sdk` |
+| Cross-package or release-risk | `npm run quality` |
+| Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:desktop -w packages/frontend` when the local Playwright server is working |
+
+Notes:
+
+- `npm run quality` means typecheck, unit tests, and builds across workspaces.
+- Frontend lint is not a required gate yet because `next lint` currently prompts for ESLint setup. Add lint only after a dedicated non-interactive lint migration.
+- Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.
 
 ## Team Habits That Help
 
@@ -73,7 +94,7 @@ Good split examples:
 - [ ] Scope is one shippable outcome
 - [ ] Draft PR opened early
 - [ ] Synced with `main` recently
-- [ ] Builds pass locally
+- [ ] Relevant local checks run
 - [ ] Migrations are uniquely ordered
 - [ ] PR target is the deploy branch
 - [ ] Conflicts with `main` checked before merge

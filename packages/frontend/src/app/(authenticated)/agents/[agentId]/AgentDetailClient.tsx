@@ -199,7 +199,7 @@ export default function AgentDetailClient({ agentId }: Props) {
 
   if (loading) {
     return (
-      <div className="max-w-5xl">
+      <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading agent details" className="max-w-5xl">
         <div className="space-y-4">
           <Skeleton variant="text" className="h-6 w-40" />
           <Skeleton className="h-24 rounded-xl" />

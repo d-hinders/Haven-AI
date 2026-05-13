@@ -138,47 +138,49 @@ function SortableHeader({
 
 function LoadingTable() {
   return (
-    <Card hover={false} className="overflow-hidden">
-      <table className="w-full border-separate border-spacing-0">
-        <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
-          {[0, 1, 2, 3].map((i) => (
-            <tr key={i}>
-              {/* col1: direction icon */}
-              <td className="w-9 px-4 py-4">
-                <Skeleton className="h-9 w-9 rounded-[10px]" />
-              </td>
-              {/* col2: activity */}
-              <td className="px-4 py-4">
-                <div className="space-y-1.5">
-                  <Skeleton variant="text" className="h-3 w-40" />
-                  <Skeleton variant="text" className="h-2 w-56" />
-                </div>
-              </td>
-              {/* col3: initiator */}
-              <td className="hidden px-4 py-4 md:table-cell">
-                <Skeleton variant="text" className="h-2 w-20" />
-              </td>
-              {/* col4: from/to */}
-              <td className="hidden px-4 py-4 md:table-cell">
-                <Skeleton variant="text" className="h-2 w-28" />
-              </td>
-              {/* col5: date */}
-              <td className="hidden px-4 py-4 md:table-cell">
-                <Skeleton variant="text" className="h-2 w-14" />
-              </td>
-              {/* col6: amount */}
-              <td className="px-4 py-4 text-right">
-                <Skeleton className="h-4 w-20 ml-auto" />
-              </td>
-              {/* col7: external link */}
-              <td className="w-8 px-4 py-4 text-center">
-                <Skeleton className="h-6 w-6 mx-auto" />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
+    <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading transactions">
+      <Card hover={false} className="overflow-hidden">
+        <table className="w-full border-separate border-spacing-0">
+          <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
+            {[0, 1, 2, 3].map((i) => (
+              <tr key={i}>
+                {/* col1: direction icon */}
+                <td className="w-9 px-4 py-4">
+                  <Skeleton className="h-9 w-9 rounded-[10px]" />
+                </td>
+                {/* col2: activity */}
+                <td className="px-4 py-4">
+                  <div className="space-y-1.5">
+                    <Skeleton variant="text" className="h-3 w-40" />
+                    <Skeleton variant="text" className="h-2 w-56" />
+                  </div>
+                </td>
+                {/* col3: initiator */}
+                <td className="hidden px-4 py-4 md:table-cell">
+                  <Skeleton variant="text" className="h-2 w-20" />
+                </td>
+                {/* col4: from/to */}
+                <td className="hidden px-4 py-4 md:table-cell">
+                  <Skeleton variant="text" className="h-2 w-28" />
+                </td>
+                {/* col5: date */}
+                <td className="hidden px-4 py-4 md:table-cell">
+                  <Skeleton variant="text" className="h-2 w-14" />
+                </td>
+                {/* col6: amount */}
+                <td className="px-4 py-4 text-right">
+                  <Skeleton className="h-4 w-20 ml-auto" />
+                </td>
+                {/* col7: external link */}
+                <td className="w-8 px-4 py-4 text-center">
+                  <Skeleton className="h-6 w-6 mx-auto" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
   )
 }
 

@@ -96,7 +96,13 @@ export default function ApprovalNotifications() {
           </div>
 
           {loading ? (
-            <div className="relative p-4 space-y-3 bg-[var(--v2-surface)]">
+            <div
+              role="status"
+              aria-busy="true"
+              aria-live="polite"
+              aria-label="Loading approval notifications"
+              className="relative p-4 space-y-3 bg-[var(--v2-surface)]"
+            >
               {[0, 1].map((index) => (
                 <div
                   key={index}

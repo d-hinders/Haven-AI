@@ -51,25 +51,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type-check SDK
-        run: npm run build -w packages/sdk
+      - name: Type-check workspaces
+        run: npm run typecheck
 
-      - name: Type-check backend
-        run: npx tsc --noEmit
-        working-directory: packages/backend
+      - name: Run unit tests
+        run: npm run test:unit
 
-      - name: Type-check frontend
-        run: npx tsc --noEmit
-        working-directory: packages/frontend
-
-      - name: Run workspace tests
-        run: npm test --workspaces --if-present
-
-      - name: Build backend
-        run: npm run build -w packages/backend
-
-      - name: Build frontend
-        run: npm run build -w packages/frontend
+      - name: Build workspaces
+        run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder

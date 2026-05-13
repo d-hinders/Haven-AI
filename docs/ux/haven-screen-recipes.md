@@ -4,12 +4,14 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 
 ## Global Rules
 
+- Authenticated routes should use the shared shell and `PageHeader` before inventing custom page chrome.
 - Use one obvious primary action per screen or step.
 - Lead with what the user controls, not the crypto mechanism underneath.
 - Prefer `Haven account`, `Haven wallet`, `agent rules`, and `agent budget`.
 - Hide Safe, module, signer, owner, relayer, raw hashes, and raw addresses unless the screen is an advanced/detail surface.
 - Money-changing screens need a review moment before execution.
 - Mobile layouts should keep the primary action reachable without compressing the risk summary.
+- Use `.v2-tabular` for financial amounts, counters, and numeric metadata.
 
 ## First-Run Dashboard
 
@@ -100,10 +102,11 @@ Use when the user manually sends funds from a Haven wallet.
 
 Structure:
 1. Form step for Haven wallet, token, amount, and recipient.
-2. Review step with the amount and token as the dominant information.
-3. Money path using `TransactionMovement`: From Haven wallet -> To recipient or contact.
-4. Compact context for network and approval method.
-5. Primary action: `Approve and send`; secondary action: `Back`.
+2. Shared `Input` fields with inline validation. Use `MaxButton` for available balances and `PasteButton` for recipient addresses when available.
+3. Review step with the amount and token as the dominant information.
+4. Money path using `TransactionMovement`: From Haven wallet -> To recipient or contact.
+5. Compact context for network and approval method.
+6. Primary action: `Approve and send`; secondary action: `Back`.
 
 Money and risk clarity:
 - Show the selected Haven wallet before money moves.
@@ -111,6 +114,7 @@ Money and risk clarity:
 - Explain whether the payment will be sent immediately or submitted for additional approval.
 - For multi-approval accounts, say no money moves until the remaining approvals are complete.
 - Result states should say `Payment sent`, `Payment submitted`, or `Payment was not sent`.
+- Use toasts for short success/copy feedback, but keep blocking validation next to the field.
 
 ## Receive Funds
 
@@ -129,6 +133,8 @@ Money and risk clarity:
 - Say Add funds is the future fiat on-ramp path; do not imply it works in the POC.
 - Keep raw address visible because receiving funds requires it, but label it as the Haven wallet address.
 - Do not imply Haven holds custody or can recover funds sent on the wrong network.
+- Use a success toast after copying, but keep the address and network visible in the modal.
+- QR loading should preserve space and use `Skeleton` rather than custom pulse divs.
 
 ## Contacts And Recipient Selection
 
@@ -206,17 +212,19 @@ Use for full lists of payments and account activity.
 Structure:
 1. Page header with concise description.
 2. Filter controls for account, status, type, and time where useful.
-3. Transaction activity rows or table depending on density.
-4. Empty state that preserves the current filters.
+3. `TransactionsTable` for full history routes.
+4. Empty state inside the table that preserves the current filters.
 
 Money and risk clarity:
 - Show amount, token, status, counterparty, account, and date.
 - Use external links for details, but do not make hashes the primary labels.
-- Prefer `TransactionActivityRow` for history lists. It should show what happened first, then Haven wallet, initiator, counterparty, amount, status, and time.
+- Use `TransactionActivityRow` for dashboard, account detail, and agent detail previews. Use `TransactionsTable` for the full `/transactions` route.
 - Use `Payment sent by you`, `Received payment`, and `Agent payment by [agent name]` before using technical transaction language.
 - For x402 payments, collapse the internal Safe-to-agent funding step into one merchant-facing row such as `x402 payment by [agent name]`.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
 - Keep the amount side to two rows: amount first, then time plus an external-details icon when a transaction link exists.
+- Full history table sorting must use raw transaction values for amount sorting and `aria-sort` on sortable headers.
+- On mobile, preserve the activity title, money path, amount, time, and external-details link while hiding secondary columns.
 
 ## Account Detail
 

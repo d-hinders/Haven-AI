@@ -2,13 +2,13 @@
 
 This is the source of truth for Haven's current light visual language. Companion to `UX_GUIDELINES.md` (which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
 
-The production marketing routes are the live reference: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`. When in doubt, open the live route, inspect the element, and match the system here.
+The production authenticated app and `/design-system` are the live references for product UX. The production marketing routes are the live references for marketing UX: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`. When in doubt, open the live route, inspect the element, and match the system here.
 
 ---
 
 ## 1. Tokens
 
-All tokens live as CSS custom properties at `:root` in `packages/frontend/src/app/globals.css` and are mirrored in `packages/frontend/tailwind.config.js` so they are usable as `bg-bg`, `text-ink`, `border-border`, etc.
+All tokens live as CSS custom properties at `:root` in `packages/frontend/src/app/globals.css`. Core color, radius, and shadow tokens are mirrored in `packages/frontend/tailwind.config.js` so they are usable as `bg-bg`, `text-ink`, `border-border`, etc. Newer production tokens such as typography utilities, raised cards, popovers, modal backdrop, and the brand gradient may exist as CSS variables/classes only until they are promoted into Tailwind.
 
 ### Surfaces
 
@@ -18,6 +18,8 @@ All tokens live as CSS custom properties at `:root` in `packages/frontend/src/ap
 | `--v2-surface` | `#f6f9fc` | Alternating section bands, card hover backgrounds |
 | `--v2-surface-2` | `#eef2f7` | Disabled states, deeper card stacking |
 | `--v2-surface-code` | `#0b1120` | Dark code blocks on light pages (Stripe pattern) |
+| `--v2-surface-hover` | `#f0f4f9` | Sidebar/user-menu row hover and subtle interactive shells |
+| `--v2-modal-backdrop` | `rgba(26, 31, 54, 0.66)` | Modal backdrop with blur |
 
 ### Ink (text)
 
@@ -42,9 +44,9 @@ All tokens live as CSS custom properties at `:root` in `packages/frontend/src/ap
 | `--v2-brand` | `#4f46e5` (indigo‑600) | Primary CTA bg, links, accents, brand mark |
 | `--v2-brand-strong` | `#4338ca` (indigo‑700) | Primary CTA hover |
 | `--v2-brand-soft` | `#eef2ff` | Brand‑tinted card backgrounds, focus rings |
+| `--v2-brand-gradient` | `linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)` | Gradient wordmark or one restrained brand accent |
 
-**The brand gradient** (used only on the one accented word per hero):
-`linear-gradient(110deg, #4f46e5 0%, #7c3aed 45%, #ec4899 100%)`
+Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do not use the gradient for buttons, badges, large panels, or repeated decoration.
 
 ### Semantic
 
@@ -67,12 +69,16 @@ Same rule as v1: **never repurpose a semantic color**.
 
 ```css
 --v2-shadow-card:    0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+--v2-shadow-card-raised: 0 2px 4px rgba(16,24,40,.06), 0 4px 12px rgba(16,24,40,.08);
 --v2-shadow-button:  0 1px 1px rgba(16,24,40,.04), inset 0 1px 0 rgba(255,255,255,.12);
 --v2-shadow-modal:   0 12px 32px rgba(16,24,40,.12), 0 4px 8px rgba(16,24,40,.06);
+--v2-shadow-popover: 0 12px 24px rgba(16,24,40,.10), 0 2px 6px rgba(16,24,40,.06);
 ```
 
 Cards on hover get a brand‑tinted lift only when interactive:
 `hover:shadow-[0_8px_24px_-12px_rgba(16,24,40,0.12)]` (neutral) or `hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)]` (protocol cards, navigational).
+
+Raised card elevation is reserved for the few surfaces that anchor a page, such as the dashboard hero and account balance card. Popover shadow is for floating menus, tooltips, and toasts.
 
 **No glow shadows on text**, no colored shadows on buttons.
 
@@ -82,10 +88,22 @@ Cards on hover get a brand‑tinted lift only when interactive:
 
 Font: Inter (already loaded via `next/font/google` in `app/layout.tsx`). Optional later: switch headings to Inter Display.
 
+Authenticated app pages use compact product typography utilities from `globals.css`:
+
+| Utility | Size / line-height | Weight | Tracking | Use |
+|---|---:|---:|---:|---|
+| `.v2-text-display` | 40 / 48px | 600 | -0.02em | Rare app hero display, not ordinary dashboards |
+| `.v2-text-h1` | 28 / 34px | 600 | -0.015em | PageHeader title |
+| `.v2-text-h2` | 20 / 28px | 600 | -0.01em | Major section titles |
+| `.v2-text-h3` | 16 / 24px | 600 | 0 | Card and panel titles |
+| `.v2-text-body` | 14 / 22px | 400 | 0 | Main app body copy |
+| `.v2-text-meta` | 12 / 18px | 400 | 0 | Labels, captions, metadata |
+
+Marketing pages may still use larger hero type:
+
 | Role | Size | Weight | Tracking | Class string |
 |---|---|---|---|---|
 | Hero h1 | 44 / 64px | 600 | -0.03em | `text-[44px] md:text-[64px] font-semibold tracking-[-0.03em] leading-[1.02]` |
-| Page h1 | 44 / 60px | 600 | -0.03em | `text-[44px] md:text-[60px] font-semibold tracking-[-0.03em] leading-[1.04]` |
 | Section h2 | 28 / 34px | 600 | -0.02em | `text-[28px] md:text-[34px] font-semibold tracking-[-0.02em] leading-[1.15]` |
 | Color‑band h2 | 28 / 40px | 600 | -0.025em | adds extra size for impact on dark sections |
 | Card title | 15 / 18px | 600 | -0.01em | depending on density |
@@ -101,6 +119,28 @@ Font: Inter (already loaded via `next/font/google` in `app/layout.tsx`). Optiona
 ---
 
 ## 3. Component patterns
+
+### Authenticated shell
+
+The authenticated app uses one stable product shell:
+
+- Sidebar: 240px desktop rail, mobile overlay, white surface, subtle active tint, and a 2px brand accent bar on the active route.
+- Sidebar nav: 36px row height, 16px icon box, 13px medium label. The Approvals item shows a live actionable-count badge, hidden at zero and capped at `99+`.
+- Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
+- User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
+- Top bar: 56px blurred white header. Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
+- Main content: scrolls inside the shell, with `p-6 lg:p-8` and a skip link targeting `main#main-content`.
+
+### PageHeader
+
+Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled title blocks. It provides:
+
+- Optional uppercase eyebrow.
+- One compact h1 using `.v2-text-h1`.
+- Optional subtitle using `.v2-text-body`.
+- Right-side actions that wrap on narrow viewports.
+
+Do not use marketing hero typography for normal authenticated pages.
 
 ### Buttons
 
@@ -126,6 +166,48 @@ White‑on‑brand (used inside dark CTA band):
 `bg-white border border-[var(--v2-border)] rounded-[10px] shadow-[var(--v2-shadow-card)]`. Padding by use: `p-7` standard, `p-5` compact, `p-7 md:p-10` hero‑adjacent.
 
 Interactive cards (linked) add hover lift — see Shadows above.
+
+`Card` supports `elevation="flat" | "raised"` and `hover={false}`. Use `raised` only for prominent page anchors, and keep nested or data-dense cards flat.
+
+### Inputs
+
+Use `components/ui/Input.tsx` for product forms. Inputs have visible borders, token focus rings, and support:
+
+- `leftIcon` for search, token, or address context.
+- `rightAction` for field-local affordances such as `MaxButton` and `PasteButton`.
+- `invalid` and `helperText` for inline validation.
+
+Amount fields should use `.v2-tabular`. Paste handlers should trim pasted whitespace. Do not rely on toast alone for validation; field errors belong next to the field.
+
+### Skeletons
+
+Use `components/ui/Skeleton.tsx` instead of inline `animate-pulse` divs. The primitive is caller-sized; choose `variant="text"`, `variant="rect"`, or `variant="circle"` for radius only. Loading containers that replace meaningful content should use `role="status"`, `aria-busy="true"`, and `aria-live="polite"` around the skeletons.
+
+### Toasts
+
+Use `ToastProvider`, `Toaster`, and `useToast()` for short feedback after user actions such as copy, save, send, or retry. Toasts:
+
+- Auto-dismiss after 4 seconds and cap at 5 visible messages.
+- Use polite live regions for info/success and assertive live regions for errors.
+- Supplement the screen state; they do not replace inline error, loading, or success content when the user needs to act.
+
+### Tooltips
+
+Use `components/ui/Tooltip.tsx` for brief hover/focus clarification and for revealing truncated technical values. Tooltips are portaled and use popover shadow.
+
+Tooltips must not hide essential instructions, money/risk information, or the only copy of a raw address that the user must copy. If the value is required to complete the task, show it inline.
+
+### Transaction tables
+
+Use `components/transactions/TransactionsTable.tsx` for full transaction history routes. It is a semantic sortable table:
+
+- Desktop columns: direction icon, Activity, Initiator, From/To, Date, Amount, external link.
+- Sticky header on desktop.
+- Mobile hides secondary columns and keeps icon, activity, amount, and external link readable.
+- Date and Amount are sortable; amount sorting uses the raw transaction value, never the formatted display string.
+- Empty state renders inside the table with the correct column span.
+
+Use `TransactionActivityRow` or `AgentActivityRow` for compact dashboard, account detail, or agent detail previews.
 
 ### Sections (`Section`)
 
@@ -183,7 +265,7 @@ Animated, cycling state machine showing one payment lifecycle (Intent → Policy
 ## 4. Motion
 
 - **No entrance animations on first paint.** Respect `prefers-reduced-motion`.
-- **Allowed:** hover transitions (≤200ms), the cycling flow card on the homepage hero, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards.
+- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the cycling flow card on the homepage hero, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards.
 - **Banned:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax.
 
 ---
@@ -221,22 +303,32 @@ Tonally: marketing copy can be **slightly more inviting** to match the more ener
 
 **Voice exception flagged in the copy guidelines:** Haven *is* built on Safe and on smart‑account infrastructure. The technical disclosure surfaces (account details, transaction details, advanced settings, developer documentation) can use the technical terms — `Safe`, `passkey-backed signer`, `module`, `relayer`, `transaction hash`. But the default surface is product‑facing.
 
+Accessibility expectations for production primitives:
+
+- Modals use `role="dialog"`, `aria-modal="true"`, labelled titles, Escape handling, focus trap, and focus return.
+- Toasts use polite or assertive live regions depending on tone.
+- Tooltip triggers are keyboard focusable when the tooltip is needed for non-mouse users.
+- Loading regions that replace content use `role="status"`, `aria-busy`, and `aria-live`.
+- The authenticated shell includes a skip link to `main#main-content`.
+
 ---
 
 ## 7. Where things live
 
 | Concern | Production location |
 |---|---|
-| Tokens | CSS vars in `packages/frontend/src/app/globals.css` at `:root`, mirrored in `packages/frontend/tailwind.config.js` |
+| Tokens | CSS vars in `packages/frontend/src/app/globals.css` at `:root`; core aliases in `packages/frontend/tailwind.config.js` |
 | Header/Footer | `packages/frontend/src/components/marketing/SiteHeader.tsx`, `SiteFooter.tsx` |
-| UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx` |
+| UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx`, `Input.tsx`, `Modal.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Toast.tsx`, `Tooltip.tsx` |
 | Marketing components | `packages/frontend/src/components/marketing/Section.tsx`, `StepList.tsx`, `HeroBackdrop.tsx`, `FlowCard.tsx`, `ProtocolPlayground.tsx` |
 | Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/protocols/*/page.tsx` |
-| Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
+| Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, `packages/frontend/src/components/TopBar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
+| Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
 | Agent activity rows | `packages/frontend/src/components/haven/AgentActivityRow.tsx` |
-| Transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, composed by `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
+| Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/AgentActivityRow.tsx` |
+| Full transaction history | `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
 
 The handoff plan in `docs/design_system/REDESIGN_HANDOFF.md` is now project history.
 

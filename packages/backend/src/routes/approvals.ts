@@ -37,6 +37,12 @@ interface AgentName {
   name: string
 }
 
+// ── Helpers ───────────────────────────────────────────────────────
+
+function isValidTxHash(txHash: string): boolean {
+  return /^0x[0-9a-fA-F]{64}$/.test(txHash)
+}
+
 // ── Routes ────────────────────────────────────────────────────────
 
 export default async function approvalRoutes(app: FastifyInstance): Promise<void> {
@@ -234,7 +240,7 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
       const { id } = request.params
       const { tx_hash } = request.body
 
-      if (!tx_hash || typeof tx_hash !== 'string' || !tx_hash.startsWith('0x')) {
+      if (!tx_hash || typeof tx_hash !== 'string' || !isValidTxHash(tx_hash)) {
         return reply.code(400).send({ error: 'Valid tx_hash is required' })
       }
 

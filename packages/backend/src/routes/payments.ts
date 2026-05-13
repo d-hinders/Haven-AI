@@ -295,8 +295,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // Check expiry
       if (new Date(intent.expires_at) < new Date()) {
         await pool.query(
-          `UPDATE payment_intents SET status = 'expired' WHERE id = $1`,
-          [id],
+          `UPDATE payment_intents
+           SET status = 'expired'
+           WHERE id = $1 AND agent_id = $2 AND status = 'pending_signature'`,
+          [id, agent.id],
         )
         return reply.code(410).send({ error: 'Payment intent has expired' })
       }
@@ -320,11 +322,44 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         })
       }
 
-      // 3. Update: signed
-      await pool.query(
-        `UPDATE payment_intents SET signature = $1, signed_at = NOW(), status = 'submitted', submitted_at = NOW() WHERE id = $2`,
-        [signature, id],
+      // 3. Atomically claim the pending intent before any on-chain execution.
+      const submittedResult = await pool.query<{ id: string }>(
+        `UPDATE payment_intents
+         SET signature = $1, signed_at = NOW(), status = 'submitted', submitted_at = NOW()
+         WHERE id = $2
+           AND agent_id = $3
+           AND status = 'pending_signature'
+           AND expires_at > NOW()
+         RETURNING id`,
+        [signature, id, agent.id],
       )
+
+      if (submittedResult.rows.length === 0) {
+        const expiredResult = await pool.query<{ status: string }>(
+          `UPDATE payment_intents
+           SET status = 'expired'
+           WHERE id = $1
+             AND agent_id = $2
+             AND status = 'pending_signature'
+             AND expires_at <= NOW()
+           RETURNING status`,
+          [id, agent.id],
+        )
+
+        if (expiredResult.rows.length > 0) {
+          return reply.code(410).send({ error: 'Payment intent has expired' })
+        }
+
+        const current = await pool.query<{ status: string }>(
+          `SELECT status FROM payment_intents WHERE id = $1 AND agent_id = $2`,
+          [id, agent.id],
+        )
+        const status = current.rows[0]?.status ?? 'unknown'
+        return reply.code(409).send({
+          error: `Payment intent is ${status}, expected pending_signature`,
+          status,
+        })
+      }
 
       // 4. Execute on-chain
       try {
@@ -346,16 +381,25 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         )
 
         // 5. Success
-        await pool.query(
+        const confirmedResult = await pool.query(
           `UPDATE payment_intents
            SET status = 'confirmed',
                tx_hash = $1,
                confirmed_at = NOW(),
                usd_value = $3,
                eur_value = $4
-           WHERE id = $2`,
-          [txHash, id, fiatValues.usd, fiatValues.eur],
+           WHERE id = $2 AND agent_id = $5 AND status = 'submitted'
+           RETURNING id`,
+          [txHash, id, fiatValues.usd, fiatValues.eur, agent.id],
         )
+
+        if (confirmedResult.rows.length === 0) {
+          return reply.code(409).send({
+            payment_id: id,
+            status: 'submitted',
+            error: 'Payment intent changed after on-chain execution',
+          })
+        }
 
         return reply.send({
           payment_id: id,
@@ -371,8 +415,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         // 6. Failure
         const errorMsg = err instanceof Error ? err.message : String(err)
         await pool.query(
-          `UPDATE payment_intents SET status = 'failed', error_message = $1 WHERE id = $2`,
-          [errorMsg, id],
+          `UPDATE payment_intents
+           SET status = 'failed', error_message = $1
+           WHERE id = $2 AND agent_id = $3 AND status = 'submitted'`,
+          [errorMsg, id, agent.id],
         )
 
         return reply.code(502).send({
@@ -401,10 +447,22 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     }
 
     const intent = result.rows[0]
+    let status = intent.status
+
+    if (status === 'pending_signature' && new Date(intent.expires_at) < new Date()) {
+      const expiredResult = await pool.query<{ status: string }>(
+        `UPDATE payment_intents
+         SET status = 'expired'
+         WHERE id = $1 AND agent_id = $2 AND status = 'pending_signature'
+         RETURNING status`,
+        [id, agent.id],
+      )
+      status = expiredResult.rows[0]?.status ?? status
+    }
 
     return {
       payment_id: intent.id,
-      status: intent.status,
+      status,
       chain_id: intent.chain_id,
       token: intent.token_symbol,
       amount: intent.amount_human,
@@ -424,6 +482,13 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   app.get('/', async (request) => {
     const agent = request.agent as AgentContext
+
+    await pool.query(
+      `UPDATE payment_intents
+       SET status = 'expired'
+       WHERE agent_id = $1 AND status = 'pending_signature' AND expires_at < NOW()`,
+      [agent.id],
+    )
 
     const result = await pool.query<PaymentIntentRow>(
       `SELECT * FROM payment_intents WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 50`,

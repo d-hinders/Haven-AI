@@ -266,7 +266,7 @@ export default function Sidebar() {
 
           {/* User card with kebab */}
           <div className="px-3 pb-4 pt-1">
-            <div className={`relative flex items-center gap-2 overflow-hidden rounded-md transition-colors duration-150 ${
+            <div className={`relative flex items-center gap-2 rounded-md transition-colors duration-150 ${
               profileActive
                 ? 'bg-[var(--v2-brand-soft)]'
                 : 'hover:bg-[var(--v2-surface-hover)]'

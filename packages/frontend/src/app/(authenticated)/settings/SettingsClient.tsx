@@ -11,7 +11,6 @@ import { truncate } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { StatusBadge } from '@/components/ui/StatusBadge'
 
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
@@ -46,31 +45,6 @@ function Section({
       </div>
       <div className="divide-y divide-[var(--v2-border)]">{children}</div>
     </section>
-  )
-}
-
-function SummaryCard({
-  label,
-  value,
-  detail,
-  badge,
-}: {
-  label: string
-  value: ReactNode
-  detail?: ReactNode
-  badge?: ReactNode
-}) {
-  return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
-        {badge}
-      </div>
-      <div className="mt-3 text-lg font-semibold text-[var(--v2-ink)]">{value}</div>
-      {detail ? (
-        <div className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">{detail}</div>
-      ) : null}
-    </div>
   )
 }
 
@@ -120,10 +94,6 @@ function StatusPill({
       {children}
     </span>
   )
-}
-
-function badgeToneFromStatus(tone: 'neutral' | 'success' | 'brand' | 'warning'): 'neutral' | 'success' | 'brand' | 'warning' {
-  return tone
 }
 
 function ComingSoonToggle({ label }: { label: string }) {
@@ -394,27 +364,11 @@ export default function SettingsClient() {
           ? 'Haven listed approvers for your linked accounts. Keep access to every wallet or passkey needed to approve payments.'
           : 'Review approvers before relying on these accounts for payments.'
 
-  const signInValue = hasPasskey
-    ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''}`
-    : hasWallet
-      ? 'Connected wallet'
-      : 'Passkey-managed account'
-  const approvalSummaryValue = linkedAccounts.length === 0
-    ? 'No accounts linked'
-    : ownersLoading
-      ? 'Checking access'
-    : `${verifiedAccountCount} of ${linkedAccounts.length} account${linkedAccounts.length !== 1 ? 's' : ''}`
-  const approvalSummaryDetail = linkedAccounts.length === 0
-    ? 'Create a Haven account before relying on agent payments.'
-    : ownersLoading
-      ? 'Haven is checking which wallets and passkeys can approve actions.'
-      : 'Approver access is checked for each Haven account.'
-
   return (
-    <div className="max-w-6xl">
+    <div className="max-w-4xl">
       <PageHeader
         title="Settings"
-        subtitle="Configure how Haven displays values, approves actions, and keeps account access understandable."
+        subtitle="Manage preferences, account access, notifications, and data controls."
         actions={
           <Button href="/profile" variant="ghost">
             View profile
@@ -422,26 +376,7 @@ export default function SettingsClient() {
         }
       />
 
-      <div className="grid gap-6">
-        <div className="grid gap-4 md:grid-cols-3">
-          <SummaryCard
-            label="Display currency"
-            value={currency}
-            detail="Used for balances and spend summaries."
-          />
-          <SummaryCard
-            label="Approve actions"
-            value={approvalSummaryValue}
-            detail={approvalSummaryDetail}
-            badge={<StatusBadge tone={badgeToneFromStatus(approvalAccessStatus.tone)}>{approvalAccessStatus.label}</StatusBadge>}
-          />
-          <SummaryCard
-            label="Sign-in method"
-            value={signInValue}
-            detail={hasPasskey ? 'Passkeys can approve actions quickly.' : 'Review access before relying on agent payments.'}
-          />
-        </div>
-
+      <div className="space-y-6">
         <Section
           title="Preferences"
           description="Choose how Haven displays values and future alerts."
@@ -480,150 +415,147 @@ export default function SettingsClient() {
           />
         </Section>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.95fr)]">
-          <Section
-            title="Access and approvals"
-            description="Review how account actions are approved, then name the approvers you recognize."
-            className="xl:row-span-2"
-          >
-            <SettingRow
-              label="Connected wallet"
-              value={hasWallet ? truncate(user!.wallet_address!) : 'Passkey-managed account'}
-              detail={hasWallet ? 'This wallet can approve actions for accounts it controls.' : 'This account uses passkeys for approvals when available.'}
-            />
-            <SettingRow
-              label="Passkey status"
-              value={hasPasskey ? <StatusPill tone="success">Enrolled</StatusPill> : <StatusPill>No passkey</StatusPill>}
-              detail={hasPasskey ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''} registered for approving actions in Haven.` : 'Set up a passkey during onboarding for faster approvals.'}
-            />
-            <SettingRow
-              label="Password"
-              detail="Password changes are not available yet."
-              action={<StatusPill>Coming soon</StatusPill>}
-            />
-            <SettingRow
-              label="Approver access"
-              detail={approvalAccessDetail}
-              value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
-            />
-            <div className="px-6 py-4">
-              {ownersLoading ? (
-                <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
-              ) : owners.length > 0 ? (
-                <div className="space-y-3">
-                  {ownersPartialFailure ? (
-                    <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
-                      Some approvers could not be refreshed. Showing the wallets and passkeys Haven could verify.
-                    </div>
-                  ) : null}
-                  {ownersError ? (
-                    <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-                      {ownersError}
-                    </div>
-                  ) : null}
-                  {owners.map((owner) => {
-                    const normalizedOwner = owner.owner_address.toLowerCase()
-                    const type = passkeyAddresses.has(normalizedOwner)
-                      ? 'Passkey'
-                      : walletAddress === normalizedOwner
-                        ? 'Connected wallet'
-                        : 'Wallet'
-
-                    return (
-                      <OwnerRow
-                        key={owner.owner_address}
-                        owner={owner}
-                        type={type}
-                        onRename={renameOwner}
-                        onClear={clearOwner}
-                      />
-                    )
-                  })}
-                </div>
-              ) : ownersError ? (
-                <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-                  {ownersError}
-                </div>
-              ) : (
-                <p className="text-sm text-[var(--v2-ink-3)]">
-                  Link a Haven account to review and name its approvers.
-                </p>
-              )}
-            </div>
-          </Section>
-
-          <Section
-            title="Recovery and safety"
-            description="Know what Haven can and cannot recover."
-          >
-            <SettingRow
-              label="Recovery limitations"
-              detail="Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network."
-            />
-            <SettingRow
-              label="Backup approver"
-              detail="Adding backup approvers is not available yet."
-              action={<StatusPill>Coming soon</StatusPill>}
-            />
-            <SettingRow
-              label="Active sessions"
-              detail="Review signed-in devices and revoke sessions."
-              action={<StatusPill>Coming soon</StatusPill>}
-            />
-          </Section>
-
-          <Section
-            title="Accounts and networks"
-            description="Your Haven accounts and the networks they use."
-          >
-            <div className="px-6 py-4">
-              {user?.safes?.length ? (
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--v2-ink)]">
-                        {user.safes.length} linked account{user.safes.length !== 1 ? 's' : ''}
-                      </p>
-                      <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-                        Each account can hold funds and be linked to agents independently.
-                      </p>
-                    </div>
-                    <Button href="/accounts" variant="ghost" size="sm">Manage accounts</Button>
+        <Section
+          title="Access and approvals"
+          description="Review how account actions are approved, then name the approvers you recognize."
+        >
+          <SettingRow
+            label="Connected wallet"
+            value={hasWallet ? truncate(user!.wallet_address!) : 'Passkey-managed account'}
+            detail={hasWallet ? 'This wallet can approve actions for accounts it controls.' : 'This account uses passkeys for approvals when available.'}
+          />
+          <SettingRow
+            label="Passkey status"
+            value={hasPasskey ? <StatusPill tone="success">Enrolled</StatusPill> : <StatusPill>No passkey</StatusPill>}
+            detail={hasPasskey ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''} registered for approving actions in Haven.` : 'Set up a passkey during onboarding for faster approvals.'}
+          />
+          <SettingRow
+            label="Password"
+            detail="Password changes are not available yet."
+            action={<StatusPill>Coming soon</StatusPill>}
+          />
+          <SettingRow
+            label="Approver access"
+            detail={approvalAccessDetail}
+            value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
+          />
+          <div className="px-6 py-4">
+            {ownersLoading ? (
+              <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
+            ) : owners.length > 0 ? (
+              <div className="space-y-3">
+                {ownersPartialFailure ? (
+                  <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
+                    Some approvers could not be refreshed. Showing the wallets and passkeys Haven could verify.
                   </div>
-                  <div className="grid gap-3">
-                    {user.safes.map((safe) => (
-                      <SafeLink key={safe.id} safe={safe} />
-                    ))}
+                ) : null}
+                {ownersError ? (
+                  <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+                    {ownersError}
                   </div>
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] px-4 py-6 text-center">
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">No accounts yet</p>
-                  <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Create an account to start using Haven.</p>
-                  <Button href="/accounts" size="sm" className="mt-4">
-                    Add account
-                  </Button>
-                </div>
-              )}
-            </div>
-          </Section>
+                ) : null}
+                {owners.map((owner) => {
+                  const normalizedOwner = owner.owner_address.toLowerCase()
+                  const type = passkeyAddresses.has(normalizedOwner)
+                    ? 'Passkey'
+                    : walletAddress === normalizedOwner
+                      ? 'Connected wallet'
+                      : 'Wallet'
 
-          <Section
-            title="Data and privacy"
-            description="Controls for activity history and product preferences."
-          >
-            <SettingRow
-              label="Export transactions"
-              detail="Download a CSV of account and agent activity."
-              action={<StatusPill>Coming soon</StatusPill>}
-            />
-            <SettingRow
-              label="Privacy controls"
-              detail="Manage analytics and product improvement preferences."
-              action={<StatusPill>Coming soon</StatusPill>}
-            />
-          </Section>
-        </div>
+                  return (
+                    <OwnerRow
+                      key={owner.owner_address}
+                      owner={owner}
+                      type={type}
+                      onRename={renameOwner}
+                      onClear={clearOwner}
+                    />
+                  )
+                })}
+              </div>
+            ) : ownersError ? (
+              <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+                {ownersError}
+              </div>
+            ) : (
+              <p className="text-sm text-[var(--v2-ink-3)]">
+                Link a Haven account to review and name its approvers.
+              </p>
+            )}
+          </div>
+        </Section>
+
+        <Section
+          title="Recovery and safety"
+          description="Know what Haven can and cannot recover."
+        >
+          <SettingRow
+            label="Recovery limitations"
+            detail="Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network."
+          />
+          <SettingRow
+            label="Backup approver"
+            detail="Adding backup approvers is not available yet."
+            action={<StatusPill>Coming soon</StatusPill>}
+          />
+          <SettingRow
+            label="Active sessions"
+            detail="Review signed-in devices and revoke sessions."
+            action={<StatusPill>Coming soon</StatusPill>}
+          />
+        </Section>
+
+        <Section
+          title="Accounts and networks"
+          description="Your Haven accounts and the networks they use."
+        >
+          <div className="px-6 py-4">
+            {user?.safes?.length ? (
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--v2-ink)]">
+                      {user.safes.length} linked account{user.safes.length !== 1 ? 's' : ''}
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+                      Each account can hold funds and be linked to agents independently.
+                    </p>
+                  </div>
+                  <Button href="/accounts" variant="ghost" size="sm">Manage accounts</Button>
+                </div>
+                <div className="grid gap-3">
+                  {user.safes.map((safe) => (
+                    <SafeLink key={safe.id} safe={safe} />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] px-4 py-6 text-center">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">No accounts yet</p>
+                <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Create an account to start using Haven.</p>
+                <Button href="/accounts" size="sm" className="mt-4">
+                  Add account
+                </Button>
+              </div>
+            )}
+          </div>
+        </Section>
+
+        <Section
+          title="Data and privacy"
+          description="Controls for activity history and product preferences."
+        >
+          <SettingRow
+            label="Export transactions"
+            detail="Download a CSV of account and agent activity."
+            action={<StatusPill>Coming soon</StatusPill>}
+          />
+          <SettingRow
+            label="Privacy controls"
+            detail="Manage analytics and product improvement preferences."
+            action={<StatusPill>Coming soon</StatusPill>}
+          />
+        </Section>
       </div>
     </div>
   )

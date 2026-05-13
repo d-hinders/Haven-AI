@@ -53,13 +53,26 @@ describe('Sidebar', () => {
     expect(profileLink).toHaveAttribute('href', '/profile')
   })
 
-  it('shows Profile and Settings in the account menu', async () => {
+  it('shows Profile, Settings, and sign out in the account menu', async () => {
     const user = userEvent.setup()
+    const logout = vi.fn()
+    mockUseAuth.mockReturnValue({
+      user: {
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        safes: [],
+      },
+      logout,
+    })
     render(<Sidebar />)
 
     await user.click(screen.getByRole('button', { name: 'User menu' }))
 
     expect(screen.getByRole('menuitem', { name: 'Profile' })).toHaveAttribute('href', '/profile')
     expect(screen.getByRole('menuitem', { name: 'Settings' })).toHaveAttribute('href', '/settings')
+    await user.click(screen.getByRole('menuitem', { name: 'Log out' }))
+
+    expect(logout).toHaveBeenCalled()
+    expect(mockPush).toHaveBeenCalledWith('/')
   })
 })

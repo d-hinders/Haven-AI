@@ -33,6 +33,15 @@ interface X402AuthorizeBody {
   signature?: string      // delegate signature (optional — enables one-shot authorize+execute)
 }
 
+interface X402ApprovalRow {
+  id: string
+  status: string
+  token_symbol: string
+  amount_human: string
+  expires_at: string
+  machine_challenge_id: string | null
+}
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 function isValidAddress(addr: string): boolean {
@@ -71,6 +80,23 @@ function resolveTokenByAddress(chainId: number, address: string) {
     return Object.values(chain.tokens).find((t) => t.address === null) ?? null
   }
   return chain.tokenByAddress[lower] ?? null
+}
+
+function pendingApprovalResponse(
+  approval: X402ApprovalRow,
+  remainingHuman: string | null,
+) {
+  return {
+    payment_id: approval.id,
+    status: 'pending_approval',
+    message: `Payment of ${approval.amount_human} ${approval.token_symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
+    remaining: remainingHuman,
+    requested: approval.amount_human,
+    token: approval.token_symbol,
+    expires_at: approval.expires_at,
+    rail: 'x402',
+    challenge_id: approval.machine_challenge_id,
+  }
 }
 
 // ── Routes ────────────────────────────────────────────────────────
@@ -176,7 +202,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       const existingResult = await pool.query(
         `SELECT *
          FROM payment_intents
-         WHERE agent_id = $1 AND x402_idempotency_key = $2
+         WHERE agent_id = $1
+           AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
            AND status NOT IN ('failed', 'expired')
          ORDER BY created_at DESC
          LIMIT 1`,
@@ -269,6 +296,30 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           error: 'x402 payment already in progress',
         })
       }
+
+      const existingApprovalResult = await pool.query<X402ApprovalRow>(
+        `SELECT id, status, token_symbol, amount_human, expires_at,
+                machine_challenge_id
+         FROM approval_requests
+         WHERE agent_id = $1
+           AND machine_idempotency_key = $2
+           AND COALESCE(payment_rail, source) = 'x402'
+           AND status <> 'expired'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [agent.id, idempotencyKey],
+      )
+      const existingApproval = existingApprovalResult.rows[0]
+      if (existingApproval?.status === 'rejected') {
+        return reply.code(409).send({
+          payment_id: existingApproval.id,
+          status: existingApproval.status,
+          error: 'Payment was rejected by the account owner',
+        })
+      }
+      if (existingApproval) {
+        return reply.code(202).send(pendingApprovalResponse(existingApproval, null))
+      }
     }
 
     // 4. Policy check: agent must have this token in the on-chain allowance config
@@ -323,30 +374,55 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
       const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''
       const approvalReason = `x402 payment for ${url}${merchantPart}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
+      const metadata = {
+        protocol: 'x402',
+        network,
+        category: category ?? null,
+        description: description ?? null,
+      }
 
-      const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
+      const approvalResult = await pool.query<X402ApprovalRow>(
         `INSERT INTO approval_requests (
           agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, reason, source, x402_resource_url, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'x402', $11, 'pending',
+          to_address, amount_raw, amount_human, reason, source, x402_resource_url,
+          payment_rail, payment_resource_url, merchant_address, machine_idempotency_key,
+          machine_metadata, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'x402', $11,
+          'x402', $12, $13, $14, $15, 'pending',
           NOW() + interval '24 hours')
-        RETURNING id, status, expires_at`,
+        ON CONFLICT (agent_id, machine_idempotency_key)
+          WHERE machine_idempotency_key IS NOT NULL
+            AND status NOT IN ('expired')
+        DO NOTHING
+        RETURNING id, status, token_symbol, amount_human, expires_at, machine_challenge_id`,
         [
           agent.id, agent.user_id, agent.safe_address, agent.chain_id,
           tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
           amountRaw.toString(), amountHuman, approvalReason, url,
+          url, merchantPayTo?.toLowerCase() ?? null, idempotencyKey ?? null,
+          JSON.stringify(metadata),
         ],
       )
-      const approval = approvalResult.rows[0]
-      return reply.code(202).send({
-        payment_id: approval.id,
-        status: 'pending_approval',
-        message: `Payment of ${amountHuman} ${tokenConfig.symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
-        remaining: remainingHuman,
-        requested: amountHuman,
-        token: tokenConfig.symbol,
-        expires_at: approval.expires_at,
-      })
+      let approval = approvalResult.rows[0] ?? null
+      if (!approval && idempotencyKey) {
+        const existingApprovalResult = await pool.query<X402ApprovalRow>(
+          `SELECT id, status, token_symbol, amount_human, expires_at,
+                  machine_challenge_id
+           FROM approval_requests
+           WHERE agent_id = $1
+             AND machine_idempotency_key = $2
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND status <> 'expired'
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [agent.id, idempotencyKey],
+        )
+        approval = existingApprovalResult.rows[0] ?? null
+      }
+      if (!approval) {
+        return reply.code(409).send({ error: 'x402 approval already exists but could not be loaded' })
+      }
+      return reply.code(202).send(pendingApprovalResponse(approval, remainingHuman))
     }
 
     // 7. Generate transfer hash on-chain
@@ -375,9 +451,16 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
         to_address, amount_raw, amount_human, delegate_address,
         allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
-        x402_merchant_address, x402_idempotency_key, expires_at
+        x402_merchant_address, x402_idempotency_key,
+        payment_rail, payment_resource_url, merchant_address, machine_idempotency_key,
+        machine_metadata, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
-        'x402', $13, $14, $15, $16, NOW() + interval '10 minutes')
+        'x402', $13, $14, $15, $16, 'x402', $17, $18, $19, $20,
+        NOW() + interval '10 minutes')
+      ON CONFLICT (agent_id, x402_idempotency_key)
+        WHERE x402_idempotency_key IS NOT NULL
+          AND status NOT IN ('failed', 'expired')
+      DO NOTHING
       RETURNING *`,
       [
         agent.id, agent.user_id, agent.safe_address, agent.chain_id,
@@ -385,9 +468,32 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         amountRaw.toString(), amountHuman, agent.delegate_address,
         onChainAllowance.nonce, signHash,
         url, category ?? null, merchantPayTo?.toLowerCase() ?? null, idempotencyKey ?? null,
+        url, merchantPayTo?.toLowerCase() ?? null, idempotencyKey ?? null,
+        JSON.stringify({
+          protocol: 'x402',
+          network,
+          category: category ?? null,
+          description: description ?? null,
+        }),
       ],
     )
-    const intent = intentResult.rows[0]
+    let intent = intentResult.rows[0]
+    if (!intent && idempotencyKey) {
+      const existingResult = await pool.query(
+        `SELECT *
+         FROM payment_intents
+         WHERE agent_id = $1
+           AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
+           AND status NOT IN ('failed', 'expired')
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [agent.id, idempotencyKey],
+      )
+      intent = existingResult.rows[0]
+    }
+    if (!intent) {
+      return reply.code(409).send({ error: 'x402 payment already exists but could not be loaded' })
+    }
 
     // 11. If signature provided, execute immediately (one-shot mode)
     if (signature) {

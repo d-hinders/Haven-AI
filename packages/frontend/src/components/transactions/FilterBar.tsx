@@ -20,7 +20,18 @@ interface FilterBarProps {
   onChange: (filters: TransactionFilterState) => void
 }
 
-type DropdownKey = 'safe' | 'agent' | 'token' | null
+type DropdownKey = 'safe' | 'agent' | 'token' | 'direction' | null
+
+const DIRECTION_OPTIONS: { value: 'in' | 'out'; label: string }[] = [
+  { value: 'in', label: 'Incoming' },
+  { value: 'out', label: 'Outgoing' },
+]
+
+function directionLabel(direction: 'in' | 'out' | undefined): string {
+  if (direction === 'in') return 'Incoming'
+  if (direction === 'out') return 'Outgoing'
+  return 'All'
+}
 
 function chainLabel(chainId: number): string {
   return getChainConfig(chainId).name.replace(/\s+Chain$/, '')
@@ -87,10 +98,7 @@ export default function FilterBar({
       : agents.find((agent) => agent.id === filters.agentId)
   const selectedToken = tokens.find((token) => token.key === filters.tokenKey)
 
-  // FilterBar surfaces chips only for the dimensions it actually controls
-  // (safeId / agentId / tokenKey). The `direction` filter is owned by the
-  // caller (TransactionsClient renders its own chip in the count line).
-  type ChipKey = 'safeId' | 'agentId' | 'tokenKey'
+  type ChipKey = 'safeId' | 'agentId' | 'tokenKey' | 'direction'
   const chips = [
     selectedSafe
       ? { key: 'safeId' as const, label: `Account: ${selectedSafe.name}` }
@@ -101,12 +109,16 @@ export default function FilterBar({
     selectedToken
       ? { key: 'tokenKey' as const, label: `Token: ${tokenLabel(selectedToken)}` }
       : null,
+    filters.direction
+      ? { key: 'direction' as const, label: `Direction: ${directionLabel(filters.direction)}` }
+      : null,
   ].filter((chip): chip is { key: ChipKey; label: string } => Boolean(chip))
 
   const clearFilter = (key: ChipKey) => {
     if (key === 'safeId') onChange({ ...filters, safeId: undefined })
     if (key === 'agentId') onChange({ ...filters, agentId: undefined })
     if (key === 'tokenKey') onChange({ ...filters, tokenKey: undefined })
+    if (key === 'direction') onChange({ ...filters, direction: undefined })
   }
 
   return (
@@ -243,6 +255,41 @@ export default function FilterBar({
                   <div className="min-w-0 text-left">
                     <div className="truncate font-medium">{tokenLabel(token)}</div>
                   </div>
+                </DropdownButton>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="relative">
+          <button
+            onClick={() => setOpen(open === 'direction' ? null : 'direction')}
+            className={triggerClasses(Boolean(filters.direction))}
+          >
+            <span>Direction: {directionLabel(filters.direction)}</span>
+            <Chevron open={open === 'direction'} />
+          </button>
+          {open === 'direction' && (
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-44 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+              <DropdownButton
+                active={!filters.direction}
+                onClick={() => {
+                  onChange({ ...filters, direction: undefined })
+                  setOpen(null)
+                }}
+              >
+                All
+              </DropdownButton>
+              {DIRECTION_OPTIONS.map((option) => (
+                <DropdownButton
+                  key={option.value}
+                  active={filters.direction === option.value}
+                  onClick={() => {
+                    onChange({ ...filters, direction: option.value })
+                    setOpen(null)
+                  }}
+                >
+                  <span className="truncate font-medium">{option.label}</span>
                 </DropdownButton>
               ))}
             </div>

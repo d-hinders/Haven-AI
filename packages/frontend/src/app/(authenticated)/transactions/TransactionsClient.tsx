@@ -82,8 +82,6 @@ export default function TransactionsClient() {
     router.replace(query ? `/transactions?${query}` : '/transactions', { scroll: false })
   }
 
-  const clearDirection = () => handleFilterChange({ ...filters, direction: undefined })
-
   if (!hasSafes) {
     return (
       <div className="max-w-5xl">
@@ -130,31 +128,16 @@ export default function TransactionsClient() {
         onChange={handleFilterChange}
       />
 
-      <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-[var(--v2-ink-3)]">
-            {loadingInitial ? (
-              'Loading transactions...'
-            ) : (
-              <>
-                <span className="v2-tabular">{visibleTransactions.length}</span> transaction{visibleTransactions.length !== 1 ? 's' : ''}
-              </>
-            )}
-          </span>
-          {filters.direction && !loadingInitial && (
-            <button
-              type="button"
-              onClick={clearDirection}
-              className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-brand-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-              aria-label={`Clear ${filters.direction === 'in' ? 'incoming' : 'outgoing'} filter`}
-            >
-              {filters.direction === 'in' ? 'Incoming only' : 'Outgoing only'}
-              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+      <div className="mt-5 mb-3 flex items-center justify-between gap-4">
+        <span className="text-xs text-[var(--v2-ink-3)]">
+          {loadingInitial ? (
+            'Loading transactions...'
+          ) : (
+            <>
+              <span className="v2-tabular">{visibleTransactions.length}</span> transaction{visibleTransactions.length !== 1 ? 's' : ''}
+            </>
           )}
-        </div>
+        </span>
         {!loadingInitial && hasMore && visibleTransactions.length > 0 && (
           <span className="text-xs text-[var(--v2-ink-3)]">
             Showing <span className="v2-tabular">{visibleTransactions.length}</span> of <span className="v2-tabular">{total}</span>

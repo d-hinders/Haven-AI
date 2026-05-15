@@ -8,6 +8,7 @@ import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { useAgents } from '@/hooks/useAgents'
 import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
+import { useCountUp } from '@/hooks/useCountUp'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
@@ -189,7 +190,7 @@ function ConnectedAgentsSection({
           </div>
         </div>
       ) : (
-        <div className="divide-y divide-[var(--v2-border)]">
+        <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
           {agents.slice(0, 5).map((agent) => {
             const status = agentStatusPresentation(agent.status)
             return (
@@ -225,7 +226,7 @@ function ConnectedAgentsSection({
 function DashboardHero({
   loading,
   unavailable,
-  total,
+  totalFiat,
   currency,
   changeAvailable,
   changeAmount,
@@ -238,7 +239,7 @@ function DashboardHero({
 }: {
   loading: boolean
   unavailable: boolean
-  total: string
+  totalFiat: number
   currency: 'USD' | 'EUR'
   changeAvailable: boolean
   changeAmount: number
@@ -249,13 +250,29 @@ function DashboardHero({
   onReceive: () => void
   onAddFunds: () => void
 }) {
+  // Animate the balance from 0 → totalFiat on first paint after data loads.
+  // Subsequent changes (currency switches, polled refresh) snap instantly.
+  // Respects prefers-reduced-motion via the hook.
+  const animatedTotal = useCountUp(totalFiat, { enabled: !loading && !unavailable })
+
   return (
     <section
       className="relative overflow-hidden rounded-[24px] border border-[var(--v2-border-anchor)] bg-[var(--v2-surface-anchor)] shadow-[var(--v2-shadow-card-raised)]"
     >
+      {/*
+        Subtle ambient drift on the hero's gradient backdrop — the v2-mesh-drift
+        keyframe in globals.css alternates ~2% translation over 18s. Adds a
+        quiet sense of "alive" without being noticeable. Disabled by the same
+        keyframe under prefers-reduced-motion.
+
+        The backdrop extends 6% past the parent on every side so the drift's
+        translation never pulls the layer off-edge and exposes the underlying
+        anchor surface. The parent's `overflow-hidden` + rounded corners clip
+        the buffer away.
+      */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0"
+        className="pointer-events-none absolute -inset-[6%] v2-mesh-drift"
         style={{ background: 'var(--v2-surface-hero)' }}
       />
       <div className="relative grid gap-6 px-6 py-7 sm:px-8 sm:py-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
@@ -269,7 +286,7 @@ function DashboardHero({
             </p>
           ) : (
             <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular sm:text-5xl">
-              {total}
+              {formatCurrency(animatedTotal, currency)}
             </p>
           )}
           {changeAvailable ? (
@@ -343,7 +360,7 @@ function MetricCard({
       {loading ? (
         <div className="mt-3 h-7 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
       ) : (
-        <p className={`mt-2 text-2xl font-semibold tracking-tight v2-tabular ${unavailable ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-ink)]'}`}>
+        <p className={`mt-2 text-2xl font-semibold tracking-tight v2-tabular v2-animate-fade-in ${unavailable ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-ink)]'}`}>
           {unavailable ? 'Unavailable' : value}
         </p>
       )}
@@ -432,8 +449,9 @@ function AttentionSection({
     // Anchor elevation — the "Needs attention" panel is the second-most
     // important surface on the dashboard after the balance hero. The cooler
     // off-white surface and brand-tinted hairline give it presence without
-    // competing with the hero.
-    <Card as="article" elevation="anchor" className="overflow-hidden">
+    // competing with the hero. Slide-in on mount so the arrival feels
+    // intentional rather than abrupt (it's an interruption element).
+    <Card as="article" elevation="anchor" className="overflow-hidden v2-animate-slide-in">
       <div className="border-b border-[var(--v2-border)] px-5 py-4">
         <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Needs attention</h2>
       </div>
@@ -561,7 +579,7 @@ function TransactionsSection({
           />
         </div>
       ) : (
-        <div className="divide-y divide-[var(--v2-border)]">
+        <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
           {transactions.slice(0, 5).map((tx) => (
             <Link
               key={`${tx.hash}-${tx.type}-${tx.safeId}`}
@@ -753,7 +771,7 @@ export default function DashboardClient() {
     <DashboardHero
       loading={overviewInitialLoading}
       unavailable={overviewUnavailable}
-      total={formatCurrency(totalFiat, currency)}
+      totalFiat={totalFiat}
       currency={currency}
       changeAvailable={Boolean(overview?.change.available)}
       changeAmount={changeAmount}

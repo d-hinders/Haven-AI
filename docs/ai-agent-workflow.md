@@ -36,6 +36,7 @@ Use `docs/ai-review-patterns.md` as shared memory for recurring PR review issues
 
 Before final review, the captain should do a risk-specific self-check based on the changed surface:
 
+- regulatory perimeter: for payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, merchant, fiat/card, swap, yield, or advice surfaces, apply `docs/regulatory/casp-risk-guardrails.md`
 - transactions and feeds: raw vs formatted values, totals, dedupe, pagination, source labels, and cross-surface consistency
 - approvals and pending actions: status transitions, migrations or constraints, post-action copy, expiry, notification counts, and single vs multi-approval behavior
 - send, receive, contacts, and other modals: primary action hierarchy, scroll, z-index, close behavior, typing behavior, duplicate handling, and network context
@@ -213,6 +214,7 @@ For UI work, enforce the Haven UI instructions from AGENTS.md:
 - review copy against the UX copy guidelines
 - check mobile and desktop layouts when practical
 - use `docs/ai-review-patterns.md` for known reviewer traps before final review
+- use `docs/regulatory/casp-risk-guardrails.md` for payment, Safe, relayer, SDK payment API, x402/MPP, merchant, fiat/card, swap, yield, or advice work
 
 Before implementation, briefly tell me:
 - which agents you will use, if any

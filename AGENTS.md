@@ -38,6 +38,12 @@ Every screen that moves money or changes agent authority must make these clear:
 - What happened already?
 - How can the user pause, revoke, reject, or stop it?
 
+## CASP / MiCA Guardrails
+
+Before changing payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP flows, merchant-facing demos, fiat/card surfaces, swaps, yield, or treasury features, read `docs/regulatory/casp-risk-guardrails.md`.
+
+Hard product and architecture rule: Haven is non-custodial smart account software. Haven must not hold user or agent private keys, make API credentials sufficient to spend, rely on off-chain policy as the real spend control, alter signed payment intent, operate swaps/ramps/fiat/card/merchant settlement/yield/advice flows without review, or prevent users from accessing and revoking Safe permissions outside Haven.
+
 ## UI Closeout
 
 Before completing UI work:

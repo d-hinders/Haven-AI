@@ -1138,10 +1138,10 @@ export default function CreateAgentModal({
                   <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
                   <div>
                     <p className="text-sm text-[var(--v2-ink)] font-medium">
-                      {execStatus === 'checking' && 'Checking module status...'}
-                      {execStatus === 'signing' && 'Awaiting signature...'}
-                      {execStatus === 'executing' && 'Submitting to chain...'}
-                      {execStatus === 'saving' && 'Saving agent...'}
+                      {execStatus === 'checking' && 'Checking agent rules...'}
+                      {execStatus === 'signing' && 'Approve agent rules...'}
+                      {execStatus === 'executing' && 'Connecting agent...'}
+                      {execStatus === 'saving' && 'Saving agent in Haven...'}
                     </p>
                     <div className="text-xs text-[var(--v2-ink-3)] mt-1">
                       {execStatus === 'signing' ? (

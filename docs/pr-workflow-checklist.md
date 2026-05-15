@@ -6,6 +6,7 @@ Use this checklist for feature branches so PRs stay mergeable, reviewable, and d
 
 - Branch from `main` unless the work truly depends on another unmerged branch.
 - Keep the branch scoped to one shippable outcome.
+- If the work touches payments, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, fiat/card, swaps, merchant flows, yield, or advice, read `docs/regulatory/casp-risk-guardrails.md` first.
 - If the work spans backend, frontend, and migrations, ask whether it should be split into multiple PRs first.
 - If the change touches migrations, assume merge risk is high and keep the branch short-lived.
 
@@ -40,6 +41,7 @@ Good split examples:
 - Run the relevant local checks from the command guide below.
 - Confirm the PR target is `main` if the work is meant to deploy after merge.
 - Confirm migrations are uniquely ordered and named.
+- Confirm payment-related changes preserve the CASP guardrails: no Haven-held user or agent keys, no API-key-only payment authority, no off-chain-only spend control, no mutation of signed amount/token/recipient/route, and no unreviewed swap, ramp, fiat, card, merchant settlement, yield, or advice functionality.
 - Confirm the PR description explains:
   - what changed
   - what was intentionally left out
@@ -60,6 +62,7 @@ Use the smallest reliable set that matches the change.
 | Change type | Commands |
 | --- | --- |
 | Docs or prompt-only | `git diff --check` |
+| Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
 | Backend/API | `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` |
 | Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, and `npm run build -w packages/sdk` |

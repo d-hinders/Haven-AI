@@ -2,7 +2,7 @@
 
 TypeScript SDK for [Haven](https://github.com/d-hinders/Haven-AI) — agent wallet infrastructure for the autonomous economy.
 
-Haven gives AI agents the ability to hold, send, and receive money within strict, user-defined guardrails. This SDK makes it trivial to integrate Haven payments into any agent.
+Haven lets AI agents request and sign payments within strict, user-approved on-chain guardrails. This SDK makes it straightforward to integrate Haven payment requests into any agent without giving Haven custody of user or agent keys.
 
 ## Install
 
@@ -92,7 +92,9 @@ const result = await haven.waitForConfirmation(intent.paymentId)
 
 ## x402 Protocol Support
 
-Haven natively supports the [x402](https://x402.org) payment protocol. When an API returns HTTP 402, Haven evaluates the payment against policy, funds the agent delegate wallet from the Haven wallet, signs the merchant's standard x402 payment payload, and retries automatically:
+Production merchant acceptance, facilitator, settlement, fiat, or acquiring functionality needs separate product and legal review under the repo's [CASP / MiCA guardrails](../../docs/regulatory/casp-risk-guardrails.md). The hosted x402 endpoint is an internal technical demo, not a merchant settlement product.
+
+Haven natively supports the [x402](https://x402.org) payment protocol. When an API returns HTTP 402, the SDK evaluates the challenge against the agent's approved limits, uses the configured delegate key for the required signature, and retries automatically:
 
 ```typescript
 // Automatic — fetch() intercepts 402, pays, and retries
@@ -147,9 +149,9 @@ for (const block of response.content) {
 
 | Tool | Description |
 |------|-------------|
-| `make_payment` | Send a payment from the Haven-managed Safe wallet |
+| `make_payment` | Request and sign a payment from the user-controlled Safe within approved limits |
 | `get_payment_status` | Check the status of a previously initiated payment |
-| `authorize_x402_payment` | Fund the agent wallet and return a payment header for an HTTP 402 resource |
+| `authorize_x402_payment` | Authorize a policy-limited x402 payment and return a payment header for an HTTP 402 resource |
 
 ## Configuration
 

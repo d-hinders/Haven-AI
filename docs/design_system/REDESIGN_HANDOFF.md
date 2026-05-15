@@ -7,6 +7,7 @@ This file is historical project context for the v2 redesign migration. The migra
 - Design system: `docs/design_system/DESIGN_SYSTEM.md`
 - **Copy (authoritative):** `docs/design_system/UX_COPY_GUIDELINES.md` — read this before touching any user‑facing string
 - Product doctrine + IA + accessibility: `docs/UX_GUIDELINES.md`
+- Regulatory perimeter: `docs/regulatory/casp-risk-guardrails.md`
 
 **Status:** Phase 0, Phase 0.5, Phase 1, Phase 2, and Phase 3 are implemented. New work should start from `UX_GUIDELINES.md`, `DESIGN_SYSTEM.md`, and `UX_COPY_GUIDELINES.md`.
 
@@ -66,7 +67,7 @@ Apply these explicit swaps:
 
 | Current | Replace with |
 |---|---|
-| Hero lede: "Non‑custodial wallet infrastructure that gives AI agents the ability to hold, send, and receive money — within strict, user‑defined guardrails." | "An account for your agents. You set the rules — they pay within them, never beyond. No raw keys, no shared cards." |
+| Old hero lede about non‑custodial wallet infrastructure | "An account for your agents. You set the rules — they pay within them, never beyond. No raw keys, no shared cards." |
 | `HOW_IT_WORKS` step 02 title "Create an agent with policies" | "Set agent rules" |
 | `HOW_IT_WORKS` step 02 body "Define exactly what each agent can do: daily spend limits, allowed assets, approved recipients, and per‑transaction approval thresholds." | "Choose how much each agent can spend, who it can pay, and what it can pay for." |
 | `HOW_IT_WORKS` step 03 title "Agents transact within the rules" | "Connect your agent" |

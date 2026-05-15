@@ -264,10 +264,15 @@ function DashboardHero({
         keyframe in globals.css alternates ~2% translation over 18s. Adds a
         quiet sense of "alive" without being noticeable. Disabled by the same
         keyframe under prefers-reduced-motion.
+
+        The backdrop extends 6% past the parent on every side so the drift's
+        translation never pulls the layer off-edge and exposes the underlying
+        anchor surface. The parent's `overflow-hidden` + rounded corners clip
+        the buffer away.
       */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 v2-mesh-drift"
+        className="pointer-events-none absolute -inset-[6%] v2-mesh-drift"
         style={{ background: 'var(--v2-surface-hero)' }}
       />
       <div className="relative grid gap-6 px-6 py-7 sm:px-8 sm:py-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">

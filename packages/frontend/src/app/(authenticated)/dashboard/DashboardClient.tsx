@@ -138,13 +138,13 @@ function ConnectedAgentsSection({
       </div>
 
       {loading ? (
-        <div className="divide-y divide-[var(--v2-border)]">
+        <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading connected agents">
           {[0, 1, 2].map((item) => (
-            <div key={item} className="flex items-center gap-3 px-5 py-4">
-              <div className="h-10 w-10 rounded-xl bg-[var(--v2-surface-2)] animate-pulse" />
+            <div key={item} className="flex items-center gap-3 px-5 py-3 min-h-[64px]">
+              <div className="h-8 w-8 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
               <div className="min-w-0 flex-1">
-                <div className="h-4 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="mt-2 h-3 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <div className="h-3.5 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
               </div>
             </div>
           ))}
@@ -212,7 +212,7 @@ function ConnectedAgentsSection({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 }
-                className="px-5 py-3"
+                className="min-h-[64px] px-5 py-3"
               />
             )
           })}
@@ -518,7 +518,7 @@ function TransactionsSection({
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">
           {[0, 1, 2].map((item) => (
-            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
+            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 min-h-[64px]">
               <div className="flex items-center gap-3">
                 <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
                 <div>

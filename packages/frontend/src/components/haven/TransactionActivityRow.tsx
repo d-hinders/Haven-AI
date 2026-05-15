@@ -49,8 +49,10 @@ export function TransactionActivityRow({
   density?: Density
 }) {
   const isCompact = density === 'compact'
+  // Compact density pins to the same row height as the <Row> primitive so
+  // both dashboard activity columns sit on the same rhythm.
   const containerPadding = isCompact
-    ? 'gap-3 px-4 py-3 sm:px-5'
+    ? 'gap-3 px-4 py-3 sm:px-5 min-h-[64px]'
     : 'gap-3 px-4 py-4 sm:px-5'
   return (
     <div className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}`}>

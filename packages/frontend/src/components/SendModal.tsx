@@ -12,7 +12,7 @@ import { truncate, isValidAddress } from '@/lib/format'
 import { exceedsRawBalance, validateMoneyInput } from '@/lib/money-input'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
-import NetworkGate from './NetworkGate'
+import OnchainActionGate from './OnchainActionGate'
 import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
@@ -892,15 +892,22 @@ export default function SendModal({
                 Back
               </Button>
               <div className="flex-1">
-                <NetworkGate requiredChainId={chainId}>
+                <OnchainActionGate
+                  requiredChainId={chainId}
+                  operationGate={operationGate}
+                  noSignerMessage="Connect wallet to send from this account."
+                  showNotice={false}
+                >
+                  {({ disabled }) => (
                   <Button
                     onClick={handleConfirm}
-                    disabled={signingUnavailable || !signer || !tokenConfig}
+                    disabled={disabled || !signer || !tokenConfig}
                     className="w-full"
                   >
                     {isMultiSig ? 'Approve and submit' : 'Approve and send'}
                   </Button>
-                </NetworkGate>
+                  )}
+                </OnchainActionGate>
               </div>
             </div>
           </div>

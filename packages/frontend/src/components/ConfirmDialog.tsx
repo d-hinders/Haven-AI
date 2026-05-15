@@ -19,6 +19,10 @@ export interface ConfirmDialogProps {
   tone?: 'danger' | 'primary'
   /** Disable the confirm button (e.g. while the confirm action is running). */
   loading?: boolean
+  /** Disable the confirm button without changing the button label. */
+  confirmDisabled?: boolean
+  /** Wrap the confirm button when the caller needs an extra guard, such as network switching. */
+  confirmButtonWrapper?: (button: ReactNode) => ReactNode
 }
 
 /**
@@ -35,19 +39,36 @@ export default function ConfirmDialog({
   cancelLabel = 'Cancel',
   tone = 'danger',
   loading = false,
+  confirmDisabled = false,
+  confirmButtonWrapper,
 }: ConfirmDialogProps) {
+  const cancelBtnRef = useRef<HTMLButtonElement>(null)
   const confirmBtnRef = useRef<HTMLButtonElement>(null)
+  const initialFocusRef = confirmDisabled ? cancelBtnRef : confirmBtnRef
+  const confirmButton = (
+    <Button
+      ref={confirmBtnRef}
+      type="button"
+      variant={tone === 'danger' ? 'danger' : 'primary'}
+      onClick={() => void onConfirm()}
+      disabled={loading || confirmDisabled}
+      className="min-w-24"
+    >
+      {loading ? 'Working...' : confirmLabel}
+    </Button>
+  )
 
   return (
     <Modal
       open={open}
       onClose={loading ? () => undefined : onCancel}
       title={title}
-      initialFocusRef={confirmBtnRef}
+      initialFocusRef={initialFocusRef}
       closeOnBackdrop={!loading}
       footer={(
         <>
           <Button
+            ref={cancelBtnRef}
             type="button"
             variant="tertiary"
             onClick={onCancel}
@@ -55,16 +76,7 @@ export default function ConfirmDialog({
           >
             {cancelLabel}
           </Button>
-          <Button
-            ref={confirmBtnRef}
-            type="button"
-            variant={tone === 'danger' ? 'danger' : 'primary'}
-            onClick={() => void onConfirm()}
-            disabled={loading}
-            className="min-w-24"
-          >
-            {loading ? 'Working...' : confirmLabel}
-          </Button>
+          {confirmButtonWrapper ? confirmButtonWrapper(confirmButton) : confirmButton}
         </>
       )}
     >

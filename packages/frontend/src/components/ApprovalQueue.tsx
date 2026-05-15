@@ -5,7 +5,7 @@ import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useApprovals, type ApprovalRequest } from '@/hooks/useApprovals'
-import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
+import { useSafeOperationGate, type SafeOperationGate } from '@/hooks/useSafeOperationGate'
 import {
   getSafeNonce,
   buildSafeTx,
@@ -29,7 +29,7 @@ import {
   isActionableApprovalStatus,
 } from '@/lib/payment-status'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
-import NetworkGate from './NetworkGate'
+import OnchainActionGate from './OnchainActionGate'
 import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -82,6 +82,7 @@ function ApprovalCard({
   executionDisabled = false,
   disabledReason,
   showOtherDeviceNotice = false,
+  operationGate,
   actionError,
 }: {
   approval: ApprovalRequest
@@ -95,6 +96,7 @@ function ApprovalCard({
   executionDisabled?: boolean
   disabledReason?: string
   showOtherDeviceNotice?: boolean
+  operationGate: SafeOperationGate
   actionError?: string | null
 }) {
   const actionable = isActionableApprovalStatus(approval.status)
@@ -258,10 +260,16 @@ function ApprovalCard({
                 >
                   Reject
                 </Button>
-                <NetworkGate requiredChainId={approval.chain_id}>
+                <OnchainActionGate
+                  requiredChainId={approval.chain_id}
+                  operationGate={operationGate}
+                  noSignerMessage="Connect a wallet to approve this payment."
+                  showNotice={false}
+                >
+                  {({ disabled }) => (
                   <Button
                     size="sm"
-                    disabled={executing || executionDisabled}
+                    disabled={disabled || executing || executionDisabled}
                     onClick={onApproveAndExecute}
                     className="w-full sm:w-auto"
                   >
@@ -273,7 +281,8 @@ function ApprovalCard({
                           : 'Approving...'
                       : actionLabel}
                   </Button>
-                </NetworkGate>
+                  )}
+                </OnchainActionGate>
               </div>
             )}
             {executionDisabled && disabledReason ? (
@@ -457,6 +466,7 @@ function ApprovalCardWithContext({
       executionDisabled={executionDisabled}
       disabledReason={disabledReason}
       showOtherDeviceNotice={passkeyOnOtherDevice}
+      operationGate={operationGate}
       actionError={actionError}
     />
   )

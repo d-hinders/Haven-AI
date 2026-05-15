@@ -135,6 +135,87 @@ describe('MPP demo helpers', () => {
     })
   })
 
+  it('records a reconciliation event when an MPP retry is rejected after payment', async () => {
+    const backendUrl = 'https://haven-api.example'
+    const resourceUrl = challenge.resource
+    const txHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Machine payment required', challenge }), {
+        status: 402,
+        headers: {
+          'Content-Type': 'application/json',
+          'MACHINE-PAYMENT-CHALLENGE': btoa(JSON.stringify(challenge)),
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'pay_123',
+        status: 'pending_signature',
+        chain_id: 8453,
+        safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+        token: 'USDC',
+        amount: '0.01',
+        to: challenge.recipient,
+        resource_url: resourceUrl,
+        rail: 'mpp_demo',
+        challenge_id: challenge.challengeId,
+        sign_data: {
+          hash: `0x${'11'.repeat(32)}`,
+          components: {
+            safe: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+            token: challenge.asset.address,
+            to: challenge.recipient,
+            amount: challenge.amount.atomic,
+            payment_token: '0x0000000000000000000000000000000000000000',
+            payment: '0',
+            nonce: 1,
+          },
+          instructions: 'Sign with delegate key',
+        },
+      }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'pay_123',
+        status: 'confirmed',
+        tx_hash: txHash,
+        chain_id: 8453,
+        token: 'USDC',
+        amount: '0.01',
+        to: challenge.recipient,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Proof rejected' }), { status: 402 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: backendUrl,
+    })
+
+    await expect(haven.fetch(resourceUrl)).rejects.toMatchObject({
+      statusCode: 402,
+      body: expect.objectContaining({
+        marker: 'machine_payment_retry_rejected_after_payment',
+        payment_id: 'pay_123',
+      }),
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/reconciliation-events`)
+    const reportInit = fetchMock.mock.calls[4][1] as RequestInit
+    expect(JSON.parse(reportInit.body as string)).toMatchObject({
+      paymentId: 'pay_123',
+      rail: 'mpp_demo',
+      eventType: 'merchant_retry_rejected_after_payment',
+      txHash,
+      details: {
+        resource_url: resourceUrl,
+        retry_status: 402,
+        retry_body: JSON.stringify({ error: 'Proof rejected' }),
+        challenge_id: challenge.challengeId,
+      },
+    })
+  })
+
   it('surfaces MPP approval queues as a 202 API error', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

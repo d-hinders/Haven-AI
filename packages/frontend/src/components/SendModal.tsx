@@ -9,6 +9,7 @@ import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainTokens, type SendParams } from '@/lib/safe-tx'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate, isValidAddress } from '@/lib/format'
+import { exceedsRawBalance, validateMoneyInput } from '@/lib/money-input'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
 import NetworkGate from './NetworkGate'
@@ -209,11 +210,17 @@ export default function SendModal({
   const tokenBalance = balances.find(
     (b) => b.symbol.toLowerCase() === selectedToken.toLowerCase(),
   )
+  const tokenConfig = chainTokens[selectedToken]
+  const amountValidation = tokenConfig
+    ? validateMoneyInput(amount, tokenConfig.decimals, { tokenSymbol: selectedToken })
+    : null
+  const displayAmount = amountValidation?.ok ? amountValidation.amount : amount
   const amountWarning =
-    amount && tokenBalance && parseFloat(amount) > parseFloat(tokenBalance.formatted)
+    amountValidation?.ok &&
+    tokenBalance &&
+    exceedsRawBalance(amountValidation.raw, tokenBalance.balance)
       ? `This amount is higher than your available balance of ${tokenBalance.formatted} ${selectedToken}.`
       : ''
-  const tokenConfig = chainTokens[selectedToken]
   const selectedSafeOption =
     safeOptions.find((safe) => safe.id === selectedSafeOptionId) ?? null
   const walletName = selectedSafeOption?.name ?? safeName ?? 'Haven wallet'
@@ -281,19 +288,25 @@ export default function SendModal({
     setRecipientError('')
     setFormError('')
 
-    if (!amount || parseFloat(amount) <= 0) {
-      setAmountError('Enter an amount greater than 0')
+    if (!tokenConfig) {
+      setAmountError('Choose a supported token')
       return false
     }
 
-    if (tokenBalance) {
-      const bal = parseFloat(tokenBalance.formatted)
-      const amt = parseFloat(amount)
-      if (amt > bal) {
-        setAmountError(`Insufficient balance. You have ${tokenBalance.formatted} ${selectedToken}`)
-        return false
-      }
+    const parsedAmount = validateMoneyInput(amount, tokenConfig.decimals, {
+      tokenSymbol: selectedToken,
+    })
+    if (!parsedAmount.ok) {
+      setAmountError(parsedAmount.message)
+      return false
     }
+
+    if (tokenBalance && exceedsRawBalance(parsedAmount.raw, tokenBalance.balance)) {
+      setAmountError(`Insufficient balance. You have ${tokenBalance.formatted} ${selectedToken}`)
+      return false
+    }
+
+    if (parsedAmount.amount !== amount) setAmount(parsedAmount.amount)
 
     if (!recipient) {
       setRecipientError('Enter a recipient address')
@@ -311,7 +324,7 @@ export default function SendModal({
     }
 
     return true
-  }, [amount, recipient, safeAddress, selectedToken, tokenBalance])
+  }, [amount, recipient, safeAddress, selectedToken, tokenBalance, tokenConfig])
 
   // ── Actions ──────────────────────────────────────────────────────
   const handleReview = () => {
@@ -336,6 +349,14 @@ export default function SendModal({
       return
     }
     if (blockedByOtherDevice || !signer || !tokenConfig) return
+    const parsedAmount = validateMoneyInput(amount, tokenConfig.decimals, {
+      tokenSymbol: selectedToken,
+    })
+    if (!parsedAmount.ok) {
+      setAmountError(parsedAmount.message)
+      setStep('form')
+      return
+    }
 
     setStep('executing')
 
@@ -343,7 +364,7 @@ export default function SendModal({
       token: selectedToken,
       tokenAddress: tokenConfig.address as Address | null,
       decimals: tokenConfig.decimals,
-      amount,
+      amount: parsedAmount.amount,
       recipient: recipient as Address,
     }
 
@@ -815,7 +836,7 @@ export default function SendModal({
                 <div>
                   <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
                   <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                    {amount} {selectedToken}
+                    {displayAmount} {selectedToken}
                   </p>
                 </div>
                 <StatusBadge tone="neutral">
@@ -907,7 +928,7 @@ export default function SendModal({
                 <ResultIcon tone="success" />
                 <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Payment sent</p>
                 <p className="text-xs text-[var(--v2-ink-3)] mb-5 text-center">
-                  {amount} {selectedToken} was sent from {walletName} to {recipientLabel}.
+                  {displayAmount} {selectedToken} was sent from {walletName} to {recipientLabel}.
                 </p>
                 {txHash && (
                   <div className="mb-6 flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
@@ -932,7 +953,7 @@ export default function SendModal({
                 <ResultIcon tone="warning" />
                 <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Payment submitted</p>
                 <p className="text-xs text-[var(--v2-ink-3)] mb-2 text-center">
-                  {amount} {selectedToken} from {walletName} to {recipientLabel}.
+                  {displayAmount} {selectedToken} from {walletName} to {recipientLabel}.
                 </p>
                 <p className="text-xs text-[var(--v2-ink-3)] mb-5 text-center">
                   No money has moved yet. This payment needs {threshold - 1} more approval{threshold - 1 !== 1 ? 's' : ''} before it can be sent.

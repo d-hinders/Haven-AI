@@ -4,6 +4,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
 type AmountTone = 'success' | 'danger' | 'neutral'
 export type TransactionActivityDirection = 'in' | 'out' | 'neutral'
+type Density = 'comfortable' | 'compact'
 
 export interface TransactionActivityDetail {
   label: string
@@ -27,6 +28,7 @@ export function TransactionActivityRow({
   direction = 'neutral',
   details = [],
   action,
+  density = 'comfortable',
 }: {
   title: string
   description?: ReactNode
@@ -38,20 +40,36 @@ export function TransactionActivityRow({
   direction?: TransactionActivityDirection
   details?: TransactionActivityDetail[]
   action?: ReactNode
+  /**
+   * `comfortable` (default) is for the dedicated transactions screen.
+   * `compact` matches the height of the shared `<Row>` primitive (~56px) so
+   * the dashboard's agents + transactions columns sit on the same rhythm.
+   * Compact also hides the description line on the desktop layout.
+   */
+  density?: Density
 }) {
+  const isCompact = density === 'compact'
+  // Compact density pins to a fixed row height (h-[72px]) so the dashboard's
+  // agents and transactions columns sit on identical rhythm regardless of
+  // line-height nuances inside the title row (badge + text mixed heights).
+  // Horizontal padding only — vertical centering does the rest.
+  const containerPadding = isCompact
+    ? 'gap-3 px-4 sm:px-5 h-[72px]'
+    : 'gap-3 px-4 py-4 sm:px-5'
   return (
-    <div className="grid gap-3 px-4 py-4 transition-colors hover:bg-[var(--v2-surface)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
-      <div className="flex min-w-0 items-start gap-3">
-        <DirectionMark direction={direction} />
+    <div className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}`}>
+      <div className="flex min-w-0 items-center gap-3">
+        <DirectionMark direction={direction} density={density} />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="min-w-0 truncate text-sm font-medium text-[var(--v2-ink)]">{title}</p>
             {status ? <StatusBadge tone={statusTone}>{status}</StatusBadge> : null}
           </div>
           {description ? (
-            <div className="mt-1 text-xs text-[var(--v2-ink-2)]">{description}</div>
+            // Compact density tightens the title→description gap to match Row's mt-0.5.
+            <div className={`${isCompact ? 'mt-0.5 truncate' : 'mt-1'} text-xs text-[var(--v2-ink-2)]`}>{description}</div>
           ) : null}
-          {details.length > 0 ? (
+          {details.length > 0 && !isCompact ? (
             <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--v2-ink-3)]">
               {details.map((detail) => (
                 <div key={detail.label} className="flex min-w-0 items-center gap-1">
@@ -69,11 +87,13 @@ export function TransactionActivityRow({
           <p className={`text-sm font-semibold v2-tabular ${AMOUNT_TONE_CLASS[amountTone]}`}>
             {amount}
           </p>
-          {timestamp || action ? (
+          {(timestamp || action) && !isCompact ? (
             <div className="mt-1 flex items-center justify-end gap-2 text-xs text-[var(--v2-ink-3)]">
               {timestamp ? <span>{timestamp}</span> : null}
               {action}
             </div>
+          ) : timestamp && isCompact ? (
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{timestamp}</p>
           ) : null}
         </div>
       </div>
@@ -98,7 +118,13 @@ export function ExternalDetailsLink({ href, label = 'Open externally' }: { href:
   )
 }
 
-function DirectionMark({ direction }: { direction: TransactionActivityDirection }) {
+function DirectionMark({
+  direction,
+  density = 'comfortable',
+}: {
+  direction: TransactionActivityDirection
+  density?: Density
+}) {
   const classes =
     direction === 'in'
       ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
@@ -106,12 +132,18 @@ function DirectionMark({ direction }: { direction: TransactionActivityDirection 
         ? 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]'
         : 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
 
+  // Compact density renders a 32px mark to match the <Row> primitive's tinted
+  // leading circle, so transaction rows sit on the same height as agent rows
+  // on the dashboard.
+  const sizeClass = density === 'compact' ? 'h-8 w-8' : 'h-9 w-9'
+  const iconSizeClass = density === 'compact' ? 'h-3.5 w-3.5' : 'h-4 w-4'
+
   return (
     <span
       aria-hidden="true"
-      className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border ${classes}`}
+      className={`flex flex-shrink-0 items-center justify-center rounded-[10px] border ${sizeClass} ${classes}`}
     >
-      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <svg className={iconSizeClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         {direction === 'in' ? (
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
         ) : direction === 'out' ? (

@@ -96,8 +96,8 @@ const authorizeMachinePaymentSchema = {
 }
 
 const MAKE_PAYMENT_DESCRIPTION =
-  'Send a payment from the Haven-managed Safe wallet. ' +
-  "The payment will be validated against the agent's on-chain spending policy. " +
+  'Request and sign a payment from the user-controlled Safe within approved on-chain limits. ' +
+  'Haven authenticates the agent, validates the signed intent, and relays the Safe AllowanceModule transaction; it does not hold keys or control funds. ' +
   'Gnosis Chain tokens: EURe, USDC.e, xDAI. Base tokens: USDC, ETH.'
 
 const GET_STATUS_DESCRIPTION =
@@ -106,13 +106,13 @@ const GET_STATUS_DESCRIPTION =
 
 const AUTHORIZE_X402_DESCRIPTION =
   'Authorize payment for an HTTP 402 (Payment Required) response. ' +
-  'When a paid API returns 402 with x402 payment requirements, use this tool to fund the agent wallet and get a merchant payment header. ' +
-  'Haven evaluates the payment against policy before moving funds from the Haven wallet. ' +
+  'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key and request a policy-limited Safe AllowanceModule top-up when needed. ' +
+  'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request.'
 
 const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =
   'Authorize a Haven machine-payment challenge, currently for the internal MPP demo rail. ' +
-  'Haven checks the agent budget, sends the fixed USDC payment when allowed, and returns a proof header for the retry request.'
+  'The agent signs the payment, Haven relays it within the on-chain allowance, and the tool returns a proof header for the retry request.'
 
 // ── Claude (Anthropic) format ────────────────────────────────────
 

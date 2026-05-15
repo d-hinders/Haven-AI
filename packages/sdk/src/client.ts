@@ -286,9 +286,14 @@ export class HavenClient {
     option: X402PaymentOption,
     idempotencyKey: string,
   ): Promise<X402Receipt> {
-    // 2. Move the required USDC from the Haven wallet to the delegate EOA.
-    // The merchant then verifies and settles the standard EIP-3009 x402
-    // authorization signed by this same delegate wallet.
+    // 2. Standard x402 settles from an EOA, so the SDK uses the agent-owned
+    // delegate EOA for the merchant-facing EIP-3009 authorization. Haven does
+    // not control this EOA or its private key.
+    //
+    // The only automated funding path is a separate Safe AllowanceModule
+    // transfer signed by the agent key and constrained by the user's on-chain
+    // allowance. Haven's backend relays that signed top-up; it is not the source
+    // of payment authority.
     // Sign before funding so retries reuse one EIP-3009 nonce. If funding fails,
     // the unused authorization simply expires via validBefore.
     const paymentHeader = await this.createStandardX402Header(paymentRequired, option)

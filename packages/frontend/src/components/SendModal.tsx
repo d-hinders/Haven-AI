@@ -809,36 +809,37 @@ export default function SendModal({
 
         {/* ── STEP 2: Review ──────────────────────────────────────── */}
         {step === 'review' && (
+          // Flattened review: the modal IS the card. The amount block and the
+          // details block are separated by a hairline rule, not by a
+          // nested-card-in-a-card-in-a-card.
           <div className="p-6 space-y-5">
-            <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
-                  <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                    {amount} {selectedToken}
-                  </p>
-                </div>
-                <StatusBadge tone="neutral">
-                  {isMultiSig ? 'Needs approval' : 'Ready to send'}
-                </StatusBadge>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
+                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                  {amount} {selectedToken}
+                </p>
               </div>
+              <StatusBadge tone="neutral">
+                {isMultiSig ? 'Needs approval' : 'Ready to send'}
+              </StatusBadge>
+            </div>
 
-              <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
-                <TransactionMovement from={walletName} to={recipientLabel} />
-                <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <SendDetail label="Haven wallet" value={walletName} />
-                  <SendDetail
-                    label="Recipient"
-                    value={recipientLabel}
-                    subValue={recipientDetailSubValue}
-                    copyValue={selectedContactName ? recipient : undefined}
-                    copyLabel="Copy recipient address"
-                    subMono
-                  />
-                  <SendDetail label="Network" value={getChainConfig(chainId).name} />
-                  <SendDetail label="Approve with" value={approvalMethodLabel} />
-                </dl>
-              </div>
+            <div className="-mx-6 border-t border-[var(--v2-border)] px-6 pt-5">
+              <TransactionMovement from={walletName} to={recipientLabel} />
+              <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                <SendDetail label="Haven wallet" value={walletName} />
+                <SendDetail
+                  label="Recipient"
+                  value={recipientLabel}
+                  subValue={recipientDetailSubValue}
+                  copyValue={selectedContactName ? recipient : undefined}
+                  copyLabel="Copy recipient address"
+                  subMono
+                />
+                <SendDetail label="Network" value={getChainConfig(chainId).name} />
+                <SendDetail label="Approve with" value={approvalMethodLabel} />
+              </dl>
             </div>
 
             <p className="text-xs text-[var(--v2-ink-3)]">

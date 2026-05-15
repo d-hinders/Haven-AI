@@ -182,7 +182,12 @@ function ApprovalCard({
             </p>
           </div>
 
-          <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+          {/*
+            Sidebar details panel — tinted background only, no border. The
+            border-+-grey-+-rounded combo read as a nested card; the bg-surface
+            alone is enough to differentiate it from the parent card body.
+          */}
+          <div className="rounded-[10px] bg-[var(--v2-surface)] p-4">
             <TransactionMovement from={walletName} to={recipient} />
             <dl className="mt-4 grid gap-3 sm:grid-cols-2">
               <ApprovalDetail label="Agent" value={approval.agent_name} />

@@ -116,12 +116,15 @@ function AllowanceBar({
   const remaining = effective.remaining
   const pct = total > 0n ? Number((spent * 100n) / total) : 0
   const nearLimit = pct >= 90 && remaining > 0n
-  const color =
+  // Semantic bar fills via design-system tokens (--v2-bar-fill-*) — these
+  // replace the previous hardcoded indigo / amber / red Tailwind gradients
+  // so the colors are consistent with the rest of the v2 palette.
+  const fillStyle =
     pct < 40
-      ? 'from-indigo-500 to-violet-500'
+      ? 'var(--v2-bar-fill-ok)'
       : pct < 75
-        ? 'from-amber-500 to-orange-500'
-        : 'from-red-500 to-rose-500'
+        ? 'var(--v2-bar-fill-warn)'
+        : 'var(--v2-bar-fill-danger)'
 
   // Animate bar width from 0 to target on mount
   const [displayPct, setDisplayPct] = useState(0)
@@ -166,10 +169,8 @@ function AllowanceBar({
         }`}
       >
         <div
-          className={`h-full rounded-full bg-gradient-to-r ${color} allowance-fill ${
-            nearLimit ? 'animate-pulse' : ''
-          }`}
-          style={{ width: `${displayPct}%` }}
+          className={`h-full rounded-full allowance-fill ${nearLimit ? 'animate-pulse' : ''}`}
+          style={{ width: `${displayPct}%`, background: fillStyle }}
         />
       </div>
       {/* Reset info */}

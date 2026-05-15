@@ -25,6 +25,7 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { TransactionActivityRow, TransactionMovement } from '@/components/haven'
@@ -252,13 +253,12 @@ function DashboardHero({
 }) {
   return (
     <section
-      className="relative overflow-hidden rounded-[24px] border shadow-[var(--v2-shadow-card-raised)]"
-      style={{ borderColor: '#E7E9F2', backgroundColor: '#F7F5FF' }}
+      className="relative overflow-hidden rounded-[24px] border border-[var(--v2-border-anchor)] bg-[var(--v2-surface-anchor)] shadow-[var(--v2-shadow-card-raised)]"
     >
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{ background: 'linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%)' }}
+        style={{ background: 'var(--v2-surface-hero)' }}
       />
       <div className="relative grid gap-6 px-6 py-7 sm:px-8 sm:py-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div>
@@ -365,8 +365,12 @@ function AttentionSection({
   if (!hasOverviewError && approvalActionCount === 0) return null
 
   return (
-    <section className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
-      <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+    // Anchor elevation — the "Needs attention" panel is the second-most
+    // important surface on the dashboard after the balance hero. The cooler
+    // off-white surface and brand-tinted hairline give it presence without
+    // competing with the hero.
+    <Card as="article" elevation="anchor" className="overflow-hidden">
+      <div className="border-b border-[var(--v2-border)] px-5 py-4">
         <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Needs attention</h2>
       </div>
       <div className="divide-y divide-[var(--v2-border)]">
@@ -399,7 +403,7 @@ function AttentionSection({
           </div>
         ) : null}
       </div>
-    </section>
+    </Card>
   )
 }
 

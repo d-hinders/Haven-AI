@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -66,6 +67,15 @@ function LoadingCard() {
 
 function MovementExample({ from, to }: { from: string; to: string }) {
   return <TransactionMovement from={from} to={to} />
+}
+
+/** Generic placeholder icon for demos — 1.5 stroke, currentColor. */
+function DotIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+      <circle cx="12" cy="12" r="6" />
+    </svg>
+  )
 }
 
 export default function DesignSystemPage() {
@@ -153,15 +163,137 @@ export default function DesignSystemPage() {
           </Card>
         </div>
 
-        <Card hover={false} elevation="raised" className="p-5">
-          <p className="text-xs font-medium text-[var(--v2-ink-3)]">Raised card example</p>
-          <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-            $4,280.35
-          </p>
-          <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
-            Reserve raised elevation for page-anchor surfaces such as a balance hero or account total.
-          </p>
+        <div className="grid gap-5 lg:grid-cols-3">
+          <Card hover={false} className="p-5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Flat (default)</p>
+            <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Standard card</p>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+              The default. One page can have many flat cards. Hover lift on interactive variants.
+            </p>
+          </Card>
+
+          <Card hover={false} elevation="anchor" className="p-5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
+            <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Secondary focal point</p>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+              Use for the second-most-important surface on a page (pending approvals, agent status). Cooler off-white background, brand-tinted hairline.
+            </p>
+          </Card>
+
+          <Card hover={false} elevation="raised" className="p-5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Raised</p>
+            <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+              $4,280.35
+            </p>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              The single page hero (balance, total). Hover lift suppressed — it's already prominent.
+            </p>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="Card.Section — nested content without grey-on-white"
+        description="When you need to group content inside a card, use Card.Section instead of a grey inner wrapper. Renders a hairline top border that bleeds to the card's edges — the canonical way to subsection a card. Avoid nesting a second `<Card>` (or a grey-on-white inner box) inside a card whenever Card.Section will do."
+      >
+        <Card hover={false} className="p-5">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Operating wallet</h3>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base · 0x8f4F…6f4C</p>
+          </div>
+          <Card.Section className="mt-5 pt-5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Holdings</p>
+            <dl className="mt-2 grid grid-cols-2 gap-y-2 text-sm">
+              <dt className="text-[var(--v2-ink-2)]">USDC</dt>
+              <dd className="text-right v2-tabular text-[var(--v2-ink)]">4,280.35</dd>
+              <dt className="text-[var(--v2-ink-2)]">ETH</dt>
+              <dd className="text-right v2-tabular text-[var(--v2-ink)]">0.482</dd>
+            </dl>
+          </Card.Section>
+          <Card.Section className="mt-5 pt-5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approvers</p>
+            <p className="mt-2 text-sm text-[var(--v2-ink-2)]">2 of 3 approvers required</p>
+          </Card.Section>
         </Card>
+        <p className="text-xs text-[var(--v2-ink-3)]">
+          Reserve <code className="font-mono">inset</code> only for code blocks or quote-style content — the default hairline style is the standard.
+        </p>
+      </Section>
+
+      <Section
+        title="Row — the canonical list item"
+        description="One primitive for every list row in the app. Slots: leading icon (with optional tinted circle), title, subtitle, trailing. Hover and focus styles are baked in for interactive variants. Density toggles between comfortable lists and compact panels."
+      >
+        <Card hover={false} className="overflow-hidden">
+          <Row
+            leading={<DotIcon />}
+            leadingTone="brand"
+            title="Operating wallet"
+            subtitle="Base · 0x8f4F…6f4C"
+            trailing={<StatusBadge tone="brand">Default</StatusBadge>}
+            href="#"
+          />
+          <Row
+            leading={<DotIcon />}
+            leadingTone="success"
+            title="Trip wallet"
+            subtitle="Base · 0x31bc…8d04"
+            trailing={<span className="v2-tabular text-sm font-semibold text-[var(--v2-ink)]">75.00 EURe</span>}
+            href="#"
+          />
+          <Row
+            leading={<DotIcon />}
+            leadingTone="warning"
+            title="Research assistant"
+            subtitle="Needs approval · 2 pending"
+            trailing={<StatusBadge tone="warning">Review</StatusBadge>}
+            accent
+            href="#"
+          />
+        </Card>
+        <Card hover={false} className="overflow-hidden">
+          <Row
+            density="compact"
+            leading={<DotIcon />}
+            title="Compact row"
+            subtitle="Tighter padding for dense panels"
+            trailing={<span className="text-xs text-[var(--v2-ink-3)]">12m ago</span>}
+          />
+          <Row
+            density="compact"
+            leading={<DotIcon />}
+            title="Static row"
+            subtitle="No href / onClick — renders as a div, no hover"
+          />
+        </Card>
+      </Section>
+
+      <Section
+        title="Empty states"
+        description="Pick a tone that matches the meaning (brand for default, warning for attention, success after a completed flow). The leading icon sits in a soft tinted circle with a faint halo — gives the surface a focal point without illustration overhead."
+      >
+        <div className="grid gap-5 lg:grid-cols-3">
+          <EmptyState
+            icon={<DotIcon />}
+            tone="brand"
+            title="No agents yet"
+            body="Create an agent to give it a budget and rules. Haven asks for approval when it tries to spend more."
+            action={<Button size="sm">Create agent</Button>}
+          />
+          <EmptyState
+            icon={<DotIcon />}
+            tone="warning"
+            title="One agent needs attention"
+            body="A scheduled payment is above its remaining budget. Approve or reject it before it expires."
+            action={<Button size="sm" variant="ghost">Open approvals</Button>}
+          />
+          <EmptyState
+            icon={<DotIcon />}
+            tone="success"
+            title="You're all caught up"
+            body="No pending approvals. Agents will keep working within their budgets."
+          />
+        </div>
       </Section>
 
       <Section

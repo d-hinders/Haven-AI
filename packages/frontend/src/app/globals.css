@@ -37,6 +37,25 @@
   --v2-surface-hover: #f0f4f9;
   --v2-brand-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
 
+  /* Anchor surface — slightly cooler off-white for the "second most important"
+     card on a page (e.g. pending-approvals callout). Used with the anchor
+     elevation tier on Card. */
+  --v2-surface-anchor: #fafbfd;
+  --v2-border-anchor: rgba(79, 70, 229, 0.10);
+
+  /* Hero surface wash — replaces the inline lavender gradient on DashboardHero. */
+  --v2-surface-hero: linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%);
+
+  /* Semantic gradient fills for progress / allowance bars. Replace ad-hoc
+     `from-indigo-500 to-violet-500` style classes. */
+  --v2-bar-fill-ok: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);
+  --v2-bar-fill-warn: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
+  --v2-bar-fill-danger: linear-gradient(90deg, #ef4444 0%, #f43f5e 100%);
+
+  /* Subtle inset highlight on raised surfaces — gives them the "milky glass"
+     finish without changing the surface color. Use sparingly. */
+  --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
   --v2-font-weight-medium: 500;
   --v2-font-weight-semibold: 600;
   --v2-font-weight-bold: 700;

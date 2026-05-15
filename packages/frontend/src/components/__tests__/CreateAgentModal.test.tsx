@@ -117,11 +117,17 @@ vi.mock('@/components/WalletButton', () => ({
 
 import CreateAgentModal from '@/components/CreateAgentModal'
 
-function renderModal(onCreated = vi.fn()) {
+function renderModal({
+  onCreated = vi.fn(),
+  onClose = vi.fn(),
+}: {
+  onCreated?: ReturnType<typeof vi.fn>
+  onClose?: ReturnType<typeof vi.fn>
+} = {}) {
   render(
     <CreateAgentModal
       open
-      onClose={vi.fn()}
+      onClose={onClose}
       safeAddress={SAFE_ADDRESS}
       safeId="safe-1"
       onCreated={onCreated}
@@ -129,7 +135,7 @@ function renderModal(onCreated = vi.fn()) {
   )
 }
 
-async function completeReviewStep() {
+async function fillAgentRules() {
   fireEvent.change(screen.getByPlaceholderText('e.g. Research Agent'), {
     target: { value: 'Research Agent' },
   })
@@ -140,7 +146,10 @@ async function completeReviewStep() {
   })
   fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
   fireEvent.click(screen.getByRole('button', { name: 'Review credential' }))
+}
 
+async function completeExistingCredentialReviewStep() {
+  await fillAgentRules()
   fireEvent.click(screen.getByRole('button', { name: 'Use an existing credential address instead' }))
   fireEvent.change(screen.getByPlaceholderText('0x...'), {
     target: { value: DELEGATE_ADDRESS },
@@ -150,12 +159,30 @@ async function completeReviewStep() {
   expect(await screen.findByText('Review agent rules')).toBeInTheDocument()
 }
 
+async function completeGeneratedCredentialReviewStep() {
+  await fillAgentRules()
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Review agent rules' })).not.toBeDisabled(),
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+
+  expect(await screen.findByText('Review agent rules')).toBeInTheDocument()
+}
+
 describe('CreateAgentModal recovery', () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>
+  let clipboardWriteText: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    clipboardWriteText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: clipboardWriteText,
+      },
+    })
     mockUsePublicClient.mockReturnValue({})
     mockUseActiveSigner.mockReturnValue({
       type: 'eoa',
@@ -200,8 +227,8 @@ describe('CreateAgentModal recovery', () => {
         delegate_address: DELEGATE_ADDRESS,
       })
 
-    renderModal(onCreated)
-    await completeReviewStep()
+    renderModal({ onCreated })
+    await completeExistingCredentialReviewStep()
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect agent' }))
 
@@ -217,5 +244,32 @@ describe('CreateAgentModal recovery', () => {
     expect(await screen.findByText('Your agent is ready')).toBeInTheDocument()
     expect(mockExecuteSafeTx).toHaveBeenCalledTimes(1)
     expect(mockApiPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('requires saving the generated credential file before finishing setup', async () => {
+    const onCreated = vi.fn()
+    const onClose = vi.fn()
+
+    renderModal({ onCreated, onClose })
+    await completeGeneratedCredentialReviewStep()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect agent' }))
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('Your agent is ready')).toBeInTheDocument()
+    expect(screen.getByText('Action required')).toBeInTheDocument()
+    expect(screen.getByText(/This credential is shown once/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy file' }))
+
+    await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
+    expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('sk_test'))
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Done' })).not.toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

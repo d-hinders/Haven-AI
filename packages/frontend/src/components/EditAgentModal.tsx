@@ -12,6 +12,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { validateMoneyInput } from '@/lib/money-input'
 import NetworkGate from './NetworkGate'
 import {
   getSafeNonce,
@@ -118,7 +119,14 @@ export default function EditAgentModal({
     trimmedName !== agent.name ||
     trimmedDescription !== (agent.description ?? '')
   const hasBudgetInput = amount.trim().length > 0
-  const budgetChanged = hasBudgetInput && Number(amount) > 0
+  const budgetValidation =
+    hasBudgetInput && selectedTokenConfig
+      ? validateMoneyInput(amount, selectedTokenConfig.decimals, {
+          tokenSymbol: selectedTokenConfig.symbol,
+        })
+      : null
+  const budgetDisplayAmount = budgetValidation?.ok ? budgetValidation.amount : amount
+  const budgetChanged = budgetValidation?.ok ?? false
   const hasInvalidBudget = hasBudgetInput && !budgetChanged
   const canReview = trimmedName.length > 0 && !hasInvalidBudget && (detailsChanged || budgetChanged)
 
@@ -162,7 +170,15 @@ export default function EditAgentModal({
       let threshold = safeDetails?.threshold ?? 1
 
       if (budgetChanged && selectedTokenConfig && publicClient && signer && safeDetails) {
-        const rawAmount = parseUnits(amount, selectedTokenConfig.decimals)
+        const parsedAmount = validateMoneyInput(amount, selectedTokenConfig.decimals, {
+          tokenSymbol: selectedTokenConfig.symbol,
+        })
+        if (!parsedAmount.ok) {
+          setExecError(parsedAmount.message)
+          setExecStatus('error')
+          return
+        }
+        const rawAmount = parseUnits(parsedAmount.amount, selectedTokenConfig.decimals)
         const token = (selectedTokenConfig.address ?? '0x0000000000000000000000000000000000000000') as Address
 
         // Build Safe tx
@@ -365,12 +381,17 @@ export default function EditAgentModal({
                     ))}
                   </Select>
                   <Input
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (/^\d*\.?\d*$/.test(value)) setAmount(value)
+                    }}
                     placeholder="Amount"
+                    invalid={hasInvalidBudget}
+                    helperText={hasInvalidBudget && budgetValidation && !budgetValidation.ok ? budgetValidation.message : undefined}
+                    className="v2-tabular"
                   />
                   <Select
                     value={resetTimeMin}
@@ -442,7 +463,7 @@ export default function EditAgentModal({
                       {isExistingToken ? 'Updated budget' : 'New budget'}
                     </p>
                     <p className="text-sm text-[var(--v2-ink)]">
-                      {amount} {selectedToken}
+                      {budgetDisplayAmount} {selectedToken}
                       <span className="text-[var(--v2-ink-3)] ml-2">{resetLabel(resetTimeMin)}</span>
                     </p>
                   </div>
@@ -454,7 +475,7 @@ export default function EditAgentModal({
                   <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">Wallet rule change</p>
                   <p className="flex items-center gap-2 text-xs text-[var(--v2-ink-2)]">
                     <span className="w-1 h-1 rounded-full bg-[var(--v2-brand)]" />
-                    {isExistingToken ? 'Update' : 'Set'} {amount} {selectedToken} budget for this agent ({resetLabel(resetTimeMin).toLowerCase()})
+                    {isExistingToken ? 'Update' : 'Set'} {budgetDisplayAmount} {selectedToken} budget for this agent ({resetLabel(resetTimeMin).toLowerCase()})
                   </p>
                 </div>
               )}
@@ -566,7 +587,7 @@ export default function EditAgentModal({
                 </p>
                 <p className="text-xs text-[var(--v2-ink-3)] mt-1">
                   {budgetChanged
-                    ? `${amount} ${selectedToken} — ${resetLabel(resetTimeMin).toLowerCase()}`
+                    ? `${budgetDisplayAmount} ${selectedToken} — ${resetLabel(resetTimeMin).toLowerCase()}`
                     : 'Name and description saved'}
                 </p>
                 {txHash && (

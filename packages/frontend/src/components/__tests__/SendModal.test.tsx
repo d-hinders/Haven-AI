@@ -140,6 +140,63 @@ describe('SendModal', () => {
     })
   })
 
+  it('checks spend amounts against the raw token balance', () => {
+    render(
+      <SendModal
+        {...defaultProps}
+        balances={[
+          {
+            ...defaultProps.balances[0],
+            balance: '100000000000000000',
+            formatted: '0.1',
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.change(screen.getByPlaceholderText('0.00'), {
+      target: { value: '0.100000000000000001' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(RECIPIENT_INPUT), { target: { value: RECIPIENT } })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(screen.getByText('Insufficient balance. You have 0.1 ETH')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Review payment' })).not.toBeInTheDocument()
+  })
+
+  it('normalizes shorthand decimal amounts before sending', async () => {
+    const send = vi.fn().mockResolvedValue(undefined)
+    mockUseSendTransaction.mockReturnValue({
+      status: 'idle',
+      txHash: null,
+      error: null,
+      send,
+      reset: vi.fn(),
+    })
+
+    render(<SendModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '.5' } })
+    fireEvent.change(screen.getByPlaceholderText(RECIPIENT_INPUT), { target: { value: RECIPIENT } })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(screen.getByText('0.5 ETH')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve and send' }))
+
+    await waitFor(() => {
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: '0.5',
+        }),
+        SAFE_ADDRESS,
+        1,
+        '0x3333333333333333333333333333333333333333',
+        8453,
+      )
+    })
+  })
+
   it('shows saved-recipient affordance when no contacts exist', () => {
     render(<SendModal {...defaultProps} />)
 

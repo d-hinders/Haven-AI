@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
+export type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
 
 const TONE_CLASS: Record<StatusTone, string> = {
   success: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]',

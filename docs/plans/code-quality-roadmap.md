@@ -173,6 +173,7 @@ Changes:
 - Ensure over-allowance x402 approvals are idempotent and carry enough merchant/protocol metadata.
 - Add tests for duplicate x402 approval requests, expired replay, DB conflicts, and SDK handling of `pending_approval` and `expired`.
 - Define a minimal durable record for funded-but-not-settled delegate-wallet cases, even if sweeping remains a later operational feature.
+- Current target: record authenticated reconciliation events when a merchant/resource retry returns 402 after Haven has confirmed the payment; defer automated sweeping/retry jobs to a later operational phase.
 
 Ownership:
 

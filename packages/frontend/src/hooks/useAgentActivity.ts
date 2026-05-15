@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import type { ApprovalStatus, PaymentStatus } from '@/lib/payment-status'
+
+type ActivityStatus = ApprovalStatus | PaymentStatus
 
 export interface ActivityItem {
   type: 'payment' | 'approval'
@@ -14,7 +17,7 @@ export interface ActivityItem {
   amount: string
   to: string
   reason?: string | null
-  status: string
+  status: ActivityStatus
   tx_hash: string | null
   source?: string
   x402_resource_url?: string | null

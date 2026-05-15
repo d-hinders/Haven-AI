@@ -35,6 +35,7 @@ const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const RECIPIENT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const SIGN_HASH = `0x${'11'.repeat(32)}`
 const PAYMENT_ID = '33333333-3333-3333-3333-333333333333'
+const TX_HASH = `0x${'ab'.repeat(32)}`
 
 const challenge = {
   rail: 'mpp_demo',
@@ -89,6 +90,25 @@ describe('machine payment routes', () => {
       machine_challenge_id: challenge.challengeId,
       sign_hash: SIGN_HASH,
       allowance_nonce: 3,
+      ...overrides,
+    }
+  }
+
+  function confirmedPayment(overrides: Record<string, unknown> = {}) {
+    return {
+      id: PAYMENT_ID,
+      user_id: AGENT.user_id,
+      tx_hash: TX_HASH,
+      status: 'confirmed',
+      payment_rail: 'mpp_demo',
+      source: 'mpp_demo',
+      payment_resource_url: challenge.resource,
+      x402_resource_url: null,
+      merchant_address: RECIPIENT.toLowerCase(),
+      x402_merchant_address: null,
+      machine_challenge_id: challenge.challengeId,
+      machine_idempotency_key: 'mpp_demo:test',
+      x402_idempotency_key: null,
       ...overrides,
     }
   }
@@ -303,5 +323,101 @@ describe('machine payment routes', () => {
       recovered: '0x0000000000000000000000000000000000000001',
     })
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+  })
+
+  it('records a reconciliation event for confirmed payments rejected by the merchant retry', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'event-123',
+          status: 'open',
+          created_at: '2026-05-15T12:00:00.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: TX_HASH,
+        reason: 'Merchant returned HTTP 402 after payment',
+        details: { retryStatus: 402, resourceUrl: challenge.resource },
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      event_id: 'event-123',
+      status: 'open',
+      payment_id: PAYMENT_ID,
+      rail: 'mpp_demo',
+      event_type: 'merchant_retry_rejected_after_payment',
+    })
+
+    const insertCall = mockQuery.mock.calls[2]
+    expect(insertCall[0]).toContain('machine_payment_reconciliation_events')
+    expect(insertCall[0]).toContain('ON CONFLICT (payment_intent_id, event_type)')
+    expect(insertCall[1]).toContain(PAYMENT_ID)
+    expect(insertCall[1]).toContain('mpp_demo')
+    expect(insertCall[1]).toContain('merchant_retry_rejected_after_payment')
+    expect(insertCall[1]).toContain(TX_HASH)
+    expect(insertCall[1]).toContain(challenge.resource)
+    expect(insertCall[1]).toContain(RECIPIENT.toLowerCase())
+    expect(insertCall[1]).toContain(challenge.challengeId)
+    expect(insertCall[1]).toContain('mpp_demo:test')
+  })
+
+  it('does not record reconciliation events for unconfirmed payments', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [confirmedPayment({ status: 'pending_signature', tx_hash: null })],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toMatchObject({
+      error: 'Reconciliation events require a confirmed payment intent',
+      status: 'pending_signature',
+    })
+    expect(mockQuery).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects reconciliation events whose tx hash does not match the payment', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: `0x${'cd'.repeat(32)}`,
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toBe('txHash does not match payment intent')
+    expect(mockQuery).toHaveBeenCalledTimes(2)
   })
 })

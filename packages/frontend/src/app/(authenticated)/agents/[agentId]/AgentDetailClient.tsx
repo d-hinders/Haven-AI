@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
-import { useAgents, type AgentStatus } from '@/hooks/useAgents'
+import { useAgents } from '@/hooks/useAgents'
 import { useAgentActivity, type ActivityItem } from '@/hooks/useAgentActivity'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
@@ -14,6 +14,11 @@ import { RESET_PERIODS } from '@/lib/allowance-module'
 import { getChainConfig } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
+import {
+  activityStatusPresentation,
+  agentStatusPresentation,
+  failedOrRejectedStatus,
+} from '@/lib/payment-status'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import EditAgentModal from '@/components/EditAgentModal'
@@ -34,35 +39,6 @@ import {
   ExternalDetailsLink,
   TransactionMovement,
 } from '@/components/haven'
-
-function statusLabel(status: AgentStatus | string): string {
-  if (status === 'active') return 'Connected'
-  if (status === 'paused') return 'Paused'
-  if (status === 'revoked') return 'Revoked'
-  return status
-}
-
-function statusTone(status: AgentStatus | string): 'success' | 'warning' | 'danger' | 'neutral' {
-  if (status === 'active') return 'success'
-  if (status === 'paused') return 'warning'
-  if (status === 'revoked') return 'danger'
-  return 'neutral'
-}
-
-function activityStatusLabel(status: string): string {
-  if (status === 'confirmed' || status === 'executed') return 'Sent'
-  if (status === 'pending' || status === 'pending_approval') return 'Needs approval'
-  if (status === 'failed') return 'Failed'
-  if (status === 'rejected') return 'Rejected'
-  return statusLabel(status)
-}
-
-function activityStatusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
-  if (status === 'confirmed' || status === 'executed') return 'neutral'
-  if (status === 'pending' || status === 'pending_approval') return 'warning'
-  if (status === 'failed' || status === 'rejected') return 'danger'
-  return 'neutral'
-}
 
 function activityTitle(item: ActivityItem, agentName?: string): string {
   const sourceTitle = paymentSourceTitle(item.source)
@@ -264,6 +240,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     budgetLines.length === 0
       ? 'No automatic spending is configured for this agent.'
       : 'Payments within budget can run automatically. Larger payments need your manual approval.'
+  const agentStatus = agentStatusPresentation(currentAgent.status)
 
   async function copyCredential() {
     if (!fullCredential) return
@@ -363,8 +340,8 @@ export default function AgentDetailClient({ agentId }: Props) {
         title={currentAgent.name}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <StatusBadge tone={statusTone(currentAgent.status)}>
-              {statusLabel(currentAgent.status)}
+            <StatusBadge tone={agentStatus.tone}>
+              {agentStatus.label}
             </StatusBadge>
             {!isRevoked ? (
               <Button
@@ -483,8 +460,8 @@ export default function AgentDetailClient({ agentId }: Props) {
               walletName={walletName}
               amount={budgetAmountSummary}
               resetPeriod={budgetPeriodSummary}
-              status={statusLabel(currentAgent.status)}
-              statusTone={statusTone(currentAgent.status)}
+              status={agentStatus.label}
+              statusTone={agentStatus.tone}
               density="compact"
             >
               <div className="space-y-2">
@@ -524,23 +501,26 @@ export default function AgentDetailClient({ agentId }: Props) {
               />
             ) : (
               <div>
-                {activity.map((item) => (
-                  <AgentActivityRow
-                    key={`${item.type}-${item.id}`}
-                    title={activityTitle(item, currentAgent.name)}
-                    description={activityMovement(item, walletName)}
-                    amount={`-${item.amount} ${item.token}`}
-                    amountTone={item.status === 'failed' || item.status === 'rejected' ? 'danger' : 'neutral'}
-                    status={activityStatusLabel(item.status)}
-                    statusTone={activityStatusTone(item.status)}
-                    timestamp={timeAgo(item.created_at)}
-                    action={
-                      item.tx_hash && item.explorer_url ? (
-                        <ExternalDetailsLink href={item.explorer_url} />
-                      ) : undefined
-                    }
-                  />
-                ))}
+                {activity.map((item) => {
+                  const status = activityStatusPresentation(item.status)
+                  return (
+                    <AgentActivityRow
+                      key={`${item.type}-${item.id}`}
+                      title={activityTitle(item, currentAgent.name)}
+                      description={activityMovement(item, walletName)}
+                      amount={`-${item.amount} ${item.token}`}
+                      amountTone={failedOrRejectedStatus(item.status) ? 'danger' : 'neutral'}
+                      status={status.label}
+                      statusTone={status.tone}
+                      timestamp={timeAgo(item.created_at)}
+                      action={
+                        item.tx_hash && item.explorer_url ? (
+                          <ExternalDetailsLink href={item.explorer_url} />
+                        ) : undefined
+                      }
+                    />
+                  )
+                })}
               </div>
             )}
           </Card>

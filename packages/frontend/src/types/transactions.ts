@@ -1,3 +1,5 @@
+import type { AgentStatus } from '@/lib/payment-status'
+
 export interface Transaction {
   hash: string
   type: 'native' | 'erc20' | 'internal'
@@ -61,7 +63,7 @@ export interface TransactionFilterSafeOption {
 export interface TransactionFilterAgentOption {
   id: string
   name: string
-  status: string
+  status: AgentStatus
 }
 
 export interface TransactionFilterTokenOption {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import type { ApprovalStatus } from '@/lib/payment-status'
 
 export interface ApprovalRequest {
   id: string
@@ -17,7 +18,7 @@ export interface ApprovalRequest {
   reason: string | null
   source: string
   x402_resource_url: string | null
-  status: string
+  status: ApprovalStatus
   tx_hash: string | null
   reviewed_at: string | null
   created_at: string
@@ -57,7 +58,7 @@ export function useApprovals(pollInterval = 15000) {
   }, [fetchApprovals, pollInterval])
 
   const approve = useCallback(async (id: string) => {
-    const result = await api.post<{ id: string; status: string; payment: unknown }>(
+    const result = await api.post<{ id: string; status: ApprovalStatus; payment: unknown }>(
       `/approvals/${id}/approve`,
     )
     await fetchApprovals()

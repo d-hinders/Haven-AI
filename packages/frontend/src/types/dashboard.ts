@@ -1,4 +1,5 @@
 import type { AggregatedTransaction } from './transactions'
+import type { AgentStatus } from '@/lib/payment-status'
 
 export interface DashboardAgentAllowance {
   tokenSymbol: string
@@ -9,7 +10,7 @@ export interface DashboardAgentAllowance {
 export interface DashboardAgentPreview {
   id: string
   name: string
-  status: string
+  status: AgentStatus
   safeId: string | null
   safeName: string | null
   safeChainId: number | null

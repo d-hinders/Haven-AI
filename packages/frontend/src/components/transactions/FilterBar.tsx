@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { getChainConfig } from '@/lib/chains'
+import { agentStatusPresentation } from '@/lib/payment-status'
 import type {
   TransactionFilterAgentOption,
   TransactionFilterSafeOption,
@@ -31,9 +32,10 @@ function tokenLabel(token: TransactionFilterTokenOption): string {
     : `${token.symbol} (${chainLabel(token.chainId)})`
 }
 
-function agentStatusTone(status: string): string {
-  if (status === 'active') return 'text-[var(--v2-ink)]'
-  if (status === 'paused') return 'text-[var(--v2-ink-2)]'
+function agentStatusClass(status: string): string {
+  const { tone } = agentStatusPresentation(status)
+  if (tone === 'success') return 'text-[var(--v2-ink)]'
+  if (tone === 'warning') return 'text-[var(--v2-ink-2)]'
   return 'text-[var(--v2-ink-3)]'
 }
 
@@ -180,25 +182,28 @@ export default function FilterBar({
                   <div className="truncate font-medium">User (manual)</div>
                 </div>
               </DropdownButton>
-              {sortedAgents.map((agent) => (
-                <DropdownButton
-                  key={agent.id}
-                  active={filters.agentId === agent.id}
-                  onClick={() => {
-                    onChange({ ...filters, agentId: agent.id })
-                    setOpen(null)
-                  }}
-                >
-                  <div className="min-w-0 text-left">
-                    <div className={`truncate font-medium ${agentStatusTone(agent.status)}`}>
-                      {agent.name}
+              {sortedAgents.map((agent) => {
+                const status = agentStatusPresentation(agent.status)
+                return (
+                  <DropdownButton
+                    key={agent.id}
+                    active={filters.agentId === agent.id}
+                    onClick={() => {
+                      onChange({ ...filters, agentId: agent.id })
+                      setOpen(null)
+                    }}
+                  >
+                    <div className="min-w-0 text-left">
+                      <div className={`truncate font-medium ${agentStatusClass(agent.status)}`}>
+                        {agent.name}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+                        {status.label}
+                      </div>
                     </div>
-                    <div className="text-[10px] uppercase tracking-wide text-[var(--v2-ink-3)]">
-                      {agent.status}
-                    </div>
-                  </div>
-                </DropdownButton>
-              ))}
+                  </DropdownButton>
+                )
+              })}
             </div>
           )}
         </div>

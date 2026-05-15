@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import type { AgentStatus } from '@/lib/payment-status'
 
 export interface AgentAllowance {
   id: string
@@ -11,8 +12,6 @@ export interface AgentAllowance {
   allowance_amount: string
   reset_period_min: number
 }
-
-export type AgentStatus = 'active' | 'paused' | 'revoked'
 
 export interface Agent {
   id: string

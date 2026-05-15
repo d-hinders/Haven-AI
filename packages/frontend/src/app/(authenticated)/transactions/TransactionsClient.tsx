@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
@@ -18,11 +18,15 @@ export default function TransactionsClient() {
   const searchParams = useSearchParams()
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
-  const [filters, setFilters] = useState<TransactionFilterState>(() => ({
-    safeId: searchParams.get('safeId') ?? undefined,
-    agentId: searchParams.get('agentId') ?? undefined,
-    tokenKey: searchParams.get('tokenKey') ?? undefined,
-  }))
+  const [filters, setFilters] = useState<TransactionFilterState>(() => {
+    const direction = searchParams.get('direction')
+    return {
+      safeId: searchParams.get('safeId') ?? undefined,
+      agentId: searchParams.get('agentId') ?? undefined,
+      tokenKey: searchParams.get('tokenKey') ?? undefined,
+      direction: direction === 'in' || direction === 'out' ? direction : undefined,
+    }
+  })
   const {
     safes,
     agents,
@@ -45,7 +49,18 @@ export default function TransactionsClient() {
 
   const userSafes = user?.safes ?? []
   const hasSafes = userSafes.length > 0
-  const hasActiveFilters = Boolean(filters.safeId || filters.agentId || filters.tokenKey)
+  const hasActiveFilters = Boolean(
+    filters.safeId || filters.agentId || filters.tokenKey || filters.direction,
+  )
+
+  // Client-side direction filter — the API doesn't yet support this dimension,
+  // so we filter the fetched page in memory. Honest UX caveat: when combined
+  // with paginated results this only filters what's loaded, same constraint
+  // as the client-side sort.
+  const visibleTransactions = useMemo(() => {
+    if (!filters.direction) return transactions
+    return transactions.filter((tx) => tx.direction === filters.direction)
+  }, [transactions, filters.direction])
 
   const safeNamesById = new Map(safes.map((safe) => [safe.id, safe.name]))
   const safeNamesByAddress = new Map(
@@ -61,10 +76,13 @@ export default function TransactionsClient() {
     if (nextFilters.safeId) params.set('safeId', nextFilters.safeId)
     if (nextFilters.agentId) params.set('agentId', nextFilters.agentId)
     if (nextFilters.tokenKey) params.set('tokenKey', nextFilters.tokenKey)
+    if (nextFilters.direction) params.set('direction', nextFilters.direction)
 
     const query = params.toString()
     router.replace(query ? `/transactions?${query}` : '/transactions', { scroll: false })
   }
+
+  const clearDirection = () => handleFilterChange({ ...filters, direction: undefined })
 
   if (!hasSafes) {
     return (
@@ -112,25 +130,40 @@ export default function TransactionsClient() {
         onChange={handleFilterChange}
       />
 
-      <div className="mt-5 mb-3 flex items-center justify-between gap-4">
-        <span className="text-xs text-[var(--v2-ink-3)]">
-          {loadingInitial ? (
-            'Loading transactions...'
-          ) : (
-            <>
-              <span className="v2-tabular">{transactions.length}</span> transaction{transactions.length !== 1 ? 's' : ''}
-            </>
-          )}
-        </span>
-        {!loadingInitial && hasMore && transactions.length > 0 && (
+      <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
           <span className="text-xs text-[var(--v2-ink-3)]">
-            Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span>
+            {loadingInitial ? (
+              'Loading transactions...'
+            ) : (
+              <>
+                <span className="v2-tabular">{visibleTransactions.length}</span> transaction{visibleTransactions.length !== 1 ? 's' : ''}
+              </>
+            )}
+          </span>
+          {filters.direction && !loadingInitial && (
+            <button
+              type="button"
+              onClick={clearDirection}
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-brand-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              aria-label={`Clear ${filters.direction === 'in' ? 'incoming' : 'outgoing'} filter`}
+            >
+              {filters.direction === 'in' ? 'Incoming only' : 'Outgoing only'}
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+        {!loadingInitial && hasMore && visibleTransactions.length > 0 && (
+          <span className="text-xs text-[var(--v2-ink-3)]">
+            Showing <span className="v2-tabular">{visibleTransactions.length}</span> of <span className="v2-tabular">{total}</span>
           </span>
         )}
       </div>
 
       <TransactionsTable
-        transactions={transactions}
+        transactions={visibleTransactions}
         loading={loadingInitial}
         error={error}
         onRefresh={() => void refresh()}
@@ -139,7 +172,7 @@ export default function TransactionsClient() {
         hasActiveFilters={hasActiveFilters}
       />
 
-      {transactions.length > 0 && (
+      {visibleTransactions.length > 0 && (
         <div className="mt-5 flex items-center justify-center">
           {hasMore ? (
             <Button

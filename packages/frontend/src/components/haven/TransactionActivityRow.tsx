@@ -4,6 +4,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
 type AmountTone = 'success' | 'danger' | 'neutral'
 export type TransactionActivityDirection = 'in' | 'out' | 'neutral'
+type Density = 'comfortable' | 'compact'
 
 export interface TransactionActivityDetail {
   label: string
@@ -27,6 +28,7 @@ export function TransactionActivityRow({
   direction = 'neutral',
   details = [],
   action,
+  density = 'comfortable',
 }: {
   title: string
   description?: ReactNode
@@ -38,10 +40,21 @@ export function TransactionActivityRow({
   direction?: TransactionActivityDirection
   details?: TransactionActivityDetail[]
   action?: ReactNode
+  /**
+   * `comfortable` (default) is for the dedicated transactions screen.
+   * `compact` matches the height of the shared `<Row>` primitive (~56px) so
+   * the dashboard's agents + transactions columns sit on the same rhythm.
+   * Compact also hides the description line on the desktop layout.
+   */
+  density?: Density
 }) {
+  const isCompact = density === 'compact'
+  const containerPadding = isCompact
+    ? 'gap-3 px-4 py-3 sm:px-5'
+    : 'gap-3 px-4 py-4 sm:px-5'
   return (
-    <div className="grid gap-3 px-4 py-4 transition-colors hover:bg-[var(--v2-surface)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
-      <div className="flex min-w-0 items-start gap-3">
+    <div className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}`}>
+      <div className="flex min-w-0 items-center gap-3">
         <DirectionMark direction={direction} />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -49,9 +62,9 @@ export function TransactionActivityRow({
             {status ? <StatusBadge tone={statusTone}>{status}</StatusBadge> : null}
           </div>
           {description ? (
-            <div className="mt-1 text-xs text-[var(--v2-ink-2)]">{description}</div>
+            <div className={`mt-1 text-xs text-[var(--v2-ink-2)] ${isCompact ? 'truncate' : ''}`}>{description}</div>
           ) : null}
-          {details.length > 0 ? (
+          {details.length > 0 && !isCompact ? (
             <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--v2-ink-3)]">
               {details.map((detail) => (
                 <div key={detail.label} className="flex min-w-0 items-center gap-1">
@@ -69,11 +82,13 @@ export function TransactionActivityRow({
           <p className={`text-sm font-semibold v2-tabular ${AMOUNT_TONE_CLASS[amountTone]}`}>
             {amount}
           </p>
-          {timestamp || action ? (
+          {(timestamp || action) && !isCompact ? (
             <div className="mt-1 flex items-center justify-end gap-2 text-xs text-[var(--v2-ink-3)]">
               {timestamp ? <span>{timestamp}</span> : null}
               {action}
             </div>
+          ) : timestamp && isCompact ? (
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{timestamp}</p>
           ) : null}
         </div>
       </div>

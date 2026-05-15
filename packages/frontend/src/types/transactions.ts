@@ -51,6 +51,11 @@ export interface TransactionFilterState {
   safeId?: string
   agentId?: string
   tokenKey?: string
+  /**
+   * Direction filter — incoming or outgoing only. Applied client-side over
+   * the fetched transactions; the API doesn't yet support this dimension.
+   */
+  direction?: 'in' | 'out'
 }
 
 export interface TransactionFilterSafeOption {

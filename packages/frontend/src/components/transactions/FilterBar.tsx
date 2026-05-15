@@ -87,6 +87,10 @@ export default function FilterBar({
       : agents.find((agent) => agent.id === filters.agentId)
   const selectedToken = tokens.find((token) => token.key === filters.tokenKey)
 
+  // FilterBar surfaces chips only for the dimensions it actually controls
+  // (safeId / agentId / tokenKey). The `direction` filter is owned by the
+  // caller (TransactionsClient renders its own chip in the count line).
+  type ChipKey = 'safeId' | 'agentId' | 'tokenKey'
   const chips = [
     selectedSafe
       ? { key: 'safeId' as const, label: `Account: ${selectedSafe.name}` }
@@ -97,9 +101,9 @@ export default function FilterBar({
     selectedToken
       ? { key: 'tokenKey' as const, label: `Token: ${tokenLabel(selectedToken)}` }
       : null,
-  ].filter((chip): chip is { key: keyof TransactionFilterState; label: string } => Boolean(chip))
+  ].filter((chip): chip is { key: ChipKey; label: string } => Boolean(chip))
 
-  const clearFilter = (key: keyof TransactionFilterState) => {
+  const clearFilter = (key: ChipKey) => {
     if (key === 'safeId') onChange({ ...filters, safeId: undefined })
     if (key === 'agentId') onChange({ ...filters, agentId: undefined })
     if (key === 'tokenKey') onChange({ ...filters, tokenKey: undefined })

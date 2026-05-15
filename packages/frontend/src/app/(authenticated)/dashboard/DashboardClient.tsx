@@ -26,6 +26,7 @@ import ComingSoonModal from '@/components/ComingSoonModal'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -195,11 +196,9 @@ function ConnectedAgentsSection({
               <Row
                 key={agent.id}
                 href={`/agents/${agent.id}`}
-                leading={
-                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
-                  </svg>
-                }
+                // Robot mark matches the sidebar's "agents" icon so the
+                // dashboard and nav read as the same system.
+                leading={<AgentMarkIcon />}
                 leadingTone="brand"
                 title={
                   <span className="flex items-center gap-2">
@@ -315,6 +314,7 @@ function MetricCard({
   value,
   footer,
   href,
+  icon,
   loading,
   unavailable,
 }: {
@@ -322,12 +322,24 @@ function MetricCard({
   value: string
   footer?: string
   href?: string
+  icon?: ReactNode
   loading?: boolean
   unavailable?: boolean
 }) {
   const content = (
     <>
-      <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
+        {icon ? (
+          <span
+            aria-hidden="true"
+            // Icon adopts brand color on hover via the group class on the parent link.
+            className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--v2-ink-3)] transition-colors duration-150 group-hover:text-[var(--v2-brand)]"
+          >
+            {icon}
+          </span>
+        ) : null}
+      </div>
       {loading ? (
         <div className="mt-3 h-7 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
       ) : (
@@ -339,17 +351,70 @@ function MetricCard({
     </>
   )
 
-  const className = 'block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]'
+  // Every metric card is interactive now — the four-card grid was inconsistent
+  // before (two had href, two didn't). The hover lift (raised shadow + 1px
+  // translate) makes the affordance obvious and matches the Stripe-style
+  // hover treatment used on the dashboard hero.
+  const baseClass =
+    'group block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)] transition-all duration-200 ease-out motion-reduce:transition-none motion-reduce:hover:translate-y-0'
+  const hoverClass =
+    'hover:-translate-y-px hover:shadow-[var(--v2-shadow-card-raised)] hover:border-[var(--v2-border-strong)]'
 
   if (href) {
     return (
-      <Link href={href} className={`${className} transition-colors hover:bg-[var(--v2-surface)]`}>
+      <Link href={href} className={`${baseClass} ${hoverClass}`}>
         {content}
       </Link>
     )
   }
+  return <div className={baseClass}>{content}</div>
+}
 
-  return <div className={className}>{content}</div>
+// ── Metric card icons (1.5 stroke, 14px, currentColor) ───────────────────
+// These match the sidebar / Row visual language. AgentMarkIcon mirrors the
+// sidebar's "agents" robot mark so the dashboard reads the same as the nav.
+
+function AgentMarkIcon() {
+  return (
+    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <rect x="5" y="8" width="14" height="10" rx="3" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v3M9.5 12h.01M14.5 12h.01M9 16h6" />
+    </svg>
+  )
+}
+
+function SpendIcon() {
+  return (
+    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m4-9.5c0-1.38-1.79-2.5-4-2.5s-4 1.12-4 2.5 1.79 2.5 4 2.5 4 1.12 4 2.5-1.79 2.5-4 2.5-4-1.12-4-2.5" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+    </svg>
+  )
+}
+
+function WalletIcon() {
+  return (
+    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9v3m13.5 3.75h.008v.008H16.5v-.008z" />
+    </svg>
+  )
+}
+
+function EmptyTransactionsIcon() {
+  // Arrows-in-out icon — mirrors the sidebar's "transactions" mark so the
+  // empty state belongs to the same visual family.
+  return (
+    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 7.5h11.25m0 0L15.75 4.5m3 3l-3 3M16.5 16.5H5.25m0 0l3-3m-3 3l3 3" />
+    </svg>
+  )
 }
 
 function AttentionSection({
@@ -451,14 +516,14 @@ function TransactionsSection({
       </div>
 
       {loading ? (
-        <div className="divide-y divide-[var(--v2-border)]">
+        <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">
           {[0, 1, 2].map((item) => (
-            <div key={item} className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
-              <div className="flex items-start gap-3">
+            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
+              <div className="flex items-center gap-3">
                 <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
                 <div>
-                  <div className="h-4 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="mt-2 h-3 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  <div className="mt-1.5 h-2.5 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
                 </div>
               </div>
               <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse sm:justify-self-end" />
@@ -475,17 +540,25 @@ function TransactionsSection({
         </div>
       ) : transactions.length === 0 ? (
         <div className="p-6">
-          <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
-            <p className="text-sm text-[var(--v2-ink)]">No transactions yet</p>
-            <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
-              {hasAccounts
+          <EmptyState
+            tone="brand"
+            icon={<EmptyTransactionsIcon />}
+            title="No transactions yet"
+            body={
+              hasAccounts
                 ? 'Receive funds or make your first payment to start building activity here.'
-                : 'Create a Haven account to start tracking transactions.'}
-            </p>
-            <Link href={hasAccounts ? '/transactions' : '/accounts'} className="mt-4 inline-flex text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-              {hasAccounts ? 'Open transactions' : 'Go to accounts'}
-            </Link>
-          </div>
+                : 'Create a Haven account to start tracking transactions.'
+            }
+            action={
+              <Button
+                href={hasAccounts ? '/transactions' : '/accounts'}
+                variant="ghost"
+                size="sm"
+              >
+                {hasAccounts ? 'Open transactions' : 'Go to accounts'}
+              </Button>
+            }
+          />
         </div>
       ) : (
         <div className="divide-y divide-[var(--v2-border)]">
@@ -504,6 +577,7 @@ function TransactionsSection({
                 statusTone={tx.direction === 'in' ? 'success' : 'neutral'}
                 timestamp={timeAgo(tx.timestamp * 1000)}
                 direction={tx.direction}
+                density="compact"
               />
             </Link>
           ))}
@@ -706,6 +780,7 @@ export default function DashboardClient() {
         label="Agents connected"
         value={String(overview?.metrics.connectedAgents ?? 0)}
         href="/agents"
+        icon={<AgentMarkIcon />}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
       />
@@ -713,6 +788,8 @@ export default function DashboardClient() {
         label="Monthly agent spend"
         value={formatCompactCurrency(monthlySpend, currency)}
         footer="Current calendar month"
+        href="/transactions?direction=out"
+        icon={<SpendIcon />}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
       />
@@ -720,6 +797,8 @@ export default function DashboardClient() {
         label="Successful transactions"
         value={String(overview?.metrics.successfulTransactions ?? 0)}
         footer="All time"
+        href="/transactions"
+        icon={<CheckIcon />}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
       />
@@ -727,6 +806,7 @@ export default function DashboardClient() {
         label="Active accounts"
         value={String(overview?.metrics.activeAccounts ?? safes.length)}
         href="/accounts"
+        icon={<WalletIcon />}
         loading={false}
       />
     </div>

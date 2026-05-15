@@ -23,6 +23,7 @@ import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import EditAgentModal from '@/components/EditAgentModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import OnchainActionGate, { OnchainActionNotice, isOnchainActionBlocked } from '@/components/OnchainActionGate'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -160,6 +161,8 @@ export default function AgentDetailClient({ agentId }: Props) {
     chainId,
   })
   const revokeBlockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
+  const revokeApprovalBlocked = isOnchainActionBlocked(operationGate)
+  const revokeNoSignerMessage = 'Connect a wallet to revoke this agent budget.'
 
   const [editOpen, setEditOpen] = useState(false)
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
@@ -647,9 +650,32 @@ export default function AgentDetailClient({ agentId }: Props) {
         onCancel={() => setConfirmAction(null)}
         onConfirm={handleRevoke}
         title="Revoke this agent?"
-        body="This removes the agent budget from the Haven wallet. The agent will need a new setup if you want to use it again."
+        body={(
+          <>
+            <p>
+              This removes the agent budget from the Haven wallet. The agent will need a new setup if you want to use it again.
+            </p>
+            <OnchainActionNotice
+              operationGate={operationGate}
+              noSignerMessage={revokeNoSignerMessage}
+              className="mt-4"
+            />
+          </>
+        )}
         confirmLabel="Revoke agent"
         loading={pendingAction === 'revoke'}
+        confirmDisabled={revokeApprovalBlocked}
+        confirmButtonWrapper={(button) => (
+          <OnchainActionGate
+            requiredChainId={chainId}
+            operationGate={operationGate}
+            noSignerMessage={revokeNoSignerMessage}
+            showNotice={false}
+            className="min-w-44"
+          >
+            {() => button}
+          </OnchainActionGate>
+        )}
       />
 
       <ConfirmDialog
@@ -668,6 +694,7 @@ export default function AgentDetailClient({ agentId }: Props) {
           onClose={() => setEditOpen(false)}
           agent={currentAgent}
           safeAddress={safeAddress ?? ''}
+          chainId={chainId}
           safeDetails={safeDetails}
           existingOnChainAllowances={existingOnChainAllowances}
           onUpdated={() => {

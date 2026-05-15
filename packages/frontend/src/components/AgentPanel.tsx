@@ -982,6 +982,7 @@ export default function AgentPanel() {
           onClose={() => setEditAgent(null)}
           agent={editAgent}
           safeAddress={safeAddress}
+          chainId={chainId}
           safeDetails={safeDetails}
           existingOnChainAllowances={
             onChainData.get(editAgent.delegate_address?.toLowerCase() ?? '')?.allowances ?? null

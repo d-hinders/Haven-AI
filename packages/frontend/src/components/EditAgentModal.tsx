@@ -9,11 +9,11 @@ import {
   type AllowanceInfo,
 } from '@/lib/allowance-module'
 import { api } from '@/lib/api'
-import { useAuth } from '@/context/AuthContext'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { validateMoneyInput } from '@/lib/money-input'
-import NetworkGate from './NetworkGate'
+import OnchainActionGate from './OnchainActionGate'
 import {
   getSafeNonce,
   signSafeTx,
@@ -41,6 +41,7 @@ interface Props {
   onClose: () => void
   agent: Agent
   safeAddress: string
+  chainId: number
   safeDetails: SafeDetails | null
   existingOnChainAllowances: AllowanceInfo[] | null
   onUpdated: () => void
@@ -53,14 +54,13 @@ export default function EditAgentModal({
   onClose,
   agent,
   safeAddress,
+  chainId,
   safeDetails,
   existingOnChainAllowances,
   onUpdated,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
-  const { activeSafe } = useAuth()
-  const chainId = activeSafe?.chain_id ?? 100
   const chainTokens = getChainTokens(chainId)
   const tokenOptions = Object.entries(chainTokens).map(([symbol, cfg]) => ({
     symbol,
@@ -91,6 +91,11 @@ export default function EditAgentModal({
     safeAddress: safeAddress as Address,
     chainId,
   })
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddress as Address,
+    chainId,
+  })
+  const budgetApprovalMessage = 'Connect a wallet to update this agent budget.'
 
   // Tokens already configured on-chain for this delegate
   const existingTokenAddrs = useMemo(() => {
@@ -496,14 +501,21 @@ export default function EditAgentModal({
                 </Button>
                 <div className="flex-1">
                   {budgetChanged ? (
-                    <NetworkGate requiredChainId={chainId}>
+                    <OnchainActionGate
+                      requiredChainId={chainId}
+                      operationGate={operationGate}
+                      noSignerMessage={budgetApprovalMessage}
+                    >
+                      {({ disabled }) => (
                       <Button
                         onClick={handleExecute}
+                        disabled={disabled || !publicClient || !signer || !safeDetails || !selectedTokenConfig}
                         className="w-full"
                       >
                         {isExistingToken ? 'Update budget' : 'Add budget'}
                       </Button>
-                    </NetworkGate>
+                      )}
+                    </OnchainActionGate>
                   ) : (
                     <Button
                       onClick={handleExecute}

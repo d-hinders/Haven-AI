@@ -14,6 +14,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { validateMoneyInput } from '@/lib/money-input'
 import NetworkGate from './NetworkGate'
 import {
   getSafeNonce,
@@ -157,6 +158,7 @@ export default function CreateAgentModal({
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
   const [addToken, setAddToken] = useState<string>(tokenOptions[0]?.symbol ?? '')
   const [addAmount, setAddAmount] = useState('')
+  const [addAmountError, setAddAmountError] = useState('')
   const [addReset, setAddReset] = useState(1440) // daily
 
   // Execution
@@ -191,6 +193,7 @@ export default function CreateAgentModal({
     setAllowances([])
     setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
+    setAddAmountError('')
     setAddReset(1440)
     setExecStatus('checking')
     setExecError(null)
@@ -303,7 +306,14 @@ export default function CreateAgentModal({
 
   function handleAddAllowance() {
     const tokenOpt = tokenOptions.find((t) => t.symbol === addToken)
-    if (!tokenOpt || !addAmount || Number(addAmount) <= 0) return
+    if (!tokenOpt) return
+    const parsedAmount = validateMoneyInput(addAmount, tokenOpt.decimals, {
+      tokenSymbol: tokenOpt.symbol,
+    })
+    if (!parsedAmount.ok) {
+      setAddAmountError(parsedAmount.message)
+      return
+    }
 
     // Don't add duplicate tokens
     if (allowances.some((a) => a.tokenSymbol === addToken)) return
@@ -320,11 +330,12 @@ export default function CreateAgentModal({
         tokenSymbol: tokenOpt.symbol,
         tokenAddress: tokenOpt.address,
         decimals: tokenOpt.decimals,
-        amount: addAmount,
+        amount: parsedAmount.amount,
         resetTimeMin: addReset,
       },
     ])
     setAddAmount('')
+    setAddAmountError('')
     setAddToken(nextToken?.symbol ?? '')
   }
 
@@ -611,6 +622,15 @@ export default function CreateAgentModal({
   const availableTokens = tokenOptions.filter(
     (t) => !allowances.some((a) => a.tokenSymbol === t.symbol),
   )
+  const addTokenOption = availableTokens.find((t) => t.symbol === addToken)
+  const addAmountValidation =
+    addAmount && addTokenOption
+      ? validateMoneyInput(addAmount, addTokenOption.decimals, {
+          tokenSymbol: addTokenOption.symbol,
+        })
+      : null
+  const addAmountMessage =
+    addAmountError || (addAmountValidation && !addAmountValidation.ok ? addAmountValidation.message : '')
   const blockReason = deployBlockReason()
 
   return (
@@ -813,12 +833,20 @@ export default function CreateAgentModal({
                       ))}
                     </Select>
                     <Input
-                      type="number"
-                      min="0"
-                      step="any"
+                      type="text"
+                      inputMode="decimal"
                       value={addAmount}
-                      onChange={(e) => setAddAmount(e.target.value)}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        if (/^\d*\.?\d*$/.test(value)) {
+                          setAddAmount(value)
+                          setAddAmountError('')
+                        }
+                      }}
                       placeholder="Amount"
+                      invalid={Boolean(addAmountMessage)}
+                      helperText={addAmountMessage || undefined}
+                      className="v2-tabular"
                     />
                     <Select
                       value={addReset}
@@ -837,8 +865,8 @@ export default function CreateAgentModal({
                     onClick={handleAddAllowance}
                     disabled={
                       !addAmount ||
-                      Number(addAmount) <= 0 ||
-                      !availableTokens.some((t) => t.symbol === addToken)
+                      !addAmountValidation?.ok ||
+                      !addTokenOption
                     }
                     className="w-full"
                   >

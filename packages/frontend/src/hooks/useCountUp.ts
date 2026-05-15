@@ -26,13 +26,16 @@ function easeOutCubic(t: number): number {
 }
 
 /**
- * Returns a smoothly-animated value that counts up from 0 to `target` on the
- * first time the hook becomes enabled. Subsequent changes to `target` snap
- * instantly (no re-animation on every render or currency switch).
+ * Returns a smoothly-animated value that counts up to `target`.
  *
- * Usage:
- *   const animated = useCountUp(totalFiat, { enabled: !loading })
- *   <p className="v2-tabular">{formatCurrency(animated, currency)}</p>
+ * Two scenarios trigger the count-up:
+ *  1. First paint after the hook becomes enabled with a positive target
+ *     (the usual case — dashboard mounts, balance arrives).
+ *  2. A 0 → positive transition after first paint (the milestone case —
+ *     a brand-new user funds their account and the balance flips from 0).
+ *
+ * Other updates (currency switches, polled refreshes of an already-positive
+ * balance) snap to the new value without animating.
  *
  * Respects prefers-reduced-motion: when set, returns the target immediately.
  */
@@ -40,15 +43,12 @@ export function useCountUp(target: number, options: UseCountUpOptions = {}): num
   const { duration = 600, enabled = true } = options
   const [value, setValue] = useState(() => (enabled && !prefersReducedMotion() ? 0 : target))
   const hasAnimatedRef = useRef(false)
+  const previousTargetRef = useRef<number | null>(null)
   const frameRef = useRef<number | null>(null)
 
   useEffect(() => {
-    // Subsequent updates after the first animation: snap to the new target
-    // without re-animating. Currency switches, refreshes, polled updates etc.
-    if (hasAnimatedRef.current) {
-      setValue(target)
-      return
-    }
+    const previousTarget = previousTargetRef.current
+    previousTargetRef.current = target
 
     // Reduced-motion users: skip the animation entirely.
     if (prefersReducedMotion()) {
@@ -60,14 +60,29 @@ export function useCountUp(target: number, options: UseCountUpOptions = {}): num
     // Not enabled yet (e.g. still loading) — leave at 0, wait.
     if (!enabled) return
 
-    // Skip the animation if the target is effectively 0 — animating 0 → 0
-    // doesn't add anything.
+    // First-paint case: target is 0 (or not finite). Skip animation; nothing
+    // to animate to. Stay open for the milestone case below if the target
+    // later goes positive.
     if (!Number.isFinite(target) || target === 0) {
-      hasAnimatedRef.current = true
+      setValue(target)
+      // Do NOT flip hasAnimatedRef here — we still want to animate the first
+      // positive value if it arrives later (the milestone).
+      return
+    }
+
+    // Snap for boring updates: already animated once AND the previous target
+    // was already positive (currency switch, poll refresh).
+    if (
+      hasAnimatedRef.current &&
+      previousTarget !== null &&
+      previousTarget > 0
+    ) {
       setValue(target)
       return
     }
 
+    // Otherwise: animate from 0 → target. Covers first-paint with a positive
+    // target AND the 0 → first-funded milestone.
     hasAnimatedRef.current = true
     const start = performance.now()
     const from = 0

@@ -59,6 +59,23 @@ Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
 })
 
+// Mock window.matchMedia — JSDOM doesn't ship it. Defaults to
+// `prefers-reduced-motion: reduce` so motion hooks (useCountUp etc) skip
+// animations and tests can assert against final values synchronously.
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: query === '(prefers-reduced-motion: reduce)',
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+})
+
 beforeEach(() => {
   localStorageMock.clear()
   vi.clearAllMocks()

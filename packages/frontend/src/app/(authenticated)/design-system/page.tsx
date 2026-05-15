@@ -692,7 +692,7 @@ export default function DesignSystemPage() {
                       aria-hidden="true"
                       className={`flex h-9 w-9 items-center justify-center rounded-[10px] border ${row.directionClass}`}
                     >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         {row.direction === 'in' ? (
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
                         ) : (

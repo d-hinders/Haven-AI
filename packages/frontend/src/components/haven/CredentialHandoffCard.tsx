@@ -41,7 +41,7 @@ export function CredentialHandoffCard({
             saved ? 'text-[var(--v2-success)]' : 'text-[var(--v2-brand)]'
           }`}
         >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7}>
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
             {saved ? (
               <path d="m5 12.5 4.25 4.25L19 7" strokeLinecap="round" strokeLinejoin="round" />
             ) : (

@@ -28,7 +28,7 @@ export function ApprovalRequiredBanner({
             neutral ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-warning)] shadow-[var(--v2-shadow-card)]'
           }`}
         >
-          <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.7}>
+          <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
             {neutral ? (
               <>
                 <circle cx="8" cy="8" r="5.75" />

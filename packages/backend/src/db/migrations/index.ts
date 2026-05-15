@@ -12,6 +12,7 @@ import * as ownerAliases from './009_owner_aliases.js'
 import * as x402StandardMetadata from './010_x402_standard_metadata.js'
 import * as approvalRequestSource from './011_approval_request_source.js'
 import * as machinePaymentMetadata from './012_machine_payment_metadata.js'
+import * as machinePaymentReconciliationEvents from './013_machine_payment_reconciliation_events.js'
 
 export interface Migration {
   version: string
@@ -37,4 +38,5 @@ export const migrations: Migration[] = [
   x402StandardMetadata,
   approvalRequestSource,
   machinePaymentMetadata,
+  machinePaymentReconciliationEvents,
 ]

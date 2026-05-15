@@ -27,6 +27,7 @@ import { ExternalDetailsLink } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
+import { agentStatusPresentation } from '@/lib/payment-status'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
@@ -88,12 +89,6 @@ function agentBudgetSummary(agent: Agent): string {
 
   const allowance = allowances[0]
   return `${allowance.allowance_amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
-}
-
-function agentStatusTone(status: Agent['status']): 'success' | 'warning' | 'neutral' {
-  if (status === 'active') return 'success'
-  if (status === 'paused') return 'warning'
-  return 'neutral'
 }
 
 export default function AccountDetailClient() {
@@ -387,28 +382,29 @@ export default function AccountDetailClient() {
           />
         ) : safeAgents.length > 0 ? (
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {safeAgents.map((agent) => (
-              <Link
-                key={agent.id}
-                href={`/agents/${agent.id}`}
-                className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 transition-colors hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)]"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
-                    <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                      {agentBudgetSummary(agent)}
-                    </p>
+            {safeAgents.map((agent) => {
+              const status = agentStatusPresentation(agent.status)
+              return (
+                <Link
+                  key={agent.id}
+                  href={`/agents/${agent.id}`}
+                  className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 transition-colors hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
+                      <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                        {agentBudgetSummary(agent)}
+                      </p>
+                    </div>
+                    <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
                   </div>
-                  <StatusBadge tone={agentStatusTone(agent.status)}>
-                    {agent.status === 'active' ? 'Active' : agent.status === 'paused' ? 'Paused' : 'Revoked'}
-                  </StatusBadge>
-                </div>
-                <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-                  Review or stop this agent from its detail page.
-                </p>
-              </Link>
-            ))}
+                  <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+                    Review or stop this agent from its detail page.
+                  </p>
+                </Link>
+              )
+            })}
           </div>
         ) : (
           <EmptyState

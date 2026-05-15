@@ -24,6 +24,10 @@ import {
   approvalRecipientLabel,
   approvalSourceLabel,
 } from '@/lib/approval-labels'
+import {
+  approvalStatusPresentation,
+  isActionableApprovalStatus,
+} from '@/lib/payment-status'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import NetworkGate from './NetworkGate'
 import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
@@ -49,29 +53,6 @@ function resolveTokenSymbol(address: string, chainId: number): string {
     if (cfg.address && cfg.address.toLowerCase() === lower) return symbol
   }
   return 'Unknown'
-}
-
-function statusLabel(status: string): string {
-  if (status === 'pending') return 'Needs approval'
-  if (status === 'approved') return 'Approved'
-  if (status === 'proposed') return 'Submitted'
-  if (status === 'rejected') return 'Rejected'
-  if (status === 'executed') return 'Sent'
-  if (status === 'expired') return 'Expired'
-  return status
-}
-
-function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' | 'brand' {
-  if (status === 'pending') return 'warning'
-  if (status === 'approved') return 'brand'
-  if (status === 'proposed') return 'brand'
-  if (status === 'rejected') return 'danger'
-  if (status === 'executed') return 'success'
-  return 'neutral'
-}
-
-function isActionableStatus(status: string): boolean {
-  return status === 'pending' || status === 'approved'
 }
 
 function ApprovalDetail({
@@ -116,7 +97,8 @@ function ApprovalCard({
   showOtherDeviceNotice?: boolean
   actionError?: string | null
 }) {
-  const actionable = isActionableStatus(approval.status)
+  const actionable = isActionableApprovalStatus(approval.status)
+  const status = approvalStatusPresentation(approval.status)
   const [confirmReject, setConfirmReject] = useState(false)
   const recipient = approvalRecipientLabel({
     reason: approval.reason,
@@ -152,7 +134,7 @@ function ApprovalCard({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge tone={statusTone(approval.status)}>{statusLabel(approval.status)}</StatusBadge>
+              <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
               {sourceLabel ? <StatusBadge tone="neutral">{sourceLabel}</StatusBadge> : null}
             </div>
             <p
@@ -476,6 +458,7 @@ function ApprovalCardWithContext({
 }
 
 function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
+  const status = approvalStatusPresentation(approval.status)
   const recipient = approvalRecipientLabel({
     reason: approval.reason,
     source: approval.source,
@@ -487,7 +470,7 @@ function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
     <div className="grid gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={statusTone(approval.status)}>{statusLabel(approval.status)}</StatusBadge>
+          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
           <p className="truncate text-sm font-medium text-[var(--v2-ink)]">
             <span className="v2-tabular">{approval.amount_human}</span> {approval.token_symbol}
           </p>
@@ -546,8 +529,8 @@ export default function ApprovalQueue() {
   } = useApprovals()
   const [executingApprovalId, setExecutingApprovalId] = useState<string | null>(null)
 
-  const actionableApprovals = approvals.filter((approval) => isActionableStatus(approval.status))
-  const pastApprovals = approvals.filter((approval) => !isActionableStatus(approval.status))
+  const actionableApprovals = approvals.filter((approval) => isActionableApprovalStatus(approval.status))
+  const pastApprovals = approvals.filter((approval) => !isActionableApprovalStatus(approval.status))
 
   if (loading) {
     return (

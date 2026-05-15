@@ -65,6 +65,12 @@ type ExecutionStatus =
   | 'error'
 
 type KeyMode = 'generate' | 'existing'
+type AuthorityStatus = 'confirmed' | 'proposed'
+
+interface AuthorityResult {
+  status: AuthorityStatus
+  txHash: string | null
+}
 
 interface Props {
   open: boolean
@@ -165,6 +171,8 @@ export default function CreateAgentModal({
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('checking')
   const [execError, setExecError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
+  const [authorityResult, setAuthorityResult] = useState<AuthorityResult | null>(null)
+  const [backendSaveFailed, setBackendSaveFailed] = useState(false)
 
   // Result
   const [createdApiKey, setCreatedApiKey] = useState<string | null>(null)
@@ -198,6 +206,8 @@ export default function CreateAgentModal({
     setExecStatus('checking')
     setExecError(null)
     setTxHash(null)
+    setAuthorityResult(null)
+    setBackendSaveFailed(false)
     setCreatedApiKey(null)
     setCreatedAgentId(null)
     setCopiedHandoff(false)
@@ -205,6 +215,15 @@ export default function CreateAgentModal({
   }, [])
 
   const handleClose = useCallback(() => {
+    if (backendSaveFailed && authorityResult) {
+      const confirmed = window.confirm(
+        'The agent rules were created in your Haven wallet, but Haven has not saved the agent yet.\n\n' +
+        'If you close now, the agent may not appear in Haven. Try finishing the save first.\n\n' +
+        'Close anyway?',
+      )
+      if (!confirmed) return
+    }
+
     // Guard against accidental dismissal of the Done step before the user has
     // saved the credential file. Closing without saving can leave the user
     // with a connected agent that does not have the credential it needs.
@@ -220,7 +239,7 @@ export default function CreateAgentModal({
     }
     resetForm()
     onClose()
-  }, [step, createdApiKey, credentialsSaved, onClose, resetForm])
+  }, [backendSaveFailed, authorityResult, step, createdApiKey, credentialsSaved, onClose, resetForm])
 
   // Escape-to-close — allow closing in all steps except while an on-chain
   // action is actively in flight (mirrors the backdrop-click behaviour).
@@ -390,6 +409,8 @@ export default function CreateAgentModal({
 
     setStep('executing')
     setExecError(null)
+    setBackendSaveFailed(false)
+    setAuthorityResult(null)
 
     try {
       // 1. Check if module is enabled
@@ -428,6 +449,7 @@ export default function CreateAgentModal({
 
       const threshold = safeDetails.threshold ?? 1
 
+      let completedAuthority: AuthorityResult
       if (threshold <= 1) {
         // Single-owner: execute directly
         setExecStatus('executing')
@@ -440,6 +462,10 @@ export default function CreateAgentModal({
           chainId,
         )
         setTxHash(result.txHash)
+        completedAuthority = {
+          status: 'confirmed',
+          txHash: result.txHash,
+        }
       } else {
         // Multi-sig: propose
         setExecStatus('executing')
@@ -453,47 +479,18 @@ export default function CreateAgentModal({
           chainId,
         )
         setTxHash(safeTxHash)
+        completedAuthority = {
+          status: 'proposed',
+          txHash: safeTxHash,
+        }
       }
 
       // 5. Save agent to Haven backend
       setExecStatus('saving')
-      const agent = await api.post<{ id: string; name: string; api_key: string; delegate_address: string }>('/agents', {
-          name: name.trim(),
-          description: description.trim() || undefined,
-          delegate_address: delegateAddress,
-          safe_id: safeId || undefined,
-          allowances: allowances.map((a) => ({
-            token_address:
-              a.tokenAddress ?? '0x0000000000000000000000000000000000000000',
-            token_symbol: a.tokenSymbol,
-            allowance_amount: parseUnits(a.amount, a.decimals).toString(),
-            reset_period_min: a.resetTimeMin,
-          })),
-        })
-      setCreatedApiKey(agent.api_key)
-      setCreatedAgentId(agent.id)
-      setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
-      setStep('done')
-      toast.success('Agent created')
-      onCreated(agent)
+      setAuthorityResult(completedAuthority)
+      await saveAgentToHaven(completedAuthority)
     } catch (err: unknown) {
-      console.error('[Haven] Agent setup error:', err)
-
-      // Extract the most useful error message from viem's nested error chain
-      let message = 'Setup failed'
-      if (err instanceof Error) {
-        message = err.message
-        // viem wraps contract errors — dig into the cause chain
-        let cause = (err as { cause?: unknown }).cause
-        while (cause instanceof Error) {
-          if (cause.message) message = cause.message
-          cause = (cause as { cause?: unknown }).cause
-        }
-        // Also check for shortMessage (viem-specific)
-        const short = (err as { shortMessage?: string }).shortMessage
-        if (short) message = short
-      }
-
+      const message = errorMessage(err)
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
         setExecError(
           signer?.type === 'passkey'
@@ -505,6 +502,69 @@ export default function CreateAgentModal({
       }
       setExecStatus('error')
     }
+  }
+
+  function agentPayload() {
+    return {
+      name: name.trim(),
+      description: description.trim() || undefined,
+      delegate_address: delegateAddress,
+      safe_id: safeId || undefined,
+      allowances: allowances.map((a) => ({
+        token_address:
+          a.tokenAddress ?? '0x0000000000000000000000000000000000000000',
+        token_symbol: a.tokenSymbol,
+        allowance_amount: parseUnits(a.amount, a.decimals).toString(),
+        reset_period_min: a.resetTimeMin,
+      })),
+    }
+  }
+
+  function errorMessage(err: unknown): string {
+    console.error('[Haven] Agent setup error:', err)
+    let message = 'Setup failed'
+    if (err instanceof Error) {
+      message = err.message
+      let cause = (err as { cause?: unknown }).cause
+      while (cause instanceof Error) {
+        if (cause.message) message = cause.message
+        cause = (cause as { cause?: unknown }).cause
+      }
+      const short = (err as { shortMessage?: string }).shortMessage
+      if (short) message = short
+    }
+    return message
+  }
+
+  async function saveAgentToHaven(authority: AuthorityResult) {
+    try {
+      const agent = await api.post<{ id: string; name: string; api_key: string; delegate_address: string }>(
+        '/agents',
+        agentPayload(),
+      )
+      setCreatedApiKey(agent.api_key)
+      setCreatedAgentId(agent.id)
+      setBackendSaveFailed(false)
+      setExecError(null)
+      setExecStatus(authority.status)
+      setStep('done')
+      toast.success('Agent created')
+      onCreated(agent)
+    } catch (err: unknown) {
+      const message = errorMessage(err)
+      setBackendSaveFailed(true)
+      setAuthorityResult(authority)
+      setExecError(message)
+      setExecStatus('error')
+    }
+  }
+
+  async function handleRetryHavenSave() {
+    if (!authorityResult) return
+    setBackendSaveFailed(false)
+    setExecError(null)
+    setExecStatus('saving')
+    await saveAgentToHaven(authorityResult)
   }
 
   // ── Copy helpers ───────────────────────────────────────
@@ -1096,33 +1156,72 @@ export default function CreateAgentModal({
                 </>
               ) : (
                 <>
-                  <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center mx-auto">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400">
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto ${
+                    backendSaveFailed
+                      ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
+                      : 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
+                  }`}>
+                    {backendSaveFailed ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 1 1-9-9" />
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    )}
                   </div>
                   <div>
-                    <p className="text-sm text-red-400 font-medium">
-                      Setup failed
+                    <p className={`text-sm font-medium ${backendSaveFailed ? 'text-[var(--v2-warning)]' : 'text-[var(--v2-danger)]'}`}>
+                      {backendSaveFailed ? 'Finish saving this agent' : 'Setup failed'}
                     </p>
-                    <p className="text-xs text-[var(--v2-ink-3)] mt-1 max-w-xs mx-auto">
-                      {execError}
+                    <p className="text-xs text-[var(--v2-ink-2)] mt-1 max-w-xs mx-auto">
+                      {backendSaveFailed
+                        ? 'The agent rules were created in your Haven wallet, but Haven could not save the agent. Try finishing the save before creating another agent.'
+                        : execError}
                     </p>
+                    {backendSaveFailed && execError && (
+                      <p className="mt-2 text-[11px] text-[var(--v2-ink-3)] max-w-xs mx-auto">
+                        {execError}
+                      </p>
+                    )}
+                    {backendSaveFailed && authorityResult?.txHash && (
+                      <a
+                        href={
+                          authorityResult.status === 'confirmed'
+                            ? getExplorerUrl(chainId, 'tx', authorityResult.txHash)
+                            : `https://app.safe.global/transactions/tx?safe=${getChainConfig(chainId).shortName}:${safeAddress}&id=${authorityResult.txHash}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-block text-xs text-[var(--v2-brand)] underline underline-offset-2 hover:text-[var(--v2-brand-strong)]"
+                      >
+                        {authorityResult.status === 'confirmed' ? `View on ${getChainConfig(chainId).name} Explorer` : 'View approval request'}
+                      </a>
+                    )}
                   </div>
                   <div className="flex gap-3 pt-2">
-                    <button
-                      onClick={() => setStep('review')}
-                      className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={handleExecute}
-                      className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white rounded-xl py-2.5 transition-colors"
-                    >
-                      Retry
-                    </button>
+                    {backendSaveFailed ? (
+                      <>
+                        <Button variant="ghost" onClick={handleClose} className="flex-1">
+                          Close
+                        </Button>
+                        <Button onClick={handleRetryHavenSave} className="flex-1">
+                          Finish saving
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button variant="ghost" onClick={() => setStep('review')} className="flex-1">
+                          Back
+                        </Button>
+                        <Button onClick={handleExecute} className="flex-1">
+                          Retry
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </>
               )}

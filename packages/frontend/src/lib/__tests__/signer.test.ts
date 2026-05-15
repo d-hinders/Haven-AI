@@ -7,7 +7,7 @@ const mockUseWalletClient = vi.fn()
 
 vi.mock('wagmi', () => ({
   useAccount: () => mockUseAccount(),
-  useWalletClient: () => mockUseWalletClient(),
+  useWalletClient: (args: unknown) => mockUseWalletClient(args),
 }))
 
 import { getStoredPasskeySigner, useActiveSigner } from '@/lib/signer'
@@ -119,6 +119,7 @@ describe('useActiveSigner', () => {
       address: PASSKEY_SIGNER_ADDRESS,
       credentialId: 'credential-123',
     })
+    expect(mockUseWalletClient).toHaveBeenCalledWith({ chainId: 100 })
   })
 
   it('falls back to the connected EOA when no passkey metadata exists', () => {
@@ -138,5 +139,6 @@ describe('useActiveSigner', () => {
       address: EOA_ADDRESS,
       walletClient,
     })
+    expect(mockUseWalletClient).toHaveBeenCalledWith({ chainId: 100 })
   })
 })

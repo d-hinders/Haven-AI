@@ -3,12 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Address } from 'viem'
 
 const mockUseAccount = vi.fn()
-const mockUseWalletClient = vi.fn()
 const mockUseAuth = vi.fn()
 
 vi.mock('wagmi', () => ({
   useAccount: () => mockUseAccount(),
-  useWalletClient: () => mockUseWalletClient(),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -35,11 +33,9 @@ describe('useSafeOperationGate', () => {
   beforeEach(() => {
     localStorage.clear()
     mockUseAccount.mockReset()
-    mockUseWalletClient.mockReset()
     mockUseAuth.mockReset()
 
     mockUseAccount.mockReturnValue({ address: undefined })
-    mockUseWalletClient.mockReturnValue({ data: undefined })
     mockUseAuth.mockReturnValue({ passkeys: [] })
   })
 
@@ -70,7 +66,6 @@ describe('useSafeOperationGate', () => {
 
   it('returns ready for an EOA safe when a wallet is connected', () => {
     mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
-    mockUseWalletClient.mockReturnValue({ data: { account: { address: EOA_ADDRESS } } })
 
     const { result } = renderHook(() =>
       useSafeOperationGate({
@@ -96,7 +91,6 @@ describe('useSafeOperationGate', () => {
   it('returns passkey_on_other_device when the backend has a passkey row but this device does not', () => {
     mockUseAuth.mockReturnValue({ passkeys: [PASSKEY_ROW] })
     mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
-    mockUseWalletClient.mockReturnValue({ data: { account: { address: EOA_ADDRESS } } })
 
     const { result } = renderHook(() =>
       useSafeOperationGate({

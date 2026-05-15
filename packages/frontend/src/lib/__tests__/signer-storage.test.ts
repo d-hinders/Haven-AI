@@ -7,7 +7,7 @@ const mockUseWalletClient = vi.fn()
 
 vi.mock('wagmi', () => ({
   useAccount: () => mockUseAccount(),
-  useWalletClient: () => mockUseWalletClient(),
+  useWalletClient: (args: unknown) => mockUseWalletClient(args),
 }))
 
 import {

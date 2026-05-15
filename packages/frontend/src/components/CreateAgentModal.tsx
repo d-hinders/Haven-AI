@@ -12,10 +12,11 @@ import {
 } from '@/lib/allowance-module'
 import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { validateMoneyInput } from '@/lib/money-input'
-import NetworkGate from './NetworkGate'
+import OnchainActionGate from './OnchainActionGate'
 import {
   getSafeNonce,
   signSafeTx,
@@ -188,6 +189,10 @@ export default function CreateAgentModal({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
   })
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
 
   // ── Reset ──────────────────────────────────────────────
 
@@ -314,7 +319,12 @@ export default function CreateAgentModal({
   // moves the visibility forward.)
 
   function deployBlockReason(): string | null {
-    if (!signer) return 'Connect a wallet or use a passkey on this device to approve this change.'
+    if (operationGate.kind === 'passkey_on_other_device') {
+      return 'Use the device with this Haven account passkey to approve.'
+    }
+    if (operationGate.kind === 'no_signer') {
+      return 'Connect a wallet or use a passkey on this device to approve this change.'
+    }
     if (!publicClient) return 'No RPC client for this chain. Refresh the page.'
     if (!safeDetails)
       return 'Account details are still loading — or the Haven backend is unreachable. Make sure it is running on port 3001.'
@@ -1116,15 +1126,23 @@ export default function CreateAgentModal({
                   Back
                 </Button>
                 <div className="flex-1">
-                  <NetworkGate requiredChainId={chainId} autoSwitch>
+                  <OnchainActionGate
+                    requiredChainId={chainId}
+                    operationGate={operationGate}
+                    noSignerMessage="Connect a wallet or use a passkey on this device to approve this change."
+                    autoSwitch
+                    showNotice={false}
+                  >
+                    {({ disabled }) => (
                     <Button
                       onClick={handleExecute}
-                      disabled={!!blockReason}
+                      disabled={disabled || !!blockReason}
                       className="w-full"
                     >
                       Connect agent
                     </Button>
-                  </NetworkGate>
+                    )}
+                  </OnchainActionGate>
                 </div>
               </div>
             </div>

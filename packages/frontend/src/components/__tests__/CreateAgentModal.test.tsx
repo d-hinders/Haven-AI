@@ -9,6 +9,7 @@ const {
   SIGNER_ADDRESS,
   mockUsePublicClient,
   mockUseActiveSigner,
+  mockUseSafeOperationGate,
   mockUseSafeDetails,
   mockApiPost,
   mockIsModuleEnabled,
@@ -24,6 +25,7 @@ const {
   SIGNER_ADDRESS: '0x3333333333333333333333333333333333333333',
   mockUsePublicClient: vi.fn(),
   mockUseActiveSigner: vi.fn(),
+  mockUseSafeOperationGate: vi.fn(),
   mockUseSafeDetails: vi.fn(),
   mockApiPost: vi.fn(),
   mockIsModuleEnabled: vi.fn(),
@@ -68,6 +70,10 @@ vi.mock('@/hooks/useSafeDetails', () => ({
 
 vi.mock('@/lib/signer', () => ({
   useActiveSigner: (args: unknown) => mockUseActiveSigner(args),
+}))
+
+vi.mock('@/hooks/useSafeOperationGate', () => ({
+  useSafeOperationGate: (args: unknown) => mockUseSafeOperationGate(args),
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -194,6 +200,7 @@ describe('CreateAgentModal recovery', () => {
       address: SIGNER_ADDRESS as Address,
       walletClient: {},
     })
+    mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
     mockUseSafeDetails.mockReturnValue({
       details: {
         address: SAFE_ADDRESS,

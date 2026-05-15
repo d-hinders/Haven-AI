@@ -172,7 +172,7 @@ export function useActiveSigner(args: {
   chainId?: number
 }): HavenUserSigner | null {
   const { address } = useAccount()
-  const { data: walletClient } = useWalletClient()
+  const { data: walletClient } = useWalletClient({ chainId: args.chainId })
 
   const passkeySignerValue = useSyncExternalStore(
     subscribe,

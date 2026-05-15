@@ -423,6 +423,18 @@ export class HavenClient {
     })
 
     if (retryResponse.status === 402) {
+      await this.recordMerchantRetryRejected({
+        rail: 'x402',
+        paymentId: receipt.paymentId,
+        txHash: receipt.txHash,
+        resourceUrl: receipt.resourceUrl,
+        retryResponse,
+        details: {
+          merchant_to: receipt.merchantTo,
+          delegate_to: receipt.to,
+        },
+      })
+
       throw new HavenApiError(
         'x402 retry was rejected after Haven funded the delegate wallet; reconciliation may be required.',
         402,
@@ -515,6 +527,17 @@ export class HavenClient {
     })
 
     if (retryResponse.status === 402) {
+      await this.recordMerchantRetryRejected({
+        rail: receipt.rail,
+        paymentId: receipt.paymentId,
+        txHash: receipt.txHash,
+        resourceUrl: receipt.resourceUrl,
+        retryResponse,
+        details: {
+          challenge_id: receipt.challengeId,
+        },
+      })
+
       throw new HavenApiError(
         'Machine payment retry was rejected after Haven sent the payment.',
         402,
@@ -595,6 +618,33 @@ export class HavenClient {
     return {
       ...receiptWithoutHeader,
       proofHeader: encodeMachinePaymentProof(receiptWithoutHeader),
+    }
+  }
+
+  private async recordMerchantRetryRejected(input: {
+    rail: string
+    paymentId: string
+    txHash: string
+    resourceUrl: string
+    retryResponse: Response
+    details?: Record<string, unknown>
+  }): Promise<void> {
+    try {
+      await this.post('/machine-payments/reconciliation-events', {
+        paymentId: input.paymentId,
+        rail: input.rail,
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: input.txHash,
+        reason: `Merchant returned HTTP ${input.retryResponse.status} after Haven payment confirmation`,
+        details: {
+          resource_url: input.resourceUrl,
+          retry_status: input.retryResponse.status,
+          retry_body: await responseSnippet(input.retryResponse),
+          ...input.details,
+        },
+      })
+    } catch {
+      // Best-effort durability: preserve the original retry failure for callers.
     }
   }
 
@@ -882,4 +932,13 @@ function getPaymentHeaderValidBefore(paymentHeader: string): number {
 
 function decodeBase64Json<T>(value: string): T {
   return JSON.parse(atob(value)) as T
+}
+
+async function responseSnippet(response: Response): Promise<string | null> {
+  try {
+    const text = await response.clone().text()
+    return text.slice(0, 1000) || null
+  } catch {
+    return null
+  }
 }

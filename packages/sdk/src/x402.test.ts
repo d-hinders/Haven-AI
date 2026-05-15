@@ -221,6 +221,83 @@ describe('x402 helpers', () => {
     })
   })
 
+  it('records a reconciliation event when an x402 retry is rejected after funding', async () => {
+    const backendUrl = 'https://haven.example'
+    const resourceUrl = paymentRequired.resource.url
+    const txHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'pay_123',
+        status: 'pending_signature',
+        chain_id: 8453,
+        safe_address: safeAddress,
+        token: 'USDC',
+        amount: '0.02',
+        to: delegateAddress,
+        resource_url: resourceUrl,
+        sign_data: {
+          hash: `0x${'11'.repeat(32)}`,
+          components: {
+            safe: safeAddress,
+            token: accepted.asset,
+            to: delegateAddress,
+            amount: accepted.amount,
+            payment_token: '0x0000000000000000000000000000000000000000',
+            payment: '0',
+            nonce: 1,
+          },
+          instructions: 'Sign with delegate key',
+        },
+      }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'pay_123',
+        status: 'confirmed',
+        tx_hash: txHash,
+        chain_id: 8453,
+        token: 'USDC',
+        amount: '0.02',
+        to: delegateAddress,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Payment rejected' }), { status: 402 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: backendUrl,
+    })
+
+    await expect(haven.fetch(resourceUrl)).rejects.toMatchObject({
+      statusCode: 402,
+      body: expect.objectContaining({
+        marker: 'x402_retry_rejected_after_funding',
+        payment_id: 'pay_123',
+      }),
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/reconciliation-events`)
+    const reportInit = fetchMock.mock.calls[4][1] as RequestInit
+    expect(JSON.parse(reportInit.body as string)).toMatchObject({
+      paymentId: 'pay_123',
+      rail: 'x402',
+      eventType: 'merchant_retry_rejected_after_payment',
+      txHash,
+      details: {
+        resource_url: resourceUrl,
+        retry_status: 402,
+        retry_body: JSON.stringify({ error: 'Payment rejected' }),
+        merchant_to: accepted.payTo,
+        delegate_to: delegateAddress,
+      },
+    })
+  })
+
   it('does not fund the delegate wallet for unsupported Base assets', async () => {
     const unsupportedPaymentRequired: X402PaymentRequired = {
       ...paymentRequired,

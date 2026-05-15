@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -19,6 +19,7 @@ import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@
 import { truncate, timeAgo } from '@/lib/format'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import CreateAgentModal from '@/components/CreateAgentModal'
 import SendModal from '@/components/SendModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
@@ -644,16 +645,17 @@ export default function DashboardClient() {
     }
   })
 
-  const onboardingStage: 'fund' | 'add-agent' | null =
-    safes.length === 0 || balancesLoading
-      ? null
-      : !hasAnyBalance
-        ? 'fund'
-        : agentsLoading
-          ? null
-        : agents.length === 0
-          ? 'add-agent'
-          : null
+  // Each onboarding step is computed independently from real state so the
+  // user can complete them in any order. The guide always renders the
+  // canonical Fund → Agent → First payment ordering but a step completed
+  // out of order shows as done regardless.
+  const dataReady = safes.length > 0 && !balancesLoading && !agentsLoading
+  const hasFunds = dataReady && hasAnyBalance
+  const hasAgents = dataReady && agents.length > 0
+  const hasFirstAgentPayment = Boolean(
+    overview?.transactions?.some((tx) => Boolean(tx.agentName)),
+  )
+  const allOnboardingComplete = dataReady && hasFunds && hasAgents && hasFirstAgentPayment
 
   const defaultSafe = useMemo(
     () => activeSafe ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
@@ -666,19 +668,39 @@ export default function DashboardClient() {
   const [sendOpen, setSendOpen] = useState(false)
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
+  const [agentUsageOpen, setAgentUsageOpen] = useState(false)
   const [actionSafeId, setActionSafeId] = useState<string | null>(null)
-  const [dismissedGuideStage, setDismissedGuideStage] = useState<'fund' | 'add-agent' | null>(null)
+  // In-progress dismissal is session-only — refreshing brings the checklist
+  // back so we keep nudging the user toward completing setup.
+  const [inProgressDismissed, setInProgressDismissed] = useState(false)
+  // Setup-complete dismissal IS persisted — once the user has done all three
+  // steps and dismissed the celebration, we don't show it again on reload.
+  const [completeDismissed, setCompleteDismissed] = useState(false)
 
   useEffect(() => {
     if (actionSafeId && safes.some((safe) => safe.id === actionSafeId)) return
     setActionSafeId(defaultSafe?.id ?? null)
   }, [actionSafeId, defaultSafe?.id, safes])
 
+  // Read the persisted setup-complete dismissal once the user is known.
   useEffect(() => {
-    if (dismissedGuideStage && dismissedGuideStage !== onboardingStage) {
-      setDismissedGuideStage(null)
+    if (typeof window === 'undefined') return
+    if (!user?.id) return
+    const stored = window.localStorage.getItem(`haven-onboarding-complete-dismissed:${user.id}`)
+    if (stored === '1') setCompleteDismissed(true)
+  }, [user?.id])
+
+  // If the user makes progress after dismissing the in-progress checklist,
+  // bring it back so they see the next step. We track the completed count in
+  // a ref and reset the dismiss whenever it grows.
+  const completedCount = (hasFunds ? 1 : 0) + (hasAgents ? 1 : 0) + (hasFirstAgentPayment ? 1 : 0)
+  const previousCompletedRef = useRef(completedCount)
+  useEffect(() => {
+    if (completedCount > previousCompletedRef.current && inProgressDismissed) {
+      setInProgressDismissed(false)
     }
-  }, [dismissedGuideStage, onboardingStage])
+    previousCompletedRef.current = completedCount
+  }, [completedCount, inProgressDismissed])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
   const actionGate = useSafeOperationGate({
@@ -715,9 +737,13 @@ export default function DashboardClient() {
   const overviewInitialLoading = overviewLoading && !overview
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError || approvalActionCount > 0)
-  const showOnboardingGuide = Boolean(
-    onboardingStage && !requiresOtherDevice && dismissedGuideStage !== onboardingStage,
-  )
+  // Render the guide whenever the user has at least one Safe and either:
+  // (a) they have unfinished steps and haven't dismissed the checklist, OR
+  // (b) they've just finished all three steps and haven't dismissed the celebration.
+  const showOnboardingGuide =
+    dataReady &&
+    !requiresOtherDevice &&
+    (allOnboardingComplete ? !completeDismissed : !inProgressDismissed)
   const showTopAside = hasAttention
 
   function refreshDashboardData() {
@@ -763,8 +789,15 @@ export default function DashboardClient() {
     setPickerAction(null)
   }
 
-  function dismissOnboardingGuide() {
-    setDismissedGuideStage(onboardingStage)
+  function dismissInProgressGuide() {
+    setInProgressDismissed(true)
+  }
+
+  function dismissCompleteBanner() {
+    setCompleteDismissed(true)
+    if (typeof window !== 'undefined' && user?.id) {
+      window.localStorage.setItem(`haven-onboarding-complete-dismissed:${user.id}`, '1')
+    }
   }
 
   const heroPanel = (
@@ -856,27 +889,59 @@ export default function DashboardClient() {
     <div className="max-w-6xl">
       <PageHeader title="Dashboard" subtitle="Your money, agents, and actions at a glance." />
 
-      {showOnboardingGuide && onboardingStage ? (
-        <div className="space-y-6">
-          {heroPanel}
-          {hasAttention ? attentionPanel : null}
+      {/*
+        Hide metrics + activity only for a brand-new user (no progress at
+        all). Once any step is done, the full dashboard renders alongside
+        the checklist so the user can see their progress against the rest
+        of the dashboard.
+      */}
+      {(() => {
+        const showGuide = showOnboardingGuide
+        // Focused first-run view: hero + checklist only, no metrics/activity.
+        // Triggered when the user hasn't funded their account yet — agent and
+        // payment steps need funded state to be useful.
+        const isFocusedView = showGuide && !hasFunds
+        const guide = showGuide ? (
           <DashboardOnboardingGuide
-            stage={onboardingStage}
+            hasFunds={hasFunds}
+            hasAgents={hasAgents}
+            hasFirstAgentPayment={hasFirstAgentPayment}
             onReceiveFunds={openReceiveForDefaultSafe}
             onAddAgent={() => openCreateAgent(null)}
-            onDismiss={dismissOnboardingGuide}
+            onShowAgentUsage={() => setAgentUsageOpen(true)}
+            onDismiss={dismissInProgressGuide}
+            onDismissComplete={dismissCompleteBanner}
+            inProgressDismissed={inProgressDismissed}
+            completeDismissed={completeDismissed}
           />
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className={`grid items-start gap-4 ${showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''}`}>
-            {heroPanel}
-            {attentionPanel}
+        ) : null
+
+        if (isFocusedView) {
+          return (
+            <div className="space-y-6">
+              {heroPanel}
+              {hasAttention ? attentionPanel : null}
+              {guide}
+            </div>
+          )
+        }
+
+        return (
+          <div className="space-y-6">
+            <div
+              className={`grid items-start gap-4 ${
+                showTopAside ? 'xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]' : ''
+              }`}
+            >
+              {heroPanel}
+              {attentionPanel}
+            </div>
+            {guide}
+            {metricsGrid}
+            {activityGrid}
           </div>
-          {metricsGrid}
-          {activityGrid}
-        </div>
-      )}
+        )
+      })()}
 
       <CreateAgentModal
         open={createAgentOpen}
@@ -928,6 +993,11 @@ export default function DashboardClient() {
         open={comingSoonOpen}
         onClose={() => setComingSoonOpen(false)}
         onReceive={() => setReceiveOpen(true)}
+      />
+
+      <UsingYourAgentInfo
+        open={agentUsageOpen}
+        onClose={() => setAgentUsageOpen(false)}
       />
     </div>
   )

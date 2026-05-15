@@ -298,14 +298,34 @@ export default function DesignSystemPage() {
 
       <Section
         title="First-run setup"
-        description="Dashboard setup guidance should stay sparse: one next step, one primary action, and no full dashboard density until the user dismisses setup."
+        description="A three-step checklist anchors a new user. Each step's status is computed independently from real state — agents and funds can be completed in any order. The active step gets the primary CTA; later steps lock until their prerequisite lands. When all three are done, the guide collapses to a Setup complete banner."
       >
-        <div className="max-w-3xl">
+        <div className="max-w-3xl space-y-4">
+          {/* Active: fund step open, agent + payment steps still pending. */}
           <DashboardOnboardingGuide
-            stage="fund"
+            hasFunds={false}
+            hasAgents={false}
+            hasFirstAgentPayment={false}
             onReceiveFunds={() => undefined}
             onAddAgent={() => undefined}
+            onShowAgentUsage={() => undefined}
             onDismiss={() => undefined}
+            onDismissComplete={() => undefined}
+            inProgressDismissed={false}
+            completeDismissed={false}
+          />
+          {/* All three done — the celebration banner. */}
+          <DashboardOnboardingGuide
+            hasFunds
+            hasAgents
+            hasFirstAgentPayment
+            onReceiveFunds={() => undefined}
+            onAddAgent={() => undefined}
+            onShowAgentUsage={() => undefined}
+            onDismiss={() => undefined}
+            onDismissComplete={() => undefined}
+            inProgressDismissed={false}
+            completeDismissed={false}
           />
         </div>
       </Section>

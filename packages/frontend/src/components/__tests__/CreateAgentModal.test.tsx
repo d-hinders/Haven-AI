@@ -136,16 +136,21 @@ function renderModal({
 }
 
 async function fillAgentRules() {
-  fireEvent.change(screen.getByPlaceholderText('e.g. Research Agent'), {
-    target: { value: 'Research Agent' },
-  })
-  fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+  await startBudgetStep()
 
   fireEvent.change(screen.getByPlaceholderText('Amount'), {
     target: { value: '10' },
   })
   fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
   fireEvent.click(screen.getByRole('button', { name: 'Review credential' }))
+}
+
+async function startBudgetStep() {
+  fireEvent.change(screen.getByPlaceholderText('e.g. Research Agent'), {
+    target: { value: 'Research Agent' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+  expect(await screen.findByText('Add at least one agent budget to continue')).toBeInTheDocument()
 }
 
 async function completeExistingCredentialReviewStep() {
@@ -271,5 +276,40 @@ describe('CreateAgentModal recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('validates budget amounts before allowing credential review', async () => {
+    renderModal()
+    await startBudgetStep()
+
+    expect(screen.getByRole('button', { name: 'Review credential' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add budget' })).toBeDisabled()
+
+    fireEvent.change(screen.getByPlaceholderText('Amount'), {
+      target: { value: '0' },
+    })
+
+    expect(await screen.findByText('Enter an amount greater than 0')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add budget' })).toBeDisabled()
+
+    fireEvent.change(screen.getByPlaceholderText('Amount'), {
+      target: { value: '1.1234567' },
+    })
+
+    expect(await screen.findByText('USDC supports up to 6 decimal places')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add budget' })).toBeDisabled()
+
+    fireEvent.change(screen.getByPlaceholderText('Amount'), {
+      target: { value: '.5' },
+    })
+
+    expect(screen.queryByText('Enter an amount greater than 0')).not.toBeInTheDocument()
+    expect(screen.queryByText('USDC supports up to 6 decimal places')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add budget' })).not.toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+
+    expect(screen.getByText('0.5 USDC per day')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review credential' })).not.toBeDisabled()
   })
 })

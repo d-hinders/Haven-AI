@@ -20,7 +20,14 @@ test.describe('dashboard browser UX', () => {
 
     await page.goto('/dashboard')
     await dismissMobileSidebar(page)
-    await page.getByRole('button', { name: 'Receive' }).click()
+    // The hero CTA renders as "Receive funds" when the safe is unfunded
+    // (test fixture's default) and "Receive" once funded. The onboarding
+    // checklist also exposes a "Receive funds" CTA, so we pin to the
+    // first match in DOM order (the hero) with an exact-match regex.
+    await page
+      .getByRole('button', { name: /^Receive( funds)?$/ })
+      .first()
+      .click()
 
     const modal = page.getByRole('dialog', { name: 'Receive funds' })
     await expect(modal).toBeVisible()

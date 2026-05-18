@@ -75,6 +75,27 @@ vi.mock('@/components/PasskeyOtherDeviceNotice', () => ({
   default: () => <div>Use another device</div>,
 }))
 
+const mockToastSuccess = vi.fn()
+const mockToastError = vi.fn()
+const mockToastInfo = vi.fn()
+vi.mock('@/components/ui/Toast', async () => {
+  const actual = await vi.importActual<typeof import('@/components/ui/Toast')>(
+    '@/components/ui/Toast',
+  )
+  return {
+    ...actual,
+    useToast: () => ({
+      toast: Object.assign(vi.fn(), {
+        success: mockToastSuccess,
+        error: mockToastError,
+        info: mockToastInfo,
+      }),
+      dismiss: vi.fn(),
+      toasts: [],
+    }),
+  }
+})
+
 import DashboardClient from '../DashboardClient'
 
 const SAFE = {
@@ -157,6 +178,7 @@ describe('DashboardClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    window.sessionStorage.clear()
     mockBaseState()
   })
 
@@ -298,5 +320,45 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Agent preview unavailable')).toBeInTheDocument()
     expect(screen.getByText('Activity preview unavailable')).toBeInTheDocument()
     expect(screen.queryByText('No transactions yet')).not.toBeInTheDocument()
+  })
+
+  describe('first-arrival welcome toast', () => {
+    it('fires a welcome toast and clears the flag when arriving from onboarding', () => {
+      window.sessionStorage.setItem('haven-just-onboarded', '1')
+
+      render(<DashboardClient />)
+
+      expect(mockToastSuccess).toHaveBeenCalledOnce()
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        'Welcome to Haven, Ada — your account is live.',
+      )
+      // Flag is consumed so a refresh later in the session does NOT re-fire.
+      expect(window.sessionStorage.getItem('haven-just-onboarded')).toBeNull()
+    })
+
+    it('does not fire the welcome toast on a normal dashboard render', () => {
+      // No session flag set.
+      render(<DashboardClient />)
+
+      expect(mockToastSuccess).not.toHaveBeenCalledWith(
+        expect.stringContaining('Welcome to Haven'),
+      )
+    })
+
+    it('falls back silently when sessionStorage is unavailable', () => {
+      // Simulate private-browsing-style failure on read.
+      const getSpy = vi
+        .spyOn(window.sessionStorage.__proto__, 'getItem')
+        .mockImplementation(() => {
+          throw new Error('sessionStorage disabled')
+        })
+
+      expect(() => render(<DashboardClient />)).not.toThrow()
+      expect(mockToastSuccess).not.toHaveBeenCalledWith(
+        expect.stringContaining('Welcome to Haven'),
+      )
+
+      getSpy.mockRestore()
+    })
   })
 })

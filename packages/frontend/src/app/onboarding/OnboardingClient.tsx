@@ -165,10 +165,27 @@ export default function OnboardingClient() {
 
   const isPasskeyOnboarding = signerMode === 'passkey'
   const name = displayName(user)
-  const completionTitle = 'Your Haven account is ready'
-  const completionDescription = `Your account is live on ${getChainConfig(selectedChainId).name}. You can now add funds, create agent budgets, and start making payments.`
+  const networkName = getChainConfig(selectedChainId).name
+  const completionTitle = "You’re in"
+  const completionDescription = `Your Haven account is live on ${networkName}. Add funds, set agent budgets, and you’re ready to pay.`
   const completionAddressLabel = 'Account address'
   const completionTxLabel = isPasskeyOnboarding ? 'Setup transaction' : 'Transaction'
+
+  // Capture the "just onboarded" moment so the dashboard can fire its
+  // welcome toast / hero fade exactly once on first arrival. Session-scoped
+  // so a normal refresh of the dashboard later in the session doesn't
+  // re-fire.
+  const handleGoToDashboard = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem('haven-just-onboarded', '1')
+      } catch {
+        // sessionStorage can throw in private mode — fall back to a
+        // dashboard arrival without the celebration. No user-facing impact.
+      }
+    }
+    router.push('/dashboard')
+  }
 
   return (
     <div className="min-h-screen bg-[var(--v2-bg)] text-[var(--v2-ink)] flex flex-col">
@@ -215,9 +232,8 @@ export default function OnboardingClient() {
                   </div>
                   {index < progressSteps.length - 1 && (
                     <div
-                      className={`h-px w-12 shrink-0 transition-colors duration-300 ${
-                        currentIndex > index ? 'bg-[var(--v2-success)]/45' : 'bg-[var(--v2-border)]'
-                      }`}
+                      data-filled={currentIndex > index}
+                      className="v2-progress-line h-px w-12 shrink-0 bg-[var(--v2-border)]"
                     />
                   )}
                 </div>
@@ -226,11 +242,11 @@ export default function OnboardingClient() {
           </div>
 
           {step === 'choose-signer' && (
-            <div className="space-y-6">
+            <div key="choose-signer" className="v2-animate-step-rise space-y-6">
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Welcome, {name}</h1>
                 <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-                  Choose a network, then pick how you want to approve payments and changes.
+                  Pick how you’ll approve payments. You can change networks later.
                 </p>
               </div>
 
@@ -283,18 +299,18 @@ export default function OnboardingClient() {
           )}
 
           {step === 'connect' && signerMode === 'eoa' && (
-            <div>
+            <div key="connect" className="v2-animate-step-rise">
               <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Connect your wallet</h1>
               <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
-                Connect a browser wallet to get started. This wallet will approve payments and
-                changes for your Haven account.
+                Use a browser wallet to approve payments and changes for your Haven account.
+                You stay in control — Haven never holds your signing key.
               </p>
               <ConnectButton />
             </div>
           )}
 
           {step === 'deploy' && signerMode === 'eoa' && (
-            <div>
+            <div key="deploy-eoa" className="v2-animate-step-rise">
               <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Create your Haven account</h1>
               <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
                 Create your Haven account on your chosen network. Your connected wallet will approve
@@ -352,99 +368,169 @@ export default function OnboardingClient() {
                   {deploying ? (
                     <span className="flex items-center justify-center gap-2">
                       <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      {deployStage === 'signing' && 'Waiting for signature...'}
-                      {deployStage === 'confirming' && 'Confirming on-chain...'}
-                      {deployStage === 'registering' && 'Finalizing...'}
-                      {!deployStage && 'Creating account...'}
+                      {deployStage === 'signing' && 'Waiting for your signature…'}
+                      {deployStage === 'confirming' && `Confirming on ${networkName}…`}
+                      {deployStage === 'registering' && 'Tying your account to Haven…'}
+                      {!deployStage && 'Creating your account…'}
                     </span>
                   ) : (
-                    'Create account'
+                    'Create my Haven account'
                   )}
                 </button>
               </NetworkGate>
 
               {deploying && (
-                <div className="mt-6 space-y-2">
-                  {(
-                    [
-                      { id: 'signing', label: 'Sign in wallet' },
-                      { id: 'confirming', label: 'Confirming on-chain' },
-                      { id: 'registering', label: 'Registering with Haven' },
-                    ] as const
-                  ).map((item, index) => {
-                    const order: DeployStage[] = ['signing', 'confirming', 'registering']
-                    const currentIndex = deployStage ? order.indexOf(deployStage) : 0
-                    const isActive = deployStage === item.id
-                    const isDone = currentIndex > index
+                <div className="relative mt-6">
+                  {/* Mesh-drift backdrop during the wait — runs only while
+                      deploying so the screen feels alive without competing
+                      with the foreground stage tracker. */}
+                  <div
+                    aria-hidden="true"
+                    className="v2-mesh-drift pointer-events-none absolute -inset-x-6 -inset-y-4 -z-10 opacity-60"
+                    style={{
+                      background:
+                        'radial-gradient(ellipse 60% 50% at 30% 30%, rgba(99,102,241,0.16) 0%, transparent 70%), radial-gradient(ellipse 55% 45% at 75% 70%, rgba(14,165,233,0.13) 0%, transparent 65%)',
+                    }}
+                  />
+                  <div className="space-y-2">
+                    {(
+                      [
+                        {
+                          id: 'signing',
+                          label: 'Asking your wallet to sign',
+                          hint: 'Approve the signature in your wallet to authorise account creation.',
+                        },
+                        {
+                          id: 'confirming',
+                          label: `Confirming on ${networkName}`,
+                          hint: 'Your account is being recorded on-chain. This usually takes a few seconds.',
+                        },
+                        {
+                          id: 'registering',
+                          label: 'Tying your account to Haven',
+                          hint: 'Linking the on-chain account to your Haven profile.',
+                        },
+                      ] as const
+                    ).map((item, index) => {
+                      const order: DeployStage[] = ['signing', 'confirming', 'registering']
+                      const currentIndex = deployStage ? order.indexOf(deployStage) : 0
+                      const isActive = deployStage === item.id
+                      const isDone = currentIndex > index
 
-                    return (
-                      <div
-                        key={item.id}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-md border transition-colors duration-300 ${
-                          isActive
-                            ? 'border-[var(--v2-brand)]/35 bg-[var(--v2-brand-soft)]'
-                            : isDone
-                              ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)]'
-                              : 'border-[var(--v2-border)] bg-white'
-                        }`}
-                      >
+                      return (
                         <div
-                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium shrink-0 ${
+                          key={item.id}
+                          className={`flex items-center gap-3 px-3 py-2.5 rounded-md border transition-colors duration-300 ${
                             isActive
-                              ? 'bg-white text-[var(--v2-brand)]'
+                              ? 'border-[var(--v2-brand)]/35 bg-[var(--v2-brand-soft)]'
                               : isDone
-                                ? 'bg-white text-[var(--v2-success)]'
-                                : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
+                                ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)]'
+                                : 'border-[var(--v2-border)] bg-white'
                           }`}
                         >
-                          {isDone ? '✓' : isActive ? <span className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" /> : index + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className={`text-xs font-medium ${isActive ? 'text-[var(--v2-brand)]' : isDone ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink-3)]'}`}>
-                            {item.label}
+                          <div
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium shrink-0 ${
+                              isActive
+                                ? 'bg-white text-[var(--v2-brand)]'
+                                : isDone
+                                  ? 'bg-white text-[var(--v2-success)]'
+                                  : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
+                            }`}
+                          >
+                            {isDone ? (
+                              '✓'
+                            ) : isActive ? (
+                              <span className="animate-pending-pulse w-2 h-2 rounded-full bg-[var(--v2-brand)]" />
+                            ) : (
+                              index + 1
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-xs font-medium ${isActive ? 'text-[var(--v2-brand)]' : isDone ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink-3)]'}`}>
+                              {item.label}
+                            </div>
+                            {isActive && (
+                              <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5">
+                                {item.id === 'signing' ? (
+                                  <SigningStatus signer={signer} stage="signing" />
+                                ) : (
+                                  item.hint
+                                )}
+                              </div>
+                            )}
                           </div>
                           {isActive && (
-                            <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5">
-                              {item.id === 'signing' ? (
-                                <SigningStatus signer={signer} stage="signing" />
-                              ) : item.id === 'confirming' ? (
-                                'Waiting for block inclusion'
-                              ) : (
-                                'Linking your account to Haven'
-                              )}
-                            </div>
+                            <div className="w-3 h-3 border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] rounded-full animate-spin shrink-0" />
                           )}
                         </div>
-                        {isActive && (
-                          <div className="w-3 h-3 border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] rounded-full animate-spin shrink-0" />
-                        )}
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </div>
           )}
 
           {step === 'deploy' && signerMode === 'passkey' && (
-            <PasskeyEnrollFlow
-              user={user}
-              selectedChainId={selectedChainId}
-              onComplete={(args) => {
-                void handlePasskeyComplete(args)
-              }}
-              onError={setError}
-            />
+            <div key="deploy-passkey" className="v2-animate-step-rise">
+              <PasskeyEnrollFlow
+                user={user}
+                selectedChainId={selectedChainId}
+                onComplete={(args) => {
+                  void handlePasskeyComplete(args)
+                }}
+                onError={setError}
+              />
+            </div>
           )}
 
           {step === 'done' && (
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">{completionTitle}</h1>
-              <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
-                {completionDescription}
-              </p>
+            <div key="done" className="v2-animate-step-rise">
+              {/* Check-bloom moment — a brand-soft disc with a check that
+                  pops in, surrounded by a single soft radial bloom that
+                  grows and fades behind it. Plays once on mount. */}
+              <div className="relative mb-6 flex justify-center">
+                <div
+                  aria-hidden="true"
+                  className="v2-animate-bloom pointer-events-none absolute inset-0 flex items-center justify-center"
+                >
+                  <div
+                    className="h-24 w-24 rounded-full"
+                    style={{
+                      background:
+                        'radial-gradient(circle, rgba(99,102,241,0.35) 0%, rgba(99,102,241,0.12) 45%, transparent 70%)',
+                    }}
+                  />
+                </div>
+                <div className="animate-check-pop relative flex h-14 w-14 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-[var(--v2-brand)]/25 shadow-[var(--v2-shadow-button)]">
+                  <svg
+                    className="h-7 w-7 text-[var(--v2-brand)]"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.4}
+                  >
+                    <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+              </div>
 
-              <div className="mb-6 space-y-3">
+              <div
+                className="v2-animate-stagger text-center"
+                style={{ ['--v2-stagger-delay' as string]: '160ms' }}
+              >
+                <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+                  {completionTitle}
+                </h1>
+                <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
+                  {completionDescription}
+                </p>
+              </div>
+
+              <div
+                className="v2-animate-stagger mb-6 space-y-3"
+                style={{ ['--v2-stagger-delay' as string]: '260ms' }}
+              >
                 <div className="p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
                   <span className="block text-xs text-[var(--v2-ink-3)] mb-1">{completionAddressLabel}</span>
                   <a
@@ -472,10 +558,11 @@ export default function OnboardingClient() {
               </div>
 
               <button
-                onClick={() => router.push('/dashboard')}
-                className="w-full py-2.5 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)]"
+                onClick={handleGoToDashboard}
+                className="v2-animate-stagger w-full py-3 rounded-md bg-[var(--v2-brand)] text-white text-sm font-semibold hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)] hover:-translate-y-0.5 hover:shadow-[var(--v2-shadow-card)]"
+                style={{ ['--v2-stagger-delay' as string]: '340ms' }}
               >
-                Go to Dashboard
+                Go to dashboard →
               </button>
             </div>
           )}

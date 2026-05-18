@@ -37,13 +37,13 @@ function getRandomUserId(): Uint8Array {
 function stageLabel(stage: Stage): string {
   switch (stage) {
     case 'creating_passkey':
-      return 'Creating passkey'
+      return 'Creating your passkey'
     case 'enrolling':
-      return 'Preparing your account'
+      return 'Saving it to your account'
     case 'deploying':
-      return 'Creating your Haven wallet'
+      return 'Bringing your account online'
     case 'registering':
-      return 'Finishing setup'
+      return 'Tying it to Haven'
     case 'done':
       return 'Done'
     case 'error':
@@ -56,13 +56,13 @@ function stageLabel(stage: Stage): string {
 function stageHint(stage: Stage): string {
   switch (stage) {
     case 'creating_passkey':
-      return 'Approve the prompt to create your secure passkey.'
+      return 'Approve the Face ID / Touch ID prompt to create a private key only this device can use.'
     case 'enrolling':
-      return 'Saving your sign-in method to your Haven account.'
+      return 'Saving your sign-in method to Haven so this device can authorise payments later.'
     case 'deploying':
-      return 'Creating your Haven wallet.'
+      return 'Creating your on-chain Haven account. This usually takes a few seconds.'
     case 'registering':
-      return 'Linking your wallet to your Haven account.'
+      return 'Linking your on-chain account to your Haven profile.'
     case 'done':
       return 'Your Haven account is ready.'
     case 'error':
@@ -241,11 +241,24 @@ export default function PasskeyEnrollFlow({
       )}
 
       {stage !== 'idle' && (
-        <div className="space-y-3">
+        <div className="relative space-y-3">
+          {/* Mesh-drift backdrop during the wait — calms the moment the
+              user is staring at a spinner without information. */}
+          <div
+            aria-hidden="true"
+            className="v2-mesh-drift pointer-events-none absolute -inset-x-4 -inset-y-2 -z-10 opacity-60"
+            style={{
+              background:
+                'radial-gradient(ellipse 60% 50% at 30% 30%, rgba(99,102,241,0.16) 0%, transparent 70%), radial-gradient(ellipse 55% 45% at 75% 70%, rgba(14,165,233,0.13) 0%, transparent 65%)',
+            }}
+          />
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Setting up your Haven account</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+              Setting up your Haven account
+            </h1>
             <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-              We&apos;re creating your passkey and setting up your account now.
+              We&apos;re creating your passkey and bringing your account online. Stay on this tab — it
+              takes a few seconds.
             </p>
           </div>
 
@@ -275,14 +288,20 @@ export default function PasskeyEnrollFlow({
                         : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
                   }`}
                 >
-                  {isDone ? '✓' : isActive ? <span className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" /> : index + 1}
+                  {isDone ? (
+                    '✓'
+                  ) : isActive ? (
+                    <span className="animate-pending-pulse w-2 h-2 rounded-full bg-[var(--v2-brand)]" />
+                  ) : (
+                    index + 1
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className={`text-xs font-medium ${isActive ? 'text-[var(--v2-brand)]' : isDone ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink-3)]'}`}>
                     {item.label}
                   </div>
                   {(isActive || stage === 'error') && (
-                    <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5">
+                    <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5 leading-relaxed">
                       {stage === 'error' ? error : item.hint}
                     </div>
                   )}

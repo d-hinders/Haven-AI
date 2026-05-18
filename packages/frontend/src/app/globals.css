@@ -202,9 +202,14 @@
 }
 
 .animate-check-pop {
-  animation: check-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
   transform-origin: center;
   display: inline-flex;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-check-pop {
+    animation: check-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
 }
 
 /* Allowance bar fill ease-out */
@@ -218,8 +223,10 @@
   50%      { opacity: 0.55; transform: scale(0.85); }
 }
 
-.animate-pending-pulse {
-  animation: pending-pulse 1.4s ease-in-out infinite;
+@media (prefers-reduced-motion: no-preference) {
+  .animate-pending-pulse {
+    animation: pending-pulse 1.4s ease-in-out infinite;
+  }
 }
 
 /*
@@ -249,5 +256,87 @@
 @media (prefers-reduced-motion: no-preference) {
   .v2-animate-slide-in {
     animation: v2-slide-in 220ms ease-out;
+  }
+}
+
+/*
+ * Onboarding wizard step entrance — slightly larger rise than the standard
+ * fade so step swaps feel like progress rather than a content swap. Used
+ * inside the signup form, wizard body, and success screen.
+ */
+@keyframes v2-step-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-step-rise {
+    animation: v2-step-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+/*
+ * Onboarding stagger — child elements opt into a one-shot fade-up with a
+ * `--v2-stagger-delay` custom property driving their start offset. Pairs
+ * with `v2-animate-step-rise` on a wrapper so a card and its children land
+ * sequentially without manual delay classes everywhere.
+ */
+@keyframes v2-stagger-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-stagger {
+    animation: v2-stagger-up 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--v2-stagger-delay, 0ms);
+  }
+}
+
+/*
+ * Onboarding success bloom — a single soft radial glow that grows once and
+ * fades behind the check-pop circle on the wizard's "you're in" screen.
+ * Plays only on first paint of the success state.
+ */
+@keyframes v2-bloom {
+  0%   { opacity: 0; transform: scale(0.55); }
+  40%  { opacity: 0.85; }
+  100% { opacity: 0; transform: scale(2.1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-bloom {
+    animation: v2-bloom 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+/*
+ * Progress connector fill — used by the onboarding wizard step indicator so
+ * the line between two steps grows from left to right when the leading step
+ * completes, instead of snapping colour.
+ */
+.v2-progress-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.v2-progress-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--v2-success);
+  opacity: 0.45;
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.v2-progress-line[data-filled='true']::after {
+  transform: scaleX(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-progress-line::after {
+    transition: none;
   }
 }

@@ -18,6 +18,7 @@ import { getChainConfig } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import CreateAgentModal from '@/components/CreateAgentModal'
@@ -760,6 +761,33 @@ export default function DashboardClient() {
     }
     previousFundedRef.current = hasFunds
   }, [dataReady, hasFunds, toast])
+
+  // First arrival from the onboarding wizard — fire a single welcome toast
+  // so the moment of arrival nods to the achievement without shouting. The
+  // session flag is set by the wizard's "Go to dashboard" CTA and cleared
+  // here so a refresh later in the same session doesn't re-fire.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!user) return
+    let justOnboarded = false
+    try {
+      justOnboarded = window.sessionStorage.getItem('haven-just-onboarded') === '1'
+      if (justOnboarded) {
+        window.sessionStorage.removeItem('haven-just-onboarded')
+      }
+    } catch {
+      // sessionStorage can throw in private mode — bail out silently. No
+      // user-facing impact, the dashboard still renders.
+      return
+    }
+    if (!justOnboarded) return
+    const firstName = displayName(user).split(' ')[0]
+    toast.success(`Welcome to Haven, ${firstName} — your account is live.`)
+    // Intentionally fire once per session. The dependency array is empty
+    // because we want this effect to run only on first mount after
+    // arriving from onboarding; user identity is captured in the closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
   const actionGate = useSafeOperationGate({

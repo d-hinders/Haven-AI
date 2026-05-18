@@ -19,6 +19,8 @@ Use this as shared memory for PR review feedback that was worth fixing. Keep it 
 - Avoid optional hook or function arguments when missing values make the old call compile but fail at runtime. Make required context required in TypeScript.
 - Audit all callers after changing hook signatures, response fields, status values, or API payloads.
 - Prefer explicit response fields over matching on free-text reason strings. If a free-text fallback is necessary, document it as temporary.
+- When SDK or API behavior changes, review generated examples, credential handoff files, demo scripts, and skill bundles for stale instructions.
+- When renaming technical fields to product-facing names, keep compatibility aliases when external users or generated artifacts may already depend on the old env var or field.
 
 ## Async UX And Modals
 
@@ -38,6 +40,14 @@ Use this as shared memory for PR review feedback that was worth fixing. Keep it 
 - If the same movement, transaction row, status badge, contact row, or money summary appears in multiple places, prefer one shared component or utility.
 - Keep dashboard, account detail, agent detail, transaction history, approvals, and design-system examples aligned after changing shared presentation.
 - If a temporary frontend shim or preview backfill is added, label it clearly and avoid letting it redefine backend-owned totals or durable semantics.
+
+## Generated Artifacts And Developer Handoffs
+
+- Treat generated Markdown, `.env` examples, SDK quickstarts, demo scripts, and agent skill bundles as product surfaces. They should be reviewed when payment capabilities, credential semantics, or SDK APIs change.
+- Credential handoffs should include the current payment paths the agent can use, such as direct payments, x402, and Haven machine-payment flows when supported.
+- Generated artifacts should explain queued approval behavior and avoid implying the agent can spend beyond the user's rules.
+- Keep developer-facing details accurate without leaking stale primary-UX vocabulary. Prefer `Haven wallet`, `credential address`, `agent rules`, and `agent budget`; mention Safe/module details only when they are necessary for advanced integration clarity.
+- Do not remove established env vars from generated files without a compatibility plan. Add clearer aliases alongside older names when external integrations may already rely on them.
 
 ## Test Gaps Worth Catching
 

@@ -41,10 +41,74 @@ Before final review, the captain should do a risk-specific self-check based on t
 - approvals and pending actions: status transitions, migrations or constraints, post-action copy, expiry, notification counts, and single vs multi-approval behavior
 - send, receive, contacts, and other modals: primary action hierarchy, scroll, z-index, close behavior, typing behavior, duplicate handling, and network context
 - hooks, APIs, and shared utilities: required vs optional arguments, caller audits, response shape changes, fallback values, and non-happy-path tests
+- generated artifacts: credential files, SDK examples, demo scripts, and skill bundles stay aligned with current Haven capabilities, env vars, product language, and regulatory guardrails
 
 After a Claude or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/ai-review-patterns.md` or the reviewer prompt. Do not add one-off preferences or obsolete implementation details.
 
 Workers can implement narrow slices, but the captain owns cross-surface consistency, shared abstractions, PR shape, final review judgment, and deciding which review comments become durable workflow memory.
+
+## Task Prompt Shape
+
+When the user is planning work, help turn the request into this shape before implementation:
+
+```text
+Goal:
+[What outcome should exist when this is done.]
+
+Scope:
+[What should be included.]
+
+Out of scope:
+[What should not be changed, even if nearby.]
+
+PR shape:
+[One PR / two PRs / roadmap first / follow-up PRs.]
+
+Risk:
+[Docs only / UI polish / shared behavior / money movement / agent authority / SDK or API contract.]
+
+Workflow:
+Use the Haven agent workflow. The captain owns product judgment, shared files, final integration, and merge-readiness judgment. Use subagents if they materially improve discovery, bounded implementation, or review.
+
+Definition of done:
+- PR opened
+- relevant checks run
+- review/risk summary included
+- merge-readiness report included
+```
+
+Use this prompt shape especially when work could sprawl, when the user asks for a plan, or when multiple small PRs would be better than one broad branch.
+
+## PR Closeout Contract
+
+Every non-trivial PR should end with a concise closeout:
+
+- changed files or surfaces
+- checks run
+- what was intentionally left out
+- review status
+- merge-readiness report
+
+Use this merge-readiness format:
+
+```text
+Merge readiness:
+- CI: passing / failing / pending
+- Local checks: ...
+- Review status: self-reviewed / reviewer-agent-reviewed / external reviewed / not reviewed
+- Risk level: low / medium / high
+- Why safe to merge: ...
+- Residual risk: ...
+- Recommended merge order: ...
+```
+
+When the user asks "is this safe to merge?", answer in this format. Do not treat green CI as the whole review for money movement, agent authority, generated credential artifacts, SDK payment APIs, x402/MPP, or shared contracts.
+
+## Common PR Patterns
+
+For broad cleanup or quality waves, prefer one or two focused PRs and then stop. If larger refactors remain, name them as a separate project rather than letting the cleanup wave expand.
+
+For generated artifacts, pair implementation changes with output review. If SDK/API behavior, credential semantics, x402/MPP behavior, or product language changes, check generated credential files, `.env` examples, SDK snippets, demo scripts, and skill bundles.
 
 ## How To Create Or Invoke Agents
 
@@ -136,7 +200,8 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 8. Run relevant build or test checks.
 9. Ask `haven-reviewer` for a final diff review when risk warrants it.
 10. Let the captain fix final issues, commit, push, and open the PR.
-11. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur.
+11. Add the PR closeout contract and merge-readiness report before calling the work complete.
+12. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur.
 
 ## Files The Captain Should Usually Own
 
@@ -223,6 +288,13 @@ Before implementation, briefly tell me:
 - what checks you expect to run
 
 Then proceed with the work unless you find a real blocker. This update is informational, not a request for permission to use the agentic workflow.
+
+Before calling the PR ready, include:
+- changed surfaces
+- checks run
+- what was intentionally left out
+- review status
+- merge-readiness report with risk level, residual risk, and recommended merge order if multiple PRs are open
 ```
 
 ## Feature Delivery Prompt Template

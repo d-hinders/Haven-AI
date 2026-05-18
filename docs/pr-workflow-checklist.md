@@ -46,6 +46,7 @@ Good split examples:
   - what changed
   - what was intentionally left out
   - what reviewers should focus on
+- Include a merge-readiness section using the template below for non-trivial PRs.
 
 ## Before Merging
 
@@ -54,6 +55,24 @@ Good split examples:
 - Re-run the relevant local checks if the branch changed after review.
 - If the PR started stacked, re-open or retarget it so the final merge path is into `main`.
 - Verify that merging this PR will trigger the expected deployment branch.
+- For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green.
+
+## Merge Readiness Report
+
+Use this in PR descriptions, final Codex/Claude handoffs, and "is this safe to merge?" answers:
+
+```md
+## Merge Readiness
+- CI: passing / failing / pending
+- Local checks: [commands run, or "not run" with reason]
+- Review status: self-reviewed / reviewer-agent-reviewed / external review / not reviewed
+- Risk level: low / medium / high
+- Why safe to merge: [short reason]
+- Residual risk: [none, or concrete follow-up]
+- Recommended merge order: [if multiple PRs are open]
+```
+
+Green CI is necessary but not sufficient for risk-bearing work. The merge-readiness report should say why the branch is safe, not only that checks passed.
 
 ## Local Check Commands
 
@@ -82,6 +101,8 @@ Notes:
 - Treat migrations as coordination points, not routine files.
 - Prefer making the smallest deployable slice first.
 - If a branch starts getting broad, stop and split it before review gets deep.
+- For cleanup waves, prefer one or two low-risk PRs and then stop. Move larger refactors into a new explicit project.
+- For generated files or handoff artifacts, review the generated output whenever SDK/API behavior or product capabilities change.
 
 ## Questions To Ask Up Front
 
@@ -90,6 +111,7 @@ Notes:
 - Does this add or modify a migration?
 - Which files are most likely to conflict with in-flight work?
 - What is the smallest version we can merge safely this week?
+- Does this change require generated docs, SDK examples, credential handoffs, or workflow prompts to be updated?
 
 ## Quick Copy-Paste Checklist
 

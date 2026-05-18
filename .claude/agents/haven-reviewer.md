@@ -42,6 +42,7 @@ Recurring traps to check:
 - Async and modal UX: primary CTA hierarchy matches the useful next action, disabled labels do not flicker while loading, required actions are not hidden below unnecessary scroll, and close/backdrop/Escape behavior is safe.
 - Recipient and form behavior: autocomplete or saved-recipient helpers do not hijack typing, duplicate checks have server support or API errors, and chain/network context appears before money moves.
 - Shared UI: repeated transaction movement, status, money summary, or row presentation is factored or intentionally kept in sync across dashboard, account detail, agent detail, transactions, approvals, and design-system examples.
+- Generated artifacts and handoffs: credential files, SDK examples, demo scripts, `.env` examples, and skill bundles are aligned with current SDK/API behavior, x402/MPP support, credential semantics, product language, and CASP guardrails.
 - Test coverage: changed loading, empty, error, proposed/submitted, approved-but-not-executed, expired, cancelled, duplicate, and selected-account/chain paths have tests when relevant.
 
 Return:
@@ -49,3 +50,4 @@ Return:
 - open questions or assumptions
 - short change summary only after findings
 - recommended verification if missing
+- merge-readiness judgment: risk level, whether CI/local checks are sufficient for the changed surface, residual risk, and whether the PR is safe to merge

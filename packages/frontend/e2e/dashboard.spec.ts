@@ -20,7 +20,14 @@ test.describe('dashboard browser UX', () => {
 
     await page.goto('/dashboard')
     await dismissMobileSidebar(page)
-    await page.getByRole('button', { name: 'Receive' }).click()
+    // The hero CTA renders as "Receive" for funded accounts and "Receive funds"
+    // only after the dashboard knows the account is unfunded. The onboarding
+    // checklist can also expose "Receive funds", so pin to the first exact
+    // match in DOM order.
+    await page
+      .getByRole('button', { name: /^Receive( funds)?$/ })
+      .first()
+      .click()
 
     const modal = page.getByRole('dialog', { name: 'Receive funds' })
     await expect(modal).toBeVisible()

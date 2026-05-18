@@ -32,6 +32,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { useToast } from '@/components/ui/Toast'
 import { TransactionActivityRow, TransactionMovement } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -233,6 +234,9 @@ function DashboardHero({
   changeAmount,
   changePercent,
   hasAccounts,
+  hasFunds,
+  fundingStateKnown,
+  watchingForDeposit,
   requiresOtherDevice,
   onSend,
   onReceive,
@@ -246,6 +250,9 @@ function DashboardHero({
   changeAmount: number
   changePercent: number
   hasAccounts: boolean
+  hasFunds: boolean
+  fundingStateKnown: boolean
+  watchingForDeposit: boolean
   requiresOtherDevice: boolean
   onSend: () => void
   onReceive: () => void
@@ -290,7 +297,24 @@ function DashboardHero({
               {formatCurrency(animatedTotal, currency)}
             </p>
           )}
-          {changeAvailable ? (
+          {/*
+            Three meta-line states under the headline number:
+            1. Watching for a deposit (user opened Receive earlier, balance
+               still 0) — shows a soft brand-tinted pill with a pulse so the
+               user knows the dashboard is actively listening.
+            2. Funded with change data — show today's signed % change.
+            3. Funded without change data, OR no change available — quiet
+               "Across all linked Haven accounts." caption.
+          */}
+          {watchingForDeposit ? (
+            <p className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[var(--v2-brand)]">
+              <span
+                aria-hidden="true"
+                className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--v2-brand)] animate-pending-pulse"
+              />
+              Watching for incoming deposits…
+            </p>
+          ) : changeAvailable ? (
             <p className={`mt-3 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
               {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
             </p>
@@ -304,7 +328,10 @@ function DashboardHero({
         {hasAccounts ? (
           requiresOtherDevice ? (
             <PasskeyOtherDeviceNotice className="max-w-sm" />
-          ) : (
+          ) : !fundingStateKnown || hasFunds ? (
+            // Funded: Send is primary, Receive + Add funds support.
+            // While balances are still loading, keep this neutral action order
+            // so the hero does not briefly claim the account needs funds.
             <div className="flex flex-wrap gap-3">
               <Button onClick={onSend} size="lg">
                 Send
@@ -314,6 +341,21 @@ function DashboardHero({
               </Button>
               <Button onClick={onAddFunds} variant="ghost" size="lg">
                 Add funds
+              </Button>
+            </div>
+          ) : (
+            // Unfunded: Receive becomes the primary action — Send is useless
+            // with $0 and a confusing offer. We keep Send visible but ghost
+            // so a user who already has off-flow plans can still find it.
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={onReceive} size="lg">
+                Receive funds
+              </Button>
+              <Button onClick={onAddFunds} variant="ghost" size="lg">
+                Add funds
+              </Button>
+              <Button onClick={onSend} variant="ghost" size="lg">
+                Send
               </Button>
             </div>
           )
@@ -626,6 +668,7 @@ function EmptyPreview({
 
 export default function DashboardClient() {
   const { user, activeSafe } = useAuth()
+  const { toast } = useToast()
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
@@ -669,6 +712,10 @@ export default function DashboardClient() {
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [agentUsageOpen, setAgentUsageOpen] = useState(false)
+  // Set true the first time the user opens Receive in this session. Combined
+  // with !hasFunds it drives the hero's "Watching for incoming deposits…"
+  // hint so the user knows the dashboard is actively listening.
+  const [hasOpenedReceive, setHasOpenedReceive] = useState(false)
   const [actionSafeId, setActionSafeId] = useState<string | null>(null)
   // In-progress dismissal is session-only — refreshing brings the checklist
   // back so we keep nudging the user toward completing setup.
@@ -701,6 +748,18 @@ export default function DashboardClient() {
     }
     previousCompletedRef.current = completedCount
   }, [completedCount, inProgressDismissed])
+
+  // Celebrate the first-fund moment: when hasFunds flips false → true, fire
+  // a success toast. Only after data is ready, to avoid firing on initial
+  // mount before the balances hook has resolved.
+  const previousFundedRef = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (!dataReady) return
+    if (previousFundedRef.current === false && hasFunds) {
+      toast.success('Funds received — your agents can spend now')
+    }
+    previousFundedRef.current = hasFunds
+  }, [dataReady, hasFunds, toast])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
   const actionGate = useSafeOperationGate({
@@ -773,12 +832,16 @@ export default function DashboardClient() {
 
     setActionSafeId(defaultSafe?.id ?? null)
     if (action === 'send') setSendOpen(true)
-    if (action === 'receive') setReceiveOpen(true)
+    if (action === 'receive') {
+      setHasOpenedReceive(true)
+      setReceiveOpen(true)
+    }
   }
 
   function openReceiveForDefaultSafe() {
     if (!defaultSafe) return
     setActionSafeId(defaultSafe.id)
+    setHasOpenedReceive(true)
     setReceiveOpen(true)
   }
 
@@ -810,6 +873,9 @@ export default function DashboardClient() {
       changeAmount={changeAmount}
       changePercent={changePercent}
       hasAccounts={safes.length > 0}
+      hasFunds={hasFunds}
+      fundingStateKnown={dataReady}
+      watchingForDeposit={dataReady && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       onSend={() => openHeroAction('send')}
       onReceive={() => openHeroAction('receive')}
@@ -992,7 +1058,10 @@ export default function DashboardClient() {
       <ComingSoonModal
         open={comingSoonOpen}
         onClose={() => setComingSoonOpen(false)}
-        onReceive={() => setReceiveOpen(true)}
+        onReceive={() => {
+          setHasOpenedReceive(true)
+          setReceiveOpen(true)
+        }}
       />
 
       <UsingYourAgentInfo

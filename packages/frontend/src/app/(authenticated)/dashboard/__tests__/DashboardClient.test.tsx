@@ -225,6 +225,21 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
   })
 
+  it('does not show the unfunded receive CTA before balances finish loading', () => {
+    mockUseAggregatedBalances.mockReturnValue({
+      balances: [],
+      loading: true,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
   it('shows a focused first-run guide instead of the full dashboard when the account needs funds', () => {
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],

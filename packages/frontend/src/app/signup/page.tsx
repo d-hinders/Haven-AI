@@ -21,14 +21,19 @@ type FieldErrors = Partial<Record<'name' | 'email' | 'password' | 'confirmPasswo
 function TrustRow({
   title,
   description,
+  delayMs,
 }: {
   title: string
   description: string
+  delayMs: number
 }) {
   return (
-    <div className="flex gap-3">
-      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--v2-success-soft)] text-[var(--v2-success)]">
-        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2}>
+    <div
+      className="v2-animate-stagger flex gap-3"
+      style={{ ['--v2-stagger-delay' as string]: `${delayMs}ms` }}
+    >
+      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] ring-1 ring-inset ring-[var(--v2-brand)]/20">
+        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2}>
           <path d="M3.5 8.5 6.5 11.5 12.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
@@ -136,15 +141,26 @@ export default function SignupPage() {
 
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
         <div className="grid w-full max-w-4xl gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
-          <div className="rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-[var(--v2-shadow-card)]">
-            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
-              Create your account
+          <div className="v2-animate-step-rise rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-[var(--v2-shadow-card)]">
+            <h1
+              className="v2-animate-stagger text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2"
+              style={{ ['--v2-stagger-delay' as string]: '40ms' }}
+            >
+              Create your Haven account
             </h1>
-            <p className="text-sm text-[var(--v2-ink-2)] mb-8">
-              Set up Haven, then create your first account with a passkey or connected wallet.
+            <p
+              className="v2-animate-stagger text-sm text-[var(--v2-ink-2)] mb-8"
+              style={{ ['--v2-stagger-delay' as string]: '120ms' }}
+            >
+              One account, agents that spend within rules you set.
             </p>
 
-            <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            <form
+              onSubmit={handleSubmit}
+              noValidate
+              className="v2-animate-stagger space-y-4"
+              style={{ ['--v2-stagger-delay' as string]: '200ms' }}
+            >
               {error && (
                 <div className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                   {error}
@@ -287,22 +303,31 @@ export default function SignupPage() {
             </p>
           </div>
 
-          <div className="rounded-[14px] border border-[var(--v2-border)] bg-white/85 p-6 shadow-[var(--v2-shadow-card)]">
-            <p className="text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]">
-              What happens next
+          <div
+            className="v2-animate-step-rise rounded-[14px] border border-[var(--v2-border)] bg-white/85 p-6 shadow-[var(--v2-shadow-card)]"
+            style={{ ['--v2-stagger-delay' as string]: '120ms' }}
+          >
+            <p
+              className="v2-animate-stagger text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]"
+              style={{ ['--v2-stagger-delay' as string]: '180ms' }}
+            >
+              What you&apos;re signing up for
             </p>
             <div className="mt-5 space-y-5">
               <TrustRow
-                title="Create an account wallet"
-                description="Use a passkey or wallet to create the account that will hold funds."
+                delayMs={260}
+                title="An account wallet you own"
+                description="Create it with a passkey or your existing wallet. Funds live in a Safe — never with Haven."
               />
               <TrustRow
-                title="You stay in control"
-                description="Haven applies rules for agents; it does not hold unrestricted payment credentials."
+                delayMs={340}
+                title="Agents that ask, then act"
+                description="Set budgets and reset periods. Anything over that limit waits for your approval."
               />
               <TrustRow
-                title="Start with clear limits"
-                description="Connect agents only after you choose budgets, networks, and spend rules."
+                delayMs={420}
+                title="No surprises in production"
+                description="Every payment is logged with the agent, the policy, and the outcome — auditable from day one."
               />
             </div>
           </div>

@@ -44,9 +44,12 @@ function withInput(overrides: Partial<HandoffInput>): HandoffInput {
 }
 
 describe('buildDotenv', () => {
-  it('emits API key, safe address, and chain id', () => {
+  it('emits API key, agent identity, wallet address, and chain id', () => {
     const env = buildDotenv(BASE_INPUT)
+    expect(env).toContain('HAVEN_AGENT_ID=agt_abc123')
     expect(env).toContain('HAVEN_API_KEY=sk_agent_TESTKEY_NEVERREAL')
+    expect(env).toContain('HAVEN_DELEGATE_ADDRESS=0xaDA083091fAd5dE77370716b1BA7AC76C11f0b8b')
+    expect(env).toContain('HAVEN_WALLET_ADDRESS=0xbf35beb0f587db2527b64e58d61f78bbf840860f')
     expect(env).toContain('HAVEN_SAFE_ADDRESS=0xbf35beb0f587db2527b64e58d61f78bbf840860f')
     expect(env).toContain('HAVEN_CHAIN_ID=100')
   })
@@ -60,7 +63,8 @@ describe('buildDotenv', () => {
     const env = buildDotenv(
       withInput({ credentials: { ...BASE_INPUT.credentials, delegatePrivateKey: null } }),
     )
-    expect(env).not.toContain('HAVEN_DELEGATE_KEY')
+    expect(env).not.toContain('HAVEN_DELEGATE_KEY=0xPRIVATEKEY_NEVERREAL')
+    expect(env).toContain('# HAVEN_DELEGATE_KEY=<private key for 0xaDA083091fAd5dE77370716b1BA7AC76C11f0b8b>')
   })
 
   it('includes HAVEN_API_URL only when apiBaseUrl is provided', () => {
@@ -79,6 +83,14 @@ describe('buildHandoff — identity & metadata', () => {
     expect(markdown).toContain('0xaDA083091fAd5dE77370716b1BA7AC76C11f0b8b')
     expect(markdown).toContain('Treasury Safe')
     expect(markdown).toContain('chain id `100`')
+  })
+
+  it('uses current Haven language for wallet and credential identity', () => {
+    const { markdown } = buildHandoff(BASE_INPUT)
+    expect(markdown).toContain('Haven wallet')
+    expect(markdown).toContain('Credential address')
+    expect(markdown).not.toContain('Safe account')
+    expect(markdown).not.toContain('AllowanceModule')
   })
 
   it('resolves a known chainId to its display name', () => {
@@ -160,6 +172,22 @@ describe('buildHandoff — policy', () => {
   })
 })
 
+describe('buildHandoff — paid API support', () => {
+  it('documents x402 and machine-payment fetch support', () => {
+    const { markdown } = buildHandoff(BASE_INPUT)
+    expect(markdown).toContain('haven.fetch')
+    expect(markdown).toContain('standard x402')
+    expect(markdown).toContain('machine-payment')
+  })
+
+  it('explains queued approval errors from over-budget payments', () => {
+    const { markdown } = buildHandoff(BASE_INPUT)
+    expect(markdown).toContain('HavenApiError')
+    expect(markdown).toContain('HTTP status `202`')
+    expect(markdown).toMatch(/do not retry/i)
+  })
+})
+
 describe('buildHandoff — revoke link', () => {
   it('uses the provided appBaseUrl', () => {
     const { markdown } = buildHandoff(
@@ -196,5 +224,13 @@ describe('buildHandoff — SDK example', () => {
       expect(md).toContain('haven.pay({')
       expect(md).toContain('@haven_ai/sdk')
     }
+  })
+
+  it('keeps the BYO-key quickstart honest about the missing private key', () => {
+    const { markdown } = buildHandoff(
+      withInput({ credentials: { ...BASE_INPUT.credentials, delegatePrivateKey: null } }),
+    )
+    expect(markdown).toContain('Set HAVEN_DELEGATE_KEY before making payments')
+    expect(markdown).toContain('HAVEN_DELEGATE_ADDRESS=')
   })
 })

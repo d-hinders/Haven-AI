@@ -49,6 +49,7 @@ When choosing the workflow, include likely reviewer traps for the change type:
 - Approvals and pending actions: new statuses, migrations or constraints, expiry, single vs multi-approval behavior, notification counts, and post-action copy.
 - Send, receive, contacts, and modals: scroll fit, z-index, close behavior, primary CTA hierarchy, typing/autocomplete behavior, duplicate enforcement, and network context.
 - Hooks, APIs, and shared utilities: required context, caller audits, response-shape compatibility, structured errors, and regression tests for non-happy paths.
+- Generated artifacts and handoffs: credential files, SDK examples, demo scripts, `.env` examples, and skill bundles must stay aligned with current SDK/API behavior, x402/MPP support, credential semantics, product language, and CASP guardrails.
 
 Return:
 - recommended agent plan
@@ -58,5 +59,6 @@ Return:
 - expected checks
 - likely reviewer traps
 - risks to watch
+- expected merge-readiness report items: CI, local checks, review status, risk level, why safe to merge, residual risk, and merge order if multiple PRs are open
 
 If asked to review progress, report whether the current work follows the planned ownership boundaries and what should be adjusted before continuing.

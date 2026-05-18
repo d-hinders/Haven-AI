@@ -44,6 +44,8 @@ Before changing payment execution, agent authority, Safe setup, relaying, SDK pa
 
 Hard product and architecture rule: Haven is non-custodial smart account software. Haven must not hold user or agent private keys, make API credentials sufficient to spend, rely on off-chain policy as the real spend control, alter signed payment intent, operate swaps/ramps/fiat/card/merchant settlement/yield/advice flows without review, or prevent users from accessing and revoking Safe permissions outside Haven.
 
+Apply these guardrails to generated artifacts too: SDK examples, credential files, agent handoff docs, demo scripts, and skill bundles must not imply Haven holds funds, controls keys, transfers money on the user's behalf, or makes API credentials sufficient to spend.
+
 ## UI Closeout
 
 Before completing UI work:
@@ -54,6 +56,20 @@ Before completing UI work:
 - Review copy against `docs/design_system/UX_COPY_GUIDELINES.md`.
 - Review the changed UX against `docs/ux/haven-design-review.md`.
 - Run relevant frontend tests or build checks when practical.
+
+## PR Closeout And Merge Readiness
+
+When opening or reviewing a non-trivial PR, report merge readiness explicitly instead of relying on green CI alone:
+
+- CI status
+- local checks run
+- review status, including whether a reviewer agent or external review covered the diff
+- risk level: low, medium, or high
+- why it is safe to merge
+- residual risk or follow-up
+- recommended merge order when multiple PRs are open
+
+Green CI is necessary but not sufficient for changes that touch money movement, agent authority, generated credential artifacts, SDK payment APIs, x402/MPP flows, or shared contracts.
 
 ## Agentic Workflow
 

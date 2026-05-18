@@ -304,7 +304,7 @@ export default function SignupPage() {
           </div>
 
           <div
-            className="v2-animate-step-rise rounded-[14px] border border-[var(--v2-border)] bg-white/85 p-6 shadow-[var(--v2-shadow-card)]"
+            className="v2-animate-stagger rounded-[14px] border border-[var(--v2-border)] bg-white/85 p-6 shadow-[var(--v2-shadow-card)]"
             style={{ ['--v2-stagger-delay' as string]: '120ms' }}
           >
             <p

@@ -425,7 +425,13 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       return reply.code(202).send(pendingApprovalResponse(approval, remainingHuman))
     }
 
-    // 7. Generate transfer hash on-chain
+    // 7. Generate transfer hash on-chain.
+    //
+    // For standard x402, `payTo` can be the agent-owned delegate EOA because
+    // the protocol's merchant-facing payment header is settled from an EOA.
+    // Haven does not control that EOA or its private key. This transfer is only
+    // a Safe AllowanceModule top-up authorized by the agent signature and
+    // constrained by the user's on-chain allowance; the backend merely relays it.
     let signHash: string
     try {
       signHash = await generateTransferHash(

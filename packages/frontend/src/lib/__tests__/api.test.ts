@@ -32,7 +32,6 @@ describe('ApiClient', () => {
 
       expect(fetch).toHaveBeenCalledWith('/api/users', {
         headers: {
-          'Content-Type': 'application/json',
           Authorization: 'Bearer test-token',
         },
       })
@@ -55,9 +54,7 @@ describe('ApiClient', () => {
       await api.get('/users')
 
       expect(fetch).toHaveBeenCalledWith('https://branch-backend.example/users', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: {},
       })
       expect(localStorage.getItem('haven_api_base_url')).toBe('https://branch-backend.example')
     })
@@ -69,9 +66,7 @@ describe('ApiClient', () => {
       await api.get('/users')
 
       expect(fetch).toHaveBeenCalledWith('https://branch-backend.example/users', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: {},
       })
     })
   })
@@ -91,6 +86,19 @@ describe('ApiClient', () => {
       })
       expect(result).toEqual({ created: true })
     })
+
+    it('omits JSON content type when called without a body', async () => {
+      mockFetchOk({ rejected: true })
+
+      const result = await api.post('/approvals/1/reject')
+
+      expect(fetch).toHaveBeenCalledWith('/api/approvals/1/reject', {
+        method: 'POST',
+        body: undefined,
+        headers: {},
+      })
+      expect(result).toEqual({ rejected: true })
+    })
   })
 
   describe('put()', () => {
@@ -107,6 +115,20 @@ describe('ApiClient', () => {
         },
       })
       expect(result).toEqual({ updated: true })
+    })
+  })
+
+  describe('delete()', () => {
+    it('omits JSON content type for bodyless delete requests', async () => {
+      mockFetchOk({ success: true })
+
+      const result = await api.delete('/agents/1')
+
+      expect(fetch).toHaveBeenCalledWith('/api/agents/1', {
+        method: 'DELETE',
+        headers: {},
+      })
+      expect(result).toEqual({ success: true })
     })
   })
 
@@ -133,9 +155,7 @@ describe('ApiClient', () => {
       await expect(api.get('/secret')).rejects.toThrow(ApiRequestError)
 
       expect(fetch).toHaveBeenCalledWith('/api/secret', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: {},
       })
       expect(localStorage.getItem('haven_api_base_url')).toBeNull()
     })

@@ -104,6 +104,18 @@ describe('buildSkillBundle — credential plumbing', () => {
     expect(payTs).toMatch(/throw new Error\([^)]*HAVEN_API_KEY/)
     expect(payTs).toMatch(/throw new Error\([^)]*HAVEN_DELEGATE_KEY/)
   })
+
+  it('keeps SKILL.md aligned with current Haven agent rules and fetch support', async () => {
+    const { read } = await readBundle(BASE_INPUT)
+    const skillMd = await read('SKILL.md')
+
+    expect(skillMd).toContain('Haven wallet')
+    expect(skillMd).toContain('Credential address')
+    expect(skillMd).toContain('haven.fetch()')
+    expect(skillMd).toContain('HavenApiError')
+    expect(skillMd).not.toContain('server-side policy')
+    expect(skillMd).not.toContain('AllowanceModule')
+  })
 })
 
 describe('buildSkillBundle — revoke link', () => {

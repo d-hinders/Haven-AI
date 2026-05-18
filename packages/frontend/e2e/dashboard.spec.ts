@@ -20,10 +20,10 @@ test.describe('dashboard browser UX', () => {
 
     await page.goto('/dashboard')
     await dismissMobileSidebar(page)
-    // The hero CTA renders as "Receive funds" when the safe is unfunded
-    // (test fixture's default) and "Receive" once funded. The onboarding
-    // checklist also exposes a "Receive funds" CTA, so we pin to the
-    // first match in DOM order (the hero) with an exact-match regex.
+    // The hero CTA renders as "Receive" for funded accounts and "Receive funds"
+    // only after the dashboard knows the account is unfunded. The onboarding
+    // checklist can also expose "Receive funds", so pin to the first exact
+    // match in DOM order.
     await page
       .getByRole('button', { name: /^Receive( funds)?$/ })
       .first()

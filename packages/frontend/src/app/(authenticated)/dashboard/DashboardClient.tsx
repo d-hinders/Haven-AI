@@ -235,6 +235,7 @@ function DashboardHero({
   changePercent,
   hasAccounts,
   hasFunds,
+  fundingStateKnown,
   watchingForDeposit,
   requiresOtherDevice,
   onSend,
@@ -250,6 +251,7 @@ function DashboardHero({
   changePercent: number
   hasAccounts: boolean
   hasFunds: boolean
+  fundingStateKnown: boolean
   watchingForDeposit: boolean
   requiresOtherDevice: boolean
   onSend: () => void
@@ -326,8 +328,10 @@ function DashboardHero({
         {hasAccounts ? (
           requiresOtherDevice ? (
             <PasskeyOtherDeviceNotice className="max-w-sm" />
-          ) : hasFunds ? (
+          ) : !fundingStateKnown || hasFunds ? (
             // Funded: Send is primary, Receive + Add funds support.
+            // While balances are still loading, keep this neutral action order
+            // so the hero does not briefly claim the account needs funds.
             <div className="flex flex-wrap gap-3">
               <Button onClick={onSend} size="lg">
                 Send
@@ -870,6 +874,7 @@ export default function DashboardClient() {
       changePercent={changePercent}
       hasAccounts={safes.length > 0}
       hasFunds={hasFunds}
+      fundingStateKnown={dataReady}
       watchingForDeposit={dataReady && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       onSend={() => openHeroAction('send')}

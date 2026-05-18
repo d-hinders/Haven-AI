@@ -131,8 +131,14 @@ class ApiClient {
   ): Promise<T> {
     const token = this.getToken()
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       ...((options.headers as Record<string, string>) ?? {}),
+    }
+
+    const hasContentType = Object.keys(headers).some(
+      (header) => header.toLowerCase() === 'content-type',
+    )
+    if (options.body !== undefined && !hasContentType) {
+      headers['Content-Type'] = 'application/json'
     }
 
     if (token) {
@@ -161,14 +167,14 @@ class ApiClient {
   post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>(path, {
       method: 'POST',
-      body: body ? JSON.stringify(body) : undefined,
+      body: body === undefined ? undefined : JSON.stringify(body),
     })
   }
 
   put<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>(path, {
       method: 'PUT',
-      body: body ? JSON.stringify(body) : undefined,
+      body: body === undefined ? undefined : JSON.stringify(body),
     })
   }
 

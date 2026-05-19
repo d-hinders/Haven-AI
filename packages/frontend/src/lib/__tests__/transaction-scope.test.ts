@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildTransactionScopeSubtitle } from '@/lib/transaction-scope'
+import {
+  buildTransactionScopeSubtitle,
+  buildTransactionSummary,
+} from '@/lib/transaction-scope'
+import type { AggregatedTransaction } from '@/types/transactions'
 
 const lookups = {
   accountNamesById: new Map([
@@ -71,5 +75,70 @@ describe('buildTransactionScopeSubtitle', () => {
         lookups,
       ),
     ).toBe('Transactions for Operations')
+  })
+})
+
+// Minimal stand-in for AggregatedTransaction — only the fields the summary
+// reads are populated. Cast through `unknown` so we don't have to mock
+// blockchain-shaped fields irrelevant to this helper.
+function tx(direction: 'in' | 'out', isError = false): AggregatedTransaction {
+  return {
+    hash: '0xhash',
+    type: 'native',
+    from: '0xfrom',
+    to: '0xto',
+    value: '0',
+    valueFormatted: '0',
+    asset: 'USDC',
+    decimals: 6,
+    direction,
+    timestamp: 0,
+    blockNumber: 0,
+    isError,
+    chainId: 100,
+    safeId: 'saf_1',
+    safeAddress: '0xsafe',
+    safeName: 'Main account',
+  }
+}
+
+describe('buildTransactionSummary', () => {
+  it('counts received and sent for successful transactions', () => {
+    const result = buildTransactionSummary([
+      tx('in'),
+      tx('in'),
+      tx('out'),
+    ])
+    expect(result).toEqual({ received: 2, sent: 1, failed: 0 })
+  })
+
+  it('puts failed transactions in the failed bucket, NOT also in sent', () => {
+    // Regression: previously a failed outgoing tx incremented both `sent`
+    // AND `failed`, so the user saw "1 sent · 1 failed" for a single
+    // failed-send event. Buckets are now mutually exclusive.
+    const result = buildTransactionSummary([
+      tx('in'),
+      tx('out'),
+      tx('out', true), // failed outgoing
+      tx('out', true), // failed outgoing
+    ])
+    expect(result).toEqual({ received: 1, sent: 1, failed: 2 })
+    // Total adds up to the input length.
+    expect(result.received + result.sent + result.failed).toBe(4)
+  })
+
+  it('returns zeros for an empty list', () => {
+    expect(buildTransactionSummary([])).toEqual({
+      received: 0,
+      sent: 0,
+      failed: 0,
+    })
+  })
+
+  it('counts a failed incoming tx as failed only', () => {
+    // Rare but possible — an inbound transfer that reverted. Same
+    // mutually-exclusive rule applies.
+    const result = buildTransactionSummary([tx('in', true), tx('in')])
+    expect(result).toEqual({ received: 1, sent: 0, failed: 1 })
   })
 })

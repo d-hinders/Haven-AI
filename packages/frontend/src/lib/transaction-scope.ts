@@ -1,4 +1,41 @@
-import type { TransactionFilterState } from '@/types/transactions'
+import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
+
+export interface TransactionDirectionSummary {
+  received: number
+  sent: number
+  failed: number
+}
+
+/**
+ * Count loaded transactions by direction.
+ *
+ * Buckets are **mutually exclusive**: a failed outgoing transaction
+ * counts in `failed`, not in both `failed` and `sent`. So
+ * `received + sent + failed = transactions.length`.
+ *
+ * Used by the `/transactions` summary row when filters are active.
+ * Amount aggregation is intentionally not surfaced — summing across
+ * mixed-token transactions either lies (single number) or gets noisy
+ * (per-token breakdown). Counts answer "is this view mostly incoming
+ * or outgoing?" without overpromising on aggregates.
+ */
+export function buildTransactionSummary(
+  transactions: ReadonlyArray<AggregatedTransaction>,
+): TransactionDirectionSummary {
+  let received = 0
+  let sent = 0
+  let failed = 0
+  for (const tx of transactions) {
+    if (tx.isError) {
+      failed += 1
+    } else if (tx.direction === 'in') {
+      received += 1
+    } else {
+      sent += 1
+    }
+  }
+  return { received, sent, failed }
+}
 
 /**
  * Render the `/transactions` page subtitle for a given filter state.

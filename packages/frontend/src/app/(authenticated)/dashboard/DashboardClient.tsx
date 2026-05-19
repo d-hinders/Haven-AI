@@ -634,9 +634,17 @@ function TransactionsSection({
                 title={transactionTitle(tx)}
                 description={transactionMovement(tx, resolveAddress)}
                 amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
-                amountTone={tx.direction === 'in' ? 'success' : 'neutral'}
-                status={tx.direction === 'in' ? 'Received' : 'Sent'}
-                statusTone={tx.direction === 'in' ? 'success' : 'neutral'}
+                amountTone={
+                  tx.isError
+                    ? 'danger'
+                    : tx.direction === 'in'
+                      ? 'success'
+                      : 'debit'
+                }
+                status={tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent'}
+                statusTone={
+                  tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
+                }
                 timestamp={timeAgo(tx.timestamp * 1000)}
                 direction={tx.direction}
                 density="compact"

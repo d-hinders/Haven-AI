@@ -6,7 +6,10 @@ import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
-import { buildTransactionScopeSubtitle } from '@/lib/transaction-scope'
+import {
+  buildTransactionScopeSubtitle,
+  buildTransactionSummary,
+} from '@/lib/transaction-scope'
 import type { TransactionFilterState } from '@/types/transactions'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
@@ -88,21 +91,11 @@ export default function TransactionsClient() {
   )
 
   // Cheap summary stats — count by direction over what's currently loaded.
-  // Summing amounts across mixed-token transactions would either lie (single
-  // number across tokens) or get noisy fast (per-token breakdown), so we
-  // surface a count instead. It still answers "is this view mostly incoming
-  // or outgoing?" without overpromising on aggregates.
-  const summary = useMemo(() => {
-    let received = 0
-    let sent = 0
-    let failed = 0
-    for (const tx of visibleTransactions) {
-      if (tx.isError) failed += 1
-      if (tx.direction === 'in') received += 1
-      else sent += 1
-    }
-    return { received, sent, failed }
-  }, [visibleTransactions])
+  // See `buildTransactionSummary` for the mutually-exclusive bucket rule.
+  const summary = useMemo(
+    () => buildTransactionSummary(visibleTransactions),
+    [visibleTransactions],
+  )
   const showSummary = hasActiveFilters && visibleTransactions.length > 0
   const handleFilterChange = (nextFilters: TransactionFilterState) => {
     setFilters(nextFilters)

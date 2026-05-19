@@ -383,11 +383,6 @@ function transactionTitle(tx: AggregatedTransaction): string {
   return 'Payment sent by you'
 }
 
-function transactionStatus(tx: AggregatedTransaction): string {
-  if (tx.isError) return 'Failed'
-  return tx.direction === 'in' ? 'Received' : 'Sent'
-}
-
 function transactionAmount(tx: AggregatedTransaction): string {
   const sign = tx.direction === 'in' ? '+' : '-'
   return `${sign}${tx.valueFormatted} ${tx.asset}`
@@ -422,5 +417,3 @@ function counterpartyLabel(
 }
 
 // Kept for completeness — used by AgentActivityRow callers via TransactionActivityRow
-// transactionStatus is used locally; exported for any future callers
-export { transactionStatus }

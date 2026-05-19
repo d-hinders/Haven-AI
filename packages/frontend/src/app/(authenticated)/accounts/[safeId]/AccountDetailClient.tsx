@@ -27,6 +27,7 @@ import { ExternalDetailsLink } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
+import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -81,14 +82,19 @@ function formatResetPeriod(minutes: number): string {
   return `every ${minutes} minutes`
 }
 
-function agentBudgetSummary(agent: Agent): string {
+function agentBudgetSummary(agent: Agent, chainId: number | null): string {
   if (agent.status === 'revoked') return 'Access revoked'
   const allowances = agent.allowances ?? []
   if (allowances.length === 0) return 'No agent budget set'
   if (allowances.length > 1) return `${allowances.length} agent budgets`
 
   const allowance = allowances[0]
-  return `${allowance.allowance_amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
+  const amount = formatAllowanceForToken(
+    allowance.allowance_amount,
+    chainId,
+    allowance.token_symbol,
+  )
+  return `${amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
 }
 
 export default function AccountDetailClient() {
@@ -285,7 +291,7 @@ export default function AccountDetailClient() {
 
         <div className="p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Token balances</h2>
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Token balances</h2>
             <button
               onClick={handleBalancesRefresh}
               className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
@@ -351,13 +357,13 @@ export default function AccountDetailClient() {
       <Card hover={false} className="p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent access</h2>
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
               Connected agents can request payments from this Haven wallet when their status and agent budget allow it.
             </p>
           </div>
           <Button href="/agents" variant="ghost" size="sm">
-            Manage agents
+            View all agents
           </Button>
         </div>
 
@@ -394,7 +400,7 @@ export default function AccountDetailClient() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
                       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                        {agentBudgetSummary(agent)}
+                        {agentBudgetSummary(agent, chainId)}
                       </p>
                     </div>
                     <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
@@ -419,7 +425,7 @@ export default function AccountDetailClient() {
       {/* Account info */}
       <Card hover={false} className="p-5 sm:p-6">
         <div className="mb-5 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-[var(--v2-ink)]">
+          <h2 className="text-base font-semibold text-[var(--v2-ink)]">
             Advanced account details
           </h2>
         </div>
@@ -522,7 +528,17 @@ export default function AccountDetailClient() {
       <div>
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Transaction history</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-semibold text-[var(--v2-ink)]">Transaction history</h2>
+              {!txLoading && total > 0 ? (
+                <Link
+                  href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
+                  className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+                >
+                  View all &rarr;
+                </Link>
+              ) : null}
+            </div>
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
               {txLoading
                 ? 'Loading activity...'

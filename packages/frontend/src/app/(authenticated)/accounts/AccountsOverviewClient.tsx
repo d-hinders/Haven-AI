@@ -14,10 +14,11 @@ import { useAccount, usePublicClient } from 'wagmi'
 import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import NetworkPill from '@/components/NetworkPill'
-import { truncate } from '@/lib/format'
+import { timeAgo } from '@/lib/format'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { Button } from '@/components/ui/Button'
 
 // ── Add Safe Modal ──────────────────────────────────────────────────
 
@@ -147,8 +148,8 @@ function AddSafeModal({
               </button>
             )}
             <h2 className="text-lg font-semibold text-[var(--v2-ink)]">
-              {mode === 'choose' && 'Add Account'}
-              {mode === 'deploy' && deployStep === 'done' && 'Account Created'}
+              {mode === 'choose' && 'Add account'}
+              {mode === 'deploy' && deployStep === 'done' && 'Account created'}
               {mode === 'deploy' && deployStep !== 'done' && 'Create Haven account'}
               {mode === 'import' && 'Import existing account'}
             </h2>
@@ -449,9 +450,15 @@ interface SafeCardProps {
   agentCount: number
   showDefaultBadge: boolean
   currency: 'USD' | 'EUR'
+  staggerIndex: number
   onClick: () => void
   onSetDefault: () => void
 }
+
+// Number of top-token rows we surface on the card before collapsing the rest
+// into a "+N more" footnote. Three keeps the card height predictable across a
+// row of cards regardless of how many tokens any single Safe holds.
+const TOP_TOKENS_PREVIEW = 3
 
 function SafeCard({
   safe,
@@ -459,18 +466,37 @@ function SafeCard({
   agentCount,
   showDefaultBadge,
   currency,
+  staggerIndex,
   onClick,
   onSetDefault,
 }: SafeCardProps) {
-  const { totalUsd, totalEur, loading: portfolioLoading } = usePortfolio(safe.safe_address)
+  const {
+    totalUsd,
+    totalEur,
+    breakdown,
+    loading: portfolioLoading,
+  } = usePortfolio(safe.safe_address)
   const fiatTotal = currency === 'USD' ? totalUsd : totalEur
+
+  // The breakdown comes back sorted by value, but make it explicit so we never
+  // accidentally show dust above a meaningful holding.
+  const sortedBreakdown = [...breakdown].sort((a, b) => {
+    const aValue = currency === 'USD' ? a.usdValue : a.eurValue
+    const bValue = currency === 'USD' ? b.usdValue : b.eurValue
+    return bValue - aValue
+  })
+  const visibleTokens = sortedBreakdown.slice(0, TOP_TOKENS_PREVIEW)
+  const hiddenTokenCount = Math.max(0, sortedBreakdown.length - TOP_TOKENS_PREVIEW)
 
   return (
     <Link
       href={`/accounts/${safe.id}`}
       onClick={onClick}
-      aria-label={`${safe.name} \u2014 ${truncate(safe.safe_address)}`}
-      className={`block ${entityCardClassName({ selected: isActive })}`}
+      aria-label={safe.name}
+      className={`v2-animate-stagger block ${entityCardClassName({ selected: isActive })} p-5 sm:p-6`}
+      style={{
+        ['--v2-stagger-delay' as string]: `${staggerIndex * 60}ms`,
+      }}
     >
       {/* Default action — stop link navigation for nested buttons. */}
       <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -488,22 +514,22 @@ function SafeCard({
         )}
       </div>
 
-      {/* Safe name */}
-      <div className="flex items-center gap-2 mb-3 pr-24">
-        <h3 className="text-sm font-semibold text-[var(--v2-ink)] truncate">{safe.name}</h3>
+      {/* Header — name + default chip */}
+      <div className="mb-2 flex items-center gap-2 pr-12">
+        <h3 className="truncate text-base font-semibold text-[var(--v2-ink)]">{safe.name}</h3>
         {showDefaultBadge && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-[var(--v2-brand)] font-medium flex-shrink-0">
+          <span className="flex-shrink-0 rounded bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-medium text-[var(--v2-brand)]">
             default
           </span>
         )}
       </div>
 
-      {/* Address + network */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
-        <p className="text-xs font-mono text-[var(--v2-ink-3)]">
-          {truncate(safe.safe_address)}
-        </p>
+      {/* Caption — network + age. Replaces the raw 0x address that was too
+          technical for an at-a-glance overview. */}
+      <div className="mb-5 flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
         <NetworkPill chainId={safe.chain_id ?? 100} />
+        <span aria-hidden="true">{'·'}</span>
+        <span>Added {timeAgo(safe.created_at)}</span>
       </div>
 
       {/* Fiat total */}
@@ -511,19 +537,62 @@ function SafeCard({
         {portfolioLoading ? (
           <Skeleton className="h-7 w-28" />
         ) : (
-          <p className="text-xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+          <p className="v2-tabular text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">
             {formatFiat(fiatTotal, currency)}
           </p>
         )}
       </div>
 
-      {/* Stats */}
-      <div className="flex items-center gap-4 text-xs text-[var(--v2-ink-3)]">
-        <span className="flex items-center gap-1">
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      {/* Token breakdown preview — up to 3 top holdings plus a "+N more"
+          overflow. Reserves a small minimum height so cards in the same row
+          stay aligned even when one Safe is empty. */}
+      <div className="mb-4 min-h-[68px] space-y-1.5">
+        {portfolioLoading ? (
+          <>
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-4/5" />
+            <Skeleton className="h-4 w-3/4" />
+          </>
+        ) : visibleTokens.length === 0 ? (
+          <p className="text-xs text-[var(--v2-ink-3)]">
+            No funds yet &mdash; receive to get started.
+          </p>
+        ) : (
+          <>
+            {visibleTokens.map((item) => {
+              const fiatValue = currency === 'USD' ? item.usdValue : item.eurValue
+              return (
+                <div
+                  key={item.symbol}
+                  className="flex items-center justify-between gap-3 text-xs text-[var(--v2-ink-2)]"
+                >
+                  <span className="truncate">
+                    <span className="font-medium text-[var(--v2-ink)]">{item.symbol}</span>{' '}
+                    <span className="v2-tabular text-[var(--v2-ink-3)]">{item.formatted}</span>
+                  </span>
+                  <span className="v2-tabular flex-shrink-0 text-[var(--v2-ink-3)]">
+                    {formatFiat(fiatValue, currency)}
+                  </span>
+                </div>
+              )
+            })}
+            {hiddenTokenCount > 0 && (
+              <p className="text-[11px] text-[var(--v2-ink-3)]">+ {hiddenTokenCount} more</p>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Footer chip row — agent count + Open affordance */}
+      <div className="flex items-center justify-between gap-3 border-t border-[var(--v2-border)] pt-3 text-xs text-[var(--v2-ink-3)]">
+        <span className="flex items-center gap-1.5">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
           </svg>
           {agentCount} agent{agentCount !== 1 ? 's' : ''}
+        </span>
+        <span className="font-medium text-[var(--v2-brand)] opacity-70 transition-opacity group-hover:opacity-100">
+          Open &rarr;
         </span>
       </div>
     </Link>
@@ -563,15 +632,7 @@ export default function AccountsOverviewClient() {
           ) : undefined
         }
         actions={safes.length > 0 ? (
-          <button
-            onClick={() => setAddModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Add Account
-          </button>
+          <Button onClick={() => setAddModalOpen(true)}>Add account</Button>
         ) : undefined}
       />
 
@@ -603,8 +664,8 @@ export default function AccountsOverviewClient() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {safes.map((safe) => (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {safes.map((safe, index) => (
             <SafeCard
               key={safe.id}
               safe={safe}
@@ -612,6 +673,7 @@ export default function AccountsOverviewClient() {
               agentCount={agentCountBySafe.get(safe.id) ?? 0}
               showDefaultBadge={!!safe.is_default && safes.length > 1}
               currency={currency}
+              staggerIndex={index}
               onClick={() => setActiveSafe(safe)}
               onSetDefault={() => setDefault(safe.id)}
             />

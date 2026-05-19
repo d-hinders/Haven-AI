@@ -130,8 +130,12 @@ describe('AccountDetailClient', () => {
               id: 'allowance-1',
               agent_id: 'agent-1',
               token_address: '0x0000000000000000000000000000000000000000',
-              token_symbol: 'USDC',
-              allowance_amount: '100',
+              // USDC.e on Gnosis has 6 decimals — raw 100_000_000 = 100.
+              // This exercises the decimals formatter we extracted into
+              // lib/allowance-format.ts; the old code dumped the raw bigint
+              // straight into the label, which is the bug the PR fixes.
+              token_symbol: 'USDC.e',
+              allowance_amount: '100000000',
               reset_period_min: 1440,
             },
           ],
@@ -183,7 +187,7 @@ describe('AccountDetailClient', () => {
     expect(screen.getByText('1 of 1 approver required')).toBeInTheDocument()
     expect(screen.getByText('Agent access')).toBeInTheDocument()
     expect(screen.getByText('Research agent')).toBeInTheDocument()
-    expect(screen.getByText('100 USDC per day')).toBeInTheDocument()
+    expect(screen.getByText('100 USDC.e per day')).toBeInTheDocument()
     expect(screen.getByText('Advanced account details')).toBeInTheDocument()
     expect(screen.getByText('Approvers')).toBeInTheDocument()
     expect(screen.getByText('Wallet')).toBeInTheDocument()

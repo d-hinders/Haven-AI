@@ -465,6 +465,15 @@ export default function AgentDetailClient({ agentId }: Props) {
                       : 'Pause new requests or revoke the agent budget if you need to stop access.'}
                 </p>
                 <div className="flex flex-wrap gap-2">
+                  {!isRevoked ? (
+                    <Button
+                      onClick={openUpdateBudget}
+                      disabled={pendingAction !== null}
+                      size="sm"
+                    >
+                      Update budget
+                    </Button>
+                  ) : null}
                   {isActive ? (
                     <Button
                       onClick={() => void handlePause()}
@@ -479,6 +488,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                     <Button
                       onClick={() => void handleResume()}
                       disabled={pendingAction !== null}
+                      variant="ghost"
                       size="sm"
                     >
                       {pendingAction === 'resume' ? 'Resuming…' : 'Resume requests'}

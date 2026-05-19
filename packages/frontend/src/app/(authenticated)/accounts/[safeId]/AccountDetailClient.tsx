@@ -19,6 +19,13 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -104,7 +111,8 @@ export default function AccountDetailClient() {
 
   const { user, activeSafe, setActiveSafe, loading: authLoading, passkeys = [] } = useAuth()
   const { getOwnerAlias } = useOwnerDirectory()
-  const { renameSafe, removeSafe, loading: safesLoading } = useUserSafes()
+  const { renameSafe, removeSafe, setDefault, loading: safesLoading } = useUserSafes()
+  const { toast } = useToast()
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
@@ -259,9 +267,50 @@ export default function AccountDetailClient() {
                 </Button>
               </>
             )}
-            <Button variant="ghost" onClick={() => setRenameOpen(true)}>
-              Edit
-            </Button>
+            {/*
+              Account-level settings live behind a kebab menu so they don't
+              compete visually with the transactional Send/Receive buttons.
+              "Rename" + "Remove" are direct actions; "Set as default" only
+              appears when this isn't already the default Safe.
+            */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Account options"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 data-[state=open]:bg-[var(--v2-surface)]"
+              >
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="5" r="1.25" />
+                  <circle cx="12" cy="12" r="1.25" />
+                  <circle cx="12" cy="19" r="1.25" />
+                </svg>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                  Rename
+                </DropdownMenuItem>
+                {!safe.is_default && (user?.safes?.length ?? 0) > 1 ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      void setDefault(safe.id)
+                      toast.success(`${safe.name} is now your default account`)
+                    }}
+                  >
+                    Set as default
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem tone="danger" onSelect={() => setRemoveOpen(true)}>
+                  Remove account
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         }
       />

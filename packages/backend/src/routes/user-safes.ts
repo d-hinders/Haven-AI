@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isSupportedChain } from '../lib/chains.js'
+import { relaySafeDeploy } from '../lib/safe-deployer.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -22,6 +23,11 @@ interface AddSafeBody {
   safe_address: string
   chain_id?: number
   name?: string
+}
+
+interface DeploySafeBody {
+  chain_id?: number
+  owner_address: string
 }
 
 interface RenameSafeBody {
@@ -46,6 +52,30 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
     )
 
     return { safes: result.rows }
+  })
+
+  // POST /user/safes/deploy — relay-sponsored Safe deployment
+  // The relayer pays gas and returns the deployed Safe address + txHash.
+  // Registration is done separately via POST /user/safes so the flow is
+  // identical for both onboarding and add-account.
+  app.post<{ Body: DeploySafeBody }>('/deploy', async (request, reply) => {
+    const { chain_id = 100, owner_address } = request.body
+
+    if (!owner_address || !ETH_ADDRESS_RE.test(owner_address)) {
+      return reply.code(400).send({ error: 'Invalid owner address' })
+    }
+
+    if (!isSupportedChain(chain_id)) {
+      return reply.code(400).send({ error: `Unsupported chain: ${chain_id}` })
+    }
+
+    try {
+      const { safeAddress, txHash } = await relaySafeDeploy(chain_id, owner_address)
+      return reply.code(201).send({ safe_address: safeAddress, tx_hash: txHash })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Relay deployment failed'
+      return reply.code(500).send({ error: msg })
+    }
   })
 
   // POST /user/safes — add (import) an existing Safe

@@ -222,11 +222,6 @@ export default function AccountDetailClient() {
     }
   }
 
-  const openDeleteFromEdit = () => {
-    setRenameOpen(false)
-    setRemoveOpen(true)
-  }
-
   // While auth context is still hydrating `user.safes`, avoid flashing
   // "Account not found" — the safe lookup will resolve once safes load.
   if (authLoading || !user) {
@@ -276,7 +271,7 @@ export default function AccountDetailClient() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 data-[state=open]:bg-[var(--v2-surface)]"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
                 <svg
                   className="h-4 w-4"
@@ -646,7 +641,6 @@ export default function AccountDetailClient() {
           safe={safe}
           onClose={() => setRenameOpen(false)}
           onRename={handleRename}
-          onDelete={openDeleteFromEdit}
           loading={safesLoading}
         />
       )}
@@ -667,13 +661,11 @@ function RenameModal({
   safe,
   onClose,
   onRename,
-  onDelete,
   loading,
 }: {
   safe: UserSafe
   onClose: () => void
   onRename: (name: string) => Promise<void>
-  onDelete: () => void
   loading: boolean
 }) {
   const [name, setName] = useState(safe.name)
@@ -702,8 +694,8 @@ function RenameModal({
       <div className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Edit account</h2>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Rename this account in Haven.</p>
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Give this Haven account a name only you see.</p>
           </div>
           <button
             onClick={onClose}
@@ -735,24 +727,6 @@ function RenameModal({
               {error}
             </div>
           )}
-          <div className="rounded-lg border border-[var(--v2-danger)]/15 bg-[var(--v2-danger-soft)] px-3 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-medium text-[var(--v2-ink)]">Delete account</p>
-                <p className="mt-0.5 text-[11px] text-[var(--v2-ink-3)]">
-                  Removes this account from Haven. On-chain funds are unaffected.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={loading}
-                className="rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--v2-danger)] transition-colors hover:bg-[var(--v2-danger)]/10 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
           <div className="flex gap-3 pt-1">
             <Button
               type="button"

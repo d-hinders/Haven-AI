@@ -13,7 +13,7 @@ import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { validateMoneyInput } from '@/lib/money-input'
-import OnchainActionGate from './OnchainActionGate'
+import OnchainActionGate, { OnchainActionNotice } from './OnchainActionGate'
 import {
   getSafeNonce,
   signSafeTx,
@@ -456,7 +456,7 @@ export default function EditAgentModal({
                     ))}
                   </Select>
                 </div>
-                {isExistingToken && (
+                {(matchesExistingByAddr || matchesExistingBySymbol) && (
                   <p className="text-xs text-[var(--v2-ink-2)]">
                     This will replace the existing {selectedToken} budget for this agent.
                   </p>
@@ -475,6 +475,19 @@ export default function EditAgentModal({
                   the dashboard — no separate threshold to configure.
                 </p>
               )}
+
+              {/* Hint when nothing has changed yet — explains why the
+                  Review button is disabled. Important in 'agent' mode where
+                  there's no budget field to discover. */}
+              {!canReview && !hasInvalidBudget ? (
+                <p className="text-xs text-[var(--v2-ink-3)]">
+                  {mode === 'budget'
+                    ? 'Enter a new budget amount to continue.'
+                    : mode === 'agent'
+                      ? 'Edit the name or description to continue.'
+                      : 'Make a change to continue.'}
+                </p>
+              ) : null}
 
               <div className="flex gap-3">
                 <Button
@@ -541,6 +554,17 @@ export default function EditAgentModal({
                 </div>
               )}
 
+              {/* Render the gate notice above the Cancel/Confirm row so the
+                  caption doesn't push the Confirm button out of line with
+                  the Back button (which would happen if the gate rendered
+                  it inline inside the flex-1 wrapper). */}
+              {budgetChanged ? (
+                <OnchainActionNotice
+                  operationGate={operationGate}
+                  noSignerMessage={budgetApprovalMessage}
+                />
+              ) : null}
+
               <div className="flex gap-3">
                 <Button
                   variant="ghost"
@@ -555,6 +579,7 @@ export default function EditAgentModal({
                       requiredChainId={chainId}
                       operationGate={operationGate}
                       noSignerMessage={budgetApprovalMessage}
+                      showNotice={false}
                     >
                       {({ disabled }) => (
                       <Button

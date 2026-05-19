@@ -204,7 +204,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent }: Props)
                 <button
                   type="button"
                   onClick={() => void copyAgentId()}
-                  className="flex-shrink-0 text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+                  className="flex-shrink-0 rounded text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
                   aria-label="Copy agent ID"
                 >
                   {idCopied ? 'Copied' : 'Copy'}

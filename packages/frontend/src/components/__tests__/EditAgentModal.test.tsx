@@ -166,4 +166,24 @@ describe('EditAgentModal — Add vs Update budget label', () => {
     fireEvent.change(tokenSelect, { target: { value: 'EURe' } })
     expect(screen.getByText(/Update agent budget/i)).toBeInTheDocument()
   })
+
+  it("does NOT show 'This will replace' for a brand-new token in budget mode", () => {
+    // Reviewer-flagged scenario: agent has EURe, user opens Update budget
+    // and picks xDAI (no existing allowance). The header still reads
+    // "Update agent budget" (matches the user's mental model from the
+    // menu entry), but the precise replace-warning note must NOT appear
+    // because there's no xDAI budget to replace.
+    render(<EditAgentModal {...baseProps} mode="budget" />)
+    // xDAI is the default selected token in the mock.
+    expect(screen.queryByText(/will replace the existing xDAI budget/i)).not.toBeInTheDocument()
+  })
+
+  it("shows 'This will replace' for an existing token", () => {
+    // Confirms the replace-warning still fires when the user IS in fact
+    // replacing an existing allowance.
+    render(<EditAgentModal {...baseProps} mode="all" />)
+    const tokenSelect = screen.getAllByRole('combobox')[0]
+    fireEvent.change(tokenSelect, { target: { value: 'EURe' } })
+    expect(screen.getByText(/will replace the existing EURe budget/i)).toBeInTheDocument()
+  })
 })

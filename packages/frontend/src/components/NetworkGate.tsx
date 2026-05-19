@@ -70,7 +70,10 @@ export default function NetworkGate({
   // the user *why* the action is gated.
   return (
     <div className={className}>
-      <p className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]">
+      <p
+        role="status"
+        className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
+      >
         <svg
           aria-hidden="true"
           className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"

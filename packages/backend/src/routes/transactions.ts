@@ -33,6 +33,8 @@ export interface Transaction {
   source?: string
   x402ResourceUrl?: string | null
   x402MerchantAddress?: string | null
+  paymentId?: string
+  paymentProofStatus?: string | null
 }
 
 interface UserSafeRow {
@@ -52,12 +54,14 @@ export interface EnrichedTransaction extends Transaction {
 }
 
 interface PaymentIntentAgentRow {
+  id: string
   tx_hash: string
   agent_id: string
   agent_name: string
   source: string | null
   payment_resource_url: string | null
   merchant_address: string | null
+  payment_proof_status: string | null
 }
 
 interface X402PaymentIntentRow {
@@ -76,8 +80,39 @@ interface X402PaymentIntentRow {
   amount_human: string
   x402_merchant_address: string | null
   x402_resource_url: string | null
+  payment_proof_status: string | null
   confirmed_at: string | null
   created_at: string
+}
+
+interface MachinePaymentEvidenceDetailRow {
+  id: string
+  payment_intent_id: string
+  rail: string
+  proof_status: string
+  tx_hash: string
+  chain_id: number
+  resource_url: string
+  merchant_address: string | null
+  payer_address: string
+  settlement_address: string
+  token_symbol: string
+  token_address: string
+  amount_raw: string
+  amount_human: string
+  challenge_id: string | null
+  idempotency_key: string | null
+  challenge_payload: Record<string, unknown> | null
+  selected_payment: Record<string, unknown> | null
+  payment_proof_header_name: string | null
+  payment_proof_header: string | null
+  protocol_receipt_header_name: string | null
+  protocol_receipt_header: string | null
+  protocol_receipt_payload: Record<string, unknown> | null
+  merchant_status: number | null
+  confirmed_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 interface FetchSafeTransactionsParams {
@@ -371,14 +406,17 @@ export async function enrichTransactionsWithAgents(
 
   try {
     const piResult = await pool.query<PaymentIntentAgentRow>(
-      `SELECT LOWER(pi.tx_hash) AS tx_hash,
+      `SELECT pi.id,
+              LOWER(pi.tx_hash) AS tx_hash,
               pi.agent_id,
               a.name AS agent_name,
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS payment_resource_url,
-              COALESCE(pi.merchant_address, pi.x402_merchant_address) AS merchant_address
+              COALESCE(pi.merchant_address, pi.x402_merchant_address) AS merchant_address,
+              mpe.proof_status AS payment_proof_status
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
+       LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
        WHERE LOWER(pi.tx_hash) = ANY($1)
          AND pi.user_id = $2
          AND pi.status = 'confirmed'`,
@@ -387,7 +425,15 @@ export async function enrichTransactionsWithAgents(
 
     const agentByTxHash = new Map<
       string,
-      { id: string; name: string; source: string | null; resourceUrl: string | null; merchantAddress: string | null }
+      {
+        id: string
+        name: string
+        source: string | null
+        resourceUrl: string | null
+        merchantAddress: string | null
+        paymentId: string
+        paymentProofStatus: string | null
+      }
     >()
     for (const row of piResult.rows) {
       agentByTxHash.set(row.tx_hash, {
@@ -396,6 +442,8 @@ export async function enrichTransactionsWithAgents(
         source: row.source,
         resourceUrl: row.payment_resource_url,
         merchantAddress: row.merchant_address,
+        paymentId: row.id,
+        paymentProofStatus: row.payment_proof_status,
       })
     }
 
@@ -408,6 +456,8 @@ export async function enrichTransactionsWithAgents(
         source: agent?.source ?? tx.source,
         x402ResourceUrl: agent?.resourceUrl ?? tx.x402ResourceUrl,
         x402MerchantAddress: agent?.merchantAddress ?? tx.x402MerchantAddress,
+        paymentId: agent?.paymentId ?? tx.paymentId,
+        paymentProofStatus: agent?.paymentProofStatus ?? tx.paymentProofStatus,
       }
     })
   } catch {
@@ -438,10 +488,12 @@ export async function fetchConfirmedX402Transactions(
             pi.amount_human,
             pi.x402_merchant_address,
             pi.x402_resource_url,
+            mpe.proof_status AS payment_proof_status,
             pi.confirmed_at,
             pi.created_at
      FROM payment_intents pi
      JOIN agents a ON a.id = pi.agent_id
+     LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
      JOIN user_safes us
        ON us.user_id = pi.user_id
       AND us.id = ANY($2)
@@ -492,6 +544,8 @@ export async function fetchConfirmedX402Transactions(
       safeName: row.safe_name,
       agentId: row.agent_id,
       agentName: row.agent_name,
+      paymentId: row.id,
+      paymentProofStatus: row.payment_proof_status ?? 'payment_confirmed',
     }
   })
 }
@@ -678,6 +732,91 @@ export default async function transactionRoutes(
       failedSafeIds: Array.from(new Set(failedSafeIds)),
     }
   })
+
+  app.get<{ Params: { paymentId: string } }>(
+    '/payment-intents/:paymentId/evidence',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { paymentId } = request.params
+
+      if (!UUID_RE.test(paymentId)) {
+        return reply.code(400).send({ error: 'Invalid paymentId' })
+      }
+
+      const result = await pool.query<MachinePaymentEvidenceDetailRow>(
+        `SELECT mpe.id,
+                mpe.payment_intent_id,
+                mpe.rail,
+                mpe.proof_status,
+                mpe.tx_hash,
+                mpe.chain_id,
+                mpe.resource_url,
+                mpe.merchant_address,
+                mpe.payer_address,
+                mpe.settlement_address,
+                mpe.token_symbol,
+                mpe.token_address,
+                mpe.amount_raw,
+                mpe.amount_human,
+                mpe.challenge_id,
+                mpe.idempotency_key,
+                mpe.challenge_payload,
+                mpe.selected_payment,
+                mpe.payment_proof_header_name,
+                mpe.payment_proof_header,
+                mpe.protocol_receipt_header_name,
+                mpe.protocol_receipt_header,
+                mpe.protocol_receipt_payload,
+                mpe.merchant_status,
+                mpe.confirmed_at,
+                mpe.created_at,
+                mpe.updated_at
+         FROM machine_payment_evidence mpe
+         JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
+         WHERE mpe.payment_intent_id = $1
+           AND pi.user_id = $2
+         LIMIT 1`,
+        [paymentId, sub],
+      )
+
+      const evidence = result.rows[0]
+      if (!evidence) {
+        return reply.code(404).send({ error: 'Payment evidence not found' })
+      }
+
+      return {
+        evidence: {
+          id: evidence.id,
+          payment_id: evidence.payment_intent_id,
+          rail: evidence.rail,
+          proof_status: evidence.proof_status,
+          tx_hash: evidence.tx_hash,
+          chain_id: evidence.chain_id,
+          resource_url: evidence.resource_url,
+          merchant_address: evidence.merchant_address,
+          payer_address: evidence.payer_address,
+          settlement_address: evidence.settlement_address,
+          token_symbol: evidence.token_symbol,
+          token_address: evidence.token_address,
+          amount_raw: evidence.amount_raw,
+          amount_human: evidence.amount_human,
+          challenge_id: evidence.challenge_id,
+          idempotency_key: evidence.idempotency_key,
+          challenge_payload: evidence.challenge_payload,
+          selected_payment: evidence.selected_payment,
+          payment_proof_header_name: evidence.payment_proof_header_name,
+          payment_proof_header: evidence.payment_proof_header,
+          protocol_receipt_header_name: evidence.protocol_receipt_header_name,
+          protocol_receipt_header: evidence.protocol_receipt_header,
+          protocol_receipt_payload: evidence.protocol_receipt_payload,
+          merchant_status: evidence.merchant_status,
+          confirmed_at: evidence.confirmed_at,
+          created_at: evidence.created_at,
+          updated_at: evidence.updated_at,
+        },
+      }
+    },
+  )
 
   app.get<{ Querystring: { fresh?: string } }>('/filters', async (request) => {
     const { sub } = request.user as { sub: string }

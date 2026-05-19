@@ -97,7 +97,15 @@ describe('machine payment routes', () => {
   function confirmedPayment(overrides: Record<string, unknown> = {}) {
     return {
       id: PAYMENT_ID,
+      agent_id: AGENT.id,
       user_id: AGENT.user_id,
+      safe_address: AGENT.safe_address,
+      chain_id: 8453,
+      token_symbol: 'USDC',
+      token_address: USDC,
+      to_address: RECIPIENT.toLowerCase(),
+      amount_raw: '10000',
+      amount_human: '0.01',
       tx_hash: TX_HASH,
       status: 'confirmed',
       payment_rail: 'mpp_demo',
@@ -109,6 +117,7 @@ describe('machine payment routes', () => {
       machine_challenge_id: challenge.challengeId,
       machine_idempotency_key: 'mpp_demo:test',
       x402_idempotency_key: null,
+      confirmed_at: '2026-05-15T12:00:00.000Z',
       ...overrides,
     }
   }
@@ -371,6 +380,146 @@ describe('machine payment routes', () => {
     expect(insertCall[1]).toContain(RECIPIENT.toLowerCase())
     expect(insertCall[1]).toContain(challenge.challengeId)
     expect(insertCall[1]).toContain('mpp_demo:test')
+  })
+
+  it('attaches SDK-reported merchant evidence for confirmed machine payments', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'evidence-123',
+          payment_intent_id: PAYMENT_ID,
+          agent_id: AGENT.id,
+          user_id: AGENT.user_id,
+          rail: 'mpp_demo',
+          proof_status: 'protocol_receipt_attached',
+          tx_hash: TX_HASH,
+          chain_id: 8453,
+          resource_url: challenge.resource,
+          merchant_address: RECIPIENT.toLowerCase(),
+          payer_address: AGENT.safe_address.toLowerCase(),
+          settlement_address: RECIPIENT.toLowerCase(),
+          token_symbol: 'USDC',
+          token_address: USDC.toLowerCase(),
+          amount_raw: '10000',
+          amount_human: '0.01',
+          challenge_id: challenge.challengeId,
+          idempotency_key: 'mpp_demo:test',
+          challenge_payload: challenge,
+          selected_payment: null,
+          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+          payment_proof_header: 'proof-header',
+          protocol_receipt_header_name: 'Payment-Receipt',
+          protocol_receipt_header: 'receipt-header',
+          protocol_receipt_payload: { status: 'settled' },
+          merchant_status: 200,
+          confirmed_at: '2026-05-15T12:00:00.000Z',
+          created_at: '2026-05-15T12:00:00.000Z',
+          updated_at: '2026-05-15T12:00:01.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: TX_HASH,
+        resourceUrl: challenge.resource,
+        merchantStatus: 200,
+        challengePayload: challenge,
+        paymentProofHeaderName: 'MACHINE-PAYMENT-PROOF',
+        paymentProofHeader: 'proof-header',
+        protocolReceiptHeaderName: 'Payment-Receipt',
+        protocolReceiptHeader: 'receipt-header',
+        protocolReceiptPayload: { status: 'settled' },
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      evidence: {
+        payment_id: PAYMENT_ID,
+        rail: 'mpp_demo',
+        proof_status: 'protocol_receipt_attached',
+        tx_hash: TX_HASH,
+        payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+        protocol_receipt_header_name: 'Payment-Receipt',
+        protocol_receipt_payload: { status: 'settled' },
+      },
+    })
+
+    expect(mockQuery.mock.calls[2][0]).toContain('machine_payment_evidence')
+    expect(mockQuery.mock.calls[3][0]).toContain('UPDATE machine_payment_evidence')
+  })
+
+  it('rejects evidence reports whose tx hash does not match the payment', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: `0x${'cd'.repeat(32)}`,
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toBe('txHash does not match payment intent')
+    expect(mockQuery).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects evidence reports for unconfirmed payments', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [confirmedPayment({ status: 'pending_signature', tx_hash: null })],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: TX_HASH,
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toBe('Evidence requires a confirmed payment intent')
+    expect(mockQuery).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not attach evidence to another agent payment', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: TX_HASH,
+      },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json().error).toBe('Payment intent not found')
+    expect(mockQuery).toHaveBeenCalledTimes(2)
   })
 
   it('does not record reconciliation events for unconfirmed payments', async () => {

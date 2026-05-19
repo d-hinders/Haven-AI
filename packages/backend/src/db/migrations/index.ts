@@ -13,6 +13,7 @@ import * as x402StandardMetadata from './010_x402_standard_metadata.js'
 import * as approvalRequestSource from './011_approval_request_source.js'
 import * as machinePaymentMetadata from './012_machine_payment_metadata.js'
 import * as machinePaymentReconciliationEvents from './013_machine_payment_reconciliation_events.js'
+import * as machinePaymentEvidence from './014_machine_payment_evidence.js'
 
 export interface Migration {
   version: string
@@ -39,4 +40,5 @@ export const migrations: Migration[] = [
   approvalRequestSource,
   machinePaymentMetadata,
   machinePaymentReconciliationEvents,
+  machinePaymentEvidence,
 ]

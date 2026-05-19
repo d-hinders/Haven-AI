@@ -123,6 +123,7 @@ describe('mergeX402Transactions', () => {
           amount_human: '0.02',
           x402_merchant_address: '0x2222222222222222222222222222222222222222',
           x402_resource_url: 'https://api.example.com/data',
+          payment_proof_status: 'protocol_receipt_attached',
           confirmed_at: '2026-05-08T11:50:10Z',
           created_at: '2026-05-08T11:49:55Z',
         },
@@ -175,6 +176,8 @@ describe('mergeX402Transactions', () => {
       safeName: 'Main wallet',
       agentId: 'agent-id',
       agentName: 'Research assistant',
+      paymentId: 'payment-id',
+      paymentProofStatus: 'protocol_receipt_attached',
     })
   })
 })

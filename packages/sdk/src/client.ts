@@ -454,6 +454,20 @@ export class HavenClient {
       )
     }
 
+    await this.reportMachinePaymentEvidence({
+      paymentId: receipt.paymentId,
+      rail: 'x402',
+      txHash: receipt.txHash,
+      resourceUrl: receipt.resourceUrl,
+      merchantStatus: retryResponse.status,
+      challengePayload: paymentRequired as unknown as Record<string, unknown>,
+      selectedPayment: receipt.accepted as unknown as Record<string, unknown>,
+      paymentProofHeaderName: 'X-PAYMENT',
+      paymentProofHeader: receipt.paymentHeader,
+      protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
+      protocolReceiptHeader: retryResponse.headers.get('PAYMENT-RESPONSE') ?? undefined,
+    })
+
     return retryResponse
   }
 
@@ -556,6 +570,27 @@ export class HavenClient {
       )
     }
 
+    await this.reportMachinePaymentEvidence({
+      paymentId: receipt.paymentId,
+      rail: receipt.rail,
+      txHash: receipt.txHash,
+      resourceUrl: receipt.resourceUrl,
+      merchantStatus: retryResponse.status,
+      challengePayload: challenge as unknown as Record<string, unknown>,
+      paymentProofHeaderName: 'MACHINE-PAYMENT-PROOF',
+      paymentProofHeader: receipt.proofHeader,
+      protocolReceiptHeaderName:
+        retryResponse.headers.has('Payment-Receipt')
+          ? 'Payment-Receipt'
+          : retryResponse.headers.has('MACHINE-PAYMENT-RESPONSE')
+            ? 'MACHINE-PAYMENT-RESPONSE'
+            : undefined,
+      protocolReceiptHeader:
+        retryResponse.headers.get('Payment-Receipt') ??
+        retryResponse.headers.get('MACHINE-PAYMENT-RESPONSE') ??
+        undefined,
+    })
+
     return retryResponse
   }
 
@@ -650,6 +685,42 @@ export class HavenClient {
       })
     } catch {
       // Best-effort durability: preserve the original retry failure for callers.
+    }
+  }
+
+  private async reportMachinePaymentEvidence(input: {
+    paymentId: string
+    rail: string
+    txHash: string
+    resourceUrl: string
+    merchantStatus: number
+    challengePayload?: Record<string, unknown>
+    selectedPayment?: Record<string, unknown>
+    paymentProofHeaderName?: string
+    paymentProofHeader?: string
+    protocolReceiptHeaderName?: string
+    protocolReceiptHeader?: string
+  }): Promise<void> {
+    try {
+      await this.post('/machine-payments/evidence', {
+        paymentId: input.paymentId,
+        rail: input.rail,
+        txHash: input.txHash,
+        resourceUrl: input.resourceUrl,
+        merchantStatus: input.merchantStatus,
+        challengePayload: input.challengePayload,
+        selectedPayment: input.selectedPayment,
+        paymentProofHeaderName: input.paymentProofHeaderName,
+        paymentProofHeader: input.paymentProofHeader,
+        protocolReceiptHeaderName: input.protocolReceiptHeaderName,
+        protocolReceiptHeader: input.protocolReceiptHeader,
+        protocolReceiptPayload: input.protocolReceiptHeader
+          ? parseProtocolReceiptHeader(input.protocolReceiptHeader)
+          : undefined,
+      })
+    } catch {
+      // Evidence reporting is best-effort. The paid resource response remains
+      // the caller-visible result when merchant retry succeeded.
     }
   }
 
@@ -937,6 +1008,18 @@ function getPaymentHeaderValidBefore(paymentHeader: string): number {
 
 function decodeBase64Json<T>(value: string): T {
   return JSON.parse(atob(value)) as T
+}
+
+function parseProtocolReceiptHeader(value: string): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(atob(value)) as Record<string, unknown>
+  } catch {
+    try {
+      return JSON.parse(value) as Record<string, unknown>
+    } catch {
+      return undefined
+    }
+  }
 }
 
 async function responseSnippet(response: Response): Promise<string | null> {

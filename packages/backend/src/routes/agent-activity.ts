@@ -24,6 +24,7 @@ interface PaymentRow {
   payment_rail: string | null
   payment_resource_url: string | null
   merchant_address: string | null
+  payment_proof_status: string | null
   created_at: string
   confirmed_at: string | null
 }
@@ -97,6 +98,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
+              mpe.proof_status AS payment_proof_status,
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,
@@ -105,6 +107,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
        LEFT JOIN user_safes us ON us.id = a.safe_id
+       LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
        WHERE pi.agent_id = $1
        ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`,
@@ -138,6 +141,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         to: p.to_address,
         status: p.status,
         tx_hash: p.tx_hash,
+        payment_id: p.id,
+        payment_proof_status: p.payment_proof_status,
         source: p.source ?? 'direct',
         x402_resource_url: p.x402_resource_url,
         x402_merchant_address: p.x402_merchant_address,
@@ -286,6 +291,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
+              mpe.proof_status AS payment_proof_status,
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,
@@ -294,6 +300,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
        LEFT JOIN user_safes us ON us.id = a.safe_id
+       LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
        WHERE pi.agent_id = ANY($1)
        ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`,
@@ -329,6 +336,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         to: p.to_address,
         status: p.status,
         tx_hash: p.tx_hash,
+        payment_id: p.id,
+        payment_proof_status: p.payment_proof_status,
         source: p.source ?? 'direct',
         x402_resource_url: p.x402_resource_url,
         x402_merchant_address: p.x402_merchant_address,

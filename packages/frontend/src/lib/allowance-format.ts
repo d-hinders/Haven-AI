@@ -17,21 +17,31 @@ export function formatAllowanceAmount(amount: string, decimals: number): string 
   // Primary path: raw on-chain bigint string.
   try {
     const raw = BigInt(amount)
+    const negative = raw < 0n
+    const absRaw = negative ? -raw : raw
     const divisor = 10n ** BigInt(decimals)
-    const whole = raw / divisor
-    const fraction = raw % divisor
+    const whole = absRaw / divisor
+    const fraction = absRaw % divisor
     const fractionText = fraction
       .toString()
       .padStart(decimals, '0')
       .slice(0, 4)
       .replace(/0+$/, '')
 
-    return fractionText ? `${whole}.${fractionText}` : whole.toString()
+    const body = fractionText ? `${whole}.${fractionText}` : whole.toString()
+    return negative ? `-${body}` : body
   } catch {
     // Fallthrough — `amount` likely already has a decimal point.
   }
 
-  // Defensive path: already-decimal string. Parse, then trim.
+  // Defensive path: already-decimal string. Reject scientific notation —
+  // `Number('1e20').toFixed(4)` returns a 25-character integer that
+  // defeats the whole point of formatting, and once values approach
+  // Number.MAX_SAFE_INTEGER `toFixed` silently loses precision. Pass
+  // such strings through unchanged so the caller sees something
+  // diagnosable.
+  if (/[eE]/.test(amount)) return amount
+
   const asNumber = Number(amount)
   if (!Number.isFinite(asNumber)) return amount
 

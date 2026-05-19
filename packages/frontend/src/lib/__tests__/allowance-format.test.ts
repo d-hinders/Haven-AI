@@ -44,6 +44,23 @@ describe('formatAllowanceAmount', () => {
   it('handles zero correctly', () => {
     expect(formatAllowanceAmount('0', 18)).toBe('0')
   })
+
+  it('renders negative bigint inputs as a clean signed value', () => {
+    // Regression: the old code produced "-5.-5" because BigInt's `%`
+    // preserves sign. Now: separate the sign, format the magnitude,
+    // re-attach.
+    expect(formatAllowanceAmount('-5500000', 6)).toBe('-5.5')
+    expect(formatAllowanceAmount('-1000000000000000000', 18)).toBe('-1')
+  })
+
+  it('passes scientific-notation inputs through unchanged', () => {
+    // `Number('1e20').toFixed(4)` returns a 25-character integer that
+    // defeats the formatter and silently loses precision near
+    // Number.MAX_SAFE_INTEGER. Pass it through so the bug is visible
+    // rather than disguised as a giant decimal.
+    expect(formatAllowanceAmount('1e18', 18)).toBe('1e18')
+    expect(formatAllowanceAmount('2.5e20', 6)).toBe('2.5e20')
+  })
 })
 
 describe('getTokenDecimals', () => {

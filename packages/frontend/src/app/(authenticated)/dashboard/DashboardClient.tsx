@@ -635,11 +635,7 @@ function TransactionsSection({
                 description={transactionMovement(tx, resolveAddress)}
                 amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
                 amountTone={
-                  tx.isError
-                    ? 'danger'
-                    : tx.direction === 'in'
-                      ? 'success'
-                      : 'debit'
+                  tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
                 }
                 status={tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent'}
                 statusTone={

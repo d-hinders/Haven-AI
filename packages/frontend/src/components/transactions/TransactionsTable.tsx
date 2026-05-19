@@ -297,11 +297,15 @@ export default function TransactionsTable({
             </tr>
           ) : (
             sorted.map((tx, index) => {
+              // Outgoing amounts intentionally stay neutral ink — the sky
+              // `--v2-debit` colour is reserved for the direction icon so
+              // the row reads as a calm number with a coloured marker,
+              // rather than a busy two-colour line.
               const amountTone: AmountTone = tx.isError
                 ? 'danger'
                 : tx.direction === 'in'
                   ? 'success'
-                  : 'debit'
+                  : 'neutral'
               const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
               // Incoming transactions: leave initiator blank (no meaningful "who" — the originator is the sending wallet).
               // Outgoing without an agent: surface as "You".

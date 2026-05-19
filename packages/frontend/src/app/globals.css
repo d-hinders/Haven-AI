@@ -22,6 +22,11 @@
 
   --v2-success: #0e9f6e;
   --v2-success-soft: #ecfdf5;
+  /* Sky / debit — used for outgoing transactions (send / debit) globally.
+     Sibling to success on the cool side of the spectrum so incoming /
+     outgoing read as a symmetric pair without clashing with brand-indigo. */
+  --v2-debit: #0284c7;
+  --v2-debit-soft: #f0f9ff;
   --v2-warning: #b54708;
   --v2-warning-soft: #fef3c7;
   --v2-danger: #b42318;

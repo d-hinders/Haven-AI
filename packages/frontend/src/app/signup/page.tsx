@@ -317,7 +317,7 @@ export default function SignupPage() {
               <TrustRow
                 delayMs={260}
                 title="An account wallet you own"
-                description="Create it with a passkey or your existing wallet. Funds live in a Safe — never with Haven."
+                description="Create it with a passkey or your existing wallet. You hold the funds — Haven never does."
               />
               <TrustRow
                 delayMs={340}

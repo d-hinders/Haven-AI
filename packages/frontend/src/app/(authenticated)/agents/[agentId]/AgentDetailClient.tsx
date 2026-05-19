@@ -462,7 +462,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                     ? 'This agent no longer has access through Haven.'
                     : isPaused
                       ? 'Paused agents cannot start new payments through Haven.'
-                      : 'Pause new requests or revoke the agent budget if you need to stop access.'}
+                      : 'Pause the agent or revoke its budget if you need to stop access.'}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {!isRevoked ? (
@@ -482,7 +482,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                       variant="ghost"
                       size="sm"
                     >
-                      {pendingAction === 'pause' ? 'Pausing…' : 'Pause requests'}
+                      {pendingAction === 'pause' ? 'Pausing…' : 'Pause agent'}
                     </Button>
                   ) : null}
                   {isPaused ? (
@@ -492,7 +492,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                       variant="ghost"
                       size="sm"
                     >
-                      {pendingAction === 'resume' ? 'Resuming…' : 'Resume requests'}
+                      {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
                     </Button>
                   ) : null}
                   {!isRevoked ? (

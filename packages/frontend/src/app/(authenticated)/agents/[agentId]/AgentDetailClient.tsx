@@ -425,8 +425,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         />
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-6">
+      <div className="mt-6 space-y-6">
           <AgentRulesSummary
             title="Agent budget"
             description="What this agent can spend, where the money comes from, and how you stay in control."
@@ -456,6 +455,48 @@ export default function AgentDetailClient({ agentId }: Props) {
                 helper: approvalCopy,
               },
             ]}
+            footer={
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-[var(--v2-ink-3)]">
+                  {isRevoked
+                    ? 'This agent no longer has access through Haven.'
+                    : isPaused
+                      ? 'Paused agents cannot start new payments through Haven.'
+                      : 'Pause new requests or revoke the agent budget if you need to stop access.'}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {isActive ? (
+                    <Button
+                      onClick={() => void handlePause()}
+                      disabled={pendingAction !== null}
+                      variant="ghost"
+                      size="sm"
+                    >
+                      {pendingAction === 'pause' ? 'Pausing…' : 'Pause requests'}
+                    </Button>
+                  ) : null}
+                  {isPaused ? (
+                    <Button
+                      onClick={() => void handleResume()}
+                      disabled={pendingAction !== null}
+                      size="sm"
+                    >
+                      {pendingAction === 'resume' ? 'Resuming…' : 'Resume requests'}
+                    </Button>
+                  ) : null}
+                  {!isRevoked ? (
+                    <Button
+                      onClick={() => setConfirmAction('revoke')}
+                      disabled={pendingAction !== null || revokeBlockedByOtherDevice}
+                      variant="danger"
+                      size="sm"
+                    >
+                      Revoke agent budget
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            }
           />
 
           {budgetLines.length === 0 ? (
@@ -509,61 +550,22 @@ export default function AgentDetailClient({ agentId }: Props) {
               </div>
             )}
           </Card>
-        </div>
 
-        <aside className="space-y-6">
-          <Card hover={false} className="p-5">
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent access</h2>
-            <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              {isRevoked
-                ? 'This agent no longer has access through Haven.'
-                : isPaused
-                  ? 'Paused agents cannot start new payments through Haven.'
-                  : 'Pause new requests or revoke the agent budget if you need to stop access.'}
-            </p>
-            <div className="mt-4 grid gap-2">
-              {isActive ? (
-                <Button
-                  onClick={() => void handlePause()}
-                  disabled={pendingAction !== null}
-                  variant="ghost"
-                  className="w-full"
-                >
-                  {pendingAction === 'pause' ? 'Pausing...' : 'Pause requests'}
-                </Button>
-              ) : null}
-              {isPaused ? (
-                <Button
-                  onClick={() => void handleResume()}
-                  disabled={pendingAction !== null}
-                  className="w-full"
-                >
-                  {pendingAction === 'resume' ? 'Resuming...' : 'Resume requests'}
-                </Button>
-              ) : null}
-              {!isRevoked ? (
-                <Button
-                  onClick={() => setConfirmAction('revoke')}
-                  disabled={pendingAction !== null || revokeBlockedByOtherDevice}
-                  variant="danger"
-                  className="w-full"
-                >
-                  Revoke agent budget
-                </Button>
-              ) : (
-                <Button
-                  onClick={() => setConfirmAction('delete')}
-                  disabled={pendingAction !== null}
-                  variant="danger"
-                  className="w-full"
-                >
-                  Delete agent
-                </Button>
-              )}
+          {/* Revoked agents lose the inline footer affordances (they're no
+              longer pausable / revokable), so they keep an explicit Delete
+              CTA at the page level for the cleanup path. */}
+          {isRevoked ? (
+            <div className="flex justify-end">
+              <Button
+                onClick={() => setConfirmAction('delete')}
+                disabled={pendingAction !== null}
+                variant="danger"
+                size="sm"
+              >
+                Delete agent
+              </Button>
             </div>
-          </Card>
-
-        </aside>
+          ) : null}
       </div>
 
       <ConfirmDialog

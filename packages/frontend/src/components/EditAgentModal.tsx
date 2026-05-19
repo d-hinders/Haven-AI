@@ -4,10 +4,12 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address, parseUnits } from 'viem'
 import {
+  buildDeleteAllowanceTx,
   buildSetAllowanceTx,
   RESET_PERIODS,
   type AllowanceInfo,
 } from '@/lib/allowance-module'
+import ConfirmDialog from './ConfirmDialog'
 import { api } from '@/lib/api'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -29,6 +31,7 @@ import { SigningStatus } from './SigningStatus'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
+import { useToast } from './ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -99,6 +102,15 @@ export default function EditAgentModal({
   const [execError, setExecError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
 
+  // Per-row remove flow — independent of the add/update form. We keep the
+  // pending-removal token in state so the confirm dialog can address the
+  // user with the specific token name before any on-chain call happens.
+  const [pendingRemoval, setPendingRemoval] = useState<{
+    token: Address
+    symbol: string
+  } | null>(null)
+  const [isRemoving, setIsRemoving] = useState(false)
+
   // Wagmi
   const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
@@ -110,6 +122,7 @@ export default function EditAgentModal({
     chainId,
   })
   const budgetApprovalMessage = 'Connect a wallet to update this agent budget.'
+  const { toast } = useToast()
 
   // Tokens already configured on-chain for this delegate, matched by both
   // address and symbol so native-token entries (where one side stores the
@@ -317,6 +330,82 @@ export default function EditAgentModal({
     }
   }
 
+  // ── Remove a single token allowance ────────────────────
+
+  const confirmRemoval = useCallback(async () => {
+    if (!pendingRemoval) return
+    if (!publicClient || !signer || !safeDetails) {
+      toast.error('Connect a wallet to remove this budget.')
+      return
+    }
+
+    setIsRemoving(true)
+    try {
+      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
+      const safeTx = buildDeleteAllowanceTx(
+        agent.delegate_address as Address,
+        pendingRemoval.token,
+        nonce,
+      )
+
+      const signature = await signSafeTx(
+        signer,
+        safeAddress as Address,
+        safeTx,
+        chainId,
+      )
+
+      const threshold = safeDetails.threshold ?? 1
+      if (threshold <= 1) {
+        await executeSafeTx(
+          signer,
+          publicClient,
+          safeAddress as Address,
+          safeTx,
+          signature,
+          chainId,
+        )
+      } else {
+        const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
+        await proposeSafeTx(
+          safeAddress as Address,
+          safeTx,
+          safeTxHash,
+          signature,
+          signer.address,
+          chainId,
+        )
+      }
+
+      // Mirror the on-chain removal in Haven's DB. Encode the token address
+      // explicitly to keep native-token sentinels safe.
+      await api.delete(
+        `/agents/${agent.id}/allowances/${encodeURIComponent(pendingRemoval.token)}`,
+      )
+
+      toast.success(`${pendingRemoval.symbol} budget removed`)
+      setPendingRemoval(null)
+      onUpdated()
+    } catch (err) {
+      console.error('[Haven] Remove allowance error:', err)
+      const message = err instanceof Error ? err.message : 'Could not remove budget.'
+      toast.error(message.length > 120 ? 'Could not remove budget.' : message)
+    } finally {
+      setIsRemoving(false)
+    }
+  }, [
+    agent.delegate_address,
+    agent.id,
+    chainId,
+    onUpdated,
+    pendingRemoval,
+    publicClient,
+    safeAddress,
+    safeDetails,
+    signer,
+    toast,
+  ])
+
   // ── Render ─────────────────────────────────────────────
 
   if (!open) return null
@@ -405,9 +494,40 @@ export default function EditAgentModal({
                       const sym = tokenSymbolFromAddr(a.token, chainId)
                       const dec = tokenDecimalsFromAddr(a.token, chainId)
                       return (
-                        <div key={a.token} className="flex items-center justify-between text-xs p-2 bg-[var(--v2-surface)] rounded-lg border border-[var(--v2-border)]">
-                          <span className="text-[var(--v2-ink)] font-medium">{sym}</span>
-                          <span className="text-[var(--v2-ink-3)]">{formatAmountShort(a.amount, dec)} / {resetLabel(a.resetTimeMin).toLowerCase()}</span>
+                        <div
+                          key={a.token}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-2 text-xs"
+                        >
+                          <span className="font-medium text-[var(--v2-ink)]">{sym}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[var(--v2-ink-3)]">
+                              {formatAmountShort(a.amount, dec)} / {resetLabel(a.resetTimeMin).toLowerCase()}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPendingRemoval({ token: a.token as Address, symbol: sym })
+                              }
+                              disabled={isRemoving}
+                              aria-label={`Remove ${sym} budget`}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <svg
+                                aria-hidden="true"
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                          </div>
                         </div>
                       )
                     })}
@@ -702,6 +822,16 @@ export default function EditAgentModal({
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        onCancel={() => (isRemoving ? undefined : setPendingRemoval(null))}
+        onConfirm={() => void confirmRemoval()}
+        title={pendingRemoval ? `Remove ${pendingRemoval.symbol} budget?` : 'Remove budget?'}
+        body="This stops the agent from spending this token. You can add it back any time."
+        confirmLabel="Remove budget"
+        loading={isRemoving}
+      />
     </div>
   )
 }

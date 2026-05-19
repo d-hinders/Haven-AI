@@ -12,11 +12,18 @@ export function AgentRulesSummary({
   description = 'These rules define what the agent can do automatically.',
   items,
   density = 'normal',
+  footer,
 }: {
   title?: string
   description?: string
   items: AgentRuleSummaryItem[]
   density?: 'normal' | 'compact'
+  /**
+   * Optional footer rendered below a divider inside the same card. Used by
+   * the agent detail page to attach Pause / Revoke actions to the bottom of
+   * the budget card without spinning up a separate "Agent access" card.
+   */
+  footer?: ReactNode
 }) {
   const compact = density === 'compact'
 
@@ -47,6 +54,12 @@ export function AgentRulesSummary({
           </div>
         ))}
       </dl>
+
+      {footer ? (
+        <div className={`${compact ? 'mt-3 pt-3' : 'mt-5 pt-4'} border-t border-[var(--v2-border)]`}>
+          {footer}
+        </div>
+      ) : null}
     </Card>
   )
 }

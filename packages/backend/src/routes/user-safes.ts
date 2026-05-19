@@ -28,7 +28,6 @@ interface AddSafeBody {
 interface DeploySafeBody {
   chain_id?: number
   owner_address: string
-  name?: string
 }
 
 interface RenameSafeBody {
@@ -56,10 +55,11 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   })
 
   // POST /user/safes/deploy — relay-sponsored Safe deployment
-  // The relayer pays gas; the caller's owner_address becomes the sole owner.
+  // The relayer pays gas and returns the deployed Safe address + txHash.
+  // Registration is done separately via POST /user/safes so the flow is
+  // identical for both onboarding and add-account.
   app.post<{ Body: DeploySafeBody }>('/deploy', async (request, reply) => {
-    const { sub } = request.user as { sub: string }
-    const { chain_id = 100, owner_address, name } = request.body
+    const { chain_id = 100, owner_address } = request.body
 
     if (!owner_address || !ETH_ADDRESS_RE.test(owner_address)) {
       return reply.code(400).send({ error: 'Invalid owner address' })
@@ -69,38 +69,13 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
       return reply.code(400).send({ error: `Unsupported chain: ${chain_id}` })
     }
 
-    let safeAddress: string
-    let txHash: string
     try {
-      const result = await relaySafeDeploy(chain_id, owner_address)
-      safeAddress = result.safeAddress
-      txHash = result.txHash
+      const { safeAddress, txHash } = await relaySafeDeploy(chain_id, owner_address)
+      return reply.code(201).send({ safe_address: safeAddress, tx_hash: txHash })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Relay deployment failed'
       return reply.code(500).send({ error: msg })
     }
-
-    const countResult = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM user_safes WHERE user_id = $1`,
-      [sub],
-    )
-    const isFirst = Number(countResult.rows[0].count) === 0
-
-    const result = await pool.query<UserSafeRow>(
-      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, safe_address, chain_id, name, is_default, created_at`,
-      [sub, safeAddress, chain_id, name?.trim() || 'My Safe', isFirst],
-    )
-
-    if (isFirst) {
-      await pool.query(
-        `UPDATE users SET safe_address = $1, wallet_address = $2, updated_at = NOW() WHERE id = $3`,
-        [safeAddress, owner_address, sub],
-      )
-    }
-
-    return reply.code(201).send({ ...result.rows[0], txHash })
   })
 
   // POST /user/safes — add (import) an existing Safe

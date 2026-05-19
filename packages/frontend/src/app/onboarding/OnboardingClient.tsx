@@ -73,17 +73,19 @@ export default function OnboardingClient() {
     setError('')
 
     try {
-      // Relay-sponsored deployment: backend relayer pays gas, no wallet signature needed
-      const result = await api.post<{ safe_address: string; txHash: string }>(
+      // Step 1: relay pays gas and deploys the Safe on-chain
+      const deployed = await api.post<{ safe_address: string; tx_hash: string }>(
         '/user/safes/deploy',
         { chain_id: selectedChainId, owner_address: address },
       )
 
-      setTxHash(result.txHash)
-      setSafeAddress(result.safe_address)
+      setTxHash(deployed.tx_hash)
+      setSafeAddress(deployed.safe_address)
 
+      // Step 2: register in Haven
       setDeployStage('registering')
-      updateUser({ safe_address: result.safe_address, wallet_address: address })
+      await api.post('/user/safes', { safe_address: deployed.safe_address, chain_id: selectedChainId, name: 'My Safe' })
+      updateUser({ safe_address: deployed.safe_address, wallet_address: address })
       await refreshUser()
 
       setStep('done')

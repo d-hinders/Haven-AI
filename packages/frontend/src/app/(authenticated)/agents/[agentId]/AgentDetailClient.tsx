@@ -469,6 +469,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                     <Button
                       onClick={openUpdateBudget}
                       disabled={pendingAction !== null}
+                      variant="ghost"
                       size="sm"
                     >
                       Update budget

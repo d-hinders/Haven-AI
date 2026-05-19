@@ -22,8 +22,16 @@ import {
 } from '@/lib/payment-status'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
-import EditAgentModal from '@/components/EditAgentModal'
+import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
+import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
 import OnchainActionGate, { OnchainActionNotice, isOnchainActionBlocked } from '@/components/OnchainActionGate'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
@@ -35,7 +43,6 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { Tooltip } from '@/components/ui/Tooltip'
 import {
   AgentActivityRow,
-  AgentBudgetCard,
   AgentRulesSummary,
   ApprovalRequiredBanner,
   ExternalDetailsLink,
@@ -148,12 +155,22 @@ export default function AgentDetailClient({ agentId }: Props) {
   const revokeNoSignerMessage = 'Connect a wallet to revoke this agent budget.'
 
   const [editOpen, setEditOpen] = useState(false)
+  const [editMode, setEditMode] = useState<EditAgentModalMode>('all')
+  const [credentialsOpen, setCredentialsOpen] = useState(false)
+  const openEditAgent = () => {
+    setEditMode('agent')
+    setEditOpen(true)
+  }
+  const openUpdateBudget = () => {
+    setEditMode('budget')
+    setEditOpen(true)
+  }
+  const closeEdit = () => {
+    setEditOpen(false)
+  }
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [showCredential, setShowCredential] = useState(false)
-  const [credentialCopied, setCredentialCopied] = useState(false)
-  const [delegateCopied, setDelegateCopied] = useState(false)
 
   const isActive = agent?.status === 'active'
   const isPaused = agent?.status === 'paused'
@@ -189,12 +206,6 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
 
   const currentAgent = agent
-  const fullCredential = currentAgent.api_key?.trim() || null
-  const credentialPrefix =
-    currentAgent.api_key_prefix ?? (fullCredential ? fullCredential.slice(0, 12) : null)
-  const maskedCredential = credentialPrefix
-    ? `${credentialPrefix}${'•'.repeat(12)}`
-    : 'Credential shown only when created'
   const walletName = currentAgent.safe_name ?? safe?.name ?? 'Unassigned Haven wallet'
   const networkName = chainConfig?.name ?? 'Unknown network'
   const budgetLines = currentAgent.allowances.map((allowance) => {
@@ -227,20 +238,6 @@ export default function AgentDetailClient({ agentId }: Props) {
       ? 'No automatic spending is configured for this agent.'
       : 'Payments within budget can run automatically. Larger payments need your manual approval.'
   const agentStatus = agentStatusPresentation(currentAgent.status)
-
-  async function copyCredential() {
-    if (!fullCredential) return
-    await navigator.clipboard.writeText(fullCredential)
-    setCredentialCopied(true)
-    setTimeout(() => setCredentialCopied(false), 2000)
-  }
-
-  async function copyDelegateAddress() {
-    if (!currentAgent.delegate_address) return
-    await navigator.clipboard.writeText(currentAgent.delegate_address)
-    setDelegateCopied(true)
-    setTimeout(() => setDelegateCopied(false), 2000)
-  }
 
   async function handlePause() {
     setPendingAction('pause')
@@ -330,13 +327,34 @@ export default function AgentDetailClient({ agentId }: Props) {
               {agentStatus.label}
             </StatusBadge>
             {!isRevoked ? (
-              <Button
-                onClick={() => setEditOpen(true)}
-                disabled={pendingAction !== null}
-                variant="ghost"
-              >
-                Edit
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label="Agent options"
+                  disabled={pendingAction !== null}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="5" r="1.25" />
+                    <circle cx="12" cy="12" r="1.25" />
+                    <circle cx="12" cy="19" r="1.25" />
+                  </svg>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onSelect={openEditAgent}>Edit agent</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={openUpdateBudget}>Update budget</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
+                    Payment credentials
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : (
               <Button
                 onClick={() => setConfirmAction('delete')}
@@ -410,8 +428,8 @@ export default function AgentDetailClient({ agentId }: Props) {
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
           <AgentRulesSummary
-            title="Agent rules"
-            description="A quick view of what this agent can do and how you stay in control."
+            title="Agent budget"
+            description="What this agent can spend, where the money comes from, and how you stay in control."
             items={[
               {
                 label: 'Who can spend',
@@ -419,12 +437,12 @@ export default function AgentDetailClient({ agentId }: Props) {
                 helper: currentAgent.description || undefined,
               },
               {
-                label: 'From wallet',
+                label: 'From account',
                 value: `${walletName} on ${networkName}`,
-                helper: 'Payments come from this Haven wallet only.',
+                helper: 'Payments come from this Haven account only.',
               },
               {
-                label: 'Agent budget',
+                label: 'Budget',
                 value:
                   budgetLines.length > 0 ? (
                     <div className="space-y-1">
@@ -440,32 +458,13 @@ export default function AgentDetailClient({ agentId }: Props) {
             ]}
           />
 
-          {budgetLines.length > 0 ? (
-            <AgentBudgetCard
-              agentName={currentAgent.name}
-              walletName={walletName}
-              amount={budgetAmountSummary}
-              resetPeriod={budgetPeriodSummary}
-              status={agentStatus.label}
-              statusTone={agentStatus.tone}
-              density="compact"
-            >
-              <div className="space-y-2">
-                {budgetLines.map((line) => (
-                  <div key={line.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-2">
-                    <p className="text-sm font-medium text-[var(--v2-ink)] v2-tabular">{line.amount} {line.token}</p>
-                    <p className="text-xs text-[var(--v2-ink-2)]">{line.period}</p>
-                  </div>
-                ))}
-              </div>
-            </AgentBudgetCard>
-          ) : (
+          {budgetLines.length === 0 ? (
             <EmptyState
               title="No agent budget set"
               body={isRevoked ? 'This agent has been revoked and can no longer be edited.' : 'Add an agent budget before this agent can make automatic payments.'}
-              action={!isRevoked ? <Button size="sm" onClick={() => setEditOpen(true)}>Add budget</Button> : undefined}
+              action={!isRevoked ? <Button size="sm" onClick={openUpdateBudget}>Add budget</Button> : undefined}
             />
-          )}
+          ) : null}
 
           <Card hover={false} className="overflow-hidden">
             <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
@@ -564,67 +563,6 @@ export default function AgentDetailClient({ agentId }: Props) {
             </div>
           </Card>
 
-          {!isRevoked ? (
-            <Card hover={false} className="p-5">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Haven credential</h2>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-                Your agent uses this credential to request payments through Haven.
-              </p>
-              <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-                <code className="block truncate font-mono text-xs text-[var(--v2-ink-2)]">
-                  {fullCredential && showCredential ? fullCredential : maskedCredential}
-                </code>
-                {fullCredential ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setShowCredential((value) => !value)}
-                    >
-                      {showCredential ? 'Hide' : 'Show'}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => void copyCredential()}>
-                      {credentialCopied ? 'Copied' : 'Copy'}
-                    </Button>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                    Haven only shows the full credential when you create the agent. If you lose it, create a new agent or rotate the credential.
-                  </p>
-                )}
-              </div>
-            </Card>
-          ) : null}
-
-          <Card hover={false} className="p-5">
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Advanced details</h2>
-            <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              Technical identifiers are shown here for recovery and debugging.
-            </p>
-            {currentAgent.delegate_address ? (
-              <div className="mt-4">
-                <p className="text-xs font-medium text-[var(--v2-ink-3)]">Credential address</p>
-                <div className="mt-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-                  <code className="block break-all font-mono text-xs text-[var(--v2-ink)]">
-                    {currentAgent.delegate_address}
-                  </code>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => void copyDelegateAddress()}
-                    className="mt-3"
-                  >
-                    {delegateCopied ? 'Copied' : 'Copy address'}
-                  </Button>
-                </div>
-                <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                  If this credential address is ever compromised, revoke this agent and create a new one.
-                </p>
-              </div>
-            ) : (
-              <p className="mt-4 text-sm text-[var(--v2-ink-2)]">This agent does not currently expose a credential address.</p>
-            )}
-          </Card>
         </aside>
       </div>
 
@@ -674,7 +612,8 @@ export default function AgentDetailClient({ agentId }: Props) {
       {!isRevoked ? (
         <EditAgentModal
           open={editOpen}
-          onClose={() => setEditOpen(false)}
+          onClose={closeEdit}
+          mode={editMode}
           agent={currentAgent}
           safeAddress={safeAddress ?? ''}
           chainId={chainId}
@@ -687,6 +626,12 @@ export default function AgentDetailClient({ agentId }: Props) {
           }}
         />
       ) : null}
+
+      <PaymentCredentialsModal
+        open={credentialsOpen}
+        onClose={() => setCredentialsOpen(false)}
+        agent={currentAgent}
+      />
     </div>
   )
 }

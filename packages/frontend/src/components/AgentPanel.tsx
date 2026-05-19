@@ -140,7 +140,7 @@ function AllowanceBar({
           {tokenSymbol(info.token, chainId)}
           {nearLimit && (
             <span
-              className="inline-flex items-center gap-1 text-[9px] px-1 py-0.5 rounded bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] font-semibold uppercase tracking-wide animate-pulse"
+              className="inline-flex items-center gap-1 rounded bg-[var(--v2-danger-soft)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--v2-danger)] animate-pending-pulse"
               title={`${pct}% of allowance spent`}
             >
               <span className="w-1 h-1 rounded-full bg-[var(--v2-danger)]" />
@@ -175,17 +175,17 @@ function AllowanceBar({
       </div>
       {/* Reset info */}
       {effective.isResetPending && (
-        <p className="text-[10px] text-[var(--v2-success)]">
+        <p className="text-xs text-[var(--v2-success)]">
           Reset pending — full allowance available
         </p>
       )}
       {!effective.isResetPending && effective.nextResetTime && (
-        <p className="text-[10px] text-[var(--v2-ink-3)]">
+        <p className="text-xs text-[var(--v2-ink-3)]">
           Resets in {timeUntil(effective.nextResetTime)}
         </p>
       )}
       {remaining === 0n && total > 0n && !effective.isResetPending && (
-        <p className="text-[10px] text-[var(--v2-danger)]">
+        <p className="text-xs text-[var(--v2-danger)]">
           Fully spent{info.resetTimeMin > 0 ? ' — resets ' + (effective.nextResetTime ? 'in ' + timeUntil(effective.nextResetTime) : 'next period') : ''}
         </p>
       )}
@@ -225,7 +225,7 @@ function ConfiguredAllowanceRow({
       <div className="h-[3px] w-full rounded-full bg-[var(--v2-surface-2)]">
         <div className="h-full w-full rounded-full bg-[var(--v2-brand)]/25" />
       </div>
-      <p className="text-[10px] text-[var(--v2-ink-3)]">Configured in Haven</p>
+      <p className="text-xs text-[var(--v2-ink-3)]">Configured in Haven</p>
     </div>
   )
 }
@@ -307,11 +307,6 @@ function AgentCard({
   }, [onChainAllowances])
   const hasNetworkAllowances = !!displayAllowances && displayAllowances.length > 0
   const hasConfiguredAllowances = agent.allowances.length > 0
-  const budgetSourceLabel = hasNetworkAllowances
-    ? 'network'
-    : hasConfiguredAllowances
-      ? 'configured'
-      : null
   const showConfiguredFallback =
     !onChainLoading &&
     !hasNetworkAllowances &&
@@ -394,8 +389,8 @@ function AgentCard({
             <path d="M14 15V9" />
           </svg>
           <div>
-            <p className="text-[11px] font-medium text-[var(--v2-warning)]">Paused in Haven</p>
-            <p className="text-[11px] text-[var(--v2-warning)] leading-relaxed">
+            <p className="text-xs font-medium text-[var(--v2-warning)]">Paused in Haven</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
               New agent payments are blocked until you resume this agent. Existing network permissions stay in place.
             </p>
           </div>
@@ -405,12 +400,7 @@ function AgentCard({
       {isOperational && (
         <div className="mb-3">
           <div className="space-y-2">
-            <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide">
-              Agent budget
-              {budgetSourceLabel ? (
-                <span className="text-[var(--v2-ink-3)] ml-1 normal-case">({budgetSourceLabel})</span>
-              ) : null}
-            </p>
+            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Agent budget</p>
 
             {hasNetworkAllowances ? (
               displayAllowances.map((info) => (
@@ -596,8 +586,8 @@ function UnmanagedDelegateCard({
 
       {/* Delegate address */}
       <div className="mb-4">
-        <p className="text-[10px] text-[var(--v2-warning)] uppercase tracking-wide mb-1">
-          Delegate
+        <p className="mb-1 text-xs font-medium text-[var(--v2-warning)]">
+          Signing address
         </p>
         <p className="text-xs font-mono text-[var(--v2-ink-2)]">
           {truncate(delegate)}
@@ -617,10 +607,7 @@ function UnmanagedDelegateCard({
       {/* On-chain allowances */}
       {allowances.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[10px] text-[var(--v2-warning)] uppercase tracking-wide">
-            Agent budget
-            <span className="text-[var(--v2-warning)] ml-1 normal-case">(network)</span>
-          </p>
+          <p className="text-xs font-medium text-[var(--v2-warning)]">Agent budget</p>
           {allowances.map((info) => (
             <AllowanceBar key={info.token} info={info} chainId={chainId} />
           ))}

@@ -36,6 +36,16 @@ import { useFocusTrap } from '@/hooks/useFocusTrap'
 type Step = 'form' | 'review' | 'executing' | 'done'
 type ExecutionStatus = 'signing' | 'executing' | 'saving' | 'confirmed' | 'proposed' | 'error'
 
+/**
+ * `'all'` — default; renders name + description AND budget fields together.
+ *   Keeps full backwards-compat with the original Edit flow.
+ * `'agent'` — only name + description. Used by the detail-page kebab's
+ *   "Edit agent" entry.
+ * `'budget'` — only token / amount / reset-period. Used by the detail-page
+ *   kebab's "Update budget" entry.
+ */
+export type EditAgentModalMode = 'all' | 'agent' | 'budget'
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -45,6 +55,7 @@ interface Props {
   safeDetails: SafeDetails | null
   existingOnChainAllowances: AllowanceInfo[] | null
   onUpdated: () => void
+  mode?: EditAgentModalMode
 }
 
 // ── Component ──────────────────────────────────────────────────────
@@ -58,7 +69,10 @@ export default function EditAgentModal({
   safeDetails,
   existingOnChainAllowances,
   onUpdated,
+  mode = 'all',
 }: Props) {
+  const showAgentFields = mode === 'all' || mode === 'agent'
+  const showBudgetFields = mode === 'all' || mode === 'budget'
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
   const chainTokens = getChainTokens(chainId)
@@ -97,19 +111,23 @@ export default function EditAgentModal({
   })
   const budgetApprovalMessage = 'Connect a wallet to update this agent budget.'
 
-  // Tokens already configured on-chain for this delegate
-  const existingTokenAddrs = useMemo(() => {
-    const set = new Set<string>()
+  // Tokens already configured on-chain for this delegate, matched by both
+  // address and symbol so native-token entries (where one side stores the
+  // ERC-20 wrapper address and the other stores the native sentinel) still
+  // resolve as "existing".
+  const existingTokenKeys = useMemo(() => {
+    const addrs = new Set<string>()
+    const symbols = new Set<string>()
     if (existingOnChainAllowances) {
       for (const a of existingOnChainAllowances) {
-        set.add(a.token.toLowerCase())
+        addrs.add(a.token.toLowerCase())
       }
     }
-    // Also include DB allowances as fallback
     for (const a of agent.allowances) {
-      set.add(a.token_address.toLowerCase())
+      if (a.token_address) addrs.add(a.token_address.toLowerCase())
+      if (a.token_symbol) symbols.add(a.token_symbol)
     }
-    return set
+    return { addrs, symbols }
   }, [existingOnChainAllowances, agent.allowances])
 
   // Available tokens = all tokens (can add new or update existing)
@@ -117,7 +135,17 @@ export default function EditAgentModal({
 
   const selectedTokenConfig = tokenOptions.find((t) => t.symbol === selectedToken)
   const tokenAddress = selectedTokenConfig?.address ?? '0x0000000000000000000000000000000000000000'
-  const isExistingToken = existingTokenAddrs.has(tokenAddress.toLowerCase())
+  // Match by either address or symbol — handles the native-token edge case
+  // where the saved record uses a different sentinel/address shape than the
+  // current token config. In `'budget'` mode the modal was opened from the
+  // detail page's "Update budget" kebab entry, so the user's mental model
+  // is "update" regardless of token choice — bias the label accordingly.
+  const matchesExistingByAddr = existingTokenKeys.addrs.has(tokenAddress.toLowerCase())
+  const matchesExistingBySymbol = existingTokenKeys.symbols.has(selectedToken)
+  const isExistingToken =
+    matchesExistingByAddr ||
+    matchesExistingBySymbol ||
+    (mode === 'budget' && agent.allowances.length > 0)
   const trimmedName = agentName.trim()
   const trimmedDescription = agentDescription.trim()
   const detailsChanged =
@@ -133,7 +161,16 @@ export default function EditAgentModal({
   const budgetDisplayAmount = budgetValidation?.ok ? budgetValidation.amount : amount
   const budgetChanged = budgetValidation?.ok ?? false
   const hasInvalidBudget = hasBudgetInput && !budgetChanged
-  const canReview = trimmedName.length > 0 && !hasInvalidBudget && (detailsChanged || budgetChanged)
+  // Step-gate logic per mode:
+  //   'agent'  — name is required, budget is hidden, so we just need details to differ.
+  //   'budget' — budget is required, name/description is hidden.
+  //   'all'    — either change is enough, name still required.
+  const canReview =
+    mode === 'budget'
+      ? !hasInvalidBudget && budgetChanged
+      : trimmedName.length > 0 &&
+        !hasInvalidBudget &&
+        (detailsChanged || (showBudgetFields && budgetChanged))
 
   // ── Reset ──────────────────────────────────────────────
 
@@ -298,12 +335,19 @@ export default function EditAgentModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)]">
           <div>
-            <h2 className="text-sm font-semibold">Edit Agent: {agent.name}</h2>
-            <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
-              {step === 'form' && 'Update agent details or budget'}
-              {step === 'review' && 'Review rule changes'}
-              {step === 'executing' && 'Updating rules...'}
-              {step === 'done' && 'Agent updated'}
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">
+              {mode === 'budget' ? 'Update budget' : 'Edit agent'}
+            </h2>
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              {step === 'form' &&
+                (mode === 'budget'
+                  ? 'Change the budget you let this agent spend.'
+                  : mode === 'agent'
+                    ? 'Rename the agent or change its description.'
+                    : 'Update agent details or budget.')}
+              {step === 'review' && 'Review the change before confirming.'}
+              {step === 'executing' && 'Updating…'}
+              {step === 'done' && 'Updated successfully.'}
             </p>
           </div>
           <button
@@ -323,35 +367,37 @@ export default function EditAgentModal({
           {/* ── STEP: Form ─────────────────────────────── */}
           {step === 'form' && (
             <div className="space-y-5">
-              <div className="space-y-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
-                <div>
-                  <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
-                    Agent name
-                  </label>
-                  <Input
-                    value={agentName}
-                    onChange={(e) => setAgentName(e.target.value)}
-                    placeholder="e.g. Research Agent"
-                  />
+              {showAgentFields && (
+                <div className="space-y-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
+                      Agent name
+                    </label>
+                    <Input
+                      value={agentName}
+                      onChange={(e) => setAgentName(e.target.value)}
+                      placeholder="e.g. Research Agent"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
+                      Description <span className="text-[var(--v2-ink-3)]">(optional)</span>
+                    </label>
+                    <textarea
+                      value={agentDescription}
+                      onChange={(e) => setAgentDescription(e.target.value)}
+                      placeholder="What does this agent do?"
+                      rows={2}
+                      className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-[10px] px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
-                    Description <span className="normal-case text-[var(--v2-ink-3)]">(optional)</span>
-                  </label>
-                  <textarea
-                    value={agentDescription}
-                    onChange={(e) => setAgentDescription(e.target.value)}
-                    placeholder="What does this agent do?"
-                    rows={2}
-                    className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-[10px] px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
-                  />
-                </div>
-              </div>
+              )}
 
               {/* Existing allowances summary */}
-              {existingOnChainAllowances && existingOnChainAllowances.length > 0 && (
+              {showBudgetFields && existingOnChainAllowances && existingOnChainAllowances.length > 0 && (
                 <div>
-                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-2">
+                  <p className="mb-2 text-xs font-medium text-[var(--v2-ink-3)]">
                     Current agent budgets
                   </p>
                   <div className="space-y-1">
@@ -370,8 +416,9 @@ export default function EditAgentModal({
               )}
 
               {/* Add / update allowance */}
+              {showBudgetFields && (
               <div className="space-y-3 p-4 bg-[var(--v2-surface)] rounded-xl border border-dashed border-[var(--v2-border)]">
-                <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">
+                <p className="text-xs font-medium text-[var(--v2-ink-3)]">
                   {isExistingToken ? 'Update agent budget' : 'Add new agent budget'}
                 </p>
                 <div className="grid grid-cols-3 gap-2">
@@ -410,21 +457,24 @@ export default function EditAgentModal({
                   </Select>
                 </div>
                 {isExistingToken && (
-                  <p className="text-[11px] text-[var(--v2-ink-2)]">
+                  <p className="text-xs text-[var(--v2-ink-2)]">
                     This will replace the existing {selectedToken} budget for this agent.
                   </p>
                 )}
                 {hasInvalidBudget && (
-                  <p className="text-[11px] text-[var(--v2-danger)]">
+                  <p className="text-xs text-[var(--v2-danger)]">
                     Enter a budget amount greater than zero, or leave the amount blank to edit details only.
                   </p>
                 )}
               </div>
+              )}
 
-              <p className="text-[11px] text-[var(--v2-ink-3)] leading-relaxed">
-                Payments that exceed this agent budget are queued for your approval in
-                the dashboard — no separate threshold to configure.
-              </p>
+              {showBudgetFields && (
+                <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                  Payments that exceed this agent budget are queued for your approval in
+                  the dashboard — no separate threshold to configure.
+                </p>
+              )}
 
               <div className="flex gap-3">
                 <Button
@@ -450,34 +500,34 @@ export default function EditAgentModal({
             <div className="space-y-5">
               <div className="bg-[var(--v2-surface)] rounded-xl p-4 border border-[var(--v2-border)] space-y-3">
                 <div>
-                  <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Agent</p>
-                  <p className="text-sm text-[var(--v2-ink)] font-medium">{trimmedName}</p>
+                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Agent</p>
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">{trimmedName}</p>
                   {trimmedDescription ? (
                     <p className="mt-1 text-xs text-[var(--v2-ink-2)]">{trimmedDescription}</p>
                   ) : null}
                 </div>
-                {detailsChanged && (
+                {showAgentFields && detailsChanged && (
                   <div>
-                    <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">Details</p>
+                    <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Details</p>
                     <p className="text-xs text-[var(--v2-ink-2)]">Name and description will update in Haven.</p>
                   </div>
                 )}
-                {budgetChanged && (
+                {showBudgetFields && budgetChanged && (
                   <div>
-                    <p className="text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wide mb-1">
+                    <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">
                       {isExistingToken ? 'Updated budget' : 'New budget'}
                     </p>
                     <p className="text-sm text-[var(--v2-ink)]">
                       {budgetDisplayAmount} {selectedToken}
-                      <span className="text-[var(--v2-ink-3)] ml-2">{resetLabel(resetTimeMin)}</span>
+                      <span className="ml-2 text-[var(--v2-ink-3)]">{resetLabel(resetTimeMin)}</span>
                     </p>
                   </div>
                 )}
               </div>
 
-              {budgetChanged && (
+              {showBudgetFields && budgetChanged && (
                 <div className="space-y-2">
-                  <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">Wallet rule change</p>
+                  <p className="text-xs font-medium text-[var(--v2-ink-3)]">Wallet rule change</p>
                   <p className="flex items-center gap-2 text-xs text-[var(--v2-ink-2)]">
                     <span className="w-1 h-1 rounded-full bg-[var(--v2-brand)]" />
                     {isExistingToken ? 'Update' : 'Set'} {budgetDisplayAmount} {selectedToken} budget for this agent ({resetLabel(resetTimeMin).toLowerCase()})

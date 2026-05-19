@@ -11,6 +11,7 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from './allowance-module.js'
+import { tryRecordMachinePaymentEvidenceBaseById } from './machine-payment-evidence.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -623,6 +624,8 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
        WHERE id = $2`,
       [txHash, intent.id, fiatValues.usd, fiatValues.eur],
     )
+
+    await tryRecordMachinePaymentEvidenceBaseById(intent.id, agent.id)
 
     return {
       statusCode: 201,

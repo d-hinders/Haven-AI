@@ -5,6 +5,10 @@ import {
   authorizeMachinePayment,
   type MachinePaymentRail,
 } from '../lib/machine-payments.js'
+import {
+  attachMachinePaymentEvidence,
+  type MachinePaymentEvidenceRow,
+} from '../lib/machine-payment-evidence.js'
 
 interface MachinePaymentChallengeBody {
   rail: MachinePaymentRail
@@ -45,6 +49,21 @@ interface ReconciliationEventBody {
   details?: Record<string, unknown>
 }
 
+interface EvidenceBody {
+  paymentId?: string
+  rail?: MachinePaymentRail
+  txHash?: string
+  resourceUrl?: string
+  merchantStatus?: number
+  challengePayload?: Record<string, unknown>
+  selectedPayment?: Record<string, unknown>
+  paymentProofHeaderName?: string
+  paymentProofHeader?: string
+  protocolReceiptHeaderName?: string
+  protocolReceiptHeader?: string
+  protocolReceiptPayload?: Record<string, unknown>
+}
+
 interface ReconciliationPaymentRow {
   id: string
   user_id: string
@@ -64,6 +83,40 @@ interface ReconciliationPaymentRow {
 const RECONCILIATION_EVENT_TYPES = new Set([
   'merchant_retry_rejected_after_payment',
 ])
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function mapEvidence(row: MachinePaymentEvidenceRow) {
+  return {
+    id: row.id,
+    payment_id: row.payment_intent_id,
+    rail: row.rail,
+    proof_status: row.proof_status,
+    tx_hash: row.tx_hash,
+    chain_id: row.chain_id,
+    resource_url: row.resource_url,
+    merchant_address: row.merchant_address,
+    payer_address: row.payer_address,
+    settlement_address: row.settlement_address,
+    token_symbol: row.token_symbol,
+    token_address: row.token_address,
+    amount_raw: row.amount_raw,
+    amount_human: row.amount_human,
+    challenge_id: row.challenge_id,
+    idempotency_key: row.idempotency_key,
+    challenge_payload: row.challenge_payload,
+    selected_payment: row.selected_payment,
+    payment_proof_header_name: row.payment_proof_header_name,
+    protocol_receipt_header_name: row.protocol_receipt_header_name,
+    protocol_receipt_payload: row.protocol_receipt_payload,
+    merchant_status: row.merchant_status,
+    confirmed_at: row.confirmed_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }
+}
 
 function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): string | null {
   if (!challenge || typeof challenge !== 'object') return 'challenge is required'
@@ -124,6 +177,118 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     })
 
     return reply.code(result.statusCode).send(result.body)
+  })
+
+  app.post<{ Body: EvidenceBody }>('/evidence', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const body = request.body
+
+    if (!body || typeof body !== 'object') {
+      return reply.code(400).send({ error: 'Evidence body is required' })
+    }
+    if (!body.paymentId || typeof body.paymentId !== 'string') {
+      return reply.code(400).send({ error: 'paymentId is required' })
+    }
+    if (!body.rail || typeof body.rail !== 'string') {
+      return reply.code(400).send({ error: 'rail is required' })
+    }
+    if (!body.txHash || typeof body.txHash !== 'string') {
+      return reply.code(400).send({ error: 'txHash is required' })
+    }
+    if (body.resourceUrl !== undefined && typeof body.resourceUrl !== 'string') {
+      return reply.code(400).send({ error: 'resourceUrl must be a string' })
+    }
+    if (
+      body.paymentProofHeaderName !== undefined &&
+      typeof body.paymentProofHeaderName !== 'string'
+    ) {
+      return reply.code(400).send({ error: 'paymentProofHeaderName must be a string' })
+    }
+    if (
+      body.paymentProofHeader !== undefined &&
+      typeof body.paymentProofHeader !== 'string'
+    ) {
+      return reply.code(400).send({ error: 'paymentProofHeader must be a string' })
+    }
+    if (
+      body.protocolReceiptHeaderName !== undefined &&
+      typeof body.protocolReceiptHeaderName !== 'string'
+    ) {
+      return reply.code(400).send({ error: 'protocolReceiptHeaderName must be a string' })
+    }
+    if (
+      body.protocolReceiptHeader !== undefined &&
+      typeof body.protocolReceiptHeader !== 'string'
+    ) {
+      return reply.code(400).send({ error: 'protocolReceiptHeader must be a string' })
+    }
+    if (
+      body.challengePayload !== undefined &&
+      !isPlainObject(body.challengePayload)
+    ) {
+      return reply.code(400).send({ error: 'challengePayload must be an object' })
+    }
+    if (
+      body.selectedPayment !== undefined &&
+      !isPlainObject(body.selectedPayment)
+    ) {
+      return reply.code(400).send({ error: 'selectedPayment must be an object' })
+    }
+    if (
+      body.protocolReceiptPayload !== undefined &&
+      !isPlainObject(body.protocolReceiptPayload)
+    ) {
+      return reply.code(400).send({ error: 'protocolReceiptPayload must be an object' })
+    }
+
+    try {
+      const evidence = await attachMachinePaymentEvidence({
+        agentId: agent.id,
+        paymentId: body.paymentId,
+        rail: body.rail,
+        txHash: body.txHash,
+        resourceUrl: body.resourceUrl,
+        merchantStatus: body.merchantStatus,
+        challengePayload: body.challengePayload,
+        selectedPayment: body.selectedPayment,
+        paymentProofHeaderName: body.paymentProofHeaderName,
+        paymentProofHeader: body.paymentProofHeader,
+        protocolReceiptHeaderName: body.protocolReceiptHeaderName,
+        protocolReceiptHeader: body.protocolReceiptHeader,
+        protocolReceiptPayload: body.protocolReceiptPayload,
+      })
+
+      if (!evidence) {
+        return reply.code(404).send({ error: 'Payment intent not found' })
+      }
+
+      return reply.code(202).send({ evidence: mapEvidence(evidence) })
+    } catch (err) {
+      const marker = err instanceof Error ? err.message : String(err)
+      if (marker === 'payment_not_confirmed') {
+        return reply.code(409).send({ error: 'Evidence requires a confirmed payment intent' })
+      }
+      if (marker === 'tx_hash_mismatch') {
+        return reply.code(409).send({ error: 'txHash does not match payment intent' })
+      }
+      if (marker === 'rail_mismatch') {
+        return reply.code(409).send({ error: 'rail does not match payment intent' })
+      }
+      if (marker === 'resource_mismatch') {
+        return reply.code(409).send({ error: 'resourceUrl does not match payment intent' })
+      }
+      if (marker === 'unsupported_rail') {
+        return reply.code(400).send({ error: 'Unsupported evidence rail' })
+      }
+      if (marker === 'tx_hash_invalid') {
+        return reply.code(400).send({ error: 'txHash must be a 0x-prefixed transaction hash' })
+      }
+      if (marker === 'merchant_status_invalid') {
+        return reply.code(400).send({ error: 'merchantStatus must be an HTTP status code' })
+      }
+
+      throw err
+    }
   })
 
   app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', async (request, reply) => {

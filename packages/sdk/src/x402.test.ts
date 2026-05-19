@@ -172,7 +172,17 @@ describe('x402 helpers', () => {
         to: delegateAddress,
         explorer_url: 'https://basescan.org/tx/0xabc',
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': btoa(JSON.stringify({
+            success: true,
+            transaction: '0xabc',
+            network: accepted.network,
+          })),
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 }))
 
     const haven = new HavenClient({
       apiKey: 'sk_agent_test',
@@ -188,7 +198,7 @@ describe('x402 helpers', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
 
     const fundingInit = fetchMock.mock.calls[1][1] as RequestInit
     expect(JSON.parse(fundingInit.body as string)).toMatchObject({
@@ -217,6 +227,24 @@ describe('x402 helpers', () => {
           to: accepted.payTo,
           value: accepted.amount,
         },
+      },
+    })
+
+    expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/evidence`)
+    const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
+    expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
+      paymentId: 'pay_123',
+      rail: 'x402',
+      txHash: '0xabc',
+      resourceUrl,
+      merchantStatus: 200,
+      selectedPayment: accepted,
+      paymentProofHeaderName: 'X-PAYMENT',
+      protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
+      protocolReceiptPayload: {
+        success: true,
+        transaction: '0xabc',
+        network: accepted.network,
       },
     })
   })

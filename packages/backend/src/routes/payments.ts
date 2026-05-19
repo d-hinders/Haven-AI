@@ -11,6 +11,7 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
+import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -400,6 +401,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
             error: 'Payment intent changed after on-chain execution',
           })
         }
+
+        await tryRecordMachinePaymentEvidenceBaseById(id, agent.id, request.log)
 
         return reply.send({
           payment_id: id,

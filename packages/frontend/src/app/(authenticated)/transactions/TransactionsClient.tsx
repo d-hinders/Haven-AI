@@ -6,6 +6,10 @@ import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
+import {
+  buildTransactionScopeSubtitle,
+  buildTransactionSummary,
+} from '@/lib/transaction-scope'
 import type { TransactionFilterState } from '@/types/transactions'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
@@ -63,12 +67,36 @@ export default function TransactionsClient() {
   }, [transactions, filters.direction])
 
   const safeNamesById = new Map(safes.map((safe) => [safe.id, safe.name]))
+  const agentNamesById = new Map(agents.map((agent) => [agent.id, agent.name]))
+  const tokenSymbolsByKey = new Map(tokens.map((token) => [token.key, token.symbol]))
   const safeNamesByAddress = new Map(
     userSafes.map((safe) => [safe.safe_address.toLowerCase(), safe.name]),
   )
   const failedSafeNames = failedSafeIds
     .map((id) => safeNamesById.get(id))
     .filter((name): name is string => Boolean(name))
+
+  // Plain-English page subtitle that reflects the active filter scope. When
+  // the user lands here from the "View all →" link on an account or agent
+  // detail page, this turns the static "All activity across your accounts."
+  // line into "Transactions for {accountName}" so the view feels intentional.
+  const subtitle = useMemo(
+    () =>
+      buildTransactionScopeSubtitle(filters, {
+        accountNamesById: safeNamesById,
+        agentNamesById,
+        tokenSymbolsByKey,
+      }),
+    [filters, safeNamesById, agentNamesById, tokenSymbolsByKey],
+  )
+
+  // Cheap summary stats — count by direction over what's currently loaded.
+  // See `buildTransactionSummary` for the mutually-exclusive bucket rule.
+  const summary = useMemo(
+    () => buildTransactionSummary(visibleTransactions),
+    [visibleTransactions],
+  )
+  const showSummary = hasActiveFilters && visibleTransactions.length > 0
   const handleFilterChange = (nextFilters: TransactionFilterState) => {
     setFilters(nextFilters)
 
@@ -82,12 +110,16 @@ export default function TransactionsClient() {
     router.replace(query ? `/transactions?${query}` : '/transactions', { scroll: false })
   }
 
+  const handleClearFilters = () => {
+    handleFilterChange({})
+  }
+
   if (!hasSafes) {
     return (
       <div className="max-w-5xl">
         <PageHeader
           title="Transaction history"
-          subtitle="Payments and account activity across your Haven wallets."
+          subtitle="All activity across your accounts."
         />
 
         <EmptyState
@@ -101,10 +133,7 @@ export default function TransactionsClient() {
 
   return (
     <div className="max-w-6xl">
-      <PageHeader
-        title="Transaction history"
-        subtitle="Payments and account activity across your Haven wallets."
-      />
+      <PageHeader title="Transaction history" subtitle={subtitle} />
 
       {partialFailure && (
         <div className="mb-4 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
@@ -128,16 +157,40 @@ export default function TransactionsClient() {
         onChange={handleFilterChange}
       />
 
-      <div className="mt-5 mb-3 flex items-center justify-between gap-4">
-        <span className="text-xs text-[var(--v2-ink-3)]">
-          {loadingInitial ? (
-            'Loading transactions...'
-          ) : (
+      <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--v2-ink-3)]">
+          <span>
+            {loadingInitial ? (
+              'Loading transactions...'
+            ) : (
+              <>
+                <span className="v2-tabular">{visibleTransactions.length}</span> transaction
+                {visibleTransactions.length !== 1 ? 's' : ''}
+              </>
+            )}
+          </span>
+          {showSummary ? (
             <>
-              <span className="v2-tabular">{visibleTransactions.length}</span> transaction{visibleTransactions.length !== 1 ? 's' : ''}
+              <span aria-hidden="true">·</span>
+              <span>
+                <span className="v2-tabular font-medium text-[var(--v2-success)]">{summary.received}</span> received
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>
+                <span className="v2-tabular font-medium text-[var(--v2-debit)]">{summary.sent}</span> sent
+              </span>
+              {summary.failed > 0 ? (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    <span className="v2-tabular font-medium text-[var(--v2-danger)]">{summary.failed}</span> failed
+                  </span>
+                </>
+              ) : null}
+              {hasMore ? <span className="text-[var(--v2-ink-3)]">(loaded results)</span> : null}
             </>
-          )}
-        </span>
+          ) : null}
+        </div>
         {!loadingInitial && hasMore && visibleTransactions.length > 0 && (
           <span className="text-xs text-[var(--v2-ink-3)]">
             Showing <span className="v2-tabular">{visibleTransactions.length}</span> of <span className="v2-tabular">{total}</span>
@@ -153,6 +206,7 @@ export default function TransactionsClient() {
         resolveAddress={resolveAddress}
         safeNamesByAddress={safeNamesByAddress}
         hasActiveFilters={hasActiveFilters}
+        onClearFilters={handleClearFilters}
       />
 
       {visibleTransactions.length > 0 && (
@@ -167,7 +221,7 @@ export default function TransactionsClient() {
               {loadingMore ? 'Loading...' : 'Load more'}
             </Button>
           ) : (
-            <span className="text-xs text-[var(--v2-ink-3)]">You&apos;ve reached the end.</span>
+            <span className="text-xs text-[var(--v2-ink-3)]">You&apos;ve reached the end</span>
           )}
         </div>
       )}

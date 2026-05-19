@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import {
   TransactionActivityRow,
+  type AmountTone,
   type TransactionActivityDetail,
   type TransactionActivityDirection,
 } from './TransactionActivityRow'
@@ -20,7 +21,7 @@ export function AgentActivityRow({
   title: string
   description: ReactNode
   amount: string
-  amountTone?: 'success' | 'danger' | 'neutral'
+  amountTone?: AmountTone
   status: string
   statusTone: 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
   timestamp?: string

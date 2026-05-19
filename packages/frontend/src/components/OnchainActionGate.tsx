@@ -48,12 +48,28 @@ export function OnchainActionNotice({
   const message = getOnchainActionBlockMessage(operationGate, noSignerMessage)
   if (!message) return null
 
+  // Quiet inline hint (info icon + ink-3 caption) rather than a yellow
+  // box. The yellow background made this read like an interactive
+  // element; downgrading to a passive caption keeps the user's eye on
+  // the disabled primary button below.
   return (
     <div
-      role="alert"
-      className={`rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-3 py-2 text-sm text-[var(--v2-warning)] ${className}`}
+      role="status"
+      className={`flex items-start gap-2 text-xs text-[var(--v2-ink-3)] ${className}`}
     >
-      {message}
+      <svg
+        aria-hidden="true"
+        className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.75}
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v5" strokeLinecap="round" />
+        <circle cx="12" cy="8" r="0.6" fill="currentColor" />
+      </svg>
+      <span>{message}</span>
     </div>
   )
 }

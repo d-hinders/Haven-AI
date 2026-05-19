@@ -102,6 +102,7 @@ describe('payment routes', () => {
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [] })
 
     const response = await app.inject({
       method: 'POST',
@@ -120,6 +121,88 @@ describe('payment routes', () => {
     expect(mockQuery.mock.calls[2][0]).toContain('expires_at > NOW()')
     expect(mockQuery.mock.calls[3][0]).toContain("status = 'submitted'")
     expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
+  })
+
+  it('creates base evidence after a protocol payment is confirmed', async () => {
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '1.00', eur: '0.92' })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [pendingIntent({
+          payment_rail: 'x402',
+          source: 'x402',
+          payment_resource_url: 'https://merchant.example/data',
+          merchant_address: RECIPIENT.toLowerCase(),
+          machine_idempotency_key: 'x402:test',
+        })],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({
+        rows: [pendingIntent({
+          status: 'confirmed',
+          tx_hash: TX_HASH,
+          payment_rail: 'x402',
+          source: 'x402',
+          payment_resource_url: 'https://merchant.example/data',
+          merchant_address: RECIPIENT.toLowerCase(),
+          machine_idempotency_key: 'x402:test',
+          confirmed_at: '2026-05-19T10:00:00.000Z',
+        })],
+      })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/payments/${PAYMENT_ID}/sign`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: SIGNATURE },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(mockQuery.mock.calls[4][0]).toContain('FROM payment_intents')
+    expect(mockQuery.mock.calls[5][0]).toContain('machine_payment_evidence')
+    expect(mockQuery.mock.calls[5][1]).toContain(PAYMENT_ID)
+    expect(mockQuery.mock.calls[5][1]).toContain('x402')
+    expect(mockQuery.mock.calls[5][1]).toContain(TX_HASH)
+  })
+
+  it('still returns confirmed when protocol evidence indexing fails', async () => {
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '1.00', eur: '0.92' })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [pendingIntent({
+          payment_rail: 'x402',
+          source: 'x402',
+          payment_resource_url: 'https://merchant.example/data',
+          merchant_address: RECIPIENT.toLowerCase(),
+          machine_idempotency_key: 'x402:test',
+        })],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockRejectedValueOnce(new Error('evidence table unavailable'))
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/payments/${PAYMENT_ID}/sign`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: SIGNATURE },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'confirmed',
+      tx_hash: TX_HASH,
+    })
   })
 
   it('does not execute when another request already claimed the payment intent', async () => {

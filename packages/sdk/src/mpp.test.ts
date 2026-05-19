@@ -102,7 +102,17 @@ describe('MPP demo helpers', () => {
         to: challenge.recipient,
         explorer_url: 'https://basescan.org/tx/0xabc',
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ paid: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ paid: true }), {
+        status: 200,
+        headers: {
+          'Payment-Receipt': JSON.stringify({
+            status: 'settled',
+            method: 'evm',
+            reference: 'pay_123',
+          }),
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 }))
 
     const haven = new HavenClient({
       apiKey: 'sk_agent_test',
@@ -113,7 +123,7 @@ describe('MPP demo helpers', () => {
     const response = await haven.fetch(resourceUrl)
 
     expect(response.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
 
     const authorizeInit = fetchMock.mock.calls[1][1] as RequestInit
     expect(fetchMock.mock.calls[1][0]).toBe(`${backendUrl}/machine-payments/authorize`)
@@ -132,6 +142,24 @@ describe('MPP demo helpers', () => {
       txHash: '0xabc',
       settledVia: 'haven',
       chainId: 8453,
+    })
+
+    expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/evidence`)
+    const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
+    expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
+      paymentId: 'pay_123',
+      rail: 'mpp_demo',
+      txHash: '0xabc',
+      resourceUrl,
+      merchantStatus: 200,
+      challengePayload: { challengeId: challenge.challengeId, rail: 'mpp_demo' },
+      paymentProofHeaderName: 'MACHINE-PAYMENT-PROOF',
+      protocolReceiptHeaderName: 'Payment-Receipt',
+      protocolReceiptPayload: {
+        status: 'settled',
+        method: 'evm',
+        reference: 'pay_123',
+      },
     })
   })
 

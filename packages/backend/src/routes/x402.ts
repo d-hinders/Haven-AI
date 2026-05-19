@@ -12,6 +12,7 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
+import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -557,6 +558,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
            WHERE id = $2`,
           [txHash, intent.id, fiatValues.usd, fiatValues.eur],
         )
+
+        await tryRecordMachinePaymentEvidenceBaseById(intent.id, agent.id, request.log)
 
         return reply.code(201).send({
           success: true,

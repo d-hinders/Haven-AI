@@ -19,6 +19,8 @@ export interface Transaction {
   source?: 'direct' | 'x402' | 'mpp_demo'
   x402ResourceUrl?: string | null
   x402MerchantAddress?: string | null
+  paymentId?: string
+  paymentProofStatus?: string | null
 }
 
 export interface AggregatedTransaction extends Transaction {

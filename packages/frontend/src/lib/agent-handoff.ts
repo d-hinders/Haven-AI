@@ -23,11 +23,6 @@ export interface HandoffAllowance {
   resetPeriodMin: number
 }
 
-export interface HandoffRecipient {
-  address: string
-  label?: string
-}
-
 export interface HandoffInput {
   agent: {
     id: string
@@ -40,8 +35,6 @@ export interface HandoffInput {
   }
   policy: {
     allowances: HandoffAllowance[]
-    restrictRecipients: boolean
-    allowedRecipients: HandoffRecipient[]
   }
   credentials: {
     apiKey: string
@@ -95,12 +88,17 @@ export function buildDotenv(input: HandoffInput): string {
     `# Haven credentials for "${agent.name}"`,
     `# Shown once at creation — cannot be recovered. Treat like a password.`,
     ``,
+    `HAVEN_AGENT_ID=${agent.id}`,
     `HAVEN_API_KEY=${credentials.apiKey}`,
+    `HAVEN_DELEGATE_ADDRESS=${agent.delegateAddress}`,
   ]
   if (credentials.delegatePrivateKey) {
     lines.push(`HAVEN_DELEGATE_KEY=${credentials.delegatePrivateKey}`)
+  } else {
+    lines.push(`# HAVEN_DELEGATE_KEY=<private key for ${agent.delegateAddress}>`)
   }
   lines.push(
+    `HAVEN_WALLET_ADDRESS=${agent.safeAddress}`,
     `HAVEN_SAFE_ADDRESS=${agent.safeAddress}`,
     `HAVEN_CHAIN_ID=${agent.chainId}`,
   )
@@ -120,10 +118,13 @@ function buildSdkExample(hasDelegateKey: boolean): string {
     return [
       `import { HavenClient } from '@haven_ai/sdk'`,
       ``,
+      `const delegateKey = process.env.HAVEN_DELEGATE_KEY`,
+      `if (!delegateKey) throw new Error('Set HAVEN_DELEGATE_KEY before making payments')`,
+      ``,
       `const haven = new HavenClient({`,
       `  apiKey: process.env.HAVEN_API_KEY!,`,
       `  // Load your delegate key however your app does it (KMS, vault, env):`,
-      `  delegateKey: process.env.HAVEN_DELEGATE_KEY!,`,
+      `  delegateKey,`,
       `  baseUrl: process.env.HAVEN_API_URL,`,
       `})`,
       ``,
@@ -139,9 +140,12 @@ function buildSdkExample(hasDelegateKey: boolean): string {
   return [
     `import { HavenClient } from '@haven_ai/sdk'`,
     ``,
+    `const delegateKey = process.env.HAVEN_DELEGATE_KEY`,
+    `if (!delegateKey) throw new Error('HAVEN_DELEGATE_KEY is not set')`,
+    ``,
     `const haven = new HavenClient({`,
     `  apiKey: process.env.HAVEN_API_KEY!,`,
-    `  delegateKey: process.env.HAVEN_DELEGATE_KEY!,`,
+    `  delegateKey,`,
     `  baseUrl: process.env.HAVEN_API_URL,`,
     `})`,
     ``,
@@ -153,6 +157,16 @@ function buildSdkExample(hasDelegateKey: boolean): string {
     `})`,
     ``,
     `console.log('Confirmed:', result.txHash)`,
+  ].join('\n')
+}
+
+function buildPaidApiExample(): string {
+  return [
+    `// Works with standard x402 and Haven machine-payment challenges.`,
+    `const response = await haven.fetch('https://paid-api.example/data')`,
+    `const data = await response.json()`,
+    ``,
+    `console.log(data)`,
   ].join('\n')
 }
 
@@ -170,7 +184,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
   }
 
   const hasDelegateKey = !!credentials.delegatePrivateKey
-  const revokeUrl = `${(appBaseUrl ?? 'https://app.haven.xyz').replace(/\/+$/, '')}/agents`
+  const revokeUrl = `${(appBaseUrl ?? 'https://haven-ai-frontend.vercel.app').replace(/\/+$/, '')}/agents`
 
   const policyLines: string[] = []
   if (policy.allowances.length === 0) {
@@ -181,22 +195,9 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
       policyLines.push(`  - ${a.amount} ${a.tokenSymbol} ${resetLabel(a.resetPeriodMin)}`)
     }
   }
-  if (policy.restrictRecipients) {
-    if (policy.allowedRecipients.length === 0) {
-      policyLines.push(
-        `- **Recipients:** allowlist enabled but empty — the agent cannot send anywhere until you add recipients.`,
-      )
-    } else {
-      policyLines.push(`- **Allowed recipients:**`)
-      for (const r of policy.allowedRecipients) {
-        policyLines.push(
-          `  - \`${r.address}\`${r.label ? ` — ${r.label}` : ''}`,
-        )
-      }
-    }
-  } else {
-    policyLines.push(`- **Recipients:** any address`)
-  }
+  policyLines.push(
+    `- **Over-budget payments:** queued for approval in the Haven dashboard.`,
+  )
 
   const credentialLines: string[] = [
     `**API key** — authenticates every request to Haven:`,
@@ -228,7 +229,8 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
   const markdown = ([
     `# Haven agent — ${agent.name}`,
     ``,
-    `Everything this agent needs to make payments via Haven. Keep this file private:`,
+    `Everything this agent needs to connect to Haven and make payments within your rules.`,
+    `Keep this file private:`,
     `it contains credentials that ${hasDelegateKey ? 'cannot be shown again' : 'authenticate the agent'}.`,
     ``,
     agent.description ? `> ${agent.description}` : null,
@@ -236,17 +238,17 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `## Identity`,
     ``,
     `- **Agent ID:** \`${agent.id}\``,
-    `- **Safe account:** \`${agent.safeAddress}\`${agent.safeName ? ` (${agent.safeName})` : ''}`,
-    `- **Delegate address:** \`${agent.delegateAddress}\``,
+    `- **Haven wallet:** \`${agent.safeAddress}\`${agent.safeName ? ` (${agent.safeName})` : ''}`,
+    `- **Credential address:** \`${agent.delegateAddress}\``,
     `- **Network:** ${chainName} (chain id \`${agent.chainId}\`)`,
     ``,
-    `## Policy`,
+    `## Agent rules`,
     ``,
     ...policyLines,
     ``,
-    `The Haven backend enforces this policy on every request. An agent presenting`,
-    `these credentials can only spend within these limits — losing them ≠ losing`,
-    `the Safe.`,
+    `Agent budgets are enforced before money moves. Payments above the`,
+    `remaining budget are queued for approval in the Haven dashboard instead`,
+    `of raising the agent's automatic limits.`,
     ``,
     `## Credentials`,
     ``,
@@ -274,6 +276,26 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     sdkExample,
     '```',
     ``,
+    `## Paid APIs and machine-payment requests`,
+    ``,
+    `Use \`haven.fetch()\` when an API may ask the agent to pay. The SDK handles`,
+    `standard x402 responses and Haven machine-payment challenges by paying`,
+    `within the agent rules, then retrying the request with the proof/header`,
+    `the API expects.`,
+    ``,
+    '```ts',
+    buildPaidApiExample(),
+    '```',
+    ``,
+    `## When a payment needs approval`,
+    ``,
+    `If a direct payment, x402 request, or machine-payment request is above the`,
+    `remaining budget, Haven queues it for approval instead of letting the agent`,
+    `spend automatically. The SDK surfaces this as a \`HavenApiError\` with`,
+    `HTTP status \`202\` and a payment id in the error body/message. Tell the`,
+    `user to approve or reject the queued payment in Haven; do not retry in a`,
+    `tight loop.`,
+    ``,
     `## First payment — sanity check`,
     ``,
     `Once the env vars are loaded, this one-liner should print a confirmed tx hash`,
@@ -289,12 +311,13 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     ``,
     `## Revoke`,
     ``,
-    `If this file leaks or the agent misbehaves, revoke it from the Haven dashboard:`,
+    `If this file leaks or the agent misbehaves, pause or revoke it from the Haven dashboard:`,
     ``,
     `${revokeUrl}`,
     ``,
-    `Revocation is instant and cannot be undone — you'll need to create a new`,
-    `agent to restore payments.`,
+    `Revoking the agent stops new Haven requests for this credential. Haven may`,
+    `also ask you to approve a network update to remove the agent budget from`,
+    `your wallet. Create a new agent to restore payments.`,
     ``,
     apiBaseUrl ? `---` : null,
     apiBaseUrl ? `` : null,

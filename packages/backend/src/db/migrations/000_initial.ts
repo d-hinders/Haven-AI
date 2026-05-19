@@ -142,7 +142,7 @@ export async function up(client: PoolClient): Promise<void> {
       id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       safe_address VARCHAR(42) NOT NULL,
-      name         VARCHAR(100) NOT NULL DEFAULT 'My Safe',
+      name         VARCHAR(100) NOT NULL DEFAULT 'My account',
       is_default   BOOLEAN NOT NULL DEFAULT false,
       created_at   TIMESTAMPTZ DEFAULT NOW(),
       updated_at   TIMESTAMPTZ DEFAULT NOW(),
@@ -155,7 +155,7 @@ export async function up(client: PoolClient): Promise<void> {
     ALTER TABLE agents ADD COLUMN IF NOT EXISTS safe_id UUID;
 
     INSERT INTO user_safes (user_id, safe_address, name, is_default)
-    SELECT id, safe_address, 'My Safe', true
+    SELECT id, safe_address, 'My account', true
     FROM users
     WHERE safe_address IS NOT NULL
       AND NOT EXISTS (

@@ -1,42 +1,64 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
-import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
-import { type Address, parseUnits, hashTypedData } from 'viem'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { usePublicClient } from 'wagmi'
+import { type Address, parseUnits } from 'viem'
 import {
+  buildDeleteAllowanceTx,
   buildSetAllowanceTx,
   RESET_PERIODS,
   type AllowanceInfo,
 } from '@/lib/allowance-module'
+import ConfirmDialog from './ConfirmDialog'
 import { api } from '@/lib/api'
-import { useAuth } from '@/context/AuthContext'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
-import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
+import { validateMoneyInput } from '@/lib/money-input'
+import OnchainActionGate, { OnchainActionNotice } from './OnchainActionGate'
 import {
   getSafeNonce,
   signSafeTx,
   executeSafeTx,
   proposeSafeTx,
+  getSafeTxHash,
   getChainTokens,
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
 import type { Agent } from '@/hooks/useAgents'
-import { truncate } from '@/lib/format'
+import { useActiveSigner } from '@/lib/signer'
+import { SigningStatus } from './SigningStatus'
+import { Button } from './ui/Button'
+import { Input } from './ui/Input'
+import { Select } from './ui/Select'
+import { useToast } from './ui/Toast'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 // ── Types ──────────────────────────────────────────────────────────
 
 type Step = 'form' | 'review' | 'executing' | 'done'
 type ExecutionStatus = 'signing' | 'executing' | 'saving' | 'confirmed' | 'proposed' | 'error'
 
+/**
+ * `'all'` — default; renders name + description AND budget fields together.
+ *   Keeps full backwards-compat with the original Edit flow.
+ * `'agent'` — only name + description. Used by the detail-page kebab's
+ *   "Edit agent" entry.
+ * `'budget'` — only token / amount / reset-period. Used by the detail-page
+ *   kebab's "Update budget" entry.
+ */
+export type EditAgentModalMode = 'all' | 'agent' | 'budget'
+
 interface Props {
   open: boolean
   onClose: () => void
   agent: Agent
   safeAddress: string
+  chainId: number
   safeDetails: SafeDetails | null
   existingOnChainAllowances: AllowanceInfo[] | null
   onUpdated: () => void
+  mode?: EditAgentModalMode
 }
 
 // ── Component ──────────────────────────────────────────────────────
@@ -46,12 +68,16 @@ export default function EditAgentModal({
   onClose,
   agent,
   safeAddress,
+  chainId,
   safeDetails,
   existingOnChainAllowances,
   onUpdated,
+  mode = 'all',
 }: Props) {
-  const { activeSafe } = useAuth()
-  const chainId = activeSafe?.chain_id ?? 100
+  const showAgentFields = mode === 'all' || mode === 'agent'
+  const showBudgetFields = mode === 'all' || mode === 'budget'
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, open)
   const chainTokens = getChainTokens(chainId)
   const tokenOptions = Object.entries(chainTokens).map(([symbol, cfg]) => ({
     symbol,
@@ -65,42 +91,56 @@ export default function EditAgentModal({
   const [step, setStep] = useState<Step>('form')
 
   // Form state
+  const [agentName, setAgentName] = useState(agent.name)
+  const [agentDescription, setAgentDescription] = useState(agent.description ?? '')
   const [selectedToken, setSelectedToken] = useState<string>(defaultToken)
   const [amount, setAmount] = useState('')
   const [resetTimeMin, setResetTimeMin] = useState(1440)
-  const [approvalThreshold, setApprovalThreshold] = useState('')
-
-  // Recipient allowlist state
-  const [restrictRecipients, setRestrictRecipients] = useState(agent.restrict_recipients ?? false)
-  const [allowedRecipients, setAllowedRecipients] = useState<RecipientEntry[]>(
-    (agent.allowed_recipients ?? []).map((r) => ({ address: r.address, label: r.label ?? undefined })),
-  )
-  const [recipientsSaving, setRecipientsSaving] = useState(false)
-  const [recipientsSaved, setRecipientsSaved] = useState(false)
 
   // Execution
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('signing')
   const [execError, setExecError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
 
-  // Wagmi
-  const { address: connectedAddress } = useAccount()
-  const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  // Per-row remove flow — independent of the add/update form. We keep the
+  // pending-removal token in state so the confirm dialog can address the
+  // user with the specific token name before any on-chain call happens.
+  const [pendingRemoval, setPendingRemoval] = useState<{
+    token: Address
+    symbol: string
+  } | null>(null)
+  const [isRemoving, setIsRemoving] = useState(false)
 
-  // Tokens already configured on-chain for this delegate
-  const existingTokenAddrs = useMemo(() => {
-    const set = new Set<string>()
+  // Wagmi
+  const publicClient = usePublicClient({ chainId })
+  const signer = useActiveSigner({
+    safeAddress: safeAddress as Address,
+    chainId,
+  })
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddress as Address,
+    chainId,
+  })
+  const budgetApprovalMessage = 'Connect a wallet to update this agent budget.'
+  const { toast } = useToast()
+
+  // Tokens already configured on-chain for this delegate, matched by both
+  // address and symbol so native-token entries (where one side stores the
+  // ERC-20 wrapper address and the other stores the native sentinel) still
+  // resolve as "existing".
+  const existingTokenKeys = useMemo(() => {
+    const addrs = new Set<string>()
+    const symbols = new Set<string>()
     if (existingOnChainAllowances) {
       for (const a of existingOnChainAllowances) {
-        set.add(a.token.toLowerCase())
+        addrs.add(a.token.toLowerCase())
       }
     }
-    // Also include DB allowances as fallback
     for (const a of agent.allowances) {
-      set.add(a.token_address.toLowerCase())
+      if (a.token_address) addrs.add(a.token_address.toLowerCase())
+      if (a.token_symbol) symbols.add(a.token_symbol)
     }
-    return set
+    return { addrs, symbols }
   }, [existingOnChainAllowances, agent.allowances])
 
   // Available tokens = all tokens (can add new or update existing)
@@ -108,26 +148,60 @@ export default function EditAgentModal({
 
   const selectedTokenConfig = tokenOptions.find((t) => t.symbol === selectedToken)
   const tokenAddress = selectedTokenConfig?.address ?? '0x0000000000000000000000000000000000000000'
-  const isExistingToken = existingTokenAddrs.has(tokenAddress.toLowerCase())
+  // Match by either address or symbol — handles the native-token edge case
+  // where the saved record uses a different sentinel/address shape than the
+  // current token config. In `'budget'` mode the modal was opened from the
+  // detail page's "Update budget" kebab entry, so the user's mental model
+  // is "update" regardless of token choice — bias the label accordingly.
+  const matchesExistingByAddr = existingTokenKeys.addrs.has(tokenAddress.toLowerCase())
+  const matchesExistingBySymbol = existingTokenKeys.symbols.has(selectedToken)
+  const isExistingToken =
+    matchesExistingByAddr ||
+    matchesExistingBySymbol ||
+    (mode === 'budget' && agent.allowances.length > 0)
+  const trimmedName = agentName.trim()
+  const trimmedDescription = agentDescription.trim()
+  const detailsChanged =
+    trimmedName !== agent.name ||
+    trimmedDescription !== (agent.description ?? '')
+  const hasBudgetInput = amount.trim().length > 0
+  const budgetValidation =
+    hasBudgetInput && selectedTokenConfig
+      ? validateMoneyInput(amount, selectedTokenConfig.decimals, {
+          tokenSymbol: selectedTokenConfig.symbol,
+        })
+      : null
+  const budgetDisplayAmount = budgetValidation?.ok ? budgetValidation.amount : amount
+  const budgetChanged = budgetValidation?.ok ?? false
+  const hasInvalidBudget = hasBudgetInput && !budgetChanged
+  // Step-gate logic per mode:
+  //   'agent'  — name is required, budget is hidden, so we just need details to differ.
+  //   'budget' — budget is required, name/description is hidden.
+  //   'all'    — either change is enough, name still required.
+  const canReview =
+    mode === 'budget'
+      ? !hasInvalidBudget && budgetChanged
+      : trimmedName.length > 0 &&
+        !hasInvalidBudget &&
+        (detailsChanged || (showBudgetFields && budgetChanged))
 
   // ── Reset ──────────────────────────────────────────────
 
   const resetForm = useCallback(() => {
     setStep('form')
+    setAgentName(agent.name)
+    setAgentDescription(agent.description ?? '')
     setSelectedToken(defaultToken)
     setAmount('')
     setResetTimeMin(1440)
-    setApprovalThreshold('')
-    setRestrictRecipients(agent.restrict_recipients ?? false)
-    setAllowedRecipients(
-      (agent.allowed_recipients ?? []).map((r) => ({ address: r.address, label: r.label ?? undefined })),
-    )
-    setRecipientsSaving(false)
-    setRecipientsSaved(false)
     setExecStatus('signing')
     setExecError(null)
     setTxHash(null)
-  }, [])
+  }, [agent.description, agent.name, defaultToken])
+
+  useEffect(() => {
+    if (open) resetForm()
+  }, [open, resetForm])
 
   const handleClose = useCallback(() => {
     resetForm()
@@ -140,109 +214,94 @@ export default function EditAgentModal({
   // ── Execute ────────────────────────────────────────────
 
   async function handleExecute() {
-    if (!publicClient || !walletClient || !connectedAddress || !safeDetails || !selectedTokenConfig) return
-    if (!amount || Number(amount) <= 0) return
+    if (!canReview) return
+    if (budgetChanged && (!publicClient || !signer || !safeDetails || !selectedTokenConfig)) return
 
+    setExecStatus(budgetChanged ? 'signing' : 'saving')
     setStep('executing')
     setExecError(null)
 
     try {
-      const rawAmount = parseUnits(amount, selectedTokenConfig.decimals)
-      const token = (selectedTokenConfig.address ?? '0x0000000000000000000000000000000000000000') as Address
+      let threshold = safeDetails?.threshold ?? 1
 
-      // Build Safe tx
-      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
-      const safeTx = buildSetAllowanceTx(
-        agent.delegate_address as Address,
-        token,
-        rawAmount,
-        resetTimeMin,
-        nonce,
-      )
-
-      // Sign
-      setExecStatus('signing')
-      const signature = await signSafeTx(
-        walletClient,
-        safeAddress as Address,
-        safeTx,
-        connectedAddress,
-        chainId,
-      )
-
-      const threshold = safeDetails.threshold ?? 1
-
-      if (threshold <= 1) {
-        setExecStatus('executing')
-        const result = await executeSafeTx(
-          walletClient,
-          publicClient,
-          safeAddress as Address,
-          safeTx,
-          signature,
-          connectedAddress,
-          chainId,
-        )
-        setTxHash(result.txHash)
-      } else {
-        setExecStatus('executing')
-        const safeTxHash = hashTypedData({
-          domain: {
-            chainId,
-            verifyingContract: safeAddress as Address,
-          },
-          types: {
-            SafeTx: [
-              { name: 'to', type: 'address' },
-              { name: 'value', type: 'uint256' },
-              { name: 'data', type: 'bytes' },
-              { name: 'operation', type: 'uint8' },
-              { name: 'safeTxGas', type: 'uint256' },
-              { name: 'baseGas', type: 'uint256' },
-              { name: 'gasPrice', type: 'uint256' },
-              { name: 'gasToken', type: 'address' },
-              { name: 'refundReceiver', type: 'address' },
-              { name: 'nonce', type: 'uint256' },
-            ],
-          },
-          primaryType: 'SafeTx',
-          message: {
-            to: safeTx.to,
-            value: safeTx.value,
-            data: safeTx.data,
-            operation: safeTx.operation,
-            safeTxGas: safeTx.safeTxGas,
-            baseGas: safeTx.baseGas,
-            gasPrice: safeTx.gasPrice,
-            gasToken: safeTx.gasToken,
-            refundReceiver: safeTx.refundReceiver,
-            nonce: safeTx.nonce,
-          },
+      if (budgetChanged && selectedTokenConfig && publicClient && signer && safeDetails) {
+        const parsedAmount = validateMoneyInput(amount, selectedTokenConfig.decimals, {
+          tokenSymbol: selectedTokenConfig.symbol,
         })
-        await proposeSafeTx(
+        if (!parsedAmount.ok) {
+          setExecError(parsedAmount.message)
+          setExecStatus('error')
+          return
+        }
+        const rawAmount = parseUnits(parsedAmount.amount, selectedTokenConfig.decimals)
+        const token = (selectedTokenConfig.address ?? '0x0000000000000000000000000000000000000000') as Address
+
+        // Build Safe tx
+        const nonce = await getSafeNonce(publicClient, safeAddress as Address)
+        const safeTx = buildSetAllowanceTx(
+          agent.delegate_address as Address,
+          token,
+          rawAmount,
+          resetTimeMin,
+          nonce,
+        )
+
+        // Sign
+        setExecStatus('signing')
+        const signature = await signSafeTx(
+          signer,
           safeAddress as Address,
           safeTx,
-          safeTxHash,
-          signature,
-          connectedAddress,
           chainId,
         )
-        setTxHash(safeTxHash)
+
+        threshold = safeDetails.threshold ?? 1
+
+        if (threshold <= 1) {
+          setExecStatus('executing')
+          const result = await executeSafeTx(
+            signer,
+            publicClient,
+            safeAddress as Address,
+            safeTx,
+            signature,
+            chainId,
+          )
+          setTxHash(result.txHash)
+        } else {
+          setExecStatus('executing')
+          const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
+          await proposeSafeTx(
+            safeAddress as Address,
+            safeTx,
+            safeTxHash,
+            signature,
+            signer.address,
+            chainId,
+          )
+          setTxHash(safeTxHash)
+        }
+
+        // Save budget to Haven backend
+        setExecStatus('saving')
+        await api.post(`/agents/${agent.id}/allowances`, {
+            token_address: tokenAddress,
+            token_symbol: selectedTokenConfig.symbol,
+            allowance_amount: rawAmount.toString(),
+            reset_period_min: resetTimeMin,
+          })
+      } else {
+        setExecStatus('saving')
       }
 
-      // Save to Haven backend
-      setExecStatus('saving')
-      await api.post(`/agents/${agent.id}/allowances`, {
-          token_address: tokenAddress,
-          token_symbol: selectedTokenConfig.symbol,
-          allowance_amount: rawAmount.toString(),
-          reset_period_min: resetTimeMin,
-          approval_threshold: approvalThreshold && Number(approvalThreshold) > 0
-            ? parseUnits(approvalThreshold, selectedTokenConfig.decimals).toString()
-            : null,
+      if (detailsChanged) {
+        await api.put(`/agents/${agent.id}`, {
+          name: trimmedName,
+          description: trimmedDescription,
         })
+      }
 
-      setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
+      setExecStatus(budgetChanged && threshold > 1 ? 'proposed' : 'confirmed')
       setStep('done')
       onUpdated()
     } catch (err: unknown) {
@@ -259,13 +318,93 @@ export default function EditAgentModal({
         if (short) message = short
       }
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
-        setExecError('Transaction rejected in wallet')
+        setExecError(
+          signer?.type === 'passkey'
+            ? 'Face ID or Touch ID was cancelled'
+            : 'Transaction rejected in wallet',
+        )
       } else {
         setExecError(message)
       }
       setExecStatus('error')
     }
   }
+
+  // ── Remove a single token allowance ────────────────────
+
+  const confirmRemoval = useCallback(async () => {
+    if (!pendingRemoval) return
+    if (!publicClient || !signer || !safeDetails) {
+      toast.error('Connect a wallet to remove this budget.')
+      return
+    }
+
+    setIsRemoving(true)
+    try {
+      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
+      const safeTx = buildDeleteAllowanceTx(
+        agent.delegate_address as Address,
+        pendingRemoval.token,
+        nonce,
+      )
+
+      const signature = await signSafeTx(
+        signer,
+        safeAddress as Address,
+        safeTx,
+        chainId,
+      )
+
+      const threshold = safeDetails.threshold ?? 1
+      if (threshold <= 1) {
+        await executeSafeTx(
+          signer,
+          publicClient,
+          safeAddress as Address,
+          safeTx,
+          signature,
+          chainId,
+        )
+      } else {
+        const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
+        await proposeSafeTx(
+          safeAddress as Address,
+          safeTx,
+          safeTxHash,
+          signature,
+          signer.address,
+          chainId,
+        )
+      }
+
+      // Mirror the on-chain removal in Haven's DB. Encode the token address
+      // explicitly to keep native-token sentinels safe.
+      await api.delete(
+        `/agents/${agent.id}/allowances/${encodeURIComponent(pendingRemoval.token)}`,
+      )
+
+      toast.success(`${pendingRemoval.symbol} budget removed`)
+      setPendingRemoval(null)
+      onUpdated()
+    } catch (err) {
+      console.error('[Haven] Remove allowance error:', err)
+      const message = err instanceof Error ? err.message : 'Could not remove budget.'
+      toast.error(message.length > 120 ? 'Could not remove budget.' : message)
+    } finally {
+      setIsRemoving(false)
+    }
+  }, [
+    agent.delegate_address,
+    agent.id,
+    chainId,
+    onUpdated,
+    pendingRemoval,
+    publicClient,
+    safeAddress,
+    safeDetails,
+    signer,
+    toast,
+  ])
 
   // ── Render ─────────────────────────────────────────────
 
@@ -276,27 +415,35 @@ export default function EditAgentModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 v2-modal-backdrop">
       <div
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div className="relative bg-[#0e0e0e] border border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Edit agent" className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)]">
           <div>
-            <h2 className="text-sm font-semibold">Edit Agent: {agent.name}</h2>
-            <p className="text-xs text-zinc-600 mt-0.5">
-              {step === 'form' && 'Add or update a spending limit'}
-              {step === 'review' && 'Review on-chain changes'}
-              {step === 'executing' && 'Updating on-chain...'}
-              {step === 'done' && 'Allowance updated'}
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">
+              {mode === 'budget' ? 'Update budget' : 'Edit agent'}
+            </h2>
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              {step === 'form' &&
+                (mode === 'budget'
+                  ? 'Change the budget you let this agent spend.'
+                  : mode === 'agent'
+                    ? 'Rename the agent or change its description.'
+                    : 'Update agent details or budget.')}
+              {step === 'review' && 'Review the change before confirming.'}
+              {step === 'executing' && 'Updating…'}
+              {step === 'done' && 'Updated successfully.'}
             </p>
           </div>
           <button
             onClick={handleClose}
             disabled={step === 'executing' && execStatus !== 'error'}
-            className="text-zinc-700 hover:text-zinc-400 disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 -mr-1"
+            aria-label="Close"
+            className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 -mr-1"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -309,20 +456,78 @@ export default function EditAgentModal({
           {/* ── STEP: Form ─────────────────────────────── */}
           {step === 'form' && (
             <div className="space-y-5">
+              {showAgentFields && (
+                <div className="space-y-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
+                      Agent name
+                    </label>
+                    <Input
+                      value={agentName}
+                      onChange={(e) => setAgentName(e.target.value)}
+                      placeholder="e.g. Research Agent"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
+                      Description <span className="text-[var(--v2-ink-3)]">(optional)</span>
+                    </label>
+                    <textarea
+                      value={agentDescription}
+                      onChange={(e) => setAgentDescription(e.target.value)}
+                      placeholder="What does this agent do?"
+                      rows={2}
+                      className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-[10px] px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Existing allowances summary */}
-              {existingOnChainAllowances && existingOnChainAllowances.length > 0 && (
+              {showBudgetFields && existingOnChainAllowances && existingOnChainAllowances.length > 0 && (
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-2">
-                    Current on-chain allowances
+                  <p className="mb-2 text-xs font-medium text-[var(--v2-ink-3)]">
+                    Current agent budgets
                   </p>
                   <div className="space-y-1">
                     {existingOnChainAllowances.map((a) => {
                       const sym = tokenSymbolFromAddr(a.token, chainId)
                       const dec = tokenDecimalsFromAddr(a.token, chainId)
                       return (
-                        <div key={a.token} className="flex items-center justify-between text-xs p-2 bg-white/[0.03] rounded-lg border border-white/[0.06]">
-                          <span className="text-zinc-300 font-medium">{sym}</span>
-                          <span className="text-zinc-500">{formatAmountShort(a.amount, dec)} / {resetLabel(a.resetTimeMin).toLowerCase()}</span>
+                        <div
+                          key={a.token}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-2 text-xs"
+                        >
+                          <span className="font-medium text-[var(--v2-ink)]">{sym}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[var(--v2-ink-3)]">
+                              {formatAmountShort(a.amount, dec)} / {resetLabel(a.resetTimeMin).toLowerCase()}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPendingRemoval({ token: a.token as Address, symbol: sym })
+                              }
+                              disabled={isRemoving}
+                              aria-label={`Remove ${sym} budget`}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <svg
+                                aria-hidden="true"
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                          </div>
                         </div>
                       )
                     })}
@@ -331,124 +536,94 @@ export default function EditAgentModal({
               )}
 
               {/* Add / update allowance */}
-              <div className="space-y-3 p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">
-                  {isExistingToken ? 'Update spending limit' : 'Add new spending limit'}
+              {showBudgetFields && (
+              <div className="space-y-3 p-4 bg-[var(--v2-surface)] rounded-xl border border-dashed border-[var(--v2-border)]">
+                <p className="text-xs font-medium text-[var(--v2-ink-3)]">
+                  {isExistingToken ? 'Update agent budget' : 'Add new agent budget'}
                 </p>
                 <div className="grid grid-cols-3 gap-2">
-                  <select
+                  <Select
                     value={selectedToken}
                     onChange={(e) => setSelectedToken(e.target.value)}
-                    className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
                   >
                     {availableTokens.map((t) => (
                       <option key={t.symbol} value={t.symbol}>
                         {t.symbol}
                       </option>
                     ))}
-                  </select>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
+                  </Select>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (/^\d*\.?\d*$/.test(value)) setAmount(value)
+                    }}
                     placeholder="Amount"
-                    className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
+                    invalid={hasInvalidBudget}
+                    helperText={hasInvalidBudget && budgetValidation && !budgetValidation.ok ? budgetValidation.message : undefined}
+                    className="v2-tabular"
                   />
-                  <select
+                  <Select
                     value={resetTimeMin}
                     onChange={(e) => setResetTimeMin(Number(e.target.value))}
-                    className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
                   >
                     {RESET_PERIODS.map((p) => (
                       <option key={p.value} value={p.value}>
                         {p.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
-                {isExistingToken && (
-                  <p className="text-[11px] text-amber-400/70">
-                    This will replace the existing {selectedToken} allowance on-chain
+                {(matchesExistingByAddr || matchesExistingBySymbol) && (
+                  <p className="text-xs text-[var(--v2-ink-2)]">
+                    This will replace the existing {selectedToken} budget for this agent.
                   </p>
                 )}
-
-                {/* Approval threshold */}
-                <div className="pt-2 border-t border-white/[0.06]">
-                  <label className="block text-[11px] text-zinc-500 mb-1.5">
-                    Approval threshold (optional)
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={approvalThreshold}
-                      onChange={(e) => setApprovalThreshold(e.target.value)}
-                      placeholder={`e.g. 10`}
-                      className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
-                    />
-                    <span className="text-xs text-zinc-600">{selectedToken}</span>
-                  </div>
-                  <p className="text-[10px] text-zinc-700 mt-1">
-                    Payments above this amount require your approval in the dashboard.
-                    Leave empty for no approval requirement.
+                {hasInvalidBudget && (
+                  <p className="text-xs text-[var(--v2-danger)]">
+                    Enter a budget amount greater than zero, or leave the amount blank to edit details only.
                   </p>
-                </div>
+                )}
               </div>
+              )}
 
-              {/* Recipient allowlist */}
-              <div className="p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
-                <RecipientAllowlistEditor
-                  enabled={restrictRecipients}
-                  onToggle={setRestrictRecipients}
-                  recipients={allowedRecipients}
-                  onChange={setAllowedRecipients}
-                />
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    onClick={async () => {
-                      setRecipientsSaving(true)
-                      setRecipientsSaved(false)
-                      try {
-                        await api.put(`/agents/${agent.id}`, {
-                            restrict_recipients: restrictRecipients,
-                            allowed_recipients: restrictRecipients ? allowedRecipients : [],
-                          })
-                        setRecipientsSaved(true)
-                        setTimeout(() => setRecipientsSaved(false), 2000)
-                      } catch {
-                        // ignore
-                      } finally {
-                        setRecipientsSaving(false)
-                      }
-                    }}
-                    disabled={recipientsSaving}
-                    className="text-xs font-medium text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors"
-                  >
-                    {recipientsSaving ? 'Saving...' : recipientsSaved ? 'Saved!' : 'Save recipients'}
-                  </button>
-                  <p className="text-[10px] text-zinc-700">
-                    Recipients are saved to Haven (no on-chain tx needed)
-                  </p>
-                </div>
-              </div>
+              {showBudgetFields && (
+                <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                  Payments that exceed this agent budget are queued for your approval in
+                  the dashboard — no separate threshold to configure.
+                </p>
+              )}
+
+              {/* Hint when nothing has changed yet — explains why the
+                  Review button is disabled. Important in 'agent' mode where
+                  there's no budget field to discover. */}
+              {!canReview && !hasInvalidBudget ? (
+                <p className="text-xs text-[var(--v2-ink-3)]">
+                  {mode === 'budget'
+                    ? 'Enter a new budget amount to continue.'
+                    : mode === 'agent'
+                      ? 'Edit the name or description to continue.'
+                      : 'Make a change to continue.'}
+                </p>
+              ) : null}
 
               <div className="flex gap-3">
-                <button
+                <Button
+                  variant="ghost"
                   onClick={handleClose}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => setStep('review')}
-                  disabled={!amount || Number(amount) <= 0}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  disabled={!canReview}
+                  className="flex-1"
                 >
-                  Review
-                </button>
+                  Review changes
+                </Button>
               </div>
             </div>
           )}
@@ -456,53 +631,95 @@ export default function EditAgentModal({
           {/* ── STEP: Review ──────────────────────────── */}
           {step === 'review' && (
             <div className="space-y-5">
-              <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-3">
+              <div className="bg-[var(--v2-surface)] rounded-xl p-4 border border-[var(--v2-border)] space-y-3">
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Agent</p>
-                  <p className="text-sm text-zinc-200 font-medium">{agent.name}</p>
+                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Agent</p>
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">{trimmedName}</p>
+                  {trimmedDescription ? (
+                    <p className="mt-1 text-xs text-[var(--v2-ink-2)]">{trimmedDescription}</p>
+                  ) : null}
                 </div>
-                <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">Delegate</p>
-                  <p className="text-xs font-mono text-zinc-400">{truncate(agent.delegate_address!)}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                    {isExistingToken ? 'Update allowance' : 'New allowance'}
-                  </p>
-                  <p className="text-sm text-zinc-200">
-                    {amount} {selectedToken}
-                    <span className="text-zinc-600 ml-2">{resetLabel(resetTimeMin)}</span>
-                  </p>
-                </div>
+                {showAgentFields && detailsChanged && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Details</p>
+                    <p className="text-xs text-[var(--v2-ink-2)]">Name and description will update in Haven.</p>
+                  </div>
+                )}
+                {showBudgetFields && budgetChanged && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">
+                      {isExistingToken ? 'Updated budget' : 'New budget'}
+                    </p>
+                    <p className="text-sm text-[var(--v2-ink)]">
+                      {budgetDisplayAmount} {selectedToken}
+                      <span className="ml-2 text-[var(--v2-ink-3)]">{resetLabel(resetTimeMin)}</span>
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <div className="space-y-2">
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">On-chain action</p>
-                <p className="flex items-center gap-2 text-xs text-zinc-400">
-                  <span className="w-1 h-1 rounded-full bg-indigo-400" />
-                  {isExistingToken ? 'Update' : 'Set'} {amount} {selectedToken} allowance for {truncate(agent.delegate_address!)} ({resetLabel(resetTimeMin).toLowerCase()})
-                </p>
-              </div>
-
-              {(safeDetails?.threshold ?? 1) > 1 && (
-                <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/10 rounded-lg px-3 py-2">
-                  Multi-sig Safe ({safeDetails?.threshold}/{safeDetails?.owners?.length}) — this will be proposed for co-signer approval.
+              {showBudgetFields && budgetChanged && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-[var(--v2-ink-3)]">Wallet rule change</p>
+                  <p className="flex items-center gap-2 text-xs text-[var(--v2-ink-2)]">
+                    <span className="w-1 h-1 rounded-full bg-[var(--v2-brand)]" />
+                    {isExistingToken ? 'Update' : 'Set'} {budgetDisplayAmount} {selectedToken} budget for this agent ({resetLabel(resetTimeMin).toLowerCase()})
+                  </p>
                 </div>
               )}
 
+              {budgetChanged && (safeDetails?.threshold ?? 1) > 1 && (
+                <div className="text-xs text-[var(--v2-warning)] bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg px-3 py-2">
+                  This account requires {safeDetails?.threshold} of {safeDetails?.owners?.length} approvals. Haven will submit it for approval.
+                </div>
+              )}
+
+              {/* Render the gate notice above the Cancel/Confirm row so the
+                  caption doesn't push the Confirm button out of line with
+                  the Back button (which would happen if the gate rendered
+                  it inline inside the flex-1 wrapper). */}
+              {budgetChanged ? (
+                <OnchainActionNotice
+                  operationGate={operationGate}
+                  noSignerMessage={budgetApprovalMessage}
+                />
+              ) : null}
+
               <div className="flex gap-3">
-                <button
+                <Button
+                  variant="ghost"
                   onClick={() => setStep('form')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1"
                 >
                   Back
-                </button>
-                <button
-                  onClick={handleExecute}
-                  className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20"
-                >
-                  {isExistingToken ? 'Update Allowance' : 'Add Allowance'}
-                </button>
+                </Button>
+                <div className="flex-1">
+                  {budgetChanged ? (
+                    <OnchainActionGate
+                      requiredChainId={chainId}
+                      operationGate={operationGate}
+                      noSignerMessage={budgetApprovalMessage}
+                      showNotice={false}
+                    >
+                      {({ disabled }) => (
+                      <Button
+                        onClick={handleExecute}
+                        disabled={disabled || !publicClient || !signer || !safeDetails || !selectedTokenConfig}
+                        className="w-full"
+                      >
+                        {isExistingToken ? 'Update budget' : 'Add budget'}
+                      </Button>
+                      )}
+                    </OnchainActionGate>
+                  ) : (
+                    <Button
+                      onClick={handleExecute}
+                      className="w-full"
+                    >
+                      Save details
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -514,16 +731,20 @@ export default function EditAgentModal({
                 <>
                   <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
                   <div>
-                    <p className="text-sm text-zinc-200 font-medium">
-                      {execStatus === 'signing' && 'Sign in your wallet...'}
-                      {execStatus === 'executing' && 'Executing on-chain...'}
+                    <p className="text-sm text-[var(--v2-ink)] font-medium">
+                      {execStatus === 'signing' && (budgetChanged ? 'Awaiting signature...' : 'Saving changes...')}
+                      {execStatus === 'executing' && 'Submitting budget update...'}
                       {execStatus === 'saving' && 'Saving to Haven...'}
                     </p>
-                    <p className="text-xs text-zinc-600 mt-1">
-                      {execStatus === 'signing'
-                        ? 'Approve the transaction in your connected wallet'
-                        : 'This may take a moment'}
-                    </p>
+                    <div className="text-xs text-[var(--v2-ink-3)] mt-1">
+                      {execStatus === 'signing' ? (
+                        <SigningStatus signer={signer} stage="signing" />
+                      ) : execStatus === 'executing' ? (
+                        <SigningStatus signer={signer} stage="executing" />
+                      ) : (
+                        'This may take a moment'
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (
@@ -536,18 +757,18 @@ export default function EditAgentModal({
                   </div>
                   <div>
                     <p className="text-sm text-red-400 font-medium">Update failed</p>
-                    <p className="text-xs text-zinc-600 mt-1 max-w-xs mx-auto">{execError}</p>
+                    <p className="text-xs text-[var(--v2-ink-3)] mt-1 max-w-xs mx-auto">{execError}</p>
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={() => setStep('review')}
-                      className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
                     >
                       Back
                     </button>
                     <button
                       onClick={handleExecute}
-                      className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 transition-colors"
+                      className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white rounded-xl py-2.5 transition-colors"
                     >
                       Retry
                     </button>
@@ -566,13 +787,15 @@ export default function EditAgentModal({
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-zinc-200">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">
                   {execStatus === 'confirmed'
-                    ? 'Allowance updated successfully'
-                    : 'Update proposed for approval'}
+                    ? 'Agent updated'
+                    : 'Budget update proposed for approval'}
                 </p>
-                <p className="text-xs text-zinc-500 mt-1">
-                  {amount} {selectedToken} — {resetLabel(resetTimeMin).toLowerCase()}
+                <p className="text-xs text-[var(--v2-ink-3)] mt-1">
+                  {budgetChanged
+                    ? `${budgetDisplayAmount} ${selectedToken} — ${resetLabel(resetTimeMin).toLowerCase()}`
+                    : 'Name and description saved'}
                 </p>
                 {txHash && (
                   <a
@@ -583,7 +806,7 @@ export default function EditAgentModal({
                     }
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-2 mt-1 inline-block"
+                    className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] underline underline-offset-2 mt-1 inline-block"
                   >
                     {execStatus === 'confirmed' ? 'View on Explorer' : 'View in Safe{Wallet}'}
                   </a>
@@ -591,7 +814,7 @@ export default function EditAgentModal({
               </div>
               <button
                 onClick={handleClose}
-                className="w-full text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                className="w-full text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
               >
                 Done
               </button>
@@ -599,6 +822,16 @@ export default function EditAgentModal({
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        onCancel={() => (isRemoving ? undefined : setPendingRemoval(null))}
+        onConfirm={() => void confirmRemoval()}
+        title={pendingRemoval ? `Remove ${pendingRemoval.symbol} budget?` : 'Remove budget?'}
+        body="This stops the agent from spending this token. You can add it back any time."
+        confirmLabel="Remove budget"
+        loading={isRemoving}
+      />
     </div>
   )
 }

@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { ApiRequestError } from '@/lib/api'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { HavenMark } from '@/components/brand/HavenMark'
 
 function LoginForm() {
   const { login, user, loading } = useAuth()
@@ -54,21 +57,19 @@ function LoginForm() {
   }
 
   return (
-    <div className="w-full max-w-sm">
-      <h1 className="text-2xl font-bold tracking-tight mb-2">Welcome back</h1>
-      <p className="text-sm text-zinc-500 mb-8">
-        Log in to your Haven account.
-      </p>
+    <div className="w-full max-w-sm rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-[var(--v2-shadow-card)]">
+      <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Welcome back</h1>
+      <p className="text-sm text-[var(--v2-ink-2)] mb-8">Log in to your Haven account.</p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {justRegistered && !error && (
-          <div className="text-sm text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 rounded-md px-4 py-3">
+          <div className="rounded-md border border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] px-4 py-3 text-sm text-[var(--v2-success)]">
             Account created. Log in to continue.
           </div>
         )}
 
         {error && (
-          <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-4 py-3">
+          <div className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
             {error}
           </div>
         )}
@@ -76,18 +77,17 @@ function LoginForm() {
         <div>
           <label
             htmlFor="email"
-            className="block text-xs text-zinc-400 mb-1.5"
+            className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
           >
             Email
           </label>
-          <input
+          <Input
             id="email"
             type="email"
             required
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
             placeholder="you@example.com"
           />
         </div>
@@ -95,35 +95,34 @@ function LoginForm() {
         <div>
           <label
             htmlFor="password"
-            className="block text-xs text-zinc-400 mb-1.5"
+            className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
           >
             Password
           </label>
-          <input
+          <Input
             id="password"
             type="password"
             required
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
           />
         </div>
 
-        <button
+        <Button
           type="submit"
           disabled={submitting}
-          className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full"
         >
           {submitting ? 'Logging in...' : 'Log in'}
-        </button>
+        </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-zinc-500">
+      <p className="mt-6 text-center text-sm text-[var(--v2-ink-2)]">
         {"Don't have an account?"}{' '}
         <Link
           href="/signup"
-          className="text-indigo-400 hover:text-indigo-300 transition-colors"
+          className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
         >
           Sign up
         </Link>
@@ -134,35 +133,33 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#ededed] flex flex-col">
-      {/* Subtle gradient background */}
+    <div className="min-h-screen bg-[var(--v2-bg)] text-[var(--v2-ink)] flex flex-col">
       <div
         className="pointer-events-none fixed inset-x-0 top-0 h-[500px] z-0"
         style={{
           background:
-            'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 70%)',
+            'radial-gradient(ellipse 80% 55% at 50% -10%, rgba(99,102,241,0.13) 0%, transparent 70%), radial-gradient(ellipse 70% 60% at 100% 10%, rgba(14,165,233,0.08) 0%, transparent 65%)',
         }}
       />
 
-      {/* Top bar */}
-      <div className="relative z-10 border-b border-white/[0.06] bg-[#0a0a0a]/80 backdrop-blur-md">
+      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
           <Link
             href="/"
-            className="text-[15px] font-semibold tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent"
+            className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
           >
+            <HavenMark />
             Haven
           </Link>
         </div>
       </div>
 
-      {/* Form */}
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
         <Suspense
           fallback={
             <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-              <span className="text-sm text-zinc-500">Loading...</span>
+              <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
+              <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
             </div>
           }
         >

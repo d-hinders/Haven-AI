@@ -442,3 +442,36 @@ export function buildSetAllowanceTx(
     nonce,
   }
 }
+
+/**
+ * Build a Safe transaction that removes a single token's allowance for the
+ * given delegate. The AllowanceModule's `deleteAllowance` zeroes the slot
+ * entirely (cleaner than `setAllowance(token, 0, 0)` which leaves a
+ * lingering zero-amount record).
+ *
+ * Use the corresponding `DELETE /agents/:id/allowances/:tokenAddress`
+ * endpoint to mirror the removal in Haven's DB after the on-chain tx
+ * confirms.
+ */
+export function buildDeleteAllowanceTx(
+  delegate: Address,
+  token: Address,
+  nonce: bigint,
+): SafeTxParams {
+  return {
+    to: ALLOWANCE_MODULE_ADDRESS,
+    value: 0n,
+    data: encodeFunctionData({
+      abi: ALLOWANCE_MODULE_ABI,
+      functionName: 'deleteAllowance',
+      args: [delegate, token],
+    }),
+    operation: 0,
+    safeTxGas: 0n,
+    baseGas: 0n,
+    gasPrice: 0n,
+    gasToken: ZERO_ADDRESS,
+    refundReceiver: ZERO_ADDRESS,
+    nonce,
+  }
+}

@@ -2,6 +2,9 @@ import Fastify from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import authRoutes from '../routes/auth.js'
 import userRoutes from '../routes/user.js'
+import passkeyRoutes from '../routes/passkeys.js'
+import safeDeployRoutes from '../routes/safe-deploy.js'
+import safeExecRoutes from '../routes/safe-exec.js'
 
 export async function buildApp() {
   const app = Fastify({ logger: false })
@@ -16,6 +19,9 @@ export async function buildApp() {
 
   await app.register(authRoutes, { prefix: '/auth' })
   await app.register(userRoutes, { prefix: '/user' })
+  await app.register(passkeyRoutes, { prefix: '/passkeys' })
+  await app.register(safeDeployRoutes, { prefix: '/safe' })
+  await app.register(safeExecRoutes, { prefix: '/safe' })
 
   return app
 }

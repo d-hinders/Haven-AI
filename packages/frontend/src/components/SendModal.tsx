@@ -2,27 +2,133 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { type Address } from 'viem'
-import { useAccount } from 'wagmi'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
+import { useActiveSigner } from '@/lib/signer'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainTokens, type SendParams } from '@/lib/safe-tx'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate, isValidAddress } from '@/lib/format'
+import { exceedsRawBalance, validateMoneyInput } from '@/lib/money-input'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
 import type { Contact } from '@/hooks/useContacts'
+import OnchainActionGate from './OnchainActionGate'
+import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
+import { Button } from '@/components/ui/Button'
+import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import {
+  ApprovalRequiredBanner,
+  ExternalDetailsLink,
+  TransactionMovement,
+} from '@/components/haven'
+import { useToast } from '@/components/ui/Toast'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
+interface SendSafeOption {
+  id: string
+  name: string
+  address: string
+  chainId: number
+  isDefault: boolean
+}
+
+function SendDetail({
+  label,
+  value,
+  subValue,
+  copyValue,
+  copyLabel,
+  mono = false,
+  subMono = false,
+}: {
+  label: string
+  value: string
+  subValue?: string
+  copyValue?: string
+  copyLabel?: string
+  mono?: boolean
+  subMono?: boolean
+}) {
+  const { toast } = useToast()
+  return (
+    <div>
+      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">{label}</dt>
+      <dd className={`mt-1 truncate text-sm font-medium text-[var(--v2-ink)] ${mono ? 'font-mono' : ''}`}>
+        {value}
+      </dd>
+      {subValue && (
+        <dd className="mt-0.5 flex min-w-0 items-center gap-1.5">
+          <span className={`truncate text-[11px] text-[var(--v2-ink-3)] ${subMono ? 'font-mono' : ''}`}>
+            {subValue}
+          </span>
+          {copyValue && (
+            <button
+              type="button"
+              aria-label={copyLabel ?? `Copy ${label.toLowerCase()}`}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard?.writeText(copyValue)
+                  toast.success('Address copied')
+                } catch {
+                  toast.error('Copy failed')
+                }
+              }}
+              className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 8.25V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.25" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8Z" />
+              </svg>
+            </button>
+          )}
+        </dd>
+      )}
+    </div>
+  )
+}
+
+function ResultIcon({ tone }: { tone: 'success' | 'warning' | 'danger' }) {
+  const toneClass =
+    tone === 'success'
+      ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+      : tone === 'warning'
+        ? 'border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
+        : 'border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
+
+  return (
+    <div className={`mb-5 flex h-14 w-14 items-center justify-center rounded-full border ${toneClass}`}>
+      <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={tone === 'warning' ? 1.5 : 2}>
+        {tone === 'success' ? (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+        ) : tone === 'warning' ? (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+        ) : (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        )}
+      </svg>
+    </div>
+  )
+}
 
 // ── Props ────────────────────────────────────────────────────────────
 interface SendModalProps {
   open: boolean
   onClose: () => void
   safeAddress: string
+  safeName?: string
   safeDetails: SafeDetails | null
   balances: BalanceItem[]
   onSuccess?: () => void
   contacts?: Contact[]
+  contactsError?: string | null
   resolveAddress?: (address: string) => string | null
   chainId?: number
+  safeOptions?: SendSafeOption[]
+  selectedSafeOptionId?: string
+  onSelectSafeOption?: (safeId: string) => void
+  contextLoading?: boolean
+  contextError?: string | null
 }
 
 // ── Component ────────────────────────────────────────────────────────
@@ -30,15 +136,39 @@ export default function SendModal({
   open,
   onClose,
   safeAddress,
+  safeName,
   safeDetails,
   balances,
   onSuccess,
   contacts = [],
+  contactsError = null,
   resolveAddress,
   chainId = 100,
+  safeOptions = [],
+  selectedSafeOptionId,
+  onSelectSafeOption,
+  contextLoading = false,
+  contextError = null,
 }: SendModalProps) {
-  const { address: connectedAddress } = useAccount()
-  const { status, txHash, error, send, reset } = useSendTransaction()
+  const { toast } = useToast()
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, open)
+  const safeAddressForHooks = safeAddress as Address
+  const { status, txHash, error, send, reset } = useSendTransaction({
+    safeAddress: safeAddressForHooks,
+    chainId,
+  })
+  const signer = useActiveSigner({
+    safeAddress: safeAddressForHooks,
+    chainId,
+  })
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddressForHooks,
+    chainId,
+  })
+  const blockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
+  const needsConnectedWallet = operationGate.kind === 'no_signer'
+  const signingUnavailable = blockedByOtherDevice || needsConnectedWallet
 
   // Build token list from chain config
   const chainConfig = getChainConfig(chainId)
@@ -59,10 +189,11 @@ export default function SendModal({
   const [recipient, setRecipient] = useState('')
   const [selectedContactName, setSelectedContactName] = useState<string | null>(null)
   const [formError, setFormError] = useState('')
+  const [amountError, setAmountError] = useState('')
+  const [recipientError, setRecipientError] = useState('')
   const [step, setStep] = useState<'form' | 'review' | 'executing' | 'result'>('form')
   const [showContactPicker, setShowContactPicker] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
-  const pickerRef = useRef<HTMLDivElement>(null)
 
   // Escape-to-close (disabled during execution so the user can't abandon a
   // signing flow by tapping a key).
@@ -73,28 +204,54 @@ export default function SendModal({
       c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
       c.address.toLowerCase().includes(contactSearch.toLowerCase()),
   )
-
-  // Close picker on outside click
-  useEffect(() => {
-    if (!showContactPicker) return
-    const handler = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setShowContactPicker(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [showContactPicker])
+  const quickContacts = contacts.slice(0, 3)
 
   // Get balance for selected token
   const tokenBalance = balances.find(
     (b) => b.symbol.toLowerCase() === selectedToken.toLowerCase(),
   )
   const tokenConfig = chainTokens[selectedToken]
+  const amountValidation = tokenConfig
+    ? validateMoneyInput(amount, tokenConfig.decimals, { tokenSymbol: selectedToken })
+    : null
+  const displayAmount = amountValidation?.ok ? amountValidation.amount : amount
+  const amountWarning =
+    amountValidation?.ok &&
+    tokenBalance &&
+    exceedsRawBalance(amountValidation.raw, tokenBalance.balance)
+      ? `This amount is higher than your available balance of ${tokenBalance.formatted} ${selectedToken}.`
+      : ''
+  const selectedSafeOption =
+    safeOptions.find((safe) => safe.id === selectedSafeOptionId) ?? null
+  const walletName = selectedSafeOption?.name ?? safeName ?? 'Haven wallet'
+  const recipientLabel = selectedContactName ?? truncate(recipient)
+  const recipientDetailSubValue = selectedContactName ? truncate(recipient) : undefined
   const threshold = safeDetails?.threshold ?? 1
   const isMultiSig = threshold > 1
+  const gasPaidByLabel =
+    signer?.type === 'passkey'
+      ? `Haven${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
+      : `Your wallet${gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}`
+  const approvalMethodLabel =
+    signer?.type === 'passkey'
+      ? 'Device approval'
+      : signer?.type === 'eoa'
+        ? 'Your wallet'
+        : 'Approval method'
+  const progressHelp =
+    status === 'building'
+      ? 'Reading account status...'
+      : status === 'signing'
+        ? signer?.type === 'passkey'
+          ? 'Approve this payment with your device.'
+          : 'Approve this payment in your wallet.'
+        : status === 'executing'
+          ? isMultiSig
+            ? 'Submitting this payment for approval.'
+            : 'Sending this payment from your Haven wallet.'
+          : null
 
-  // Reset everything when modal opens/closes
+  // Reset everything when the modal opens or the selected account changes.
   useEffect(() => {
     if (open) {
       setSelectedToken(defaultToken)
@@ -102,66 +259,104 @@ export default function SendModal({
       setRecipient('')
       setSelectedContactName(null)
       setFormError('')
+      setAmountError('')
+      setRecipientError('')
       setStep('form')
       setShowContactPicker(false)
       setContactSearch('')
       reset()
     }
-  }, [open, reset])
+  }, [defaultToken, open, reset, safeAddress])
 
   // Track send status to update step
   useEffect(() => {
-    if (status === 'confirmed' || status === 'proposed') {
+    if (status === 'confirmed') {
       setStep('result')
-    }
-    if (status === 'error') {
+      toast.success('Payment sent')
+    } else if (status === 'proposed') {
+      setStep('result')
+      toast.info('Payment queued for approval')
+    } else if (status === 'error') {
       // Stay on executing step to show error with retry
       setStep('result')
     }
-  }, [status])
+  }, [status, toast])
 
   // ── Validation ───────────────────────────────────────────────────
   const validate = useCallback((): boolean => {
-    if (!amount || parseFloat(amount) <= 0) {
-      setFormError('Enter an amount greater than 0')
+    setAmountError('')
+    setRecipientError('')
+    setFormError('')
+
+    if (!tokenConfig) {
+      setAmountError('Choose a supported token')
       return false
     }
 
-    if (tokenBalance) {
-      const bal = parseFloat(tokenBalance.formatted)
-      const amt = parseFloat(amount)
-      if (amt > bal) {
-        setFormError(`Insufficient balance. You have ${tokenBalance.formatted} ${selectedToken}`)
-        return false
-      }
+    const parsedAmount = validateMoneyInput(amount, tokenConfig.decimals, {
+      tokenSymbol: selectedToken,
+    })
+    if (!parsedAmount.ok) {
+      setAmountError(parsedAmount.message)
+      return false
     }
 
+    if (tokenBalance && exceedsRawBalance(parsedAmount.raw, tokenBalance.balance)) {
+      setAmountError(`Insufficient balance. You have ${tokenBalance.formatted} ${selectedToken}`)
+      return false
+    }
+
+    if (parsedAmount.amount !== amount) setAmount(parsedAmount.amount)
+
     if (!recipient) {
-      setFormError('Enter a recipient address')
+      setRecipientError('Enter a recipient address')
       return false
     }
 
     if (!isValidAddress(recipient)) {
-      setFormError('Invalid Ethereum address')
+      setRecipientError('Enter a valid wallet address')
       return false
     }
 
     if (recipient.toLowerCase() === safeAddress.toLowerCase()) {
-      setFormError('Cannot send to the same Safe address')
+      setRecipientError('Cannot send to the same account address')
       return false
     }
 
-    setFormError('')
     return true
-  }, [amount, recipient, safeAddress, selectedToken, tokenBalance])
+  }, [amount, recipient, safeAddress, selectedToken, tokenBalance, tokenConfig])
 
   // ── Actions ──────────────────────────────────────────────────────
   const handleReview = () => {
+    if (contextLoading || !safeDetails) {
+      setFormError('Account details are still loading. Please wait a moment.')
+      return
+    }
+    if (contextError) {
+      setFormError('Could not load this account. Try again in a moment.')
+      return
+    }
+    if (needsConnectedWallet) {
+      setFormError('Connect wallet to send from this account.')
+      return
+    }
     if (validate()) setStep('review')
   }
 
   const handleConfirm = async () => {
-    if (!connectedAddress || !tokenConfig) return
+    if (needsConnectedWallet) {
+      setFormError('Connect wallet to send from this account.')
+      return
+    }
+    if (blockedByOtherDevice || !signer || !tokenConfig) return
+    const parsedAmount = validateMoneyInput(amount, tokenConfig.decimals, {
+      tokenSymbol: selectedToken,
+    })
+    if (!parsedAmount.ok) {
+      setAmountError(parsedAmount.message)
+      setStep('form')
+      return
+    }
 
     setStep('executing')
 
@@ -169,16 +364,40 @@ export default function SendModal({
       token: selectedToken,
       tokenAddress: tokenConfig.address as Address | null,
       decimals: tokenConfig.decimals,
-      amount,
+      amount: parsedAmount.amount,
       recipient: recipient as Address,
     }
 
-    await send(params, safeAddress as Address, threshold, connectedAddress, chainId)
+    await send(params, safeAddress as Address, threshold, signer.address, chainId)
   }
 
   const handleDone = () => {
     onSuccess?.()
     onClose()
+  }
+
+  const handleRequestClose = () => {
+    if (step === 'result' && (status === 'confirmed' || status === 'proposed')) {
+      handleDone()
+      return
+    }
+
+    onClose()
+  }
+
+  const handleSelectContact = (contact: Contact) => {
+    setRecipient(contact.address)
+    setSelectedContactName(contact.name)
+    setShowContactPicker(false)
+    setContactSearch('')
+    setFormError('')
+  }
+
+  const handleRecipientChange = (value: string) => {
+    setRecipient(value)
+    setSelectedContactName(resolveAddress?.(value) ?? null)
+    setFormError('')
+    setRecipientError('')
   }
 
   // ── Don't render if closed ───────────────────────────────────────
@@ -187,37 +406,38 @@ export default function SendModal({
   // ── Status labels ────────────────────────────────────────────────
   const statusLabel: Record<SendStatus, string> = {
     idle: '',
-    building: 'Preparing transaction...',
-    signing: 'Waiting for wallet signature...',
-    executing: isMultiSig ? 'Submitting proposal...' : `Confirming on ${getChainConfig(chainId).name}...`,
-    confirmed: 'Transaction confirmed!',
-    proposed: 'Transaction proposed!',
-    error: 'Transaction failed',
+    building: 'Preparing payment...',
+    signing:
+      signer?.type === 'passkey' ? 'Waiting for device approval...' : 'Waiting for wallet approval...',
+    executing: isMultiSig ? 'Submitting for approval...' : `Sending on ${getChainConfig(chainId).name}...`,
+    confirmed: 'Payment sent',
+    proposed: 'Payment submitted',
+    error: 'Payment failed',
   }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={step === 'executing' ? undefined : onClose}
+        className="absolute inset-0 v2-modal-backdrop"
+        onClick={step === 'executing' ? undefined : handleRequestClose}
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-md mx-4 bg-[#111113] border border-white/[0.08] rounded-xl shadow-2xl shadow-black/40 overflow-hidden">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Send payment" className="relative w-full max-w-md mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
-          <h2 className="text-base font-semibold text-[#ededed]">
-            {step === 'form' && 'Send tokens'}
-            {step === 'review' && 'Review transaction'}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
+          <h2 className="text-base font-semibold text-[var(--v2-ink)]">
+            {step === 'form' && 'Send payment'}
+            {step === 'review' && 'Review payment'}
             {step === 'executing' && 'Processing'}
-            {step === 'result' && (status === 'error' ? 'Failed' : 'Complete')}
+            {step === 'result' && (status === 'error' ? 'Payment failed' : 'Payment complete')}
           </h2>
           {step !== 'executing' && (
             <button
-              onClick={onClose}
+              onClick={handleRequestClose}
               aria-label="Close"
-              className="p-1 -mr-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+              className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -229,9 +449,92 @@ export default function SendModal({
         {/* ── STEP 1: Form ────────────────────────────────────────── */}
         {step === 'form' && (
           <div className="p-6 space-y-5">
+            {safeOptions.length > 0 && (
+              <div>
+                <label className="block text-xs text-[var(--v2-ink-2)] mb-2">
+                  Send from
+                </label>
+                <div className="space-y-2">
+                  {safeOptions.length === 1 && selectedSafeOption ? (
+                    <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-sm font-medium text-[var(--v2-ink)]">
+                          {selectedSafeOption.name}
+                        </span>
+                        {selectedSafeOption.isDefault && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
+                            Default
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[11px] text-[var(--v2-ink-3)]">
+                          {getChainConfig(selectedSafeOption.chainId).name}
+                        </span>
+                        <span className="text-[11px] text-[var(--v2-ink-3)] font-mono">
+                          {truncate(selectedSafeOption.address)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    safeOptions.map((safe) => {
+                      const isSelected = safe.id === selectedSafeOptionId
+                      return (
+                        <button
+                          key={safe.id}
+                          type="button"
+                          onClick={() => onSelectSafeOption?.(safe.id)}
+                          className={`w-full rounded-lg border px-4 py-3 text-left transition-all duration-150 ${
+                            isSelected
+                              ? 'border-[var(--v2-brand)]/50 bg-[var(--v2-brand-soft)]'
+                              : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className={`text-sm font-medium ${isSelected ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink)]'}`}>
+                              {safe.name}
+                            </span>
+                            {safe.isDefault && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                isSelected
+                                  ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+                                  : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]'
+                              }`}>
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-[11px] text-[var(--v2-ink-3)]">
+                              {getChainConfig(safe.chainId).name}
+                            </span>
+                            <span className="text-[11px] text-[var(--v2-ink-3)] font-mono">
+                              {truncate(safe.address)}
+                            </span>
+                          </div>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {(contextLoading || contextError) && (
+              <div className={`rounded-lg px-4 py-3 text-xs border ${
+                contextError
+                  ? 'text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border-[var(--v2-danger)]/20'
+                  : 'text-[var(--v2-ink-2)] bg-[var(--v2-surface)] border-[var(--v2-border)]'
+              }`}>
+                {contextError
+                  ? 'We could not load this account right now. Try again in a moment.'
+                  : 'Loading this account’s balances and approval details...'}
+              </div>
+            )}
+
             {/* Token selector */}
             <div>
-              <label className="block text-xs text-zinc-400 mb-2">Token</label>
+              <label className="block text-xs text-[var(--v2-ink-2)] mb-2">Token</label>
               <div className="grid grid-cols-3 gap-2">
                 {tokenList.map((t) => {
                   const bal = balances.find(
@@ -241,17 +544,17 @@ export default function SendModal({
                   return (
                     <button
                       key={t.symbol}
-                      onClick={() => { setSelectedToken(t.symbol); setFormError('') }}
+                      onClick={() => { setSelectedToken(t.symbol); setFormError(''); setAmountError('') }}
                       className={`p-3 rounded-lg border text-left transition-all duration-150 ${
                         isActive
-                          ? 'border-indigo-500/50 bg-indigo-500/10'
-                          : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12]'
+                          ? 'border-[var(--v2-brand)]/50 bg-[var(--v2-brand-soft)]'
+                          : 'border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)]'
                       }`}
                     >
-                      <span className={`block text-sm font-medium ${isActive ? 'text-indigo-300' : 'text-zinc-300'}`}>
+                      <span className={`block text-sm font-medium ${isActive ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink)]'}`}>
                         {t.label}
                       </span>
-                      <span className="block text-[11px] text-zinc-500 mt-0.5">
+                      <span className="block text-[11px] text-[var(--v2-ink-3)] mt-0.5">
                         {bal ? bal.formatted : '0.00'}
                       </span>
                     </button>
@@ -262,119 +565,68 @@ export default function SendModal({
 
             {/* Amount */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-zinc-400">Amount</label>
-                {tokenBalance && (
-                  <button
-                    onClick={() => setAmount(tokenBalance.formatted)}
-                    className="text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
-                  >
-                    Max: {tokenBalance.formatted}
-                  </button>
-                )}
-              </div>
-              <div className="relative">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={amount}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    // Allow numbers and one decimal point
-                    if (/^\d*\.?\d*$/.test(v)) {
-                      setAmount(v)
-                      setFormError('')
-                    }
-                  }}
-                  placeholder="0.00"
-                  className="w-full px-4 py-3 pr-16 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
-                />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-500">
-                  {selectedToken}
-                </span>
-              </div>
+              <label className="block text-xs text-[var(--v2-ink-2)] mb-2">Amount</label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => {
+                  const v = e.target.value
+                  // Allow numbers and one decimal point
+                  if (/^\d*\.?\d*$/.test(v)) {
+                    setAmount(v)
+                    setFormError('')
+                    setAmountError('')
+                  }
+                }}
+                placeholder="0.00"
+                invalid={Boolean(amountError)}
+                helperText={amountError || (amountWarning ? amountWarning : undefined)}
+                rightAction={
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-[var(--v2-ink-3)]">{selectedToken}</span>
+                    {tokenBalance && (
+                      <MaxButton onClick={() => setAmount(tokenBalance.formatted)} />
+                    )}
+                  </div>
+                }
+                className="py-3 bg-[var(--v2-surface-2)] rounded-lg font-mono"
+              />
             </div>
 
             {/* Recipient */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-zinc-400">Recipient</label>
+                <label htmlFor="send-recipient" className="text-xs text-[var(--v2-ink-2)]">Recipient</label>
                 {contacts.length > 0 && (
                   <button
                     type="button"
                     onClick={() => { setShowContactPicker((v) => !v); setContactSearch('') }}
-                    className="text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1"
+                    className="text-[11px] text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors flex items-center gap-1"
                   >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                     </svg>
-                    Contacts
+                    Saved recipients
                   </button>
                 )}
               </div>
 
-              <div className="relative" ref={pickerRef}>
-                {/* Contact picker dropdown */}
-                {showContactPicker && (
-                  <div className="absolute bottom-full mb-1 left-0 right-0 bg-[#0e0e10] border border-white/[0.10] rounded-lg shadow-xl z-10 overflow-hidden">
-                    <div className="p-2 border-b border-white/[0.06]">
-                      <input
-                        type="text"
-                        autoFocus
-                        value={contactSearch}
-                        onChange={(e) => setContactSearch(e.target.value)}
-                        placeholder="Search contacts..."
-                        className="w-full px-3 py-1.5 bg-white/[0.04] border border-white/[0.06] rounded-md text-xs text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/40"
-                      />
-                    </div>
-                    <div className="max-h-44 overflow-y-auto">
-                      {filteredContacts.length === 0 ? (
-                        <p className="text-xs text-zinc-600 text-center py-3">No contacts found</p>
-                      ) : (
-                        filteredContacts.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => {
-                              setRecipient(c.address)
-                              setSelectedContactName(c.name)
-                              setShowContactPicker(false)
-                              setFormError('')
-                            }}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors text-left"
-                          >
-                            <div className="w-6 h-6 rounded-full bg-indigo-500/15 flex items-center justify-center flex-shrink-0">
-                              <span className="text-[10px] font-semibold text-indigo-300">
-                                {c.name.slice(0, 2).toUpperCase()}
-                              </span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-medium text-[#ededed] truncate">{c.name}</p>
-                              <p className="text-[10px] text-zinc-500 font-mono">
-                                {c.address.slice(0, 6)}...{c.address.slice(-4)}
-                              </p>
-                            </div>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-
+              <div className="relative">
                 {/* Selected contact badge */}
                 {selectedContactName && (
                   <div className="flex items-center gap-2 mb-1.5">
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-md">
-                      <div className="w-4 h-4 rounded-full bg-indigo-500/20 flex items-center justify-center">
-                        <span className="text-[9px] font-semibold text-indigo-300">
+                    <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 rounded-md">
+                      <div className="w-4 h-4 rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center">
+                        <span className="text-[9px] font-semibold text-[var(--v2-brand)]">
                           {selectedContactName.slice(0, 2).toUpperCase()}
                         </span>
                       </div>
-                      <span className="text-xs text-indigo-300">{selectedContactName}</span>
+                      <span className="text-xs text-[var(--v2-brand)]">{selectedContactName}</span>
                       <button
                         type="button"
                         onClick={() => { setSelectedContactName(null); setRecipient('') }}
-                        className="text-indigo-400/60 hover:text-indigo-300 ml-0.5"
+                        className="text-[var(--v2-brand)]/60 hover:text-[var(--v2-brand-strong)] ml-0.5"
                       >
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -384,116 +636,279 @@ export default function SendModal({
                   </div>
                 )}
 
-                <input
+                <Input
+                  id="send-recipient"
                   type="text"
                   value={recipient}
-                  onChange={(e) => {
-                    setRecipient(e.target.value)
-                    setSelectedContactName(resolveAddress?.(e.target.value) ?? null)
-                    setFormError('')
-                  }}
-                  placeholder="0x..."
-                  className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
+                  onChange={(e) => handleRecipientChange(e.target.value)}
+                  placeholder="Paste address or choose a saved recipient"
+                  invalid={Boolean(recipientError)}
+                  helperText={recipientError || undefined}
+                  rightAction={
+                    <PasteButton
+                      onPaste={(text) => handleRecipientChange(text)}
+                    />
+                  }
+                  className="py-3 bg-[var(--v2-surface-2)] rounded-lg font-mono"
                 />
+                <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                  This payment will be sent on <span className="font-medium text-[var(--v2-ink-2)]">{chainConfig.name}</span>.
+                  Make sure the recipient accepts funds on this network.
+                </p>
               </div>
+
+              {contactsError && (
+                <div className="mt-3 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-3 py-2.5 text-xs leading-relaxed text-[var(--v2-warning)]">
+                  Saved recipients could not load. You can still paste a recipient address.
+                </div>
+              )}
+
+              {!contactsError && contacts.length === 0 && (
+                <div className="mt-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-3 text-xs leading-relaxed text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <span>No saved recipients yet. Add contacts for people or services you pay often.</span>
+                    <Button href="/contacts" variant="ghost" size="sm" className="sm:flex-shrink-0">
+                      Add contacts
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {contacts.length > 0 && !showContactPicker && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <p className="text-[11px] text-[var(--v2-ink-3)]">
+                      Quick select
+                    </p>
+                    {contacts.length > quickContacts.length && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowContactPicker(true)
+                          setContactSearch('')
+                        }}
+                        className="text-[11px] text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
+                      >
+                        Browse all contacts
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {quickContacts.map((contact) => {
+                      const isSelected = contact.address.toLowerCase() === recipient.toLowerCase()
+                      return (
+                        <button
+                          key={contact.id}
+                          type="button"
+                          onClick={() => handleSelectContact(contact)}
+                          className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                            isSelected
+                              ? 'border-[var(--v2-brand)]/40 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+                              : 'border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)]'
+                          }`}
+                        >
+                          <span className="w-5 h-5 rounded-full bg-[var(--v2-brand-soft)] text-[10px] font-semibold text-[var(--v2-brand)] flex items-center justify-center">
+                            {contact.name.slice(0, 2).toUpperCase()}
+                          </span>
+                          <span className="text-xs font-medium">{contact.name}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {contacts.length > 0 && showContactPicker && (
+                <div className="mt-3 rounded-xl border border-[var(--v2-border)] bg-white overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 px-3 py-3 border-b border-[var(--v2-border)]">
+                    <p className="text-xs font-medium text-[var(--v2-ink)]">
+                      Choose a contact
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowContactPicker(false)
+                        setContactSearch('')
+                      }}
+                      className="text-[11px] text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="p-3 border-b border-[var(--v2-border)]">
+                    <label htmlFor="saved-recipient-search" className="sr-only">Search saved recipients</label>
+                    <input
+                      id="saved-recipient-search"
+                      type="text"
+                      autoFocus
+                      value={contactSearch}
+                      onChange={(e) => setContactSearch(e.target.value)}
+                      placeholder="Search saved recipients"
+                      className="w-full px-3 py-2 bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-md text-xs text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/40"
+                    />
+                  </div>
+                  <div className="max-h-52 overflow-y-auto">
+                    {filteredContacts.length === 0 ? (
+                      <p className="text-xs text-[var(--v2-ink-3)] text-center py-4">
+                        No contacts found
+                      </p>
+                    ) : (
+                      filteredContacts.map((contact) => {
+                        const isSelected = contact.address.toLowerCase() === recipient.toLowerCase()
+                        return (
+                          <button
+                            key={contact.id}
+                            type="button"
+                            onClick={() => handleSelectContact(contact)}
+                            className={`w-full flex items-center gap-2.5 px-3 py-3 transition-colors text-left ${
+                              isSelected
+                                ? 'bg-[var(--v2-brand-soft)]'
+                                : 'hover:bg-[var(--v2-surface-2)]'
+                            }`}
+                          >
+                            <div className="w-7 h-7 rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center flex-shrink-0">
+                              <span className="text-[10px] font-semibold text-[var(--v2-brand)]">
+                                {contact.name.slice(0, 2).toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium text-[var(--v2-ink)] truncate">
+                                {contact.name}
+                              </p>
+                              <p className="text-[10px] text-[var(--v2-ink-3)] font-mono">
+                                {contact.address.slice(0, 6)}...{contact.address.slice(-4)}
+                              </p>
+                            </div>
+                            {isSelected && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
+                                Selected
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Error */}
+            {blockedByOtherDevice && (
+              <PasskeyOtherDeviceNotice />
+            )}
+
+            {needsConnectedWallet && (
+              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                Connect wallet to send from this account.
+              </div>
+            )}
+
             {formError && (
-              <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
+              <div className="text-sm text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border border-[var(--v2-danger)]/20 rounded-lg px-4 py-3">
                 {formError}
               </div>
             )}
 
             {/* Multi-sig notice */}
             {isMultiSig && (
-              <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-4 py-3">
-                This Safe requires {threshold} of {safeDetails?.owners.length ?? '?'} signatures.
-                Your signature will be submitted as a proposal.
-              </div>
+              <ApprovalRequiredBanner title="Additional approval required" tone="neutral" density="compact">
+                This Haven account needs {threshold} approvals. This payment will be submitted for approval before it can be sent.
+              </ApprovalRequiredBanner>
             )}
 
             {/* Continue button */}
-            <button
+            <Button
               onClick={handleReview}
-              disabled={!amount || !recipient}
-              className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={!amount || !recipient || contextLoading || !!contextError || !safeDetails || signingUnavailable}
+              className="w-full"
             >
               Continue
-            </button>
+            </Button>
           </div>
         )}
 
         {/* ── STEP 2: Review ──────────────────────────────────────── */}
         {step === 'review' && (
+          // Flattened review: the modal IS the card. The amount block and the
+          // details block are separated by a hairline rule, not by a
+          // nested-card-in-a-card-in-a-card.
           <div className="p-6 space-y-5">
-            <div className="space-y-4 bg-white/[0.02] rounded-lg p-4 border border-white/[0.06]">
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-zinc-500">Sending</span>
-                <span className="text-sm font-medium text-zinc-200 font-mono">
-                  {amount} {selectedToken}
-                </span>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-[var(--v2-ink-3)]">You are sending</p>
+                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                  {displayAmount} {selectedToken}
+                </p>
               </div>
-              <div className="h-px bg-white/[0.06]" />
-              <div className="flex justify-between items-start">
-                <span className="text-xs text-zinc-500">To</span>
-                <div className="text-right">
-                  {selectedContactName && (
-                    <p className="text-sm font-medium text-zinc-200 mb-0.5">{selectedContactName}</p>
-                  )}
-                  <span className="text-sm text-zinc-400 font-mono">
-                    {truncate(recipient)}
-                    <button
-                      onClick={() => navigator.clipboard.writeText(recipient)}
-                      className="ml-2 text-zinc-600 hover:text-zinc-400 transition-colors inline"
-                    >
-                      <svg className="w-3 h-3 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                      </svg>
-                    </button>
-                  </span>
-                </div>
-              </div>
-              <div className="h-px bg-white/[0.06]" />
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-zinc-500">From Safe</span>
-                <span className="text-sm text-zinc-400 font-mono">
-                  {truncate(safeAddress)}
-                </span>
-              </div>
-              <div className="h-px bg-white/[0.06]" />
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-zinc-500">Network</span>
-                <span className="text-sm text-zinc-400">{getChainConfig(chainId).name}</span>
-              </div>
-              <div className="h-px bg-white/[0.06]" />
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-zinc-500">Gas paid by</span>
-                <span className="text-sm text-zinc-400">
-                  Your signing wallet{gasTokenSymbol ? ` (${gasTokenSymbol})` : ''}
-                </span>
-              </div>
+              <StatusBadge tone="neutral">
+                {isMultiSig ? 'Needs approval' : 'Ready to send'}
+              </StatusBadge>
             </div>
 
+            <div className="-mx-6 border-t border-[var(--v2-border)] px-6 pt-5">
+              <TransactionMovement from={walletName} to={recipientLabel} />
+              <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                <SendDetail label="Haven wallet" value={walletName} />
+                <SendDetail
+                  label="Recipient"
+                  value={recipientLabel}
+                  subValue={recipientDetailSubValue}
+                  copyValue={selectedContactName ? recipient : undefined}
+                  copyLabel="Copy recipient address"
+                  subMono
+                />
+                <SendDetail label="Network" value={getChainConfig(chainId).name} />
+                <SendDetail label="Approve with" value={approvalMethodLabel} />
+              </dl>
+            </div>
+
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              Network fees are paid by {gasPaidByLabel}.
+            </p>
+
             {isMultiSig && (
-              <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-4 py-3">
-                This will propose the transaction. It needs {threshold} of {safeDetails?.owners.length ?? '?'} owner approvals before execution.
+              <ApprovalRequiredBanner title="Payment will wait for approval" tone="neutral" density="compact">
+                This Haven account needs {threshold} approvals. After you approve, the payment will wait for the remaining approval before money moves.
+              </ApprovalRequiredBanner>
+            )}
+
+            {blockedByOtherDevice && (
+              <PasskeyOtherDeviceNotice />
+            )}
+
+            {needsConnectedWallet && (
+              <div className="rounded-lg border border-[var(--v2-border)] bg-white px-4 py-3 text-sm text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+                Connect wallet to send from this account.
               </div>
             )}
 
             <div className="flex gap-3">
-              <button
+              <Button
+                variant="ghost"
                 onClick={() => setStep('form')}
-                className="flex-1 py-3 rounded-lg border border-white/[0.08] text-sm text-zinc-300 hover:bg-white/[0.04] transition-colors"
+                className="flex-1"
               >
                 Back
-              </button>
-              <button
-                onClick={handleConfirm}
-                className="flex-1 py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-              >
-                {isMultiSig ? 'Sign & Propose' : 'Sign & Execute'}
-              </button>
+              </Button>
+              <div className="flex-1">
+                <OnchainActionGate
+                  requiredChainId={chainId}
+                  operationGate={operationGate}
+                  noSignerMessage="Connect wallet to send from this account."
+                  showNotice={false}
+                >
+                  {({ disabled }) => (
+                  <Button
+                    onClick={handleConfirm}
+                    disabled={disabled || !signer || !tokenConfig}
+                    className="w-full"
+                  >
+                    {isMultiSig ? 'Approve and submit' : 'Approve and send'}
+                  </Button>
+                  )}
+                </OnchainActionGate>
+              </div>
             </div>
           </div>
         )}
@@ -503,15 +918,13 @@ export default function SendModal({
           <div className="p-6 flex flex-col items-center justify-center py-12">
             {/* Spinner */}
             <div className="relative mb-6">
-              <div className="w-14 h-14 rounded-full border-2 border-white/[0.06]" />
-              <div className="absolute inset-0 w-14 h-14 rounded-full border-2 border-transparent border-t-indigo-500 animate-spin" />
+              <div className="w-14 h-14 rounded-full border-2 border-[var(--v2-border)]" />
+              <div className="absolute inset-0 w-14 h-14 rounded-full border-2 border-transparent border-t-[var(--v2-brand)] animate-spin" />
             </div>
-            <p className="text-sm text-zinc-300 mb-1">{statusLabel[status]}</p>
-            <p className="text-xs text-zinc-600">
-              {status === 'signing' && 'Check your wallet for a signature request'}
-              {status === 'executing' && 'This may take a few seconds'}
-              {status === 'building' && 'Reading Safe nonce...'}
-            </p>
+            <p className="text-sm text-[var(--v2-ink)] mb-1">{statusLabel[status]}</p>
+            {progressHelp && (
+              <p className="text-xs text-[var(--v2-ink-3)]">{progressHelp}</p>
+            )}
           </div>
         )}
 
@@ -520,95 +933,81 @@ export default function SendModal({
           <div className="p-6 flex flex-col items-center py-10">
             {status === 'confirmed' && (
               <>
-                <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-5">
-                  <svg className="w-7 h-7 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                </div>
-                <p className="text-base font-semibold text-zinc-200 mb-1">Transaction confirmed</p>
-                <p className="text-xs text-zinc-500 mb-5">
-                  {amount} {selectedToken} sent to {selectedContactName ?? truncate(recipient)}
+                <ResultIcon tone="success" />
+                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Payment sent</p>
+                <p className="text-xs text-[var(--v2-ink-3)] mb-5 text-center">
+                  {displayAmount} {selectedToken} was sent from {walletName} to {recipientLabel}.
                 </p>
                 {txHash && (
-                  <a
-                    href={getExplorerUrl(chainId, 'tx', txHash)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors mb-6 flex items-center gap-1"
-                  >
-                    View on {getChainConfig(chainId).name} Explorer
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                    </svg>
-                  </a>
+                  <div className="mb-6 flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
+                    <span>Payment receipt</span>
+                    <ExternalDetailsLink
+                      href={getExplorerUrl(chainId, 'tx', txHash)}
+                      label="Open payment externally"
+                    />
+                  </div>
                 )}
-                <button
+                <Button
                   onClick={handleDone}
-                  className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200"
+                  className="w-full"
                 >
                   Done
-                </button>
+                </Button>
               </>
             )}
 
             {status === 'proposed' && (
               <>
-                <div className="w-14 h-14 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-5">
-                  <svg className="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <p className="text-base font-semibold text-zinc-200 mb-1">Transaction proposed</p>
-                <p className="text-xs text-zinc-500 mb-2 text-center">
-                  {amount} {selectedToken} to {selectedContactName ?? truncate(recipient)}
+                <ResultIcon tone="warning" />
+                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Payment submitted</p>
+                <p className="text-xs text-[var(--v2-ink-3)] mb-2 text-center">
+                  {displayAmount} {selectedToken} from {walletName} to {recipientLabel}.
                 </p>
-                <p className="text-xs text-zinc-500 mb-5 text-center">
-                  Waiting for {threshold - 1} more signature{threshold - 1 !== 1 ? 's' : ''} to execute.
+                <p className="text-xs text-[var(--v2-ink-3)] mb-5 text-center">
+                  No money has moved yet. This payment needs {threshold - 1} more approval{threshold - 1 !== 1 ? 's' : ''} before it can be sent.
                 </p>
                 <a
                   href={`https://app.safe.global/transactions/queue?safe=${chainConfig.shortName}:${safeAddress}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors mb-6 flex items-center gap-1"
+                  title="Opens app.safe.global"
+                  className="mb-6 inline-flex items-center gap-1 text-xs text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
                 >
-                  View in Safe{'{Wallet}'}
+                  View advanced approval details
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                   </svg>
                 </a>
-                <button
+                <Button
                   onClick={handleDone}
-                  className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200"
+                  className="w-full"
                 >
                   Done
-                </button>
+                </Button>
               </>
             )}
 
             {status === 'error' && (
               <>
-                <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-5">
-                  <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </div>
-                <p className="text-base font-semibold text-zinc-200 mb-1">Transaction failed</p>
-                <p className="text-xs text-zinc-500 mb-6 text-center max-w-xs">
-                  {error ?? 'An unexpected error occurred'}
+                <ResultIcon tone="danger" />
+                <p className="text-base font-semibold text-[var(--v2-ink)] mb-1">Payment was not sent</p>
+                <p className="text-xs text-[var(--v2-ink-3)] mb-6 text-center max-w-xs">
+                  {error ?? 'Check your approval method, then try again.'}
                 </p>
                 <div className="flex gap-3 w-full">
-                  <button
+                  <Button
+                    variant="ghost"
                     onClick={onClose}
-                    className="flex-1 py-3 rounded-lg border border-white/[0.08] text-sm text-zinc-300 hover:bg-white/[0.04] transition-colors"
+                    className="flex-1"
                   >
                     Cancel
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => { reset(); setStep('form') }}
-                    className="flex-1 py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200"
+                    className="flex-1"
                   >
                     Try again
-                  </button>
+                  </Button>
                 </div>
               </>
             )}

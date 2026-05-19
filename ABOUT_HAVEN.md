@@ -1,353 +1,136 @@
-# Haven — Agent-First Wallet (Technical Context)
+# About Haven
 
-## Overview
+## Product Summary
 
-Haven is an agent-first wallet built on top of smart accounts (Safe) that enables users to:
+Haven is an agentic stablecoin payment wallet. Users create or link a Haven account, add funds to a Haven wallet, and give AI agents constrained spending ability through agent rules and budgets.
 
-- Give AI agents the ability to spend money — and pay for services autonomously
-- Enforce strict policy controls on how that money is used
-- Maintain a non-custodial architecture
-- Operate across external agent environments (e.g. Claude, OpenClaw, scripts)
-- Participate in emerging agent payment protocols (x402, Stripe MPP) as both payer and receiver
+Haven is non-custodial smart account software. It helps users configure, verify, relay, and understand payment activity, but it does not hold funds, hold user or agent private keys, make API credentials sufficient to spend, or make discretionary transfer decisions.
 
-**The core idea:**
-AI agents should be able to transact, but only within clearly defined, user-controlled rules.
-Haven acts as the **wallet infrastructure layer** for the agent economy — not just a payment API, but the policy-aware backend that backs agents participating in internet-native payment protocols.
+## Core Model
 
-## Core Principles
+- User funds live in a user-controlled Safe, shown in product copy as a Haven wallet.
+- Each agent has a Haven identity, an API credential for authentication, and a credential address / delegate address for payment authority.
+- The user grants per-token budgets to the agent credential address through the Safe AllowanceModule.
+- The agent runtime holds and signs with its delegate private key. Haven's backend never holds that key.
+- The API key identifies the agent. It is not spending authority.
+- Spending authority comes from a valid agent/delegate signature and the on-chain Safe allowance state.
+- Payments within remaining on-chain budget can execute automatically through the allowance path.
+- Payments above remaining budget are queued for user approval.
+- Users can pause, revoke, reject, or stop agent authority.
 
-### 1. Non-custodial by design
+## What Exists Today
 
-- Funds are held in a Safe smart account
-- Haven does not hold unrestricted signing authority
-- If Haven is compromised, funds should not be movable
+- Haven account and Haven wallet flows.
+- Agent creation with per-token budget and reset period.
+- Agent credential generation and handoff artifacts.
+- Direct agent payments through the Haven SDK.
+- x402 and Haven machine-payment challenge handling in the SDK.
+- Dashboard, account, agent, approval, and transaction surfaces.
+- Agent pause and revoke flows.
+- Quality, review, and agent workflow documentation for implementation work.
 
-### 2. Policy-based execution
+## Agent Credentials
 
-All agent actions are constrained by:
+The generated agent credential file is a handoff artifact for the agent runtime. It should include enough context for the agent to authenticate, identify the correct wallet, and sign payments without implying that Haven is the custodian or controller of funds.
 
-- Spend limits
-- Allowed assets
-- Allowed recipients
-- Approval thresholds
-- Time constraints
+Current credential context should include:
 
-### 3. Agent-first UX
+- Haven API URL.
+- Agent ID.
+- API key.
+- Haven wallet / Safe address.
+- Credential address / delegate address.
+- Chain ID and token context when needed by the runtime.
+- Delegate private key only when Haven generated it client-side for the user and shows it once.
 
-- Agents interact with Haven via intents, not raw blockchain transactions
-- Haven abstracts calldata, token logic, and Safe transaction structure
-
-### 4. External agent compatibility
-
-- Agents can run anywhere (Claude, OpenClaw, scripts)
-- Haven provides a portable credential system
-
-### 5. Protocol-native
-
-- Haven speaks the emerging standards of the agent economy: x402 (HTTP 402) and Stripe MPP
-- Agents backed by Haven can pay any x402-enabled API or Stripe MPP merchant without custom integration
-- Haven can also accept inbound agent payments via these protocols
-
-## Architecture
-
-### Components
-
-- **Safe (Smart Account)** — Holds funds, executes transactions, multi-owner / threshold security
-- **Haven (Control Layer)** — Policy engine, agent management, transaction construction, execution orchestration, monitoring & logging
-- **Protocol Adapters** — x402 client/facilitator, Stripe MPP SPT bridge, receipt management
-- **Execution Primitives** — Safe modules, session keys (future), standard Safe approval flow
-- **Agents** — External actors that use Haven credentials and request actions (not raw txs)
-
-## Agent Model
-
-### Agent = Permissioned Actor
-
-An agent is defined by: identity, credential, and policy constraints.
-
-Example:
-
-```json
-{
-  "name": "Payment Agent",
-  "daily_limit": "500 USDC",
-  "per_tx_limit": "100 USDC",
-  "allowed_assets": ["USDC", "EURe"],
-  "allowed_recipients": ["0xabc..."],
-  "requires_approval_above": "100 USDC",
-  "expiry": "30 days"
-}
-```
-
-### Agent Credentials
-
-Agents receive a portable credential, not a private key.
-
-```json
-{
-  "agent_id": "agt_123",
-  "secret": "sk_live_xxx",
-  "safe_address": "0x...",
-  "api_url": "https://api.haven.xyz"
-}
-```
-
-This credential allows:
-
-- Requesting payments
-- Querying balances
-- Accessing transaction status
-
-It does NOT allow:
-
-- Unrestricted signing
-- Bypassing policies
-
-## Interaction Model
-
-Agents do NOT: build raw transactions, encode calldata, manage nonces, or interact directly with RPC.
-
-Agents DO: send payment intents to Haven.
+If the user brings their own credential address, Haven must not invent, recover, or store the private key. The generated instructions should tell the user or agent runtime to provide the matching delegate key through their own secret handling.
 
 ## Payment Flow
 
-### Step 1 — Agent creates intent
+1. Agent requests a payment with token, amount, recipient, and optional memo/context.
+2. Haven authenticates the API key and loads the agent, wallet, and allowance context.
+3. The agent/delegate signature provides payment authority.
+4. The Safe AllowanceModule enforces the automatic spend budget on-chain.
+5. If the request is within remaining on-chain budget, Haven relays the valid allowance transfer.
+6. If the request exceeds the remaining budget or needs human review, Haven queues it for approval.
+7. Haven records status and presents the result in approvals and transaction history.
 
-```json
-{
-  "action": "payment",
-  "safeId": "safe_123",
-  "asset": "USDC",
-  "amount": "100",
-  "recipient": "0xabc...",
-  "memo": "Invoice 1042"
-}
-```
+Haven can help construct and relay the transaction, but it must not alter the signed payment amount, token, recipient, route, or authority boundary.
 
-### Step 2 — Haven validates
+## x402 And Machine Payments
 
-Haven checks: agent identity, policy constraints, limits, allowed assets, and allowed recipients.
+The SDK supports `haven.fetch()` for standard x402 and Haven machine-payment challenge flows.
 
-### Step 3 — Haven constructs transaction
+For standard x402 merchant payments, the delegate wallet is the merchant-facing payer because the merchant protocol verifies an EIP-3009 authorization from an externally owned account. The current flow is:
 
-Haven builds a Safe-compatible transaction: ERC20 transfer or native transfer, correct encoding, correct target.
+1. Agent encounters an HTTP 402 challenge.
+2. Haven checks agent identity, wallet context, and remaining allowance.
+3. Haven can fund the delegate wallet from the Safe within budget.
+4. The agent signs the merchant-facing EIP-3009 payment from the delegate wallet.
+5. The SDK retries the request with the payment proof.
+6. Haven tracks funded, settled, failed, and stranded-payment states where relevant.
 
-### Step 4 — Execution routing
+This means the delegate key is a hot payment key and should be treated carefully. Keep x402 budgets small and reset-bound, rotate exposed keys, and reconcile/sweep stranded delegate balances before scaling high-volume payment traffic.
 
-**Case A: Auto-executable** — Within policy, executed via module or delegated path (future), sent to network.
+Production merchant facilitation, Stripe MPP, fiat/card rails, and merchant settlement are not current production surfaces. Treat them as future or review-required work under `docs/regulatory/casp-risk-guardrails.md`.
 
-**Case B: Needs approval** — Above threshold, created as Safe transaction, awaits owner signatures.
+## Guardrails
 
-**Case C: Rejected** — Fails policy check, no transaction created.
+Haven must stay within these product and architecture constraints:
 
-### Step 5 — Response to agent
+- Haven does not custody user assets.
+- Haven does not hold user or agent private keys on the backend.
+- API credentials alone cannot spend.
+- Off-chain database policy is not the real spend control.
+- Automated payment execution must be constrained by Safe AllowanceModule or equivalent on-chain control.
+- User-approved Safe transactions establish or modify agent authority.
+- Users can access and revoke Safe permissions outside Haven.
+- Haven must not operate swaps, ramps, fiat/card rails, merchant settlement, yield, treasury management, or financial advice flows without separate product, legal, and security review.
 
-```json
-{ "status": "executed", "txHash": "0x..." }
-```
+Use `docs/regulatory/casp-risk-guardrails.md` before changing payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP flows, merchant-facing demos, fiat/card surfaces, swaps, yield, or treasury features.
 
-```json
-{ "status": "pending_approval", "safeTxHash": "0x..." }
-```
+## Product Language
 
-```json
-{ "status": "rejected", "reason": "exceeds policy" }
-```
+Prefer these terms in primary UX and user-facing docs:
 
-## Execution Layer
+- Haven account.
+- Haven wallet.
+- Agent rules.
+- Agent budget.
+- Haven credential.
+- Approve actions.
+- Connect your agent.
 
-### Safe Modules
+Avoid exposing Safe, module, relayer, signer, owner, transaction hash, and raw address detail in primary UX unless the surface is explicitly advanced, account detail, transaction detail, or developer-facing.
 
-- Enable automated execution
-- Enforce rules at execution time
-- Allow Safe to execute without full multisig flow
-- Docs: https://docs.safe.global/advanced/smart-account-modules
+## Current Tech Snapshot
 
-### Guards
+- Frontend: Next.js and React.
+- Backend: Fastify, TypeScript, and PostgreSQL.
+- SDK: `@haven_ai/sdk`.
+- Smart account model: Safe plus AllowanceModule.
+- Current chain focus: Gnosis for Safe/AllowanceModule flows and Base-relevant x402 flows.
+- Payment surfaces: direct payments, x402, and Haven machine-payment challenge demos.
 
-- Validate transactions before execution
-- Enforce global safety constraints
-- Docs: https://docs.safe.global/advanced/smart-account-guards
-
-### Session Keys (future)
-
-- Temporary delegated keys
-- Limited by rules, revocable
-- Ideal for agents
-- Docs: https://docs.rhinestone.dev/home/concepts/session-keys
-
-## Protocol Integration Layer
-
-Haven's policy engine and non-custodial architecture position it as the natural wallet infrastructure behind emerging agent payment standards.
-
-### x402 — HTTP 402 Payment Required
-
-x402 (developed by Coinbase) revives the HTTP 402 status code for internet-native payments. When an agent requests a paid resource, the server responds with `402 Payment Required` including payment terms (price, token, chain, address). The agent pays on-chain and retries with proof.
-
-**Haven as x402 wallet backend:**
-
-The critical gap in x402 is: *who controls the wallet that backs the agent's payment?* By default, the agent needs a funded wallet and signing capability — no policy controls, no spend limits. Haven fills this gap.
-
-- Haven exposes an x402-compatible signer/client module
-- When an agent encounters a 402, the payment authorization routes through Haven's policy engine
-- Haven checks: is this agent allowed to spend this amount, on this asset, for this type of service?
-- If approved, Haven constructs and signs the on-chain payment from the Safe
-- The agent never holds keys — it just speaks HTTP 402
-
-**x402 session support (V2):**
-
-x402 V2 introduces sessions (authenticate once, pay repeatedly). Haven's agent credential model maps directly to this — a Haven credential can serve as an x402 session identity, with Haven enforcing cumulative spend limits across the session.
-
-**Haven as x402 facilitator (merchant-side):**
-
-For merchants or services using Haven-managed Safes to receive payments, Haven can act as an x402 facilitator — verifying inbound payment proofs and settling funds into the Safe.
-
-### Stripe MPP — Machine Payments Protocol
-
-Stripe's MPP (co-authored with Tempo) is an open standard for agent-to-merchant payments. It uses the same HTTP 402 flow but is rail-agnostic — supporting fiat (cards, BNPL) and stablecoins via Shared Payment Tokens (SPTs). SPTs are scoped, time-limited, usage-capped authorization tokens.
-
-**Haven credentials ↔ SPTs:**
-
-Haven's agent credential model (identity + policy constraints + expiry) is structurally equivalent to Stripe's SPTs. This creates two integration paths:
-
-1. **Haven agents → Stripe merchants (outbound):** Haven generates SPT-compatible tokens so Haven-backed agents can purchase from any Stripe-integrated merchant. This bridges Haven's on-chain policy engine to the entire Stripe merchant ecosystem — millions of vendors, no custom integration per merchant.
-
-2. **Stripe agents → Haven merchants (inbound):** Services using Haven-managed Safes can accept MPP payments from any MPP-speaking agent. Haven validates the SPT, confirms the PaymentIntent, and routes settled funds into the Safe.
-
-**Fiat ↔ crypto bridging:**
-
-MPP's rail-agnostic design means Haven can offer agents the choice: pay on-chain (native) or pay via Stripe (fiat). This is powerful for agents that need to interact with both crypto-native services (x402) and traditional merchants (MPP/Stripe).
-
-### Policy Model for Protocol Payments
-
-Traditional Haven policies use explicit recipient whitelists (`allowed_recipients`). Protocol-based payments require a more flexible model since agents pay *unknown services on demand*.
-
-Haven introduces **category-based policies** for protocol payments:
-
-```json
-{
-  "name": "Research Agent",
-  "daily_limit": "50 USDC",
-  "per_tx_limit": "5 USDC",
-  "allowed_protocols": ["x402", "mpp"],
-  "allowed_categories": ["api_access", "data", "compute"],
-  "max_transactions_per_hour": 100,
-  "requires_approval_above": "10 USDC",
-  "expiry": "7 days"
-}
-```
-
-This allows agents to pay for API calls, inference, data feeds, and tools without pre-approving every recipient — while still enforcing budgets and rate limits.
-
-### Micropayment Optimization
-
-Both x402 and MPP are designed for high-frequency, low-value transactions (sub-dollar API calls, per-query pricing, pay-per-token inference). Haven optimizes for this via:
-
-- **Batched settlement** — Aggregate many small payments into periodic Safe transactions to reduce gas costs
-- **Payment channels / tabs** — For repeated interactions with the same service, open a channel and settle periodically
-- **Receipt management** — Store and serve x402/MPP receipts for auditability and dispute resolution
-- **Rate-limited execution** — Policy engine enforces transaction frequency caps to prevent runaway spend
-
-## Key Design Decision
-
-**Agent should NOT hold a wallet.**
-
-Instead: Agent holds a capability to request financial actions.
-
-Haven translates that into valid Safe transactions and policy-compliant execution.
-
-## Why This Model Works
-
-- **Simplicity** — Agents use simple APIs, no blockchain complexity
-- **Safety** — Policies enforced centrally, Safe remains secure
-- **Flexibility** — Supports any agent runtime, portable credentials
-- **Extensibility** — Supports human approvals, automation, and hybrid flows
-
-## API Surface (conceptual)
-
-### Core
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/agents` | POST | Create Agent |
-| `/agents/{id}/revoke` | POST | Revoke Agent |
-| `/payments` | POST | Request Payment |
-| `/payments/{id}` | GET | Get Payment Status |
-| `/transactions` | GET | List Transactions |
-
-### Protocol Integration
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/x402/authorize` | POST | Authorize an x402 payment (agent-side) |
-| `/x402/verify` | POST | Verify an x402 payment proof (facilitator-side) |
-| `/mpp/spt` | POST | Generate a Shared Payment Token for Stripe MPP |
-| `/mpp/challenge` | POST | Issue an MPP challenge (merchant-side) |
-| `/protocols/discover` | GET | List supported payment protocols for an agent |
-| `/receipts` | GET | List payment receipts (x402 + MPP) |
-| `/receipts/{id}` | GET | Get receipt detail / proof |
-
-## Core Mental Model
+## Mental Model
 
 ```
-User → Safe (funds)
-Haven → policies + orchestration + protocol adapters
-Agent → requests actions (direct or via x402/MPP)
-Safe → executes transactions
+User controls the Haven wallet and budgets.
+Agent requests payments and signs with its credential.
+Haven authenticates, verifies, relays, records, and presents status.
+On-chain Safe rules decide what can move automatically.
+User approval decides what can move outside the automatic budget.
 ```
 
-### Protocol Payment Flow
+## Future Work
 
-```
-Agent encounters HTTP 402 (x402 or MPP)
-  → Haven policy engine evaluates (budget, category, rate limit)
-  → Haven signs/authorizes payment from Safe
-  → Agent retries request with proof/SPT
-  → Service delivers resource
-  → Haven logs receipt
-```
+The following are possible future directions, not current production promises:
 
-## Key Insight
+- Broader protocol adapters.
+- Merchant acceptance or facilitator flows.
+- Stripe MPP, fiat rails, card rails, or merchant settlement.
+- Session keys, guards, or alternative on-chain permission systems.
+- Multi-chain expansion.
+- Micropayment batching, tabs, or payment channels.
 
-AI agents should not be wallets. They should be financial actors with constrained authority.
-
-Haven enables this by:
-
-- Separating intent from execution
-- Enforcing policy before money moves
-- Keeping custody at the smart account level
-
-## Future Extensions
-
-### Near-term
-- x402 client library (agent-side wallet backend)
-- Stripe MPP SPT generation for outbound fiat payments
-- Category-based policy engine (beyond recipient whitelists)
-- Receipt and proof management API
-- Micropayment batching and settlement optimization
-
-### Medium-term
-- x402 facilitator mode (merchant-side payment acceptance)
-- MPP inbound payment acceptance for Haven-managed Safes
-- Session key-based direct execution (x402 V2 session support)
-- OAuth-style "Connect Haven" for third-party integrations
-- Cross-chain support (Base, Solana, other x402-supported networks)
-
-### Long-term
-- Multi-agent coordination and inter-agent payment channels
-- Automated treasury management
-- Fiat ↔ crypto bridging (agents choose rail per transaction)
-- Agent-to-agent marketplace settlement
-- Embedded payments SDK for external products
-
-## Summary
-
-Haven is an agent-first programmable wallet and protocol infrastructure layer where:
-
-- Users retain custody via Safe
-- Agents can spend within defined policies — both for direct payments and protocol-based purchases
-- Haven translates intent into safe execution, whether the intent comes from the agent directly or via an x402/MPP flow
-- The system speaks the emerging standards of the agent economy natively
-- The system remains flexible, secure, and extensible
-
-**The long-term vision:**
-A world where AI agents can safely and autonomously participate in financial systems — paying for APIs, services, and goods across both crypto and fiat rails — without compromising user control. Haven is the wallet infrastructure that makes this possible.
+Any future work in these areas must preserve the non-custodial model and pass the guardrails in `docs/regulatory/casp-risk-guardrails.md` before being treated as product behavior.

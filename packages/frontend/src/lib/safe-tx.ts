@@ -1,12 +1,15 @@
 import {
   encodeFunctionData,
+  hashTypedData,
   parseUnits,
   type Address,
   type Hash,
   type PublicClient,
-  type WalletClient,
 } from 'viem'
 import { getChainConfig } from './chains'
+import { api } from './api'
+import { signSafeHashWithPasskey } from './passkey-sign'
+import type { HavenUserSigner } from './signer'
 
 // ── Constants ────────────────────────────────────────────────────────
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address
@@ -171,15 +174,12 @@ export function buildSafeTx(
 }
 
 /** Sign the Safe transaction using EIP-712 typed data */
-export async function signSafeTx(
-  walletClient: WalletClient,
+export function getSafeTxHash(
   safeAddress: Address,
   tx: SafeTxParams,
-  signer: Address,
   chainId: number = 100,
-): Promise<`0x${string}`> {
-  return walletClient.signTypedData({
-    account: signer,
+): `0x${string}` {
+  return hashTypedData({
     domain: {
       chainId,
       verifyingContract: safeAddress,
@@ -201,6 +201,42 @@ export async function signSafeTx(
   })
 }
 
+/** Sign the Safe transaction using either an EOA or passkey-backed contract signer. */
+export async function signSafeTx(
+  signer: HavenUserSigner,
+  safeAddress: Address,
+  tx: SafeTxParams,
+  chainId: number = 100,
+): Promise<`0x${string}`> {
+  if (signer.type === 'eoa') {
+    return signer.walletClient.signTypedData({
+      account: signer.address,
+      domain: {
+        chainId,
+        verifyingContract: safeAddress,
+      },
+      types: SAFE_TX_TYPEHASH,
+      primaryType: 'SafeTx',
+      message: {
+        to: tx.to,
+        value: tx.value,
+        data: tx.data,
+        operation: tx.operation,
+        safeTxGas: tx.safeTxGas,
+        baseGas: tx.baseGas,
+        gasPrice: tx.gasPrice,
+        gasToken: tx.gasToken,
+        refundReceiver: tx.refundReceiver,
+        nonce: tx.nonce,
+      },
+    })
+  }
+
+  const safeTxHash = getSafeTxHash(safeAddress, tx, chainId)
+  const result = await signSafeHashWithPasskey({ signer, safeTxHash })
+  return result.signature
+}
+
 /**
  * Normalise the signature v value to 27/28.
  *
@@ -216,6 +252,10 @@ export async function signSafeTx(
  */
 function normaliseSignatureV(sig: `0x${string}`): `0x${string}` {
   const raw = sig.slice(2)
+  if (raw.length !== 130) {
+    return sig
+  }
+
   const v = parseInt(raw.slice(128, 130), 16)
 
   // Normalise: raw 0/1 → 27/28
@@ -229,41 +269,59 @@ function normaliseSignatureV(sig: `0x${string}`): `0x${string}` {
 
 /** Execute the Safe transaction on-chain (threshold = 1) */
 export async function executeSafeTx(
-  walletClient: WalletClient,
+  signer: HavenUserSigner,
   publicClient: PublicClient,
   safeAddress: Address,
   tx: SafeTxParams,
   signature: `0x${string}`,
-  sender: Address,
   chainId: number = 100,
 ): Promise<{ txHash: Hash }> {
-  const adjustedSig = normaliseSignatureV(signature)
-  const { viemChain } = getChainConfig(chainId)
+  if (signer.type === 'eoa') {
+    const adjustedSig = normaliseSignatureV(signature)
+    const { viemChain } = getChainConfig(chainId)
 
-  const txHash = await walletClient.writeContract({
-    address: safeAddress,
-    abi: SAFE_EXEC_ABI,
-    functionName: 'execTransaction',
-    args: [
-      tx.to,
-      tx.value,
-      tx.data,
-      tx.operation,
-      tx.safeTxGas,
-      tx.baseGas,
-      tx.gasPrice,
-      tx.gasToken,
-      tx.refundReceiver,
-      adjustedSig,
-    ],
-    chain: viemChain,
-    account: sender,
+    const txHash = await signer.walletClient.writeContract({
+      address: safeAddress,
+      abi: SAFE_EXEC_ABI,
+      functionName: 'execTransaction',
+      args: [
+        tx.to,
+        tx.value,
+        tx.data,
+        tx.operation,
+        tx.safeTxGas,
+        tx.baseGas,
+        tx.gasPrice,
+        tx.gasToken,
+        tx.refundReceiver,
+        adjustedSig,
+      ],
+      chain: viemChain,
+      account: signer.address,
+    })
+
+    await publicClient.waitForTransactionReceipt({ hash: txHash })
+
+    return { txHash }
+  }
+
+  const result = await api.execSafe({
+    chain_id: chainId,
+    safe_address: safeAddress,
+    to: tx.to,
+    value: tx.value.toString(),
+    data: tx.data,
+    operation: tx.operation,
+    safe_tx_gas: tx.safeTxGas.toString(),
+    base_gas: tx.baseGas.toString(),
+    gas_price: tx.gasPrice.toString(),
+    gas_token: tx.gasToken,
+    refund_receiver: tx.refundReceiver,
+    nonce: tx.nonce.toString(),
+    signatures: signature,
   })
 
-  // Wait for confirmation
-  await publicClient.waitForTransactionReceipt({ hash: txHash })
-
-  return { txHash }
+  return { txHash: result.tx_hash as Hash }
 }
 
 /** Propose a multi-sig transaction to the Safe Transaction Service */

@@ -1,3 +1,5 @@
+import type { AgentStatus } from '@/lib/payment-status'
+
 export interface Transaction {
   hash: string
   type: 'native' | 'erc20' | 'internal'
@@ -14,6 +16,19 @@ export interface Transaction {
   tokenAddress?: string
   tokenSymbol?: string
   agentName?: string
+  source?: 'direct' | 'x402' | 'mpp_demo'
+  x402ResourceUrl?: string | null
+  x402MerchantAddress?: string | null
+  paymentId?: string
+  paymentProofStatus?: string | null
+}
+
+export interface AggregatedTransaction extends Transaction {
+  chainId: number
+  safeId: string
+  safeAddress: string
+  safeName: string
+  agentId?: string
 }
 
 export interface TransactionsResponse {
@@ -22,6 +37,54 @@ export interface TransactionsResponse {
   page: number
   limit: number
   pages: number
+}
+
+export interface TransactionsFeedResponse {
+  transactions: AggregatedTransaction[]
+  total: number
+  offset: number
+  limit: number
+  hasMore: boolean
+  partialFailure: boolean
+  failedSafeIds: string[]
+}
+
+export interface TransactionFilterState {
+  safeId?: string
+  agentId?: string
+  tokenKey?: string
+  /**
+   * Direction filter — incoming or outgoing only. Applied client-side over
+   * the fetched transactions; the API doesn't yet support this dimension.
+   */
+  direction?: 'in' | 'out'
+}
+
+export interface TransactionFilterSafeOption {
+  id: string
+  name: string
+  address: string
+  chainId: number
+}
+
+export interface TransactionFilterAgentOption {
+  id: string
+  name: string
+  status: AgentStatus
+}
+
+export interface TransactionFilterTokenOption {
+  key: string
+  symbol: string
+  address: string | null
+  chainId: number
+  isNative: boolean
+}
+
+export interface TransactionFilterOptionsResponse {
+  safes: TransactionFilterSafeOption[]
+  agents: TransactionFilterAgentOption[]
+  tokens: TransactionFilterTokenOption[]
 }
 
 export interface BalanceItem {

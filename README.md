@@ -1,19 +1,19 @@
 # Haven
 
-Agent-first wallet infrastructure for the autonomous economy. Haven gives AI agents the ability to hold, send, and receive money within strict, user-defined guardrails — without requiring agents to manage private keys or understand blockchain mechanics.
+Agent-first wallet infrastructure for the autonomous economy. Haven lets AI agents request payments within strict, user-approved guardrails without requiring agents to manage Safe owner keys or understand blockchain mechanics.
 
 ## Core Concept
 
-Agents should not be wallets. They should be **financial actors with constrained authority**. Haven separates the ability to *request* a financial action from the ability to *execute* it, with a policy engine and on-chain enforcement in between.
+Agents should not be wallets. They should be **financial actors with constrained authority**. Haven separates the ability to *request* a financial action from the authority to approve and settle it, with deterministic checks and on-chain enforcement in between.
 
 ```
-User → Safe (funds / custody)
-Haven → Policy engine + orchestration
-Agent → Requests payments via simple intents
-Safe AllowanceModule → Enforces on-chain spending limits
+User -> Safe (funds held in a user-controlled smart account)
+Haven -> UI, transaction construction, pre-checks, relay, status
+Agent -> Requests payments via signed intents
+Safe AllowanceModule -> Enforces on-chain spending limits
 ```
 
-**Non-custodial by design:** Haven never holds private keys. If Haven is fully compromised, an attacker still cannot move user funds.
+**Non-custodial by design:** Haven never holds user or agent private keys. API keys authenticate agents to Haven, but signatures and on-chain Safe/module constraints are the source of payment authority.
 
 ## What's in the Repo
 
@@ -24,6 +24,11 @@ This is a TypeScript monorepo:
 | `packages/backend` | Fastify API — auth, agents, payments, Safe integration |
 | `packages/frontend` | Next.js dashboard — wallet connect, Safe deploy, agent management |
 | `packages/sdk` | `@haven_ai/sdk` — TypeScript SDK for agent payment integration |
+
+## Team Docs
+
+- [PR Workflow Checklist](docs/pr-workflow-checklist.md)
+- [CASP / MiCA Risk Minimisation Guardrails](docs/regulatory/casp-risk-guardrails.md)
 
 ## Prerequisites
 
@@ -210,9 +215,9 @@ Or with a custom task:
 npm run agent:demo -- "Pay 0.01 EURe to 0xABC... for API access"
 ```
 
-Claude receives the task, decides a payment is needed, calls the `make_payment` tool, Haven validates and executes it on-chain, and Claude summarizes the result.
+Claude receives the task, decides a payment is needed, calls the `make_payment` tool, Haven validates the signed request and relays it on-chain, and Claude summarizes the result.
 
-**What this proves:** A real AI agent autonomously moved funds from a Safe — within strict policy guardrails, without holding keys to the Safe, and without understanding blockchain mechanics.
+**What this proves:** A real AI agent requested and signed a payment from a Safe within strict on-chain guardrails, without holding keys to the Safe and without understanding blockchain mechanics.
 
 ## How It Works
 
@@ -227,9 +232,9 @@ Claude receives the task, decides a payment is needed, calls the `make_payment` 
 ```
 
 1. **Agent** sends a simple payment intent: `{ token: "EURe", amount: "5.00", to: "0x..." }`
-2. **Haven** validates against policies, checks on-chain allowance, generates the transfer hash
+2. **Haven** validates the request against mirrored policy and on-chain allowance, then generates the transfer hash
 3. **Agent** signs the hash with its delegate private key (locally — Haven never sees the key)
-4. **Haven** submits the signed transaction via a gas-paying relayer
+4. **Haven** relays the signed transaction via a gas-paying relayer without changing amount, token, or recipient
 5. **AllowanceModule** verifies the signature and spending limit, transfers tokens from the Safe
 
 ### Payment API (3-step flow)
@@ -240,7 +245,7 @@ Claude receives the task, decides a payment is needed, calls the `make_payment` 
 | 2. Sign & submit | `POST /payments/:id/sign` | Agent signs hash, Haven verifies and executes on-chain via relayer |
 | 3. Check status | `GET /payments/:id` | Poll until `confirmed` / `failed` |
 
-All endpoints authenticate with `Authorization: Bearer sk_agent_xxx`.
+All endpoints authenticate with `Authorization: Bearer sk_agent_xxx`. Authentication is not payment authority: executable transfers still require the agent-held delegate signature and on-chain Safe/module allowance.
 
 ### Security Model
 
@@ -253,7 +258,7 @@ Four independent layers — all must be compromised for funds to be at risk:
 | **Haven policy engine** | Recipient allowlists, audit trail, approval thresholds | Off-chain |
 | **Credential scoping** | Revocable API keys, time-limited access | Haven backend |
 
-**Worst case:** If Haven is fully compromised, attackers get API keys but **not** delegate private keys — they cannot sign transactions. The Safe owner can revoke all delegates immediately from [Safe{Wallet}](https://app.safe.global) without needing Haven.
+**Worst case:** If Haven is fully compromised, attackers get API keys but **not** delegate private keys, so API credentials alone cannot sign transactions. The Safe owner can revoke all delegates immediately from [Safe{Wallet}](https://app.safe.global) without needing Haven.
 
 ### Key Management
 
@@ -265,6 +270,8 @@ Four independent layers — all must be compromised for funds to be at risk:
 | Relayer key | Haven server | Pay gas only — zero fund access |
 
 Haven **never** holds Safe owner keys or delegate private keys.
+
+For architecture constraints around custody, transfer-service risk, relaying, x402/merchant demos, fiat/card rails, swaps, and investment advice, use [`docs/regulatory/casp-risk-guardrails.md`](docs/regulatory/casp-risk-guardrails.md) as the required perimeter guardrail.
 
 ## API Reference
 

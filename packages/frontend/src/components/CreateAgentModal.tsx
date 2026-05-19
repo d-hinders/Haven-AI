@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
-import { type Address, parseUnits, hashTypedData } from 'viem'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { usePublicClient } from 'wagmi'
+import { type Address, parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAddress } from 'viem/accounts'
 import {
   buildAgentSetupTx,
@@ -12,19 +12,36 @@ import {
 } from '@/lib/allowance-module'
 import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
-import RecipientAllowlistEditor, { type RecipientEntry } from './RecipientAllowlistEditor'
+import { validateMoneyInput } from '@/lib/money-input'
+import OnchainActionGate from './OnchainActionGate'
 import {
   getSafeNonce,
   signSafeTx,
   executeSafeTx,
   proposeSafeTx,
+  getSafeTxHash,
   getChainTokens,
 } from '@/lib/safe-tx'
 import { truncate, isValidAddress } from '@/lib/format'
-import { buildHandoff, buildDotenv, type HandoffInput } from '@/lib/agent-handoff'
+import { buildHandoff, type HandoffInput } from '@/lib/agent-handoff'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
+import { useActiveSigner } from '@/lib/signer'
+import { SigningStatus } from './SigningStatus'
+import WalletButton from './WalletButton'
+import { Button } from './ui/Button'
+import { Input } from './ui/Input'
+import { Select } from './ui/Select'
+import {
+  AgentBudgetCard,
+  AgentRulesSummary,
+  ApprovalRequiredBanner,
+  CredentialHandoffCard,
+} from './haven'
+import { useToast } from './ui/Toast'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 
 interface AllowanceEntry {
@@ -49,6 +66,12 @@ type ExecutionStatus =
   | 'error'
 
 type KeyMode = 'generate' | 'existing'
+type AuthorityStatus = 'confirmed' | 'proposed'
+
+interface AuthorityResult {
+  status: AuthorityStatus
+  txHash: string | null
+}
 
 interface Props {
   open: boolean
@@ -79,6 +102,9 @@ export default function CreateAgentModal({
   preset = null,
   onCreated,
 }: Props) {
+  const { toast } = useToast()
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, open)
   const { user, activeSafe } = useAuth()
   const userSafes = user?.safes ?? []
 
@@ -132,37 +158,41 @@ export default function CreateAgentModal({
   // Delegate key generation
   const [keyMode, setKeyMode] = useState<KeyMode>('generate')
   const [generatedPrivateKey, setGeneratedPrivateKey] = useState<string | null>(null)
-  // Note: the generated private key is no longer revealed on step 1 — it's
-  // bundled into the handoff file shown on the Done step. So no per-step
-  // save gate, show/hide, or copy-state here.
+  // Note: the generated credential secret is no longer revealed early — it is
+  // bundled into the credential file shown on the Done step.
 
   // Form: allowances
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
   const [addToken, setAddToken] = useState<string>(tokenOptions[0]?.symbol ?? '')
   const [addAmount, setAddAmount] = useState('')
+  const [addAmountError, setAddAmountError] = useState('')
   const [addReset, setAddReset] = useState(1440) // daily
-
-  // Form: recipient allowlist
-  const [restrictRecipients, setRestrictRecipients] = useState(false)
-  const [allowedRecipients, setAllowedRecipients] = useState<RecipientEntry[]>([])
 
   // Execution
   const [execStatus, setExecStatus] = useState<ExecutionStatus>('checking')
   const [execError, setExecError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
+  const [authorityResult, setAuthorityResult] = useState<AuthorityResult | null>(null)
+  const [backendSaveFailed, setBackendSaveFailed] = useState(false)
 
   // Result
   const [createdApiKey, setCreatedApiKey] = useState<string | null>(null)
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null)
-  const [copiedApiKey, setCopiedApiKey] = useState(false)
-  const [copiedDoneKey, setCopiedDoneKey] = useState(false)
-  const [copiedEnv, setCopiedEnv] = useState(false)
-  const [showRawCreds, setShowRawCreds] = useState(false)
+  const [copiedHandoff, setCopiedHandoff] = useState(false)
+  // True once the user has downloaded or copied the credential file.
+  // Used to gate close-without-saving on the Done step — see handleClose.
+  const [credentialsSaved, setCredentialsSaved] = useState(false)
 
   // Wagmi
-  const { address: connectedAddress } = useAccount()
-  const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const publicClient = usePublicClient({ chainId })
+  const signer = useActiveSigner({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
 
   // ── Reset ──────────────────────────────────────────────
 
@@ -176,24 +206,45 @@ export default function CreateAgentModal({
     setAllowances([])
     setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
+    setAddAmountError('')
     setAddReset(1440)
-    setRestrictRecipients(false)
-    setAllowedRecipients([])
     setExecStatus('checking')
     setExecError(null)
     setTxHash(null)
+    setAuthorityResult(null)
+    setBackendSaveFailed(false)
     setCreatedApiKey(null)
     setCreatedAgentId(null)
-    setCopiedApiKey(false)
-    setCopiedDoneKey(false)
-    setCopiedEnv(false)
-    setShowRawCreds(false)
+    setCopiedHandoff(false)
+    setCredentialsSaved(false)
   }, [])
 
   const handleClose = useCallback(() => {
+    if (backendSaveFailed && authorityResult) {
+      const confirmed = window.confirm(
+        'The agent rules were created in your Haven wallet, but Haven has not saved the agent yet.\n\n' +
+        'If you close now, the agent may not appear in Haven. Try finishing the save first.\n\n' +
+        'Close anyway?',
+      )
+      if (!confirmed) return
+    }
+
+    // Guard against accidental dismissal of the Done step before the user has
+    // saved the credential file. Closing without saving can leave the user
+    // with a connected agent that does not have the credential it needs.
+    if (step === 'done' && createdApiKey && !credentialsSaved) {
+      const confirmed = window.confirm(
+        'You haven\'t saved the agent credentials yet.\n\n' +
+        'The Haven credential cannot be shown again. ' +
+        'If you close this dialog now, the agent may be connected but unable to make requests. ' +
+        'You would need to revoke it and create a new one.\n\n' +
+        'Close anyway?',
+      )
+      if (!confirmed) return
+    }
     resetForm()
     onClose()
-  }, [onClose, resetForm])
+  }, [backendSaveFailed, authorityResult, step, createdApiKey, credentialsSaved, onClose, resetForm])
 
   // Escape-to-close — allow closing in all steps except while an on-chain
   // action is actively in flight (mirrors the backdrop-click behaviour).
@@ -268,11 +319,15 @@ export default function CreateAgentModal({
   // moves the visibility forward.)
 
   function deployBlockReason(): string | null {
-    if (!connectedAddress) return 'Connect a wallet to sign the Safe transaction.'
-    if (!walletClient) return 'Waiting for wallet client — check that your wallet is unlocked.'
+    if (operationGate.kind === 'passkey_on_other_device') {
+      return 'Use the device with this Haven account passkey to approve.'
+    }
+    if (operationGate.kind === 'no_signer') {
+      return 'Connect a wallet or use a passkey on this device to approve this change.'
+    }
     if (!publicClient) return 'No RPC client for this chain. Refresh the page.'
     if (!safeDetails)
-      return 'Safe details are still loading — or the Haven backend is unreachable. Make sure it is running on port 3001.'
+      return 'Account details are still loading — or the Haven backend is unreachable. Make sure it is running on port 3001.'
     return null
   }
 
@@ -280,10 +335,23 @@ export default function CreateAgentModal({
 
   function handleAddAllowance() {
     const tokenOpt = tokenOptions.find((t) => t.symbol === addToken)
-    if (!tokenOpt || !addAmount || Number(addAmount) <= 0) return
+    if (!tokenOpt) return
+    const parsedAmount = validateMoneyInput(addAmount, tokenOpt.decimals, {
+      tokenSymbol: tokenOpt.symbol,
+    })
+    if (!parsedAmount.ok) {
+      setAddAmountError(parsedAmount.message)
+      return
+    }
 
     // Don't add duplicate tokens
     if (allowances.some((a) => a.tokenSymbol === addToken)) return
+
+    const nextToken = tokenOptions.find(
+      (t) =>
+        t.symbol !== addToken &&
+        !allowances.some((a) => a.tokenSymbol === t.symbol),
+    )
 
     setAllowances((prev) => [
       ...prev,
@@ -291,29 +359,68 @@ export default function CreateAgentModal({
         tokenSymbol: tokenOpt.symbol,
         tokenAddress: tokenOpt.address,
         decimals: tokenOpt.decimals,
-        amount: addAmount,
+        amount: parsedAmount.amount,
         resetTimeMin: addReset,
       },
     ])
     setAddAmount('')
+    setAddAmountError('')
+    setAddToken(nextToken?.symbol ?? '')
   }
 
   function handleRemoveAllowance(symbol: string) {
     setAllowances((prev) => prev.filter((a) => a.tokenSymbol !== symbol))
+    if (tokenOptions.some((t) => t.symbol === symbol)) {
+      setAddToken(symbol)
+    }
   }
 
   function resetLabel(mins: number) {
     return RESET_PERIODS.find((p) => p.value === mins)?.label ?? `${mins}m`
   }
 
+  function budgetPeriodLabel(mins: number) {
+    const label = resetLabel(mins).toLowerCase()
+    if (label === 'one-time') return 'total budget'
+    if (label === 'daily') return 'per day'
+    if (label === 'weekly') return 'per week'
+    if (label === 'monthly') return 'per month'
+    return `every ${label}`
+  }
+
+  function budgetLine(a: AllowanceEntry) {
+    return `${a.amount} ${a.tokenSymbol} ${budgetPeriodLabel(a.resetTimeMin)}`
+  }
+
+  function budgetAmountSummary() {
+    if (allowances.length === 0) return 'No budget set'
+    if (allowances.length === 1) {
+      const [a] = allowances
+      return `${a.amount} ${a.tokenSymbol}`
+    }
+    return `${allowances.length} budgets set`
+  }
+
+  function budgetPeriodSummary() {
+    if (allowances.length === 0) return 'Add at least one token budget'
+    if (allowances.length === 1) return budgetPeriodLabel(allowances[0].resetTimeMin)
+    return allowances.map((a) => budgetLine(a)).join(' • ')
+  }
+
+  const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
+  const walletNetworkName = getChainConfig(chainId).name
+  const walletDisplayAddress = safeAddress || selectedSafe?.safe_address
+
   // ── Step: Execute ──────────────────────────────────────
 
   async function handleExecute() {
-    if (!publicClient || !walletClient || !connectedAddress || !safeDetails)
+    if (!publicClient || !signer || !safeDetails)
       return
 
     setStep('executing')
     setExecError(null)
+    setBackendSaveFailed(false)
+    setAuthorityResult(null)
 
     try {
       // 1. Check if module is enabled
@@ -344,122 +451,130 @@ export default function CreateAgentModal({
       // 4. Sign
       setExecStatus('signing')
       const signature = await signSafeTx(
-        walletClient,
+        signer,
         safeAddress as Address,
         safeTx,
-        connectedAddress,
         chainId,
       )
 
       const threshold = safeDetails.threshold ?? 1
 
+      let completedAuthority: AuthorityResult
       if (threshold <= 1) {
         // Single-owner: execute directly
         setExecStatus('executing')
         const result = await executeSafeTx(
-          walletClient,
+          signer,
           publicClient,
           safeAddress as Address,
           safeTx,
           signature,
-          connectedAddress,
           chainId,
         )
         setTxHash(result.txHash)
+        completedAuthority = {
+          status: 'confirmed',
+          txHash: result.txHash,
+        }
       } else {
         // Multi-sig: propose
         setExecStatus('executing')
-        const safeTxHash = hashTypedData({
-          domain: {
-            chainId,
-            verifyingContract: safeAddress as Address,
-          },
-          types: {
-            SafeTx: [
-              { name: 'to', type: 'address' },
-              { name: 'value', type: 'uint256' },
-              { name: 'data', type: 'bytes' },
-              { name: 'operation', type: 'uint8' },
-              { name: 'safeTxGas', type: 'uint256' },
-              { name: 'baseGas', type: 'uint256' },
-              { name: 'gasPrice', type: 'uint256' },
-              { name: 'gasToken', type: 'address' },
-              { name: 'refundReceiver', type: 'address' },
-              { name: 'nonce', type: 'uint256' },
-            ],
-          },
-          primaryType: 'SafeTx',
-          message: {
-            to: safeTx.to,
-            value: safeTx.value,
-            data: safeTx.data,
-            operation: safeTx.operation,
-            safeTxGas: safeTx.safeTxGas,
-            baseGas: safeTx.baseGas,
-            gasPrice: safeTx.gasPrice,
-            gasToken: safeTx.gasToken,
-            refundReceiver: safeTx.refundReceiver,
-            nonce: safeTx.nonce,
-          },
-        })
+        const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
         await proposeSafeTx(
           safeAddress as Address,
           safeTx,
           safeTxHash,
           signature,
-          connectedAddress,
+          signer.address,
           chainId,
         )
         setTxHash(safeTxHash)
+        completedAuthority = {
+          status: 'proposed',
+          txHash: safeTxHash,
+        }
       }
 
       // 5. Save agent to Haven backend
       setExecStatus('saving')
-      const agent = await api.post<{ id: string; name: string; api_key: string; delegate_address: string }>('/agents', {
-          name: name.trim(),
-          description: description.trim() || undefined,
-          delegate_address: delegateAddress,
-          safe_id: safeId || undefined,
-          restrict_recipients: restrictRecipients,
-          allowed_recipients: restrictRecipients ? allowedRecipients : [],
-          allowances: allowances.map((a) => ({
-            token_address:
-              a.tokenAddress ?? '0x0000000000000000000000000000000000000000',
-            token_symbol: a.tokenSymbol,
-            allowance_amount: parseUnits(a.amount, a.decimals).toString(),
-            reset_period_min: a.resetTimeMin,
-          })),
-        })
-      setCreatedApiKey(agent.api_key)
-      setCreatedAgentId(agent.id)
-      setExecStatus(threshold <= 1 ? 'confirmed' : 'proposed')
-      setStep('done')
-      onCreated(agent)
+      setAuthorityResult(completedAuthority)
+      await saveAgentToHaven(completedAuthority)
     } catch (err: unknown) {
-      console.error('[Haven] Agent setup error:', err)
-
-      // Extract the most useful error message from viem's nested error chain
-      let message = 'Setup failed'
-      if (err instanceof Error) {
-        message = err.message
-        // viem wraps contract errors — dig into the cause chain
-        let cause = (err as { cause?: unknown }).cause
-        while (cause instanceof Error) {
-          if (cause.message) message = cause.message
-          cause = (cause as { cause?: unknown }).cause
-        }
-        // Also check for shortMessage (viem-specific)
-        const short = (err as { shortMessage?: string }).shortMessage
-        if (short) message = short
-      }
-
+      const message = errorMessage(err)
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
-        setExecError('Transaction rejected in wallet')
+        setExecError(
+          signer?.type === 'passkey'
+            ? 'Face ID or Touch ID was cancelled'
+            : 'Transaction rejected in wallet',
+        )
       } else {
         setExecError(message)
       }
       setExecStatus('error')
     }
+  }
+
+  function agentPayload() {
+    return {
+      name: name.trim(),
+      description: description.trim() || undefined,
+      delegate_address: delegateAddress,
+      safe_id: safeId || undefined,
+      allowances: allowances.map((a) => ({
+        token_address:
+          a.tokenAddress ?? '0x0000000000000000000000000000000000000000',
+        token_symbol: a.tokenSymbol,
+        allowance_amount: parseUnits(a.amount, a.decimals).toString(),
+        reset_period_min: a.resetTimeMin,
+      })),
+    }
+  }
+
+  function errorMessage(err: unknown): string {
+    console.error('[Haven] Agent setup error:', err)
+    let message = 'Setup failed'
+    if (err instanceof Error) {
+      message = err.message
+      let cause = (err as { cause?: unknown }).cause
+      while (cause instanceof Error) {
+        if (cause.message) message = cause.message
+        cause = (cause as { cause?: unknown }).cause
+      }
+      const short = (err as { shortMessage?: string }).shortMessage
+      if (short) message = short
+    }
+    return message
+  }
+
+  async function saveAgentToHaven(authority: AuthorityResult) {
+    try {
+      const agent = await api.post<{ id: string; name: string; api_key: string; delegate_address: string }>(
+        '/agents',
+        agentPayload(),
+      )
+      setCreatedApiKey(agent.api_key)
+      setCreatedAgentId(agent.id)
+      setBackendSaveFailed(false)
+      setExecError(null)
+      setExecStatus(authority.status)
+      setStep('done')
+      toast.success('Agent created')
+      onCreated(agent)
+    } catch (err: unknown) {
+      const message = errorMessage(err)
+      setBackendSaveFailed(true)
+      setAuthorityResult(authority)
+      setExecError(message)
+      setExecStatus('error')
+    }
+  }
+
+  async function handleRetryHavenSave() {
+    if (!authorityResult) return
+    setBackendSaveFailed(false)
+    setExecError(null)
+    setExecStatus('saving')
+    await saveAgentToHaven(authorityResult)
   }
 
   // ── Copy helpers ───────────────────────────────────────
@@ -501,10 +616,6 @@ export default function CreateAgentModal({
           amount: a.amount,
           resetPeriodMin: a.resetTimeMin,
         })),
-        restrictRecipients,
-        allowedRecipients: restrictRecipients
-          ? allowedRecipients.map((r) => ({ address: r.address, label: r.label }))
-          : [],
       },
       credentials: {
         apiKey: createdApiKey,
@@ -535,13 +646,15 @@ export default function CreateAgentModal({
       new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
       filename,
     )
+    setCredentialsSaved(true)
   }
 
-  function handleCopyEnv() {
+  function handleCopyHandoff() {
     const input = getHandoffInput()
     if (!input) return
-    const dotenv = buildDotenv(input)
-    copyToClipboard(dotenv, setCopiedEnv)
+    const { markdown } = buildHandoff(input)
+    copyToClipboard(markdown, setCopiedHandoff)
+    setCredentialsSaved(true)
   }
 
   // Generate a key the first time the user reaches the Key step in 'generate'
@@ -579,33 +692,43 @@ export default function CreateAgentModal({
   const availableTokens = tokenOptions.filter(
     (t) => !allowances.some((a) => a.tokenSymbol === t.symbol),
   )
+  const addTokenOption = availableTokens.find((t) => t.symbol === addToken)
+  const addAmountValidation =
+    addAmount && addTokenOption
+      ? validateMoneyInput(addAmount, addTokenOption.decimals, {
+          tokenSymbol: addTokenOption.symbol,
+        })
+      : null
+  const addAmountMessage =
+    addAmountError || (addAmountValidation && !addAmountValidation.ok ? addAmountValidation.message : '')
+  const blockReason = deployBlockReason()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 v2-modal-backdrop">
       {/* Backdrop click to close (disabled during execution) */}
       <div
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div className="relative bg-[#0e0e0e] border border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Create agent" className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
           <div>
-            <h2 className="text-sm font-semibold">Add agent</h2>
-            <p className="text-xs text-zinc-600 mt-0.5">
-              {step === 'details' && "Name the agent you'll hand these credentials to"}
-              {step === 'policy' && 'Set spending limits and (optionally) restrict recipients'}
-              {step === 'key' && 'Choose the signing key the agent will use'}
-              {step === 'review' && 'Review and add the agent'}
-              {step === 'executing' && 'Adding agent...'}
-              {step === 'done' && 'Credentials ready to hand off'}
+            <h2 className="text-sm font-semibold">Connect agent</h2>
+            <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
+              {step === 'details' && "Name the agent you'll connect"}
+              {step === 'policy' && 'Set agent budget — token, amount, frequency'}
+              {step === 'key' && 'Choose the credential the agent will use'}
+              {step === 'review' && 'Review agent rules before connecting'}
+              {step === 'executing' && 'Connecting agent...'}
+              {step === 'done' && 'Add your Haven credential to your agent'}
             </p>
           </div>
           <button
             onClick={handleClose}
             disabled={step === 'executing' && execStatus !== 'error'}
             aria-label="Close"
-            className="p-1 -mr-1 rounded-md text-zinc-700 hover:text-zinc-400 hover:bg-white/[0.04] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -616,7 +739,7 @@ export default function CreateAgentModal({
 
         {/* Step indicators */}
         {step !== 'executing' && step !== 'done' && (
-          <div className="flex items-center gap-2 px-6 py-3 border-b border-white/[0.04]">
+          <div className="flex items-center gap-2 px-5 py-2 border-b border-[var(--v2-border)]">
             {(['details', 'policy', 'key', 'review'] as const).map((s, i, arr) => (
               <div key={s} className="flex items-center gap-2">
                 <div
@@ -624,355 +747,310 @@ export default function CreateAgentModal({
                     s === step
                       ? 'bg-indigo-500 text-white'
                       : arr.indexOf(step as typeof arr[number]) > i
-                        ? 'bg-indigo-500/20 text-indigo-400'
-                        : 'bg-white/[0.04] text-zinc-600'
+                        ? 'bg-indigo-500/20 text-[var(--v2-brand)]'
+                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
                   }`}
                 >
                   {i + 1}
                 </div>
                 {i < arr.length - 1 && (
-                  <div className="w-8 h-px bg-white/[0.06]" />
+                  <div className="w-8 h-px bg-[var(--v2-surface-2)]" />
                 )}
               </div>
             ))}
           </div>
         )}
 
-        <div className="p-6">
+        <div className="p-5">
           {/* ── STEP: Details ─────────────────────────────── */}
           {step === 'details' && (
             <div className="space-y-5">
               <div>
-                <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
+                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
                   Agent name
                 </label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Research Agent"
-                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
+                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all"
                 />
-                <p className="text-[10px] text-zinc-600 mt-1.5">
-                  Use the name of the agent you&apos;ll hand these credentials to (e.g. your Claude assistant, a scraping bot).
+                <p className="text-[10px] text-[var(--v2-ink-3)] mt-1.5">
+                  Use the name of the agent you&apos;ll connect to Haven, such as your Claude assistant or research workflow.
                 </p>
               </div>
               <div>
-                <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
-                  Description <span className="normal-case text-zinc-700">(optional)</span>
+                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
+                  Description <span className="normal-case text-[var(--v2-ink-3)]">(optional)</span>
                 </label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What does this agent do?"
                   rows={2}
-                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all resize-none"
+                  className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
                 />
               </div>
 
-              <button
+              <Button
                 onClick={() => setStep('policy')}
                 disabled={!canProceedDetails()}
-                className="w-full text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                className="w-full"
               >
-                Next: Policy
-              </button>
+                Set agent budget
+              </Button>
             </div>
           )}
 
-          {/* ── STEP: Policy ──────────────────────────────── */}
+          {/* ── STEP: Rules ──────────────────────────────── */}
           {step === 'policy' && (
-            <div className="space-y-5">
-              {/* Safe picker — only when the user has more than one Safe */}
-              {userSafes.length > 1 && (
-                <div>
-                  <label className="block text-[11px] text-zinc-500 mb-1.5 uppercase tracking-wide">
-                    Spends from
-                  </label>
-                  <select
-                    value={selectedSafeId ?? ''}
-                    onChange={(e) => setSelectedSafeId(e.target.value)}
-                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
-                  >
-                    {userSafes.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} — {truncate(s.safe_address)} ({getChainConfig(s.chain_id).name})
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] text-zinc-600 mt-1.5">
-                    The agent will only be able to spend from this account.
-                  </p>
+            <div className="space-y-4">
+              <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 shadow-[var(--v2-shadow-card)]">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 7.5A2.25 2.25 0 0 1 6 5.25h12A2.25 2.25 0 0 1 20.25 7.5v9A2.25 2.25 0 0 1 18 18.75H6A2.25 2.25 0 0 1 3.75 16.5v-9Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12h.01" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-[var(--v2-ink-3)]">From Haven wallet</p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-[var(--v2-ink)]">{walletName}</p>
+                      <span className="rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-2)]">
+                        {walletNetworkName}
+                      </span>
+                    </div>
+                    {walletDisplayAddress && (
+                      <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(walletDisplayAddress)}</p>
+                    )}
+                  </div>
                 </div>
-              )}
+
+                {userSafes.length > 1 && (
+                  <div className="mt-3">
+                    <Select
+                      value={selectedSafeId ?? ''}
+                      onChange={(e) => setSelectedSafeId(e.target.value)}
+                    >
+                      {userSafes.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} — {truncate(s.safe_address)} ({getChainConfig(s.chain_id).name})
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+              </div>
 
               {/* Current allowances */}
               {allowances.length > 0 && (
-                <div className="space-y-2">
-                  {allowances.map((a) => (
-                    <div
-                      key={a.tokenSymbol}
-                      className="flex items-center justify-between p-3 bg-white/[0.03] rounded-lg border border-white/[0.06]"
-                    >
-                      <div>
-                        <span className="text-sm text-zinc-200 font-medium">
-                          {a.amount} {a.tokenSymbol}
-                        </span>
-                        <span className="text-xs text-zinc-600 ml-2">
-                          {resetLabel(a.resetTimeMin)}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => handleRemoveAllowance(a.tokenSymbol)}
-                        className="text-zinc-700 hover:text-red-400 transition-colors"
+                <AgentBudgetCard
+                  agentName={name || 'New agent'}
+                  walletName={walletName}
+                  amount={budgetAmountSummary()}
+                  resetPeriod={budgetPeriodSummary()}
+                  status="Budget draft"
+                  density="compact"
+                >
+                  <div className="space-y-2">
+                    {allowances.map((a) => (
+                      <div
+                        key={a.tokenSymbol}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-2"
                       >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6l-1 14H6L5 6" />
-                          <path d="M10 11v6M14 11v6" />
-                          <path d="M9 6V4h6v2" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--v2-ink)] v2-tabular">
+                            {budgetLine(a)}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveAllowance(a.tokenSymbol)}
+                          aria-label={`Remove ${a.tokenSymbol} budget`}
+                          className="flex-shrink-0 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14H6L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4h6v2" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </AgentBudgetCard>
               )}
 
               {/* Add allowance form */}
-              {availableTokens.length > 0 && (
-                <div className="space-y-3 p-4 bg-white/[0.02] rounded-xl border border-dashed border-white/[0.08]">
-                  <p className="text-[11px] text-zinc-500 uppercase tracking-wide">
-                    Add spending limit
-                  </p>
+              {availableTokens.length > 0 ? (
+                <div className="space-y-3 rounded-[10px] border border-dashed border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">
+                      Add agent budget
+                    </p>
+                    <p className="text-[11px] text-[var(--v2-ink-3)]">One per token</p>
+                  </div>
                   <div className="grid grid-cols-3 gap-2">
-                    <select
+                    <Select
                       value={addToken}
                       onChange={(e) => setAddToken(e.target.value)}
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
                     >
                       {availableTokens.map((t) => (
                         <option key={t.symbol} value={t.symbol}>
                           {t.symbol}
                         </option>
                       ))}
-                    </select>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
+                    </Select>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
                       value={addAmount}
-                      onChange={(e) => setAddAmount(e.target.value)}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        if (/^\d*\.?\d*$/.test(value)) {
+                          setAddAmount(value)
+                          setAddAmountError('')
+                        }
+                      }}
                       placeholder="Amount"
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50"
+                      invalid={Boolean(addAmountMessage)}
+                      helperText={addAmountMessage || undefined}
+                      className="v2-tabular"
                     />
-                    <select
+                    <Select
                       value={addReset}
                       onChange={(e) => setAddReset(Number(e.target.value))}
-                      className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
                     >
                       {RESET_PERIODS.map((p) => (
                         <option key={p.value} value={p.value}>
                           {p.label}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={handleAddAllowance}
                     disabled={
                       !addAmount ||
-                      Number(addAmount) <= 0 ||
-                      !availableTokens.some((t) => t.symbol === addToken)
+                      !addAmountValidation?.ok ||
+                      !addTokenOption
                     }
-                    className="w-full text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-30 disabled:cursor-not-allowed text-zinc-300 rounded-lg py-2 transition-colors"
+                    className="w-full"
                   >
-                    + Add limit
-                  </button>
+                    Add budget
+                  </Button>
                 </div>
-              )}
+              ) : allowances.length > 0 ? (
+                <p className="rounded-[10px] bg-[var(--v2-surface)] px-3 py-2 text-xs text-[var(--v2-ink-2)]">
+                  All supported tokens for {walletNetworkName} already have budgets. Remove a token budget to change it.
+                </p>
+              ) : null}
 
               {allowances.length === 0 && (
-                <p className="text-xs text-zinc-600 text-center py-4">
-                  Add at least one spending limit to continue
+                <p className="text-xs text-[var(--v2-ink-3)] text-center py-4">
+                  Add at least one agent budget to continue
                 </p>
               )}
 
-              {/* Recipient allowlist */}
-              <div className="pt-2 border-t border-white/[0.06]">
-                <RecipientAllowlistEditor
-                  enabled={restrictRecipients}
-                  onToggle={setRestrictRecipients}
-                  recipients={allowedRecipients}
-                  onChange={setAllowedRecipients}
-                />
-              </div>
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Payments within budget can run automatically. Anything above the remaining budget waits for your approval, and you can revoke the agent later.
+              </p>
 
               <div className="flex gap-3">
-                <button
+                <Button
+                  variant="ghost"
                   onClick={() => setStep('details')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1"
                 >
                   Back
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => setStep('key')}
                   disabled={allowances.length === 0}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1"
                 >
-                  Next: Delegate key
-                </button>
+                  Review credential
+                </Button>
               </div>
             </div>
           )}
 
           {/* ── STEP: Key ─────────────────────────────────── */}
           {step === 'key' && (
-            <div className="space-y-5">
-              {/* ── Delegate key mode selector ──────────── */}
-              <div>
-                <label className="block text-[11px] text-zinc-500 mb-2 uppercase tracking-wide">
-                  Delegate key
-                </label>
-                <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-4">
+              {/* ── Credential mode selector ──────────── */}
+              <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">
+                      Agent credential
+                    </p>
+                    <h3 className="mt-1 text-sm font-semibold text-[var(--v2-ink)]">Create a new Haven credential</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                      Recommended for a new agent. Haven creates it in your browser and shows the credential file after setup.
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={() => handleSwitchKeyMode('generate')}
-                    className={`relative p-3 rounded-xl border text-left transition-all ${
+                    className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
                       keyMode === 'generate'
-                        ? 'border-indigo-500/50 bg-indigo-500/5'
-                        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
+                        ? 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+                        : 'border-[var(--v2-border-strong)] bg-white text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]'
                     }`}
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                        keyMode === 'generate' ? 'border-indigo-400' : 'border-zinc-700'
-                      }`}>
-                        {keyMode === 'generate' && (
-                          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                        )}
-                      </div>
-                      <span className={`text-xs font-medium ${
-                        keyMode === 'generate' ? 'text-zinc-200' : 'text-zinc-400'
-                      }`}>
-                        Generate new
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
-                      Haven creates a keypair for you
-                    </p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchKeyMode('existing')}
-                    className={`relative p-3 rounded-xl border text-left transition-all ${
-                      keyMode === 'existing'
-                        ? 'border-indigo-500/50 bg-indigo-500/5'
-                        : 'border-white/[0.08] bg-white/[0.02] hover:border-white/[0.12]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                        keyMode === 'existing' ? 'border-indigo-400' : 'border-zinc-700'
-                      }`}>
-                        {keyMode === 'existing' && (
-                          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                        )}
-                      </div>
-                      <span className={`text-xs font-medium ${
-                        keyMode === 'existing' ? 'text-zinc-200' : 'text-zinc-400'
-                      }`}>
-                        Use existing
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-zinc-600 ml-5.5 pl-0.5">
-                      Provide your own wallet address
-                    </p>
+                    {keyMode === 'generate' ? 'Selected' : 'Use this'}
                   </button>
                 </div>
               </div>
 
-              {/* ── Generate mode ───────────────────────── */}
-              {keyMode === 'generate' && generatedPrivateKey && (
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                      Delegate address
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs font-mono text-zinc-400 bg-white/[0.03] rounded-lg px-3 py-2 truncate">
-                        {delegateAddress}
-                      </code>
-                      <button
-                        onClick={() => copyToClipboard(delegateAddress, () => {})}
-                        className="flex-shrink-0 text-zinc-700 hover:text-zinc-400 transition-colors p-1"
-                        title="Copy address"
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="9" y="9" width="13" height="13" rx="2" />
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchKeyMode(keyMode === 'existing' ? 'generate' : 'existing')}
+                  className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
+                >
+                  {keyMode === 'existing' ? 'Use a new Haven credential instead' : 'Use an existing credential address instead'}
+                </button>
 
-                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 flex items-start gap-2">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500 flex-shrink-0 mt-0.5">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="12" y1="16" x2="12" y2="12" />
-                      <line x1="12" y1="8" x2="12.01" y2="8" />
-                    </svg>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      A fresh keypair was generated in your browser. Haven never sees the private key —
-                      you&apos;ll download it with the rest of the agent&apos;s credentials on the last step.
+                {keyMode === 'existing' && (
+                  <div className="mt-3 rounded-[10px] border border-[var(--v2-border)] bg-white p-3">
+                    <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                      Advanced setup. Enter the public address your agent will use to request payments.
                     </p>
+                    <Input
+                      value={delegateAddress}
+                      onChange={(e) => setDelegateAddress(e.target.value)}
+                      placeholder="0x..."
+                      className="mt-3 font-mono"
+                    />
+                    {delegateAddress && !isValidAddress(delegateAddress) && (
+                      <p className="mt-2 text-[11px] text-[var(--v2-danger)]">
+                        Enter a valid Ethereum address.
+                      </p>
+                    )}
                   </div>
-
-                  <button
-                    onClick={handleGenerateKey}
-                    className="text-[11px] text-zinc-700 hover:text-zinc-400 transition-colors"
-                  >
-                    Generate a different key
-                  </button>
-                </div>
-              )}
-
-              {/* ── Existing mode ──────────────────────── */}
-              {keyMode === 'existing' && (
-                <div className="space-y-2">
-                  <input
-                    value={delegateAddress}
-                    onChange={(e) => setDelegateAddress(e.target.value)}
-                    placeholder="0x..."
-                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm font-mono text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.06] transition-all"
-                  />
-                  {delegateAddress && !isValidAddress(delegateAddress) && (
-                    <p className="text-[11px] text-red-400">
-                      Invalid Ethereum address
-                    </p>
-                  )}
-                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5">
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      Enter the public address of the wallet your agent will use for signing.
-                      Make sure your agent has access to this wallet&apos;s private key — Haven will
-                      never ask for it or store it.
-                    </p>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
 
               <div className="flex gap-3">
-                <button
+                <Button
+                  variant="ghost"
                   onClick={() => setStep('policy')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1"
                 >
                   Back
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => setStep('review')}
                   disabled={!canProceedKey()}
-                  className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-colors"
+                  className="flex-1"
                 >
-                  Next: Review
-                </button>
+                  Review agent rules
+                </Button>
               </div>
             </div>
           )}
@@ -980,140 +1058,92 @@ export default function CreateAgentModal({
           {/* ── STEP: Review ──────────────────────────────── */}
           {step === 'review' && (
             <div className="space-y-5">
-              {/* Summary card */}
-              <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-3">
-                <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                    Agent
-                  </p>
-                  <p className="text-sm text-zinc-200 font-medium">{name}</p>
-                  {description && (
-                    <p className="text-xs text-zinc-500 mt-0.5">{description}</p>
-                  )}
-                </div>
-                {userSafes.length > 1 && selectedSafe && (
-                  <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                      Spends from
-                    </p>
-                    <p className="text-sm text-zinc-200">
-                      {selectedSafe.name}
-                      <span className="text-xs font-mono text-zinc-500 ml-2">
-                        {truncate(selectedSafe.safe_address)}
-                      </span>
-                      <span className="text-[10px] text-zinc-600 ml-2">
-                        {getChainConfig(selectedSafe.chain_id).name}
-                      </span>
-                    </p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                    Delegate
-                  </p>
-                  <p className="text-xs font-mono text-zinc-400">
-                    {truncate(delegateAddress)}
-                    {keyMode === 'generate' && (
-                      <span className="text-indigo-400/60 ml-2 font-sans">(generated)</span>
-                    )}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                    Spending limits
-                  </p>
-                  <div className="space-y-1">
-                    {allowances.map((a) => (
-                      <div
-                        key={a.tokenSymbol}
-                        className="flex items-center justify-between text-xs"
-                      >
-                        <span className="text-zinc-300">
-                          {a.amount} {a.tokenSymbol}
-                        </span>
-                        <span className="text-zinc-600">
-                          {resetLabel(a.resetTimeMin)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {restrictRecipients && (
-                  <div>
-                    <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-1">
-                      Recipient allowlist
-                    </p>
-                    {allowedRecipients.length > 0 ? (
+              <AgentRulesSummary
+                title="Review agent rules"
+                description="Confirm what this agent can do before you connect it."
+                density="compact"
+                items={[
+                  {
+                    label: 'Who can spend',
+                    value: name,
+                    helper: description || undefined,
+                  },
+                  {
+                    label: 'From wallet',
+                    value: `${walletName} on ${walletNetworkName}`,
+                  },
+                  {
+                    label: 'Agent budget',
+                    value: (
                       <div className="space-y-1">
-                        {allowedRecipients.map((r) => (
-                          <div key={r.address} className="text-xs text-zinc-400">
-                            {r.label ? (
-                              <span>{r.label} <span className="font-mono text-zinc-600">({truncate(r.address)})</span></span>
-                            ) : (
-                              <span className="font-mono">{truncate(r.address)}</span>
-                            )}
-                          </div>
+                        {allowances.map((a) => (
+                          <div key={a.tokenSymbol}>{budgetLine(a)}</div>
                         ))}
                       </div>
-                    ) : (
-                      <p className="text-xs text-amber-400/70">
-                        Restriction enabled but no recipients added — agent won&apos;t be able to send to anyone
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+                    ),
+                    helper: 'Agents can still start larger payments, but you approve them manually.',
+                  },
+                  {
+                    label: 'Credential',
+                    value: keyMode === 'generate' ? 'Create a new Haven credential' : 'Use an existing credential address',
+                    helper: keyMode === 'existing' ? truncate(delegateAddress) : undefined,
+                  },
+                ]}
+              />
 
-              {/* What will happen */}
-              <div className="space-y-2">
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">
-                  On-chain actions (single transaction)
-                </p>
-                <div className="space-y-1 text-xs text-zinc-400">
-                  <p className="flex items-center gap-2">
-                    <span className="w-1 h-1 rounded-full bg-indigo-400" />
-                    Enable AllowanceModule on Safe (if needed)
-                  </p>
-                  <p className="flex items-center gap-2">
-                    <span className="w-1 h-1 rounded-full bg-indigo-400" />
-                    Add {truncate(delegateAddress)} as delegate
-                  </p>
-                  {allowances.map((a) => (
-                    <p key={a.tokenSymbol} className="flex items-center gap-2">
-                      <span className="w-1 h-1 rounded-full bg-indigo-400" />
-                      Set {a.amount} {a.tokenSymbol} allowance ({resetLabel(a.resetTimeMin).toLowerCase()})
-                    </p>
-                  ))}
-                </div>
-              </div>
+              <ApprovalRequiredBanner
+                title="Payments above budget need approval"
+                density="compact"
+                tone="neutral"
+              >
+                Agents can still initiate payments above the remaining budget, but you will approve them manually before any money moves.
+              </ApprovalRequiredBanner>
 
               {(safeDetails?.threshold ?? 1) > 1 && (
-                <div className="text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/10 rounded-lg px-3 py-2">
-                  Multi-sig Safe ({safeDetails?.threshold}/{safeDetails?.owners?.length}) — this will be proposed for co-signer approval.
-                </div>
+                <ApprovalRequiredBanner title="More approvals needed" density="compact" tone="neutral">
+                  This Haven account requires {safeDetails?.threshold} of {safeDetails?.owners?.length} approvals.
+                  Haven will submit the agent rules for approval.
+                </ApprovalRequiredBanner>
               )}
 
-              {deployBlockReason() && (
-                <div className="text-xs text-red-400/90 bg-red-500/5 border border-red-500/20 rounded-lg px-3 py-2">
-                  {deployBlockReason()}
+              {blockReason && (
+                <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
+                  <p>{blockReason}</p>
+                  {!signer && (
+                    <div className="mt-3">
+                      <WalletButton />
+                    </div>
+                  )}
                 </div>
               )}
 
               <div className="flex gap-3">
-                <button
+                <Button
+                  variant="ghost"
                   onClick={() => setStep('key')}
-                  className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                  className="flex-1"
                 >
                   Back
-                </button>
-                <button
-                  onClick={handleExecute}
-                  disabled={!!deployBlockReason()}
-                  title={deployBlockReason() ?? undefined}
-                  className="flex-1 text-sm font-medium bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl py-2.5 transition-all shadow-lg shadow-indigo-500/20 disabled:shadow-none"
-                >
-                  Add agent
-                </button>
+                </Button>
+                <div className="flex-1">
+                  <OnchainActionGate
+                    requiredChainId={chainId}
+                    operationGate={operationGate}
+                    noSignerMessage="Connect a wallet or use a passkey on this device to approve this change."
+                    autoSwitch
+                    showNotice={false}
+                  >
+                    {({ disabled }) => (
+                    <Button
+                      onClick={handleExecute}
+                      disabled={disabled || !!blockReason}
+                      className="w-full"
+                    >
+                      Connect agent
+                    </Button>
+                    )}
+                  </OnchainActionGate>
+                </div>
               </div>
             </div>
           )}
@@ -1125,48 +1155,91 @@ export default function CreateAgentModal({
                 <>
                   <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
                   <div>
-                    <p className="text-sm text-zinc-200 font-medium">
-                      {execStatus === 'checking' && 'Checking module status...'}
-                      {execStatus === 'signing' && 'Sign in your wallet...'}
-                      {execStatus === 'executing' && 'Submitting to chain...'}
-                      {execStatus === 'saving' && 'Saving agent...'}
+                    <p className="text-sm text-[var(--v2-ink)] font-medium">
+                      {execStatus === 'checking' && 'Checking agent rules...'}
+                      {execStatus === 'signing' && 'Approve agent rules...'}
+                      {execStatus === 'executing' && 'Connecting agent...'}
+                      {execStatus === 'saving' && 'Saving agent in Haven...'}
                     </p>
-                    <p className="text-xs text-zinc-600 mt-1">
-                      {execStatus === 'signing'
-                        ? 'Approve the transaction in your connected wallet'
-                        : 'This may take a moment'}
-                    </p>
+                    <div className="text-xs text-[var(--v2-ink-3)] mt-1">
+                      {execStatus === 'signing' ? (
+                        <SigningStatus signer={signer} stage="signing" />
+                      ) : execStatus === 'executing' ? (
+                        <SigningStatus signer={signer} stage="executing" />
+                      ) : (
+                        'This may take a moment'
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center mx-auto">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400">
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto ${
+                    backendSaveFailed
+                      ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
+                      : 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
+                  }`}>
+                    {backendSaveFailed ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 1 1-9-9" />
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    )}
                   </div>
                   <div>
-                    <p className="text-sm text-red-400 font-medium">
-                      Setup failed
+                    <p className={`text-sm font-medium ${backendSaveFailed ? 'text-[var(--v2-warning)]' : 'text-[var(--v2-danger)]'}`}>
+                      {backendSaveFailed ? 'Finish saving this agent' : 'Setup failed'}
                     </p>
-                    <p className="text-xs text-zinc-600 mt-1 max-w-xs mx-auto">
-                      {execError}
+                    <p className="text-xs text-[var(--v2-ink-2)] mt-1 max-w-xs mx-auto">
+                      {backendSaveFailed
+                        ? 'The agent rules were created in your Haven wallet, but Haven could not save the agent. Try finishing the save before creating another agent.'
+                        : execError}
                     </p>
+                    {backendSaveFailed && execError && (
+                      <p className="mt-2 text-[11px] text-[var(--v2-ink-3)] max-w-xs mx-auto">
+                        {execError}
+                      </p>
+                    )}
+                    {backendSaveFailed && authorityResult?.txHash && (
+                      <a
+                        href={
+                          authorityResult.status === 'confirmed'
+                            ? getExplorerUrl(chainId, 'tx', authorityResult.txHash)
+                            : `https://app.safe.global/transactions/tx?safe=${getChainConfig(chainId).shortName}:${safeAddress}&id=${authorityResult.txHash}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-block text-xs text-[var(--v2-brand)] underline underline-offset-2 hover:text-[var(--v2-brand-strong)]"
+                      >
+                        {authorityResult.status === 'confirmed' ? `View on ${getChainConfig(chainId).name} Explorer` : 'View approval request'}
+                      </a>
+                    )}
                   </div>
                   <div className="flex gap-3 pt-2">
-                    <button
-                      onClick={() => setStep('review')}
-                      className="flex-1 text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={handleExecute}
-                      className="flex-1 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 transition-colors"
-                    >
-                      Retry
-                    </button>
+                    {backendSaveFailed ? (
+                      <>
+                        <Button variant="ghost" onClick={handleClose} className="flex-1">
+                          Close
+                        </Button>
+                        <Button onClick={handleRetryHavenSave} className="flex-1">
+                          Finish saving
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button variant="ghost" onClick={() => setStep('review')} className="flex-1">
+                          Back
+                        </Button>
+                        <Button onClick={handleExecute} className="flex-1">
+                          Retry
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </>
               )}
@@ -1175,140 +1248,76 @@ export default function CreateAgentModal({
 
           {/* ── STEP: Done ────────────────────────────────── */}
           {step === 'done' && (
-            <div className="space-y-5">
-              <div className="text-center py-4">
-                <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400">
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success-soft)] text-[var(--v2-success)]">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-zinc-200">
-                  {execStatus === 'confirmed'
-                    ? 'Agent added'
-                    : 'Agent pending co-signer approval'}
-                </p>
-                {txHash && (
-                  <a
-                    href={
-                      execStatus === 'confirmed'
-                        ? getExplorerUrl(chainId, 'tx', txHash)
-                        : `https://app.safe.global/transactions/tx?safe=${getChainConfig(chainId).shortName}:${safeAddress}&id=${txHash}`
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-2 mt-1 inline-block"
-                  >
-                    {execStatus === 'confirmed' ? `View on ${getChainConfig(chainId).name} Explorer` : 'View in Safe{Wallet}'}
-                  </a>
-                )}
-              </div>
-
-              {/* Handoff card — one artefact, everything the dev needs */}
-              <div className="bg-amber-400/5 border border-amber-400/15 rounded-xl p-4 space-y-3">
-                <div className="flex items-start gap-2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400 flex-shrink-0 mt-0.5">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <div>
-                    <p className="text-[11px] text-amber-400 uppercase tracking-wide font-medium">
-                      Agent handoff — save this now
-                    </p>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed mt-0.5">
-                      One file with credentials, Safe address, policy, and SDK quickstart.
-                      {generatedPrivateKey ? ' Secrets cannot be shown again.' : ''}
-                    </p>
-                  </div>
+                <div>
+                  <p className="text-sm font-semibold text-[var(--v2-ink)]">
+                    {execStatus === 'confirmed'
+                      ? 'Your agent is ready'
+                      : 'Agent rules pending approval'}
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                    {execStatus === 'confirmed'
+                      ? 'Add the Haven credential to your agent so it can make payments within your rules.'
+                      : 'After the approval is complete, add the Haven credential to your agent.'}
+                  </p>
+                  {txHash && (
+                    <a
+                      href={
+                        execStatus === 'confirmed'
+                          ? getExplorerUrl(chainId, 'tx', txHash)
+                          : `https://app.safe.global/transactions/tx?safe=${getChainConfig(chainId).shortName}:${safeAddress}&id=${txHash}`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-block text-xs text-[var(--v2-brand)] underline underline-offset-2 hover:text-[var(--v2-brand-strong)]"
+                    >
+                      {execStatus === 'confirmed' ? `View on ${getChainConfig(chainId).name} Explorer` : 'View approval request'}
+                    </a>
+                  )}
                 </div>
-
-                {/* Primary: download the markdown handoff */}
-                <button
-                  onClick={handleDownloadHandoff}
-                  className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  Download handoff file (.md)
-                </button>
-
-                {/* Secondary: copy as .env */}
-                <button
-                  onClick={handleCopyEnv}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded-lg py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
-                  title="Copy just the environment variables for pasting into .env"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                  {copiedEnv ? 'Copied!' : 'Copy as .env'}
-                </button>
-
-                {/* Tertiary: raw credentials disclosure (collapsed by default) */}
-                <details
-                  className="group"
-                  open={showRawCreds}
-                  onToggle={(e) => setShowRawCreds((e.currentTarget as HTMLDetailsElement).open)}
-                >
-                  <summary className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 rounded">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="transition-transform group-open:rotate-90">
-                      <polyline points="9 18 15 12 9 6" />
-                    </svg>
-                    Show raw credentials
-                  </summary>
-                  <div className="mt-3 space-y-3">
-                    {createdApiKey && (
-                      <div className="space-y-1.5">
-                        <p className="text-[10px] text-zinc-600 uppercase tracking-wide">
-                          API Key
-                          <span className="normal-case text-zinc-700 ml-1">— authenticates with Haven</span>
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all">
-                            {createdApiKey}
-                          </code>
-                          <button
-                            onClick={() => copyToClipboard(createdApiKey, setCopiedApiKey)}
-                            className="flex-shrink-0 text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-2"
-                          >
-                            {copiedApiKey ? 'Copied!' : 'Copy'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {generatedPrivateKey && (
-                      <div className="space-y-1.5 pt-2 border-t border-amber-400/10">
-                        <p className="text-[10px] text-zinc-600 uppercase tracking-wide">
-                          Delegate Private Key
-                          <span className="normal-case text-zinc-700 ml-1">— signs transactions</span>
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <code className="flex-1 text-xs font-mono text-zinc-300 bg-black/30 rounded-lg px-3 py-2 break-all">
-                            {generatedPrivateKey}
-                          </code>
-                          <button
-                            onClick={() => copyToClipboard(generatedPrivateKey, setCopiedDoneKey)}
-                            className="flex-shrink-0 text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-2"
-                          >
-                            {copiedDoneKey ? 'Copied!' : 'Copy'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </details>
               </div>
 
-              <button
+              <AgentBudgetCard
+                agentName={name}
+                walletName={walletName}
+                amount={budgetAmountSummary()}
+                resetPeriod={budgetPeriodSummary()}
+                status={execStatus === 'confirmed' ? 'Connected' : 'Pending approval'}
+                statusTone={execStatus === 'confirmed' ? 'success' : 'warning'}
+                density="compact"
+              />
+
+              <CredentialHandoffCard
+                title="Save the credential file"
+                description="Download or copy this file before closing. Your agent needs it to make payments within the rules you set."
+                primaryAction={
+                  <Button onClick={handleDownloadHandoff} className="w-full">
+                    Download file
+                  </Button>
+                }
+                secondaryAction={
+                  <Button variant="ghost" onClick={handleCopyHandoff} className="w-full">
+                    {copiedHandoff ? 'Copied file' : 'Copy file'}
+                  </Button>
+                }
+                note={generatedPrivateKey ? 'This credential is shown once. Haven cannot show it again after you close this window.' : undefined}
+                saved={credentialsSaved}
+              />
+
+              <Button
+                variant="ghost"
                 onClick={handleClose}
-                className="w-full text-sm font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 rounded-xl py-2.5 transition-colors"
+                disabled={!credentialsSaved}
+                className="w-full"
               >
                 Done
-              </button>
+              </Button>
             </div>
           )}
         </div>

@@ -1,6 +1,13 @@
 /**
  * x402 resource management — server side of the x402 payment protocol.
  *
+ * REGULATORY PERIMETER NOTE:
+ * This is exploratory merchant-side x402 code, not production merchant
+ * facilitator functionality. Do not expose or expand it without legal/product
+ * review against docs/regulatory/casp-risk-guardrails.md. Production resource
+ * registration, public payment verification, receipts, merchant dashboards, or
+ * settlement flows can move Haven toward merchant acquiring/facilitator scope.
+ *
  * Lets Haven users register resources (URLs, APIs, data) behind a payment
  * wall. Any HTTP client — including Haven API Key agents via POST /x402/authorize
  * — can pay the required amount and get a verified receipt in return.

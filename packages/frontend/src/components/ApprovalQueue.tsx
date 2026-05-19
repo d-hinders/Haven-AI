@@ -1,24 +1,47 @@
 'use client'
 
-import { useState } from 'react'
-import { usePublicClient, useWalletClient, useAccount } from 'wagmi'
-import { type Address, hashTypedData } from 'viem'
+import { useMemo, useState, type ReactNode } from 'react'
+import { usePublicClient } from 'wagmi'
+import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useApprovals, type ApprovalRequest } from '@/hooks/useApprovals'
+import { useSafeOperationGate, type SafeOperationGate } from '@/hooks/useSafeOperationGate'
 import {
   getSafeNonce,
   buildSafeTx,
   signSafeTx,
   executeSafeTx,
   proposeSafeTx,
+  getSafeTxHash,
   getChainTokens,
   type SendParams,
 } from '@/lib/safe-tx'
-import { getExplorerUrl } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { timeAgo, timeUntil } from '@/lib/format'
+import { useActiveSigner } from '@/lib/signer'
+import {
+  approvalReasonLabel,
+  approvalRecipientLabel,
+  approvalSourceLabel,
+} from '@/lib/approval-labels'
+import {
+  approvalStatusPresentation,
+  isActionableApprovalStatus,
+} from '@/lib/payment-status'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
-import { truncate, timeAgo, timeUntil } from '@/lib/format'
-
-// ── Helpers ──────────────────────────────────────────────────────
+import OnchainActionGate from './OnchainActionGate'
+import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Skeleton } from '@/components/ui/Skeleton'
+import { Tooltip } from '@/components/ui/Tooltip'
+import {
+  ApprovalRequiredBanner,
+  ExternalDetailsLink,
+  TransactionMovement,
+} from '@/components/haven'
 
 function resolveTokenSymbol(address: string, chainId: number): string {
   const lower = address.toLowerCase()
@@ -32,193 +55,320 @@ function resolveTokenSymbol(address: string, chainId: number): string {
   return 'Unknown'
 }
 
-// ── Status badge ─────────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    pending: 'bg-amber-500/10 text-amber-400',
-    approved: 'bg-blue-500/10 text-blue-400',
-    rejected: 'bg-red-500/10 text-red-400',
-    executed: 'bg-emerald-500/10 text-emerald-400',
-    expired: 'bg-zinc-500/10 text-zinc-500',
-  }
-  const isPending = status === 'pending' || status === 'approved'
-  const dotColor = status === 'pending' ? 'bg-amber-400' : 'bg-blue-400'
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${styles[status] ?? styles.expired}`}>
-      {isPending && (
-        <span className="relative inline-flex w-1.5 h-1.5">
-          <span className={`absolute inset-0 rounded-full ${dotColor} opacity-60 animate-ping`} />
-          <span className={`relative inline-block w-1.5 h-1.5 rounded-full ${dotColor}`} />
-        </span>
-      )}
-      {status}
-    </span>
-  )
-}
-
-// ── Single approval card ─────────────────────────────────────────
-
-function ApprovalCard({
-  approval,
-  onApproveAndExecute,
-  onReject,
-  executing,
-  chainId = 100,
+function ApprovalDetail({
+  label,
+  value,
 }: {
-  approval: ApprovalRequest
-  onApproveAndExecute: (approval: ApprovalRequest) => void
-  onReject: (id: string) => void
-  executing: boolean
-  chainId?: number
+  label: string
+  value: ReactNode
 }) {
-  const isPending = approval.status === 'pending'
-  const [confirmReject, setConfirmReject] = useState(false)
-
   return (
-    <div className={`p-4 rounded-xl border transition-all ${
-      isPending
-        ? 'bg-amber-500/[0.02] border-amber-500/20 hover:border-amber-500/30'
-        : 'bg-white/[0.02] border-white/[0.06]'
-    }`}>
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-            isPending ? 'bg-amber-500/10 text-amber-400' : 'bg-white/[0.04] text-zinc-500'
-          }`}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 8v4M12 16h.01" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-zinc-200">{approval.agent_name}</p>
-            <p
-              className="text-[10px] text-zinc-600"
-              title={new Date(approval.created_at).toLocaleString()}
-            >
-              {timeAgo(approval.created_at)}
-            </p>
-          </div>
-        </div>
-        <StatusBadge status={approval.status} />
-      </div>
-
-      {/* Payment details */}
-      <div className="bg-black/20 rounded-lg p-3 mb-3 space-y-1.5">
-        <div className="flex justify-between text-xs">
-          <span className="text-zinc-500">Amount</span>
-          <span className="text-zinc-200 font-medium">
-            {approval.amount_human} {approval.token_symbol}
-          </span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-zinc-500">To</span>
-          <span className="text-zinc-400 font-mono">{truncate(approval.to_address)}</span>
-        </div>
-        {approval.reason && (
-          <div className="flex justify-between text-xs gap-3">
-            <span className="text-zinc-500 flex-shrink-0">Reason</span>
-            <span
-              className="text-zinc-400 max-w-[240px] truncate"
-              title={approval.reason}
-            >
-              {approval.reason}
-            </span>
-          </div>
-        )}
-        {isPending && (
-          <div className="flex justify-between text-xs">
-            <span className="text-zinc-500">Expires</span>
-            <span className="text-zinc-600">{timeUntil(approval.expires_at)}</span>
-          </div>
-        )}
-        {approval.tx_hash && (
-          <div className="flex justify-between text-xs">
-            <span className="text-zinc-500">Tx</span>
-            <a
-              href={getExplorerUrl(chainId, 'tx', approval.tx_hash!)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-indigo-400 hover:text-indigo-300 font-mono"
-            >
-              {truncate(approval.tx_hash)}
-            </a>
-          </div>
-        )}
-      </div>
-
-      {/* Actions */}
-      {isPending && (
-        confirmReject ? (
-          <div className="flex items-center gap-2 bg-red-500/[0.04] border border-red-500/20 rounded-lg px-3 py-2">
-            <span className="flex-1 text-xs text-zinc-300">
-              Reject this payment? The agent will be notified.
-            </span>
-            <button
-              onClick={() => { onReject(approval.id); setConfirmReject(false) }}
-              disabled={executing}
-              className="px-3 py-1.5 rounded-md bg-red-500 hover:bg-red-400 text-white text-xs font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
-            >
-              Reject
-            </button>
-            <button
-              onClick={() => setConfirmReject(false)}
-              disabled={executing}
-              className="px-3 py-1.5 rounded-md text-zinc-400 text-xs font-medium hover:bg-white/[0.04] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onApproveAndExecute(approval)}
-              disabled={executing}
-              className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium hover:from-emerald-400 hover:to-emerald-500 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
-            >
-              {executing ? 'Executing...' : 'Approve & Execute'}
-            </button>
-            <button
-              onClick={() => setConfirmReject(true)}
-              disabled={executing}
-              className="px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-400 text-xs font-medium hover:bg-white/[0.04] hover:text-red-400 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
-            >
-              Reject
-            </button>
-          </div>
-        )
-      )}
+    <div>
+      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">{label}</dt>
+      <dd className="mt-1 truncate text-sm font-medium text-[var(--v2-ink)]">{value}</dd>
     </div>
   )
 }
 
-// ── Main component ───────────────────────────────────────────────
+function ApprovalCard({
+  approval,
+  walletName,
+  networkName,
+  onApproveAndExecute,
+  onReject,
+  executing,
+  approvalDetailsLoading = false,
+  requiresAdditionalApproval = false,
+  executionDisabled = false,
+  disabledReason,
+  showOtherDeviceNotice = false,
+  operationGate,
+  actionError,
+}: {
+  approval: ApprovalRequest
+  walletName: string
+  networkName: string
+  onApproveAndExecute: () => void
+  onReject: (id: string) => void
+  executing: boolean
+  approvalDetailsLoading?: boolean
+  requiresAdditionalApproval?: boolean
+  executionDisabled?: boolean
+  disabledReason?: string
+  showOtherDeviceNotice?: boolean
+  operationGate: SafeOperationGate
+  actionError?: string | null
+}) {
+  const actionable = isActionableApprovalStatus(approval.status)
+  const status = approvalStatusPresentation(approval.status)
+  const [confirmReject, setConfirmReject] = useState(false)
+  const recipient = approvalRecipientLabel({
+    reason: approval.reason,
+    source: approval.source,
+    x402ResourceUrl: approval.x402_resource_url,
+    toAddress: approval.to_address,
+  })
+  const sourceLabel = approvalSourceLabel({
+    reason: approval.reason,
+    source: approval.source,
+  })
+  const actionLabel = approvalDetailsLoading
+    ? 'Review payment'
+    : requiresAdditionalApproval
+    ? approval.status === 'approved'
+      ? 'Submit for approval'
+      : 'Approve and submit'
+    : approval.status === 'approved'
+      ? 'Complete payment'
+      : 'Approve payment'
+  const requestCopy =
+    approval.status === 'approved'
+      ? `${approval.agent_name} asked to send this payment. It is approved, but has not been sent yet.`
+      : `${approval.agent_name} asked to send this payment. Nothing moves until you approve it.`
 
-export default function ApprovalQueue() {
-  const { user, activeSafe } = useAuth()
-  const safeAddress = activeSafe?.safe_address ?? null
-  const chainId = activeSafe?.chain_id ?? 100
+  return (
+    <Card
+      as="article"
+      hover={false}
+      className={`overflow-hidden ${actionable ? 'border-[var(--v2-warning)]/25' : ''}`}
+    >
+      <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+              {sourceLabel ? <StatusBadge tone="neutral">{sourceLabel}</StatusBadge> : null}
+            </div>
+            <p
+              className="mt-2 text-xs text-[var(--v2-ink-3)]"
+              title={new Date(approval.created_at).toLocaleString()}
+            >
+              Requested {timeAgo(approval.created_at)}
+            </p>
+          </div>
+          {actionable ? (
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              Expires {timeUntil(approval.expires_at)}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="space-y-5 p-5">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.9fr)] lg:items-start">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Payment request</p>
+            <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+              {approval.amount_human} {approval.token_symbol}
+            </p>
+            <p className="mt-3 text-sm text-[var(--v2-ink-2)]">
+              {requestCopy}
+            </p>
+          </div>
+
+          {/*
+            Sidebar details panel — tinted background only, no border. The
+            border-+-grey-+-rounded combo read as a nested card; the bg-surface
+            alone is enough to differentiate it from the parent card body.
+          */}
+          <div className="rounded-[10px] bg-[var(--v2-surface)] p-4">
+            <TransactionMovement from={walletName} to={recipient} />
+            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+              <ApprovalDetail label="Agent" value={approval.agent_name} />
+              <ApprovalDetail label="Network" value={networkName} />
+              <ApprovalDetail label="Haven wallet" value={walletName} />
+              <ApprovalDetail
+                label={sourceLabel ? 'Merchant' : 'Recipient'}
+                value={
+                  <Tooltip label={approval.to_address} mono>
+                    <span>{recipient}</span>
+                  </Tooltip>
+                }
+              />
+            </dl>
+          </div>
+        </div>
+
+        <ApprovalRequiredBanner
+          title={approval.status === 'approved' ? 'Approved, not sent yet' : 'Approval required'}
+          tone="neutral"
+          density="compact"
+        >
+          {approval.status === 'approved'
+            ? requiresAdditionalApproval
+              ? 'This request still needs to be submitted for the remaining account approvals before the payment can be sent.'
+              : 'This request was approved but still needs to be completed before the payment is sent.'
+            : approvalReasonLabel({ reason: approval.reason, source: approval.source })}
+        </ApprovalRequiredBanner>
+
+        {showOtherDeviceNotice ? <PasskeyOtherDeviceNotice /> : null}
+
+        {actionError ? (
+          <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
+            {actionError}
+          </div>
+        ) : null}
+
+        {approval.tx_hash ? (
+          <div className="flex items-center justify-between rounded-[10px] border border-[var(--v2-border)] bg-white px-3 py-2">
+            <span className="text-xs text-[var(--v2-ink-3)]">Payment receipt</span>
+            <ExternalDetailsLink
+              href={getExplorerUrl(approval.chain_id, 'tx', approval.tx_hash)}
+              label="Open payment externally"
+            />
+          </div>
+        ) : null}
+
+        {actionable ? (
+          <div className="space-y-3">
+            {confirmReject ? (
+              <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <p className="flex-1 text-sm text-[var(--v2-danger)]">
+                    Reject this payment? The agent will need to request it again.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={executing}
+                      onClick={() => {
+                        onReject(approval.id)
+                        setConfirmReject(false)
+                      }}
+                    >
+                      Reject payment
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={executing}
+                      onClick={() => setConfirmReject(false)}
+                    >
+                      Keep request
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={executing}
+                  onClick={() => setConfirmReject(true)}
+                >
+                  Reject
+                </Button>
+                <OnchainActionGate
+                  requiredChainId={approval.chain_id}
+                  operationGate={operationGate}
+                  noSignerMessage="Connect a wallet to approve this payment."
+                  showNotice={false}
+                >
+                  {({ disabled }) => (
+                  <Button
+                    size="sm"
+                    disabled={disabled || executing || executionDisabled}
+                    onClick={onApproveAndExecute}
+                    className="w-full sm:w-auto"
+                  >
+                    {executing
+                      ? requiresAdditionalApproval
+                        ? 'Submitting...'
+                        : approval.status === 'approved'
+                          ? 'Completing...'
+                          : 'Approving...'
+                      : actionLabel}
+                  </Button>
+                  )}
+                </OnchainActionGate>
+              </div>
+            )}
+            {executionDisabled && disabledReason ? (
+              <p className="text-right text-xs text-[var(--v2-ink-3)]">{disabledReason}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  )
+}
+
+function ApprovalCardWithContext({
+  approval,
+  executingApprovalId,
+  setExecutingApprovalId,
+  approve,
+  reject,
+  markProposed,
+  markExecuted,
+  refetch,
+}: {
+  approval: ApprovalRequest
+  executingApprovalId: string | null
+  setExecutingApprovalId: (id: string | null) => void
+  approve: (id: string) => Promise<unknown>
+  reject: (id: string) => Promise<void>
+  markProposed: (id: string) => Promise<void>
+  markExecuted: (id: string, txHash: string) => Promise<void>
+  refetch: () => Promise<void>
+}) {
+  const { user } = useAuth()
+  const safe = useMemo(
+    () =>
+      user?.safes.find(
+        (item) =>
+          item.safe_address.toLowerCase() === approval.safe_address.toLowerCase() &&
+          item.chain_id === approval.chain_id,
+      ) ?? null,
+    [approval.chain_id, approval.safe_address, user?.safes],
+  )
+  const safeAddress = (safe?.safe_address ?? approval.safe_address) as Address
+  const chainId = approval.chain_id
+  const walletName = safe?.name ?? 'Haven wallet'
+  let networkName = `Chain ${chainId}`
+  try {
+    networkName = getChainConfig(chainId).name
+  } catch {
+    // Keep the approval actionable even if a new chain label has not landed yet.
+  }
   const { details: safeDetails } = useSafeDetails(safeAddress)
-  const { approvals, pendingCount, loading, approve, reject, markExecuted, refetch } = useApprovals()
-  const { address: connectedAddress } = useAccount()
-  const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const publicClient = usePublicClient({ chainId })
+  const signer = useActiveSigner({
+    safeAddress,
+    chainId,
+  })
+  const operationGate = useSafeOperationGate({
+    safeAddress,
+    chainId,
+  })
+  const passkeyOnOtherDevice = operationGate.kind === 'passkey_on_other_device'
+  const executionDisabled = passkeyOnOtherDevice || !publicClient || !signer || !safeDetails
+  const disabledReason = passkeyOnOtherDevice
+    ? 'Use the device with this Haven account passkey to approve.'
+    : !signer
+      ? 'Connect your approval method to continue.'
+      : !safeDetails
+        ? 'Account details are still loading.'
+        : undefined
+  const executing = executingApprovalId === approval.id
+  const [actionError, setActionError] = useState<string | null>(null)
+  const requiresAdditionalApproval = (safeDetails?.threshold ?? 1) > 1
+  const approvalDetailsLoading = !safeDetails
 
-  const [executing, setExecuting] = useState(false)
+  async function handleApproveAndExecute() {
+    if (executionDisabled || !publicClient || !signer || !safeDetails) return
 
-  const pendingApprovals = approvals.filter((a) => a.status === 'pending')
-  const pastApprovals = approvals.filter((a) => a.status !== 'pending')
-
-  async function handleApproveAndExecute(approval: ApprovalRequest) {
-    if (!publicClient || !walletClient || !connectedAddress || !safeAddress || !safeDetails) return
-
-    setExecuting(true)
+    setExecutingApprovalId(approval.id)
+    setActionError(null)
+    let approvalSaved = approval.status === 'approved'
     try {
-      // 1. Mark as approved in backend
-      await approve(approval.id)
+      if (approval.status !== 'approved') {
+        await approve(approval.id)
+        approvalSaved = true
+      }
 
-      // 2. Build and sign Safe transaction
       const chainTokens = getChainTokens(chainId)
       const tokenSymbol = resolveTokenSymbol(approval.token_address, chainId)
       const tokenConfig = chainTokens[tokenSymbol]
@@ -232,189 +382,247 @@ export default function ApprovalQueue() {
         recipient: approval.to_address as Address,
       }
 
-      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
+      const nonce = await getSafeNonce(publicClient, safeAddress)
       const safeTx = buildSafeTx(sendParams, nonce)
       const signature = await signSafeTx(
-        walletClient,
-        safeAddress as Address,
+        signer,
+        safeAddress,
         safeTx,
-        connectedAddress,
         chainId,
       )
 
-      // 3. Execute or propose
       const threshold = safeDetails.threshold ?? 1
       let txHash: string | undefined
 
       if (threshold <= 1) {
         const result = await executeSafeTx(
-          walletClient,
+          signer,
           publicClient,
-          safeAddress as Address,
+          safeAddress,
           safeTx,
           signature,
-          connectedAddress,
           chainId,
         )
         txHash = result.txHash
       } else {
-        const safeTxHash = hashTypedData({
-          domain: { chainId, verifyingContract: safeAddress as Address },
-          types: {
-            SafeTx: [
-              { name: 'to', type: 'address' },
-              { name: 'value', type: 'uint256' },
-              { name: 'data', type: 'bytes' },
-              { name: 'operation', type: 'uint8' },
-              { name: 'safeTxGas', type: 'uint256' },
-              { name: 'baseGas', type: 'uint256' },
-              { name: 'gasPrice', type: 'uint256' },
-              { name: 'gasToken', type: 'address' },
-              { name: 'refundReceiver', type: 'address' },
-              { name: 'nonce', type: 'uint256' },
-            ],
-          },
-          primaryType: 'SafeTx',
-          message: {
-            to: safeTx.to,
-            value: safeTx.value,
-            data: safeTx.data,
-            operation: safeTx.operation,
-            safeTxGas: safeTx.safeTxGas,
-            baseGas: safeTx.baseGas,
-            gasPrice: safeTx.gasPrice,
-            gasToken: safeTx.gasToken,
-            refundReceiver: safeTx.refundReceiver,
-            nonce: safeTx.nonce,
-          },
-        })
+        const safeTxHash = getSafeTxHash(safeAddress, safeTx, chainId)
         await proposeSafeTx(
-          safeAddress as Address,
+          safeAddress,
           safeTx,
           safeTxHash,
           signature,
-          connectedAddress,
+          signer.address,
           chainId,
         )
+        await markProposed(approval.id)
       }
 
-      // 4. Record execution
       if (txHash) {
         await markExecuted(approval.id, txHash)
       }
 
-      refetch()
+      await refetch()
     } catch (err) {
-      if (err instanceof Error && !err.message.includes('rejected') && !err.message.includes('denied')) {
+      if (err instanceof Error && (err.message.includes('rejected') || err.message.includes('denied'))) {
+        setActionError(
+          approvalSaved
+            ? 'Approval saved, but the payment was not sent. You can complete it from this queue.'
+            : 'Approval was cancelled. The request is still waiting for your review.',
+        )
+      } else {
+        setActionError(
+          approvalSaved
+            ? 'Approval saved, but the payment was not sent. Check your wallet or try again.'
+            : 'Could not complete the approval. Check your wallet or try again.',
+        )
         console.error('Approval execution failed:', err)
       }
+      await refetch()
     } finally {
-      setExecuting(false)
+      setExecutingApprovalId(null)
     }
   }
 
   async function handleReject(id: string) {
+    setActionError(null)
     try {
       await reject(id)
     } catch (err) {
+      setActionError('Could not reject this request. Try again.')
       console.error('Reject failed:', err)
     }
   }
 
-  if (!safeAddress) return null
+  return (
+    <ApprovalCard
+      approval={approval}
+      walletName={walletName}
+      networkName={networkName}
+      onApproveAndExecute={handleApproveAndExecute}
+      onReject={handleReject}
+      executing={executing}
+      approvalDetailsLoading={approvalDetailsLoading}
+      requiresAdditionalApproval={requiresAdditionalApproval}
+      executionDisabled={executionDisabled}
+      disabledReason={disabledReason}
+      showOtherDeviceNotice={passkeyOnOtherDevice}
+      operationGate={operationGate}
+      actionError={actionError}
+    />
+  )
+}
+
+function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
+  const status = approvalStatusPresentation(approval.status)
+  const recipient = approvalRecipientLabel({
+    reason: approval.reason,
+    source: approval.source,
+    x402ResourceUrl: approval.x402_resource_url,
+    toAddress: approval.to_address,
+  })
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-zinc-200">Pending Approvals</h2>
-          {pendingCount > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400">
-              {pendingCount}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Loading */}
-      {loading && (
-        <div className="space-y-3">
-          {[0, 1].map((i) => (
-            <div key={i} className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-7 h-7 rounded-lg bg-white/[0.04] animate-pulse" />
-                <div className="h-3 w-24 bg-white/[0.06] rounded animate-pulse" />
-              </div>
-              <div className="h-16 bg-white/[0.02] rounded-lg animate-pulse" />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && pendingApprovals.length === 0 && (
-        <div className="text-center py-8 rounded-xl border border-dashed border-white/[0.06]">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-emerald-400">
-              <path d="M9 12l2 2 4-4" />
-              <circle cx="12" cy="12" r="10" />
-            </svg>
-          </div>
-          <p className="text-xs text-zinc-400">You&apos;re all caught up</p>
-          <p className="text-[10px] text-zinc-600 mt-1">
-            Agent payments that need approval will appear here.
+    <div className="grid gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+          <p className="truncate text-sm font-medium text-[var(--v2-ink)]">
+            <span className="v2-tabular">{approval.amount_human}</span> {approval.token_symbol}
           </p>
         </div>
-      )}
+        <p className="mt-1 text-xs text-[var(--v2-ink-2)]">
+          {approval.agent_name} to{' '}
+          <Tooltip label={approval.to_address} mono>
+            <span>{recipient}</span>
+          </Tooltip>
+        </p>
+      </div>
+      <div className="flex items-center justify-between gap-2 sm:justify-end">
+        <span
+          className="text-xs text-[var(--v2-ink-3)]"
+          title={new Date(approval.created_at).toLocaleString()}
+        >
+          {timeAgo(approval.created_at)}
+        </span>
+        {approval.tx_hash ? (
+          <ExternalDetailsLink
+            href={getExplorerUrl(approval.chain_id, 'tx', approval.tx_hash)}
+            label="Open payment externally"
+          />
+        ) : null}
+      </div>
+    </div>
+  )
+}
 
-      {/* Pending */}
-      {pendingApprovals.length > 0 && (
-        <div className="space-y-3 mb-6">
-          {pendingApprovals.map((a) => (
-            <ApprovalCard
-              key={a.id}
-              approval={a}
-              onApproveAndExecute={handleApproveAndExecute}
-              onReject={handleReject}
-              executing={executing}
-              chainId={chainId}
-            />
-          ))}
+function ApprovalSkeleton() {
+  return (
+    <Card hover={false} className="p-5">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-5 w-28 rounded-full" />
+        <Skeleton variant="text" className="h-3 w-20" />
+      </div>
+      <Skeleton className="mt-5 h-8 w-44" />
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <Skeleton className="h-16 rounded-[10px] bg-[var(--v2-surface)]" />
+        <Skeleton className="h-16 rounded-[10px] bg-[var(--v2-surface)]" />
+      </div>
+    </Card>
+  )
+}
+
+export default function ApprovalQueue() {
+  const {
+    approvals,
+    loading,
+    error,
+    approve,
+    reject,
+    markProposed,
+    markExecuted,
+    refetch,
+  } = useApprovals()
+  const [executingApprovalId, setExecutingApprovalId] = useState<string | null>(null)
+
+  const actionableApprovals = approvals.filter((approval) => isActionableApprovalStatus(approval.status))
+  const pastApprovals = approvals.filter((approval) => !isActionableApprovalStatus(approval.status))
+
+  if (loading) {
+    return (
+      <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading approvals" className="space-y-3">
+        {[0, 1].map((index) => (
+          <ApprovalSkeleton key={index} />
+        ))}
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <EmptyState
+        title="Could not load approvals"
+        body={error}
+        action={<Button variant="ghost" size="sm" onClick={() => void refetch()}>Try again</Button>}
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-8">
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Needs review</h2>
+            <p className="mt-1 text-xs text-[var(--v2-ink-2)]">
+              Payments above an agent budget wait here until you approve, complete, or reject them.
+            </p>
+          </div>
+          {actionableApprovals.length > 0 ? (
+            <StatusBadge tone="warning">
+              <span className="v2-tabular">{actionableApprovals.length}</span> waiting
+            </StatusBadge>
+          ) : null}
         </div>
-      )}
 
-      {/* Past approvals */}
-      {pastApprovals.length > 0 && (
-        <div>
-          <p className="text-[10px] text-zinc-700 uppercase tracking-wide mb-3">History</p>
-          <div className="space-y-2">
-            {pastApprovals.slice(0, 10).map((a) => (
-              <div
-                key={a.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]"
-              >
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={a.status} />
-                  <span className="text-xs text-zinc-400">
-                    {a.amount_human} {a.token_symbol}
-                  </span>
-                  <span className="text-xs text-zinc-700">to {truncate(a.to_address)}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-zinc-700">{a.agent_name}</span>
-                  <span
-                    className="text-[10px] text-zinc-800"
-                    title={new Date(a.created_at).toLocaleString()}
-                  >
-                    {timeAgo(a.created_at)}
-                  </span>
-                </div>
-              </div>
+        {actionableApprovals.length === 0 ? (
+          <EmptyState
+            title="No payments need approval"
+            body="When an agent asks to spend above its budget, the request will appear here before any money moves."
+          />
+        ) : (
+          <div className="space-y-4">
+            {actionableApprovals.map((approval) => (
+              <ApprovalCardWithContext
+                key={approval.id}
+                approval={approval}
+                executingApprovalId={executingApprovalId}
+                setExecutingApprovalId={setExecutingApprovalId}
+                approve={approve}
+                reject={reject}
+                markProposed={markProposed}
+                markExecuted={markExecuted}
+                refetch={refetch}
+              />
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </section>
+
+      {pastApprovals.length > 0 ? (
+        <section>
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Recent decisions</h2>
+            <p className="mt-1 text-xs text-[var(--v2-ink-2)]">
+              Submitted, rejected, expired, and sent payment requests.
+            </p>
+          </div>
+          <Card hover={false} className="overflow-hidden">
+            {pastApprovals.slice(0, 10).map((approval) => (
+              <ApprovalHistoryRow key={approval.id} approval={approval} />
+            ))}
+          </Card>
+        </section>
+      ) : null}
     </div>
   )
 }

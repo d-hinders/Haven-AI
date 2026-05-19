@@ -5,33 +5,102 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { ApiRequestError } from '@/lib/api'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { HavenMark } from '@/components/brand/HavenMark'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const MAX_EMAIL_LENGTH = 255
+const MIN_PASSWORD_LENGTH = 8
+const MAX_PASSWORD_LENGTH = 128
+const MAX_NAME_LENGTH = 80
+const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
+
+type FieldErrors = Partial<Record<'name' | 'email' | 'password' | 'confirmPassword', string>>
+
+function TrustRow({
+  title,
+  description,
+  delayMs,
+}: {
+  title: string
+  description: string
+  delayMs: number
+}) {
+  return (
+    <div
+      className="v2-animate-stagger flex gap-3"
+      style={{ ['--v2-stagger-delay' as string]: `${delayMs}ms` }}
+    >
+      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] ring-1 ring-inset ring-[var(--v2-brand)]/20">
+        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M3.5 8.5 6.5 11.5 12.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-[var(--v2-ink)]">{title}</p>
+        <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-3)]">{description}</p>
+      </div>
+    </div>
+  )
+}
 
 export default function SignupPage() {
   const { signup } = useAuth()
   const router = useRouter()
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
+
+  function validateForm(): { valid: boolean; name: string; email: string } {
+    const nextErrors: FieldErrors = {}
+    const normalizedName = name.trim().replace(/\s+/g, ' ')
+    const normalizedEmail = email.trim().toLowerCase()
+
+    if (!normalizedName) {
+      nextErrors.name = 'Enter your name.'
+    } else if (normalizedName.length > MAX_NAME_LENGTH || CONTROL_CHAR_RE.test(name)) {
+      nextErrors.name = 'Use 80 characters or fewer.'
+    }
+
+    if (!normalizedEmail) {
+      nextErrors.email = 'Enter your email address.'
+    } else if (normalizedEmail.length > MAX_EMAIL_LENGTH || !EMAIL_RE.test(normalizedEmail)) {
+      nextErrors.email = 'Enter a valid email address.'
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      nextErrors.password = 'Use at least 8 characters.'
+    } else if (password.length > MAX_PASSWORD_LENGTH) {
+      nextErrors.password = 'Use 128 characters or fewer.'
+    }
+
+    if (password !== confirmPassword) {
+      nextErrors.confirmPassword = 'Passwords do not match.'
+    }
+
+    setFieldErrors(nextErrors)
+    return {
+      valid: Object.keys(nextErrors).length === 0,
+      name: normalizedName,
+      email: normalizedEmail,
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters')
-      return
-    }
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match')
-      return
-    }
+    const validation = validateForm()
+    if (!validation.valid) return
 
     setSubmitting(true)
     try {
-      const u = await signup(email, password)
+      const u = await signup(validation.name, validation.email, password)
       if (u.safe_address) {
         router.push('/dashboard')
       } else {
@@ -49,120 +118,219 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#ededed] flex flex-col">
-      {/* Subtle gradient background */}
+    <div className="min-h-screen bg-[var(--v2-bg)] text-[var(--v2-ink)] flex flex-col">
       <div
         className="pointer-events-none fixed inset-x-0 top-0 h-[500px] z-0"
         style={{
           background:
-            'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 70%)',
+            'radial-gradient(ellipse 80% 55% at 50% -10%, rgba(99,102,241,0.13) 0%, transparent 70%), radial-gradient(ellipse 70% 60% at 100% 10%, rgba(14,165,233,0.08) 0%, transparent 65%)',
         }}
       />
 
-      {/* Top bar */}
-      <div className="relative z-10 border-b border-white/[0.06] bg-[#0a0a0a]/80 backdrop-blur-md">
+      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
           <Link
             href="/"
-            className="text-[15px] font-semibold tracking-tight bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent"
+            className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
           >
+            <HavenMark />
             Haven
           </Link>
         </div>
       </div>
 
-      {/* Form */}
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
-        <div className="w-full max-w-sm">
-          <h1 className="text-2xl font-bold tracking-tight mb-2">
-            Create your account
-          </h1>
-          <p className="text-sm text-zinc-500 mb-8">
-            Get started with Haven in minutes.
-          </p>
+        <div className="grid w-full max-w-4xl gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
+          <div className="v2-animate-step-rise rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-[var(--v2-shadow-card)]">
+            <h1
+              className="v2-animate-stagger text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2"
+              style={{ ['--v2-stagger-delay' as string]: '40ms' }}
+            >
+              Create your Haven account
+            </h1>
+            <p
+              className="v2-animate-stagger text-sm text-[var(--v2-ink-2)] mb-8"
+              style={{ ['--v2-stagger-delay' as string]: '120ms' }}
+            >
+              One account, agents that spend within rules you set.
+            </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-4 py-3">
-                {error}
+            <form
+              onSubmit={handleSubmit}
+              noValidate
+              className="v2-animate-stagger space-y-4"
+              style={{ ['--v2-stagger-delay' as string]: '200ms' }}
+            >
+              {error && (
+                <div className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+                  {error}
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="name"
+                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                >
+                  Name
+                </label>
+                <Input
+                  id="name"
+                  type="text"
+                  required
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value)
+                    setFieldErrors((prev) => ({ ...prev, name: undefined }))
+                  }}
+                  placeholder="Your name"
+                  aria-invalid={Boolean(fieldErrors.name)}
+                  aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+                />
+                {fieldErrors.name && (
+                  <p id="name-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                    {fieldErrors.name}
+                  </p>
+                )}
               </div>
-            )}
 
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-xs text-zinc-400 mb-1.5"
+              <div>
+                <label
+                  htmlFor="email"
+                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                >
+                  Email
+                </label>
+                <Input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value)
+                    setFieldErrors((prev) => ({ ...prev, email: undefined }))
+                  }}
+                  placeholder="you@example.com"
+                  aria-invalid={Boolean(fieldErrors.email)}
+                  aria-describedby={fieldErrors.email ? 'email-error' : undefined}
+                />
+                {fieldErrors.email && (
+                  <p id="email-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                    {fieldErrors.email}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="password"
+                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                >
+                  Password
+                </label>
+                <Input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      password: undefined,
+                      confirmPassword: undefined,
+                    }))
+                  }}
+                  placeholder="Min 8 characters"
+                  aria-invalid={Boolean(fieldErrors.password)}
+                  aria-describedby={fieldErrors.password ? 'password-error' : undefined}
+                />
+                {fieldErrors.password && (
+                  <p id="password-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                    {fieldErrors.password}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="confirm"
+                  className="block text-xs font-medium text-[var(--v2-ink-2)] mb-1.5"
+                >
+                  Confirm password
+                </label>
+                <Input
+                  id="confirm"
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value)
+                    setFieldErrors((prev) => ({ ...prev, confirmPassword: undefined }))
+                  }}
+                  placeholder="Repeat password"
+                  aria-invalid={Boolean(fieldErrors.confirmPassword)}
+                  aria-describedby={fieldErrors.confirmPassword ? 'confirm-error' : undefined}
+                />
+                {fieldErrors.confirmPassword && (
+                  <p id="confirm-error" className="mt-1.5 text-xs text-[var(--v2-danger)]">
+                    {fieldErrors.confirmPassword}
+                  </p>
+                )}
+              </div>
+
+              <Button
+                type="submit"
+                disabled={submitting}
+                className="w-full"
               >
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
-                placeholder="you@example.com"
-              />
-            </div>
+                {submitting ? 'Creating account...' : 'Create account'}
+              </Button>
+            </form>
 
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-xs text-zinc-400 mb-1.5"
+            <p className="mt-6 text-center text-sm text-[var(--v2-ink-2)]">
+              Already have an account?{' '}
+              <Link
+                href="/login"
+                className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
               >
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
-                placeholder="Min 8 characters"
-              />
-            </div>
+                Log in
+              </Link>
+            </p>
+          </div>
 
-            <div>
-              <label
-                htmlFor="confirm"
-                className="block text-xs text-zinc-400 mb-1.5"
-              >
-                Confirm password
-              </label>
-              <input
-                id="confirm"
-                type="password"
-                required
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
-                placeholder="Repeat password"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full py-2.5 rounded-md bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          <div
+            className="v2-animate-stagger rounded-[14px] border border-[var(--v2-border)] bg-white/85 p-6 shadow-[var(--v2-shadow-card)]"
+            style={{ ['--v2-stagger-delay' as string]: '120ms' }}
+          >
+            <p
+              className="v2-animate-stagger text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]"
+              style={{ ['--v2-stagger-delay' as string]: '180ms' }}
             >
-              {submitting ? 'Creating account...' : 'Create account'}
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-sm text-zinc-500">
-            Already have an account?{' '}
-            <Link
-              href="/login"
-              className="text-indigo-400 hover:text-indigo-300 transition-colors"
-            >
-              Log in
-            </Link>
-          </p>
+              What you&apos;re signing up for
+            </p>
+            <div className="mt-5 space-y-5">
+              <TrustRow
+                delayMs={260}
+                title="An account wallet you own"
+                description="Create it with a passkey or your existing wallet. You hold the funds — Haven never does."
+              />
+              <TrustRow
+                delayMs={340}
+                title="Agents that ask, then act"
+                description="Set budgets and reset periods. Anything over that limit waits for your approval."
+              />
+              <TrustRow
+                delayMs={420}
+                title="No surprises in production"
+                description="Every payment is logged with the agent, the policy, and the outcome — auditable from day one."
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>

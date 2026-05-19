@@ -111,7 +111,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
       `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, safe_address, chain_id, name, is_default, created_at`,
-      [sub, safe_address, chain_id, name?.trim() || 'My Safe', isFirst],
+      [sub, safe_address, chain_id, name?.trim() || 'My account', isFirst],
     )
 
     // Also update legacy users.safe_address if this is the first Safe

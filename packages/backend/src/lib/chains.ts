@@ -27,13 +27,19 @@ export interface ChainConfig {
   explorerApiUrl: string     // e.g. https://api.etherscan.io/v2/api
   explorerApiKey: string     // empty allowed for Blockscout
   explorerApiProvider: ExplorerApiProvider
-  safeTxServiceUrl: string   // e.g. https://safe-transaction-gnosis-chain.safe.global
+  safeTxServiceUrl: string   // e.g. https://api.safe.global/tx-service/gno
   contracts: {
     safeProxyFactory: string
     safeSingletonL2: string
     fallbackHandler: string
     allowanceModule: string
     multiSendCallOnly: string
+  }
+  passkey: {
+    /** P-256 verifier the Safe passkey signer will call. */
+    verifier: string
+    /** SafeWebAuthnSignerFactory deployment for this chain. */
+    factoryAddress: string
   }
   tokens: Record<string, TokenConfig>
   /** Reverse lookup: lowercase contract address → TokenConfig */
@@ -73,13 +79,18 @@ const GNOSIS: ChainConfig = {
   explorerApiUrl: 'https://api.etherscan.io/v2/api',
   explorerApiKey: config.gnosisscanApiKey,
   explorerApiProvider: 'etherscan-v2',
-  safeTxServiceUrl: 'https://safe-transaction-gnosis-chain.safe.global',
+  safeTxServiceUrl: 'https://api.safe.global/tx-service/gno',
   contracts: {
     safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
     safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
     fallbackHandler: '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4',
     allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
+  },
+  passkey: {
+    verifier: '0x445a0683e494ea0c5af3e83c5159fbe47cf9e765',
+    // SafeWebAuthnSignerFactory live deployment used by the frontend parity checks in PR #40.
+    factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',
   },
   tokens: GNOSIS_TOKENS,
   tokenByAddress: buildTokenByAddress(GNOSIS_TOKENS),
@@ -115,7 +126,7 @@ const BASE: ChainConfig = {
   explorerApiUrl: 'https://base.blockscout.com/api/v2',
   explorerApiKey: '',
   explorerApiProvider: 'blockscout-v2',
-  safeTxServiceUrl: 'https://safe-transaction-base.safe.global',
+  safeTxServiceUrl: 'https://api.safe.global/tx-service/base',
   contracts: {
     // Base uses EIP-155 variant addresses for Safe v1.3.0
     safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
@@ -124,6 +135,11 @@ const BASE: ChainConfig = {
     // These are at the same CREATE2 addresses on Base
     allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
+  },
+  passkey: {
+    verifier: '0x0000000000000000000000000000000000000100',
+    // SafeWebAuthnSignerFactory live deployment used by the frontend parity checks in PR #40.
+    factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',
   },
   tokens: BASE_TOKENS,
   tokenByAddress: buildTokenByAddress(BASE_TOKENS),

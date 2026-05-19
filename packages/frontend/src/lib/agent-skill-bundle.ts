@@ -31,21 +31,22 @@ function slugify(name: string): string {
 // ── SKILL.md ───────────────────────────────────────────────────────
 
 function buildSkillMd(input: HandoffInput): string {
-  const { agent, policy } = input
+  const { agent, policy, appBaseUrl } = input
   const policySummary = policy.allowances
     .map((a) => `${a.amount} ${a.tokenSymbol}`)
     .join(', ') || 'none configured'
+  const revokeUrl = `${(appBaseUrl ?? 'https://haven-ai-frontend.vercel.app').replace(/\/+$/, '')}/agents`
 
   return `---
 name: haven-pay
 description: Make stablecoin payments via Haven on behalf of the user. Use when the user asks to send, pay, tip, or transfer crypto — or when the agent hits an HTTP 402 response from a paid API.
 ---
 
-# Haven: pay and receive via a non-custodial agent wallet
+# Haven: pay from a Haven wallet
 
-This skill lets the agent make payments from a Haven-managed Safe account.
-Every payment is checked against the agent's server-side policy before it
-executes; the agent cannot spend beyond the configured limits.
+This skill lets the agent make payments from a Haven wallet. Every payment is
+checked against the user's agent rules before money moves; payments above the
+remaining budget wait for approval in Haven.
 
 ## When to use this skill
 
@@ -56,18 +57,17 @@ executes; the agent cannot spend beyond the configured limits.
 ## Agent identity
 
 - **Name:** ${agent.name}
-- **Safe account:** \`${agent.safeAddress}\`
+- **Haven wallet:** \`${agent.safeAddress}\`
 - **Network:** chain id \`${agent.chainId}\`
-- **Delegate:** \`${agent.delegateAddress}\`
+- **Credential address:** \`${agent.delegateAddress}\`
 
 ## What this agent is allowed to do
 
 - **Spending limits:** ${policySummary}
-- **Recipients:** ${policy.restrictRecipients ? `allowlist (${policy.allowedRecipients.length} entries)` : 'any address'}
 
-If a payment exceeds these limits, Haven rejects it server-side — the skill
-surfaces a structured error. Don't try to work around limits; tell the user
-to adjust the policy in the Haven dashboard.
+If a payment exceeds the remaining budget, Haven queues it for approval in the
+dashboard. The SDK surfaces this as a \`HavenApiError\` with HTTP status \`202\`.
+Tell the user the payment is awaiting approval; don't retry in a tight loop.
 
 ## Setup (one-time)
 
@@ -97,16 +97,16 @@ const data = await res.json()
 Haven errors are shaped \`{ error, status, details? }\`. Surface the error
 message to the user verbatim — it's written for humans. Common cases:
 
-- \`policy_violation\`: the payment exceeds a limit. Tell the user which
-  limit and suggest raising it in the dashboard.
-- \`recipient_not_allowed\`: the allowlist blocks this address. Offer to
-  add the recipient in the dashboard.
-- \`insufficient_funds\`: the Safe doesn't have enough of that token.
+- \`pending_approval\` (HTTP 202): the payment exceeds the remaining budget
+  and was queued. Tell the user it's waiting for approval in Haven. Don't retry
+  until the queued payment is approved or rejected.
+- \`insufficient_funds\`: the Haven wallet doesn't have enough of that token.
 
 ## Revoke
 
-If this skill or its credentials leak, revoke the agent at
-https://app.haven.xyz/agents — payments stop immediately.
+If this skill or its credentials leak, pause or revoke the agent at
+${revokeUrl}. New Haven requests stop for that credential, and Haven may ask
+the user to approve a network update to remove the agent budget from the wallet.
 `
 }
 

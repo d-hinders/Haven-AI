@@ -2,11 +2,178 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --v2-bg: #ffffff;
+  --v2-surface: #f6f9fc;
+  --v2-surface-2: #eef2f7;
+  --v2-surface-code: #0b1120;
+
+  --v2-ink: #1a1f36;
+  --v2-ink-2: #525f7f;
+  --v2-ink-3: #8898aa;
+  --v2-ink-on-brand: #ffffff;
+
+  --v2-border: #e6ebf1;
+  --v2-border-strong: #d6dbe3;
+
+  --v2-brand: #4f46e5;
+  --v2-brand-strong: #4338ca;
+  --v2-brand-soft: #eef2ff;
+
+  --v2-success: #0e9f6e;
+  --v2-success-soft: #ecfdf5;
+  /* Sky / debit — used for outgoing transactions (send / debit) globally.
+     Sibling to success on the cool side of the spectrum so incoming /
+     outgoing read as a symmetric pair without clashing with brand-indigo. */
+  --v2-debit: #0284c7;
+  --v2-debit-soft: #f0f9ff;
+  --v2-warning: #b54708;
+  --v2-warning-soft: #fef3c7;
+  --v2-danger: #b42318;
+  --v2-danger-soft: #fef2f2;
+  --v2-modal-backdrop: rgba(26, 31, 54, 0.66);
+
+  --v2-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --v2-shadow-card-raised: 0 2px 4px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.08);
+  --v2-shadow-button: 0 1px 1px rgba(16, 24, 40, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --v2-shadow-modal: 0 12px 32px rgba(16, 24, 40, 0.12), 0 4px 8px rgba(16, 24, 40, 0.06);
+  --v2-shadow-popover: 0 12px 24px rgba(16, 24, 40, 0.10), 0 2px 6px rgba(16, 24, 40, 0.06);
+
+  --v2-surface-hover: #f0f4f9;
+  --v2-brand-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+
+  /* Anchor surface — slightly cooler off-white for the "second most important"
+     card on a page (e.g. pending-approvals callout). Used with the anchor
+     elevation tier on Card. */
+  --v2-surface-anchor: #fafbfd;
+  --v2-border-anchor: rgba(79, 70, 229, 0.10);
+
+  /* Hero surface wash — replaces the inline lavender gradient on DashboardHero. */
+  --v2-surface-hero: linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%);
+
+  /* Semantic gradient fills for progress / allowance bars. Replace ad-hoc
+     `from-indigo-500 to-violet-500` style classes. */
+  --v2-bar-fill-ok: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);
+  --v2-bar-fill-warn: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
+  --v2-bar-fill-danger: linear-gradient(90deg, #ef4444 0%, #f43f5e 100%);
+
+  /* Subtle inset highlight on raised surfaces — gives them the "milky glass"
+     finish without changing the surface color. Use sparingly. */
+  --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  --v2-font-weight-medium: 500;
+  --v2-font-weight-semibold: 600;
+  --v2-font-weight-bold: 700;
+
+  --v2-text-display: 2.5rem;
+  --v2-text-display-leading: 3rem;
+  --v2-text-h1: 1.75rem;
+  --v2-text-h1-leading: 2.125rem;
+  --v2-text-h2: 1.25rem;
+  --v2-text-h2-leading: 1.75rem;
+  --v2-text-h3: 1rem;
+  --v2-text-h3-leading: 1.5rem;
+  --v2-text-body: 0.875rem;
+  --v2-text-body-leading: 1.375rem;
+  --v2-text-meta: 0.75rem;
+  --v2-text-meta-leading: 1.125rem;
+}
+
+.v2-text-display {
+  font-size: var(--v2-text-display);
+  line-height: var(--v2-text-display-leading);
+  font-weight: var(--v2-font-weight-semibold);
+  letter-spacing: -0.02em;
+}
+
+.v2-text-h1 {
+  font-size: var(--v2-text-h1);
+  line-height: var(--v2-text-h1-leading);
+  font-weight: var(--v2-font-weight-semibold);
+  letter-spacing: -0.015em;
+}
+
+.v2-text-h2 {
+  font-size: var(--v2-text-h2);
+  line-height: var(--v2-text-h2-leading);
+  font-weight: var(--v2-font-weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.v2-text-h3 {
+  font-size: var(--v2-text-h3);
+  line-height: var(--v2-text-h3-leading);
+  font-weight: var(--v2-font-weight-semibold);
+}
+
+.v2-text-body {
+  font-size: var(--v2-text-body);
+  line-height: var(--v2-text-body-leading);
+}
+
+.v2-text-meta {
+  font-size: var(--v2-text-meta);
+  line-height: var(--v2-text-meta-leading);
+}
+
+.v2-brand-gradient-text {
+  color: var(--v2-brand);
+}
+
+@supports (-webkit-background-clip: text) or (background-clip: text) {
+  .v2-brand-gradient-text {
+    background: var(--v2-brand-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
 
-/* Custom scrollbar for dark theme */
+.v2-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.v2-modal-backdrop {
+  background: var(--v2-modal-backdrop);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+@keyframes v2FlowForward {
+  from { left: 0; opacity: 0; transform: translate(-50%, 0); }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  to   { left: 100%; opacity: 0; transform: translate(-50%, 0); }
+}
+
+@keyframes v2FlowReverse {
+  from { left: 100%; opacity: 0; transform: translate(-50%, 0); }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  to   { left: 0; opacity: 0; transform: translate(-50%, 0); }
+}
+
+@keyframes v2-mesh-drift {
+  from { transform: translate3d(-2%, -1%, 0); }
+  to   { transform: translate3d(2%, 1%, 0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-mesh-drift {
+    animation: v2-mesh-drift 18s ease-in-out infinite alternate;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-mesh-drift { animation: none; }
+}
+
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -17,18 +184,18 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(82, 95, 127, 0.22);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(82, 95, 127, 0.34);
 }
 
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+  scrollbar-color: rgba(82, 95, 127, 0.22) transparent;
 }
 
 /* Copy-to-clipboard checkmark spring */
@@ -40,9 +207,14 @@
 }
 
 .animate-check-pop {
-  animation: check-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
   transform-origin: center;
   display: inline-flex;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-check-pop {
+    animation: check-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
 }
 
 /* Allowance bar fill ease-out */
@@ -56,6 +228,120 @@
   50%      { opacity: 0.55; transform: scale(0.85); }
 }
 
-.animate-pending-pulse {
-  animation: pending-pulse 1.4s ease-in-out infinite;
+@media (prefers-reduced-motion: no-preference) {
+  .animate-pending-pulse {
+    animation: pending-pulse 1.4s ease-in-out infinite;
+  }
+}
+
+/*
+ * Content fade-in — used when a skeleton placeholder is replaced by real
+ * content. Runs once on mount and softens the visual jolt of swap.
+ */
+@keyframes v2-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-fade-in {
+    animation: v2-fade-in 200ms ease-out;
+  }
+}
+
+/*
+ * Block entrance — used when a section appears in place (e.g. the
+ * AttentionSection mounting after an approval lands). Subtle slide + fade.
+ */
+@keyframes v2-slide-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-slide-in {
+    animation: v2-slide-in 220ms ease-out;
+  }
+}
+
+/*
+ * Onboarding wizard step entrance — slightly larger rise than the standard
+ * fade so step swaps feel like progress rather than a content swap. Used
+ * inside the signup form, wizard body, and success screen.
+ */
+@keyframes v2-step-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-step-rise {
+    animation: v2-step-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+/*
+ * Onboarding stagger — child elements opt into a one-shot fade-up with a
+ * `--v2-stagger-delay` custom property driving their start offset. Pairs
+ * with `v2-animate-step-rise` on a wrapper so a card and its children land
+ * sequentially without manual delay classes everywhere.
+ */
+@keyframes v2-stagger-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-stagger {
+    animation: v2-stagger-up 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--v2-stagger-delay, 0ms);
+  }
+}
+
+/*
+ * Onboarding success bloom — a single soft radial glow that grows once and
+ * fades behind the check-pop circle on the wizard's "you're in" screen.
+ * Plays only on first paint of the success state.
+ */
+@keyframes v2-bloom {
+  0%   { opacity: 0; transform: scale(0.55); }
+  40%  { opacity: 0.85; }
+  100% { opacity: 0; transform: scale(2.1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-bloom {
+    animation: v2-bloom 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+/*
+ * Progress connector fill — used by the onboarding wizard step indicator so
+ * the line between two steps grows from left to right when the leading step
+ * completes, instead of snapping colour.
+ */
+.v2-progress-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.v2-progress-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--v2-success);
+  opacity: 0.45;
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.v2-progress-line[data-filled='true']::after {
+  transform: scaleX(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-progress-line::after {
+    transition: none;
+  }
 }

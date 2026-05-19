@@ -32,6 +32,10 @@ export interface FrontendChainConfig {
     allowanceModule: Address
     multiSendCallOnly: Address
   }
+  passkey: {
+    /** P-256 verifier the Safe passkey signer will call. */
+    verifier: Address
+  }
   tokens: Record<string, FrontendTokenConfig>
 }
 
@@ -43,13 +47,17 @@ const GNOSIS_CONFIG: FrontendChainConfig = {
   shortName: 'gnosis',
   viemChain: gnosis,
   explorerUrl: 'https://gnosisscan.io',
-  safeTxServiceUrl: 'https://safe-transaction-gnosis-chain.safe.global',
+  safeTxServiceUrl: 'https://api.safe.global/tx-service/gno',
   contracts: {
     safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
     safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
     fallbackHandler: '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4',
     allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
+  },
+  passkey: {
+    // TODO: source from safe-modules-deployments once the package exposes the Gnosis FCL verifier.
+    verifier: '0x445a0683e494ea0c5af3e83c5159fbe47cf9e765',
   },
   tokens: {
     'xDAI': { symbol: 'xDAI', decimals: 18, address: null },
@@ -66,7 +74,7 @@ const BASE_CONFIG: FrontendChainConfig = {
   shortName: 'base',
   viemChain: base,
   explorerUrl: 'https://basescan.org',
-  safeTxServiceUrl: 'https://safe-transaction-base.safe.global',
+  safeTxServiceUrl: 'https://api.safe.global/tx-service/base',
   contracts: {
     // Base uses EIP-155 variant addresses for Safe v1.3.0
     safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
@@ -75,6 +83,9 @@ const BASE_CONFIG: FrontendChainConfig = {
     // Same CREATE2 addresses on Base
     allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
+  },
+  passkey: {
+    verifier: '0x0000000000000000000000000000000000000100',
   },
   tokens: {
     'ETH': { symbol: 'ETH', decimals: 18, address: null },
@@ -91,7 +102,7 @@ const CHAINS: Record<number, FrontendChainConfig> = {
 
 export const SUPPORTED_CHAINS = Object.values(CHAINS)
 export const SUPPORTED_CHAIN_IDS = Object.keys(CHAINS).map(Number)
-export const DEFAULT_CHAIN_ID = 100
+export const DEFAULT_CHAIN_ID = BASE_CONFIG.chainId
 
 export function getChainConfig(chainId: number): FrontendChainConfig {
   const chain = CHAINS[chainId]

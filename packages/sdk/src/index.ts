@@ -12,6 +12,9 @@ export type {
   X402PaymentRequired,
   X402PaymentOption,
   X402Receipt,
+  MachinePaymentRail,
+  MachinePaymentChallenge,
+  MachinePaymentReceipt,
 } from './types.js'
 
 export type { ClaudeTool, OpenAITool } from './tools.js'
@@ -25,6 +28,14 @@ export {
 
 export {
   parsePaymentRequired,
+  parsePaymentRequiredResponse,
   selectPaymentOption,
   encodePaymentProof,
 } from './x402.js'
+
+export {
+  parseMachinePaymentChallenge,
+  parseMachinePaymentChallengeResponse,
+  buildMachinePaymentIdempotencyKey,
+  encodeMachinePaymentProof,
+} from './mpp.js'

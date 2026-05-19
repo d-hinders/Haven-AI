@@ -1,21 +1,39 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, type FormEvent, type MouseEvent } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { ApiRequestError } from '@/lib/api'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import ContactsInfo from '@/components/ContactsInfo'
 import { truncate, isValidAddress } from '@/lib/format'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Input } from '@/components/ui/Input'
+import { Modal } from '@/components/ui/Modal'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { Skeleton } from '@/components/ui/Skeleton'
+import { Tooltip } from '@/components/ui/Tooltip'
+
+function ContactIcon() {
+  return (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15 19.128A8.97 8.97 0 0 0 18 19.5a8.96 8.96 0 0 0 4.121-.997 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003A6.374 6.374 0 0 0 12.75 14.25M15 19.128A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12.75 14.25A3.375 3.375 0 1 0 6 14.25a3.375 3.375 0 0 0 6.75 0Zm8.25-6a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
+      />
+    </svg>
+  )
+}
 
 function Initials({ name }: { name: string }) {
-  const parts = name.trim().split(/\s+/)
+  const parts = name.trim().split(/\s+/).filter(Boolean)
   const initials =
     parts.length >= 2
-      ? `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-      : parts[0].slice(0, 2).toUpperCase()
+      ? `${parts[0][0]}${parts[parts.length - 1][0]}`
+      : (parts[0] ?? '?').slice(0, 2)
+
   return (
-    <div className="w-9 h-9 rounded-full bg-indigo-500/15 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
-      <span className="text-xs font-semibold text-indigo-300">{initials}</span>
+    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)]">
+      <span className="text-xs font-semibold text-[var(--v2-brand)]">{initials.toUpperCase()}</span>
     </div>
   )
 }
@@ -33,129 +51,117 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
   const [address, setAddress] = useState(initial?.address ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
-  useEscapeToClose(true, onClose, { enabled: !saving })
-  const nameRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    nameRef.current?.focus()
-  }, [])
+  const trimmedAddress = address.trim()
+  const duplicateContact =
+    mode === 'add' && isValidAddress(trimmedAddress)
+      ? existingContacts.find((contact) => contact.address.toLowerCase() === trimmedAddress.toLowerCase()) ?? null
+      : null
 
-  // When adding, surface if the address is already saved under another name.
-  const duplicateContact = (() => {
-    if (mode !== 'add') return null
-    if (!isValidAddress(address)) return null
-    const normalized = address.toLowerCase()
-    return existingContacts.find((c) => c.address.toLowerCase() === normalized) ?? null
-  })()
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
     if (!name.trim()) {
-      setError('Name is required')
+      setError('Enter a contact name.')
       return
     }
-    if (mode === 'add' && !isValidAddress(address)) {
-      setError('Invalid Ethereum address')
+    if (mode === 'add' && !isValidAddress(trimmedAddress)) {
+      setError('Enter a valid recipient address.')
       return
     }
+    if (duplicateContact) {
+      setError(`This address is already saved as ${duplicateContact.name}.`)
+      return
+    }
+
     setSaving(true)
+    setError('')
     try {
-      await onSave(name.trim(), address)
+      await onSave(name.trim(), trimmedAddress)
       onClose()
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : 'Something went wrong')
+      setError(err instanceof ApiRequestError ? err.message : 'We could not save this contact. Try again.')
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm mx-4 bg-[#111113] border border-white/[0.08] rounded-xl shadow-2xl shadow-black/40">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-          <h2 className="text-base font-semibold text-[#ededed]">
-            {mode === 'add' ? 'Add contact' : 'Edit contact'}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="p-1 -mr-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    <Modal
+      open
+      onClose={saving ? () => {} : onClose}
+      closeOnBackdrop={!saving}
+      title={mode === 'add' ? 'Add contact' : 'Edit contact'}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          Save a name for a recipient address so payment reviews can show who you are paying.
+          The payment network is chosen when you send from a Haven wallet.
+        </p>
+
+        <div>
+          <label htmlFor="contact-name" className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-2)]">
+            Contact name
+          </label>
+          <Input
+            id="contact-name"
+            type="text"
+            value={name}
+            onChange={(event) => {
+              setName(event.target.value)
+              setError('')
+            }}
+            placeholder="Acme Services"
+          />
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        {mode === 'add' ? (
           <div>
-            <label className="block text-xs text-zinc-400 mb-1.5">Name</label>
-            <input
-              ref={nameRef}
+            <label htmlFor="contact-address" className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-2)]">
+              Recipient address
+            </label>
+            <Input
+              id="contact-address"
               type="text"
-              value={name}
-              onChange={(e) => { setName(e.target.value); setError('') }}
-              placeholder="Alice"
-              className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
+              value={address}
+              onChange={(event) => {
+                setAddress(event.target.value)
+                setError('')
+              }}
+              placeholder="0x..."
+              className="font-mono"
             />
           </div>
-
-          {mode === 'add' && (
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1.5">Address</label>
-              <input
-                type="text"
-                value={address}
-                onChange={(e) => { setAddress(e.target.value); setError('') }}
-                placeholder="0x..."
-                className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors font-mono"
-              />
-            </div>
-          )}
-
-          {mode === 'edit' && initial && (
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1.5">Address</label>
-              <p className="px-3 py-2.5 bg-white/[0.02] border border-white/[0.05] rounded-lg text-sm text-zinc-500 font-mono">
-                {initial.address}
-              </p>
-            </div>
-          )}
-
-          {error && (
-            <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2.5">
-              {error}
-            </div>
-          )}
-
-          {duplicateContact && !error && (
-            <div className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2.5">
-              This address is already saved as{' '}
-              <span className="font-medium">&ldquo;{duplicateContact.name}&rdquo;</span>.
-              Saving will create a second entry.
-            </div>
-          )}
-
-          <div className="flex gap-3 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-2.5 rounded-lg border border-white/[0.08] text-sm text-zinc-300 hover:bg-white/[0.04] transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : mode === 'add' ? 'Add contact' : 'Save changes'}
-            </button>
+        ) : initial ? (
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-2)]">Recipient address</p>
+            <p className="break-all rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 font-mono text-sm text-[var(--v2-ink-2)]">
+              {initial.address}
+            </p>
           </div>
-        </form>
-      </div>
-    </div>
+        ) : null}
+
+        {duplicateContact && !error && (
+          <div className="rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-3 py-2.5 text-xs leading-relaxed text-[var(--v2-warning)]">
+            This address is already saved as <span className="font-medium">{duplicateContact.name}</span>.
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
+            {error}
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving} className="flex-1">
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving || !!duplicateContact} className="flex-1">
+            {saving ? 'Saving...' : mode === 'add' ? 'Add contact' : 'Save changes'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -168,56 +174,65 @@ interface ContactRowProps {
 function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
   const [copied, setCopied] = useState(false)
 
-  const copyAddress = async (e: React.MouseEvent) => {
-    e.preventDefault()
+  const copyAddress = async (event: MouseEvent) => {
+    event.preventDefault()
     await navigator.clipboard.writeText(contact.address)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/[0.02] transition-colors group">
+    <div className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[var(--v2-surface)]">
       <Initials name={contact.name} />
 
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[#ededed] truncate">{contact.name}</p>
-        <p className="text-xs text-zinc-500 font-mono mt-0.5">{truncate(contact.address)}</p>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
+        <Tooltip label={contact.address} mono>
+          <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
+        </Tooltip>
       </div>
 
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex flex-shrink-0 items-center gap-1">
         <button
+          type="button"
           onClick={copyAddress}
-          title="Copy address"
-          className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+          aria-label={copied ? 'Address copied' : 'Copy address'}
+          title={copied ? 'Address copied' : 'Copy address'}
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
           {copied ? (
-            <svg className="w-4 h-4 text-emerald-400 animate-check-pop" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="h-4 w-4 text-[var(--v2-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
             </svg>
           ) : (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 8.25V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.25" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8Z" />
             </svg>
           )}
         </button>
 
         <button
+          type="button"
           onClick={() => onEdit(contact)}
+          aria-label={`Edit ${contact.name}`}
           title="Edit contact"
-          className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
           </svg>
         </button>
 
         <button
+          type="button"
           onClick={() => onDelete(contact)}
+          aria-label={`Delete ${contact.name}`}
           title="Delete contact"
-          className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75v7.5m4.5-7.5v7.5M4.5 6.75h15m-12 0 .75 12A2.25 2.25 0 0 0 10.5 21h3a2.25 2.25 0 0 0 2.25-2.25l.75-12m-6-3h3a1.5 1.5 0 0 1 1.5 1.5v1.5h-6v-1.5a1.5 1.5 0 0 1 1.5-1.5Z" />
           </svg>
         </button>
       </div>
@@ -233,142 +248,137 @@ interface DeleteConfirmProps {
 
 function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
   const [deleting, setDeleting] = useState(false)
-  useEscapeToClose(true, onClose, { enabled: !deleting })
+  const [error, setError] = useState('')
 
   const handleDelete = async () => {
     setDeleting(true)
+    setError('')
     try {
       await onConfirm()
       onClose()
+    } catch {
+      setError('We could not delete this contact. Try again.')
     } finally {
       setDeleting(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm mx-4 bg-[#111113] border border-white/[0.08] rounded-xl shadow-2xl shadow-black/40 p-5">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-9 h-9 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-[#ededed]">Delete contact</p>
-            <p className="text-xs text-zinc-500 mt-0.5">This action cannot be undone.</p>
-          </div>
+    <Modal
+      open
+      onClose={deleting ? () => {} : onClose}
+      closeOnBackdrop={!deleting}
+      title="Delete contact"
+    >
+      <div className="space-y-4">
+        <p>
+          Delete <span className="font-medium text-[var(--v2-ink)]">{contact.name}</span>? This removes the saved
+          name from Haven, but it does not affect past payments.
+        </p>
+        <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+          <p className="text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
+          <Tooltip label={contact.address} mono>
+            <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
+          </Tooltip>
         </div>
-
-        <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg px-4 py-3 mb-4">
-          <p className="text-sm font-medium text-zinc-200">{contact.name}</p>
-          <p className="text-xs text-zinc-500 font-mono mt-0.5">{truncate(contact.address)}</p>
-        </div>
-
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 py-2.5 rounded-lg border border-white/[0.08] text-sm text-zinc-300 hover:bg-white/[0.04] transition-colors"
-          >
+        {error && (
+          <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
+            {error}
+          </div>
+        )}
+        <div className="flex gap-3 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={deleting} className="flex-1">
             Cancel
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="flex-1 py-2.5 rounded-lg bg-red-500/80 hover:bg-red-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </button>
+          </Button>
+          <Button type="button" variant="danger" onClick={handleDelete} disabled={deleting} className="flex-1">
+            {deleting ? 'Deleting...' : 'Delete contact'}
+          </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
 export default function ContactsPage() {
-  const { contacts, loading, addContact, updateContact, deleteContact } = useContacts()
+  const { contacts, loading, error, refetch, addContact, updateContact, deleteContact } = useContacts()
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [editTarget, setEditTarget] = useState<Contact | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null)
-  const [infoOpen, setInfoOpen] = useState(false)
 
   const filtered = contacts.filter(
-    (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.address.toLowerCase().includes(search.toLowerCase()),
+    (contact) =>
+      contact.name.toLowerCase().includes(search.toLowerCase()) ||
+      contact.address.toLowerCase().includes(search.toLowerCase()),
   )
 
   return (
-    <div className="max-w-2xl">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight mb-1">Contacts</h1>
-          <p className="text-sm text-zinc-500">Save and label frequently used addresses</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setInfoOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02] text-zinc-400 text-sm font-medium hover:bg-white/[0.05] hover:text-zinc-300 transition-all duration-200"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            How it works
-          </button>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-medium hover:from-indigo-400 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
+    <div className="max-w-5xl">
+      <PageHeader
+        title="Contacts"
+        subtitle="Save recipients you pay often so payment reviews show names instead of only wallet addresses."
+        actions={
+          <Button onClick={() => setShowAdd(true)}>
             Add contact
-          </button>
-        </div>
-      </div>
+          </Button>
+        }
+      />
 
       {contacts.length > 0 && (
         <div className="relative mb-4">
+          <label htmlFor="contacts-search" className="sr-only">Search contacts</label>
           <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none"
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--v2-ink-3)]"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
             strokeWidth={1.5}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
           </svg>
-          <input
+          <Input
+            id="contacts-search"
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or address..."
-            className="w-full pl-9 pr-4 py-2.5 bg-white/[0.03] border border-white/[0.07] rounded-lg text-sm text-[#ededed] placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 transition-colors"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by name or address"
+            className="pl-9"
           />
         </div>
       )}
 
       {loading && (
-        <div className="space-y-2">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-lg">
-              <div className="w-9 h-9 rounded-full bg-white/[0.05] animate-pulse flex-shrink-0" />
+        <div
+          role="status"
+          aria-busy="true"
+          aria-live="polite"
+          aria-label="Loading contacts"
+          className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]"
+        >
+          {[0, 1, 2].map((item) => (
+            <div key={item} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0">
+              <Skeleton variant="circle" className="h-9 w-9 flex-shrink-0" />
               <div className="flex-1 space-y-2">
-                <div className="h-3 w-32 bg-white/[0.05] rounded animate-pulse" />
-                <div className="h-2 w-24 bg-white/[0.05] rounded animate-pulse" />
+                <Skeleton variant="text" className="h-3 w-32" />
+                <Skeleton variant="text" className="h-2 w-24" />
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {!loading && filtered.length > 0 && (
-        <div className="rounded-xl border border-white/[0.07] overflow-hidden">
-          <div className="divide-y divide-white/[0.05]">
+      {!loading && error && (
+        <EmptyState
+          icon={<ContactIcon />}
+          title="Contacts could not load"
+          body={error}
+          action={<Button onClick={() => { void refetch() }}>Try again</Button>}
+        />
+      )}
+
+      {!loading && !error && filtered.length > 0 && (
+        <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
+          <div className="divide-y divide-[var(--v2-border)]">
             {filtered.map((contact) => (
               <ContactRow
                 key={contact.id}
@@ -381,43 +391,21 @@ export default function ContactsPage() {
         </div>
       )}
 
-      {!loading && contacts.length > 0 && filtered.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.07] py-12 text-center">
-          <p className="text-sm text-zinc-500">No contacts match &quot;{search}&quot;</p>
-        </div>
+      {!loading && !error && contacts.length > 0 && filtered.length === 0 && (
+        <EmptyState
+          title="No matching contacts"
+          body={`No saved recipients match "${search}".`}
+          action={<Button variant="ghost" onClick={() => setSearch('')}>Clear search</Button>}
+        />
       )}
 
-      {!loading && contacts.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.08] p-16 text-center">
-          <div className="w-14 h-14 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-5">
-            <svg
-              className="w-7 h-7 text-indigo-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
-              />
-            </svg>
-          </div>
-          <h2 className="text-base font-semibold mb-1">No contacts yet</h2>
-          <p className="text-sm text-zinc-500 max-w-xs leading-relaxed mb-6">
-            Save addresses with names for quick access when sending payments.
-          </p>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-sm font-medium hover:bg-indigo-500/15 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Add your first contact
-          </button>
-        </div>
+      {!loading && !error && contacts.length === 0 && (
+        <EmptyState
+          icon={<ContactIcon />}
+          title="No saved recipients yet"
+          body="Add a contact for any wallet address you pay often. Haven will show the name in Send, approvals, and transaction history. You confirm the network when sending."
+          action={<Button onClick={() => setShowAdd(true)}>Add your first contact</Button>}
+        />
       )}
 
       {showAdd && (
@@ -445,8 +433,6 @@ export default function ContactsPage() {
           onClose={() => setDeleteTarget(null)}
         />
       )}
-
-      <ContactsInfo open={infoOpen} onClose={() => setInfoOpen(false)} />
     </div>
   )
 }

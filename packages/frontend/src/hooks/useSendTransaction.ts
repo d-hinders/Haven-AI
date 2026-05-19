@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { usePublicClient, useWalletClient } from 'wagmi'
-import { type Address, hashTypedData } from 'viem'
+import { usePublicClient } from 'wagmi'
+import { type Address } from 'viem'
+import { useActiveSigner } from '@/lib/signer'
 import {
   buildSafeTx,
   signSafeTx,
   executeSafeTx,
+  getSafeTxHash,
   proposeSafeTx,
   getSafeNonce,
   type SendParams,
@@ -25,17 +27,23 @@ interface UseSendTransactionReturn {
   status: SendStatus
   txHash: string | null
   error: string | null
-  send: (params: SendParams, safeAddress: Address, threshold: number, signer: Address, chainId?: number) => Promise<void>
+  send: (params: SendParams, safeAddress: Address, threshold: number, signer: Address, chainId: number) => Promise<void>
   reset: () => void
 }
 
-export function useSendTransaction(): UseSendTransactionReturn {
+export function useSendTransaction(args: {
+  safeAddress: Address
+  chainId: number
+}): UseSendTransactionReturn {
   const [status, setStatus] = useState<SendStatus>('idle')
   const [txHash, setTxHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const publicClient = usePublicClient({ chainId: args.chainId })
+  const signer = useActiveSigner({
+    safeAddress: args.safeAddress,
+    chainId: args.chainId,
+  })
 
   const reset = useCallback(() => {
     setStatus('idle')
@@ -48,11 +56,11 @@ export function useSendTransaction(): UseSendTransactionReturn {
       params: SendParams,
       safeAddress: Address,
       threshold: number,
-      signer: Address,
-      chainId: number = 100,
+      _owner: Address,
+      chainId: number,
     ) => {
-      if (!walletClient || !publicClient) {
-        setError('Wallet not connected')
+      if (!signer || !publicClient) {
+        setError('No approval method is available for this Haven wallet.')
         setStatus('error')
         return
       }
@@ -68,18 +76,17 @@ export function useSendTransaction(): UseSendTransactionReturn {
 
         // Sign
         setStatus('signing')
-        const signature = await signSafeTx(walletClient, safeAddress, safeTx, signer, chainId)
+        const signature = await signSafeTx(signer, safeAddress, safeTx, chainId)
 
         if (threshold <= 1) {
           // Single-owner: execute directly
           setStatus('executing')
           const result = await executeSafeTx(
-            walletClient,
+            signer,
             publicClient,
             safeAddress,
             safeTx,
             signature,
-            signer,
             chainId,
           )
           setTxHash(result.txHash)
@@ -88,46 +95,15 @@ export function useSendTransaction(): UseSendTransactionReturn {
           // Multi-sig: propose to Safe Transaction Service
           setStatus('executing')
 
-          // Compute the safeTxHash for the proposal
-          const safeTxHash = hashTypedData({
-            domain: {
-              chainId,
-              verifyingContract: safeAddress,
-            },
-            types: {
-              SafeTx: [
-                { name: 'to', type: 'address' },
-                { name: 'value', type: 'uint256' },
-                { name: 'data', type: 'bytes' },
-                { name: 'operation', type: 'uint8' },
-                { name: 'safeTxGas', type: 'uint256' },
-                { name: 'baseGas', type: 'uint256' },
-                { name: 'gasPrice', type: 'uint256' },
-                { name: 'gasToken', type: 'address' },
-                { name: 'refundReceiver', type: 'address' },
-                { name: 'nonce', type: 'uint256' },
-              ],
-            },
-            primaryType: 'SafeTx',
-            message: {
-              to: safeTx.to,
-              value: safeTx.value,
-              data: safeTx.data,
-              operation: safeTx.operation,
-              safeTxGas: safeTx.safeTxGas,
-              baseGas: safeTx.baseGas,
-              gasPrice: safeTx.gasPrice,
-              gasToken: safeTx.gasToken,
-              refundReceiver: safeTx.refundReceiver,
-              nonce: safeTx.nonce,
-            },
-          })
+          const safeTxHash = getSafeTxHash(safeAddress, safeTx, chainId)
 
-          await proposeSafeTx(safeAddress, safeTx, safeTxHash, signature, signer, chainId)
+          await proposeSafeTx(safeAddress, safeTx, safeTxHash, signature, signer.address, chainId)
           setTxHash(safeTxHash)
           setStatus('proposed')
         }
       } catch (err: unknown) {
+        console.error('[Haven] Send payment failed:', err)
+
         // User rejected in wallet
         if (
           err instanceof Error &&
@@ -135,14 +111,18 @@ export function useSendTransaction(): UseSendTransactionReturn {
             err.message.includes('user rejected') ||
             err.message.includes('User denied'))
         ) {
-          setError('Transaction rejected in wallet')
+          setError(
+            signer.type === 'passkey'
+              ? 'Device approval was cancelled.'
+              : 'Payment was cancelled in your wallet.',
+          )
         } else {
-          setError(err instanceof Error ? err.message : 'Transaction failed')
+          setError('We could not send this payment. Check your approval method, then try again.')
         }
         setStatus('error')
       }
     },
-    [walletClient, publicClient],
+    [signer, publicClient],
   )
 
   return { status, txHash, error, send, reset }

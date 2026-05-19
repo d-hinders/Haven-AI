@@ -10,6 +10,9 @@ export interface HavenClientConfig {
   /** Haven API base URL (default: http://localhost:3001) */
   baseUrl?: string
 
+  /** Optional wallet identity to send as the x402-wallet header. */
+  x402Wallet?: string
+
   /** Timeout in ms for individual HTTP requests (default: 30000) */
   requestTimeout?: number
 
@@ -123,8 +126,12 @@ export interface X402PaymentRequired {
 /** A single payment option from x402 PaymentRequired. */
 export interface X402PaymentOption {
   scheme: string             // "exact"
-  network: string            // CAIP-2 chain ID, e.g. "eip155:100"
+  network: string            // CAIP-2 chain ID or x402 network, e.g. "eip155:8453" or "base"
   amount: string             // Atomic units
+  maxAmountRequired?: string // Atomic units (official x402 field)
+  resource?: string
+  description?: string
+  mimeType?: string
   asset: string              // Token contract address
   payTo: string              // Recipient address
   maxTimeoutSeconds: number
@@ -141,6 +148,94 @@ export interface X402Receipt {
   to: string
   resourceUrl: string
   explorerUrl: string
+  accepted?: X402PaymentOption
+  paymentHeader?: string
+  merchantTo?: string | null
+  payer?: string
+  chainId?: number
+}
+
+// ── Machine Payment Types ───────────────────────────────────────
+
+export type MachinePaymentRail =
+  | 'x402'
+  | 'mpp_demo'
+  | 'mpp_crypto'
+  | 'stripe_deposit'
+  | 'spt'
+
+export interface MachinePaymentChallenge {
+  rail: MachinePaymentRail
+  version: string
+  challengeId: string
+  resource: string
+  description: string
+  network: {
+    chainId: number
+    name: 'base'
+  }
+  asset: {
+    symbol: 'USDC'
+    address: string
+    decimals: 6
+  }
+  amount: {
+    display: string
+    atomic: string
+  }
+  recipient: string
+  expiresAt: string
+  metadata?: Record<string, unknown>
+}
+
+export interface MachinePaymentReceipt {
+  success: boolean
+  rail: MachinePaymentRail
+  paymentId: string
+  challengeId: string
+  txHash: string
+  token: string
+  amount: string
+  to: string
+  resourceUrl: string
+  explorerUrl: string
+  payer?: string
+  chainId?: number
+  proofHeader: string
+}
+
+/** @internal */
+export interface RawMachinePaymentAuthorizeResponse {
+  success?: boolean
+  payment_id: string
+  status: string
+  tx_hash?: string
+  chain_id?: number
+  safe_address?: string
+  payer?: string
+  token?: string
+  amount?: string
+  to?: string
+  merchant_to?: string | null
+  resource_url?: string
+  rail?: string
+  challenge_id?: string
+  explorer_url?: string
+  expires_at?: string
+  sign_data?: {
+    hash: string
+    components: {
+      safe: string
+      token: string
+      to: string
+      amount: string
+      payment_token: string
+      payment: string
+      nonce: number
+    }
+    instructions: string
+  }
+  error?: string
 }
 
 /** @internal */
@@ -150,9 +245,12 @@ export interface RawX402AuthorizeResponse {
   status: string
   tx_hash?: string
   chain_id?: number
+  safe_address?: string
+  payer?: string
   token?: string
   amount?: string
   to?: string
+  merchant_to?: string | null
   resource_url?: string
   explorer_url?: string
   expires_at?: string

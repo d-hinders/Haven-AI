@@ -8,7 +8,15 @@ import {
   useCallback,
   type ReactNode,
 } from 'react'
-import { api, ApiRequestError } from '@/lib/api'
+import { api, type ListPasskeysResponse } from '@/lib/api'
+import { ACTIVE_SAFE_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
+import {
+  PASSKEY_SCHEMA_VERSION,
+  clearStoredPasskeySigner,
+  hasPasskeyCredentialOnDevice,
+  setStoredPasskeySigner,
+} from '@/lib/signer'
+import type { Address } from 'viem'
 
 export interface UserSafe {
   id: string
@@ -21,6 +29,7 @@ export interface UserSafe {
 
 export interface User {
   id: string
+  name: string | null
   email: string
   wallet_address: string | null
   safe_address: string | null
@@ -39,8 +48,9 @@ interface AuthState {
   token: string | null
   loading: boolean
   activeSafe: UserSafe | null
+  passkeys: ListPasskeysResponse['passkeys']
   setActiveSafe: (safe: UserSafe) => void
-  signup: (email: string, password: string) => Promise<User>
+  signup: (name: string, email: string, password: string) => Promise<User>
   login: (email: string, password: string) => Promise<User>
   logout: () => void
   updateUser: (partial: Partial<User>) => void
@@ -53,7 +63,7 @@ function resolveActiveSafe(safes: UserSafe[]): UserSafe | null {
   if (safes.length === 0) return null
 
   // Check localStorage for a previous selection
-  const storedId = localStorage.getItem('haven_active_safe_id')
+  const storedId = localStorage.getItem(ACTIVE_SAFE_STORAGE_KEY)
   if (storedId) {
     const found = safes.find((s) => s.id === storedId)
     if (found) return found
@@ -68,10 +78,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeSafe, setActiveSafeState] = useState<UserSafe | null>(null)
+  const [passkeys, setPasskeys] = useState<ListPasskeysResponse['passkeys']>([])
 
   const setActiveSafe = useCallback((safe: UserSafe) => {
     setActiveSafeState(safe)
-    localStorage.setItem('haven_active_safe_id', safe.id)
+    localStorage.setItem(ACTIVE_SAFE_STORAGE_KEY, safe.id)
   }, [])
 
   // Sync activeSafe when user changes (e.g., after refresh or safe add/remove)
@@ -87,19 +98,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  const hydratePasskeys = useCallback(async () => {
+    try {
+      const { passkeys: rows } = await api.listPasskeys()
+      setPasskeys(rows)
+
+      for (const passkey of rows) {
+        if (
+          !passkey.safe_address ||
+          !hasPasskeyCredentialOnDevice(passkey.credential_id)
+        ) {
+          continue
+        }
+
+        setStoredPasskeySigner({
+          schemaVersion: PASSKEY_SCHEMA_VERSION,
+          address: passkey.signer_address as Address,
+          credentialId: passkey.credential_id,
+          chainId: passkey.chain_id,
+          safeAddress: passkey.safe_address as Address,
+          createdAt: Date.parse(passkey.created_at) || Date.now(),
+        })
+      }
+    } catch {
+      setPasskeys([])
+    }
+  }, [])
+
   const refreshUser = useCallback(async () => {
     try {
       const u = await api.get<User>('/auth/me')
       setUser(u)
       syncActiveSafe(u)
+      await hydratePasskeys()
     } catch {
       // Silently fail — token might be invalid
     }
-  }, [syncActiveSafe])
+  }, [hydratePasskeys, syncActiveSafe])
 
   // On mount, check for existing token
   useEffect(() => {
-    const stored = localStorage.getItem('haven_token')
+    const stored = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
     if (!stored) {
       setLoading(false)
       return
@@ -109,31 +148,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     api
       .get<User>('/auth/me')
-      .then((u) => {
+      .then(async (u) => {
         setUser(u)
         syncActiveSafe(u)
+        await hydratePasskeys()
       })
       .catch(() => {
         // Token invalid or expired
-        localStorage.removeItem('haven_token')
+        localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
         setToken(null)
+        setPasskeys([])
       })
       .finally(() => setLoading(false))
-  }, [syncActiveSafe])
+  }, [hydratePasskeys, syncActiveSafe])
 
   const signup = useCallback(
-    async (email: string, password: string): Promise<User> => {
+    async (name: string, email: string, password: string): Promise<User> => {
       const res = await api.post<AuthResponse>('/auth/signup', {
+        name,
         email,
         password,
       })
-      localStorage.setItem('haven_token', res.token)
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
       syncActiveSafe(res.user)
+      await hydratePasskeys()
       return res.user
     },
-    [syncActiveSafe],
+    [hydratePasskeys, syncActiveSafe],
   )
 
   const login = useCallback(
@@ -142,22 +185,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         password,
       })
-      localStorage.setItem('haven_token', res.token)
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
       syncActiveSafe(res.user)
+      await hydratePasskeys()
       return res.user
     },
-    [syncActiveSafe],
+    [hydratePasskeys, syncActiveSafe],
   )
 
   const logout = useCallback(() => {
-    localStorage.removeItem('haven_token')
-    localStorage.removeItem('haven_active_safe_id')
+    const safes = user?.safes ?? []
+    for (const safe of safes) {
+      clearStoredPasskeySigner({
+        safeAddress: safe.safe_address as Address,
+        chainId: safe.chain_id,
+      })
+    }
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    localStorage.removeItem(ACTIVE_SAFE_STORAGE_KEY)
     setToken(null)
     setUser(null)
+    setPasskeys([])
     setActiveSafeState(null)
-  }, [])
+  }, [user?.safes])
 
   const updateUser = useCallback((partial: Partial<User>) => {
     setUser((prev) => (prev ? { ...prev, ...partial } : null))
@@ -170,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token,
         loading,
         activeSafe,
+        passkeys,
         setActiveSafe,
         signup,
         login,

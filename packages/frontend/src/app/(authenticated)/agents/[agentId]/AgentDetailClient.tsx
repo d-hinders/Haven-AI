@@ -11,6 +11,7 @@ import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
+import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { getChainConfig } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
@@ -65,24 +66,6 @@ function activityMovement(item: ActivityItem, walletName: string) {
   )
 
   return <TransactionMovement from={walletName} to={recipient} />
-}
-
-function formatAllowanceAmount(amount: string, decimals: number): string {
-  try {
-    const raw = BigInt(amount)
-    const divisor = 10n ** BigInt(decimals)
-    const whole = raw / divisor
-    const fraction = raw % divisor
-    const fractionText = fraction
-      .toString()
-      .padStart(decimals, '0')
-      .slice(0, 4)
-      .replace(/0+$/, '')
-
-    return fractionText ? `${whole}.${fractionText}` : whole.toString()
-  } catch {
-    return amount
-  }
 }
 
 function resetLabel(resetPeriodMin: number): string {

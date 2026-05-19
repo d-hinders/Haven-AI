@@ -19,6 +19,13 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -27,6 +34,7 @@ import { ExternalDetailsLink } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
+import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -81,14 +89,19 @@ function formatResetPeriod(minutes: number): string {
   return `every ${minutes} minutes`
 }
 
-function agentBudgetSummary(agent: Agent): string {
+function agentBudgetSummary(agent: Agent, chainId: number | null): string {
   if (agent.status === 'revoked') return 'Access revoked'
   const allowances = agent.allowances ?? []
   if (allowances.length === 0) return 'No agent budget set'
   if (allowances.length > 1) return `${allowances.length} agent budgets`
 
   const allowance = allowances[0]
-  return `${allowance.allowance_amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
+  const amount = formatAllowanceForToken(
+    allowance.allowance_amount,
+    chainId,
+    allowance.token_symbol,
+  )
+  return `${amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
 }
 
 export default function AccountDetailClient() {
@@ -98,7 +111,8 @@ export default function AccountDetailClient() {
 
   const { user, activeSafe, setActiveSafe, loading: authLoading, passkeys = [] } = useAuth()
   const { getOwnerAlias } = useOwnerDirectory()
-  const { renameSafe, removeSafe, loading: safesLoading } = useUserSafes()
+  const { renameSafe, removeSafe, setDefault, loading: safesLoading } = useUserSafes()
+  const { toast } = useToast()
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
@@ -208,11 +222,6 @@ export default function AccountDetailClient() {
     }
   }
 
-  const openDeleteFromEdit = () => {
-    setRenameOpen(false)
-    setRemoveOpen(true)
-  }
-
   // While auth context is still hydrating `user.safes`, avoid flashing
   // "Account not found" — the safe lookup will resolve once safes load.
   if (authLoading || !user) {
@@ -253,9 +262,50 @@ export default function AccountDetailClient() {
                 </Button>
               </>
             )}
-            <Button variant="ghost" onClick={() => setRenameOpen(true)}>
-              Edit
-            </Button>
+            {/*
+              Account-level settings live behind a kebab menu so they don't
+              compete visually with the transactional Send/Receive buttons.
+              "Rename" + "Remove" are direct actions; "Set as default" only
+              appears when this isn't already the default Safe.
+            */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Account options"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              >
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="5" r="1.25" />
+                  <circle cx="12" cy="12" r="1.25" />
+                  <circle cx="12" cy="19" r="1.25" />
+                </svg>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                  Rename
+                </DropdownMenuItem>
+                {!safe.is_default && (user?.safes?.length ?? 0) > 1 ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      void setDefault(safe.id)
+                      toast.success(`${safe.name} is now your default account`)
+                    }}
+                  >
+                    Set as default
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem tone="danger" onSelect={() => setRemoveOpen(true)}>
+                  Remove account
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         }
       />
@@ -285,7 +335,7 @@ export default function AccountDetailClient() {
 
         <div className="p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Token balances</h2>
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Token balances</h2>
             <button
               onClick={handleBalancesRefresh}
               className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
@@ -351,14 +401,19 @@ export default function AccountDetailClient() {
       <Card hover={false} className="p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Agent access</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
+              <Link
+                href="/agents"
+                className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+              >
+                View all agents &rarr;
+              </Link>
+            </div>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
               Connected agents can request payments from this Haven wallet when their status and agent budget allow it.
             </p>
           </div>
-          <Button href="/agents" variant="ghost" size="sm">
-            Manage agents
-          </Button>
         </div>
 
         {agentsLoading ? (
@@ -394,7 +449,7 @@ export default function AccountDetailClient() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
                       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                        {agentBudgetSummary(agent)}
+                        {agentBudgetSummary(agent, chainId)}
                       </p>
                     </div>
                     <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
@@ -419,7 +474,7 @@ export default function AccountDetailClient() {
       {/* Account info */}
       <Card hover={false} className="p-5 sm:p-6">
         <div className="mb-5 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-[var(--v2-ink)]">
+          <h2 className="text-base font-semibold text-[var(--v2-ink)]">
             Advanced account details
           </h2>
         </div>
@@ -522,7 +577,17 @@ export default function AccountDetailClient() {
       <div>
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Transaction history</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-semibold text-[var(--v2-ink)]">Transaction history</h2>
+              {!txLoading && total > 0 ? (
+                <Link
+                  href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
+                  className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+                >
+                  View all &rarr;
+                </Link>
+              ) : null}
+            </div>
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
               {txLoading
                 ? 'Loading activity...'
@@ -576,7 +641,6 @@ export default function AccountDetailClient() {
           safe={safe}
           onClose={() => setRenameOpen(false)}
           onRename={handleRename}
-          onDelete={openDeleteFromEdit}
           loading={safesLoading}
         />
       )}
@@ -597,13 +661,11 @@ function RenameModal({
   safe,
   onClose,
   onRename,
-  onDelete,
   loading,
 }: {
   safe: UserSafe
   onClose: () => void
   onRename: (name: string) => Promise<void>
-  onDelete: () => void
   loading: boolean
 }) {
   const [name, setName] = useState(safe.name)
@@ -632,8 +694,8 @@ function RenameModal({
       <div className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Edit account</h2>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Rename this account in Haven.</p>
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Give this Haven account a name only you see.</p>
           </div>
           <button
             onClick={onClose}
@@ -665,24 +727,6 @@ function RenameModal({
               {error}
             </div>
           )}
-          <div className="rounded-lg border border-[var(--v2-danger)]/15 bg-[var(--v2-danger-soft)] px-3 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-medium text-[var(--v2-ink)]">Delete account</p>
-                <p className="mt-0.5 text-[11px] text-[var(--v2-ink-3)]">
-                  Removes this account from Haven. On-chain funds are unaffected.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={loading}
-                className="rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--v2-danger)] transition-colors hover:bg-[var(--v2-danger)]/10 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
           <div className="flex gap-3 pt-1">
             <Button
               type="button"

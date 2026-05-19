@@ -357,14 +357,19 @@ export default function AccountDetailClient() {
       <Card hover={false} className="p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
+              <Link
+                href="/agents"
+                className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+              >
+                View all agents &rarr;
+              </Link>
+            </div>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
               Connected agents can request payments from this Haven wallet when their status and agent budget allow it.
             </p>
           </div>
-          <Button href="/agents" variant="ghost" size="sm">
-            View all agents
-          </Button>
         </div>
 
         {agentsLoading ? (

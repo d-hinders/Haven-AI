@@ -4,6 +4,13 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -20,6 +27,7 @@ import {
   AgentRulesSummary,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
+  DirectionMark,
   ExternalDetailsLink,
   RiskExplainer,
   TransactionActivityRow,
@@ -88,13 +96,121 @@ export default function DesignSystemPage() {
       <PageHeader
         eyebrow="Internal reference"
         title="Haven design system"
-        subtitle="Use this page before changing product UX. It shows the primitives and Haven-specific patterns Codex should compose instead of inventing new visual treatments."
+        subtitle="The source of truth for Haven UI. Compose what's here before inventing new visual treatments — and add a new entry here in the same PR if you do."
         actions={
           <Button variant="ghost" size="sm" onClick={() => toast.info('Use shared primitives before adding a new pattern.')}>
             Show toast
           </Button>
         }
       />
+
+      <Section
+        title="How to use this page"
+        description="Treat this as the contract for what a Haven screen looks and feels like. The workflow keeps the design language tight as the product grows."
+      >
+        <Card hover={false} className="p-5">
+          <ol className="space-y-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">1. Look here first.</span> Before building a
+              new screen or polishing an existing one, scan this page for the primitive, pattern, or domain
+              component that fits. Most needs are covered.
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">2. Compose, don&apos;t reinvent.</span> Build
+              your surface from <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">@/components/ui</code>
+              {' '}and <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">@/components/haven</code>{' '}
+              exports. If you find yourself duplicating markup that already exists, refactor toward the
+              shared primitive.
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">3. Add new entries in the same PR.</span> If
+              the system genuinely lacks what you need — a new colour token, a new primitive, a new pattern
+              — add it here alongside the implementation. Reviewers gate this: a PR that introduces a new
+              UI shape without updating this page should be sent back.
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">4. Mind the copy conventions.</span> See the
+              Copy section near the bottom for the user-facing language rules (we say <em>account</em>, not
+              <em> Safe</em>; sentence case for modal titles, etc.).
+            </li>
+          </ol>
+        </Card>
+      </Section>
+
+      <Section
+        title="Colour tokens"
+        description="Semantic colours, defined in `globals.css` as CSS custom properties. Always reference via `var(--v2-…)` — never hardcode hex. Each base colour ships a `-soft` variant for fills."
+      >
+        <Card hover={false} className="p-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              {
+                name: '--v2-brand',
+                soft: '--v2-brand-soft',
+                use: 'Primary actions, links, brand identity.',
+                swatch: 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]',
+              },
+              {
+                name: '--v2-success',
+                soft: '--v2-success-soft',
+                use: 'Incoming payments, completed states, positive money movement.',
+                swatch: 'border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
+              },
+              {
+                name: '--v2-debit',
+                soft: '--v2-debit-soft',
+                use: 'Outgoing payments, sent money. Sibling to success — never use for warnings.',
+                swatch: 'border-[var(--v2-debit)]/30 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]',
+              },
+              {
+                name: '--v2-warning',
+                soft: '--v2-warning-soft',
+                use: 'Needs attention, paused states, soft caution. Not for irreversible actions.',
+                swatch: 'border-[var(--v2-warning)]/30 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]',
+              },
+              {
+                name: '--v2-danger',
+                soft: '--v2-danger-soft',
+                use: 'Errors, failures, destructive confirmations (revoke / delete).',
+                swatch: 'border-[var(--v2-danger)]/30 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]',
+              },
+              {
+                name: '--v2-ink / -2 / -3',
+                soft: '—',
+                use: 'Text hierarchy. -ink is primary, -ink-2 secondary, -ink-3 quietest.',
+                swatch: 'border-[var(--v2-border)] bg-white text-[var(--v2-ink)]',
+              },
+            ].map((token) => (
+              <div
+                key={token.name}
+                className="flex gap-3 rounded-[10px] border border-[var(--v2-border)] bg-white p-3"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[10px] border ${token.swatch}`}
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                    <circle cx="12" cy="12" r="6" />
+                  </svg>
+                </span>
+                <div className="min-w-0">
+                  <p className="font-mono text-xs font-medium text-[var(--v2-ink)]">{token.name}</p>
+                  <p className="font-mono text-[11px] text-[var(--v2-ink-3)]">{token.soft}</p>
+                  <p className="mt-1 text-xs leading-snug text-[var(--v2-ink-2)]">{token.use}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+            <span className="font-medium text-[var(--v2-ink-2)]">Money colour rule:</span>{' '}
+            <span className="text-[var(--v2-success)]">incoming = success green</span>,{' '}
+            <span className="text-[var(--v2-debit)]">outgoing = debit sky</span>,{' '}
+            <span className="text-[var(--v2-danger)]">failed = danger red</span>. The direction icon carries
+            the colour. Outgoing amount text stays neutral ink so the row reads calm — only the icon
+            carries the signal.
+          </p>
+        </Card>
+      </Section>
 
       <Section
         title="Primitives"
@@ -265,6 +381,79 @@ export default function DesignSystemPage() {
             title="Static row"
             subtitle="No href / onClick — renders as a div, no hover"
           />
+        </Card>
+      </Section>
+
+      <Section
+        title="Dropdown menu (kebab)"
+        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups."
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap items-center gap-6">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Account options"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <circle cx="12" cy="5" r="1.25" />
+                  <circle cx="12" cy="12" r="1.25" />
+                  <circle cx="12" cy="19" r="1.25" />
+                </svg>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => toast.info('Edit agent')}>Edit agent</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => toast.info('Update budget')}>Update budget</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => toast.info('Payment credentials')}>
+                  Payment credentials
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem tone="danger" onSelect={() => toast.error('Remove (demo only)')}>
+                  Remove agent
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <p className="max-w-md text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Used on `/agents/[id]` and `/accounts/[id]` page headers. Click-outside + Escape dismiss,
+              arrow-key roving focus, ARIA roles wired. Use sparingly — visible CTAs are still preferred
+              when there are only one or two actions.
+            </p>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="Direction marks (in / out / pending)"
+        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table."
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap items-center gap-5">
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="in" />
+              <p className="text-xs text-[var(--v2-ink-3)]">in · comfortable</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="out" />
+              <p className="text-xs text-[var(--v2-ink-3)]">out · comfortable</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="neutral" />
+              <p className="text-xs text-[var(--v2-ink-3)]">pending · comfortable</p>
+            </div>
+            <div className="ml-4 flex flex-col items-center gap-1">
+              <DirectionMark direction="in" density="compact" />
+              <p className="text-xs text-[var(--v2-ink-3)]">in · compact</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="out" density="compact" />
+              <p className="text-xs text-[var(--v2-ink-3)]">out · compact</p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+            Don&apos;t reinline this markup. If you need a new direction state, add it to{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1">DirectionMark</code> and document it here.
+          </p>
         </Card>
       </Section>
 
@@ -691,8 +880,8 @@ export default function DesignSystemPage() {
                   date: '12m ago',
                   amount: '+500.00 USDC',
                   amountClass: 'text-[var(--v2-success)]',
-                  directionClass: 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
-                  direction: 'in',
+                  direction: 'in' as const,
+                  failed: false,
                 },
                 {
                   title: 'x402 payment by Research assistant',
@@ -702,27 +891,30 @@ export default function DesignSystemPage() {
                   date: '1h ago',
                   amount: '-12.00 USDC',
                   amountClass: 'text-[var(--v2-ink)]',
-                  directionClass: 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]',
-                  direction: 'out',
+                  direction: 'out' as const,
+                  failed: false,
+                },
+                {
+                  title: 'Failed payment by Research assistant',
+                  from: 'Operating wallet',
+                  to: 'unknown.vendor',
+                  initiator: 'Research assistant',
+                  date: '2h ago',
+                  amount: '-25.00 USDC',
+                  amountClass: 'text-[var(--v2-danger)]',
+                  direction: 'out' as const,
+                  failed: true,
                 },
               ].map((row) => (
                 <tr key={row.title}>
                   <td className="px-4 py-4 align-middle">
-                    <span
-                      aria-hidden="true"
-                      className={`flex h-9 w-9 items-center justify-center rounded-[10px] border ${row.directionClass}`}
-                    >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        {row.direction === 'in' ? (
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
-                        ) : (
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0l-5 5m5-5l5 5" />
-                        )}
-                      </svg>
-                    </span>
+                    <DirectionMark direction={row.direction} />
                   </td>
                   <td className="px-4 py-4 align-middle">
-                    <p className="text-sm font-semibold text-[var(--v2-ink)]">{row.title}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-[var(--v2-ink)]">{row.title}</p>
+                      {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
+                    </div>
                     <div className="mt-1 md:hidden">
                       <TransactionMovement from={row.from} to={row.to} />
                     </div>
@@ -747,6 +939,176 @@ export default function DesignSystemPage() {
               ))}
             </tbody>
           </table>
+        </Card>
+      </Section>
+
+      <Section
+        title="Card with action footer (manage pattern)"
+        description="When a card has both content and contextual actions, use `AgentRulesSummary`'s `footer` slot (or any card with a `border-t` action row) instead of a separate aside card. Keeps related actions adjacent to the data they affect and avoids empty right-rail real estate."
+      >
+        <AgentRulesSummary
+          title="Agent budget"
+          description="What this agent can spend, where the money comes from, and how you stay in control."
+          items={[
+            {
+              label: 'Who can spend',
+              value: 'Research assistant',
+              helper: 'Connected via Haven credential.',
+            },
+            {
+              label: 'From account',
+              value: 'Operating wallet on Gnosis Chain',
+              helper: 'Payments come from this Haven account only.',
+            },
+            {
+              label: 'Budget',
+              value: '250 USDC per day',
+              helper: 'Payments within budget can run automatically. Larger payments need your manual approval.',
+            },
+          ]}
+          footer={
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-[var(--v2-ink-3)]">
+                Pause the agent or revoke its budget if you need to stop access.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="ghost" size="sm">
+                  Update budget
+                </Button>
+                <Button variant="ghost" size="sm">
+                  Pause agent
+                </Button>
+                <Button variant="danger" size="sm">
+                  Revoke agent budget
+                </Button>
+              </div>
+            </div>
+          }
+        />
+      </Section>
+
+      <Section
+        title="Wallet-gate captions"
+        description="When an action is gated on a connected / correctly-networked wallet, render a quiet info-icon caption above the (disabled) primary button — NEVER a yellow alert block beside or instead of the button. The yellow background reads as interactive. Helpers live in `OnchainActionGate` / `NetworkGate` and apply everywhere automatically."
+      >
+        <Card hover={false} className="p-5">
+          <div className="space-y-4">
+            <div>
+              <p
+                role="status"
+                className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
+              >
+                <svg
+                  aria-hidden="true"
+                  className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.75}
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 11v5" strokeLinecap="round" />
+                  <circle cx="12" cy="8" r="0.6" fill="currentColor" />
+                </svg>
+                <span>Connect a wallet to update this agent budget.</span>
+              </p>
+              <div className="flex gap-3">
+                <Button variant="ghost" className="flex-1">Back</Button>
+                <Button disabled className="flex-1">Update budget</Button>
+              </div>
+            </div>
+            <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              <span className="font-medium text-[var(--v2-ink-2)]">Pattern:</span> caption above, disabled
+              primary button below. For a network-mismatch the same caption sits above a ghost{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">Switch wallet to {'{chain}'}</code>{' '}
+              button (white background, brand focus ring) instead of the primary action.
+            </p>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="Copy conventions"
+        description="The words we use are part of the design system. Follow these rules so the product reads as one voice."
+      >
+        <Card hover={false} className="p-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Account, not Safe</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Users see <span className="font-medium">account</span>. The Safe contract abstraction stays
+                in code (<code className="text-[11px]">safeId</code>,{' '}
+                <code className="text-[11px]">UserSafe</code>, etc.). The word <em>Safe</em> should not
+                appear in any rendered string.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Sentence case</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Modal titles, section headings, button labels — all sentence case. <em>"Edit agent"</em>,
+                not <em>"Edit Agent"</em>. <em>"Update budget"</em>, not <em>"Update Budget"</em>.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Money is calm</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Amount text stays neutral ink — even for outgoing payments. The direction icon carries the
+                colour signal (green / sky / red). Don&apos;t tint amounts unless they failed.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Action verbs match the noun</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Pause the <em>agent</em>, not <em>requests</em>. Revoke the <em>budget</em>, not{' '}
+                <em>access</em>. The label should describe the user&apos;s mental model, not the
+                implementation detail.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Confirm destructive actions</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Anything that can&apos;t be reversed (revoke, remove account, remove token budget, delete
+                agent) opens a <code className="text-[11px]">ConfirmDialog</code> with a clear destructive
+                button label. Reversible actions (pause / resume) don&apos;t need confirmation.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Quiet for hints, loud for failures</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Wallet gates, summary captions, "loaded results" — caption-grey. Errors and failed states
+                — danger red. Don&apos;t mix the two.
+              </p>
+            </div>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="Info modals (InfoStep + InfoNote)"
+        description="Multi-step explainer modals (Contacts info, Using your agent) use the paged InfoModal primitive. Inside each page, compose with `InfoStep` for numbered explanations and `InfoNote` for footnotes / tinted asides — both export from `@/components/InfoModal`."
+      >
+        <Card hover={false} className="p-5">
+          <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+            Open <code className="rounded bg-[var(--v2-surface)] px-1">UsingYourAgentInfo</code> or{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1">ContactsInfo</code> from the dashboard to
+            see them in flight. Helpers in <code className="rounded bg-[var(--v2-surface)] px-1">InfoModal.tsx</code>:
+          </p>
+          <ul className="mt-3 space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            <li>
+              <code className="rounded bg-[var(--v2-surface)] px-1">&lt;InfoStep number={1} title="..."&gt;</code>{' '}
+              — numbered brand-soft circle + 14px title + 13px body. Use 1–3 per page.
+            </li>
+            <li>
+              <code className="rounded bg-[var(--v2-surface)] px-1">&lt;InfoNote label="..."&gt;</code>{' '}
+              — tinted footnote box for caveats / "where do I find this?" asides.
+            </li>
+          </ul>
+          <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+            <span className="font-medium text-[var(--v2-ink-2)]">Don&apos;t inline 11px helper text</span> —
+            grep the codebase: if you see <code className="text-[11px]">text-[10px]</code> or{' '}
+            <code className="text-[11px]">text-[11px]</code> inside a modal, it&apos;s probably a missed
+            migration. Bump to <code className="text-[11px]">text-xs</code> or compose with the helpers.
+          </p>
         </Card>
       </Section>
 

@@ -9,13 +9,13 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { ExternalDetailsLink, TransactionMovement } from '@/components/haven'
+import { DirectionMark, ExternalDetailsLink, TransactionMovement } from '@/components/haven'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TransactionActivityDirection = 'in' | 'out'
-type AmountTone = 'success' | 'danger' | 'neutral'
+type AmountTone = 'success' | 'debit' | 'danger' | 'neutral'
 type SortColumn = 'date' | 'amount'
 type SortDirection = 'asc' | 'desc'
 
@@ -32,38 +32,22 @@ interface TransactionsTableProps {
   resolveAddress?: (address: string) => string | null
   safeNamesByAddress?: Map<string, string>
   hasActiveFilters: boolean
+  /**
+   * Wires the empty-state "Clear filters" action when filters are active.
+   * Omitted on screens that don't surface filter controls.
+   */
+  onClearFilters?: () => void
 }
 
 // ─── Amount tone map ──────────────────────────────────────────────────────────
 
+// Outgoing amounts adopt the sibling `--v2-debit` colour so incoming + outgoing
+// read as a symmetric pair (green / sky) instead of green / neutral.
 const AMOUNT_TONE_CLASS: Record<AmountTone, string> = {
   success: 'text-[var(--v2-success)]',
+  debit: 'text-[var(--v2-debit)]',
   danger: 'text-[var(--v2-danger)]',
   neutral: 'text-[var(--v2-ink)]',
-}
-
-// ─── DirectionMark (inlined — not exported from TransactionActivityRow) ───────
-
-function DirectionMark({ direction }: { direction: TransactionActivityDirection }) {
-  const classes =
-    direction === 'in'
-      ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-      : 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]'
-
-  return (
-    <span
-      aria-hidden="true"
-      className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border ${classes}`}
-    >
-      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        {direction === 'in' ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
-        ) : (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0l-5 5m5-5l5 5" />
-        )}
-      </svg>
-    </span>
-  )
 }
 
 // ─── Chevron sort indicator ────────────────────────────────────────────────────
@@ -194,6 +178,7 @@ export default function TransactionsTable({
   resolveAddress,
   safeNamesByAddress,
   hasActiveFilters,
+  onClearFilters,
 }: TransactionsTableProps) {
   const [sort, setSort] = useState<SortState>({ column: 'date', direction: 'desc' })
 
@@ -297,7 +282,11 @@ export default function TransactionsTable({
                       : 'Payments and account funding activity will appear here.'
                   }
                   action={
-                    !hasActiveFilters ? (
+                    hasActiveFilters && onClearFilters ? (
+                      <Button variant="ghost" size="sm" onClick={onClearFilters}>
+                        Clear filters
+                      </Button>
+                    ) : !hasActiveFilters ? (
                       <Button href="/dashboard" variant="ghost" size="sm">
                         Open dashboard
                       </Button>
@@ -308,7 +297,15 @@ export default function TransactionsTable({
             </tr>
           ) : (
             sorted.map((tx, index) => {
-              const amountTone: AmountTone = tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
+              // Outgoing amounts intentionally stay neutral ink — the sky
+              // `--v2-debit` colour is reserved for the direction icon so
+              // the row reads as a calm number with a coloured marker,
+              // rather than a busy two-colour line.
+              const amountTone: AmountTone = tx.isError
+                ? 'danger'
+                : tx.direction === 'in'
+                  ? 'success'
+                  : 'neutral'
               const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
               // Incoming transactions: leave initiator blank (no meaningful "who" — the originator is the sending wallet).
               // Outgoing without an agent: surface as "You".
@@ -326,9 +323,14 @@ export default function TransactionsTable({
 
                   {/* col2: activity */}
                   <td className="px-4 py-4">
-                    <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
-                      {transactionTitle(tx)}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
+                        {transactionTitle(tx)}
+                      </p>
+                      {tx.isError ? (
+                        <StatusBadge tone="danger">Failed</StatusBadge>
+                      ) : null}
+                    </div>
                     <div className="mt-0.5 text-xs text-[var(--v2-ink-2)] md:hidden">
                       {movement}
                     </div>
@@ -385,11 +387,6 @@ function transactionTitle(tx: AggregatedTransaction): string {
   return 'Payment sent by you'
 }
 
-function transactionStatus(tx: AggregatedTransaction): string {
-  if (tx.isError) return 'Failed'
-  return tx.direction === 'in' ? 'Received' : 'Sent'
-}
-
 function transactionAmount(tx: AggregatedTransaction): string {
   const sign = tx.direction === 'in' ? '+' : '-'
   return `${sign}${tx.valueFormatted} ${tx.asset}`
@@ -424,5 +421,3 @@ function counterpartyLabel(
 }
 
 // Kept for completeness — used by AgentActivityRow callers via TransactionActivityRow
-// transactionStatus is used locally; exported for any future callers
-export { transactionStatus }

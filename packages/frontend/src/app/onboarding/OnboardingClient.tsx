@@ -5,20 +5,17 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { api } from '@/lib/api'
-import { deploySafe, type DeployStage } from '@/lib/safe'
 import { displayName } from '@/lib/user'
-import { useActiveSigner } from '@/lib/signer'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount, usePublicClient } from 'wagmi'
+import { useAccount } from 'wagmi'
 import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
-import NetworkGate from '@/components/NetworkGate'
-import { SigningStatus } from '@/components/SigningStatus'
 import { HavenMark } from '@/components/brand/HavenMark'
 import PasskeyEnrollFlow from './PasskeyEnrollFlow'
 import type { User } from '@/context/AuthContext'
 
 type Step = 'choose-signer' | 'connect' | 'deploy' | 'done'
 type SignerMode = 'passkey' | 'eoa' | null
+type DeployStage = 'deploying' | 'registering'
 
 const EMPTY_TX_HASH = `0x${'0'.repeat(64)}`
 
@@ -36,8 +33,6 @@ export default function OnboardingClient() {
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
   const [selectedChainId, setSelectedChainId] = useState(DEFAULT_CHAIN_ID)
-  const publicClient = usePublicClient({ chainId: selectedChainId })
-  const signer = useActiveSigner({ chainId: selectedChainId })
 
   const progressSteps = useMemo(() => {
     if (signerMode === 'eoa') {
@@ -79,7 +74,7 @@ export default function OnboardingClient() {
         .catch((err: unknown) => {
           console.warn('[Haven] Failed to persist wallet address before deploy:', err)
           setError(
-            'We couldn\u2019t save your wallet address just now. You can continue \u2014 we\u2019ll save it when you deploy.',
+            'We couldn’t save your wallet address just now. You can continue — we’ll save it when you deploy.',
           )
           setStep('deploy')
         })
@@ -87,50 +82,36 @@ export default function OnboardingClient() {
   }, [address, isConnected, signerMode, step, updateUser, user])
 
   const handleDeploy = async () => {
-    if (!signer || !publicClient) return
+    if (!address) return
 
     setDeploying(true)
-    setDeployStage('signing')
+    setDeployStage('deploying')
     setError('')
 
     try {
-      const result = await deploySafe(
-        signer,
-        publicClient,
-        selectedChainId,
-        (stage, data) => {
-          setDeployStage(stage)
-          if (data?.txHash) setTxHash(data.txHash)
-        },
+      // Step 1: relay pays gas and deploys the Safe on-chain — no wallet signature needed
+      const deployed = await api.post<{ safe_address: string; tx_hash: string }>(
+        '/user/safes/deploy',
+        { chain_id: selectedChainId, owner_address: address },
       )
-      setTxHash(result.txHash)
-      setSafeAddress(result.safeAddress)
 
-      // Save to backend using the existing EOA path.
+      setTxHash(deployed.tx_hash)
+      setSafeAddress(deployed.safe_address)
+
+      // Step 2: register in Haven
       setDeployStage('registering')
-      await api.put<User>('/user/safe', {
-        safe_address: result.safeAddress,
+      await api.post('/user/safes', {
+        safe_address: deployed.safe_address,
         chain_id: selectedChainId,
+        name: 'My Safe',
       })
-
-      updateUser({
-        safe_address: result.safeAddress,
-        wallet_address: signer.type === 'eoa' ? signer.address : user?.wallet_address,
-      })
+      updateUser({ safe_address: deployed.safe_address, wallet_address: address })
       await refreshUser()
 
       setStep('done')
     } catch (err: unknown) {
       console.error('Safe deployment failed:', err)
-      if (err instanceof Error) {
-        if (err.message.includes('User rejected') || err.message.includes('denied')) {
-          setError('Transaction was rejected in your wallet.')
-        } else {
-          setError(err.message.length > 200 ? 'Deployment failed. Please try again.' : err.message)
-        }
-      } else {
-        setError('Deployment failed. Please try again.')
-      }
+      setError(err instanceof Error ? err.message : 'Deployment failed. Please try again.')
     } finally {
       setDeploying(false)
       setDeployStage(null)
@@ -166,8 +147,8 @@ export default function OnboardingClient() {
   const isPasskeyOnboarding = signerMode === 'passkey'
   const name = displayName(user)
   const networkName = getChainConfig(selectedChainId).name
-  const completionTitle = "You’re in"
-  const completionDescription = `Your Haven account is live on ${networkName}. Add funds, set agent budgets, and you’re ready to pay.`
+  const completionTitle = "You're in"
+  const completionDescription = `Your Haven account is live on ${networkName}. Add funds, set agent budgets, and you're ready to pay.`
   const completionAddressLabel = 'Account address'
   const completionTxLabel = isPasskeyOnboarding ? 'Setup transaction' : 'Transaction'
 
@@ -246,7 +227,7 @@ export default function OnboardingClient() {
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Welcome, {name}</h1>
                 <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-                  Pick how you’ll approve payments. You can change networks later.
+                  Pick how you'll approve payments. You can change networks later.
                 </p>
               </div>
 
@@ -313,8 +294,7 @@ export default function OnboardingClient() {
             <div key="deploy-eoa" className="v2-animate-step-rise">
               <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Create your Haven account</h1>
               <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
-                Create your Haven account on your chosen network. Your connected wallet will approve
-                payments and changes. Haven never holds signing authority.
+                Your connected wallet will be the owner of this account. Haven&rsquo;s relayer pays gas &mdash; no wallet signature needed.
               </p>
 
               <div className="mb-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
@@ -359,31 +339,25 @@ export default function OnboardingClient() {
                 </div>
               )}
 
-              <NetworkGate requiredChainId={selectedChainId}>
-                <button
-                  onClick={handleDeploy}
-                  disabled={deploying}
-                  className="w-full py-2.5 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {deploying ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      {deployStage === 'signing' && 'Waiting for your signature…'}
-                      {deployStage === 'confirming' && `Confirming on ${networkName}…`}
-                      {deployStage === 'registering' && 'Tying your account to Haven…'}
-                      {!deployStage && 'Creating your account…'}
-                    </span>
-                  ) : (
-                    'Create my Haven account'
-                  )}
-                </button>
-              </NetworkGate>
+              <button
+                onClick={handleDeploy}
+                disabled={deploying || !address}
+                className="w-full py-2.5 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deploying ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    {deployStage === 'deploying' && 'Deploying on-chain…'}
+                    {deployStage === 'registering' && 'Linking to Haven…'}
+                    {!deployStage && 'Creating your account…'}
+                  </span>
+                ) : (
+                  'Create my Haven account'
+                )}
+              </button>
 
               {deploying && (
                 <div className="relative mt-6">
-                  {/* Mesh-drift backdrop during the wait — runs only while
-                      deploying so the screen feels alive without competing
-                      with the foreground stage tracker. */}
                   <div
                     aria-hidden="true"
                     className="v2-mesh-drift pointer-events-none absolute -inset-x-6 -inset-y-4 -z-10 opacity-60"
@@ -396,23 +370,18 @@ export default function OnboardingClient() {
                     {(
                       [
                         {
-                          id: 'signing',
-                          label: 'Asking your wallet to sign',
-                          hint: 'Approve the signature in your wallet to authorise account creation.',
-                        },
-                        {
-                          id: 'confirming',
-                          label: `Confirming on ${networkName}`,
-                          hint: 'Your account is being recorded on-chain. This usually takes a few seconds.',
+                          id: 'deploying',
+                          label: 'Deploying on-chain',
+                          hint: 'Relayer is submitting the transaction — no wallet action needed.',
                         },
                         {
                           id: 'registering',
-                          label: 'Tying your account to Haven',
+                          label: 'Linking to Haven',
                           hint: 'Linking the on-chain account to your Haven profile.',
                         },
                       ] as const
                     ).map((item, index) => {
-                      const order: DeployStage[] = ['signing', 'confirming', 'registering']
+                      const order: DeployStage[] = ['deploying', 'registering']
                       const currentIndex = deployStage ? order.indexOf(deployStage) : 0
                       const isActive = deployStage === item.id
                       const isDone = currentIndex > index
@@ -451,11 +420,7 @@ export default function OnboardingClient() {
                             </div>
                             {isActive && (
                               <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5">
-                                {item.id === 'signing' ? (
-                                  <SigningStatus signer={signer} stage="signing" />
-                                ) : (
-                                  item.hint
-                                )}
+                                {item.hint}
                               </div>
                             )}
                           </div>

@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { DirectionMark } from './DirectionMark'
 
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
-type AmountTone = 'success' | 'danger' | 'neutral'
+export type AmountTone = 'success' | 'debit' | 'danger' | 'neutral'
 export type TransactionActivityDirection = 'in' | 'out' | 'neutral'
 type Density = 'comfortable' | 'compact'
 
@@ -13,6 +14,7 @@ export interface TransactionActivityDetail {
 
 const AMOUNT_TONE_CLASS: Record<AmountTone, string> = {
   success: 'text-[var(--v2-success)]',
+  debit: 'text-[var(--v2-debit)]',
   danger: 'text-[var(--v2-danger)]',
   neutral: 'text-[var(--v2-ink)]',
 }
@@ -118,43 +120,3 @@ export function ExternalDetailsLink({ href, label = 'Open externally' }: { href:
   )
 }
 
-function DirectionMark({
-  direction,
-  density = 'comfortable',
-}: {
-  direction: TransactionActivityDirection
-  density?: Density
-}) {
-  const classes =
-    direction === 'in'
-      ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-      : direction === 'out'
-        ? 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]'
-        : 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-
-  // Compact density renders a 32px mark to match the <Row> primitive's tinted
-  // leading circle, so transaction rows sit on the same height as agent rows
-  // on the dashboard.
-  const sizeClass = density === 'compact' ? 'h-8 w-8' : 'h-9 w-9'
-  const iconSizeClass = density === 'compact' ? 'h-3.5 w-3.5' : 'h-4 w-4'
-
-  return (
-    <span
-      aria-hidden="true"
-      className={`flex flex-shrink-0 items-center justify-center rounded-[10px] border ${sizeClass} ${classes}`}
-    >
-      <svg className={iconSizeClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        {direction === 'in' ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
-        ) : direction === 'out' ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0l-5 5m5-5l5 5" />
-        ) : (
-          <>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l2.5 2.5" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </>
-        )}
-      </svg>
-    </span>
-  )
-}

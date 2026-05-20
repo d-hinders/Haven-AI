@@ -7,10 +7,9 @@ import { useUserSafes } from '@/hooks/useUserSafes'
 import { useAgents } from '@/hooks/useAgents'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
-import { deploySafe } from '@/lib/safe'
-import { useActiveSigner } from '@/lib/signer'
+import { api } from '@/lib/api'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount, usePublicClient } from 'wagmi'
+import { useAccount } from 'wagmi'
 import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import NetworkPill from '@/components/NetworkPill'
@@ -51,10 +50,7 @@ function AddSafeModal({
   const [deployTxHash, setDeployTxHash] = useState('')
   const [deployChainId, setDeployChainId] = useState(DEFAULT_CHAIN_ID)
 
-  const { address: walletAddress, isConnected, chain } = useAccount()
-  const publicClient = usePublicClient({ chainId: deployChainId })
-  const signer = useActiveSigner({ chainId: deployChainId })
-  const wrongNetwork = isConnected && chain?.id !== deployChainId
+  const { address: walletAddress, isConnected } = useAccount()
 
   const resetState = () => {
     setMode('choose')
@@ -100,31 +96,27 @@ function AddSafeModal({
 
   // ── Deploy flow ──
   const handleDeploy = async () => {
-    if (!signer || !publicClient || signer.type !== 'eoa' || !walletAddress) return
+    if (!walletAddress) return
 
     setDeploying(true)
     setDeployStep('deploying')
     setError('')
 
     try {
-      const result = await deploySafe(signer, publicClient, deployChainId)
-      setDeployedAddress(result.safeAddress)
-      setDeployTxHash(result.txHash)
+      // Relay pays gas — no wallet signature needed
+      const deployed = await api.post<{ safe_address: string; tx_hash: string }>(
+        '/user/safes/deploy',
+        { chain_id: deployChainId, owner_address: walletAddress },
+      )
+      setDeployedAddress(deployed.safe_address)
+      setDeployTxHash(deployed.tx_hash)
 
-      // Register in Haven
-      await onAdd(result.safeAddress, name || 'My account', deployChainId)
+      // Register in Haven (same as import flow)
+      await onAdd(deployed.safe_address, name || 'My Safe', deployChainId)
       setDeployStep('done')
     } catch (err: unknown) {
       setDeployStep('wallet')
-      if (err instanceof Error) {
-        if (err.message.includes('User rejected') || err.message.includes('denied')) {
-          setError('Transaction was rejected in your wallet.')
-        } else {
-          setError(err.message.length > 200 ? 'Deployment failed. Please try again.' : err.message)
-        }
-      } else {
-        setError('Deployment failed. Please try again.')
-      }
+      setError(err instanceof Error ? err.message : 'Deployment failed. Please try again.')
     } finally {
       setDeploying(false)
     }
@@ -250,7 +242,7 @@ function AddSafeModal({
           {mode === 'deploy' && deployStep === 'wallet' && (
             <div className="space-y-4">
               <p className="text-sm text-[var(--v2-ink-3)]">
-                Your connected wallet will control this account. Haven never moves money on its own.
+                Your connected wallet will be the owner of this Safe. Haven&rsquo;s relayer pays gas &mdash; no signature needed.
               </p>
 
               {/* Wallet connection */}
@@ -290,12 +282,6 @@ function AddSafeModal({
                 </div>
               )}
 
-              {wrongNetwork && (
-                <div className="text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-4 py-3">
-                  Please switch to {getChainConfig(deployChainId).name} (chain ID {deployChainId}) in your wallet.
-                </div>
-              )}
-
               {error && (
                 <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
                   {error}
@@ -304,23 +290,23 @@ function AddSafeModal({
 
               <button
                 onClick={handleDeploy}
-                disabled={!isConnected || wrongNetwork || deploying}
+                disabled={!isConnected || deploying}
                 className="w-full py-2.5 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all shadow-[var(--v2-shadow-button)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Create account
               </button>
               <p className="text-[11px] text-[var(--v2-ink-3)] text-center">
-                This will submit a transaction on {getChainConfig(deployChainId).name}. Gas fees are minimal.
+                Haven&rsquo;s relayer pays the gas &mdash; no wallet signature needed.
               </p>
             </div>
           )}
 
           {mode === 'deploy' && deployStep === 'deploying' && (
             <div className="flex flex-col items-center py-8">
-              <div className="w-12 h-12 rounded-full border-2 border-indigo-500/30 border-t-indigo-500 animate-spin mb-6" />
-              <h3 className="text-sm font-medium text-[var(--v2-ink)] mb-2">Creating your account</h3>
+              <div className="w-12 h-12 rounded-full border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] animate-spin mb-6" />
+              <h3 className="text-sm font-medium text-[var(--v2-ink)] mb-2">Deploying your Safe</h3>
               <p className="text-xs text-[var(--v2-ink-3)] text-center max-w-xs">
-                Confirm the transaction in your wallet. Your Haven account is being created on {getChainConfig(deployChainId).name}.
+                Haven&rsquo;s relayer is deploying your Safe on {getChainConfig(deployChainId).name}. No wallet action needed.
               </p>
             </div>
           )}

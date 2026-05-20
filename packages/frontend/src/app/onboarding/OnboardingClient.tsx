@@ -257,7 +257,7 @@ export default function OnboardingClient() {
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold text-[var(--v2-ink)]">Use Face ID / Touch ID</div>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--v2-brand)] ring-1 ring-[var(--v2-brand)]/20 group-hover:bg-[var(--v2-brand-soft)]">
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[var(--v2-brand)] ring-1 ring-[var(--v2-brand)]/20 group-hover:bg-[var(--v2-brand-soft)]">
                     Default
                   </span>
                 </div>
@@ -419,7 +419,7 @@ export default function OnboardingClient() {
                               {item.label}
                             </div>
                             {isActive && (
-                              <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5">
+                              <div className="text-xs text-[var(--v2-ink-3)] mt-0.5">
                                 {item.hint}
                               </div>
                             )}

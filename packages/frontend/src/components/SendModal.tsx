@@ -53,13 +53,13 @@ function SendDetail({
   const { toast } = useToast()
   return (
     <div>
-      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">{label}</dt>
+      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</dt>
       <dd className={`mt-1 truncate text-sm font-medium text-[var(--v2-ink)] ${mono ? 'font-mono' : ''}`}>
         {value}
       </dd>
       {subValue && (
         <dd className="mt-0.5 flex min-w-0 items-center gap-1.5">
-          <span className={`truncate text-[11px] text-[var(--v2-ink-3)] ${subMono ? 'font-mono' : ''}`}>
+          <span className={`truncate text-xs text-[var(--v2-ink-3)] ${subMono ? 'font-mono' : ''}`}>
             {subValue}
           </span>
           {copyValue && (
@@ -468,10 +468,10 @@ export default function SendModal({
                         )}
                       </div>
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] text-[var(--v2-ink-3)]">
+                        <span className="text-xs text-[var(--v2-ink-3)]">
                           {getChainConfig(selectedSafeOption.chainId).name}
                         </span>
-                        <span className="text-[11px] text-[var(--v2-ink-3)] font-mono">
+                        <span className="text-xs text-[var(--v2-ink-3)] font-mono">
                           {truncate(selectedSafeOption.address)}
                         </span>
                       </div>
@@ -505,10 +505,10 @@ export default function SendModal({
                             )}
                           </div>
                           <div className="flex items-center justify-between gap-3">
-                            <span className="text-[11px] text-[var(--v2-ink-3)]">
+                            <span className="text-xs text-[var(--v2-ink-3)]">
                               {getChainConfig(safe.chainId).name}
                             </span>
-                            <span className="text-[11px] text-[var(--v2-ink-3)] font-mono">
+                            <span className="text-xs text-[var(--v2-ink-3)] font-mono">
                               {truncate(safe.address)}
                             </span>
                           </div>
@@ -554,7 +554,7 @@ export default function SendModal({
                       <span className={`block text-sm font-medium ${isActive ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink)]'}`}>
                         {t.label}
                       </span>
-                      <span className="block text-[11px] text-[var(--v2-ink-3)] mt-0.5">
+                      <span className="block text-xs text-[var(--v2-ink-3)] mt-0.5">
                         {bal ? bal.formatted : '0.00'}
                       </span>
                     </button>
@@ -602,7 +602,7 @@ export default function SendModal({
                   <button
                     type="button"
                     onClick={() => { setShowContactPicker((v) => !v); setContactSearch('') }}
-                    className="text-[11px] text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors flex items-center gap-1"
+                    className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors flex items-center gap-1"
                   >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
@@ -618,7 +618,7 @@ export default function SendModal({
                   <div className="flex items-center gap-2 mb-1.5">
                     <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 rounded-md">
                       <div className="w-4 h-4 rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center">
-                        <span className="text-[9px] font-semibold text-[var(--v2-brand)]">
+                        <span className="text-[10px] font-semibold text-[var(--v2-brand)]">
                           {selectedContactName.slice(0, 2).toUpperCase()}
                         </span>
                       </div>
@@ -651,16 +651,31 @@ export default function SendModal({
                   }
                   className="py-3 bg-[var(--v2-surface-2)] rounded-lg font-mono"
                 />
-                <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-3)]">
                   This payment will be sent on <span className="font-medium text-[var(--v2-ink-2)]">{chainConfig.name}</span>.
                   Make sure the recipient accepts funds on this network.
                 </p>
               </div>
 
               {contactsError && (
-                <div className="mt-3 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-3 py-2.5 text-xs leading-relaxed text-[var(--v2-warning)]">
-                  Saved recipients could not load. You can still paste a recipient address.
-                </div>
+                <p
+                  role="status"
+                  className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-[var(--v2-ink-3)]"
+                >
+                  <svg
+                    aria-hidden="true"
+                    className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                  >
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 11v5" strokeLinecap="round" />
+                    <circle cx="12" cy="8" r="0.6" fill="currentColor" />
+                  </svg>
+                  <span>Saved recipients could not load. You can still paste a recipient address.</span>
+                </p>
               )}
 
               {!contactsError && contacts.length === 0 && (
@@ -677,7 +692,7 @@ export default function SendModal({
               {contacts.length > 0 && !showContactPicker && (
                 <div className="mt-3">
                   <div className="flex items-center justify-between gap-3 mb-2">
-                    <p className="text-[11px] text-[var(--v2-ink-3)]">
+                    <p className="text-xs text-[var(--v2-ink-3)]">
                       Quick select
                     </p>
                     {contacts.length > quickContacts.length && (
@@ -687,7 +702,7 @@ export default function SendModal({
                           setShowContactPicker(true)
                           setContactSearch('')
                         }}
-                        className="text-[11px] text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
+                        className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
                       >
                         Browse all contacts
                       </button>
@@ -730,7 +745,7 @@ export default function SendModal({
                         setShowContactPicker(false)
                         setContactSearch('')
                       }}
-                      className="text-[11px] text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors"
+                      className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors"
                     >
                       Close
                     </button>
@@ -775,7 +790,7 @@ export default function SendModal({
                               <p className="text-xs font-medium text-[var(--v2-ink)] truncate">
                                 {contact.name}
                               </p>
-                              <p className="text-[10px] text-[var(--v2-ink-3)] font-mono">
+                              <p className="font-mono text-xs text-[var(--v2-ink-3)]">
                                 {contact.address.slice(0, 6)}...{contact.address.slice(-4)}
                               </p>
                             </div>

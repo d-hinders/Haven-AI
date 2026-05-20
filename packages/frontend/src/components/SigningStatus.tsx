@@ -33,9 +33,9 @@ export function SigningStatus({ signer, stage, error }: SigningStatusProps) {
 
   const tone =
     stage === 'error'
-      ? 'text-red-400'
+      ? 'text-[var(--v2-danger)]'
       : stage === 'confirmed'
-        ? 'text-emerald-400'
+        ? 'text-[var(--v2-success)]'
         : 'text-[var(--v2-ink)]'
 
   return <p className={`text-sm ${tone}`}>{text}</p>

@@ -64,7 +64,7 @@ function ApprovalDetail({
 }) {
   return (
     <div>
-      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">{label}</dt>
+      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</dt>
       <dd className="mt-1 truncate text-sm font-medium text-[var(--v2-ink)]">{value}</dd>
     </div>
   )

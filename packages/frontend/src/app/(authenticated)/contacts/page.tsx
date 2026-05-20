@@ -141,9 +141,27 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
         ) : null}
 
         {duplicateContact && !error && (
-          <div className="rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-3 py-2.5 text-xs leading-relaxed text-[var(--v2-warning)]">
-            This address is already saved as <span className="font-medium">{duplicateContact.name}</span>.
-          </div>
+          <p
+            role="status"
+            className="flex items-start gap-2 text-xs leading-relaxed text-[var(--v2-ink-3)]"
+          >
+            <svg
+              aria-hidden="true"
+              className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.75}
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v5" strokeLinecap="round" />
+              <circle cx="12" cy="8" r="0.6" fill="currentColor" />
+            </svg>
+            <span>
+              This address is already saved as{' '}
+              <span className="font-medium text-[var(--v2-ink-2)]">{duplicateContact.name}</span>.
+            </span>
+          </p>
         )}
 
         {error && (

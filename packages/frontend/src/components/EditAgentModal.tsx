@@ -749,15 +749,15 @@ export default function EditAgentModal({
                 </>
               ) : (
                 <>
-                  <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center mx-auto">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400">
+                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-danger-soft)]">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-danger)]">
                       <line x1="18" y1="6" x2="6" y2="18" />
                       <line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-sm text-red-400 font-medium">Update failed</p>
-                    <p className="text-xs text-[var(--v2-ink-3)] mt-1 max-w-xs mx-auto">{execError}</p>
+                    <p className="text-sm font-medium text-[var(--v2-danger)]">Update failed</p>
+                    <p className="mx-auto mt-1 max-w-xs text-xs text-[var(--v2-ink-3)]">{execError}</p>
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button
@@ -782,8 +782,8 @@ export default function EditAgentModal({
           {step === 'done' && (
             <div className="space-y-5">
               <div className="text-center py-4">
-                <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-success)]">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 </div>

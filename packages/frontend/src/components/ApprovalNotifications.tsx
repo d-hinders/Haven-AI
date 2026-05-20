@@ -82,7 +82,7 @@ export default function ApprovalNotifications() {
           <div className="relative px-4 py-3 border-b border-[var(--v2-border)] bg-white flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-[var(--v2-ink)]">Approvals</p>
-              <p className="text-[11px] text-[var(--v2-ink-3)]">
+              <p className="text-xs text-[var(--v2-ink-3)]">
                 {actionableCount > 0
                   ? `${actionableCount} payment${actionableCount === 1 ? '' : 's'} need your action`
                   : 'No payments need action'}
@@ -161,7 +161,7 @@ export default function ApprovalNotifications() {
                           <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
                             {approval.agent_name}
                           </p>
-                          <p className="text-[11px] text-[var(--v2-ink-3)]">
+                          <p className="text-xs text-[var(--v2-ink-3)]">
                             {timeAgo(approval.created_at)}
                           </p>
                         </div>

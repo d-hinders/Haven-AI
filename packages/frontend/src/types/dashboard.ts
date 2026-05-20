@@ -38,7 +38,7 @@ export interface DashboardOverviewResponse {
   }
   actionableApprovals?: number
   pendingApprovals: number
-  onboardingProgress: {
+  onboardingProgress?: {
     hasFirstAgentPayment: boolean
   }
   agents: DashboardAgentPreview[]

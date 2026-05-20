@@ -703,7 +703,7 @@ export default function DashboardClient() {
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
   const hasFirstAgentPayment = Boolean(
-    overview?.onboardingProgress.hasFirstAgentPayment,
+    overview?.onboardingProgress?.hasFirstAgentPayment,
   )
   const setupProgressReady =
     dataReady &&

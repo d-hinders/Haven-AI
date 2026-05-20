@@ -38,6 +38,9 @@ export interface DashboardOverviewResponse {
   }
   actionableApprovals?: number
   pendingApprovals: number
+  onboardingProgress: {
+    hasFirstAgentPayment: boolean
+  }
   agents: DashboardAgentPreview[]
   transactions: AggregatedTransaction[]
 }

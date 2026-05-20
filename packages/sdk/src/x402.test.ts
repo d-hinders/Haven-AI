@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
+import { HavenPaymentStateError } from './types.js'
 import {
   buildX402IdempotencyKey,
   encodePaymentProof,
@@ -354,15 +355,20 @@ describe('x402 helpers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('surfaces x402 approval queues as a 202 API error', async () => {
+  it('surfaces x402 approval queues as structured payment state', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({
         payment_id: 'approval-123',
         status: 'pending_approval',
+        phase: 'user_approval_required',
+        next_action: 'wait_for_user_approval',
         message: 'Queued for owner approval',
         token: 'USDC',
-        amount: '0.02',
+        requested: '0.02',
+        remaining: '0.005',
+        rail: 'x402',
+        kind: 'approval_request',
         expires_at: '2026-05-10T20:00:00.000Z',
       }), { status: 202 }))
 
@@ -372,14 +378,147 @@ describe('x402 helpers', () => {
       baseUrl: 'https://haven.example',
     })
 
-    await expect(haven.authorizeX402(paymentRequired)).rejects.toMatchObject({
+    let thrown: unknown
+    try {
+      await haven.authorizeX402(paymentRequired)
+    } catch (err) {
+      thrown = err
+    }
+
+    expect(thrown).toBeInstanceOf(HavenPaymentStateError)
+    expect(thrown).toMatchObject({
+      paymentId: 'approval-123',
       statusCode: 202,
-      body: expect.objectContaining({
-        payment_id: 'approval-123',
+      state: expect.objectContaining({
+        paymentId: 'approval-123',
         status: 'pending_approval',
+        phase: 'user_approval_required',
+        nextAction: 'wait_for_user_approval',
+        amount: '0.02',
+        token: 'USDC',
       }),
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns structured state from the x402 agent tool', async () => {
+    vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'pending_approval',
+        phase: 'user_approval_required',
+        next_action: 'wait_for_user_approval',
+        message: 'Queued for owner approval',
+        token: 'USDC',
+        requested: '0.02',
+        remaining: '0.005',
+        expires_at: '2026-05-10T20:00:00.000Z',
+      }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const result = await haven.executeTool('authorize_x402_payment', {
+      url: paymentRequired.resource.url,
+      payTo: accepted.payTo,
+      amount: accepted.amount,
+      asset: accepted.asset,
+      network: accepted.network,
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      payment_id: 'approval-123',
+      kind: 'approval_request',
+      rail: 'x402',
+      status: 'pending_approval',
+      phase: 'user_approval_required',
+      next_action: 'wait_for_user_approval',
+      amount: '0.02',
+      token: 'USDC',
+      message: 'Queued for owner approval',
+    })
+  })
+
+  it('checks status for approval request IDs', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        amount: '0.02',
+        token: 'USDC',
+        resource_url: paymentRequired.resource.url,
+        merchant_address: accepted.payTo,
+        tx_hash: `0x${'ab'.repeat(32)}`,
+        expires_at: '2026-05-10T20:00:00.000Z',
+        chain_id: 8453,
+        message: 'The user completed the funding payment. Retry the original x402 request.',
+      }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const result = await haven.executeTool('get_payment_status', {
+      payment_id: 'approval-123',
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://haven.example/machine-payments/approval-123/status')
+    expect(result).toMatchObject({
+      payment_id: 'approval-123',
+      status: 'executed',
+      phase: 'funding_sent',
+      next_action: 'retry_original_x402_request',
+      resource_url: paymentRequired.resource.url,
+    })
+  })
+
+  it('surfaces over-budget haven.fetch x402 flows as agent-actionable state', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'pending_approval',
+        phase: 'user_approval_required',
+        next_action: 'wait_for_user_approval',
+        message: 'Queued for owner approval',
+        token: 'USDC',
+        requested: '0.02',
+        expires_at: '2026-05-10T20:00:00.000Z',
+      }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    await expect(haven.fetch(paymentRequired.resource.url)).rejects.toMatchObject({
+      state: expect.objectContaining({
+        paymentId: 'approval-123',
+        nextAction: 'wait_for_user_approval',
+      }),
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('surfaces expired x402 authorization replays as a 410 API error', async () => {

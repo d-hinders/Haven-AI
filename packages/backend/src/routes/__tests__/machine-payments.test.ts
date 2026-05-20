@@ -213,6 +213,98 @@ describe('machine payment routes', () => {
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
   })
 
+  it('returns unified status for confirmed payment intents', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [confirmedPayment({
+          expires_at: '2099-01-02T00:00:00.000Z',
+        })],
+      })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      kind: 'payment_intent',
+      rail: 'mpp_demo',
+      status: 'confirmed',
+      phase: 'payment_confirmed',
+      next_action: 'none',
+      amount: '0.01',
+      token: 'USDC',
+      tx_hash: TX_HASH,
+      resource_url: challenge.resource,
+      merchant_address: RECIPIENT.toLowerCase(),
+    })
+  })
+
+  it('returns unified status for approval request IDs', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          chain_id: 8453,
+          token_symbol: 'USDC',
+          amount_human: '0.01',
+          status: 'pending',
+          tx_hash: null,
+          expires_at: '2099-01-02T00:00:00.000Z',
+          source: 'mpp_demo',
+          payment_rail: 'mpp_demo',
+          payment_resource_url: challenge.resource,
+          x402_resource_url: null,
+          merchant_address: RECIPIENT.toLowerCase(),
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/approval-123/status',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-123',
+      kind: 'approval_request',
+      rail: 'mpp_demo',
+      status: 'pending',
+      phase: 'user_approval_required',
+      next_action: 'wait_for_user_approval',
+      amount: '0.01',
+      token: 'USDC',
+    })
+  })
+
+  it('does not return status for another agent payment or approval', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toEqual({ error: 'Payment or approval request not found' })
+  })
+
   it('queues over-allowance MPP demo payments for approval with rail metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1n })

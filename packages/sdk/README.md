@@ -150,7 +150,7 @@ for (const block of response.content) {
 | Tool | Description |
 |------|-------------|
 | `make_payment` | Request and sign a payment from the user-controlled Safe within approved limits |
-| `get_payment_status` | Check the status of a previously initiated payment |
+| `get_payment_status` | Check the status of a payment intent or approval request |
 | `authorize_x402_payment` | Authorize a policy-limited x402 payment and return a payment header for an HTTP 402 resource |
 
 ## Configuration
@@ -169,33 +169,49 @@ const haven = new HavenClient({
 
 ## Payments above the on-chain allowance
 
-Haven's policy lives entirely on the Safe AllowanceModule (token, amount,
-reset period). If an agent requests a payment above the remaining allowance,
-Haven does **not** reject it — it returns HTTP 202 with `status: 'pending_approval'`
-and queues it for the wallet owner to approve in the dashboard.
+Haven's policy lives on the Safe AllowanceModule (token, amount, reset period).
+If an agent requests a payment above the remaining allowance, Haven does **not**
+reject it — it returns HTTP 202 with `status: 'pending_approval'`, a
+`payment_id`, `phase`, and `next_action`, then queues it for the wallet owner
+to approve in the dashboard.
 
 Surface that to the user: the payment isn't dead, it's waiting for a human to
-sign off. Don't retry — the same request would just queue another approval.
+sign off. Check `getPaymentStatus(payment_id)` or the `get_payment_status`
+tool later instead of retrying in a tight loop.
+
+For x402, the manual approval path has two steps. First, the user approves the
+funding movement from the Haven wallet to the agent's delegate wallet. Once
+Haven reports `next_action: 'retry_original_x402_request'`, retry the original
+paid API request so the SDK can attach the merchant x402 payment header. Do not
+rewrite the SDK while waiting for approval.
 
 ```typescript
 try {
   await haven.pay({ token: 'USDC', amount: '500', to: '0xabc...' })
 } catch (err) {
-  if (err instanceof HavenApiError && err.statusCode === 202) {
-    // err.body.payment_id, err.body.remaining, err.body.requested
+  if (err instanceof HavenPaymentStateError && err.nextAction === 'wait_for_user_approval') {
+    console.log(err.paymentId, err.phase, err.nextAction)
     console.log('Queued for owner approval — visible in the Haven dashboard.')
   }
+}
+
+const status = await haven.getPaymentStatus('approval-or-payment-id')
+if (status.nextAction === 'retry_original_x402_request') {
+  // Retry the original paid API request.
 }
 ```
 
 ## Error Handling
 
 ```typescript
-import { HavenApiError, HavenSigningError, HavenTimeoutError } from '@haven_ai/sdk'
+import { HavenApiError, HavenPaymentStateError, HavenSigningError, HavenTimeoutError } from '@haven_ai/sdk'
 
 try {
   await haven.pay({ token: 'EURe', amount: '5.00', to: '0xabc...' })
 } catch (err) {
+  if (err instanceof HavenPaymentStateError) {
+    console.log(err.paymentId, err.phase, err.nextAction)
+  }
   if (err instanceof HavenApiError) {
     console.log(err.statusCode, err.message) // API returned an error
   }

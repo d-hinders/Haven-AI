@@ -182,9 +182,10 @@ describe('buildHandoff — paid API support', () => {
 
   it('explains queued approval errors from over-budget payments', () => {
     const { markdown } = buildHandoff(BASE_INPUT)
-    expect(markdown).toContain('HavenApiError')
-    expect(markdown).toContain('HTTP status `202`')
-    expect(markdown).toMatch(/do not retry/i)
+    expect(markdown).toContain('HavenPaymentStateError')
+    expect(markdown).toContain('get_payment_status')
+    expect(markdown).toContain('retry_original_x402_request')
+    expect(markdown).toMatch(/Do not rewrite the SDK or retry/i)
   })
 })
 

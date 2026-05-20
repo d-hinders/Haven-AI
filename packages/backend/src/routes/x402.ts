@@ -13,6 +13,10 @@ import {
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
+import {
+  agentPaymentStatusHttpCode,
+  getAgentPaymentStatus,
+} from '../lib/agent-payment-status.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -89,13 +93,16 @@ function pendingApprovalResponse(
 ) {
   return {
     payment_id: approval.id,
+    kind: 'approval_request',
+    rail: 'x402',
     status: 'pending_approval',
+    phase: 'user_approval_required',
+    next_action: 'wait_for_user_approval',
     message: `Payment of ${approval.amount_human} ${approval.token_symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
     remaining: remainingHuman,
     requested: approval.amount_human,
     token: approval.token_symbol,
     expires_at: approval.expires_at,
-    rail: 'x402',
     challenge_id: approval.machine_challenge_id,
   }
 }
@@ -311,15 +318,12 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         [agent.id, idempotencyKey],
       )
       const existingApproval = existingApprovalResult.rows[0]
-      if (existingApproval?.status === 'rejected') {
-        return reply.code(409).send({
-          payment_id: existingApproval.id,
-          status: existingApproval.status,
-          error: 'Payment was rejected by the account owner',
-        })
-      }
       if (existingApproval) {
-        return reply.code(202).send(pendingApprovalResponse(existingApproval, null))
+        const status = await getAgentPaymentStatus(agent, existingApproval.id)
+        if (!status) {
+          return reply.code(409).send({ error: 'x402 approval already exists but could not be loaded' })
+        }
+        return reply.code(agentPaymentStatusHttpCode(status)).send(status)
       }
     }
 
@@ -422,6 +426,13 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       }
       if (!approval) {
         return reply.code(409).send({ error: 'x402 approval already exists but could not be loaded' })
+      }
+      if (approval.status !== 'pending') {
+        const status = await getAgentPaymentStatus(agent, approval.id)
+        if (!status) {
+          return reply.code(409).send({ error: 'x402 approval already exists but could not be loaded' })
+        }
+        return reply.code(agentPaymentStatusHttpCode(status)).send(status)
       }
       return reply.code(202).send(pendingApprovalResponse(approval, remainingHuman))
     }

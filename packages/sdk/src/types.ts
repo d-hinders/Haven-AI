@@ -73,6 +73,11 @@ export type PaymentStatus =
   | 'pending_signature'
   | 'submitted'
   | 'confirmed'
+  | 'pending_approval'
+  | 'approved'
+  | 'proposed'
+  | 'executed'
+  | 'rejected'
   | 'expired'
   | 'failed'
 
@@ -204,11 +209,69 @@ export interface MachinePaymentReceipt {
   proofHeader: string
 }
 
+// ── Agent Payment State Types ────────────────────────────────────
+
+export type PaymentStateKind = 'payment_intent' | 'approval_request'
+
+export type PaymentPhase =
+  | 'agent_signature_required'
+  | 'payment_submitted'
+  | 'payment_confirmed'
+  | 'user_approval_required'
+  | 'user_execution_required'
+  | 'waiting_for_additional_approvals'
+  | 'funding_sent'
+  | 'rejected'
+  | 'expired'
+  | 'failed'
+
+export type PaymentNextAction =
+  | 'sign_and_submit_payment'
+  | 'check_status_later'
+  | 'none'
+  | 'wait_for_user_approval'
+  | 'wait_for_user_to_complete_payment'
+  | 'retry_original_x402_request'
+  | 'stop_and_tell_user'
+  | 'request_again_if_user_still_wants_it'
+
+export interface PaymentStatusResult {
+  paymentId: string
+  kind: PaymentStateKind
+  rail: string
+  status: PaymentStatus | string
+  phase: PaymentPhase
+  nextAction: PaymentNextAction
+  amount: string
+  token: string
+  resourceUrl: string | null
+  merchantAddress: string | null
+  txHash: string | null
+  expiresAt: string
+  chainId: number
+  message: string
+}
+
+export interface PendingApproval extends PaymentStatusResult {
+  kind: 'approval_request'
+  status: 'pending_approval' | 'pending' | string
+  phase: 'user_approval_required'
+  nextAction: 'wait_for_user_approval'
+  requested?: string
+  remaining?: string | null
+}
+
 /** @internal */
 export interface RawMachinePaymentAuthorizeResponse {
   success?: boolean
   payment_id: string
+  kind?: string
   status: string
+  phase?: string
+  next_action?: string
+  message?: string
+  remaining?: string | null
+  requested?: string
   tx_hash?: string
   chain_id?: number
   safe_address?: string
@@ -242,7 +305,14 @@ export interface RawMachinePaymentAuthorizeResponse {
 export interface RawX402AuthorizeResponse {
   success?: boolean
   payment_id: string
+  kind?: string
+  rail?: string
   status: string
+  phase?: string
+  next_action?: string
+  message?: string
+  remaining?: string | null
+  requested?: string
   tx_hash?: string
   chain_id?: number
   safe_address?: string
@@ -275,7 +345,13 @@ export interface RawX402AuthorizeResponse {
 /** @internal */
 export interface RawCreateResponse {
   payment_id: string
+  kind?: string
   status: string
+  phase?: string
+  next_action?: string
+  message?: string
+  remaining?: string | null
+  requested?: string
   expires_at: string
   sign_data: {
     hash: string
@@ -297,13 +373,23 @@ export interface RawCreateResponse {
 /** @internal */
 export interface RawSignResponse {
   payment_id: string
+  kind?: string
   status: string
+  phase?: string
+  next_action?: string
+  message?: string
+  remaining?: string | null
+  requested?: string
   tx_hash?: string
   token?: string
   amount?: string
   to?: string
+  merchant_to?: string | null
+  resource_url?: string
+  rail?: string
   explorer_url?: string
   chain_id?: number
+  expires_at?: string
   error?: string
   details?: string
 }
@@ -326,6 +412,24 @@ export interface RawStatusResponse {
   expires_at: string
 }
 
+/** @internal */
+export interface RawPaymentStatusResult {
+  payment_id: string
+  kind: PaymentStateKind
+  rail: string
+  status: string
+  phase: PaymentPhase
+  next_action: PaymentNextAction
+  amount: string
+  token: string
+  resource_url: string | null
+  merchant_address: string | null
+  tx_hash: string | null
+  expires_at: string
+  chain_id: number
+  message: string
+}
+
 // ── Error Types ──────────────────────────────────────────────────
 
 export class HavenError extends Error {
@@ -345,9 +449,34 @@ export class HavenApiError extends HavenError {
     message: string,
     statusCode: number,
     public readonly body?: unknown,
+    paymentId?: string,
   ) {
-    super(message, 'API_ERROR', statusCode)
+    super(message, 'API_ERROR', statusCode, paymentId)
     this.name = 'HavenApiError'
+  }
+}
+
+export class HavenPaymentStateError extends HavenApiError {
+  constructor(
+    message: string,
+    statusCode: number,
+    public readonly state: PaymentStatusResult,
+    body?: unknown,
+  ) {
+    super(message, statusCode, body, state.paymentId)
+    this.name = 'HavenPaymentStateError'
+  }
+
+  get status(): string {
+    return this.state.status
+  }
+
+  get phase(): PaymentPhase {
+    return this.state.phase
+  }
+
+  get nextAction(): PaymentNextAction {
+    return this.state.nextAction
   }
 }
 

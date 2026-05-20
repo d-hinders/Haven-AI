@@ -161,7 +161,10 @@ function pendingApprovalResponse(
     statusCode: 202,
     body: {
       payment_id: approval.id,
+      kind: 'approval_request',
       status: 'pending_approval',
+      phase: 'user_approval_required',
+      next_action: 'wait_for_user_approval',
       message: `Payment of ${approval.amount_human} ${approval.token_symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
       remaining: remainingHuman,
       requested: approval.amount_human,

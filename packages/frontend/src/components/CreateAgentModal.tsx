@@ -25,7 +25,7 @@ import {
   getSafeTxHash,
   getChainTokens,
 } from '@/lib/safe-tx'
-import { truncate, isValidAddress } from '@/lib/format'
+import { truncate } from '@/lib/format'
 import { buildHandoff, type HandoffInput } from '@/lib/agent-handoff'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useActiveSigner } from '@/lib/signer'
@@ -39,6 +39,7 @@ import {
   AgentRulesSummary,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
+  WalletIdentityBlock,
 } from './haven'
 import { useToast } from './ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -54,7 +55,8 @@ interface AllowanceEntry {
 
 // ── Types ──────────────────────────────────────────────────────────
 
-type Step = 'details' | 'policy' | 'key' | 'review' | 'executing' | 'done'
+type SetupStep = 'details' | 'account' | 'policy' | 'review'
+type Step = SetupStep | 'executing' | 'done'
 
 type ExecutionStatus =
   | 'checking'
@@ -65,7 +67,6 @@ type ExecutionStatus =
   | 'proposed'
   | 'error'
 
-type KeyMode = 'generate' | 'existing'
 type AuthorityStatus = 'confirmed' | 'proposed'
 
 interface AuthorityResult {
@@ -83,7 +84,6 @@ interface Props {
    */
   safeAddress?: string
   safeId?: string | null
-  preset?: 'demo' | null
   onCreated: (agent: {
     id: string
     name: string
@@ -99,7 +99,6 @@ export default function CreateAgentModal({
   onClose,
   safeAddress: propSafeAddress,
   safeId: propSafeId,
-  preset = null,
   onCreated,
 }: Props) {
   const { toast } = useToast()
@@ -156,7 +155,6 @@ export default function CreateAgentModal({
   const [delegateAddress, setDelegateAddress] = useState('')
 
   // Delegate key generation
-  const [keyMode, setKeyMode] = useState<KeyMode>('generate')
   const [generatedPrivateKey, setGeneratedPrivateKey] = useState<string | null>(null)
   // Note: the generated credential secret is no longer revealed early — it is
   // bundled into the credential file shown on the Done step.
@@ -201,7 +199,6 @@ export default function CreateAgentModal({
     setName('')
     setDescription('')
     setDelegateAddress('')
-    setKeyMode('generate')
     setGeneratedPrivateKey(null)
     setAllowances([])
     setAddToken(tokenOptions[0]?.symbol ?? '')
@@ -252,37 +249,6 @@ export default function CreateAgentModal({
     enabled: !(step === 'executing' && execStatus !== 'error'),
   })
 
-  // Apply demo preset when the modal opens with preset='demo'
-  useEffect(() => {
-    if (!open || preset !== 'demo') return
-    // Pick a USDC-flavored token if available, else first non-native
-    const usdc =
-      tokenOptions.find((t) => t.symbol.toUpperCase().startsWith('USDC')) ??
-      tokenOptions.find((t) => t.address !== null) ??
-      tokenOptions[0]
-    if (!usdc) return
-
-    const privateKey = generatePrivateKey()
-    const address = privateKeyToAddress(privateKey)
-    setName('Demo Research Agent')
-    setDescription('Pre-configured for x402 API access — 10 USDC/day')
-    setKeyMode('generate')
-    setGeneratedPrivateKey(privateKey)
-    setDelegateAddress(address)
-    setAllowances([
-      {
-        tokenSymbol: usdc.symbol,
-        tokenAddress: usdc.address,
-        decimals: usdc.decimals,
-        amount: '10',
-        resetTimeMin: 1440,
-      },
-    ])
-    setStep('review')
-    // Intentionally only reruns when open/preset change; tokenOptions is derived from chainId.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, preset])
-
   // ── Key Generation ─────────────────────────────────────
 
   function handleGenerateKey() {
@@ -292,23 +258,15 @@ export default function CreateAgentModal({
     setDelegateAddress(address)
   }
 
-  function handleSwitchKeyMode(mode: KeyMode) {
-    setKeyMode(mode)
-    setDelegateAddress('')
-    setGeneratedPrivateKey(null)
-    if (mode === 'generate') {
-      handleGenerateKey()
-    }
+  function ensureGeneratedCredential() {
+    if (generatedPrivateKey && delegateAddress) return
+    handleGenerateKey()
   }
 
   // ── Step: Details ──────────────────────────────────────
 
   function canProceedDetails() {
     return name.trim().length > 0
-  }
-
-  function canProceedKey() {
-    return isValidAddress(delegateAddress)
   }
 
   // ── Step: Review ──────────────────────────────────────
@@ -607,7 +565,7 @@ export default function CreateAgentModal({
         description: description.trim() || undefined,
         delegateAddress: delegateAddress,
         safeAddress: safeAddress,
-        safeName: activeSafe?.name,
+        safeName: walletName,
         chainId,
       },
       policy: {
@@ -657,18 +615,6 @@ export default function CreateAgentModal({
     setCredentialsSaved(true)
   }
 
-  // Generate a key the first time the user reaches the Key step in 'generate'
-  // mode. We don't pre-generate on open anymore — the key isn't asked for
-  // until step 3, so doing it earlier just creates noise the user might never
-  // need (they could pick 'existing' first).
-  useEffect(() => {
-    if (open && keyMode === 'generate' && !generatedPrivateKey && step === 'key') {
-      handleGenerateKey()
-    }
-    // handleGenerateKey is stable (no deps); we intentionally only react to modal open/mode changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, keyMode, generatedPrivateKey, step])
-
   // When the user picks a different Safe in step 2, the chain may change, so
   // the supported-token list changes too. Reset the in-progress add-token to
   // a valid option and drop any allowances that reference tokens not on the
@@ -702,6 +648,13 @@ export default function CreateAgentModal({
   const addAmountMessage =
     addAmountError || (addAmountValidation && !addAmountValidation.ok ? addAmountValidation.message : '')
   const blockReason = deployBlockReason()
+  const hasMultipleSafes = userSafes.length > 1
+  const setupSteps: SetupStep[] = hasMultipleSafes
+    ? ['details', 'account', 'policy', 'review']
+    : ['details', 'policy', 'review']
+  const currentSetupStepIndex = setupSteps.indexOf(step as SetupStep)
+  const backFromPolicyStep = hasMultipleSafes ? 'account' : 'details'
+  const detailsNextStep = hasMultipleSafes ? 'account' : 'policy'
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 v2-modal-backdrop">
@@ -717,8 +670,8 @@ export default function CreateAgentModal({
             <h2 className="text-sm font-semibold">Connect agent</h2>
             <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
               {step === 'details' && "Name the agent you'll connect"}
+              {step === 'account' && 'Choose the Haven wallet this agent can spend from'}
               {step === 'policy' && 'Set agent budget — token, amount, frequency'}
-              {step === 'key' && 'Choose the credential the agent will use'}
               {step === 'review' && 'Review agent rules before connecting'}
               {step === 'executing' && 'Connecting agent...'}
               {step === 'done' && 'Add your Haven credential to your agent'}
@@ -740,16 +693,17 @@ export default function CreateAgentModal({
         {/* Step indicators */}
         {step !== 'executing' && step !== 'done' && (
           <div className="flex items-center gap-2 px-5 py-2 border-b border-[var(--v2-border)]">
-            {(['details', 'policy', 'key', 'review'] as const).map((s, i, arr) => (
+            {setupSteps.map((s, i, arr) => (
               <div key={s} className="flex items-center gap-2">
                 <div
+                  aria-label={`Step ${i + 1} of ${arr.length}`}
                   className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
                     s === step
-                      ? 'bg-indigo-500 text-white'
-                      : arr.indexOf(step as typeof arr[number]) > i
-                        ? 'bg-indigo-500/20 text-[var(--v2-brand)]'
+                      ? 'bg-[var(--v2-brand)] text-white'
+                      : currentSetupStepIndex > i
+                        ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                         : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-                  }`}
+                  } v2-tabular`}
                 >
                   {i + 1}
                 </div>
@@ -793,7 +747,7 @@ export default function CreateAgentModal({
               </div>
 
               <Button
-                onClick={() => setStep('policy')}
+                onClick={() => setStep(detailsNextStep)}
                 disabled={!canProceedDetails()}
                 className="w-full"
               >
@@ -802,47 +756,58 @@ export default function CreateAgentModal({
             </div>
           )}
 
+          {/* ── STEP: Account ────────────────────────────── */}
+          {step === 'account' && (
+            <div className="space-y-4">
+              <WalletIdentityBlock
+                name={walletName}
+                network={walletNetworkName}
+                address={walletDisplayAddress}
+              />
+
+              <div>
+                <label htmlFor="connect-agent-safe" className="block text-xs text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
+                  Haven wallet
+                </label>
+                <Select
+                  id="connect-agent-safe"
+                  value={selectedSafeId ?? ''}
+                  onChange={(e) => setSelectedSafeId(e.target.value)}
+                >
+                  {userSafes.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                The agent can request payments from this Haven wallet within the budget you set next.
+              </p>
+
+              <div className="flex gap-3">
+                <Button
+                  variant="ghost"
+                  onClick={() => setStep('details')}
+                  className="flex-1"
+                >
+                  Back
+                </Button>
+                <Button
+                  onClick={() => setStep('policy')}
+                  disabled={!selectedSafeId}
+                  className="flex-1"
+                >
+                  Set agent budget
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* ── STEP: Rules ──────────────────────────────── */}
           {step === 'policy' && (
             <div className="space-y-4">
-              <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 shadow-[var(--v2-shadow-card)]">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 7.5A2.25 2.25 0 0 1 6 5.25h12A2.25 2.25 0 0 1 20.25 7.5v9A2.25 2.25 0 0 1 18 18.75H6A2.25 2.25 0 0 1 3.75 16.5v-9Z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12h.01" />
-                    </svg>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-[var(--v2-ink-3)]">From Haven wallet</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                      <p className="truncate text-sm font-semibold text-[var(--v2-ink)]">{walletName}</p>
-                      <span className="rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-2)]">
-                        {walletNetworkName}
-                      </span>
-                    </div>
-                    {walletDisplayAddress && (
-                      <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(walletDisplayAddress)}</p>
-                    )}
-                  </div>
-                </div>
-
-                {userSafes.length > 1 && (
-                  <div className="mt-3">
-                    <Select
-                      value={selectedSafeId ?? ''}
-                      onChange={(e) => setSelectedSafeId(e.target.value)}
-                    >
-                      {userSafes.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} — {truncate(s.safe_address)} ({getChainConfig(s.chain_id).name})
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                )}
-              </div>
-
               {/* Current allowances */}
               {allowances.length > 0 && (
                 <AgentBudgetCard
@@ -852,6 +817,7 @@ export default function CreateAgentModal({
                   resetPeriod={budgetPeriodSummary()}
                   status="Budget draft"
                   density="compact"
+                  showDetails={false}
                 >
                   <div className="space-y-2">
                     {allowances.map((a) => (
@@ -962,91 +928,17 @@ export default function CreateAgentModal({
               <div className="flex gap-3">
                 <Button
                   variant="ghost"
-                  onClick={() => setStep('details')}
+                  onClick={() => setStep(backFromPolicyStep)}
                   className="flex-1"
                 >
                   Back
                 </Button>
                 <Button
-                  onClick={() => setStep('key')}
+                  onClick={() => {
+                    ensureGeneratedCredential()
+                    setStep('review')
+                  }}
                   disabled={allowances.length === 0}
-                  className="flex-1"
-                >
-                  Review credential
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* ── STEP: Key ─────────────────────────────────── */}
-          {step === 'key' && (
-            <div className="space-y-4">
-              {/* ── Credential mode selector ──────────── */}
-              <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs text-[var(--v2-ink-3)] uppercase tracking-wide">
-                      Agent credential
-                    </p>
-                    <h3 className="mt-1 text-sm font-semibold text-[var(--v2-ink)]">Create a new Haven credential</h3>
-                    <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                      Recommended for a new agent. Haven creates it in your browser and shows the credential file after setup.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchKeyMode('generate')}
-                    className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                      keyMode === 'generate'
-                        ? 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-                        : 'border-[var(--v2-border-strong)] bg-white text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]'
-                    }`}
-                  >
-                    {keyMode === 'generate' ? 'Selected' : 'Use this'}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <button
-                  type="button"
-                  onClick={() => handleSwitchKeyMode(keyMode === 'existing' ? 'generate' : 'existing')}
-                  className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
-                >
-                  {keyMode === 'existing' ? 'Use a new Haven credential instead' : 'Use an existing credential address instead'}
-                </button>
-
-                {keyMode === 'existing' && (
-                  <div className="mt-3 rounded-[10px] border border-[var(--v2-border)] bg-white p-3">
-                    <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                      Advanced setup. Enter the public address your agent will use to request payments.
-                    </p>
-                    <Input
-                      value={delegateAddress}
-                      onChange={(e) => setDelegateAddress(e.target.value)}
-                      placeholder="0x..."
-                      className="mt-3 font-mono"
-                    />
-                    {delegateAddress && !isValidAddress(delegateAddress) && (
-                      <p className="mt-2 text-xs text-[var(--v2-danger)]">
-                        Enter a valid Ethereum address.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-3">
-                <Button
-                  variant="ghost"
-                  onClick={() => setStep('policy')}
-                  className="flex-1"
-                >
-                  Back
-                </Button>
-                <Button
-                  onClick={() => setStep('review')}
-                  disabled={!canProceedKey()}
                   className="flex-1"
                 >
                   Review agent rules
@@ -1083,11 +975,6 @@ export default function CreateAgentModal({
                     ),
                     helper: 'Agents can still start larger payments, but you approve them manually.',
                   },
-                  {
-                    label: 'Credential',
-                    value: keyMode === 'generate' ? 'Create a new Haven credential' : 'Use an existing credential address',
-                    helper: keyMode === 'existing' ? truncate(delegateAddress) : undefined,
-                  },
                 ]}
               />
 
@@ -1120,7 +1007,7 @@ export default function CreateAgentModal({
               <div className="flex gap-3">
                 <Button
                   variant="ghost"
-                  onClick={() => setStep('key')}
+                  onClick={() => setStep('policy')}
                   className="flex-1"
                 >
                   Back
@@ -1303,7 +1190,7 @@ export default function CreateAgentModal({
                 }
                 secondaryAction={
                   <Button variant="ghost" onClick={handleCopyHandoff} className="w-full">
-                    {copiedHandoff ? 'Copied file' : 'Copy file'}
+                    {copiedHandoff ? 'Copied file content' : 'Copy file content'}
                   </Button>
                 }
                 note={generatedPrivateKey ? 'This credential is shown once. Haven cannot show it again after you close this window.' : undefined}

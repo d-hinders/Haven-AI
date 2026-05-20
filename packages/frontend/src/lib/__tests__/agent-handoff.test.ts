@@ -112,7 +112,7 @@ describe('buildHandoff — identity & metadata', () => {
 
   it('produces a slug-based filename without secrets', () => {
     const { filename } = buildHandoff(BASE_INPUT)
-    expect(filename).toMatch(/^my-payment-agent-haven\.md$/)
+    expect(filename).toMatch(/^skill-haven-agent-my-payment-agent\.md$/)
     expect(filename).not.toContain('sk_agent')
     expect(filename).not.toContain('0x')
   })

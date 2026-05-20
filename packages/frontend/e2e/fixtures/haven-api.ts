@@ -104,6 +104,9 @@ const dashboardOverview = {
   },
   actionableApprovals: 1,
   pendingApprovals: 1,
+  onboardingProgress: {
+    hasFirstAgentPayment: true,
+  },
   agents: [
     {
       id: testAgent.id,

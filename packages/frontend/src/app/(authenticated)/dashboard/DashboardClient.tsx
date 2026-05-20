@@ -700,10 +700,16 @@ export default function DashboardClient() {
   const dataReady = safes.length > 0 && !balancesLoading && !agentsLoading
   const hasFunds = dataReady && hasAnyBalance
   const hasAgents = dataReady && agents.length > 0
+  const overviewInitialLoading = overviewLoading && !overview
+  const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
   const hasFirstAgentPayment = Boolean(
-    overview?.transactions?.some((tx) => Boolean(tx.agentName)),
+    overview?.onboardingProgress?.hasFirstAgentPayment,
   )
-  const allOnboardingComplete = dataReady && hasFunds && hasAgents && hasFirstAgentPayment
+  const setupProgressReady =
+    dataReady &&
+    (!hasFunds || !hasAgents || firstAgentPaymentKnown)
+  const allOnboardingComplete =
+    setupProgressReady && hasFunds && hasAgents && hasFirstAgentPayment
 
   const defaultSafe = useMemo(
     () => activeSafe ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
@@ -727,7 +733,15 @@ export default function DashboardClient() {
   const [inProgressDismissed, setInProgressDismissed] = useState(false)
   // Setup-complete dismissal IS persisted — once the user has done all three
   // steps and dismissed the celebration, we don't show it again on reload.
-  const [completeDismissed, setCompleteDismissed] = useState(false)
+  const [completeDismissalState, setCompleteDismissalState] = useState<{
+    userId: string | null
+    dismissed: boolean
+  }>({ userId: null, dismissed: false })
+  const completeDismissalReady =
+    Boolean(user?.id) && completeDismissalState.userId === user?.id
+  const completeDismissed = completeDismissalReady
+    ? completeDismissalState.dismissed
+    : false
 
   useEffect(() => {
     if (actionSafeId && safes.some((safe) => safe.id === actionSafeId)) return
@@ -737,9 +751,12 @@ export default function DashboardClient() {
   // Read the persisted setup-complete dismissal once the user is known.
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (!user?.id) return
+    if (!user?.id) {
+      setCompleteDismissalState({ userId: null, dismissed: false })
+      return
+    }
     const stored = window.localStorage.getItem(`haven-onboarding-complete-dismissed:${user.id}`)
-    if (stored === '1') setCompleteDismissed(true)
+    setCompleteDismissalState({ userId: user.id, dismissed: stored === '1' })
   }, [user?.id])
 
   // If the user makes progress after dismissing the in-progress checklist,
@@ -825,14 +842,14 @@ export default function DashboardClient() {
     ? (overview?.metrics.monthlyAgentSpendEur ?? 0)
     : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
   const approvalActionCount = overview?.actionableApprovals ?? overview?.pendingApprovals ?? 0
-  const overviewInitialLoading = overviewLoading && !overview
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError || approvalActionCount > 0)
   // Render the guide whenever the user has at least one Safe and either:
   // (a) they have unfinished steps and haven't dismissed the checklist, OR
   // (b) they've just finished all three steps and haven't dismissed the celebration.
   const showOnboardingGuide =
-    dataReady &&
+    setupProgressReady &&
+    completeDismissalReady &&
     !requiresOtherDevice &&
     (allOnboardingComplete ? !completeDismissed : !inProgressDismissed)
   const showTopAside = hasAttention
@@ -889,7 +906,7 @@ export default function DashboardClient() {
   }
 
   function dismissCompleteBanner() {
-    setCompleteDismissed(true)
+    setCompleteDismissalState({ userId: user?.id ?? null, dismissed: true })
     if (typeof window !== 'undefined' && user?.id) {
       window.localStorage.setItem(`haven-onboarding-complete-dismissed:${user.id}`, '1')
     }

@@ -96,7 +96,12 @@ export default async function dashboardRoutes(
   app.get('/overview', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const [safeResult, agentResult, actionableApprovalsResult] = await Promise.all([
+    const [
+      safeResult,
+      agentResult,
+      actionableApprovalsResult,
+      onboardingProgressResult,
+    ] = await Promise.all([
       pool.query<UserSafeRow>(
         `SELECT id, safe_address, chain_id, name, is_default
          FROM user_safes
@@ -123,6 +128,32 @@ export default async function dashboardRoutes(
         `SELECT COUNT(*) AS count
          FROM approval_requests
          WHERE user_id = $1 AND status IN ('pending', 'approved')`,
+        [sub],
+      ),
+      pool.query<{ has_first_agent_payment: boolean }>(
+        `SELECT (
+           EXISTS (
+             SELECT 1
+             FROM payment_intents
+             WHERE user_id = $1
+               AND status = 'confirmed'
+               AND tx_hash IS NOT NULL
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM approval_requests
+             WHERE user_id = $1
+               AND status = 'executed'
+               AND tx_hash IS NOT NULL
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM self_sign_payment_intents
+             WHERE user_id = $1
+               AND status = 'confirmed'
+               AND tx_hash IS NOT NULL
+           )
+         ) AS has_first_agent_payment`,
         [sub],
       ),
     ])
@@ -326,6 +357,11 @@ export default async function dashboardRoutes(
       },
       actionableApprovals: Number(actionableApprovalsResult.rows[0]?.count ?? '0'),
       pendingApprovals: Number(actionableApprovalsResult.rows[0]?.count ?? '0'),
+      onboardingProgress: {
+        hasFirstAgentPayment: Boolean(
+          onboardingProgressResult.rows[0]?.has_first_agent_payment,
+        ),
+      },
       agents: agents.slice(0, AGENT_PREVIEW_LIMIT).map((agent) => ({
         id: agent.id,
         name: agent.name,

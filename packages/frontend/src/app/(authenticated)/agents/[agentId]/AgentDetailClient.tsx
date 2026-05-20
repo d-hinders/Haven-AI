@@ -1,6 +1,5 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
@@ -110,13 +109,12 @@ interface Props {
   agentId: string
 }
 
-type PendingAction = 'pause' | 'resume' | 'revoke' | 'delete' | null
-type ConfirmAction = 'revoke' | 'delete' | null
+type PendingAction = 'pause' | 'resume' | 'revoke' | null
+type ConfirmAction = 'revoke' | null
 
 export default function AgentDetailClient({ agentId }: Props) {
-  const router = useRouter()
   const { user } = useAuth()
-  const { agents, loading, pauseAgent, resumeAgent, revokeAgent, deleteAgent, refetch } = useAgents()
+  const { agents, loading, pauseAgent, resumeAgent, revokeAgent, refetch } = useAgents()
   const agent = agents.find((item) => item.id === agentId) ?? null
   const safe = useMemo(
     () => user?.safes.find((item) => item.id === agent?.safe_id) ?? null,
@@ -263,20 +261,6 @@ export default function AgentDetailClient({ agentId }: Props) {
     }
   }
 
-  async function handleDelete() {
-    setPendingAction('delete')
-    setErrorMessage(null)
-    try {
-      await deleteAgent(currentAgent.id)
-      router.push('/agents')
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Delete failed')
-    } finally {
-      setPendingAction(null)
-      setConfirmAction(null)
-    }
-  }
-
   async function handleRevoke() {
     if (revokeBlockedByOtherDevice) {
       setErrorMessage(null)
@@ -355,15 +339,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : (
-              <Button
-                onClick={() => setConfirmAction('delete')}
-                disabled={pendingAction !== null}
-                variant="danger"
-              >
-                Delete
-              </Button>
-            )}
+            ) : null}
           </div>
         }
       />
@@ -562,21 +538,6 @@ export default function AgentDetailClient({ agentId }: Props) {
             )}
           </Card>
 
-          {/* Revoked agents lose the inline footer affordances (they're no
-              longer pausable / revokable), so they keep an explicit Delete
-              CTA at the page level for the cleanup path. */}
-          {isRevoked ? (
-            <div className="flex justify-end">
-              <Button
-                onClick={() => setConfirmAction('delete')}
-                disabled={pendingAction !== null}
-                variant="danger"
-                size="sm"
-              >
-                Delete agent
-              </Button>
-            </div>
-          ) : null}
       </div>
 
       <ConfirmDialog
@@ -610,16 +571,6 @@ export default function AgentDetailClient({ agentId }: Props) {
             {() => button}
           </OnchainActionGate>
         )}
-      />
-
-      <ConfirmDialog
-        open={confirmAction === 'delete'}
-        onCancel={() => setConfirmAction(null)}
-        onConfirm={handleDelete}
-        title="Delete this revoked agent?"
-        body="This removes the revoked agent from your Haven dashboard. It does not restore access or recreate the setup."
-        confirmLabel="Delete agent"
-        loading={pendingAction === 'delete'}
       />
 
       {!isRevoked ? (

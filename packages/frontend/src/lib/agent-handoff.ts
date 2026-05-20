@@ -225,6 +225,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
 
   const dotenv = buildDotenv(input)
   const sdkExample = buildSdkExample(hasDelegateKey)
+  const filename = `skill-haven-agent-${slugify(agent.name)}.md`
 
   const markdown = ([
     `# Haven agent — ${agent.name}`,
@@ -232,6 +233,19 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `Everything this agent needs to connect to Haven and make payments within your rules.`,
     `Keep this file private:`,
     `it contains credentials that ${hasDelegateKey ? 'cannot be shown again' : 'authenticate the agent'}.`,
+    ``,
+    `## Store this skill`,
+    ``,
+    `You have downloaded \`${filename}\`. Install it in the agent's skills folder`,
+    `or equivalent durable instruction location, then add a short reference from`,
+    `the agent's top-level memory or instructions file so the agent knows to use`,
+    `this skill for Haven payments.`,
+    ``,
+    `This file contains the Haven workflow for transacting through the user's`,
+    `Haven wallet. Keep signing keys, API keys, and other spend-authorizing`,
+    `secrets only in the agent's approved secret store, ignored \`.env\`, or`,
+    `equivalent secure runtime config. Do not paste secrets into long-term`,
+    `memory or shared instruction files.`,
     ``,
     agent.description ? `> ${agent.description}` : null,
     agent.description ? `` : null,
@@ -332,8 +346,6 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     .filter((line): line is string => line !== null)
     .join('\n')
     .replace(/\n{3,}/g, '\n\n') + '\n'
-
-  const filename = `skill-haven-agent-${slugify(agent.name)}.md`
 
   return { markdown, dotenv, filename }
 }

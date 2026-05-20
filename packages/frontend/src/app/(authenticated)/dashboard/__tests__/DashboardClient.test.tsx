@@ -48,7 +48,12 @@ vi.mock('@/hooks/useSafeOperationGate', () => ({
 }))
 
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
-  default: () => <div>Onboarding guide</div>,
+  default: ({ hasFirstAgentPayment }: { hasFirstAgentPayment: boolean }) => (
+    <div>
+      <span>Onboarding guide</span>
+      <span>{hasFirstAgentPayment ? 'first-payment-complete' : 'first-payment-pending'}</span>
+    </div>
+  ),
 }))
 
 vi.mock('@/components/CreateAgentModal', () => ({
@@ -153,6 +158,9 @@ function mockBaseState() {
       },
       actionableApprovals: 2,
       pendingApprovals: 2,
+      onboardingProgress: {
+        hasFirstAgentPayment: false,
+      },
       agents: [],
       transactions: [],
     },
@@ -219,6 +227,9 @@ describe('DashboardClient', () => {
         },
         actionableApprovals: 1,
         pendingApprovals: 1,
+        onboardingProgress: {
+          hasFirstAgentPayment: false,
+        },
         agents: [],
         transactions: [],
       },
@@ -245,6 +256,65 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('No transactions yet')).not.toBeInTheDocument()
     expect(screen.queryByText('No connected agents right now')).not.toBeInTheDocument()
     expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('does not show the guide while first-payment progress is still loading', () => {
+    mockUseDashboardOverview.mockReturnValue({
+      data: null,
+      loading: true,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('shows the first-payment step as pending after setup progress resolves incomplete', () => {
+    render(<DashboardClient />)
+
+    expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    expect(screen.getByText('first-payment-pending')).toBeInTheDocument()
+  })
+
+  it('does not flash the guide for completed setup after the completion banner was dismissed', () => {
+    window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
+    mockUseDashboardOverview.mockReturnValue({
+      data: {
+        totals: { usd: 1234.56, eur: 1100 },
+        change: {
+          available: true,
+          usdAmount: 12.34,
+          eurAmount: 11,
+          usdPercent: 1.23,
+          eurPercent: 1,
+        },
+        metrics: {
+          connectedAgents: 1,
+          monthlyAgentSpendUsd: 42,
+          monthlyAgentSpendEur: 38,
+          successfulTransactions: 4,
+          activeAccounts: 1,
+        },
+        actionableApprovals: 0,
+        pendingApprovals: 0,
+        onboardingProgress: {
+          hasFirstAgentPayment: true,
+        },
+        agents: [],
+        transactions: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    expect(screen.queryByText('first-payment-complete')).not.toBeInTheDocument()
   })
 
   it('does not show the unfunded receive CTA before balances finish loading', () => {

@@ -230,12 +230,9 @@ function AddSafeModal({
                   ))}
                 </select>
               </div>
-              <button
-                onClick={() => setDeployStep('wallet')}
-                className="w-full py-2.5 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors"
-              >
+              <Button onClick={() => setDeployStep('wallet')} className="w-full">
                 Continue
-              </button>
+              </Button>
             </div>
           )}
 
@@ -283,19 +280,19 @@ function AddSafeModal({
               )}
 
               {error && (
-                <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
+                <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                   {error}
                 </div>
               )}
 
-              <button
+              <Button
                 onClick={handleDeploy}
                 disabled={!isConnected || deploying}
-                className="w-full py-2.5 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all shadow-[var(--v2-shadow-button)] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full"
               >
                 Create account
-              </button>
-              <p className="text-[11px] text-[var(--v2-ink-3)] text-center">
+              </Button>
+              <p className="text-center text-xs text-[var(--v2-ink-3)]">
                 Haven&rsquo;s relayer pays the gas &mdash; no wallet signature needed.
               </p>
             </div>
@@ -314,8 +311,8 @@ function AddSafeModal({
           {mode === 'deploy' && deployStep === 'done' && (
             <div className="space-y-4">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)]">
+                  <svg className="h-5 w-5 text-[var(--v2-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                   </svg>
                 </div>
@@ -350,12 +347,9 @@ function AddSafeModal({
                 </div>
               </div>
 
-              <button
-                onClick={handleClose}
-                className="w-full py-2.5 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors"
-              >
+              <Button onClick={handleClose} className="w-full">
                 Done
-              </button>
+              </Button>
             </div>
           )}
 
@@ -400,16 +394,12 @@ function AddSafeModal({
               </div>
 
               {error && (
-                <p className="text-xs text-red-400">{error}</p>
+                <p className="text-xs text-[var(--v2-danger)]">{error}</p>
               )}
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] disabled:opacity-50 transition-colors"
-              >
-                {loading ? 'Adding...' : 'Import Account'}
-              </button>
+              <Button type="submit" disabled={loading} className="w-full">
+                {loading ? 'Adding…' : 'Import account'}
+              </Button>
             </form>
           )}
         </div>
@@ -563,7 +553,7 @@ function SafeCard({
               )
             })}
             {hiddenTokenCount > 0 && (
-              <p className="text-[11px] text-[var(--v2-ink-3)]">+ {hiddenTokenCount} more</p>
+              <p className="text-xs text-[var(--v2-ink-3)]">+ {hiddenTokenCount} more</p>
             )}
           </>
         )}
@@ -637,17 +627,12 @@ export default function AccountsOverviewClient() {
 
       {/* Safe cards grid */}
       {safes.length === 0 ? (
-        <div className="text-center py-16 rounded-lg border border-dashed border-[var(--v2-border)]">
-          <svg className="w-12 h-12 mx-auto mb-4 text-[var(--v2-ink-3)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+        <div className="rounded-lg border border-dashed border-[var(--v2-border)] py-16 text-center">
+          <svg className="mx-auto mb-4 h-12 w-12 text-[var(--v2-ink-3)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
           </svg>
-          <p className="text-sm text-[var(--v2-ink-3)] mb-4">No Haven accounts yet</p>
-          <button
-            onClick={() => setAddModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors"
-          >
-            Add your first account
-          </button>
+          <p className="mb-4 text-sm text-[var(--v2-ink-3)]">No Haven accounts yet</p>
+          <Button onClick={() => setAddModalOpen(true)}>Add your first account</Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

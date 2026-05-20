@@ -766,7 +766,7 @@ export default function CreateAgentModal({
           {step === 'details' && (
             <div className="space-y-5">
               <div>
-                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
+                <label className="block text-xs text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
                   Agent name
                 </label>
                 <input
@@ -780,7 +780,7 @@ export default function CreateAgentModal({
                 </p>
               </div>
               <div>
-                <label className="block text-[11px] text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
+                <label className="block text-xs text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
                   Description <span className="normal-case text-[var(--v2-ink-3)]">(optional)</span>
                 </label>
                 <textarea
@@ -817,7 +817,7 @@ export default function CreateAgentModal({
                     <p className="text-xs font-medium text-[var(--v2-ink-3)]">From Haven wallet</p>
                     <div className="mt-0.5 flex flex-wrap items-center gap-2">
                       <p className="truncate text-sm font-semibold text-[var(--v2-ink)]">{walletName}</p>
-                      <span className="rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-2)]">
+                      <span className="rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-2)]">
                         {walletNetworkName}
                       </span>
                     </div>
@@ -886,10 +886,10 @@ export default function CreateAgentModal({
               {availableTokens.length > 0 ? (
                 <div className="space-y-3 rounded-[10px] border border-dashed border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">
+                    <p className="text-xs text-[var(--v2-ink-3)] uppercase tracking-wide">
                       Add agent budget
                     </p>
-                    <p className="text-[11px] text-[var(--v2-ink-3)]">One per token</p>
+                    <p className="text-xs text-[var(--v2-ink-3)]">One per token</p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <Select
@@ -985,7 +985,7 @@ export default function CreateAgentModal({
               <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-[11px] text-[var(--v2-ink-3)] uppercase tracking-wide">
+                    <p className="text-xs text-[var(--v2-ink-3)] uppercase tracking-wide">
                       Agent credential
                     </p>
                     <h3 className="mt-1 text-sm font-semibold text-[var(--v2-ink)]">Create a new Haven credential</h3>
@@ -1028,7 +1028,7 @@ export default function CreateAgentModal({
                       className="mt-3 font-mono"
                     />
                     {delegateAddress && !isValidAddress(delegateAddress) && (
-                      <p className="mt-2 text-[11px] text-[var(--v2-danger)]">
+                      <p className="mt-2 text-xs text-[var(--v2-danger)]">
                         Enter a valid Ethereum address.
                       </p>
                     )}
@@ -1201,7 +1201,7 @@ export default function CreateAgentModal({
                         : execError}
                     </p>
                     {backendSaveFailed && execError && (
-                      <p className="mt-2 text-[11px] text-[var(--v2-ink-3)] max-w-xs mx-auto">
+                      <p className="mt-2 text-xs text-[var(--v2-ink-3)] max-w-xs mx-auto">
                         {execError}
                       </p>
                     )}

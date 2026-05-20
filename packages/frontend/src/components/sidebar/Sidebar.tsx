@@ -295,7 +295,7 @@ export default function Sidebar() {
                     {name}
                   </p>
                   {showEmailLine && (
-                    <p className="text-[11px] text-[var(--v2-ink-3)] truncate leading-tight mt-0.5">
+                    <p className="mt-0.5 truncate text-xs leading-tight text-[var(--v2-ink-3)]">
                       {emailLine}
                     </p>
                   )}

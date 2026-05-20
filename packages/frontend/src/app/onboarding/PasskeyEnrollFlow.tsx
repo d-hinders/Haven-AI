@@ -301,7 +301,7 @@ export default function PasskeyEnrollFlow({
                     {item.label}
                   </div>
                   {(isActive || stage === 'error') && (
-                    <div className="text-[11px] text-[var(--v2-ink-3)] mt-0.5 leading-relaxed">
+                    <div className="text-xs text-[var(--v2-ink-3)] mt-0.5 leading-relaxed">
                       {stage === 'error' ? error : item.hint}
                     </div>
                   )}

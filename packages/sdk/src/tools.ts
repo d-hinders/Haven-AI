@@ -102,12 +102,13 @@ const MAKE_PAYMENT_DESCRIPTION =
 
 const GET_STATUS_DESCRIPTION =
   'Check the status of a previously initiated payment. ' +
-  'Returns the current status, transaction hash (if confirmed), and payment details.'
+  'Accepts payment intent IDs and approval request IDs. Returns the current status, phase, next_action, transaction hash if available, and payment details.'
 
 const AUTHORIZE_X402_DESCRIPTION =
   'Authorize payment for an HTTP 402 (Payment Required) response. ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key and request a policy-limited Safe AllowanceModule top-up when needed. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
+  'If this returns pending_approval, tell the user it is waiting in Haven, call get_payment_status later, and retry the original x402 request only when next_action is retry_original_x402_request. Do not rewrite the SDK or loop retries while approval is pending. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request.'
 
 const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =

@@ -303,6 +303,8 @@ describe('x402 routes', () => {
     expect(response.json()).toMatchObject({
       payment_id: 'approval-123',
       status: 'pending_approval',
+      phase: 'user_approval_required',
+      next_action: 'wait_for_user_approval',
       remaining: '0.01',
       requested: '0.02',
       token: 'USDC',
@@ -341,6 +343,25 @@ describe('x402 routes', () => {
           machine_challenge_id: null,
         }],
       })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          chain_id: 8453,
+          token_symbol: 'USDC',
+          amount_human: '0.02',
+          status: 'pending',
+          tx_hash: null,
+          expires_at: '2026-05-10T20:00:00.000Z',
+          source: 'x402',
+          payment_rail: 'x402',
+          payment_resource_url: 'https://mcp.soundside.ai/mcp',
+          x402_resource_url: 'https://mcp.soundside.ai/mcp',
+          merchant_address: MERCHANT.toLowerCase(),
+        }],
+      })
 
     const response = await app.inject({
       method: 'POST',
@@ -360,9 +381,73 @@ describe('x402 routes', () => {
     expect(response.statusCode).toBe(202)
     expect(response.json()).toMatchObject({
       payment_id: 'approval-123',
-      status: 'pending_approval',
-      requested: '0.02',
+      kind: 'approval_request',
+      status: 'pending',
+      phase: 'user_approval_required',
+      next_action: 'wait_for_user_approval',
+      amount: '0.02',
       token: 'USDC',
+      rail: 'x402',
+    })
+    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+  })
+
+  it('returns executed approvals as ready for the original x402 retry', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          status: 'executed',
+          token_symbol: 'USDC',
+          amount_human: '0.02',
+          expires_at: '2026-05-10T20:00:00.000Z',
+          machine_challenge_id: null,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-123',
+          chain_id: 8453,
+          token_symbol: 'USDC',
+          amount_human: '0.02',
+          status: 'executed',
+          tx_hash: `0x${'ab'.repeat(32)}`,
+          expires_at: '2026-05-10T20:00:00.000Z',
+          source: 'x402',
+          payment_rail: 'x402',
+          payment_resource_url: 'https://mcp.soundside.ai/mcp',
+          x402_resource_url: 'https://mcp.soundside.ai/mcp',
+          merchant_address: MERCHANT.toLowerCase(),
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:approval',
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-123',
+      kind: 'approval_request',
+      status: 'executed',
+      phase: 'funding_sent',
+      next_action: 'retry_original_x402_request',
       rail: 'x402',
     })
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()

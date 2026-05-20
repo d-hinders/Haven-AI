@@ -5,6 +5,7 @@ import {
   authorizeMachinePayment,
   type MachinePaymentRail,
 } from '../lib/machine-payments.js'
+import { getAgentPaymentStatus } from '../lib/agent-payment-status.js'
 import {
   attachMachinePaymentEvidence,
   type MachinePaymentEvidenceRow,
@@ -144,6 +145,17 @@ function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): strin
 
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', agentAuthMiddleware)
+
+  app.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const status = await getAgentPaymentStatus(agent, request.params.id)
+
+    if (!status) {
+      return reply.code(404).send({ error: 'Payment or approval request not found' })
+    }
+
+    return reply.send(status)
+  })
 
   app.post<{ Body: AuthorizeBody }>('/authorize', async (request, reply) => {
     const agent = request.agent as AgentContext

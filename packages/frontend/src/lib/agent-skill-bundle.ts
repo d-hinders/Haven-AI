@@ -66,8 +66,10 @@ remaining budget wait for approval in Haven.
 - **Spending limits:** ${policySummary}
 
 If a payment exceeds the remaining budget, Haven queues it for approval in the
-dashboard. The SDK surfaces this as a \`HavenApiError\` with HTTP status \`202\`.
-Tell the user the payment is awaiting approval; don't retry in a tight loop.
+dashboard. The SDK surfaces this as a structured payment state with a
+\`payment_id\`, \`phase\`, and \`next_action\`. Tell the user the payment is
+awaiting approval, then check \`get_payment_status\` later; don't retry in a
+tight loop.
 
 ## Setup (one-time)
 
@@ -98,8 +100,12 @@ Haven errors are shaped \`{ error, status, details? }\`. Surface the error
 message to the user verbatim — it's written for humans. Common cases:
 
 - \`pending_approval\` (HTTP 202): the payment exceeds the remaining budget
-  and was queued. Tell the user it's waiting for approval in Haven. Don't retry
-  until the queued payment is approved or rejected.
+  and was queued. Tell the user it's waiting for approval in Haven. Check
+  \`get_payment_status\` with the returned \`payment_id\`.
+- x402 approvals have two steps: Haven first waits for the user to fund the
+  agent delegate wallet from the Haven wallet, then the agent retries the
+  original paid API request. Retry only when \`next_action\` is
+  \`retry_original_x402_request\`. Do not rewrite the SDK while waiting.
 - \`insufficient_funds\`: the Haven wallet doesn't have enough of that token.
 
 ## Revoke

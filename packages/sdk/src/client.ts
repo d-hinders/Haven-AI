@@ -7,10 +7,14 @@ import type {
   PaymentIntent,
   PaymentResult,
   PaymentStatus,
+  PaymentPhase,
+  PaymentNextAction,
+  PaymentStatusResult,
   SignData,
   RawCreateResponse,
   RawSignResponse,
   RawStatusResponse,
+  RawPaymentStatusResult,
   X402PaymentRequired,
   X402PaymentOption,
   X402Receipt,
@@ -21,6 +25,7 @@ import type {
 } from './types.js'
 import {
   HavenApiError,
+  HavenPaymentStateError,
   HavenSigningError,
   HavenTimeoutError,
 } from './types.js'
@@ -52,7 +57,11 @@ const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
 const PAYMENT_STATE_STATUS_CODES: Record<string, number> = {
+  pending: 202,
   pending_approval: 202,
+  approved: 202,
+  proposed: 202,
+  executed: 200,
   pending_signature: 409,
   submitted: 409,
   expired: 410,
@@ -65,6 +74,55 @@ function chainIdFromNetwork(network: string | undefined): number | undefined {
   if (!network?.startsWith('eip155:')) return undefined
   const chainId = Number(network.slice('eip155:'.length))
   return Number.isFinite(chainId) ? chainId : undefined
+}
+
+function phaseForStatus(status: string): PaymentPhase | null {
+  if (status === 'pending_signature') return 'agent_signature_required'
+  if (status === 'submitted') return 'payment_submitted'
+  if (status === 'confirmed') return 'payment_confirmed'
+  if (status === 'pending' || status === 'pending_approval') return 'user_approval_required'
+  if (status === 'approved') return 'user_execution_required'
+  if (status === 'proposed') return 'waiting_for_additional_approvals'
+  if (status === 'executed') return 'funding_sent'
+  if (status === 'rejected') return 'rejected'
+  if (status === 'expired') return 'expired'
+  if (status === 'failed') return 'failed'
+  return null
+}
+
+function nextActionForStatus(status: string): PaymentNextAction | null {
+  if (status === 'pending_signature') return 'sign_and_submit_payment'
+  if (status === 'submitted') return 'check_status_later'
+  if (status === 'confirmed') return 'none'
+  if (status === 'pending' || status === 'pending_approval') return 'wait_for_user_approval'
+  if (status === 'approved') return 'wait_for_user_to_complete_payment'
+  if (status === 'proposed') return 'wait_for_user_approval'
+  if (status === 'executed') return 'retry_original_x402_request'
+  if (status === 'rejected') return 'stop_and_tell_user'
+  if (status === 'expired') return 'request_again_if_user_still_wants_it'
+  if (status === 'failed') return 'stop_and_tell_user'
+  return null
+}
+
+function messageForState(
+  label: string,
+  status: string,
+  paymentId: string,
+  nextAction: PaymentNextAction,
+): string {
+  if (status === 'pending' || status === 'pending_approval') {
+    return `${label} is above the remaining agent budget and is waiting for user approval in Haven (payment_id: ${paymentId}).`
+  }
+  if (status === 'executed') {
+    return 'The user completed the funding payment. Retry the original x402 request.'
+  }
+  if (status === 'rejected') {
+    return `The user rejected this payment request (payment_id: ${paymentId}).`
+  }
+  if (status === 'expired') {
+    return `This payment request expired (payment_id: ${paymentId}).`
+  }
+  return `${label} is ${status}; next_action=${nextAction} (payment_id: ${paymentId}).`
 }
 
 export class HavenClient {
@@ -146,11 +204,7 @@ export class HavenClient {
     // surfaces it as an explicit error rather than returning a malformed
     // intent with no signData.
     if (raw.status === 'pending_approval') {
-      throw new HavenApiError(
-        `Payment exceeds the on-chain allowance and was queued for owner approval (payment_id: ${raw.payment_id}).`,
-        202,
-        raw,
-      )
+      this.throwPaymentStateError('Payment', raw)
     }
 
     return {
@@ -212,6 +266,17 @@ export class HavenClient {
   async getPayment(paymentId: string): Promise<PaymentResult> {
     const raw = await this.get<RawStatusResponse>(`/payments/${paymentId}`)
     return this.mapPaymentResult(raw)
+  }
+
+  /**
+   * Get agent-actionable status for a payment intent or approval request.
+   *
+   * Use this for IDs returned by agent tools and machine-payment/x402 flows.
+   * `getPayment()` remains available for payment-intent-only integrations.
+   */
+  async getPaymentStatus(paymentId: string): Promise<PaymentStatusResult> {
+    const raw = await this.get<RawPaymentStatusResult>(`/machine-payments/${paymentId}/status`)
+    return this.mapPaymentStatusResult(raw)
   }
 
   /**
@@ -737,22 +802,66 @@ export class HavenClient {
     raw: RawMachinePaymentAuthorizeResponse | RawX402AuthorizeResponse | RawSignResponse,
   ): never {
     const statusCode = PAYMENT_STATE_STATUS_CODES[raw.status] ?? 502
-    const paymentId = raw.payment_id ? ` (payment_id: ${raw.payment_id})` : ''
+    const state = this.paymentStateFromRaw(label, raw)
+
+    if (state) {
+      throw new HavenPaymentStateError(state.message, statusCode, state, raw)
+    }
 
     if (raw.status === 'pending_approval') {
       throw new HavenApiError(
-        `${label} exceeds the on-chain allowance and was queued for owner approval${paymentId}.`,
+        `${label} exceeds the on-chain allowance and was queued for owner approval (payment_id: ${raw.payment_id}).`,
         statusCode,
         raw,
       )
     }
 
     if (raw.status === 'expired') {
-      throw new HavenApiError(`${label} expired before it could be completed${paymentId}.`, statusCode, raw)
+      throw new HavenApiError(
+        `${label} expired before it could be completed (payment_id: ${raw.payment_id}).`,
+        statusCode,
+        raw,
+      )
     }
 
+    const paymentId = raw.payment_id ? ` (payment_id: ${raw.payment_id})` : ''
     const message = raw.error ?? `${label} ${raw.status}${paymentId}`
     throw new HavenApiError(message, statusCode, raw)
+  }
+
+  private paymentStateFromRaw(
+    label: string,
+    raw: RawMachinePaymentAuthorizeResponse | RawX402AuthorizeResponse | RawSignResponse,
+  ): PaymentStatusResult | null {
+    if (!raw.payment_id || !raw.status) return null
+
+    const phase = (raw.phase as PaymentPhase | undefined) ?? phaseForStatus(raw.status)
+    const nextAction = (raw.next_action as PaymentNextAction | undefined) ?? nextActionForStatus(raw.status)
+    if (!phase || !nextAction) return null
+
+    const amount = raw.amount ?? raw.requested ?? ''
+    const token = raw.token ?? ''
+    const message =
+      raw.message ??
+      raw.error ??
+      messageForState(label, raw.status, raw.payment_id, nextAction)
+
+    return {
+      paymentId: raw.payment_id,
+      kind: raw.kind === 'payment_intent' ? 'payment_intent' : 'approval_request',
+      rail: raw.rail ?? 'direct',
+      status: raw.status === 'pending' ? 'pending_approval' : raw.status,
+      phase,
+      nextAction,
+      amount,
+      token,
+      resourceUrl: raw.resource_url ?? null,
+      merchantAddress: raw.merchant_to ?? null,
+      txHash: raw.tx_hash ?? null,
+      expiresAt: raw.expires_at ?? '',
+      chainId: raw.chain_id ?? 0,
+      message,
+    }
   }
 
   private x402PayerAddress(): string | undefined {
@@ -812,10 +921,7 @@ export class HavenClient {
           error: result.errorMessage,
         }
       } catch (err) {
-        return {
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        }
+        return this.toolError(err)
       }
     }
 
@@ -859,10 +965,7 @@ export class HavenClient {
           chain_id: receipt.chainId,
         }
       } catch (err) {
-        return {
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        }
+        return this.toolError(err)
       }
     }
 
@@ -887,28 +990,69 @@ export class HavenClient {
           chain_id: receipt.chainId,
         }
       } catch (err) {
-        return {
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        }
+        return this.toolError(err)
       }
     }
 
     if (toolName === 'get_payment_status') {
       const { payment_id } = input as { payment_id: string }
-      const result = await this.getPayment(payment_id)
+      const result = await this.getPaymentStatus(payment_id)
       return {
         payment_id: result.paymentId,
+        kind: result.kind,
+        rail: result.rail,
         status: result.status,
+        phase: result.phase,
+        next_action: result.nextAction,
         tx_hash: result.txHash,
         token: result.token,
         amount: result.amount,
-        to: result.to,
-        explorer_url: result.explorerUrl,
+        resource_url: result.resourceUrl,
+        merchant_address: result.merchantAddress,
+        expires_at: result.expiresAt,
+        chain_id: result.chainId,
+        message: result.message,
       }
     }
 
     throw new Error(`Unknown tool: ${toolName}`)
+  }
+
+  private toolError(err: unknown): Record<string, unknown> {
+    if (err instanceof HavenPaymentStateError) {
+      return {
+        success: false,
+        payment_id: err.state.paymentId,
+        kind: err.state.kind,
+        rail: err.state.rail,
+        status: err.state.status,
+        phase: err.state.phase,
+        next_action: err.state.nextAction,
+        tx_hash: err.state.txHash,
+        token: err.state.token,
+        amount: err.state.amount,
+        resource_url: err.state.resourceUrl,
+        merchant_address: err.state.merchantAddress,
+        expires_at: err.state.expiresAt,
+        chain_id: err.state.chainId,
+        message: err.state.message,
+        error: err.message,
+      }
+    }
+
+    if (err instanceof HavenApiError) {
+      return {
+        success: false,
+        status_code: err.statusCode,
+        error: err.message,
+        body: err.body,
+      }
+    }
+
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
   }
 
   // ── HTTP Helpers ─────────────────────────────────────────────────
@@ -983,6 +1127,25 @@ export class HavenClient {
       submittedAt: raw.submitted_at,
       confirmedAt: raw.confirmed_at,
       expiresAt: raw.expires_at,
+    }
+  }
+
+  private mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStatusResult {
+    return {
+      paymentId: raw.payment_id,
+      kind: raw.kind,
+      rail: raw.rail,
+      status: raw.status,
+      phase: raw.phase,
+      nextAction: raw.next_action,
+      amount: raw.amount,
+      token: raw.token,
+      resourceUrl: raw.resource_url,
+      merchantAddress: raw.merchant_address,
+      txHash: raw.tx_hash,
+      expiresAt: raw.expires_at,
+      chainId: raw.chain_id,
+      message: raw.message,
     }
   }
 }

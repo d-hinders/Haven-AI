@@ -182,7 +182,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       const approval = approvalResult.rows[0]
       return reply.code(202).send({
         payment_id: approval.id,
+        kind: 'approval_request',
         status: 'pending_approval',
+        phase: 'user_approval_required',
+        next_action: 'wait_for_user_approval',
         message: `Payment of ${amount} ${tokenConfig.symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
         remaining: remainingHuman,
         requested: amount,

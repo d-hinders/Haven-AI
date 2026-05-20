@@ -8,6 +8,10 @@ export type {
   PaymentIntent,
   PaymentResult,
   PaymentStatus,
+  PendingApproval,
+  PaymentStatusResult,
+  PaymentNextAction,
+  PaymentPhase,
   SignData,
   X402PaymentRequired,
   X402PaymentOption,
@@ -22,6 +26,7 @@ export type { ClaudeTool, OpenAITool } from './tools.js'
 export {
   HavenError,
   HavenApiError,
+  HavenPaymentStateError,
   HavenSigningError,
   HavenTimeoutError,
 } from './types.js'

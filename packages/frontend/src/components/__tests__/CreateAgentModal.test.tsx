@@ -5,8 +5,10 @@ import type { Address } from 'viem'
 
 const {
   SAFE_ADDRESS,
+  SECOND_SAFE_ADDRESS,
   DELEGATE_ADDRESS,
   SIGNER_ADDRESS,
+  mockUseAuth,
   mockUsePublicClient,
   mockUseActiveSigner,
   mockUseSafeOperationGate,
@@ -21,8 +23,10 @@ const {
   mockGetSafeTxHash,
 } = vi.hoisted(() => ({
   SAFE_ADDRESS: '0x1111111111111111111111111111111111111111',
+  SECOND_SAFE_ADDRESS: '0x4444444444444444444444444444444444444444',
   DELEGATE_ADDRESS: '0x2222222222222222222222222222222222222222',
   SIGNER_ADDRESS: '0x3333333333333333333333333333333333333333',
+  mockUseAuth: vi.fn(),
   mockUsePublicClient: vi.fn(),
   mockUseActiveSigner: vi.fn(),
   mockUseSafeOperationGate: vi.fn(),
@@ -42,26 +46,7 @@ vi.mock('wagmi', () => ({
 }))
 
 vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => ({
-    user: {
-      safes: [
-        {
-          id: 'safe-1',
-          name: 'Operating wallet',
-          safe_address: SAFE_ADDRESS,
-          chain_id: 100,
-          is_default: true,
-        },
-      ],
-    },
-    activeSafe: {
-      id: 'safe-1',
-      name: 'Operating wallet',
-      safe_address: SAFE_ADDRESS,
-      chain_id: 100,
-      is_default: true,
-    },
-  }),
+  useAuth: () => mockUseAuth(),
 }))
 
 vi.mock('@/hooks/useSafeDetails', () => ({
@@ -92,12 +77,24 @@ vi.mock('@/lib/allowance-module', () => ({
 }))
 
 vi.mock('@/lib/safe-tx', () => ({
-  getChainTokens: () => ({
-    USDC: {
-      address: '0x9999999999999999999999999999999999999999',
-      decimals: 6,
-    },
-  }),
+  getChainTokens: (chainId: number) =>
+    chainId === 8453
+      ? {
+          ETH: {
+            address: null,
+            decimals: 18,
+          },
+          USDC: {
+            address: '0x9999999999999999999999999999999999999999',
+            decimals: 6,
+          },
+        }
+      : {
+          USDC: {
+            address: '0x9999999999999999999999999999999999999999',
+            decimals: 6,
+          },
+        },
   getSafeNonce: (...args: unknown[]) => mockGetSafeNonce(...args),
   signSafeTx: (...args: unknown[]) => mockSignSafeTx(...args),
   executeSafeTx: (...args: unknown[]) => mockExecuteSafeTx(...args),
@@ -123,19 +120,50 @@ vi.mock('@/components/WalletButton', () => ({
 
 import CreateAgentModal from '@/components/CreateAgentModal'
 
+const DEFAULT_SAFE = {
+  id: 'safe-1',
+  name: 'Operating wallet',
+  safe_address: SAFE_ADDRESS,
+  chain_id: 100,
+  is_default: true,
+  created_at: '2026-01-01T00:00:00.000Z',
+}
+
+const SECOND_SAFE = {
+  id: 'safe-2',
+  name: 'Base wallet',
+  safe_address: SECOND_SAFE_ADDRESS,
+  chain_id: 8453,
+  is_default: false,
+  created_at: '2026-01-02T00:00:00.000Z',
+}
+
+function setAuthSafes(safes = [DEFAULT_SAFE], activeSafe = safes[0]) {
+  mockUseAuth.mockReturnValue({
+    user: {
+      safes,
+    },
+    activeSafe,
+  })
+}
+
 function renderModal({
   onCreated = vi.fn(),
   onClose = vi.fn(),
+  safeAddress = SAFE_ADDRESS,
+  safeId = 'safe-1',
 }: {
   onCreated?: ReturnType<typeof vi.fn>
   onClose?: ReturnType<typeof vi.fn>
+  safeAddress?: string
+  safeId?: string | null
 } = {}) {
   render(
     <CreateAgentModal
       open
       onClose={onClose}
-      safeAddress={SAFE_ADDRESS}
-      safeId="safe-1"
+      safeAddress={safeAddress}
+      safeId={safeId}
       onCreated={onCreated}
     />,
   )
@@ -148,7 +176,7 @@ async function fillAgentRules() {
     target: { value: '10' },
   })
   fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Review credential' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
 }
 
 async function startBudgetStep() {
@@ -159,23 +187,8 @@ async function startBudgetStep() {
   expect(await screen.findByText('Add at least one agent budget to continue')).toBeInTheDocument()
 }
 
-async function completeExistingCredentialReviewStep() {
-  await fillAgentRules()
-  fireEvent.click(screen.getByRole('button', { name: 'Use an existing credential address instead' }))
-  fireEvent.change(screen.getByPlaceholderText('0x...'), {
-    target: { value: DELEGATE_ADDRESS },
-  })
-  fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
-
-  expect(await screen.findByText('Review agent rules')).toBeInTheDocument()
-}
-
 async function completeGeneratedCredentialReviewStep() {
   await fillAgentRules()
-  await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Review agent rules' })).not.toBeDisabled(),
-  )
-  fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
 
   expect(await screen.findByText('Review agent rules')).toBeInTheDocument()
 }
@@ -195,6 +208,7 @@ describe('CreateAgentModal recovery', () => {
       },
     })
     mockUsePublicClient.mockReturnValue({})
+    setAuthSafes()
     mockUseActiveSigner.mockReturnValue({
       type: 'eoa',
       address: SIGNER_ADDRESS as Address,
@@ -240,7 +254,7 @@ describe('CreateAgentModal recovery', () => {
       })
 
     renderModal({ onCreated })
-    await completeExistingCredentialReviewStep()
+    await completeGeneratedCredentialReviewStep()
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect agent' }))
 
@@ -273,7 +287,7 @@ describe('CreateAgentModal recovery', () => {
     expect(screen.getByText(/This credential is shown once/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy file' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy file content' }))
 
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
     expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('sk_test'))
@@ -285,11 +299,80 @@ describe('CreateAgentModal recovery', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('validates budget amounts before allowing credential review', async () => {
+  it('skips wallet selection for one account and uses a 3-step counter', async () => {
+    renderModal()
+
+    expect(screen.getByLabelText('Step 1 of 3')).toBeInTheDocument()
+    expect(screen.queryByText('Choose the Haven wallet this agent can spend from')).not.toBeInTheDocument()
+
+    await startBudgetStep()
+
+    expect(screen.getByLabelText('Step 2 of 3')).toBeInTheDocument()
+    expect(screen.queryByText('Operating wallet')).not.toBeInTheDocument()
+  })
+
+  it('shows wallet selection for multiple accounts and uses a 4-step counter', async () => {
+    setAuthSafes([DEFAULT_SAFE, SECOND_SAFE], DEFAULT_SAFE)
+    renderModal()
+
+    expect(screen.getByLabelText('Step 1 of 4')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. Research Agent'), {
+      target: { value: 'Research Agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+
+    expect(await screen.findByText('Choose the Haven wallet this agent can spend from')).toBeInTheDocument()
+    expect(screen.getByLabelText('Step 2 of 4')).toBeInTheDocument()
+
+    const walletSelect = screen.getByLabelText('Haven wallet')
+    expect(walletSelect).toHaveTextContent('Operating wallet')
+    expect(walletSelect).toHaveTextContent('Base wallet')
+    expect(walletSelect).not.toHaveTextContent('0x1111')
+    expect(walletSelect).not.toHaveTextContent('Gnosis Chain')
+  })
+
+  it('uses the selected wallet for budget tokens and review summary', async () => {
+    setAuthSafes([DEFAULT_SAFE, SECOND_SAFE], DEFAULT_SAFE)
+    renderModal()
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. Research Agent'), {
+      target: { value: 'Research Agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+
+    fireEvent.change(await screen.findByLabelText('Haven wallet'), {
+      target: { value: 'safe-2' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+
+    expect(await screen.findByText('Add at least one agent budget to continue')).toBeInTheDocument()
+    expect(screen.queryByText('Base wallet')).not.toBeInTheDocument()
+    expect(screen.queryByText('Base')).not.toBeInTheDocument()
+
+    const [tokenSelect] = screen.getAllByRole('combobox')
+    expect(tokenSelect).toHaveTextContent('ETH')
+    fireEvent.change(tokenSelect, {
+      target: { value: 'ETH' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('Amount'), {
+      target: { value: '1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.getByText('1 ETH per day')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+
+    expect(await screen.findByText('Base wallet on Base')).toBeInTheDocument()
+    expect(screen.getByText('1 ETH per day')).toBeInTheDocument()
+    expect(mockUseSafeDetails).toHaveBeenLastCalledWith(SECOND_SAFE_ADDRESS)
+  })
+
+  it('validates budget amounts before allowing review', async () => {
     renderModal()
     await startBudgetStep()
 
-    expect(screen.getByRole('button', { name: 'Review credential' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Review agent rules' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Add budget' })).toBeDisabled()
 
     fireEvent.change(screen.getByPlaceholderText('Amount'), {
@@ -317,6 +400,26 @@ describe('CreateAgentModal recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
 
     expect(screen.getByText('0.5 USDC per day')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Review credential' })).not.toBeDisabled()
+    expect(screen.queryByText('From wallet')).not.toBeInTheDocument()
+    expect(screen.queryByText('Manual above budget')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review agent rules' })).not.toBeDisabled()
+  })
+
+  it('removes credential input from review and posts a generated delegate address', async () => {
+    renderModal()
+    await completeGeneratedCredentialReviewStep()
+
+    expect(screen.queryByText('Credential')).not.toBeInTheDocument()
+    expect(screen.queryByText('Use an existing credential address instead')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect agent' }))
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledTimes(1))
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/agents',
+      expect.objectContaining({
+        delegate_address: expect.stringMatching(/^0x[a-fA-F0-9]{40}$/),
+      }),
+    )
   })
 })

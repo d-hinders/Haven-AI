@@ -333,7 +333,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n') + '\n'
 
-  const filename = `${slugify(agent.name)}-haven.md`
+  const filename = `skill-haven-agent-${slugify(agent.name)}.md`
 
   return { markdown, dotenv, filename }
 }

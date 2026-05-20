@@ -711,7 +711,6 @@ export default function DashboardClient() {
   )
 
   const [createAgentOpen, setCreateAgentOpen] = useState(false)
-  const [createAgentPreset, setCreateAgentPreset] = useState<'demo' | null>(null)
   const [pickerAction, setPickerAction] = useState<'send' | 'receive' | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [receiveOpen, setReceiveOpen] = useState(false)
@@ -844,8 +843,7 @@ export default function DashboardClient() {
     refetchSelectedBalances()
   }
 
-  function openCreateAgent(preset: 'demo' | null = null) {
-    setCreateAgentPreset(preset)
+  function openCreateAgent() {
     setCreateAgentOpen(true)
   }
 
@@ -970,7 +968,7 @@ export default function DashboardClient() {
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
-        onConnectAgent={() => openCreateAgent(null)}
+        onConnectAgent={openCreateAgent}
       />
       <TransactionsSection
         transactions={overview?.transactions ?? []}
@@ -1005,7 +1003,7 @@ export default function DashboardClient() {
             hasAgents={hasAgents}
             hasFirstAgentPayment={hasFirstAgentPayment}
             onReceiveFunds={openReceiveForDefaultSafe}
-            onAddAgent={() => openCreateAgent(null)}
+            onAddAgent={openCreateAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
             onDismiss={dismissInProgressGuide}
             onDismissComplete={dismissCompleteBanner}
@@ -1045,10 +1043,8 @@ export default function DashboardClient() {
         open={createAgentOpen}
         onClose={() => {
           setCreateAgentOpen(false)
-          setCreateAgentPreset(null)
         }}
         safeId={defaultSafe?.id ?? null}
-        preset={createAgentPreset}
         onCreated={() => {
           refreshDashboardData()
         }}

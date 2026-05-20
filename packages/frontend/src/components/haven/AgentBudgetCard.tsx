@@ -10,6 +10,7 @@ export function AgentBudgetCard({
   status = 'Draft',
   statusTone = 'brand',
   density = 'normal',
+  showDetails = true,
   children,
 }: {
   agentName: string
@@ -19,6 +20,7 @@ export function AgentBudgetCard({
   status?: string
   statusTone?: 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
   density?: 'normal' | 'compact'
+  showDetails?: boolean
   children?: ReactNode
 }) {
   const compact = density === 'compact'
@@ -47,16 +49,18 @@ export function AgentBudgetCard({
         </div>
       </div>
 
-      <dl className={`${compact ? 'mt-2 gap-2 text-xs' : 'mt-4 gap-3 text-sm'} grid sm:grid-cols-2`}>
-        <div>
-          <dt className="text-xs font-medium text-[var(--v2-ink-3)]">From wallet</dt>
-          <dd className={`${compact ? 'mt-0.5' : 'mt-1'} font-medium text-[var(--v2-ink)]`}>{walletName}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Approval</dt>
-          <dd className={`${compact ? 'mt-0.5' : 'mt-1'} text-[var(--v2-ink-2)]`}>Manual above budget</dd>
-        </div>
-      </dl>
+      {showDetails && (
+        <dl className={`${compact ? 'mt-2 gap-2 text-xs' : 'mt-4 gap-3 text-sm'} grid sm:grid-cols-2`}>
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">From wallet</dt>
+            <dd className={`${compact ? 'mt-0.5' : 'mt-1'} font-medium text-[var(--v2-ink)]`}>{walletName}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Approval</dt>
+            <dd className={`${compact ? 'mt-0.5' : 'mt-1'} text-[var(--v2-ink-2)]`}>Manual above budget</dd>
+          </div>
+        </dl>
+      )}
 
       {children && (
         <div className={`${compact ? 'mt-2 pt-2' : 'mt-4 pt-4'} border-t border-[var(--v2-border)]`}>

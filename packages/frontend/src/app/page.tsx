@@ -45,7 +45,7 @@ const HOW_IT_WORKS = [
 
 const POLICY_METRICS = [
   { value: '$500', label: 'Daily budget' },
-  { value: 'ERC‑20', label: 'Allowed tokens' },
+  { value: 'USDC', label: 'Allowed tokens' },
   { value: '>$100', label: 'Requires approval' },
   { value: '100%', label: 'Audited payments' },
 ]
@@ -233,8 +233,8 @@ export default function Home() {
       {/* Protocol native */}
       <Section
         eyebrow="Protocol native"
-        title="One set of rules. Open standards. Stablecoins today, fiat next."
-        lede="Haven speaks the open standards — x402 for pay‑per‑request flows, Stripe MPP for broader agent commerce — under one agent rules layer."
+        title="One set of rules. Open standards. Built on stablecoins."
+        lede="Agents move at machine speed and need money that does too. Stablecoins settle in seconds, 24/7, with spend rules enforced by smart contracts — not by a bank that takes days. Haven speaks the open standards on those rails — x402 for pay‑per‑request flows, Stripe MPP for broader agent commerce — under one agent rules layer."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">

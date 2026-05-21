@@ -10,6 +10,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount } from 'wagmi'
 import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { StepProgress } from '@/components/ui/StepProgress'
 import PasskeyEnrollFlow from './PasskeyEnrollFlow'
 import type { User } from '@/context/AuthContext'
 
@@ -193,34 +194,15 @@ export default function OnboardingClient() {
 
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
         <div className="w-full max-w-xl rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-[var(--v2-shadow-card)]">
-          <div className="flex items-center gap-3 mb-10">
-            {progressSteps.map((currentStep, index) => {
-              const currentIndex = progressSteps.findIndex((progressStep) => progressStep === step)
-              const isCompleted = currentIndex > index || (step === 'done' && currentStep === 'done')
-              const isActive = step === currentStep && step !== 'done'
-              return (
-                <div key={currentStep} className="flex items-center gap-3">
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border transition-colors duration-300 ${
-                      isActive
-                        ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-                        : isCompleted
-                          ? 'border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-                          : 'border-[var(--v2-border)] text-[var(--v2-ink-3)]'
-                    }`}
-                  >
-                    {isCompleted ? '✓' : index + 1}
-                  </div>
-                  {index < progressSteps.length - 1 && (
-                    <div
-                      data-filled={currentIndex > index}
-                      className="v2-progress-line h-px w-12 shrink-0 bg-[var(--v2-border)]"
-                    />
-                  )}
-                </div>
-              )
-            })}
-          </div>
+          <StepProgress
+            totalSteps={progressSteps.length}
+            currentStep={
+              step === 'done'
+                ? progressSteps.length
+                : progressSteps.findIndex((progressStep) => progressStep === step)
+            }
+            className="mb-10"
+          />
 
           {step === 'choose-signer' && (
             <div key="choose-signer" className="v2-animate-step-rise space-y-6">

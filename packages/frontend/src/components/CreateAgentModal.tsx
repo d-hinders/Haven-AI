@@ -350,20 +350,12 @@ export default function CreateAgentModal({
     return `${a.amount} ${a.tokenSymbol} ${budgetPeriodLabel(a.resetTimeMin)}`
   }
 
-  function budgetAmountSummary() {
-    if (allowances.length === 0) return 'No budget set'
-    if (allowances.length === 1) {
-      const [a] = allowances
-      return `${a.amount} ${a.tokenSymbol}`
-    }
-    return `${allowances.length} budgets set`
-  }
-
-  function budgetPeriodSummary() {
-    if (allowances.length === 0) return 'Add at least one token budget'
-    if (allowances.length === 1) return budgetPeriodLabel(allowances[0].resetTimeMin)
-    return allowances.map((a) => budgetLine(a)).join(' • ')
-  }
+  const budgetRows = allowances.map((a) => ({
+    id: a.tokenSymbol,
+    tokenSymbol: a.tokenSymbol,
+    amount: a.amount,
+    period: budgetPeriodLabel(a.resetTimeMin),
+  }))
 
   const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
   const walletNetworkName = getChainConfig(chainId).name
@@ -812,40 +804,11 @@ export default function CreateAgentModal({
               {allowances.length > 0 && (
                 <AgentBudgetCard
                   agentName={name || 'New agent'}
-                  walletName={walletName}
-                  amount={budgetAmountSummary()}
-                  resetPeriod={budgetPeriodSummary()}
+                  budgets={budgetRows}
                   status="Budget draft"
                   density="compact"
-                  showDetails={false}
-                >
-                  <div className="space-y-2">
-                    {allowances.map((a) => (
-                      <div
-                        key={a.tokenSymbol}
-                        className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-[var(--v2-ink)] v2-tabular">
-                            {budgetLine(a)}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleRemoveAllowance(a.tokenSymbol)}
-                          aria-label={`Remove ${a.tokenSymbol} budget`}
-                          className="flex-shrink-0 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6l-1 14H6L5 6" />
-                            <path d="M10 11v6M14 11v6" />
-                            <path d="M9 6V4h6v2" />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </AgentBudgetCard>
+                  onRemoveBudget={(row) => handleRemoveAllowance(row.tokenSymbol)}
+                />
               )}
 
               {/* Add allowance form */}
@@ -1172,9 +1135,8 @@ export default function CreateAgentModal({
 
               <AgentBudgetCard
                 agentName={name}
+                budgets={budgetRows}
                 walletName={walletName}
-                amount={budgetAmountSummary()}
-                resetPeriod={budgetPeriodSummary()}
                 status={execStatus === 'confirmed' ? 'Connected' : 'Pending approval'}
                 statusTone={execStatus === 'confirmed' ? 'success' : 'warning'}
                 density="compact"

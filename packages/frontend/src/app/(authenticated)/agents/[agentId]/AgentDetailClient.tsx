@@ -219,18 +219,6 @@ export default function AgentDetailClient({ agentId }: Props) {
       period: budgetPeriodLabel(allowance.reset_period_min),
     }
   })
-  const budgetAmountSummary =
-    budgetLines.length === 0
-      ? 'No budget set'
-      : budgetLines.length === 1
-        ? `${budgetLines[0].amount} ${budgetLines[0].token}`
-        : `${budgetLines.length} budgets set`
-  const budgetPeriodSummary =
-    budgetLines.length === 0
-      ? 'Add an agent budget'
-      : budgetLines.length === 1
-        ? budgetLines[0].period
-        : budgetLines.map((line) => line.label).join(' • ')
   const approvalCopy =
     budgetLines.length === 0
       ? 'No automatic spending is configured for this agent.'

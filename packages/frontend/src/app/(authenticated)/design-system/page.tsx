@@ -527,8 +527,7 @@ export default function DesignSystemPage() {
           <AgentBudgetCard
             agentName="Research assistant"
             walletName="Operating wallet"
-            amount="250 USDC"
-            resetPeriod="per day"
+            budgets={[{ tokenSymbol: 'USDC', amount: '250', period: 'per day' }]}
             status="Ready to review"
           >
             <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
@@ -536,6 +535,19 @@ export default function DesignSystemPage() {
             </p>
           </AgentBudgetCard>
 
+          <AgentBudgetCard
+            agentName="Travel planner"
+            walletName="Trip wallet"
+            budgets={[
+              { tokenSymbol: 'USDC', amount: '1', period: 'per day' },
+              { tokenSymbol: 'ETH', amount: '1', period: 'per day' },
+            ]}
+            status="Budget draft"
+            onRemoveBudget={() => {}}
+          />
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
           <AgentRulesSummary
             items={[
               {
@@ -586,8 +598,7 @@ export default function DesignSystemPage() {
           <AgentBudgetCard
             agentName="Research assistant"
             walletName="Operating wallet"
-            amount="250 USDC"
-            resetPeriod="per day"
+            budgets={[{ tokenSymbol: 'USDC', amount: '250', period: 'per day' }]}
             status="Connected"
             statusTone="success"
             density="compact"
@@ -1140,8 +1151,7 @@ export default function DesignSystemPage() {
             <AgentBudgetCard
               agentName="Travel planner"
               walletName="Trip wallet"
-              amount="75 EURe"
-              resetPeriod="total budget"
+              budgets={[{ tokenSymbol: 'EURe', amount: '75', period: 'total budget' }]}
               status="Connected"
               statusTone="success"
             />

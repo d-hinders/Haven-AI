@@ -34,6 +34,7 @@ import WalletButton from './WalletButton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
+import { StepProgress } from './ui/StepProgress'
 import {
   AgentBudgetCard,
   AgentRulesSummary,
@@ -684,33 +685,15 @@ export default function CreateAgentModal({
 
         {/* Step indicators */}
         {step !== 'executing' && step !== 'done' && (
-          <div className="flex items-center gap-2 px-5 py-2 border-b border-[var(--v2-border)]">
-            {setupSteps.map((s, i, arr) => (
-              <div key={s} className="flex items-center gap-2">
-                <div
-                  aria-label={`Step ${i + 1} of ${arr.length}`}
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    s === step
-                      ? 'bg-[var(--v2-brand)] text-white'
-                      : currentSetupStepIndex > i
-                        ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-                  } v2-tabular`}
-                >
-                  {i + 1}
-                </div>
-                {i < arr.length - 1 && (
-                  <div className="w-8 h-px bg-[var(--v2-surface-2)]" />
-                )}
-              </div>
-            ))}
+          <div className="px-5 py-3 border-b border-[var(--v2-border)]">
+            <StepProgress totalSteps={setupSteps.length} currentStep={currentSetupStepIndex} />
           </div>
         )}
 
         <div className="p-5">
           {/* ── STEP: Details ─────────────────────────────── */}
           {step === 'details' && (
-            <div className="space-y-5">
+            <div key="details" className="v2-animate-step-rise space-y-5">
               <div>
                 <label className="block text-xs text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
                   Agent name
@@ -750,7 +733,7 @@ export default function CreateAgentModal({
 
           {/* ── STEP: Account ────────────────────────────── */}
           {step === 'account' && (
-            <div className="space-y-4">
+            <div key="account" className="v2-animate-step-rise space-y-4">
               <WalletIdentityBlock
                 name={walletName}
                 network={walletNetworkName}
@@ -799,7 +782,7 @@ export default function CreateAgentModal({
 
           {/* ── STEP: Rules ──────────────────────────────── */}
           {step === 'policy' && (
-            <div className="space-y-4">
+            <div key="policy" className="v2-animate-step-rise space-y-4">
               {/* Current allowances */}
               {allowances.length > 0 && (
                 <AgentBudgetCard
@@ -908,7 +891,7 @@ export default function CreateAgentModal({
 
           {/* ── STEP: Review ──────────────────────────────── */}
           {step === 'review' && (
-            <div className="space-y-5">
+            <div key="review" className="v2-animate-step-rise space-y-5">
               <AgentRulesSummary
                 title="Review agent rules"
                 description="Confirm what this agent can do before you connect it."

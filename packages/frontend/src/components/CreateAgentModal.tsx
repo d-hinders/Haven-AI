@@ -884,10 +884,6 @@ export default function CreateAgentModal({
                 </p>
               )}
 
-              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Payments within budget can run automatically. Anything above the remaining budget waits for your approval, and you can revoke the agent later.
-              </p>
-
               <div className="flex gap-3">
                 <Button
                   variant="ghost"
@@ -936,7 +932,6 @@ export default function CreateAgentModal({
                         ))}
                       </div>
                     ),
-                    helper: 'Agents can still start larger payments, but you approve them manually.',
                   },
                 ]}
               />

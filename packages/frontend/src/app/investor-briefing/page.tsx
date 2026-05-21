@@ -112,6 +112,17 @@ const WHY_NOW = [
   },
 ]
 
+const STABLECOIN_REASONS = [
+  {
+    title: 'Enforced on-chain, not by an admin',
+    body: "Stablecoins are enforced by smart contracts, not banks. Haven's policy engine operates at the protocol level — spend rules that are verifiable on-chain and can't be bypassed by any admin.",
+  },
+  {
+    title: 'Settles in seconds, not days',
+    body: 'Bank wires take days. Card networks can cut off in 48 hours. On Base or Gnosis Chain, a stablecoin settles in seconds, 24/7, globally — no correspondent bank to fail mid-workflow.',
+  },
+]
+
 const DIFFERENTIATORS = [
   'Non-custodial by design',
   'Rules checked before money moves',
@@ -322,6 +333,24 @@ export default function InvestorBriefingPage() {
           </div>
         </div>
       </section>
+
+      <BriefingSection
+        eyebrow="Why stablecoins"
+        title="The money layer for agents looks nothing like a bank."
+        lede="Two properties matter for agent payments: rules a machine can verify, and settlement at machine speed. Stablecoins give us both."
+        className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {STABLECOIN_REASONS.map((item) => (
+            <Card key={item.title} className="p-7" hover={false}>
+              <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+                {item.title}
+              </h3>
+              <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)]">{item.body}</p>
+            </Card>
+          ))}
+        </div>
+      </BriefingSection>
 
       <BriefingSection
         eyebrow="Market wedge"

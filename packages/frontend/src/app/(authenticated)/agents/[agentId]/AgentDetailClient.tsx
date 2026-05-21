@@ -210,7 +210,9 @@ export default function AgentDetailClient({ agentId }: Props) {
     const decimals =
       chainConfig &&
       Object.values(chainConfig.tokens).find((token) => token.symbol === allowance.token_symbol)?.decimals
-    const amount = formatAllowanceAmount(allowance.allowance_amount, decimals ?? 18)
+    const amount = formatAllowanceAmount(allowance.allowance_amount, decimals ?? 18, {
+      symbol: allowance.token_symbol,
+    })
     return {
       id: allowance.id,
       label: `${amount} ${allowance.token_symbol} ${budgetPeriodLabel(allowance.reset_period_min)}`,

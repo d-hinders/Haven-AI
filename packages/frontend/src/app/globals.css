@@ -316,6 +316,24 @@
 }
 
 /*
+ * One-shot attention ring — a single soft outline pulse that draws the eye
+ * to the next required action right after a stagger settles, then releases.
+ * Brand-tinted so it stays calm; never loops.
+ */
+@keyframes v2-attention-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(99,102,241,0.0); }
+  40%  { box-shadow: 0 0 0 6px rgba(99,102,241,0.18); }
+  100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-attention-ring {
+    border-radius: var(--v2-radius-card, 12px);
+    animation: v2-attention-ring 1400ms cubic-bezier(0.22, 1, 0.36, 1) 500ms both;
+  }
+}
+
+/*
  * Progress connector fill — used by the onboarding wizard step indicator so
  * the line between two steps grows from left to right when the leading step
  * completes, instead of snapping colour.

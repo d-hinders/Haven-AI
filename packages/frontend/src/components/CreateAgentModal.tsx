@@ -1152,8 +1152,15 @@ export default function CreateAgentModal({
                 />
               </div>
 
+              {/* Attention ring is a one-shot with `both` fill that ends
+                  at zero box-shadow, so leaving the class applied forever
+                  is visually inert. We deliberately do NOT toggle it on
+                  credentialsSaved — removing one animation class while
+                  another (v2-animate-stagger) remains causes Chromium to
+                  re-initialize the surviving animation, replaying the
+                  stagger from opacity 0 and flashing the card. */}
               <div
-                className={`v2-animate-stagger ${credentialsSaved ? '' : 'v2-animate-attention-ring'}`}
+                className="v2-animate-stagger v2-animate-attention-ring"
                 style={{ ['--v2-stagger-delay' as string]: '260ms' }}
               >
                 <CredentialHandoffCard

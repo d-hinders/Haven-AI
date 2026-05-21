@@ -2,28 +2,36 @@ import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 
+export type AgentBudgetRow = {
+  id?: string
+  tokenSymbol: string
+  amount: string
+  period: string
+}
+
 export function AgentBudgetCard({
   agentName,
+  budgets,
   walletName,
-  amount,
-  resetPeriod,
   status = 'Draft',
   statusTone = 'brand',
   density = 'normal',
-  showDetails = true,
+  onRemoveBudget,
+  emptyLabel = 'No budget set yet',
   children,
 }: {
   agentName: string
-  walletName: string
-  amount: string
-  resetPeriod: string
+  budgets: AgentBudgetRow[]
+  walletName?: string
   status?: string
   statusTone?: 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
   density?: 'normal' | 'compact'
-  showDetails?: boolean
+  onRemoveBudget?: (row: AgentBudgetRow) => void
+  emptyLabel?: string
   children?: ReactNode
 }) {
   const compact = density === 'compact'
+  const isEmpty = budgets.length === 0
 
   return (
     <Card hover={false} className={compact ? 'p-3' : 'p-5'}>
@@ -37,29 +45,49 @@ export function AgentBudgetCard({
         <StatusBadge tone={statusTone}>{status}</StatusBadge>
       </div>
 
-      <div className={`${compact ? 'mt-2 px-3 py-2' : 'mt-5 p-4'} rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]`}>
-        <div className={compact ? 'flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1' : undefined}>
-          <div>
-            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Can spend</p>
-            <p className={`${compact ? 'text-lg' : 'text-2xl'} mt-1 font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular`}>
-              {amount}
-            </p>
+      <div className={`${compact ? 'mt-2 space-y-1.5' : 'mt-4 space-y-2'}`}>
+        {isEmpty ? (
+          <div
+            className={`flex items-center justify-center rounded-lg border border-dashed border-[var(--v2-border)] bg-[var(--v2-surface)] ${compact ? 'px-3 py-2 text-xs' : 'px-3 py-3 text-sm'} text-[var(--v2-ink-3)]`}
+          >
+            {emptyLabel}
           </div>
-          <p className={`${compact ? 'text-xs' : 'text-sm'} mt-1 text-[var(--v2-ink-2)]`}>{resetPeriod}</p>
-        </div>
+        ) : (
+          budgets.map((row) => (
+            <div
+              key={row.id ?? row.tokenSymbol}
+              className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-2"
+            >
+              <p className="min-w-0 truncate text-sm font-medium text-[var(--v2-ink)] v2-tabular">
+                {`${row.amount} ${row.tokenSymbol} ${row.period}`}
+              </p>
+              <div className="flex flex-shrink-0 items-center gap-2">
+                {onRemoveBudget && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveBudget(row)}
+                    aria-label={`Remove ${row.tokenSymbol} budget`}
+                    className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                      <path d="M9 6V4h6v2" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
-      {showDetails && (
-        <dl className={`${compact ? 'mt-2 gap-2 text-xs' : 'mt-4 gap-3 text-sm'} grid sm:grid-cols-2`}>
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">From wallet</dt>
-            <dd className={`${compact ? 'mt-0.5' : 'mt-1'} font-medium text-[var(--v2-ink)]`}>{walletName}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Approval</dt>
-            <dd className={`${compact ? 'mt-0.5' : 'mt-1'} text-[var(--v2-ink-2)]`}>Manual above budget</dd>
-          </div>
-        </dl>
+      {walletName && (
+        <p className={`${compact ? 'mt-2 text-xs' : 'mt-3 text-xs'} text-[var(--v2-ink-2)]`}>
+          <span className="text-[var(--v2-ink-3)]">From wallet:</span>{' '}
+          <span className="font-medium text-[var(--v2-ink)]">{walletName}</span>
+        </p>
       )}
 
       {children && (

@@ -1,4 +1,6 @@
+import type { ReactNode } from 'react'
 import type { AgentStatus } from '@/lib/payment-status'
+import type { StatusTone } from '@/components/ui/StatusBadge'
 
 export interface Transaction {
   hash: string
@@ -29,6 +31,31 @@ export interface AggregatedTransaction extends Transaction {
   safeAddress: string
   safeName: string
   agentId?: string
+  /**
+   * Optional status pill rendered inline beside the activity title. When set
+   * it takes precedence over the default `isError` → "Failed" badge. Used by
+   * callers that render non-transaction activity (e.g. agent approval items)
+   * through `TransactionsTable` so the table stays a single primitive.
+   */
+  statusBadge?: { label: string; tone: StatusTone }
+  /**
+   * Optional title override. When provided, replaces the rule-based title
+   * the table would otherwise compute from direction / source / agentName.
+   */
+  titleOverride?: string
+  /**
+   * Optional from → to override for the From/To cell. When provided,
+   * replaces the address-resolution path. Use sparingly — only when the
+   * caller already has richer context than the table can resolve (e.g.
+   * x402 hostname + tooltip).
+   */
+  movementOverride?: ReactNode
+  /**
+   * Optional override for the external-link cell. `null` hides the link
+   * entirely (e.g. approval items without a tx hash). Undefined falls back
+   * to the chain-default explorer URL for the row's hash.
+   */
+  explorerUrl?: string | null
 }
 
 export interface TransactionsResponse {

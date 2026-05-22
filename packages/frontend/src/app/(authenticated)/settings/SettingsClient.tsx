@@ -130,12 +130,10 @@ function OwnerRow({
   owner,
   type,
   onRename,
-  onClear,
 }: {
   owner: OwnerAlias
   type: 'Passkey' | 'Connected wallet' | 'Wallet'
   onRename: (ownerAddress: string, name: string) => Promise<void>
-  onClear: (ownerAddress: string) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(owner.name ?? '')
@@ -162,19 +160,6 @@ function OwnerRow({
       setEditing(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'We could not save this approver name.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function clearAlias() {
-    setSaving(true)
-    setError('')
-    try {
-      await onClear(owner.owner_address)
-      setEditing(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not clear this approver name.')
     } finally {
       setSaving(false)
     }
@@ -259,11 +244,6 @@ function OwnerRow({
           </div>
         ) : (
           <div className="flex shrink-0 items-center gap-2">
-            {owner.name ? (
-              <Button variant="tertiary" size="sm" disabled={saving} onClick={() => void clearAlias()}>
-                Clear
-              </Button>
-            ) : null}
             <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
               {owner.name ? 'Edit' : 'Name'}
             </Button>
@@ -291,37 +271,12 @@ export default function SettingsClient() {
     error: ownersError,
     partialFailure: ownersPartialFailure,
     renameOwner,
-    clearOwner,
   } = useOwnerDirectory()
   const { currency, setCurrency, saving } = usePreferences()
 
-  const hasWallet = Boolean(user?.wallet_address)
   const hasPasskey = passkeys.length > 0
   const passkeyAddresses = new Set(passkeys.map((passkey) => passkey.signer_address.toLowerCase()))
   const walletAddress = user?.wallet_address?.toLowerCase()
-  const linkedAccounts = user?.safes ?? []
-  const accountsWithVerifiedApprovalMethods = new Set(
-    owners.flatMap((owner) => owner.accounts.map((account) => account.id)),
-  )
-  const verifiedAccountCount = linkedAccounts.filter((safe) => accountsWithVerifiedApprovalMethods.has(safe.id)).length
-  const approvalAccessStatus = ownersLoading
-    ? { label: 'Checking', tone: 'neutral' as const }
-    : ownersError || ownersPartialFailure
-      ? { label: 'Needs review', tone: 'warning' as const }
-      : linkedAccounts.length === 0
-        ? { label: 'No accounts', tone: 'neutral' as const }
-        : verifiedAccountCount === linkedAccounts.length
-          ? { label: 'Listed', tone: 'success' as const }
-          : { label: 'Needs review', tone: 'warning' as const }
-  const approvalAccessDetail = ownersLoading
-    ? 'Checking approvers for your linked Haven accounts.'
-    : ownersError || ownersPartialFailure
-      ? 'Some approvers could not be verified. Review the approvers section below.'
-      : linkedAccounts.length === 0
-        ? 'Create or import a Haven account before relying on Haven for payments.'
-        : verifiedAccountCount === linkedAccounts.length
-          ? 'Haven listed approvers for your linked accounts. Keep access to every wallet or passkey needed to approve payments.'
-          : 'Review approvers before relying on these accounts for payments.'
 
   return (
     <div className="max-w-4xl">
@@ -379,11 +334,6 @@ export default function SettingsClient() {
           description="How you sign in to Haven and approve actions on your accounts."
         >
           <SettingRow
-            label="Connected wallet"
-            value={hasWallet ? truncate(user!.wallet_address!) : 'Passkey-managed account'}
-            detail={hasWallet ? 'This wallet can approve actions for accounts it controls.' : 'This account uses passkeys for approvals when available.'}
-          />
-          <SettingRow
             label="Passkey status"
             value={hasPasskey ? <StatusPill tone="success">Enrolled</StatusPill> : <StatusPill>No passkey</StatusPill>}
             detail={hasPasskey ? `${passkeys.length} passkey${passkeys.length !== 1 ? 's' : ''} registered for approving actions in Haven.` : 'Set up a passkey during onboarding for faster approvals.'}
@@ -397,13 +347,8 @@ export default function SettingsClient() {
 
         <Section
           title="Approvers"
-          description="Wallets and passkeys that can approve actions on your linked Haven accounts. Name the ones you recognize."
+          description="Wallets and passkeys that can approve actions on your linked Haven accounts."
         >
-          <SettingRow
-            label="Approver access"
-            detail={approvalAccessDetail}
-            value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
-          />
           {ownersLoading ? (
             <div className="px-6 py-4">
               <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
@@ -438,7 +383,6 @@ export default function SettingsClient() {
                     owner={owner}
                     type={type}
                     onRename={renameOwner}
-                    onClear={clearOwner}
                   />
                 )
               })}

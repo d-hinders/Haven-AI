@@ -401,6 +401,183 @@ describe('x402 helpers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('resumes an approved x402 payment without creating a new authorization', async () => {
+    const txHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        amount: '0.02',
+        token: 'USDC',
+        resource_url: paymentRequired.resource.url,
+        merchant_address: accepted.payTo,
+        tx_hash: txHash,
+        expires_at: '2026-05-10T20:00:00.000Z',
+        chain_id: 8453,
+        message: 'Retry the original x402 request.',
+      }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const receipt = await haven.resumeAuthorizedX402({
+      paymentId: 'approval-123',
+      paymentRequired,
+      idempotencyKey: 'soundside-joke',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://haven.example/machine-payments/approval-123/status')
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/x402'))).toBe(false)
+
+    expect(receipt).toMatchObject({
+      success: true,
+      paymentId: 'approval-123',
+      txHash,
+      token: 'USDC',
+      amount: '0.02',
+      merchantTo: accepted.payTo,
+      haven: {
+        paymentId: 'approval-123',
+        fundingTxHash: txHash,
+        fundingExplorerUrl: `https://basescan.org/tx/${txHash}`,
+      },
+      x402: {
+        amount: accepted.amount,
+        token: 'USDC',
+        network: accepted.network,
+        asset: accepted.asset,
+        resource: paymentRequired.resource.url,
+      },
+    })
+    expect(receipt.paymentHeader).toBeTruthy()
+
+    const payment = decodeHeader(receipt.paymentHeader ?? '')
+    expect(payment).toMatchObject({
+      x402Version: 2,
+      accepted,
+      payload: {
+        authorization: {
+          from: delegateAddress,
+          to: accepted.payTo,
+          value: accepted.amount,
+        },
+      },
+    })
+  })
+
+  it('retries the original x402 request from an approved payment id', async () => {
+    const fundingTxHash = `0x${'ab'.repeat(32)}`
+    const settlementTxHash = `0x${'cd'.repeat(32)}`
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        amount: '0.02',
+        token: 'USDC',
+        resource_url: paymentRequired.resource.url,
+        merchant_address: accepted.payTo,
+        tx_hash: fundingTxHash,
+        expires_at: '2026-05-10T20:00:00.000Z',
+        chain_id: 8453,
+        message: 'Retry the original x402 request.',
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': btoa(JSON.stringify({
+            success: true,
+            transaction: settlementTxHash,
+            network: accepted.network,
+          })),
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const response = await haven.resumeX402Payment({
+      paymentId: 'approval-123',
+      url: paymentRequired.resource.url,
+      paymentRequired,
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/x402'))).toBe(false)
+
+    const retryInit = fetchMock.mock.calls[1][1] as RequestInit
+    const retryHeaders = new Headers(retryInit.headers)
+    expect(retryHeaders.get('X-PAYMENT')).toBeTruthy()
+
+    const evidenceInit = fetchMock.mock.calls[2][1] as RequestInit
+    expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
+      paymentId: 'approval-123',
+      rail: 'x402',
+      txHash: fundingTxHash,
+      protocolReceiptPayload: {
+        success: true,
+        transaction: settlementTxHash,
+        network: accepted.network,
+      },
+    })
+  })
+
+  it('rejects x402 resume attempts that do not match the approved amount', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        amount: '0.03',
+        token: 'USDC',
+        resource_url: paymentRequired.resource.url,
+        merchant_address: accepted.payTo,
+        tx_hash: `0x${'ab'.repeat(32)}`,
+        expires_at: '2026-05-10T20:00:00.000Z',
+        chain_id: 8453,
+        message: 'Retry the original x402 request.',
+      }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    await expect(haven.resumeAuthorizedX402({
+      paymentId: 'approval-123',
+      paymentRequired,
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'x402 resume request does not match the approved amount.',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/x402'))).toBe(false)
+  })
+
   it('returns structured state from the x402 agent tool', async () => {
     vi
       .spyOn(globalThis, 'fetch')
@@ -443,6 +620,58 @@ describe('x402 helpers', () => {
       amount: '0.02',
       token: 'USDC',
       message: 'Queued for owner approval',
+    })
+  })
+
+  it('returns a payment header from the x402 resume agent tool', async () => {
+    vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        amount: '0.02',
+        token: 'USDC',
+        resource_url: paymentRequired.resource.url,
+        merchant_address: accepted.payTo,
+        tx_hash: `0x${'ab'.repeat(32)}`,
+        expires_at: '2026-05-10T20:00:00.000Z',
+        chain_id: 8453,
+        message: 'Retry the original x402 request.',
+      }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const result = await haven.executeTool('resume_x402_payment', {
+      payment_id: 'approval-123',
+      url: paymentRequired.resource.url,
+      payTo: accepted.payTo,
+      amount: accepted.amount,
+      asset: accepted.asset,
+      network: accepted.network,
+      idempotencyKey: 'soundside-joke',
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      payment_id: 'approval-123',
+      payment_header: expect.any(String),
+      merchant_to: accepted.payTo,
+      haven: {
+        paymentId: 'approval-123',
+      },
+      x402: {
+        amount: accepted.amount,
+        network: accepted.network,
+        resource: paymentRequired.resource.url,
+      },
     })
   })
 

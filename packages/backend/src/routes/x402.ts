@@ -90,6 +90,16 @@ function resolveTokenByAddress(chainId: number, address: string) {
 function pendingApprovalResponse(
   approval: X402ApprovalRow,
   remainingHuman: string | null,
+  context: {
+    url: string
+    merchantPayTo: string | null
+    chainId: number
+    amountAtomic: string
+    asset: string
+    network: string
+    description?: string
+    idempotencyKey?: string
+  },
 ) {
   return {
     payment_id: approval.id,
@@ -98,12 +108,31 @@ function pendingApprovalResponse(
     status: 'pending_approval',
     phase: 'user_approval_required',
     next_action: 'wait_for_user_approval',
-    message: `Payment of ${approval.amount_human} ${approval.token_symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
+    message:
+      `This x402 funding payment of ${approval.amount_human} ${approval.token_symbol} is waiting for user approval in Haven. ` +
+      'Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.',
     remaining: remainingHuman,
     requested: approval.amount_human,
     token: approval.token_symbol,
+    resource_url: context.url,
+    merchant_address: context.merchantPayTo,
+    chain_id: context.chainId,
+    amount_atomic: context.amountAtomic,
+    asset: context.asset,
+    network: context.network,
+    description: context.description ?? null,
+    idempotency_key: context.idempotencyKey ?? null,
     expires_at: approval.expires_at,
     challenge_id: approval.machine_challenge_id,
+    x402: {
+      amount_atomic: context.amountAtomic,
+      asset: context.asset,
+      network: context.network,
+      resource_url: context.url,
+      merchant_address: context.merchantPayTo,
+      description: context.description ?? null,
+      idempotency_key: context.idempotencyKey ?? null,
+    },
   }
 }
 
@@ -434,7 +463,16 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         }
         return reply.code(agentPaymentStatusHttpCode(status)).send(status)
       }
-      return reply.code(202).send(pendingApprovalResponse(approval, remainingHuman))
+      return reply.code(202).send(pendingApprovalResponse(approval, remainingHuman, {
+        url,
+        merchantPayTo: merchantPayTo?.toLowerCase() ?? null,
+        chainId: agent.chain_id,
+        amountAtomic: amountRaw.toString(),
+        asset,
+        network,
+        description,
+        idempotencyKey,
+      }))
     }
 
     // 7. Generate transfer hash on-chain.

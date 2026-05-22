@@ -294,6 +294,20 @@ export interface PaymentStatusResult {
   expiresAt: string
   chainId: number
   message: string
+  amountAtomic?: string | null
+  asset?: string | null
+  network?: string | null
+  description?: string | null
+  idempotencyKey?: string | null
+  x402?: {
+    amountAtomic: string | null
+    asset: string | null
+    network: string | null
+    resourceUrl: string | null
+    merchantAddress: string | null
+    description: string | null
+    idempotencyKey: string | null
+  }
 }
 
 export interface PendingApproval extends PaymentStatusResult {
@@ -322,10 +336,17 @@ export interface RawMachinePaymentAuthorizeResponse {
   payer?: string
   token?: string
   amount?: string
+  amount_atomic?: string | null
+  asset?: string | null
+  network?: string | null
+  description?: string | null
+  idempotency_key?: string | null
   to?: string
   merchant_to?: string | null
+  merchant_address?: string | null
   resource_url?: string
   rail?: string
+  x402?: RawX402StateContext
   challenge_id?: string
   explorer_url?: string
   expires_at?: string
@@ -363,10 +384,17 @@ export interface RawX402AuthorizeResponse {
   payer?: string
   token?: string
   amount?: string
+  amount_atomic?: string | null
+  asset?: string | null
+  network?: string | null
+  description?: string | null
+  idempotency_key?: string | null
   to?: string
   merchant_to?: string | null
+  merchant_address?: string | null
   resource_url?: string
   explorer_url?: string
+  x402?: RawX402StateContext
   expires_at?: string
   sign_data?: {
     hash: string
@@ -427,10 +455,17 @@ export interface RawSignResponse {
   tx_hash?: string
   token?: string
   amount?: string
+  amount_atomic?: string | null
+  asset?: string | null
+  network?: string | null
+  description?: string | null
+  idempotency_key?: string | null
   to?: string
   merchant_to?: string | null
+  merchant_address?: string | null
   resource_url?: string
   rail?: string
+  x402?: RawX402StateContext
   explorer_url?: string
   chain_id?: number
   expires_at?: string
@@ -472,6 +507,23 @@ export interface RawPaymentStatusResult {
   expires_at: string
   chain_id: number
   message: string
+  amount_atomic?: string | null
+  asset?: string | null
+  network?: string | null
+  description?: string | null
+  idempotency_key?: string | null
+  x402?: RawX402StateContext
+}
+
+/** @internal */
+export interface RawX402StateContext {
+  amount_atomic?: string | null
+  asset?: string | null
+  network?: string | null
+  resource_url?: string | null
+  merchant_address?: string | null
+  description?: string | null
+  idempotency_key?: string | null
 }
 
 // ── Error Types ──────────────────────────────────────────────────

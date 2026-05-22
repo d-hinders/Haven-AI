@@ -61,6 +61,18 @@ describe('formatAllowanceAmount', () => {
     expect(formatAllowanceAmount('1e18', 18)).toBe('1e18')
     expect(formatAllowanceAmount('2.5e20', 6)).toBe('2.5e20')
   })
+
+  it('uses stablecoin defaults while preserving meaningful sub-cent precision', () => {
+    expect(formatAllowanceAmount('1000000', 6, { symbol: 'USDC' })).toBe('1.00')
+    expect(formatAllowanceAmount('1500000', 6, { symbol: 'USDC' })).toBe('1.50')
+    expect(formatAllowanceAmount('5000', 6, { symbol: 'USDC' })).toBe('0.005')
+    expect(formatAllowanceAmount('1', 18, { symbol: 'xDAI' })).toBe('0.000000000000000001')
+  })
+
+  it('uses ETH defaults while preserving smaller amounts', () => {
+    expect(formatAllowanceAmount('1000000000000000000', 18, { symbol: 'ETH' })).toBe('1.0000')
+    expect(formatAllowanceAmount('10000000000000', 18, { symbol: 'ETH' })).toBe('0.00001')
+  })
 })
 
 describe('getTokenDecimals', () => {
@@ -81,14 +93,20 @@ describe('getTokenDecimals', () => {
   })
 
   it('returns undefined for unknown chain', () => {
-    expect(getTokenDecimals(999_999, 'USDC')).toBeUndefined()
+    expect(getTokenDecimals(999_999, 'NOPE')).toBeUndefined()
+  })
+
+  it('falls back to known token unit decimals when chain metadata is missing', () => {
+    expect(getTokenDecimals(999_999, 'USDC')).toBe(6)
+    expect(getTokenDecimals(100, 'USDC')).toBe(6)
+    expect(getTokenDecimals(8453, 'EURe')).toBe(18)
   })
 })
 
 describe('formatAllowanceForToken', () => {
   it('formats a USDC allowance on Base correctly', () => {
     // 500 USDC at 6 decimals = 500_000_000
-    expect(formatAllowanceForToken('500000000', 8453, 'USDC')).toBe('500')
+    expect(formatAllowanceForToken('500000000', 8453, 'USDC')).toBe('500.00')
   })
 
   it('falls back to 18 decimals for unknown tokens', () => {
@@ -97,6 +115,11 @@ describe('formatAllowanceForToken', () => {
   })
 
   it('falls back to 18 decimals when chainId is null', () => {
-    expect(formatAllowanceForToken('1000000000000000000', null, 'USDC')).toBe('1')
+    expect(formatAllowanceForToken('1000000000000000000', null, 'MYSTERY')).toBe('1')
+  })
+
+  it('formats known tokens correctly when chainId is null', () => {
+    expect(formatAllowanceForToken('5000', null, 'USDC')).toBe('0.005')
+    expect(formatAllowanceForToken('1000000000000000000', null, 'EURe')).toBe('1.00')
   })
 })

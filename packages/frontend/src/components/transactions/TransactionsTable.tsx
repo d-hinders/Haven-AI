@@ -7,7 +7,6 @@ import { timeAgo, truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { DirectionMark, ExternalDetailsLink, TransactionMovement } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -19,9 +18,34 @@ type AmountTone = 'success' | 'debit' | 'danger' | 'neutral'
 type SortColumn = 'date' | 'amount'
 type SortDirection = 'asc' | 'desc'
 
+export type TransactionColumnId =
+  | 'direction'
+  | 'activity'
+  | 'initiator'
+  | 'fromTo'
+  | 'date'
+  | 'amount'
+  | 'link'
+
+const ALL_COLUMNS: TransactionColumnId[] = [
+  'direction',
+  'activity',
+  'initiator',
+  'fromTo',
+  'date',
+  'amount',
+  'link',
+]
+
 interface SortState {
   column: SortColumn
   direction: SortDirection
+}
+
+interface EmptyStateOverride {
+  title: string
+  body: string
+  action?: ReactNode
 }
 
 interface TransactionsTableProps {
@@ -37,6 +61,30 @@ interface TransactionsTableProps {
    * Omitted on screens that don't surface filter controls.
    */
   onClearFilters?: () => void
+  /**
+   * `page` (default) pins the column header to the page scroll container so
+   * it survives long lists. `card` is for tables nested inside a Card — no
+   * sticky header, since the surrounding Card supplies the scroll context.
+   */
+  variant?: 'page' | 'card'
+  /**
+   * `comfortable` (default) matches the dedicated history page rhythm.
+   * `compact` shaves vertical padding so dense card-nested tables don't
+   * overpower their host (e.g. the agent detail "Recent activity").
+   */
+  density?: 'comfortable' | 'compact'
+  /**
+   * Subset (and order) of columns to render. Defaults to all seven. Use to
+   * drop columns that are constant in a given context — e.g. the agent
+   * detail view omits `initiator` because every row is the same agent.
+   */
+  columns?: TransactionColumnId[]
+  /**
+   * Override the default empty-state copy when there are zero rows AND no
+   * active filters. The filter-active empty state is always supplied by the
+   * table since only it knows the filter context.
+   */
+  emptyState?: EmptyStateOverride
 }
 
 // ─── Amount tone map ──────────────────────────────────────────────────────────
@@ -67,14 +115,19 @@ function SortChevron({ active, ascending }: { active: boolean; ascending: boolea
   )
 }
 
-// ─── Sticky thead ─────────────────────────────────────────────────────────────
+// ─── Header band ──────────────────────────────────────────────────────────────
 
-// Sticky + z-index live on both <thead> AND each <th> so the header
-// reliably paints above body rows in every table-layout browser.
-// Negative top compensates for <main>'s p-6/lg:p-8 padding so the pinned
-// header sits flush against the TopBar instead of below the padding.
+// Tokenized so the header band reads as one design-system primitive across
+// every transaction list (history page, Safe detail, agent detail). The
+// `--v2-table-header-bg` token replaces the previous mix of page-bg and
+// surface-tint values that diverged per surface.
 const TH_BASE =
-  'sticky -top-6 lg:-top-8 z-20 bg-[var(--v2-bg)] border-b border-[var(--v2-border)] text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)] px-4 py-3 font-medium'
+  'bg-[var(--v2-table-header-bg)] border-b border-[var(--v2-table-row-border)] text-[11px] uppercase tracking-wide text-[var(--v2-table-header-ink)] px-4 py-3 font-medium'
+
+// Sticky behaviour only applies on the `page` variant. Negative top
+// compensates for <main>'s p-6/lg:p-8 padding so the pinned header sits
+// flush against the TopBar instead of below the padding.
+const TH_STICKY = 'sticky -top-6 lg:-top-8 z-20'
 
 function SortableHeader({
   label,
@@ -84,6 +137,7 @@ function SortableHeader({
   loadedCount,
   className = '',
   align = 'left',
+  sticky,
 }: {
   label: string
   column: SortColumn
@@ -92,6 +146,7 @@ function SortableHeader({
   loadedCount: number
   className?: string
   align?: 'left' | 'right'
+  sticky: boolean
 }) {
   const active = sort.column === column
   const ascending = active && sort.direction === 'asc'
@@ -102,7 +157,11 @@ function SortableHeader({
   const directionWord = active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'unsorted'
   const tooltipLabel = `Sorts the ${loadedCount} loaded transaction${loadedCount === 1 ? '' : 's'} — use Load more to widen the set`
   return (
-    <th className={`${TH_BASE} ${className}`} scope="col" aria-sort={ariaSort}>
+    <th
+      className={`${TH_BASE} ${sticky ? TH_STICKY : ''} ${className}`}
+      scope="col"
+      aria-sort={ariaSort}
+    >
       <Tooltip label={tooltipLabel} side="bottom">
         <button
           type="button"
@@ -120,50 +179,57 @@ function SortableHeader({
 
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
 
-function LoadingTable() {
+function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY: string }) {
+  const renders: Record<TransactionColumnId, (key: string) => ReactNode> = {
+    direction: (key) => (
+      <td key={key} className={`w-9 px-4 ${padY}`}>
+        <Skeleton className="h-9 w-9 rounded-[10px]" />
+      </td>
+    ),
+    activity: (key) => (
+      <td key={key} className={`px-4 ${padY}`}>
+        <div className="space-y-1.5">
+          <Skeleton variant="text" className="h-3 w-40" />
+          <Skeleton variant="text" className="h-2 w-56" />
+        </div>
+      </td>
+    ),
+    initiator: (key) => (
+      <td key={key} className={`hidden px-4 ${padY} md:table-cell`}>
+        <Skeleton variant="text" className="h-2 w-20" />
+      </td>
+    ),
+    fromTo: (key) => (
+      <td key={key} className={`hidden px-4 ${padY} md:table-cell`}>
+        <Skeleton variant="text" className="h-2 w-28" />
+      </td>
+    ),
+    date: (key) => (
+      <td key={key} className={`hidden px-4 ${padY} md:table-cell`}>
+        <Skeleton variant="text" className="h-2 w-14" />
+      </td>
+    ),
+    amount: (key) => (
+      <td key={key} className={`px-4 ${padY} text-right`}>
+        <Skeleton className="h-4 w-20 ml-auto" />
+      </td>
+    ),
+    link: (key) => (
+      <td key={key} className={`w-8 px-4 ${padY} text-center`}>
+        <Skeleton className="h-6 w-6 mx-auto" />
+      </td>
+    ),
+  }
+
   return (
     <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading transactions">
-      <Card hover={false} className="overflow-hidden">
-        <table className="w-full border-separate border-spacing-0">
-          <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
-            {[0, 1, 2, 3].map((i) => (
-              <tr key={i}>
-                {/* col1: direction icon */}
-                <td className="w-9 px-4 py-4">
-                  <Skeleton className="h-9 w-9 rounded-[10px]" />
-                </td>
-                {/* col2: activity */}
-                <td className="px-4 py-4">
-                  <div className="space-y-1.5">
-                    <Skeleton variant="text" className="h-3 w-40" />
-                    <Skeleton variant="text" className="h-2 w-56" />
-                  </div>
-                </td>
-                {/* col3: initiator */}
-                <td className="hidden px-4 py-4 md:table-cell">
-                  <Skeleton variant="text" className="h-2 w-20" />
-                </td>
-                {/* col4: from/to */}
-                <td className="hidden px-4 py-4 md:table-cell">
-                  <Skeleton variant="text" className="h-2 w-28" />
-                </td>
-                {/* col5: date */}
-                <td className="hidden px-4 py-4 md:table-cell">
-                  <Skeleton variant="text" className="h-2 w-14" />
-                </td>
-                {/* col6: amount */}
-                <td className="px-4 py-4 text-right">
-                  <Skeleton className="h-4 w-20 ml-auto" />
-                </td>
-                {/* col7: external link */}
-                <td className="w-8 px-4 py-4 text-center">
-                  <Skeleton className="h-6 w-6 mx-auto" />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      <table className="w-full border-separate border-spacing-0">
+        <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-table-row-border)] [&>tr:last-child>td]:border-b-0">
+          {[0, 1, 2, 3].map((i) => (
+            <tr key={i}>{columns.map((col) => renders[col](`${col}-${i}`))}</tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -179,8 +245,15 @@ export default function TransactionsTable({
   safeNamesByAddress,
   hasActiveFilters,
   onClearFilters,
+  variant = 'page',
+  density = 'comfortable',
+  columns = ALL_COLUMNS,
+  emptyState,
 }: TransactionsTableProps) {
   const [sort, setSort] = useState<SortState>({ column: 'date', direction: 'desc' })
+  const isSticky = variant === 'page'
+  const padY = density === 'compact' ? 'py-3' : 'py-4'
+  const showCol = (id: TransactionColumnId) => columns.includes(id)
 
   function handleSort(col: SortColumn) {
     setSort((prev) =>
@@ -208,7 +281,7 @@ export default function TransactionsTable({
   }, [transactions, sort])
 
   if (loading) {
-    return <LoadingTable />
+    return <LoadingTable columns={columns} padY={padY} />
   }
 
   if (error) {
@@ -225,28 +298,38 @@ export default function TransactionsTable({
     )
   }
 
+  const thStickyClass = isSticky ? TH_STICKY : ''
+  const colSpan = columns.length
+
   return (
-    // No `overflow-hidden` on the Card — sticky <thead> needs the nearest
-    // scroll container to be the page's <main>, not this wrapper.
-    <Card hover={false}>
-      <table className="w-full border-separate border-spacing-0">
-        <thead className="hidden md:table-header-group sticky -top-6 lg:-top-8 z-10">
-          <tr>
-            {/* col1: direction icon */}
-            <th className={`${TH_BASE} w-9`} scope="col" />
-            {/* col2: activity */}
-            <th className={`${TH_BASE} text-left`} scope="col">
+    <table className="w-full border-separate border-spacing-0">
+      <thead className={`hidden md:table-header-group ${isSticky ? 'sticky -top-6 lg:-top-8 z-10' : ''}`}>
+        <tr>
+          {showCol('direction') ? (
+            <th className={`${TH_BASE} ${thStickyClass} w-9`} scope="col" />
+          ) : null}
+          {showCol('activity') ? (
+            <th className={`${TH_BASE} ${thStickyClass} text-left`} scope="col">
               Activity
             </th>
-            {/* col3: initiator */}
-            <th className={`${TH_BASE} w-[120px] text-left hidden md:table-cell`} scope="col">
+          ) : null}
+          {showCol('initiator') ? (
+            <th
+              className={`${TH_BASE} ${thStickyClass} w-[120px] text-left hidden md:table-cell`}
+              scope="col"
+            >
               Initiator
             </th>
-            {/* col4: from/to */}
-            <th className={`${TH_BASE} w-[140px] text-left hidden md:table-cell`} scope="col">
+          ) : null}
+          {showCol('fromTo') ? (
+            <th
+              className={`${TH_BASE} ${thStickyClass} w-[140px] text-left hidden md:table-cell`}
+              scope="col"
+            >
               From / To
             </th>
-            {/* col5: date (sortable) */}
+          ) : null}
+          {showCol('date') ? (
             <SortableHeader
               label="Date"
               column="date"
@@ -254,8 +337,10 @@ export default function TransactionsTable({
               onSort={handleSort}
               loadedCount={transactions.length}
               className="w-[90px] hidden md:table-cell"
+              sticky={isSticky}
             />
-            {/* col6: amount (sortable) */}
+          ) : null}
+          {showCol('amount') ? (
             <SortableHeader
               label="Amount"
               column="amount"
@@ -264,121 +349,143 @@ export default function TransactionsTable({
               loadedCount={transactions.length}
               className="w-[110px] text-right"
               align="right"
+              sticky={isSticky}
             />
-            {/* col7: external link */}
-            <th className={`${TH_BASE} w-8`} scope="col" />
-          </tr>
-        </thead>
+          ) : null}
+          {showCol('link') ? (
+            <th className={`${TH_BASE} ${thStickyClass} w-8`} scope="col" />
+          ) : null}
+        </tr>
+      </thead>
 
-        <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
-          {sorted.length === 0 ? (
-            <tr>
-              <td colSpan={7} className="py-16 text-center">
-                <EmptyState
-                  title={hasActiveFilters ? 'No activity matches these filters' : 'No activity yet'}
-                  body={
-                    hasActiveFilters
-                      ? 'Adjust or clear filters to widen the history.'
-                      : 'Payments and account funding activity will appear here.'
-                  }
-                  action={
-                    hasActiveFilters && onClearFilters ? (
-                      <Button variant="ghost" size="sm" onClick={onClearFilters}>
-                        Clear filters
-                      </Button>
-                    ) : !hasActiveFilters ? (
+      <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-table-row-border)] [&>tr:last-child>td]:border-b-0">
+        {sorted.length === 0 ? (
+          <tr>
+            <td colSpan={colSpan} className="py-16 text-center">
+              <EmptyState
+                title={
+                  hasActiveFilters
+                    ? 'No activity matches these filters'
+                    : (emptyState?.title ?? 'No activity yet')
+                }
+                body={
+                  hasActiveFilters
+                    ? 'Adjust or clear filters to widen the history.'
+                    : (emptyState?.body ?? 'Payments and account funding activity will appear here.')
+                }
+                action={
+                  hasActiveFilters && onClearFilters ? (
+                    <Button variant="ghost" size="sm" onClick={onClearFilters}>
+                      Clear filters
+                    </Button>
+                  ) : !hasActiveFilters ? (
+                    emptyState?.action ?? (
                       <Button href="/dashboard" variant="ghost" size="sm">
                         Open dashboard
                       </Button>
-                    ) : undefined
-                  }
-                />
-              </td>
-            </tr>
-          ) : (
-            sorted.map((tx, index) => {
-              // Outgoing amounts intentionally stay neutral ink — the sky
-              // `--v2-debit` colour is reserved for the direction icon so
-              // the row reads as a calm number with a coloured marker,
-              // rather than a busy two-colour line.
-              const amountTone: AmountTone = tx.isError
-                ? 'danger'
-                : tx.direction === 'in'
-                  ? 'success'
-                  : 'neutral'
-              const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
-              // Incoming transactions: leave initiator blank (no meaningful "who" — the originator is the sending wallet).
-              // Outgoing without an agent: surface as "You".
-              const initiator = tx.agentName ?? (tx.direction === 'in' ? '' : 'You')
+                    )
+                  ) : undefined
+                }
+              />
+            </td>
+          </tr>
+        ) : (
+          sorted.map((tx, index) => {
+            // Outgoing amounts intentionally stay neutral ink — the sky
+            // `--v2-debit` colour is reserved for the direction icon so
+            // the row reads as a calm number with a coloured marker,
+            // rather than a busy two-colour line.
+            const amountTone: AmountTone = tx.isError
+              ? 'danger'
+              : tx.direction === 'in'
+                ? 'success'
+                : 'neutral'
+            const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
+            // Incoming transactions: leave initiator blank (no meaningful "who" — the originator is the sending wallet).
+            // Outgoing without an agent: surface as "You".
+            const initiator = tx.agentName ?? (tx.direction === 'in' ? '' : 'You')
 
-              return (
-                <tr
-                  key={`${tx.safeId}:${tx.hash}:${tx.type}:${index}`}
-                  className="hover:bg-[var(--v2-surface)] transition-colors"
-                >
-                  {/* col1: direction icon */}
-                  <td className="w-9 px-4 py-4 text-center">
+            return (
+              <tr
+                key={`${tx.safeId}:${tx.hash}:${tx.type}:${index}`}
+                className="hover:bg-[var(--v2-table-row-hover)] transition-colors"
+              >
+                {showCol('direction') ? (
+                  <td className={`w-9 px-4 ${padY} text-center`}>
                     <DirectionMark direction={tx.direction} />
                   </td>
+                ) : null}
 
-                  {/* col2: activity */}
-                  <td className="px-4 py-4">
+                {showCol('activity') ? (
+                  <td className={`px-4 ${padY}`}>
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
                         {transactionTitle(tx)}
                       </p>
-                      {tx.isError ? (
+                      {tx.statusBadge ? (
+                        <StatusBadge tone={tx.statusBadge.tone}>{tx.statusBadge.label}</StatusBadge>
+                      ) : tx.isError ? (
                         <StatusBadge tone="danger">Failed</StatusBadge>
                       ) : null}
                     </div>
-                    <div className="mt-0.5 text-xs text-[var(--v2-ink-2)] md:hidden">
-                      {movement}
-                    </div>
+                    {showCol('fromTo') ? (
+                      <div className="mt-0.5 text-xs text-[var(--v2-ink-2)] md:hidden">
+                        {movement}
+                      </div>
+                    ) : null}
                   </td>
+                ) : null}
 
-                  {/* col3: initiator */}
-                  <td className="hidden md:table-cell w-[120px] px-4 py-4">
+                {showCol('initiator') ? (
+                  <td className={`hidden md:table-cell w-[120px] px-4 ${padY}`}>
                     <span className="text-xs text-[var(--v2-ink-2)] truncate block">{initiator}</span>
                   </td>
+                ) : null}
 
-                  {/* col4: from/to */}
-                  <td className="hidden md:table-cell w-[140px] px-4 py-4">
+                {showCol('fromTo') ? (
+                  <td className={`hidden md:table-cell w-[140px] px-4 ${padY}`}>
                     <span className="text-xs text-[var(--v2-ink-2)] truncate block">{movement}</span>
                   </td>
+                ) : null}
 
-                  {/* col5: date */}
-                  <td className="hidden md:table-cell w-[90px] px-4 py-4 whitespace-nowrap">
+                {showCol('date') ? (
+                  <td className={`hidden md:table-cell w-[90px] px-4 ${padY} whitespace-nowrap`}>
                     <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">
                       {timeAgo(tx.timestamp * 1000)}
                     </span>
                   </td>
+                ) : null}
 
-                  {/* col6: amount */}
-                  <td className="w-[110px] px-4 py-4 text-right">
+                {showCol('amount') ? (
+                  <td className={`w-[110px] px-4 ${padY} text-right`}>
                     <span
                       className={`v2-tabular text-sm font-semibold ${AMOUNT_TONE_CLASS[amountTone]}`}
                     >
                       {transactionAmount(tx)}
                     </span>
                   </td>
+                ) : null}
 
-                  {/* col7: external link */}
-                  <td className="w-8 px-4 py-4 text-center">
-                    <ExternalDetailsLink href={getExplorerUrl(tx.chainId, 'tx', tx.hash)} />
+                {showCol('link') ? (
+                  <td className={`w-8 px-4 ${padY} text-center`}>
+                    {tx.explorerUrl !== null ? (
+                      <ExternalDetailsLink href={tx.explorerUrl ?? getExplorerUrl(tx.chainId, 'tx', tx.hash)} />
+                    ) : null}
                   </td>
-                </tr>
-              )
-            })
-          )}
-        </tbody>
-      </table>
-    </Card>
+                ) : null}
+              </tr>
+            )
+          })
+        )}
+      </tbody>
+    </table>
   )
 }
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
 
 function transactionTitle(tx: AggregatedTransaction): string {
+  if (tx.titleOverride) return tx.titleOverride
   if (tx.direction === 'in') return 'Received payment'
   const sourceTitle = paymentSourceTitle(tx.source)
   if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
@@ -397,6 +504,7 @@ function transactionMovement(
   resolveAddress?: (address: string) => string | null,
   safeNamesByAddress?: Map<string, string>,
 ): ReactNode {
+  if (tx.movementOverride) return tx.movementOverride
   const counterparty = counterpartyLabel(tx, resolveAddress, safeNamesByAddress)
   const from = tx.direction === 'in' ? counterparty : tx.safeName
   const to = tx.direction === 'in' ? tx.safeName : counterparty
@@ -419,5 +527,3 @@ function counterpartyLabel(
 
   return safeName ?? contactName ?? truncate(address)
 }
-
-// Kept for completeness — used by AgentActivityRow callers via TransactionActivityRow

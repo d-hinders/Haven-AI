@@ -40,13 +40,13 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tooltip } from '@/components/ui/Tooltip'
+import TransactionsTable from '@/components/transactions/TransactionsTable'
 import {
-  AgentActivityRow,
   AgentRulesSummary,
   ApprovalRequiredBanner,
-  ExternalDetailsLink,
   TransactionMovement,
 } from '@/components/haven'
+import type { AggregatedTransaction } from '@/types/transactions'
 
 function activityTitle(item: ActivityItem, agentName?: string): string {
   const sourceTitle = paymentSourceTitle(item.source)
@@ -72,6 +72,49 @@ function activityMovement(item: ActivityItem, walletName: string) {
   )
 
   return <TransactionMovement from={walletName} to={recipient} />
+}
+
+// Adapts the agent activity feed (payments + approvals) into the shape the
+// shared TransactionsTable expects, so the agent detail screen reuses the
+// same primitive — and the same tinted header band — as the other
+// transaction surfaces. Approval items without a tx hash render with no
+// external link via `explorerUrl: null`.
+function activityToTransaction(
+  item: ActivityItem,
+  agentName: string,
+  walletName: string,
+): AggregatedTransaction {
+  const status = activityStatusPresentation(item.status)
+  const isError = failedOrRejectedStatus(item.status)
+  const createdMs = new Date(item.created_at).getTime()
+  return {
+    hash: item.tx_hash ?? `activity-${item.type}-${item.id}`,
+    type: 'erc20',
+    from: item.safe_address ?? '',
+    to: item.to,
+    value: item.amount_raw ?? '0',
+    valueFormatted: item.amount,
+    asset: item.token,
+    decimals: 0,
+    direction: 'out',
+    timestamp: Number.isFinite(createdMs) ? Math.floor(createdMs / 1000) : 0,
+    blockNumber: 0,
+    isError,
+    tokenAddress: item.token_address ?? undefined,
+    agentName,
+    source: item.source as AggregatedTransaction['source'],
+    x402ResourceUrl: item.x402_resource_url ?? null,
+    x402MerchantAddress: item.x402_merchant_address ?? null,
+    chainId: item.chain_id ?? 0,
+    safeId: item.safe_id ?? '',
+    safeAddress: item.safe_address ?? '',
+    safeName: item.safe_name ?? walletName,
+    agentId: item.agent_id,
+    statusBadge: { label: status.label, tone: status.tone },
+    titleOverride: activityTitle(item, agentName),
+    movementOverride: activityMovement(item, walletName),
+    explorerUrl: item.explorer_url,
+  }
 }
 
 function resetLabel(resetPeriodMin: number): string {
@@ -210,7 +253,9 @@ export default function AgentDetailClient({ agentId }: Props) {
     const decimals =
       chainConfig &&
       Object.values(chainConfig.tokens).find((token) => token.symbol === allowance.token_symbol)?.decimals
-    const amount = formatAllowanceAmount(allowance.allowance_amount, decimals ?? 18)
+    const amount = formatAllowanceAmount(allowance.allowance_amount, decimals ?? 18, {
+      symbol: allowance.token_symbol,
+    })
     return {
       id: allowance.id,
       label: `${amount} ${allowance.token_symbol} ${budgetPeriodLabel(allowance.reset_period_min)}`,
@@ -482,49 +527,30 @@ export default function AgentDetailClient({ agentId }: Props) {
             />
           ) : null}
 
-          <Card hover={false} className="overflow-hidden">
-            <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Recent activity</h2>
-              <p className="mt-1 text-xs text-[var(--v2-ink-2)]">Payments and approval requests from this agent.</p>
+          <div>
+            <div className="mb-4">
+              <h2 className="text-base font-semibold text-[var(--v2-ink)]">Recent activity</h2>
+              <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Payments and approval requests from this agent.</p>
             </div>
-
-            {activityLoading ? (
-              <div className="p-5 space-y-3">
-                {[0, 1, 2].map((index) => (
-                  <Skeleton key={index} className="h-14 rounded-lg" />
-                ))}
-              </div>
-            ) : activity.length === 0 ? (
-              <EmptyState
-                className="m-5"
-                title="No activity yet"
-                body="Payments, approvals, and confirmations for this agent will appear here."
+            <Card hover={false}>
+              <TransactionsTable
+                transactions={activity.map((item) =>
+                  activityToTransaction(item, currentAgent.name, walletName),
+                )}
+                loading={activityLoading}
+                error={null}
+                onRefresh={() => {}}
+                hasActiveFilters={false}
+                variant="card"
+                density="compact"
+                columns={['direction', 'activity', 'fromTo', 'date', 'amount', 'link']}
+                emptyState={{
+                  title: 'No activity yet',
+                  body: 'Payments, approvals, and confirmations for this agent will appear here.',
+                }}
               />
-            ) : (
-              <div>
-                {activity.map((item) => {
-                  const status = activityStatusPresentation(item.status)
-                  return (
-                    <AgentActivityRow
-                      key={`${item.type}-${item.id}`}
-                      title={activityTitle(item, currentAgent.name)}
-                      description={activityMovement(item, walletName)}
-                      amount={`-${item.amount} ${item.token}`}
-                      amountTone={failedOrRejectedStatus(item.status) ? 'danger' : 'neutral'}
-                      status={status.label}
-                      statusTone={status.tone}
-                      timestamp={timeAgo(item.created_at)}
-                      action={
-                        item.tx_hash && item.explorer_url ? (
-                          <ExternalDetailsLink href={item.explorer_url} />
-                        ) : undefined
-                      }
-                    />
-                  )
-                })}
-              </div>
-            )}
-          </Card>
+            </Card>
+          </div>
 
       </div>
 

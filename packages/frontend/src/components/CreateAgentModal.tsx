@@ -34,6 +34,7 @@ import WalletButton from './WalletButton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
+import { StepProgress } from './ui/StepProgress'
 import {
   AgentBudgetCard,
   AgentRulesSummary,
@@ -684,33 +685,15 @@ export default function CreateAgentModal({
 
         {/* Step indicators */}
         {step !== 'executing' && step !== 'done' && (
-          <div className="flex items-center gap-2 px-5 py-2 border-b border-[var(--v2-border)]">
-            {setupSteps.map((s, i, arr) => (
-              <div key={s} className="flex items-center gap-2">
-                <div
-                  aria-label={`Step ${i + 1} of ${arr.length}`}
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    s === step
-                      ? 'bg-[var(--v2-brand)] text-white'
-                      : currentSetupStepIndex > i
-                        ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-                  } v2-tabular`}
-                >
-                  {i + 1}
-                </div>
-                {i < arr.length - 1 && (
-                  <div className="w-8 h-px bg-[var(--v2-surface-2)]" />
-                )}
-              </div>
-            ))}
+          <div className="px-5 py-3 border-b border-[var(--v2-border)]">
+            <StepProgress totalSteps={setupSteps.length} currentStep={currentSetupStepIndex} />
           </div>
         )}
 
         <div className="p-5">
           {/* ── STEP: Details ─────────────────────────────── */}
           {step === 'details' && (
-            <div className="space-y-5">
+            <div key="details" className="v2-animate-step-rise space-y-5">
               <div>
                 <label className="block text-xs text-[var(--v2-ink-3)] mb-1.5 uppercase tracking-wide">
                   Agent name
@@ -750,7 +733,7 @@ export default function CreateAgentModal({
 
           {/* ── STEP: Account ────────────────────────────── */}
           {step === 'account' && (
-            <div className="space-y-4">
+            <div key="account" className="v2-animate-step-rise space-y-4">
               <WalletIdentityBlock
                 name={walletName}
                 network={walletNetworkName}
@@ -799,7 +782,7 @@ export default function CreateAgentModal({
 
           {/* ── STEP: Rules ──────────────────────────────── */}
           {step === 'policy' && (
-            <div className="space-y-4">
+            <div key="policy" className="v2-animate-step-rise space-y-4">
               {/* Current allowances */}
               {allowances.length > 0 && (
                 <AgentBudgetCard
@@ -908,7 +891,7 @@ export default function CreateAgentModal({
 
           {/* ── STEP: Review ──────────────────────────────── */}
           {step === 'review' && (
-            <div className="space-y-5">
+            <div key="review" className="v2-animate-step-rise space-y-5">
               <AgentRulesSummary
                 title="Review agent rules"
                 description="Confirm what this agent can do before you connect it."
@@ -1093,20 +1076,47 @@ export default function CreateAgentModal({
 
           {/* ── STEP: Done ────────────────────────────────── */}
           {step === 'done' && (
-            <div className="space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success-soft)] text-[var(--v2-success)]">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
+            <div className="v2-animate-step-rise space-y-4">
+              {/* Check-bloom moment — mirrors the onboarding "you're in"
+                  screen so the wizard's success feels like a milestone, not
+                  a status row. Brand-tinted (not green) since green is the
+                  inline "Connected" chip below. */}
+              <div className="text-center">
+                <div className="relative mb-3 flex justify-center">
+                  <div
+                    aria-hidden="true"
+                    className="v2-animate-bloom pointer-events-none absolute inset-0 flex items-center justify-center"
+                  >
+                    <div
+                      className="h-20 w-20 rounded-full"
+                      style={{
+                        background:
+                          'radial-gradient(circle, rgba(99,102,241,0.32) 0%, rgba(99,102,241,0.10) 45%, transparent 70%)',
+                      }}
+                    />
+                  </div>
+                  <div className="animate-check-pop relative flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-[var(--v2-brand)]/25 shadow-[var(--v2-shadow-button)]">
+                    <svg
+                      className="h-6 w-6 text-[var(--v2-brand)]"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2.4}
+                    >
+                      <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-[var(--v2-ink)]">
+                <div
+                  className="v2-animate-stagger"
+                  style={{ ['--v2-stagger-delay' as string]: '0ms' }}
+                >
+                  <h3 className="text-base font-semibold text-[var(--v2-ink)]">
                     {execStatus === 'confirmed'
                       ? 'Your agent is ready'
                       : 'Agent rules pending approval'}
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                  </h3>
+                  <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--v2-ink-2)]">
                     {execStatus === 'confirmed'
                       ? 'Add the Haven credential to your agent so it can make payments within your rules.'
                       : 'After the approval is complete, add the Haven credential to your agent.'}
@@ -1120,7 +1130,7 @@ export default function CreateAgentModal({
                       }
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-1 inline-block text-xs text-[var(--v2-brand)] underline underline-offset-2 hover:text-[var(--v2-brand-strong)]"
+                      className="mt-2 inline-block text-xs text-[var(--v2-brand)] underline underline-offset-2 hover:text-[var(--v2-brand-strong)]"
                     >
                       {execStatus === 'confirmed' ? `View on ${getChainConfig(chainId).name} Explorer` : 'View approval request'}
                     </a>
@@ -1128,40 +1138,66 @@ export default function CreateAgentModal({
                 </div>
               </div>
 
-              <AgentBudgetCard
-                agentName={name}
-                budgets={budgetRows}
-                walletName={walletName}
-                status={execStatus === 'confirmed' ? 'Connected' : 'Pending approval'}
-                statusTone={execStatus === 'confirmed' ? 'success' : 'warning'}
-                density="compact"
-              />
-
-              <CredentialHandoffCard
-                title="Save the credential file"
-                description="Download or copy this file before closing. Your agent needs it to make payments within the rules you set."
-                primaryAction={
-                  <Button onClick={handleDownloadHandoff} className="w-full">
-                    Download file
-                  </Button>
-                }
-                secondaryAction={
-                  <Button variant="ghost" onClick={handleCopyHandoff} className="w-full">
-                    {copiedHandoff ? 'Copied file content' : 'Copy file content'}
-                  </Button>
-                }
-                note={generatedPrivateKey ? 'This credential is shown once. Haven cannot show it again after you close this window.' : undefined}
-                saved={credentialsSaved}
-              />
-
-              <Button
-                variant="ghost"
-                onClick={handleClose}
-                disabled={!credentialsSaved}
-                className="w-full"
+              <div
+                className="v2-animate-stagger"
+                style={{ ['--v2-stagger-delay' as string]: '160ms' }}
               >
-                Done
-              </Button>
+                <AgentBudgetCard
+                  agentName={name}
+                  budgets={budgetRows}
+                  walletName={walletName}
+                  status={execStatus === 'confirmed' ? 'Connected' : 'Pending approval'}
+                  statusTone={execStatus === 'confirmed' ? 'success' : 'warning'}
+                  density="compact"
+                />
+              </div>
+
+              <div
+                className="v2-animate-stagger"
+                style={{ ['--v2-stagger-delay' as string]: '260ms' }}
+              >
+                <CredentialHandoffCard
+                  title="Save the credential file"
+                  description="Download or copy this file before closing. Your agent needs it to make payments within the rules you set."
+                  primaryAction={
+                    <Button onClick={handleDownloadHandoff} className="w-full">
+                      Download file
+                    </Button>
+                  }
+                  secondaryAction={
+                    <Button variant="ghost" onClick={handleCopyHandoff} className="w-full">
+                      {copiedHandoff ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="animate-check-pop inline-flex">
+                            <svg className="h-3.5 w-3.5 text-[var(--v2-success)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
+                              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </span>
+                          Copied
+                        </span>
+                      ) : (
+                        'Copy file content'
+                      )}
+                    </Button>
+                  }
+                  note={generatedPrivateKey ? 'This credential is shown once. Haven cannot show it again after you close this window.' : undefined}
+                  saved={credentialsSaved}
+                />
+              </div>
+
+              <div
+                className="v2-animate-stagger"
+                style={{ ['--v2-stagger-delay' as string]: '360ms' }}
+              >
+                <Button
+                  variant="ghost"
+                  onClick={handleClose}
+                  disabled={!credentialsSaved}
+                  className="w-full"
+                >
+                  Done
+                </Button>
+              </div>
             </div>
           )}
         </div>

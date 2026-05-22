@@ -23,6 +23,12 @@ interface UpdateAgentBody {
   description?: string
 }
 
+interface SafeInfoRow {
+  safe_address: string | null
+  safe_name: string | null
+  safe_chain_id: number | null
+}
+
 interface AgentRow {
   id: string
   user_id: string
@@ -32,6 +38,7 @@ interface AgentRow {
   safe_id: string | null
   safe_address: string | null
   safe_name: string | null
+  safe_chain_id: number | null
   api_key_prefix: string | null
   status: string
   created_at: string
@@ -61,7 +68,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     const agentResult = await pool.query<AgentRow>(
       `SELECT a.id, a.name, a.description, a.delegate_address,
-              a.safe_id, us.safe_address, us.name as safe_name,
+              a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               a.api_key_prefix, a.status, a.created_at
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
@@ -155,6 +162,18 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKeyHash, apiKeyPrefix, resolvedSafeId],
       )
       const agent = agentResult.rows[0]
+      const safeInfoResult = resolvedSafeId
+        ? await client.query<SafeInfoRow>(
+            `SELECT safe_address, name AS safe_name, chain_id AS safe_chain_id
+             FROM user_safes WHERE id = $1`,
+            [resolvedSafeId],
+          )
+        : null
+      const safeInfo = safeInfoResult?.rows[0] ?? {
+        safe_address: null,
+        safe_name: null,
+        safe_chain_id: null,
+      }
 
       const savedAllowances: AllowanceRow[] = []
       if (allowances && allowances.length > 0) {
@@ -178,6 +197,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       await client.query('COMMIT')
       return reply.code(201).send({
         ...agent,
+        ...safeInfo,
         api_key: apiKey,
         allowances: savedAllowances,
       })
@@ -198,12 +218,19 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const { name, description } = request.body
 
       const result = await pool.query<AgentRow>(
-        `UPDATE agents
-         SET name        = COALESCE($3, name),
-             description = COALESCE($4, description),
-             updated_at  = NOW()
-         WHERE id = $1 AND user_id = $2
-         RETURNING id, name, description, delegate_address, api_key_prefix, status, created_at`,
+        `WITH updated AS (
+           UPDATE agents
+           SET name        = COALESCE($3, name),
+               description = COALESCE($4, description),
+               updated_at  = NOW()
+           WHERE id = $1 AND user_id = $2
+           RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at
+         )
+         SELECT updated.id, updated.name, updated.description, updated.delegate_address,
+                updated.safe_id, us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
+                updated.api_key_prefix, updated.status, updated.created_at
+         FROM updated
+         LEFT JOIN user_safes us ON updated.safe_id = us.id`,
         [id, sub, name?.trim() ?? null, description?.trim() ?? null],
       )
 

@@ -53,26 +53,64 @@ function CardRoot({
 /**
  * A subsection inside a <Card>. Renders white-on-white with a hairline top
  * border that bleeds to the card's inner edge — the canonical way to group
- * content inside a card. Avoids the grey-on-white nested-card pattern.
+ * content inside a card.
  *
- * Pass `inset` if the section should be visually recessed (rare; reserve for
- * code blocks or quote-style content). Default is the hairline style.
+ * **Design-system invariant:** never use a tinted background to "group" content
+ * inside a Card (e.g. `bg-[var(--v2-surface)]` on a wrapper). Reach for
+ * `Card.Section` for white-on-white grouping, `Card.Section divided` for a
+ * row list, or `Row` for individual list items. Tinted surfaces are reserved
+ * for callouts, table headers, anchor cards, chips, code blocks, and overlay
+ * surfaces — not generic grouping.
+ *
+ * Modes:
+ * - **default** — hairline `border-t` above, white background, standard
+ *   horizontal padding matching the parent Card. Use for a single content
+ *   block under a section heading.
+ * - **divided** — hairline `border-t` above, row dividers between each child,
+ *   no horizontal padding on the wrapper (children own their padding via
+ *   `Row` or equivalent). Use for a list inside a Card.
+ * - **inset** — recessed tinted background. Reserve for code blocks or
+ *   quote-style content. Don't use for generic grouping.
  */
 function CardSection({
   children,
   className = '',
   inset = false,
+  divided = false,
 }: {
   children: ReactNode
   className?: string
   inset?: boolean
+  divided?: boolean
 }) {
-  // Negative horizontal margin matches the standard Card padding (p-5/p-6) so the
-  // border bleeds edge-to-edge. Callers control vertical padding via className.
-  const base = inset
-    ? 'bg-[var(--v2-surface)] -mx-5 md:-mx-6 px-5 md:px-6 border-y border-[var(--v2-border)]'
-    : '-mx-5 md:-mx-6 px-5 md:px-6 border-t border-[var(--v2-border)]'
-  return <div className={`${base} ${className}`}>{children}</div>
+  // Negative horizontal margin matches the standard Card padding (p-5/p-6) so
+  // the border bleeds edge-to-edge. For `divided`, drop the inner horizontal
+  // padding so child rows can supply their own and the dividers bleed too.
+  if (inset) {
+    return (
+      <div
+        className={`bg-[var(--v2-surface)] -mx-5 md:-mx-6 px-5 md:px-6 border-y border-[var(--v2-border)] ${className}`}
+      >
+        {children}
+      </div>
+    )
+  }
+  if (divided) {
+    return (
+      <div
+        className={`-mx-5 md:-mx-6 border-t border-[var(--v2-border)] divide-y divide-[var(--v2-table-row-border)] ${className}`}
+      >
+        {children}
+      </div>
+    )
+  }
+  return (
+    <div
+      className={`-mx-5 md:-mx-6 px-5 md:px-6 border-t border-[var(--v2-border)] ${className}`}
+    >
+      {children}
+    </div>
+  )
 }
 
 export const Card = Object.assign(CardRoot, { Section: CardSection })

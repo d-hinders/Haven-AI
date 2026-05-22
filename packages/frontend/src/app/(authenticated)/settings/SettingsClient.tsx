@@ -181,7 +181,7 @@ function OwnerRow({
   }
 
   return (
-    <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+    <div className="px-6 py-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -223,19 +223,21 @@ function OwnerRow({
               View on explorer
             </a>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {owner.accounts.map((account) => {
-              const chain = getChainConfig(account.chain_id ?? 100)
-              return (
-                <span
-                  key={`${account.id}-${owner.owner_address}`}
-                  className="rounded-md border border-[var(--v2-border)] bg-white px-2 py-1 text-xs text-[var(--v2-ink-3)]"
-                >
-                  {account.name} · {chain.name}
-                </span>
-              )
-            })}
-          </div>
+          {owner.accounts.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {owner.accounts.map((account) => {
+                const chain = getChainConfig(account.chain_id ?? 100)
+                return (
+                  <span
+                    key={`${account.id}-${owner.owner_address}`}
+                    className="rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs text-[var(--v2-ink-2)]"
+                  >
+                    {account.name} · {chain.name}
+                  </span>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
         {editing ? (
           <div className="flex shrink-0 items-center gap-2">
@@ -396,50 +398,58 @@ export default function SettingsClient() {
             detail={approvalAccessDetail}
             value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
           />
-          <div className="px-6 py-4">
-            {ownersLoading ? (
+          {ownersLoading ? (
+            <div className="px-6 py-4">
               <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
-            ) : owners.length > 0 ? (
-              <div className="space-y-3">
-                {ownersPartialFailure ? (
+            </div>
+          ) : owners.length > 0 ? (
+            <>
+              {ownersPartialFailure ? (
+                <div className="px-6 py-3">
                   <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
                     Some approvers could not be refreshed. Showing the wallets and passkeys Haven could verify.
                   </div>
-                ) : null}
-                {ownersError ? (
+                </div>
+              ) : null}
+              {ownersError ? (
+                <div className="px-6 py-3">
                   <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                     {ownersError}
                   </div>
-                ) : null}
-                {owners.map((owner) => {
-                  const normalizedOwner = owner.owner_address.toLowerCase()
-                  const type = passkeyAddresses.has(normalizedOwner)
-                    ? 'Passkey'
-                    : walletAddress === normalizedOwner
-                      ? 'Connected wallet'
-                      : 'Wallet'
+                </div>
+              ) : null}
+              {owners.map((owner) => {
+                const normalizedOwner = owner.owner_address.toLowerCase()
+                const type = passkeyAddresses.has(normalizedOwner)
+                  ? 'Passkey'
+                  : walletAddress === normalizedOwner
+                    ? 'Connected wallet'
+                    : 'Wallet'
 
-                  return (
-                    <OwnerRow
-                      key={owner.owner_address}
-                      owner={owner}
-                      type={type}
-                      onRename={renameOwner}
-                      onClear={clearOwner}
-                    />
-                  )
-                })}
-              </div>
-            ) : ownersError ? (
+                return (
+                  <OwnerRow
+                    key={owner.owner_address}
+                    owner={owner}
+                    type={type}
+                    onRename={renameOwner}
+                    onClear={clearOwner}
+                  />
+                )
+              })}
+            </>
+          ) : ownersError ? (
+            <div className="px-6 py-3">
               <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                 {ownersError}
               </div>
-            ) : (
+            </div>
+          ) : (
+            <div className="px-6 py-4">
               <p className="text-sm text-[var(--v2-ink-3)]">
                 Link a Haven account to review and name its approvers.
               </p>
-            )}
-          </div>
+            </div>
+          )}
         </Section>
 
         <Section

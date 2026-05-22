@@ -130,12 +130,10 @@ function OwnerRow({
   owner,
   type,
   onRename,
-  onClear,
 }: {
   owner: OwnerAlias
   type: 'Passkey' | 'Connected wallet' | 'Wallet'
   onRename: (ownerAddress: string, name: string) => Promise<void>
-  onClear: (ownerAddress: string) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(owner.name ?? '')
@@ -167,24 +165,11 @@ function OwnerRow({
     }
   }
 
-  async function clearAlias() {
-    setSaving(true)
-    setError('')
-    try {
-      await onClear(owner.owner_address)
-      setEditing(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not clear this approver name.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
   return (
-    <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+    <div className="px-6 py-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
             {editing ? (
               <div className="w-full max-w-sm">
                 <Input
@@ -206,13 +191,24 @@ function OwnerRow({
               </p>
             )}
             <StatusPill tone={type === 'Wallet' ? 'neutral' : 'brand'}>{type}</StatusPill>
+            {!editing && owner.accounts.map((account) => {
+              const chain = getChainConfig(account.chain_id ?? 100)
+              return (
+                <span
+                  key={`${account.id}-${owner.owner_address}`}
+                  className="rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-0.5 text-xs text-[var(--v2-ink-2)]"
+                >
+                  {account.name} · {chain.name}
+                </span>
+              )
+            })}
           </div>
-          {!editing && owner.name ? (
-            <p className="mt-1 font-mono text-xs text-[var(--v2-ink-3)]">
-              {truncate(owner.owner_address)}
-            </p>
-          ) : null}
-          <div className="mt-2 flex flex-wrap items-center gap-3">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {!editing && owner.name ? (
+              <span className="font-mono text-xs text-[var(--v2-ink-3)]">
+                {truncate(owner.owner_address)}
+              </span>
+            ) : null}
             <CopyAddressButton address={owner.owner_address} />
             <a
               href={getExplorerUrl(owner.accounts[0]?.chain_id ?? 100, 'address', owner.owner_address)}
@@ -222,19 +218,6 @@ function OwnerRow({
             >
               View on explorer
             </a>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {owner.accounts.map((account) => {
-              const chain = getChainConfig(account.chain_id ?? 100)
-              return (
-                <span
-                  key={`${account.id}-${owner.owner_address}`}
-                  className="rounded-md border border-[var(--v2-border)] bg-white px-2 py-1 text-xs text-[var(--v2-ink-3)]"
-                >
-                  {account.name} · {chain.name}
-                </span>
-              )
-            })}
           </div>
         </div>
         {editing ? (
@@ -257,11 +240,6 @@ function OwnerRow({
           </div>
         ) : (
           <div className="flex shrink-0 items-center gap-2">
-            {owner.name ? (
-              <Button variant="tertiary" size="sm" disabled={saving} onClick={() => void clearAlias()}>
-                Clear
-              </Button>
-            ) : null}
             <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
               {owner.name ? 'Edit' : 'Name'}
             </Button>
@@ -289,37 +267,12 @@ export default function SettingsClient() {
     error: ownersError,
     partialFailure: ownersPartialFailure,
     renameOwner,
-    clearOwner,
   } = useOwnerDirectory()
   const { currency, setCurrency, saving } = usePreferences()
 
-  const hasWallet = Boolean(user?.wallet_address)
   const hasPasskey = passkeys.length > 0
   const passkeyAddresses = new Set(passkeys.map((passkey) => passkey.signer_address.toLowerCase()))
   const walletAddress = user?.wallet_address?.toLowerCase()
-  const linkedAccounts = user?.safes ?? []
-  const accountsWithVerifiedApprovalMethods = new Set(
-    owners.flatMap((owner) => owner.accounts.map((account) => account.id)),
-  )
-  const verifiedAccountCount = linkedAccounts.filter((safe) => accountsWithVerifiedApprovalMethods.has(safe.id)).length
-  const approvalAccessStatus = ownersLoading
-    ? { label: 'Checking', tone: 'neutral' as const }
-    : ownersError || ownersPartialFailure
-      ? { label: 'Needs review', tone: 'warning' as const }
-      : linkedAccounts.length === 0
-        ? { label: 'No accounts', tone: 'neutral' as const }
-        : verifiedAccountCount === linkedAccounts.length
-          ? { label: 'Listed', tone: 'success' as const }
-          : { label: 'Needs review', tone: 'warning' as const }
-  const approvalAccessDetail = ownersLoading
-    ? 'Checking approvers for your linked Haven accounts.'
-    : ownersError || ownersPartialFailure
-      ? 'Some approvers could not be verified. Review the approvers section below.'
-      : linkedAccounts.length === 0
-        ? 'Create or import a Haven account before relying on Haven for payments.'
-        : verifiedAccountCount === linkedAccounts.length
-          ? 'Haven listed approvers for your linked accounts. Keep access to every wallet or passkey needed to approve payments.'
-          : 'Review approvers before relying on these accounts for payments.'
 
   return (
     <div className="max-w-4xl">
@@ -373,14 +326,9 @@ export default function SettingsClient() {
         </Section>
 
         <Section
-          title="Access and approvals"
-          description="Review how account actions are approved, then name the approvers you recognize."
+          title="Access"
+          description="How you sign in to Haven and approve actions on your accounts."
         >
-          <SettingRow
-            label="Connected wallet"
-            value={hasWallet ? truncate(user!.wallet_address!) : 'Passkey-managed account'}
-            detail={hasWallet ? 'This wallet can approve actions for accounts it controls.' : 'This account uses passkeys for approvals when available.'}
-          />
           <SettingRow
             label="Passkey status"
             value={hasPasskey ? <StatusPill tone="success">Enrolled</StatusPill> : <StatusPill>No passkey</StatusPill>}
@@ -391,55 +339,63 @@ export default function SettingsClient() {
             detail="Password changes are not available yet."
             action={<StatusPill>Coming soon</StatusPill>}
           />
-          <SettingRow
-            label="Approver access"
-            detail={approvalAccessDetail}
-            value={<StatusPill tone={approvalAccessStatus.tone}>{approvalAccessStatus.label}</StatusPill>}
-          />
-          <div className="px-6 py-4">
-            {ownersLoading ? (
+        </Section>
+
+        <Section
+          title="Approvers"
+          description="Wallets and passkeys that can approve actions on your linked Haven accounts."
+        >
+          {ownersLoading ? (
+            <div className="px-6 py-4">
               <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
-            ) : owners.length > 0 ? (
-              <div className="space-y-3">
-                {ownersPartialFailure ? (
+            </div>
+          ) : owners.length > 0 ? (
+            <>
+              {ownersPartialFailure ? (
+                <div className="px-6 py-3">
                   <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
                     Some approvers could not be refreshed. Showing the wallets and passkeys Haven could verify.
                   </div>
-                ) : null}
-                {ownersError ? (
+                </div>
+              ) : null}
+              {ownersError ? (
+                <div className="px-6 py-3">
                   <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                     {ownersError}
                   </div>
-                ) : null}
-                {owners.map((owner) => {
-                  const normalizedOwner = owner.owner_address.toLowerCase()
-                  const type = passkeyAddresses.has(normalizedOwner)
-                    ? 'Passkey'
-                    : walletAddress === normalizedOwner
-                      ? 'Connected wallet'
-                      : 'Wallet'
+                </div>
+              ) : null}
+              {owners.map((owner) => {
+                const normalizedOwner = owner.owner_address.toLowerCase()
+                const type = passkeyAddresses.has(normalizedOwner)
+                  ? 'Passkey'
+                  : walletAddress === normalizedOwner
+                    ? 'Connected wallet'
+                    : 'Wallet'
 
-                  return (
-                    <OwnerRow
-                      key={owner.owner_address}
-                      owner={owner}
-                      type={type}
-                      onRename={renameOwner}
-                      onClear={clearOwner}
-                    />
-                  )
-                })}
-              </div>
-            ) : ownersError ? (
+                return (
+                  <OwnerRow
+                    key={owner.owner_address}
+                    owner={owner}
+                    type={type}
+                    onRename={renameOwner}
+                  />
+                )
+              })}
+            </>
+          ) : ownersError ? (
+            <div className="px-6 py-3">
               <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                 {ownersError}
               </div>
-            ) : (
+            </div>
+          ) : (
+            <div className="px-6 py-4">
               <p className="text-sm text-[var(--v2-ink-3)]">
                 Link a Haven account to review and name its approvers.
               </p>
-            )}
-          </div>
+            </div>
+          )}
         </Section>
 
         <Section

@@ -308,8 +308,77 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Surface hierarchy — no nested filled cards"
+        description="One tinted surface per surface tier. Don't reach for a grey inner wrapper to 'group' siblings inside a Card — use Card.Section (white-on-white hairline) or Card.Section divided (row list). Tinted surfaces are reserved for callouts, table headers, anchor cards, chips, code blocks, and overlay surfaces."
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          {/* ❌ Anti-pattern */}
+          <div>
+            <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--v2-danger)]">
+              <span aria-hidden="true">❌</span> Avoid — grey card inside white card
+            </p>
+            <Card hover={false} className="p-5">
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Agent access</h3>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                Connected agents can request payments from this wallet.
+              </p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {[
+                  { name: 'Research assistant', budget: '250 USDC per day' },
+                  { name: 'Travel planner', budget: '0.10 ETH per day' },
+                ].map((agent) => (
+                  <div
+                    key={agent.name}
+                    className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3"
+                  >
+                    <p className="text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
+                    <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{agent.budget}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              Two competing surface tiers, repeated boilerplate, and the inner tiles fight the card's lift. Replace with a row list.
+            </p>
+          </div>
+
+          {/* ✅ Recommended */}
+          <div>
+            <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--v2-success)]">
+              <span aria-hidden="true">✅</span> Use — Card.Section divided + Row
+            </p>
+            <Card hover={false}>
+              <div className="px-5 pt-5">
+                <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Agent access</h3>
+                <p className="mt-1 pb-5 text-xs text-[var(--v2-ink-3)]">
+                  Connected agents can request payments from this wallet.
+                </p>
+              </div>
+              <Card.Section divided>
+                <Row
+                  title="Research assistant"
+                  subtitle="250 USDC per day"
+                  trailing={<StatusBadge tone="brand">Connected</StatusBadge>}
+                  href="#"
+                />
+                <Row
+                  title="Travel planner"
+                  subtitle="0.10 ETH per day"
+                  trailing={<StatusBadge tone="warning">Paused</StatusBadge>}
+                  href="#"
+                />
+              </Card.Section>
+            </Card>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              One surface tier. Dividers do the grouping work, chips and pills stay tinted as inline tokens.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      <Section
         title="Card.Section — nested content without grey-on-white"
-        description="When you need to group content inside a card, use Card.Section instead of a grey inner wrapper. Renders a hairline top border that bleeds to the card's edges — the canonical way to subsection a card. Avoid nesting a second `<Card>` (or a grey-on-white inner box) inside a card whenever Card.Section will do."
+        description="When you need to group content inside a card, use Card.Section instead of a grey inner wrapper. Renders a hairline top border that bleeds to the card's edges — the canonical way to subsection a card. Pass `divided` for a row list (auto row dividers, no horizontal padding so child rows own theirs)."
       >
         <Card hover={false} className="p-5">
           <div>
@@ -331,7 +400,7 @@ export default function DesignSystemPage() {
           </Card.Section>
         </Card>
         <p className="text-xs text-[var(--v2-ink-3)]">
-          Reserve <code className="font-mono">inset</code> only for code blocks or quote-style content — the default hairline style is the standard.
+          Reserve <code className="font-mono">inset</code> only for code blocks or quote-style content — the default hairline style is the standard. Use <code className="font-mono">divided</code> for any in-card list of rows.
         </p>
       </Section>
 

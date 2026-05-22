@@ -182,6 +182,54 @@ export interface X402AuthorizationOptions {
   idempotencyKey?: string
 }
 
+/** Serializable HTTP request state for retrying the same x402 merchant request. */
+export interface X402RequestSnapshot {
+  url: string
+  method: string
+  headers: [string, string][]
+  body?: string
+}
+
+/** Quote parsed from an HTTP 402 response without creating a Haven payment. */
+export interface X402Quote {
+  rail: 'x402'
+  idempotencyKey: string
+  paymentRequired: X402PaymentRequired
+  accepted: X402PaymentOption
+  request: X402RequestSnapshot
+  resourceUrl: string
+  description: string | null
+  mimeType: string | null
+  amountAtomic: string
+  amount: string
+  token: string
+  asset: string
+  network: string
+  chainId: number | null
+  merchantAddress: string
+  maxTimeoutSeconds: number
+}
+
+/** State bundle an agent can persist while waiting for manual x402 approval. */
+export interface X402ResumeState {
+  rail: 'x402'
+  paymentId: string
+  idempotencyKey: string
+  paymentRequired: X402PaymentRequired
+  accepted: X402PaymentOption
+  url: string
+  request?: X402RequestSnapshot
+  resourceUrl: string
+  description: string | null
+  amountAtomic: string
+  amount: string
+  token: string
+  asset: string
+  network: string
+  chainId: number | null
+  merchantAddress: string
+}
+
 export interface ResumeAuthorizedX402Input extends X402AuthorizationOptions {
   /** Payment or approval request ID returned by authorizeX402 / haven.fetch. */
   paymentId: string
@@ -199,6 +247,9 @@ export interface ResumeX402PaymentInput extends X402AuthorizationOptions {
 
   /** Original fetch options. Reused for the 402 probe and final merchant retry. */
   init?: RequestInit
+
+  /** Serializable original request captured by quoteX402() / pending approval errors. */
+  request?: X402RequestSnapshot
 
   /** Original or freshly parsed x402 requirements. Supplying this avoids an extra merchant 402 probe. */
   paymentRequired?: X402PaymentRequired
@@ -553,6 +604,8 @@ export class HavenApiError extends HavenError {
 }
 
 export class HavenPaymentStateError extends HavenApiError {
+  resumeState?: X402ResumeState
+
   constructor(
     message: string,
     statusCode: number,

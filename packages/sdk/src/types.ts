@@ -158,6 +158,50 @@ export interface X402Receipt {
   merchantTo?: string | null
   payer?: string
   chainId?: number
+  haven?: {
+    paymentId: string
+    fundingTxHash: string
+    fundingExplorerUrl: string
+  }
+  merchant?: {
+    payTo: string | null
+    settlementTxHash?: string | null
+    settlementExplorerUrl?: string | null
+  }
+  x402?: {
+    amount: string
+    token: string
+    network: string
+    asset: string
+    resource: string
+  }
+}
+
+export interface X402AuthorizationOptions {
+  /** Stable caller-supplied key for this user intent. Prevents duplicate approvals across fresh 402 quotes. */
+  idempotencyKey?: string
+}
+
+export interface ResumeAuthorizedX402Input extends X402AuthorizationOptions {
+  /** Payment or approval request ID returned by authorizeX402 / haven.fetch. */
+  paymentId: string
+
+  /** Original or freshly parsed x402 requirements for the merchant retry. */
+  paymentRequired: X402PaymentRequired
+}
+
+export interface ResumeX402PaymentInput extends X402AuthorizationOptions {
+  /** Payment or approval request ID returned by authorizeX402 / haven.fetch. */
+  paymentId: string
+
+  /** Original paid URL. If paymentRequired is omitted, Haven will call it once to re-read the 402 challenge. */
+  url: string
+
+  /** Original fetch options. Reused for the 402 probe and final merchant retry. */
+  init?: RequestInit
+
+  /** Original or freshly parsed x402 requirements. Supplying this avoids an extra merchant 402 probe. */
+  paymentRequired?: X402PaymentRequired
 }
 
 // ── Machine Payment Types ───────────────────────────────────────

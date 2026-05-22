@@ -11,6 +11,7 @@ import type {
   PaymentNextAction,
   PaymentStatusResult,
   SignData,
+  X402AuthorizationOptions,
   RawCreateResponse,
   RawSignResponse,
   RawStatusResponse,
@@ -18,6 +19,8 @@ import type {
   X402PaymentRequired,
   X402PaymentOption,
   X402Receipt,
+  ResumeAuthorizedX402Input,
+  ResumeX402PaymentInput,
   RawX402AuthorizeResponse,
   MachinePaymentChallenge,
   MachinePaymentReceipt,
@@ -52,6 +55,11 @@ function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
   const base = CHAIN_EXPLORER_TX[chainId ?? 8453] ?? CHAIN_EXPLORER_TX[8453]
   return `${base}/${txHash}`
 }
+
+function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null | undefined): string {
+  return txHash ? buildExplorerUrl(chainId, txHash) : ''
+}
+
 const DEFAULT_REQUEST_TIMEOUT = 30_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
@@ -123,6 +131,41 @@ function messageForState(
     return `This payment request expired (payment_id: ${paymentId}).`
   }
   return `${label} is ${status}; next_action=${nextAction} (payment_id: ${paymentId}).`
+}
+
+function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
+  return Boolean(a && b && a.toLowerCase() === b.toLowerCase())
+}
+
+function decimalFromUsdcAtomic(value: string): string {
+  const amount = BigInt(value)
+  const whole = amount / 1_000_000n
+  const fraction = (amount % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '')
+  return fraction ? `${whole}.${fraction}` : whole.toString()
+}
+
+function normalizeDecimal(value: string): string {
+  if (!value.includes('.')) return value.replace(/^0+(?=\d)/, '') || '0'
+  const [whole, fraction = ''] = value.split('.')
+  const normalizedWhole = whole.replace(/^0+(?=\d)/, '') || '0'
+  const normalizedFraction = fraction.replace(/0+$/, '')
+  return normalizedFraction ? `${normalizedWhole}.${normalizedFraction}` : normalizedWhole
+}
+
+function parseMerchantSettlement(header: string | null): {
+  settlementTxHash?: string | null
+} {
+  if (!header) return {}
+  const parsed = parseProtocolReceiptHeader(header)
+  const tx =
+    typeof parsed?.transaction === 'string'
+      ? parsed.transaction
+      : typeof parsed?.txHash === 'string'
+        ? parsed.txHash
+        : typeof parsed?.tx_hash === 'string'
+          ? parsed.tx_hash
+          : null
+  return { settlementTxHash: tx }
 }
 
 export class HavenClient {
@@ -309,7 +352,10 @@ export class HavenClient {
    *
    * Requires `delegateKey` to be set in the client config.
    */
-  async authorizeX402(paymentRequired: X402PaymentRequired): Promise<X402Receipt> {
+  async authorizeX402(
+    paymentRequired: X402PaymentRequired,
+    options: X402AuthorizationOptions = {},
+  ): Promise<X402Receipt> {
     if (!this.delegateKey) {
       throw new HavenSigningError(
         'delegateKey is required for x402 payments. Pass it in the HavenClient config.',
@@ -329,7 +375,7 @@ export class HavenClient {
       )
     }
 
-    const idempotencyKey = buildX402IdempotencyKey(paymentRequired, option)
+    const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
     const cached = this.x402ReceiptCache.get(idempotencyKey)
     if (cached && cached.expiresAt > Date.now()) return cached.receipt
 
@@ -375,21 +421,14 @@ export class HavenClient {
 
     // If the backend already executed (shouldn't happen without sig), return
     if (raw.success && raw.tx_hash) {
-      const receipt = {
-        success: true,
-        paymentId: raw.payment_id,
-        txHash: raw.tx_hash,
-        token: raw.token ?? '',
-        amount: raw.amount ?? '',
-        to: raw.to ?? '',
-        resourceUrl: paymentRequired.resource.url,
-        explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) : ''),
-        accepted: option,
-        paymentHeader,
-        merchantTo: raw.merchant_to ?? option.payTo,
-        payer: raw.payer ?? raw.safe_address,
-        chainId: raw.chain_id ?? chainIdFromNetwork(option.network),
-      }
+      const receipt = this.mapX402ReceiptFromAuthorization(paymentRequired, option, paymentHeader, raw)
+      this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
+      return receipt
+    }
+
+    const state = this.paymentStateFromRaw('x402 payment', raw)
+    if (state?.nextAction === 'retry_original_x402_request') {
+      const receipt = this.mapX402ReceiptFromStatus(paymentRequired, option, paymentHeader, state)
       this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
       return receipt
     }
@@ -412,23 +451,62 @@ export class HavenClient {
       this.throwPaymentStateError('x402 payment', execResult)
     }
 
-    const receipt = {
-      success: true,
-      paymentId: raw.payment_id,
-      txHash: execResult.tx_hash ?? '',
-      token: execResult.token ?? raw.token ?? '',
-      amount: execResult.amount ?? raw.amount ?? '',
-      to: execResult.to ?? raw.to ?? '',
-      resourceUrl: paymentRequired.resource.url,
-      explorerUrl: execResult.explorer_url ?? (execResult.tx_hash ? buildExplorerUrl(execResult.chain_id, execResult.tx_hash) : ''),
-      accepted: option,
-      paymentHeader,
-      merchantTo: option.payTo,
-      payer: raw.payer ?? raw.safe_address ?? raw.sign_data?.components.safe,
-      chainId: execResult.chain_id ?? raw.chain_id ?? chainIdFromNetwork(option.network),
-    }
+    const receipt = this.mapX402ReceiptFromAuthorization(paymentRequired, option, paymentHeader, raw, execResult)
     this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
     return receipt
+  }
+
+  async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt> {
+    if (!this.delegateKey) {
+      throw new HavenSigningError(
+        'delegateKey is required for x402 payments. Pass it in the HavenClient config.',
+      )
+    }
+    if (!this.delegateAddress) {
+      throw new HavenSigningError('delegateAddress could not be derived from delegateKey.')
+    }
+
+    const option = selectStandardPaymentOption(input.paymentRequired.accepts)
+    if (!option) {
+      throw new HavenApiError(
+        'No compatible payment option found in x402 requirements. ' +
+        'Haven supports standard x402 exact payments on Base USDC.',
+        400,
+      )
+    }
+
+    const idempotencyKey = input.idempotencyKey ?? buildX402IdempotencyKey(input.paymentRequired, option)
+    const cached = this.x402ReceiptCache.get(idempotencyKey)
+    if (cached && cached.expiresAt > Date.now()) return cached.receipt
+
+    const status = await this.getPaymentStatus(input.paymentId)
+    this.assertCanResumeX402(status, input.paymentRequired, option)
+
+    const paymentHeader = await this.createStandardX402Header(input.paymentRequired, option)
+    const receipt = this.mapX402ReceiptFromStatus(input.paymentRequired, option, paymentHeader, status)
+    this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
+    return receipt
+  }
+
+  async resumeX402Payment(input: ResumeX402PaymentInput): Promise<Response> {
+    const initialInit = this.withX402Wallet(input.init, this.x402PayerAddress())
+    let paymentRequired = input.paymentRequired
+
+    if (!paymentRequired) {
+      const response = await globalThis.fetch(input.url, initialInit)
+      if (response.status !== 402) {
+        throw new HavenApiError('Expected the original x402 request to return HTTP 402 before resuming.', 400)
+      }
+      paymentRequired = await parsePaymentRequiredResponse(response)
+    }
+
+    const receipt = await this.resumeAuthorizedX402({
+      paymentId: input.paymentId,
+      paymentRequired,
+      idempotencyKey: input.idempotencyKey,
+    })
+
+    return this.retryX402Request(input.url, initialInit, paymentRequired, receipt)
   }
 
   /**
@@ -444,7 +522,11 @@ export class HavenClient {
    *
    * Requires `delegateKey` to be set in the client config.
    */
-  async fetch(url: string, init?: RequestInit): Promise<Response> {
+  async fetch(
+    url: string,
+    init?: RequestInit,
+    options: X402AuthorizationOptions = {},
+  ): Promise<Response> {
     const initialInit = this.withX402Wallet(init, this.x402PayerAddress())
 
     // 1. Make the original request
@@ -475,7 +557,16 @@ export class HavenClient {
     }
 
     // 4. Pay through Haven
-    const receipt = await this.authorizeX402(paymentRequired)
+    const receipt = await this.authorizeX402(paymentRequired, options)
+    return this.retryX402Request(url, initialInit, paymentRequired, receipt)
+  }
+
+  private async retryX402Request(
+    url: string,
+    initialInit: RequestInit | undefined,
+    paymentRequired: X402PaymentRequired,
+    receipt: X402Receipt,
+  ): Promise<Response> {
     if (!receipt.accepted) {
       throw new HavenApiError('No accepted x402 option was recorded for payment retry', 500)
     }
@@ -516,6 +607,15 @@ export class HavenClient {
           merchant_to: receipt.merchantTo,
           delegate_to: receipt.to,
         },
+      )
+    }
+
+    const merchantSettlement = parseMerchantSettlement(retryResponse.headers.get('PAYMENT-RESPONSE'))
+    if (receipt.merchant && merchantSettlement.settlementTxHash) {
+      receipt.merchant.settlementTxHash = merchantSettlement.settlementTxHash
+      receipt.merchant.settlementExplorerUrl = buildExplorerUrl(
+        receipt.chainId,
+        merchantSettlement.settlementTxHash,
       )
     }
 
@@ -657,6 +757,192 @@ export class HavenClient {
     })
 
     return retryResponse
+  }
+
+  private assertCanResumeX402(
+    status: PaymentStatusResult,
+    paymentRequired: X402PaymentRequired,
+    option: X402PaymentOption,
+  ): void {
+    if (status.rail !== 'x402') {
+      throw new HavenPaymentStateError(
+        `Payment ${status.paymentId} is ${status.rail}, not x402.`,
+        409,
+        status,
+      )
+    }
+
+    if (status.nextAction !== 'retry_original_x402_request') {
+      throw new HavenPaymentStateError(status.message, PAYMENT_STATE_STATUS_CODES[status.status] ?? 409, status)
+    }
+
+    if (!status.txHash) {
+      throw new HavenApiError(
+        `x402 payment ${status.paymentId} is ready to retry but has no Haven transaction hash.`,
+        502,
+        status,
+        status.paymentId,
+      )
+    }
+
+    if (status.resourceUrl && status.resourceUrl !== paymentRequired.resource.url) {
+      throw new HavenApiError(
+        'x402 resume request does not match the approved resource URL.',
+        409,
+        { status, paymentRequired },
+        status.paymentId,
+      )
+    }
+
+    if (status.merchantAddress && !sameAddress(status.merchantAddress, option.payTo)) {
+      throw new HavenApiError(
+        'x402 resume request does not match the approved merchant.',
+        409,
+        { status, selectedPayment: option },
+        status.paymentId,
+      )
+    }
+
+    const optionChainId = chainIdFromNetwork(option.network)
+    if (status.chainId && optionChainId && status.chainId !== optionChainId) {
+      throw new HavenApiError(
+        'x402 resume request does not match the approved network.',
+        409,
+        { status, selectedPayment: option },
+        status.paymentId,
+      )
+    }
+
+    if (status.token && status.token !== 'USDC') {
+      throw new HavenApiError(
+        'x402 resume request does not match the approved token.',
+        409,
+        { status, selectedPayment: option },
+        status.paymentId,
+      )
+    }
+
+    const approvedAmount = status.amount ? normalizeDecimal(status.amount) : ''
+    const requestedAmount = normalizeDecimal(decimalFromUsdcAtomic(option.amount))
+    if (approvedAmount && approvedAmount !== requestedAmount) {
+      throw new HavenApiError(
+        'x402 resume request does not match the approved amount.',
+        409,
+        { status, selectedPayment: option },
+        status.paymentId,
+      )
+    }
+  }
+
+  private mapX402ReceiptFromAuthorization(
+    paymentRequired: X402PaymentRequired,
+    option: X402PaymentOption,
+    paymentHeader: string,
+    raw: RawX402AuthorizeResponse,
+    execResult?: RawSignResponse,
+  ): X402Receipt {
+    const txHash = execResult?.tx_hash ?? raw.tx_hash ?? ''
+    const chainId = execResult?.chain_id ?? raw.chain_id ?? chainIdFromNetwork(option.network)
+    const token = execResult?.token ?? raw.token ?? 'USDC'
+    const amount = execResult?.amount ?? raw.amount ?? decimalFromUsdcAtomic(option.amount)
+    const to = execResult?.to ?? raw.to ?? this.delegateAddress ?? ''
+    const explorerUrl = execResult?.explorer_url ?? raw.explorer_url ?? explorerUrlOrEmpty(chainId, txHash)
+    const merchantTo = execResult?.merchant_to ?? raw.merchant_to ?? option.payTo
+    const payer = raw.payer ?? raw.safe_address ?? raw.sign_data?.components.safe
+
+    return this.buildX402Receipt({
+      paymentId: raw.payment_id,
+      txHash,
+      token,
+      amount,
+      to,
+      resourceUrl: paymentRequired.resource.url,
+      explorerUrl,
+      accepted: option,
+      paymentHeader,
+      merchantTo,
+      payer,
+      chainId,
+    })
+  }
+
+  private mapX402ReceiptFromStatus(
+    paymentRequired: X402PaymentRequired,
+    option: X402PaymentOption,
+    paymentHeader: string,
+    status: PaymentStatusResult,
+  ): X402Receipt {
+    if (!status.txHash) {
+      throw new HavenApiError(
+        `x402 payment ${status.paymentId} is ready to retry but has no Haven transaction hash.`,
+        502,
+        status,
+        status.paymentId,
+      )
+    }
+
+    return this.buildX402Receipt({
+      paymentId: status.paymentId,
+      txHash: status.txHash,
+      token: status.token || 'USDC',
+      amount: status.amount || decimalFromUsdcAtomic(option.amount),
+      to: this.delegateAddress ?? '',
+      resourceUrl: paymentRequired.resource.url,
+      explorerUrl: explorerUrlOrEmpty(status.chainId, status.txHash),
+      accepted: option,
+      paymentHeader,
+      merchantTo: status.merchantAddress ?? option.payTo,
+      payer: this.x402Wallet,
+      chainId: status.chainId || chainIdFromNetwork(option.network),
+    })
+  }
+
+  private buildX402Receipt(input: {
+    paymentId: string
+    txHash: string
+    token: string
+    amount: string
+    to: string
+    resourceUrl: string
+    explorerUrl: string
+    accepted: X402PaymentOption
+    paymentHeader: string
+    merchantTo?: string | null
+    payer?: string
+    chainId?: number
+  }): X402Receipt {
+    const fundingExplorerUrl = input.explorerUrl || explorerUrlOrEmpty(input.chainId, input.txHash)
+
+    return {
+      success: true,
+      paymentId: input.paymentId,
+      txHash: input.txHash,
+      token: input.token,
+      amount: input.amount,
+      to: input.to,
+      resourceUrl: input.resourceUrl,
+      explorerUrl: input.explorerUrl,
+      accepted: input.accepted,
+      paymentHeader: input.paymentHeader,
+      merchantTo: input.merchantTo ?? input.accepted.payTo,
+      payer: input.payer,
+      chainId: input.chainId,
+      haven: {
+        paymentId: input.paymentId,
+        fundingTxHash: input.txHash,
+        fundingExplorerUrl,
+      },
+      merchant: {
+        payTo: input.merchantTo ?? input.accepted.payTo,
+      },
+      x402: {
+        amount: input.accepted.amount,
+        token: input.token,
+        network: input.accepted.network,
+        asset: input.accepted.asset,
+        resource: input.accepted.resource ?? input.resourceUrl,
+      },
+    }
   }
 
   private async createStandardX402Header(
@@ -926,44 +1212,46 @@ export class HavenClient {
     }
 
     if (toolName === 'authorize_x402_payment') {
-      const { url, payTo, amount, asset, network, description } = input as {
+      const { url, payTo, amount, asset, network, description, idempotencyKey } = input as {
         url: string
         payTo: string
         amount: string
         asset: string
         network: string
         description?: string
+        idempotencyKey?: string
       }
 
       try {
-        const receipt = await this.authorizeX402({
-          x402Version: 2,
-          resource: { url, description },
-          accepts: [
-            {
-              scheme: 'exact',
-              network,
-              amount,
-              asset,
-              payTo,
-              maxTimeoutSeconds: 30,
-            },
-          ],
+        const receipt = await this.authorizeX402(
+          this.toolX402PaymentRequired({ url, payTo, amount, asset, network, description }),
+          { idempotencyKey },
+        )
+        return this.x402ToolReceipt(receipt)
+      } catch (err) {
+        return this.toolError(err)
+      }
+    }
+
+    if (toolName === 'resume_x402_payment') {
+      const { payment_id, url, payTo, amount, asset, network, description, idempotencyKey } = input as {
+        payment_id: string
+        url: string
+        payTo: string
+        amount: string
+        asset: string
+        network: string
+        description?: string
+        idempotencyKey?: string
+      }
+
+      try {
+        const receipt = await this.resumeAuthorizedX402({
+          paymentId: payment_id,
+          paymentRequired: this.toolX402PaymentRequired({ url, payTo, amount, asset, network, description }),
+          idempotencyKey,
         })
-        return {
-          success: true,
-          payment_id: receipt.paymentId,
-          tx_hash: receipt.txHash,
-          token: receipt.token,
-          amount: receipt.amount,
-          to: receipt.to,
-          resource_url: receipt.resourceUrl,
-          explorer_url: receipt.explorerUrl,
-          payment_header: receipt.paymentHeader,
-          merchant_to: receipt.merchantTo,
-          payer: receipt.payer,
-          chain_id: receipt.chainId,
-        }
+        return this.x402ToolReceipt(receipt)
       } catch (err) {
         return this.toolError(err)
       }
@@ -1016,6 +1304,50 @@ export class HavenClient {
     }
 
     throw new Error(`Unknown tool: ${toolName}`)
+  }
+
+  private toolX402PaymentRequired(input: {
+    url: string
+    payTo: string
+    amount: string
+    asset: string
+    network: string
+    description?: string
+  }): X402PaymentRequired {
+    return {
+      x402Version: 2,
+      resource: { url: input.url, description: input.description },
+      accepts: [
+        {
+          scheme: 'exact',
+          network: input.network,
+          amount: input.amount,
+          asset: input.asset,
+          payTo: input.payTo,
+          maxTimeoutSeconds: 30,
+        },
+      ],
+    }
+  }
+
+  private x402ToolReceipt(receipt: X402Receipt): Record<string, unknown> {
+    return {
+      success: true,
+      payment_id: receipt.paymentId,
+      tx_hash: receipt.txHash,
+      token: receipt.token,
+      amount: receipt.amount,
+      to: receipt.to,
+      resource_url: receipt.resourceUrl,
+      explorer_url: receipt.explorerUrl,
+      payment_header: receipt.paymentHeader,
+      merchant_to: receipt.merchantTo,
+      payer: receipt.payer,
+      chain_id: receipt.chainId,
+      haven: receipt.haven,
+      merchant: receipt.merchant,
+      x402: receipt.x402,
+    }
   }
 
   private toolError(err: unknown): Record<string, unknown> {

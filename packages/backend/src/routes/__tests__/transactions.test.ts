@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchSafeTransactions, mergeX402Transactions } from '../transactions.js'
+import {
+  enrichTransactionsWithAgents,
+  fetchSafeTransactions,
+  mergeX402Transactions,
+} from '../transactions.js'
 import type { FastifyBaseLogger } from 'fastify'
 import pool from '../../db.js'
 
@@ -105,30 +109,32 @@ describe('fetchSafeTransactions', () => {
 
 describe('mergeX402Transactions', () => {
   it('normalizes x402 funding intents into merchant-facing transactions', async () => {
-    vi.spyOn(pool, 'query').mockResolvedValueOnce({
-      rows: [
-        {
-          id: 'payment-id',
-          tx_hash: TX_HASH,
-          agent_id: 'agent-id',
-          agent_name: 'Research assistant',
-          safe_id: 'safe-id',
-          safe_address: SAFE_ADDRESS,
-          safe_name: 'Main wallet',
-          chain_id: 8453,
-          token_symbol: 'USDC',
-          token_address: USDC_ADDRESS,
-          to_address: '0x1111111111111111111111111111111111111111',
-          amount_raw: '20000',
-          amount_human: '0.02',
-          x402_merchant_address: '0x2222222222222222222222222222222222222222',
-          x402_resource_url: 'https://api.example.com/data',
-          payment_proof_status: 'protocol_receipt_attached',
-          confirmed_at: '2026-05-08T11:50:10Z',
-          created_at: '2026-05-08T11:49:55Z',
-        },
-      ],
-    } as never)
+    vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'payment-id',
+            tx_hash: TX_HASH,
+            agent_id: 'agent-id',
+            agent_name: 'Research assistant',
+            safe_id: 'safe-id',
+            safe_address: SAFE_ADDRESS,
+            safe_name: 'Main wallet',
+            chain_id: 8453,
+            token_symbol: 'USDC',
+            token_address: USDC_ADDRESS,
+            to_address: '0x1111111111111111111111111111111111111111',
+            amount_raw: '20000',
+            amount_human: '0.02',
+            x402_merchant_address: '0x2222222222222222222222222222222222222222',
+            x402_resource_url: 'https://api.example.com/data',
+            payment_proof_status: 'protocol_receipt_attached',
+            confirmed_at: '2026-05-08T11:50:10Z',
+            created_at: '2026-05-08T11:49:55Z',
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const result = await mergeX402Transactions(
       'user-id',
@@ -178,6 +184,136 @@ describe('mergeX402Transactions', () => {
       agentName: 'Research assistant',
       paymentId: 'payment-id',
       paymentProofStatus: 'protocol_receipt_attached',
+    })
+  })
+
+  it('normalizes manually approved x402 approval requests into merchant-facing transactions', async () => {
+    vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'approval-id',
+            tx_hash: TX_HASH,
+            agent_id: 'agent-id',
+            agent_name: 'Research assistant',
+            safe_id: 'safe-id',
+            safe_address: SAFE_ADDRESS,
+            safe_name: 'Main wallet',
+            chain_id: 8453,
+            token_symbol: 'USDC',
+            token_address: USDC_ADDRESS,
+            to_address: '0x1111111111111111111111111111111111111111',
+            amount_raw: '10000',
+            amount_human: '0.01',
+            merchant_address: '0x2222222222222222222222222222222222222222',
+            payment_resource_url: 'https://mcp.soundside.ai/mcp',
+            executed_at: '2026-05-22T07:50:10Z',
+            created_at: '2026-05-22T07:49:55Z',
+          },
+        ],
+      } as never)
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{
+        id: 'safe-id',
+        safe_address: SAFE_ADDRESS,
+        chain_id: 8453,
+        name: 'Main wallet',
+      }],
+      [{
+        hash: TX_HASH,
+        type: 'erc20',
+        from: SAFE_ADDRESS,
+        to: '0x1111111111111111111111111111111111111111',
+        value: '10000',
+        valueFormatted: '0.01',
+        asset: 'USDC',
+        decimals: 6,
+        direction: 'out',
+        timestamp: 1779436199,
+        blockNumber: 45725826,
+        isError: false,
+        tokenAddress: USDC_ADDRESS,
+        tokenSymbol: 'USDC',
+        chainId: 8453,
+        safeId: 'safe-id',
+        safeAddress: SAFE_ADDRESS,
+        safeName: 'Main wallet',
+      }],
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      hash: TX_HASH,
+      from: SAFE_ADDRESS,
+      to: '0x2222222222222222222222222222222222222222',
+      value: '10000',
+      valueFormatted: '0.01',
+      asset: 'USDC',
+      direction: 'out',
+      source: 'x402',
+      x402ResourceUrl: 'https://mcp.soundside.ai/mcp',
+      x402MerchantAddress: '0x2222222222222222222222222222222222222222',
+      safeId: 'safe-id',
+      safeName: 'Main wallet',
+      agentId: 'agent-id',
+      agentName: 'Research assistant',
+      paymentId: 'approval-id',
+      paymentProofStatus: 'payment_confirmed',
+    })
+  })
+})
+
+describe('enrichTransactionsWithAgents', () => {
+  it('enriches raw explorer transfers from executed x402 approvals', async () => {
+    vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'approval-id',
+            tx_hash: TX_HASH.toLowerCase(),
+            agent_id: 'agent-id',
+            agent_name: 'Soundside agent',
+            source: 'x402',
+            payment_resource_url: 'https://mcp.soundside.ai/mcp',
+            merchant_address: '0x2222222222222222222222222222222222222222',
+          },
+        ],
+      } as never)
+
+    const result = await enrichTransactionsWithAgents('user-id', [{
+      hash: TX_HASH,
+      type: 'erc20',
+      from: SAFE_ADDRESS,
+      to: '0xA87300000000000000000000000000000000DD35',
+      value: '10000',
+      valueFormatted: '0.01',
+      asset: 'USDC',
+      decimals: 6,
+      direction: 'out',
+      timestamp: 1779436199,
+      blockNumber: 45725826,
+      isError: false,
+      tokenAddress: USDC_ADDRESS,
+      tokenSymbol: 'USDC',
+      chainId: 8453,
+      safeId: 'safe-id',
+      safeAddress: SAFE_ADDRESS,
+      safeName: 'Based',
+    }])
+
+    expect(result[0]).toMatchObject({
+      hash: TX_HASH,
+      source: 'x402',
+      x402ResourceUrl: 'https://mcp.soundside.ai/mcp',
+      x402MerchantAddress: '0x2222222222222222222222222222222222222222',
+      agentId: 'agent-id',
+      agentName: 'Soundside agent',
+      paymentId: 'approval-id',
+      paymentProofStatus: 'payment_confirmed',
     })
   })
 })

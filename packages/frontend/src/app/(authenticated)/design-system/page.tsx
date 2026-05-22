@@ -22,7 +22,6 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import {
-  AgentActivityRow,
   AgentBudgetCard,
   AgentRulesSummary,
   ApprovalRequiredBanner,
@@ -809,21 +808,24 @@ export default function DesignSystemPage() {
             <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recent agent activity</h3>
             </div>
-            <AgentActivityRow
+            <TransactionActivityRow
+              direction="out"
               title="x402 payment"
               description={<MovementExample from="Research assistant" to="API provider" />}
               amount="-12.00 USDC"
               status="Sent"
               statusTone="neutral"
             />
-            <AgentActivityRow
+            <TransactionActivityRow
+              direction="out"
               title="Approval request"
               description={<MovementExample from="Research assistant" to="Cloud vendor" />}
               amount="-320.00 USDC"
               status="Needs approval"
               statusTone="warning"
             />
-            <AgentActivityRow
+            <TransactionActivityRow
+              direction="out"
               title="Payment rejected"
               description={<MovementExample from="Research assistant" to="Unknown vendor" />}
               amount="-80.00 USDC"
@@ -843,19 +845,19 @@ export default function DesignSystemPage() {
           <table className="w-full border-separate border-spacing-0">
             <thead className="hidden md:table-header-group">
               <tr>
-                <th className="w-10 border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3" scope="col">
+                <th className="w-10 border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3" scope="col">
                   <span className="sr-only">Direction</span>
                 </th>
-                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
+                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
                   Activity
                 </th>
-                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
+                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
                   Initiator
                 </th>
-                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
+                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
                   From / To
                 </th>
-                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="descending">
+                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="descending">
                   <button
                     type="button"
                     aria-label="Sort by Date, currently descending"
@@ -867,7 +869,7 @@ export default function DesignSystemPage() {
                     </svg>
                   </button>
                 </th>
-                <th className="border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3 text-right text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="none">
+                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-right text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="none">
                   <button
                     type="button"
                     aria-label="Sort by Amount, currently unsorted"
@@ -876,7 +878,7 @@ export default function DesignSystemPage() {
                     Amount
                   </button>
                 </th>
-                <th className="w-8 border-b border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-3" scope="col">
+                <th className="w-8 border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3" scope="col">
                   <span className="sr-only">External details</span>
                 </th>
               </tr>

@@ -598,15 +598,22 @@ export default function AccountDetailClient() {
             <p className="text-xs text-[var(--v2-ink-3)]">Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span></p>
           ) : null}
         </div>
-        <TransactionsTable
-          transactions={transactions}
-          loading={txLoading}
-          error={txError}
-          onRefresh={() => void refetchTx()}
-          resolveAddress={resolveAddress}
-          safeNamesByAddress={safeNamesByAddress}
-          hasActiveFilters={false}
-        />
+        <Card hover={false}>
+          <TransactionsTable
+            transactions={transactions}
+            loading={txLoading}
+            error={txError}
+            onRefresh={() => void refetchTx()}
+            resolveAddress={resolveAddress}
+            safeNamesByAddress={safeNamesByAddress}
+            hasActiveFilters={false}
+            variant="card"
+            emptyState={{
+              title: 'No activity yet',
+              body: 'Inbound and outbound payments for this Haven wallet will appear here.',
+            }}
+          />
+        </Card>
         {transactions.length > 0 && hasMore ? (
           <div className="mt-5 flex justify-center">
             <Button href={`/transactions?safeId=${encodeURIComponent(safeId)}`} variant="ghost">

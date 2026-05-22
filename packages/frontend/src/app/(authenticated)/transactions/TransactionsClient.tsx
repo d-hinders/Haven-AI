@@ -14,6 +14,7 @@ import type { TransactionFilterState } from '@/types/transactions'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
 
@@ -198,16 +199,19 @@ export default function TransactionsClient() {
         )}
       </div>
 
-      <TransactionsTable
-        transactions={visibleTransactions}
-        loading={loadingInitial}
-        error={error}
-        onRefresh={() => void refresh()}
-        resolveAddress={resolveAddress}
-        safeNamesByAddress={safeNamesByAddress}
-        hasActiveFilters={hasActiveFilters}
-        onClearFilters={handleClearFilters}
-      />
+      <Card hover={false}>
+        <TransactionsTable
+          transactions={visibleTransactions}
+          loading={loadingInitial}
+          error={error}
+          onRefresh={() => void refresh()}
+          resolveAddress={resolveAddress}
+          safeNamesByAddress={safeNamesByAddress}
+          hasActiveFilters={hasActiveFilters}
+          onClearFilters={handleClearFilters}
+          variant="page"
+        />
+      </Card>
 
       {visibleTransactions.length > 0 && (
         <div className="mt-5 flex items-center justify-center">

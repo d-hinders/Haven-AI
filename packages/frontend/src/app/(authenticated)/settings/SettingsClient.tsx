@@ -375,8 +375,8 @@ export default function SettingsClient() {
         </Section>
 
         <Section
-          title="Access and approvals"
-          description="Review how account actions are approved, then name the approvers you recognize."
+          title="Access"
+          description="How you sign in to Haven and approve actions on your accounts."
         >
           <SettingRow
             label="Connected wallet"
@@ -393,6 +393,12 @@ export default function SettingsClient() {
             detail="Password changes are not available yet."
             action={<StatusPill>Coming soon</StatusPill>}
           />
+        </Section>
+
+        <Section
+          title="Approvers"
+          description="Wallets and passkeys that can approve actions on your linked Haven accounts. Name the ones you recognize."
+        >
           <SettingRow
             label="Approver access"
             detail={approvalAccessDetail}

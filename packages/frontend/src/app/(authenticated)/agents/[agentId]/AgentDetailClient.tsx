@@ -335,7 +335,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="max-w-5xl">
       <PageHeader
         title={currentAgent.name}
         actions={

@@ -169,7 +169,7 @@ function OwnerRow({
     <div className="px-6 py-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
             {editing ? (
               <div className="w-full max-w-sm">
                 <Input
@@ -191,6 +191,17 @@ function OwnerRow({
               </p>
             )}
             <StatusPill tone={type === 'Wallet' ? 'neutral' : 'brand'}>{type}</StatusPill>
+            {!editing && owner.accounts.map((account) => {
+              const chain = getChainConfig(account.chain_id ?? 100)
+              return (
+                <span
+                  key={`${account.id}-${owner.owner_address}`}
+                  className="rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-0.5 text-xs text-[var(--v2-ink-2)]"
+                >
+                  {account.name} · {chain.name}
+                </span>
+              )
+            })}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
             {!editing && owner.name ? (
@@ -208,21 +219,6 @@ function OwnerRow({
               View on explorer
             </a>
           </div>
-          {owner.accounts.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {owner.accounts.map((account) => {
-                const chain = getChainConfig(account.chain_id ?? 100)
-                return (
-                  <span
-                    key={`${account.id}-${owner.owner_address}`}
-                    className="rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs text-[var(--v2-ink-2)]"
-                  >
-                    {account.name} · {chain.name}
-                  </span>
-                )
-              })}
-            </div>
-          ) : null}
         </div>
         {editing ? (
           <div className="flex shrink-0 items-center gap-2">

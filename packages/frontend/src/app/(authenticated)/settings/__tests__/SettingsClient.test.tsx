@@ -50,7 +50,7 @@ describe('SettingsClient', () => {
     })
   })
 
-  it('shows a passkey-friendly wallet value when the user has no wallet address', () => {
+  it('renders the Access and Recovery sections for a passkey-managed account', () => {
     mockUseAuth.mockReturnValue({
       user: {
         name: null,
@@ -65,8 +65,10 @@ describe('SettingsClient', () => {
 
     render(<SettingsClient />)
 
-    expect(screen.getAllByText('Connected wallet').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Passkey-managed account').length).toBeGreaterThan(0)
+    // Connected-wallet row was removed (covered by Approvers below); Passkey
+    // status and Recovery sections remain.
+    expect(screen.getByText('Access')).toBeInTheDocument()
+    expect(screen.getByText('Passkey status')).toBeInTheDocument()
     expect(screen.getByText('Recovery and safety')).toBeInTheDocument()
   })
 
@@ -136,8 +138,8 @@ describe('SettingsClient', () => {
 
     render(<SettingsClient />)
 
-    expect(screen.getByText('Access and approvals')).toBeInTheDocument()
-    expect(screen.getAllByText('Listed').length).toBeGreaterThan(0)
+    expect(screen.getByText('Approvers')).toBeInTheDocument()
+    // "Connected wallet" appears as the owner type pill next to the approver name.
     expect(screen.getAllByText('Connected wallet').length).toBeGreaterThan(0)
     expect(screen.getByText('Main account · Gnosis Chain')).toBeInTheDocument()
 

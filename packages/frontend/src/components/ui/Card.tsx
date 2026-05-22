@@ -65,10 +65,12 @@ function CardRoot({
  * Modes:
  * - **default** — hairline `border-t` above, white background, standard
  *   horizontal padding matching the parent Card. Use for a single content
- *   block under a section heading.
- * - **divided** — hairline `border-t` above, row dividers between each child,
- *   no horizontal padding on the wrapper (children own their padding via
- *   `Row` or equivalent). Use for a list inside a Card.
+ *   block under a section heading inside a Card with `p-5`/`p-6` padding.
+ *   Negative margins bleed the border edge-to-edge.
+ * - **divided** — hairline `border-t` above, row dividers between each child.
+ *   Assumes the parent Card has **no inner padding** (the dividers bleed
+ *   naturally to the card edges) and children supply their own horizontal
+ *   padding (via `Row` or equivalent). Use for a list inside a Card.
  * - **inset** — recessed tinted background. Reserve for code blocks or
  *   quote-style content. Don't use for generic grouping.
  */
@@ -83,10 +85,9 @@ function CardSection({
   inset?: boolean
   divided?: boolean
 }) {
-  // Negative horizontal margin matches the standard Card padding (p-5/p-6) so
-  // the border bleeds edge-to-edge. For `divided`, drop the inner horizontal
-  // padding so child rows can supply their own and the dividers bleed too.
   if (inset) {
+    // Negative horizontal margin negates the parent Card's p-5/p-6 so the
+    // tinted background bleeds edge-to-edge.
     return (
       <div
         className={`bg-[var(--v2-surface)] -mx-5 md:-mx-6 px-5 md:px-6 border-y border-[var(--v2-border)] ${className}`}
@@ -96,14 +97,19 @@ function CardSection({
     )
   }
   if (divided) {
+    // Divided mode is for row-list use inside a padding-0 Card. No negative
+    // margins — the wrapper sits flush with the card edges, dividers extend
+    // full-width, and child rows own their own horizontal padding.
     return (
       <div
-        className={`-mx-5 md:-mx-6 border-t border-[var(--v2-border)] divide-y divide-[var(--v2-table-row-border)] ${className}`}
+        className={`border-t border-[var(--v2-border)] divide-y divide-[var(--v2-table-row-border)] ${className}`}
       >
         {children}
       </div>
     )
   }
+  // Default: subsection inside a Card with p-5/p-6 padding. Negative margins
+  // bleed the hairline top border to the card's inner edges.
   return (
     <div
       className={`-mx-5 md:-mx-6 px-5 md:px-6 border-t border-[var(--v2-border)] ${className}`}

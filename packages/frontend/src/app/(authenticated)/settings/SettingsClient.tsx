@@ -207,12 +207,12 @@ function OwnerRow({
             )}
             <StatusPill tone={type === 'Wallet' ? 'neutral' : 'brand'}>{type}</StatusPill>
           </div>
-          {!editing && owner.name ? (
-            <p className="mt-1 font-mono text-xs text-[var(--v2-ink-3)]">
-              {truncate(owner.owner_address)}
-            </p>
-          ) : null}
-          <div className="mt-2 flex flex-wrap items-center gap-3">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {!editing && owner.name ? (
+              <span className="font-mono text-xs text-[var(--v2-ink-3)]">
+                {truncate(owner.owner_address)}
+              </span>
+            ) : null}
             <CopyAddressButton address={owner.owner_address} />
             <a
               href={getExplorerUrl(owner.accounts[0]?.chain_id ?? 100, 'address', owner.owner_address)}

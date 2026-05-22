@@ -162,11 +162,19 @@ function buildSdkExample(hasDelegateKey: boolean): string {
 
 function buildPaidApiExample(): string {
   return [
-    `// Works with standard x402 and Haven machine-payment challenges.`,
+    `// One-call path for standard x402 and Haven machine-payment challenges.`,
     `const response = await haven.fetch('https://paid-api.example/data')`,
     `const data = await response.json()`,
     ``,
     `console.log(data)`,
+    ``,
+    `// Quote-first path when the agent needs to check a price cap before paying.`,
+    `const quote = await haven.quoteX402('https://paid-api.example/data', undefined, {`,
+    `  idempotencyKey: 'paid-api-data',`,
+    `})`,
+    `if (Number(quote.amount) > 0.05) throw new Error('Price is above the user cap')`,
+    `const paidResponse = await haven.payX402Quote(quote)`,
+    `const paidData = await paidResponse.json()`,
   ].join('\n')
 }
 
@@ -300,7 +308,10 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `funding from the Haven wallet to the agent's delegate wallet; only after`,
     `Haven reports \`next_action: "retry_original_x402_request"\` should the agent`,
     `retry the original paid API request and send the merchant x402 payment header.`,
-    `Do not rewrite the SDK or retry in a tight loop while approval is pending.`,
+    `If you used \`quoteX402()\`, keep the returned quote or the error's`,
+    `\`resumeState\` so \`resumeX402Payment(resumeState)\` can continue the`,
+    `same merchant/MCP session. Do not rewrite the SDK, start a new merchant`,
+    `session, or retry in a tight loop while approval is pending.`,
     ``,
     `## First payment — sanity check`,
     ``,

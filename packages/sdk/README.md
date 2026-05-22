@@ -120,6 +120,26 @@ if (apiResponse.status === 402) {
 }
 ```
 
+For agents that need to inspect the price before paying, use the quote-first
+path. `quoteX402()` probes the merchant and parses the HTTP 402 response, but it
+does not create a Haven payment, approval request, signature, or on-chain
+transaction.
+
+```typescript
+const quote = await haven.quoteX402(
+  'https://paid-api.example.com/data',
+  undefined,
+  { idempotencyKey: 'paid-api-data-2026-05-22' },
+)
+
+if (Number(quote.amount) > 0.05) {
+  throw new Error(`Price ${quote.amount} ${quote.token} is above the user cap`)
+}
+
+const response = await haven.payX402Quote(quote)
+const data = await response.json()
+```
+
 Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`) and send the payment as `X-PAYMENT`. Haven's older tx-hash proof helper remains exported for Haven-native integrations, but `haven.fetch()` does not send `PAYMENT-SIGNATURE`.
 
 For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet/Safe address should use a Haven-native flow instead of standard merchant x402.
@@ -197,24 +217,25 @@ user approves, call `getPaymentStatus(payment_id)`. When Haven reports
 `nextAction: 'retry_original_x402_request'`, call `resumeX402Payment()` with the
 same user-intent idempotency key and the original x402 details.
 
+When the agent used `quoteX402()` / `payX402Quote()`, pending approval errors
+include a serializable `resumeState`. Persist it with the MCP session details
+and pass it back to `resumeX402Payment()` after approval.
+
 ```typescript
+let resumeState
 try {
-  await haven.pay({ token: 'USDC', amount: '500', to: '0xabc...' })
+  await haven.payX402Quote(quote)
 } catch (err) {
-  if (err instanceof HavenPaymentStateError && err.nextAction === 'wait_for_user_approval') {
+  if (err instanceof HavenPaymentStateError && err.resumeState) {
+    resumeState = err.resumeState
     console.log(err.paymentId, err.phase, err.nextAction)
-    console.log('Queued for owner approval — visible in the Haven dashboard.')
+    console.log('Queued for owner approval. Save resumeState and wait.')
   }
 }
 
 const status = await haven.getPaymentStatus('approval-or-payment-id')
 if (status.nextAction === 'retry_original_x402_request') {
-  const response = await haven.resumeX402Payment({
-    paymentId: status.paymentId,
-    url: 'https://paid-api.example.com/data',
-    paymentRequired,
-    idempotencyKey: 'paid-api-data-2026-05-22',
-  })
+  const response = await haven.resumeX402Payment(resumeState)
   const data = await response.json()
 }
 ```
@@ -249,6 +270,10 @@ merchant requires it: initialize, retain `mcp-session-id`, send the original
 with the same `payment_id` and retry the original `tools/call` with
 `X-PAYMENT`. Use a stable `idempotencyKey` for the user intent so fresh merchant
 quotes or sessions do not become duplicate Haven approval requests.
+
+See [`examples/mcp-x402-sse.ts`](./examples/mcp-x402-sse.ts) for a complete
+MCP flow with initialize, `mcp-session-id`, JSON-RPC `tools/call`, quote
+inspection, user approval, saved resume state, and final retry.
 
 ## Error Handling
 

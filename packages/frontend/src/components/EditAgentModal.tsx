@@ -14,6 +14,7 @@ import { api } from '@/lib/api'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { validateMoneyInput } from '@/lib/money-input'
 import OnchainActionGate, { OnchainActionNotice } from './OnchainActionGate'
 import {
@@ -501,7 +502,7 @@ export default function EditAgentModal({
                           <span className="font-medium text-[var(--v2-ink)]">{sym}</span>
                           <div className="flex items-center gap-2">
                             <span className="text-[var(--v2-ink-3)]">
-                              {formatAmountShort(a.amount, dec)} / {resetLabel(a.resetTimeMin).toLowerCase()}
+                              {formatAmountShort(a.amount, dec, sym)} / {resetLabel(a.resetTimeMin).toLowerCase()}
                             </span>
                             <button
                               type="button"
@@ -860,11 +861,6 @@ function tokenDecimalsFromAddr(addr: string, cId: number): number {
   return 18
 }
 
-function formatAmountShort(raw: bigint, decimals: number): string {
-  if (raw === 0n) return '0'
-  const str = raw.toString().padStart(decimals + 1, '0')
-  const intPart = str.slice(0, str.length - decimals) || '0'
-  const fracPart = str.slice(str.length - decimals)
-  const trimmed = fracPart.replace(/0+$/, '').padEnd(2, '0').slice(0, 4)
-  return `${intPart}.${trimmed}`
+function formatAmountShort(raw: bigint, decimals: number, symbol: string): string {
+  return formatAllowanceAmount(raw.toString(), decimals, { symbol })
 }

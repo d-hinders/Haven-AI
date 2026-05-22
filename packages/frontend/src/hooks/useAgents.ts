@@ -21,6 +21,7 @@ export interface Agent {
   safe_id: string | null
   safe_address: string | null
   safe_name: string | null
+  safe_chain_id?: number | null
   api_key?: string | null
   api_key_prefix?: string | null
   status: AgentStatus

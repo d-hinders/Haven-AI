@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
@@ -398,76 +399,64 @@ export default function AccountDetailClient() {
         </div>
       </Card>
 
-      <Card hover={false} className="p-5 sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
-              <Link
-                href="/agents"
-                className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
-              >
-                View all agents &rarr;
-              </Link>
-            </div>
-            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              Connected agents can request payments from this Haven wallet when their status and agent budget allow it.
-            </p>
+      <Card hover={false}>
+        <div className="px-5 pt-5 sm:px-6 sm:pt-6">
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
+            <Link
+              href="/agents"
+              className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+            >
+              View all agents &rarr;
+            </Link>
           </div>
+          <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            Connected agents can request payments from this Haven wallet when their status and agent budget allow it.
+          </p>
         </div>
 
         {agentsLoading ? (
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {[0, 1].map((item) => (
-              <div
-                key={item}
-                className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3"
-              >
+          <Card.Section divided>
+            {[0, 1, 2].map((item) => (
+              <div key={item} className="px-4 py-3.5">
                 <div className="h-4 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
                 <div className="mt-2 h-3 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
               </div>
             ))}
-          </div>
+          </Card.Section>
         ) : agentsError ? (
-          <EmptyState
-            title="Agent access could not load"
-            body="Haven could not verify which agents can request payments from this wallet."
-            className="mt-5 py-8"
-            action={<Button variant="ghost" size="sm" onClick={refetchAgents}>Try again</Button>}
-          />
+          <div className="border-t border-[var(--v2-border)]">
+            <EmptyState
+              title="Agent access could not load"
+              body="Haven could not verify which agents can request payments from this wallet."
+              className="py-8"
+              action={<Button variant="ghost" size="sm" onClick={refetchAgents}>Try again</Button>}
+            />
+          </div>
         ) : safeAgents.length > 0 ? (
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <Card.Section divided>
             {safeAgents.map((agent) => {
               const status = agentStatusPresentation(agent.status)
               return (
-                <Link
+                <Row
                   key={agent.id}
                   href={`/agents/${agent.id}`}
-                  className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 transition-colors hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</p>
-                      <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                        {agentBudgetSummary(agent, chainId)}
-                      </p>
-                    </div>
-                    <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
-                  </div>
-                  <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-                    Review or stop this agent from its detail page.
-                  </p>
-                </Link>
+                  title={agent.name}
+                  subtitle={agentBudgetSummary(agent, chainId)}
+                  trailing={<StatusBadge tone={status.tone}>{status.label}</StatusBadge>}
+                />
               )
             })}
-          </div>
+          </Card.Section>
         ) : (
-          <EmptyState
-            title="No agents connected"
-            body="Connect an agent when you want it to request payments from this Haven wallet."
-            className="mt-5 py-8"
-            action={<Button href="/agents" size="sm">Connect agent</Button>}
-          />
+          <div className="border-t border-[var(--v2-border)]">
+            <EmptyState
+              title="No agents connected"
+              body="Connect an agent when you want it to request payments from this Haven wallet."
+              className="py-8"
+              action={<Button href="/agents" size="sm">Connect agent</Button>}
+            />
+          </div>
         )}
       </Card>
 
@@ -598,15 +587,22 @@ export default function AccountDetailClient() {
             <p className="text-xs text-[var(--v2-ink-3)]">Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span></p>
           ) : null}
         </div>
-        <TransactionsTable
-          transactions={transactions}
-          loading={txLoading}
-          error={txError}
-          onRefresh={() => void refetchTx()}
-          resolveAddress={resolveAddress}
-          safeNamesByAddress={safeNamesByAddress}
-          hasActiveFilters={false}
-        />
+        <Card hover={false}>
+          <TransactionsTable
+            transactions={transactions}
+            loading={txLoading}
+            error={txError}
+            onRefresh={() => void refetchTx()}
+            resolveAddress={resolveAddress}
+            safeNamesByAddress={safeNamesByAddress}
+            hasActiveFilters={false}
+            variant="card"
+            emptyState={{
+              title: 'No activity yet',
+              body: 'Inbound and outbound payments for this Haven wallet will appear here.',
+            }}
+          />
+        </Card>
         {transactions.length > 0 && hasMore ? (
           <div className="mt-5 flex justify-center">
             <Button href={`/transactions?safeId=${encodeURIComponent(safeId)}`} variant="ghost">

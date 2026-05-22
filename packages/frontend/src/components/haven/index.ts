@@ -1,5 +1,4 @@
 export { AgentBudgetCard } from './AgentBudgetCard'
-export { AgentActivityRow } from './AgentActivityRow'
 export {
   ExternalDetailsLink,
   TransactionActivityRow,

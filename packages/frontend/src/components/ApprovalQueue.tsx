@@ -20,7 +20,6 @@ import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { timeAgo, timeUntil } from '@/lib/format'
 import { useActiveSigner } from '@/lib/signer'
 import {
-  approvalReasonLabel,
   approvalRecipientLabel,
   approvalSourceLabel,
 } from '@/lib/approval-labels'
@@ -38,7 +37,6 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tooltip } from '@/components/ui/Tooltip'
 import {
-  ApprovalRequiredBanner,
   ExternalDetailsLink,
   TransactionMovement,
 } from '@/components/haven'
@@ -128,19 +126,6 @@ function ApprovalCard({
         ? 'Approval saved. Complete the payment before the agent can retry the merchant.'
         : `${approval.agent_name} asked to send this payment. It is approved, but has not been sent yet.`
       : `${approval.agent_name} asked to send this payment. Nothing moves until you approve it.`
-  const approvalBannerCopy =
-    approval.status === 'approved'
-      ? requiresAdditionalApproval
-        ? isX402
-          ? 'Approval saved. Submit this payment for the remaining account approvals before the agent can retry the merchant.'
-          : 'This request still needs to be submitted for the remaining account approvals before the payment can be sent.'
-        : isX402
-          ? 'Approval saved. Complete the payment before the agent can retry the merchant.'
-          : 'This request was approved but still needs to be completed before the payment is sent.'
-      : isX402
-        ? 'This payment is above the remaining agent budget. Nothing moves until you approve it.'
-        : approvalReasonLabel({ reason: approval.reason, source: approval.source })
-
   return (
     <Card
       as="article"
@@ -203,14 +188,6 @@ function ApprovalCard({
             </dl>
           </div>
         </div>
-
-        <ApprovalRequiredBanner
-          title={approval.status === 'approved' ? 'Approved, not sent yet' : 'Approval required'}
-          tone="neutral"
-          density="compact"
-        >
-          {approvalBannerCopy}
-        </ApprovalRequiredBanner>
 
         {showOtherDeviceNotice ? <PasskeyOtherDeviceNotice /> : null}
 

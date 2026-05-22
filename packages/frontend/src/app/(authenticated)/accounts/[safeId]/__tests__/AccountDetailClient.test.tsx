@@ -187,7 +187,7 @@ describe('AccountDetailClient', () => {
     expect(screen.getByText('1 of 1 approver required')).toBeInTheDocument()
     expect(screen.getByText('Agent access')).toBeInTheDocument()
     expect(screen.getByText('Research agent')).toBeInTheDocument()
-    expect(screen.getByText('100 USDC.e per day')).toBeInTheDocument()
+    expect(screen.getByText('100.00 USDC.e per day')).toBeInTheDocument()
     expect(screen.getByText('Advanced account details')).toBeInTheDocument()
     expect(screen.getByText('Approvers')).toBeInTheDocument()
     expect(screen.getByText('Wallet')).toBeInTheDocument()

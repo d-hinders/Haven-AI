@@ -19,6 +19,7 @@ import ConfirmDialog from './ConfirmDialog'
 import { truncate } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
+import { formatAllowanceAmount, getTokenDecimals } from '@/lib/allowance-format'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { entityCardClassName } from './ui/entityCardStyles'
@@ -28,6 +29,15 @@ import { Skeleton } from './ui/Skeleton'
 
 function resetLabel(mins: number) {
   return RESET_PERIODS.find((p) => p.value === mins)?.label ?? `${mins}m`
+}
+
+function budgetPeriodLabel(mins: number) {
+  const label = resetLabel(mins).toLowerCase()
+  if (label === 'one-time') return 'total budget'
+  if (label === 'daily') return 'per day'
+  if (label === 'weekly') return 'per week'
+  if (label === 'monthly') return 'per month'
+  return `every ${label}`
 }
 
 /** Resolve token address to symbol (chain-aware) */
@@ -54,21 +64,16 @@ function tokenDecimals(addr: string, chainId: number): number {
   return 18
 }
 
-/** Format raw bigint to human-readable amount */
-function formatAmount(raw: bigint, decimals: number): string {
-  if (raw === 0n) return '0'
-  const str = raw.toString().padStart(decimals + 1, '0')
-  const intPart = str.slice(0, str.length - decimals) || '0'
-  const fracPart = str.slice(str.length - decimals)
-  const trimmed = fracPart.replace(/0+$/, '').padEnd(2, '0').slice(0, 6)
-  return `${intPart}.${trimmed}`
+function tokenDecimalsForAllowance(allowance: AgentAllowance, chainId: number): number {
+  return getTokenDecimals(chainId, allowance.token_symbol) ?? tokenDecimals(allowance.token_address, chainId)
 }
 
 function formatConfiguredAllowance(allowance: AgentAllowance, chainId: number): string {
   try {
-    return formatAmount(
-      BigInt(allowance.allowance_amount),
-      tokenDecimals(allowance.token_address, chainId),
+    return formatAllowanceAmount(
+      BigInt(allowance.allowance_amount).toString(),
+      tokenDecimalsForAllowance(allowance, chainId),
+      { symbol: allowance.token_symbol },
     )
   } catch {
     return allowance.allowance_amount
@@ -110,6 +115,7 @@ function AllowanceBar({
   chainId?: number
 }) {
   const decimals = tokenDecimals(info.token, chainId)
+  const symbol = tokenSymbol(info.token, chainId)
   const effective = computeEffectiveAllowance(info)
   const total = info.amount
   const spent = effective.effectiveSpent
@@ -137,7 +143,7 @@ function AllowanceBar({
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
         <span className="text-[var(--v2-ink-2)] font-medium flex items-center gap-1.5">
-          {tokenSymbol(info.token, chainId)}
+          {symbol}
           {nearLimit && (
             <span
               className="inline-flex items-center gap-1 rounded bg-[var(--v2-danger-soft)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--v2-danger)] animate-pending-pulse"
@@ -152,13 +158,13 @@ function AllowanceBar({
           )}
         </span>
         <span className="text-[var(--v2-ink-3)]">
-          <span className="v2-tabular">{formatAmount(remaining, decimals)}</span>
+          <span className="v2-tabular">{formatAllowanceAmount(remaining.toString(), decimals, { symbol })}</span>
           {' / '}
-          <span className="v2-tabular">{formatAmount(total, decimals)}</span>
+          <span className="v2-tabular">{formatAllowanceAmount(total.toString(), decimals, { symbol })}</span>
           {' remaining'}
           {info.resetTimeMin > 0 && (
             <span className="text-[var(--v2-ink-3)] ml-1">
-              per {resetLabel(info.resetTimeMin).toLowerCase()}
+              {budgetPeriodLabel(info.resetTimeMin)}
             </span>
           )}
         </span>
@@ -210,7 +216,7 @@ function ConfiguredAllowanceRow({
   allowance: AgentAllowance
   chainId: number
 }) {
-  const reset = resetLabel(allowance.reset_period_min).toLowerCase()
+  const reset = budgetPeriodLabel(allowance.reset_period_min)
 
   return (
     <div className="space-y-1">
@@ -219,7 +225,7 @@ function ConfiguredAllowanceRow({
         <span className="text-right text-[var(--v2-ink-3)]">
           <span className="v2-tabular">{formatConfiguredAllowance(allowance, chainId)}</span>
           {` ${allowance.token_symbol}`}
-          {allowance.reset_period_min > 0 ? ` per ${reset}` : ''}
+          {allowance.reset_period_min > 0 ? ` ${reset}` : ''}
         </span>
       </div>
       <div className="h-[3px] w-full rounded-full bg-[var(--v2-surface-2)]">
@@ -664,9 +670,9 @@ export default function AgentPanel() {
   const managedDelegates = useMemo(
     () =>
       agents
-        .filter((a) => a.status !== 'revoked' && a.delegate_address)
+        .filter((a) => a.status !== 'revoked' && a.delegate_address && (!a.safe_id || a.safe_id === activeSafe?.id))
         .map((a) => a.delegate_address!),
-    [agents],
+    [activeSafe?.id, agents],
   )
 
   // On-chain allowance data — discovers ALL delegates, not just DB agents
@@ -864,9 +870,11 @@ export default function AgentPanel() {
             <div className="grid items-start gap-4 lg:grid-cols-2">
               {visibleAgents.map((agent) => {
                 const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
-                const chainData = delegateKey
+                const agentUsesActiveSafe = !agent.safe_id || agent.safe_id === activeSafe?.id
+                const chainData = delegateKey && agentUsesActiveSafe
                   ? onChainData.get(delegateKey)?.allowances ?? null
                   : null
+                const agentChainId = agent.safe_chain_id ?? chainId
 
                 return (
                   <AgentCard
@@ -881,7 +889,7 @@ export default function AgentPanel() {
                     onRevoke={handleRevoke}
                     onDelete={handleDelete}
                     busyAction={busyAgentId === agent.id ? busyAction : null}
-                    chainId={chainId}
+                    chainId={agentChainId}
                   />
                 )
               })}
@@ -928,7 +936,7 @@ export default function AgentPanel() {
                   onRevoke={handleRevoke}
                   onDelete={handleDelete}
                   busyAction={busyAgentId === agent.id ? busyAction : null}
-                  chainId={chainId}
+                  chainId={agent.safe_chain_id ?? chainId}
                 />
               ))}
             </div>

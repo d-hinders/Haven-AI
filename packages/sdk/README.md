@@ -189,7 +189,10 @@ tool later instead of retrying in a tight loop.
 
 For x402, approval resume is explicit. If `authorizeX402()` or `haven.fetch()`
 throws `HavenPaymentStateError` with `nextAction: 'wait_for_user_approval'`,
-stop and tell the user the request is waiting in Haven. Do not loop. After the
+stop and tell the user the Haven funding leg is waiting in Haven. Do not loop
+and do not start a new merchant or MCP session. Pending x402 states include the
+resource URL, merchant address, chain id, asset, network, atomic amount, and
+idempotency key so agents can explain what is waiting for approval. After the
 user approves, call `getPaymentStatus(payment_id)`. When Haven reports
 `nextAction: 'retry_original_x402_request'`, call `resumeX402Payment()` with the
 same user-intent idempotency key and the original x402 details.
@@ -215,6 +218,15 @@ if (status.nextAction === 'retry_original_x402_request') {
   const data = await response.json()
 }
 ```
+
+Think of manual approval x402 as two separate legs:
+
+- Haven funding leg: the user may need to approve a Safe AllowanceModule transfer
+  to the agent delegate wallet. Status fields such as `phase`,
+  `nextAction`, and `txHash` describe this leg.
+- Merchant x402 leg: after the funding leg is complete, the agent resumes the
+  same payment id and retries the original merchant request with `X-PAYMENT`.
+  Do not treat a new 402 probe or a new MCP session as a resume.
 
 For manual HTTP stacks, use `resumeAuthorizedX402()` to get the merchant header
 without retrying the request for you:

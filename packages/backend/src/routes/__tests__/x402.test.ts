@@ -309,7 +309,22 @@ describe('x402 routes', () => {
       requested: '0.02',
       token: 'USDC',
       rail: 'x402',
+      resource_url: 'https://mcp.soundside.ai/mcp',
+      merchant_address: MERCHANT.toLowerCase(),
+      chain_id: 8453,
+      amount_atomic: '20000',
+      asset: USDC,
+      network: 'base',
+      idempotency_key: 'x402:approval',
       challenge_id: null,
+      x402: {
+        amount_atomic: '20000',
+        asset: USDC,
+        network: 'base',
+        resource_url: 'https://mcp.soundside.ai/mcp',
+        merchant_address: MERCHANT.toLowerCase(),
+        idempotency_key: 'x402:approval',
+      },
     })
 
     const insertCall = mockQuery.mock.calls[6]
@@ -351,7 +366,9 @@ describe('x402 routes', () => {
           id: 'approval-123',
           chain_id: 8453,
           token_symbol: 'USDC',
+          token_address: USDC,
           amount_human: '0.02',
+          amount_raw: '20000',
           status: 'pending',
           tx_hash: null,
           expires_at: '2026-05-10T20:00:00.000Z',
@@ -360,6 +377,13 @@ describe('x402 routes', () => {
           payment_resource_url: 'https://mcp.soundside.ai/mcp',
           x402_resource_url: 'https://mcp.soundside.ai/mcp',
           merchant_address: MERCHANT.toLowerCase(),
+          machine_idempotency_key: 'x402:approval',
+          machine_metadata: JSON.stringify({
+            protocol: 'x402',
+            network: 'base',
+            category: null,
+            description: null,
+          }),
         }],
       })
 
@@ -388,6 +412,20 @@ describe('x402 routes', () => {
       amount: '0.02',
       token: 'USDC',
       rail: 'x402',
+      resource_url: 'https://mcp.soundside.ai/mcp',
+      merchant_address: MERCHANT.toLowerCase(),
+      amount_atomic: '20000',
+      asset: USDC,
+      network: 'base',
+      idempotency_key: 'x402:approval',
+      x402: {
+        amount_atomic: '20000',
+        asset: USDC,
+        network: 'base',
+        resource_url: 'https://mcp.soundside.ai/mcp',
+        merchant_address: MERCHANT.toLowerCase(),
+        idempotency_key: 'x402:approval',
+      },
     })
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   })
@@ -414,7 +452,9 @@ describe('x402 routes', () => {
           id: 'approval-123',
           chain_id: 8453,
           token_symbol: 'USDC',
+          token_address: USDC,
           amount_human: '0.02',
+          amount_raw: '20000',
           status: 'executed',
           tx_hash: `0x${'ab'.repeat(32)}`,
           expires_at: '2026-05-10T20:00:00.000Z',
@@ -423,6 +463,13 @@ describe('x402 routes', () => {
           payment_resource_url: 'https://mcp.soundside.ai/mcp',
           x402_resource_url: 'https://mcp.soundside.ai/mcp',
           merchant_address: MERCHANT.toLowerCase(),
+          machine_idempotency_key: 'x402:approval',
+          machine_metadata: JSON.stringify({
+            protocol: 'x402',
+            network: 'base',
+            category: null,
+            description: null,
+          }),
         }],
       })
 
@@ -449,6 +496,12 @@ describe('x402 routes', () => {
       phase: 'funding_sent',
       next_action: 'retry_original_x402_request',
       rail: 'x402',
+      resource_url: 'https://mcp.soundside.ai/mcp',
+      merchant_address: MERCHANT.toLowerCase(),
+      amount_atomic: '20000',
+      asset: USDC,
+      network: 'base',
+      idempotency_key: 'x402:approval',
     })
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
   })
@@ -497,6 +550,12 @@ describe('x402 routes', () => {
       status: 'pending_approval',
       remaining: '0.01',
       rail: 'x402',
+      resource_url: 'https://mcp.soundside.ai/mcp',
+      merchant_address: MERCHANT.toLowerCase(),
+      amount_atomic: '20000',
+      asset: USDC,
+      network: 'base',
+      idempotency_key: 'x402:approval',
     })
     expect(mockQuery.mock.calls[7][0]).toContain('FROM approval_requests')
   })

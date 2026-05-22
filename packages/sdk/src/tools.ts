@@ -151,13 +151,13 @@ const AUTHORIZE_X402_DESCRIPTION =
   'Authorize payment for an HTTP 402 (Payment Required) response. ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key and request a policy-limited Safe AllowanceModule top-up when needed. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
-  'If this returns pending_approval, tell the user it is waiting in Haven, call get_payment_status later, and use resume_x402_payment only when next_action is retry_original_x402_request. Do not loop retries while approval is pending. ' +
+  'If this returns pending_approval, tell the user it is waiting in Haven, preserve the original merchant/MCP session and x402 details, call get_payment_status later, and use resume_x402_payment only when next_action is retry_original_x402_request. Do not start a new merchant session or loop retries while approval is pending. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request when doing a manual HTTP retry.'
 
 const RESUME_X402_DESCRIPTION =
   'Resume an x402 payment after the user approved it in Haven. ' +
   'Use this only after get_payment_status returns next_action=retry_original_x402_request. ' +
-  'It checks the approved payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new approval request.'
+  'It checks the approved payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new approval request or merchant session.'
 
 const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =
   'Authorize a Haven machine-payment challenge, currently for the internal MPP demo rail. ' +

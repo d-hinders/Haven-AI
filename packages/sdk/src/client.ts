@@ -1142,11 +1142,27 @@ export class HavenClient {
       amount,
       token,
       resourceUrl: raw.resource_url ?? null,
-      merchantAddress: raw.merchant_to ?? null,
+      merchantAddress: raw.merchant_address ?? raw.merchant_to ?? null,
       txHash: raw.tx_hash ?? null,
       expiresAt: raw.expires_at ?? '',
       chainId: raw.chain_id ?? 0,
       message,
+      amountAtomic: raw.amount_atomic ?? raw.x402?.amount_atomic ?? null,
+      asset: raw.asset ?? raw.x402?.asset ?? null,
+      network: raw.network ?? raw.x402?.network ?? null,
+      description: raw.description ?? raw.x402?.description ?? null,
+      idempotencyKey: raw.idempotency_key ?? raw.x402?.idempotency_key ?? null,
+      x402: raw.x402
+        ? {
+            amountAtomic: raw.x402.amount_atomic ?? raw.amount_atomic ?? null,
+            asset: raw.x402.asset ?? raw.asset ?? null,
+            network: raw.x402.network ?? raw.network ?? null,
+            resourceUrl: raw.x402.resource_url ?? raw.resource_url ?? null,
+            merchantAddress: raw.x402.merchant_address ?? raw.merchant_address ?? raw.merchant_to ?? null,
+            description: raw.x402.description ?? raw.description ?? null,
+            idempotencyKey: raw.x402.idempotency_key ?? raw.idempotency_key ?? null,
+          }
+        : undefined,
     }
   }
 
@@ -1365,6 +1381,22 @@ export class HavenClient {
         amount: err.state.amount,
         resource_url: err.state.resourceUrl,
         merchant_address: err.state.merchantAddress,
+        amount_atomic: err.state.amountAtomic,
+        asset: err.state.asset,
+        network: err.state.network,
+        description: err.state.description,
+        idempotency_key: err.state.idempotencyKey,
+        x402: err.state.x402
+          ? {
+              amount_atomic: err.state.x402.amountAtomic,
+              asset: err.state.x402.asset,
+              network: err.state.x402.network,
+              resource_url: err.state.x402.resourceUrl,
+              merchant_address: err.state.x402.merchantAddress,
+              description: err.state.x402.description,
+              idempotency_key: err.state.x402.idempotencyKey,
+            }
+          : undefined,
         expires_at: err.state.expiresAt,
         chain_id: err.state.chainId,
         message: err.state.message,
@@ -1478,6 +1510,22 @@ export class HavenClient {
       expiresAt: raw.expires_at,
       chainId: raw.chain_id,
       message: raw.message,
+      amountAtomic: raw.amount_atomic ?? raw.x402?.amount_atomic ?? null,
+      asset: raw.asset ?? raw.x402?.asset ?? null,
+      network: raw.network ?? raw.x402?.network ?? null,
+      description: raw.description ?? raw.x402?.description ?? null,
+      idempotencyKey: raw.idempotency_key ?? raw.x402?.idempotency_key ?? null,
+      x402: raw.x402
+        ? {
+            amountAtomic: raw.x402.amount_atomic ?? raw.amount_atomic ?? null,
+            asset: raw.x402.asset ?? raw.asset ?? null,
+            network: raw.x402.network ?? raw.network ?? null,
+            resourceUrl: raw.x402.resource_url ?? raw.resource_url,
+            merchantAddress: raw.x402.merchant_address ?? raw.merchant_address,
+            description: raw.x402.description ?? raw.description ?? null,
+            idempotencyKey: raw.x402.idempotency_key ?? raw.idempotency_key ?? null,
+          }
+        : undefined,
     }
   }
 }

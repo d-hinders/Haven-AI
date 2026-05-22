@@ -80,8 +80,51 @@ const authorizeX402Schema = {
       type: 'string' as const,
       description: 'Description of the resource being paid for',
     },
+    idempotencyKey: {
+      type: 'string' as const,
+      description: 'Stable caller-supplied key for this user intent. Reuse it when resuming after user approval.',
+    },
   },
   required: ['url', 'payTo', 'amount', 'asset', 'network'] as const,
+}
+
+const resumeX402Schema = {
+  type: 'object' as const,
+  properties: {
+    payment_id: {
+      type: 'string' as const,
+      description: 'The payment or approval request ID returned by authorize_x402_payment.',
+    },
+    url: {
+      type: 'string' as const,
+      description: 'The original URL that returned HTTP 402.',
+    },
+    payTo: {
+      type: 'string' as const,
+      description: 'Payment recipient address from the original 402 response.',
+    },
+    amount: {
+      type: 'string' as const,
+      description: 'Payment amount in atomic units from the original 402 response.',
+    },
+    asset: {
+      type: 'string' as const,
+      description: 'Token contract address from the original 402 response.',
+    },
+    network: {
+      type: 'string' as const,
+      description: 'CAIP-2 chain ID or x402 network from the original 402 response.',
+    },
+    description: {
+      type: 'string' as const,
+      description: 'Description of the resource being paid for.',
+    },
+    idempotencyKey: {
+      type: 'string' as const,
+      description: 'Stable caller-supplied key used for the original authorization.',
+    },
+  },
+  required: ['payment_id', 'url', 'payTo', 'amount', 'asset', 'network'] as const,
 }
 
 const authorizeMachinePaymentSchema = {
@@ -108,8 +151,13 @@ const AUTHORIZE_X402_DESCRIPTION =
   'Authorize payment for an HTTP 402 (Payment Required) response. ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key and request a policy-limited Safe AllowanceModule top-up when needed. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
-  'If this returns pending_approval, tell the user it is waiting in Haven, call get_payment_status later, and retry the original x402 request only when next_action is retry_original_x402_request. Do not rewrite the SDK or loop retries while approval is pending. ' +
-  'Use the returned payment_header as the X-PAYMENT header on the retry request.'
+  'If this returns pending_approval, tell the user it is waiting in Haven, call get_payment_status later, and use resume_x402_payment only when next_action is retry_original_x402_request. Do not loop retries while approval is pending. ' +
+  'Use the returned payment_header as the X-PAYMENT header on the retry request when doing a manual HTTP retry.'
+
+const RESUME_X402_DESCRIPTION =
+  'Resume an x402 payment after the user approved it in Haven. ' +
+  'Use this only after get_payment_status returns next_action=retry_original_x402_request. ' +
+  'It checks the approved payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new approval request.'
 
 const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =
   'Authorize a Haven machine-payment challenge, currently for the internal MPP demo rail. ' +
@@ -143,6 +191,11 @@ function claudeTools(): ClaudeTool[] {
       name: 'authorize_x402_payment',
       description: AUTHORIZE_X402_DESCRIPTION,
       input_schema: authorizeX402Schema,
+    },
+    {
+      name: 'resume_x402_payment',
+      description: RESUME_X402_DESCRIPTION,
+      input_schema: resumeX402Schema,
     },
     {
       name: 'authorize_machine_payment',
@@ -191,6 +244,14 @@ function openaiTools(): OpenAITool[] {
         name: 'authorize_x402_payment',
         description: AUTHORIZE_X402_DESCRIPTION,
         parameters: authorizeX402Schema,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'resume_x402_payment',
+        description: RESUME_X402_DESCRIPTION,
+        parameters: resumeX402Schema,
       },
     },
     {

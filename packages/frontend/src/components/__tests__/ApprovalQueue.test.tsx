@@ -295,4 +295,63 @@ describe('ApprovalQueue', () => {
     })
     expect(mockExecuteSafeTx).toHaveBeenCalled()
   })
+
+  it('uses x402-specific copy for pending and approved requests', () => {
+    const baseHookValue = mockUseApprovals()
+    mockUseApprovals.mockReturnValue({
+      ...baseHookValue,
+      approvals: [
+        {
+          ...baseHookValue.approvals[1],
+          id: 'approval-x402-pending',
+          agent_name: 'Soundside agent',
+          source: 'x402',
+          x402_resource_url: 'https://mcp.soundside.ai/mcp',
+          reason: 'x402 payment for https://mcp.soundside.ai/mcp',
+          status: 'pending',
+        },
+        {
+          ...baseHookValue.approvals[1],
+          id: 'approval-x402-approved',
+          agent_name: 'Soundside agent',
+          source: 'x402',
+          x402_resource_url: 'https://mcp.soundside.ai/mcp',
+          reason: 'x402 payment for https://mcp.soundside.ai/mcp',
+          status: 'approved',
+        },
+      ],
+      actionableCount: 2,
+    })
+
+    render(<ApprovalQueue />)
+
+    expect(screen.getByText('This payment is above the remaining agent budget. Nothing moves until you approve it.')).toBeInTheDocument()
+    expect(screen.getAllByText('Approval saved. Complete the payment before the agent can retry the merchant.')).toHaveLength(2)
+    expect(screen.getAllByText('mcp.soundside.ai').length).toBeGreaterThan(0)
+  })
+
+  it('keeps executed x402 approvals user-facing as sent with retry guidance', () => {
+    const baseHookValue = mockUseApprovals()
+    mockUseApprovals.mockReturnValue({
+      ...baseHookValue,
+      approvals: [
+        {
+          ...baseHookValue.approvals[1],
+          id: 'approval-x402-executed',
+          agent_name: 'Soundside agent',
+          source: 'x402',
+          x402_resource_url: 'https://mcp.soundside.ai/mcp',
+          reason: 'x402 payment for https://mcp.soundside.ai/mcp',
+          status: 'executed',
+          tx_hash: `0x${'ab'.repeat(32)}`,
+        },
+      ],
+      actionableCount: 0,
+    })
+
+    render(<ApprovalQueue />)
+
+    expect(screen.getByText('Sent')).toBeInTheDocument()
+    expect(screen.getByText('Return to your agent and ask it to retry the original x402 request.')).toBeInTheDocument()
+  })
 })

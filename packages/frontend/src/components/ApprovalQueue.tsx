@@ -102,6 +102,7 @@ function ApprovalCard({
   const actionable = isActionableApprovalStatus(approval.status)
   const status = approvalStatusPresentation(approval.status)
   const [confirmReject, setConfirmReject] = useState(false)
+  const isX402 = approval.source === 'x402'
   const recipient = approvalRecipientLabel({
     reason: approval.reason,
     source: approval.source,
@@ -123,8 +124,22 @@ function ApprovalCard({
       : 'Approve payment'
   const requestCopy =
     approval.status === 'approved'
-      ? `${approval.agent_name} asked to send this payment. It is approved, but has not been sent yet.`
+      ? isX402
+        ? 'Approval saved. Complete the payment before the agent can retry the merchant.'
+        : `${approval.agent_name} asked to send this payment. It is approved, but has not been sent yet.`
       : `${approval.agent_name} asked to send this payment. Nothing moves until you approve it.`
+  const approvalBannerCopy =
+    approval.status === 'approved'
+      ? requiresAdditionalApproval
+        ? isX402
+          ? 'Approval saved. Submit this payment for the remaining account approvals before the agent can retry the merchant.'
+          : 'This request still needs to be submitted for the remaining account approvals before the payment can be sent.'
+        : isX402
+          ? 'Approval saved. Complete the payment before the agent can retry the merchant.'
+          : 'This request was approved but still needs to be completed before the payment is sent.'
+      : isX402
+        ? 'This payment is above the remaining agent budget. Nothing moves until you approve it.'
+        : approvalReasonLabel({ reason: approval.reason, source: approval.source })
 
   return (
     <Card
@@ -194,11 +209,7 @@ function ApprovalCard({
           tone="neutral"
           density="compact"
         >
-          {approval.status === 'approved'
-            ? requiresAdditionalApproval
-              ? 'This request still needs to be submitted for the remaining account approvals before the payment can be sent.'
-              : 'This request was approved but still needs to be completed before the payment is sent.'
-            : approvalReasonLabel({ reason: approval.reason, source: approval.source })}
+          {approvalBannerCopy}
         </ApprovalRequiredBanner>
 
         {showOtherDeviceNotice ? <PasskeyOtherDeviceNotice /> : null}
@@ -474,6 +485,7 @@ function ApprovalCardWithContext({
 
 function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
   const status = approvalStatusPresentation(approval.status)
+  const isExecutedX402 = approval.source === 'x402' && approval.status === 'executed'
   const recipient = approvalRecipientLabel({
     reason: approval.reason,
     source: approval.source,
@@ -496,6 +508,11 @@ function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
             <span>{recipient}</span>
           </Tooltip>
         </p>
+        {isExecutedX402 ? (
+          <p className="mt-1 text-xs text-[var(--v2-ink-2)]">
+            Return to your agent and ask it to retry the original x402 request.
+          </p>
+        ) : null}
       </div>
       <div className="flex items-center justify-between gap-2 sm:justify-end">
         <span

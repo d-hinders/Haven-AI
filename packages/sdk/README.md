@@ -97,8 +97,13 @@ Production merchant acceptance, facilitator, settlement, fiat, or acquiring func
 Haven natively supports the [x402](https://x402.org) payment protocol. When an API returns HTTP 402, the SDK evaluates the challenge against the agent's approved limits, uses the configured delegate key for the required signature, and retries automatically:
 
 ```typescript
-// Automatic — fetch() intercepts 402, pays, and retries
-const response = await haven.fetch('https://paid-api.example.com/data')
+// Automatic — fetch() intercepts 402, pays, and retries.
+// Use a stable idempotencyKey when one user intent may need manual approval.
+const response = await haven.fetch(
+  'https://paid-api.example.com/data',
+  undefined,
+  { idempotencyKey: 'paid-api-data-2026-05-22' },
+)
 const data = await response.json()
 
 // Manual — parse and authorize the 402 yourself
@@ -107,7 +112,9 @@ import { parsePaymentRequiredResponse } from '@haven_ai/sdk'
 const apiResponse = await fetch('https://paid-api.example.com/data')
 if (apiResponse.status === 402) {
   const paymentRequired = await parsePaymentRequiredResponse(apiResponse)
-  const receipt = await haven.authorizeX402(paymentRequired)
+  const receipt = await haven.authorizeX402(paymentRequired, {
+    idempotencyKey: 'paid-api-data-2026-05-22',
+  })
   // Retry with { 'X-PAYMENT': receipt.paymentHeader }
   console.log(receipt.explorerUrl)
 }
@@ -152,6 +159,7 @@ for (const block of response.content) {
 | `make_payment` | Request and sign a payment from the user-controlled Safe within approved limits |
 | `get_payment_status` | Check the status of a payment intent or approval request |
 | `authorize_x402_payment` | Authorize a policy-limited x402 payment and return a payment header for an HTTP 402 resource |
+| `resume_x402_payment` | Resume an approved x402 payment and return a merchant payment header without creating a duplicate approval |
 
 ## Configuration
 
@@ -179,11 +187,12 @@ Surface that to the user: the payment isn't dead, it's waiting for a human to
 sign off. Check `getPaymentStatus(payment_id)` or the `get_payment_status`
 tool later instead of retrying in a tight loop.
 
-For x402, the manual approval path has two steps. First, the user approves the
-funding movement from the Haven wallet to the agent's delegate wallet. Once
-Haven reports `next_action: 'retry_original_x402_request'`, retry the original
-paid API request so the SDK can attach the merchant x402 payment header. Do not
-rewrite the SDK while waiting for approval.
+For x402, approval resume is explicit. If `authorizeX402()` or `haven.fetch()`
+throws `HavenPaymentStateError` with `nextAction: 'wait_for_user_approval'`,
+stop and tell the user the request is waiting in Haven. Do not loop. After the
+user approves, call `getPaymentStatus(payment_id)`. When Haven reports
+`nextAction: 'retry_original_x402_request'`, call `resumeX402Payment()` with the
+same user-intent idempotency key and the original x402 details.
 
 ```typescript
 try {
@@ -197,9 +206,37 @@ try {
 
 const status = await haven.getPaymentStatus('approval-or-payment-id')
 if (status.nextAction === 'retry_original_x402_request') {
-  // Retry the original paid API request.
+  const response = await haven.resumeX402Payment({
+    paymentId: status.paymentId,
+    url: 'https://paid-api.example.com/data',
+    paymentRequired,
+    idempotencyKey: 'paid-api-data-2026-05-22',
+  })
+  const data = await response.json()
 }
 ```
+
+For manual HTTP stacks, use `resumeAuthorizedX402()` to get the merchant header
+without retrying the request for you:
+
+```typescript
+const receipt = await haven.resumeAuthorizedX402({
+  paymentId: status.paymentId,
+  paymentRequired,
+  idempotencyKey: 'paid-api-data-2026-05-22',
+})
+
+await fetch('https://paid-api.example.com/data', {
+  headers: { 'X-PAYMENT': receipt.paymentHeader! },
+})
+```
+
+For MCP/SSE x402 tools, keep the same MCP session and JSON-RPC payload where the
+merchant requires it: initialize, retain `mcp-session-id`, send the original
+`tools/call`, parse the 402 challenge, wait for approval if needed, then resume
+with the same `payment_id` and retry the original `tools/call` with
+`X-PAYMENT`. Use a stable `idempotencyKey` for the user intent so fresh merchant
+quotes or sessions do not become duplicate Haven approval requests.
 
 ## Error Handling
 

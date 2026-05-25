@@ -172,6 +172,10 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
       // legacy `source` column so both endpoints report the same value when
       // a rail is set. Falls back to 'direct' to mirror the SQL COALESCE.
       const derivedSource = row.payment_rail ?? row.source ?? 'direct'
+      // Same idea for resource URL: prefer the new column, fall back to the
+      // legacy x402 column. Return the resolved value in BOTH fields so
+      // callers don't have to coalesce client-side.
+      const resolvedResourceUrl = row.payment_resource_url ?? row.x402_resource_url
       return {
         id: row.id,
         status: 'approved',
@@ -184,10 +188,10 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
           amount_human: row.amount_human,
           safe_address: row.safe_address,
           source: derivedSource,
-          x402_resource_url: row.payment_resource_url ?? row.x402_resource_url,
+          x402_resource_url: resolvedResourceUrl,
           merchant_address: row.merchant_address,
           payment_rail: row.payment_rail,
-          payment_resource_url: row.payment_resource_url,
+          payment_resource_url: resolvedResourceUrl,
         },
       }
     },

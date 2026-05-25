@@ -148,7 +148,7 @@ function ApprovalCard({
         ? `Approval saved. Complete the payment so ${approval.agent_name} can pay ${merchantLabel}.`
         : `${approval.agent_name} asked to send this payment. It is approved, but has not been sent yet.`
       : hasNamedMerchant
-        ? `${approval.agent_name} wants to pay ${merchantLabel} ${approval.amount_human} ${approval.token_symbol}. Nothing moves until you approve it.`
+        ? `${approval.agent_name} wants to pay ${merchantLabel}. Nothing moves until you approve it.`
         : `${approval.agent_name} asked to send this payment. Nothing moves until you approve it.`
   // Show "Where does the money go?" only for x402 rows that have a merchant_address
   const showDisclosure = isX402 && Boolean(approval.merchant_address)

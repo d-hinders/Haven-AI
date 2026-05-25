@@ -333,7 +333,7 @@ describe('ApprovalQueue', () => {
 
     expect(screen.queryByText('This payment is above the remaining agent budget. Nothing moves until you approve it.')).not.toBeInTheDocument()
     // New copy names the merchant (resolved from x402_resource_url hostname) in the pending state
-    expect(screen.getByText('Soundside agent wants to pay mcp.soundside.ai 2 ETH. Nothing moves until you approve it.')).toBeInTheDocument()
+    expect(screen.getByText('Soundside agent wants to pay mcp.soundside.ai. Nothing moves until you approve it.')).toBeInTheDocument()
     // Approved state names merchant and agent
     expect(screen.getByText('Approval saved. Complete the payment so Soundside agent can pay mcp.soundside.ai.')).toBeInTheDocument()
     expect(screen.getAllByText('mcp.soundside.ai').length).toBeGreaterThan(0)
@@ -409,7 +409,7 @@ describe('ApprovalQueue', () => {
 
     // Headline copy names the merchant
     expect(
-      screen.getByText('Payments agent wants to pay api.example.com 2 ETH. Nothing moves until you approve it.'),
+      screen.getByText('Payments agent wants to pay api.example.com. Nothing moves until you approve it.'),
     ).toBeInTheDocument()
 
     // Forbidden technical jargon must not appear anywhere

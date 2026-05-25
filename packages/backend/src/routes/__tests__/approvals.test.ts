@@ -132,6 +132,50 @@ describe('approval routes', () => {
     expect(body.payment.payment_resource_url).toBe('https://api.example.com/resource')
   })
 
+  it('POST /:id/approve resolves resource URL from legacy x402_resource_url when payment_resource_url is null', async () => {
+    // Legacy row shape: payment_resource_url was added later, so older x402
+    // approvals only have the value in x402_resource_url. Both response fields
+    // must resolve to the same URL so downstream callers don't have to coalesce.
+    const legacyRow = {
+      id: 'approval-legacy-x402',
+      agent_id: 'agent-1',
+      user_id: 'user-1',
+      safe_address: '0xSafe',
+      chain_id: 100,
+      token_symbol: 'USDC',
+      token_address: '0xToken',
+      to_address: '0xDelegate',
+      amount_raw: '1000000',
+      amount_human: '1.000000',
+      reason: 'x402 API call',
+      source: 'x402',
+      x402_resource_url: 'https://legacy.example.com/resource',
+      payment_rail: 'x402',
+      payment_resource_url: null,
+      merchant_address: '0xMerchant',
+      status: 'approved',
+      tx_hash: null,
+      reviewed_at: '2026-05-25T00:00:00Z',
+      usd_value: null,
+      eur_value: null,
+      executed_at: null,
+      created_at: '2026-05-25T00:00:00Z',
+      expires_at: '2026-05-26T00:00:00Z',
+    }
+    mockQuery.mockResolvedValueOnce({ rows: [legacyRow] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-legacy-x402/approve',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.payment.x402_resource_url).toBe('https://legacy.example.com/resource')
+    expect(body.payment.payment_resource_url).toBe('https://legacy.example.com/resource')
+  })
+
   it('marks an approved request as proposed', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ id: 'approval-1' }] })
 

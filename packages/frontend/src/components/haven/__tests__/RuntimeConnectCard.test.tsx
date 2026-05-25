@@ -40,7 +40,7 @@ describe('RuntimeConnectCard', () => {
   it('renders all tabs unselected and hides the credentials until a tile is clicked', () => {
     render(<RuntimeConnectCard credential={credential()} />)
 
-    for (const name of ['Claude Desktop', 'Cursor', 'Generic MCP', 'SDK / CLI']) {
+    for (const name of ['Claude Desktop', 'Cursor', 'Other agents', 'SDK / CLI']) {
       expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'false')
     }
     // Credentials and the Try it block stay out of the DOM until the user picks something.
@@ -72,6 +72,7 @@ describe('RuntimeConnectCard', () => {
   })
 
   it('switching to "Use a file" mode removes the secret from the visible snippet', () => {
+    // (Inline mode was tested above with the credentials visible.)
     render(<RuntimeConnectCard credential={credential()} />)
     fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
     expect(screen.getByText(/sk_agent_TESTKEY_NEVERREAL/)).toBeInTheDocument()

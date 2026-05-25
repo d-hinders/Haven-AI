@@ -185,14 +185,15 @@ export function RuntimeConnectCard({
 
           {mode === 'inline' && (
             <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-              These credentials let your agent make payments on your behalf. The budget you
-              just set still caps what it can spend, and you can revoke this agent in Haven anytime.
+              The credentials are right there in the snippet — copy it once and you’re done.
+              Your budget still caps what the agent can spend, and you can revoke it in Haven
+              anytime.
             </p>
           )}
           {mode === 'file' && (
             <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-              Save the credentials somewhere private on the same machine as your agent, then
-              point this snippet at that file. The snippet itself won’t contain any secret.
+              The credentials live in a separate file you save. The snippet only references that
+              file by path — no secret in the snippet itself.
             </p>
           )}
 

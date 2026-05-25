@@ -1205,7 +1205,7 @@ export default function CreateAgentModal({
                   title="Keep a copy of the credentials"
                   description="Saves your agent's credentials as a file so you can store them alongside your other secrets."
                   primaryAction={
-                    <Button onClick={handleDownloadCredential} className="w-full">
+                    <Button onClick={handleDownloadCredential}>
                       Download credentials
                     </Button>
                   }

@@ -83,9 +83,9 @@ function claudeDesktopInline(cred: AgentCredentialJson): RuntimeSnippet {
     label: 'Claude Desktop',
     language: 'json',
     guidance:
-      'Add this block to your Claude Desktop config, then restart Claude. ' +
-      'macOS: ~/Library/Application Support/Claude/claude_desktop_config.json. ' +
-      'Windows: %APPDATA%\\Claude\\claude_desktop_config.json.',
+      'Open Claude Desktop’s MCP settings and paste this in. Restart Claude when you’re done. ' +
+      '(The settings live at ~/Library/Application Support/Claude/claude_desktop_config.json on macOS · ' +
+      '%APPDATA%\\Claude\\claude_desktop_config.json on Windows.)',
     destination: 'claude_desktop_config.json',
     code: jsonBlock(config),
     mode: 'inline',
@@ -104,8 +104,8 @@ function claudeDesktopFile(cred: AgentCredentialJson, path: string): RuntimeSnip
   return {
     ...claudeDesktopInline(cred),
     guidance:
-      'Save the credential JSON above to a private path, then add this block to your ' +
-      'Claude Desktop config and restart Claude.',
+      'First download the credentials below and save them somewhere private. Then paste this into ' +
+      'Claude Desktop’s MCP settings and restart Claude.',
     code: jsonBlock(config),
     mode: 'file',
   }
@@ -134,8 +134,8 @@ function cursorInline(cred: AgentCredentialJson): RuntimeSnippet {
     label: 'Cursor',
     language: 'json',
     guidance:
-      'Add this block to ~/.cursor/mcp.json (create the file if it does not exist), ' +
-      'then reload Cursor.',
+      'Open Cursor’s MCP settings and paste this in. Reload Cursor when you’re done. ' +
+      '(The settings live at ~/.cursor/mcp.json — create the file if it’s not there yet.)',
     destination: '~/.cursor/mcp.json',
     code: jsonBlock(config),
     mode: 'inline',
@@ -154,14 +154,14 @@ function cursorFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
   return {
     ...cursorInline(cred),
     guidance:
-      'Save the credential JSON to a private path, then add this block to ~/.cursor/mcp.json ' +
-      'and reload Cursor.',
+      'First download the credentials below and save them somewhere private. Then paste this into ' +
+      'Cursor’s MCP settings and reload Cursor.',
     code: jsonBlock(config),
     mode: 'file',
   }
 }
 
-// ── Generic MCP stdio client ──────────────────────────────────────
+// ── Other agents (any other MCP-aware app or custom script) ──────
 
 function genericInline(cred: AgentCredentialJson): RuntimeSnippet {
   const envLines = [
@@ -174,11 +174,11 @@ function genericInline(cred: AgentCredentialJson): RuntimeSnippet {
   const code = `${envLines.join(' \\\n  ')} \\\n  npx -y ${MCP_PACKAGE}`
   return {
     id: 'generic-mcp',
-    label: 'Generic MCP',
+    label: 'Other agents',
     language: 'bash',
     guidance:
-      'Launch the Haven MCP server as an stdio subprocess from any MCP-aware client. ' +
-      'Copy this command into your client\'s server definition.',
+      'Run this command wherever your agent runs — no config file to edit. The Haven MCP server ' +
+      'starts in stdio mode and your agent connects to it as an MCP tool.',
     code,
     mode: 'inline',
   }
@@ -189,8 +189,8 @@ function genericFile(_cred: AgentCredentialJson, path: string): RuntimeSnippet {
   return {
     ...genericInline(_cred),
     guidance:
-      'Save the credential JSON to a private path, then point your MCP client at this ' +
-      'command. The server reads everything from the file.',
+      'First download the credentials below and save them somewhere private. Then run this ' +
+      'command wherever your agent runs — the Haven MCP server reads everything from that file.',
     code,
     mode: 'file',
   }
@@ -217,8 +217,8 @@ function sdkInline(cred: AgentCredentialJson): RuntimeSnippet {
     label: 'SDK / CLI',
     language: 'typescript',
     guidance:
-      'Use the SDK directly when you are writing code instead of plugging into an existing ' +
-      'agent runtime. The credential file works as a .env source.',
+      'Drop this into your agent’s code. The SDK reads the credentials from environment variables ' +
+      '— no config file to edit.',
     code,
     mode: 'inline',
   }
@@ -226,7 +226,7 @@ function sdkInline(cred: AgentCredentialJson): RuntimeSnippet {
 
 function sdkFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
   const code = [
-    `// Load the credential file directly:`,
+    `// Load the credentials file directly:`,
     `import { readFile } from 'node:fs/promises'`,
     `import { HavenClient } from '@haven_ai/sdk'`,
     ``,
@@ -240,7 +240,8 @@ function sdkFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
   return {
     ...sdkInline(cred),
     guidance:
-      'Save the credential JSON to a private path and load it directly. No env vars to wire up.',
+      'First download the credentials below and save them somewhere private. Then drop this into ' +
+      'your agent’s code — it reads the saved file directly.',
     code,
     mode: 'file',
   }

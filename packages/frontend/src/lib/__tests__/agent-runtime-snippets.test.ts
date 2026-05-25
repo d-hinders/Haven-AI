@@ -59,7 +59,7 @@ describe('buildRuntimeSnippets — inline mode', () => {
     expect(snippet.destination).toContain('~/.cursor/mcp.json')
   })
 
-  it('Generic MCP snippet is a bash command with env vars prefixed', () => {
+  it('Other agents snippet is a bash command with env vars prefixed', () => {
     const snippet = buildRuntimeSnippet({ credential: credential() }, 'generic-mcp', 'inline')
     expect(snippet.language).toBe('bash')
     expect(snippet.code).toContain('HAVEN_API_KEY=sk_agent_TESTKEY_NEVERREAL')
@@ -93,7 +93,7 @@ describe('buildRuntimeSnippets — file mode', () => {
     expect(snippet.code).not.toContain('0xPRIVATEKEY_NEVERREAL')
   })
 
-  it('Generic MCP file-mode snippet uses HAVEN_CREDENTIALS', () => {
+  it('Other agents file-mode snippet uses HAVEN_CREDENTIALS', () => {
     const snippet = buildRuntimeSnippet(
       { credential: credential(), credentialFilePath: PATH },
       'generic-mcp',

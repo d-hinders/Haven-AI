@@ -287,7 +287,7 @@ describe('CreateAgentModal recovery', () => {
     // Runtime connect tiles are the primary post-creation surface.
     expect(screen.getByRole('tab', { name: 'Claude Desktop' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Cursor' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Generic MCP' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Other agents' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'SDK / CLI' })).toBeInTheDocument()
 
     // The compact credential file download keeps a single save action.

@@ -54,10 +54,19 @@ export function CredentialHandoffCard({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-2 rounded-[10px] border border-[var(--v2-border)] bg-white p-2 sm:grid-cols-2">
-        {primaryAction}
-        {secondaryAction}
-      </div>
+      {/* When the card has both primary + secondary actions we render them
+       *  in a bordered subgrid (two buttons side by side reads as a chooser).
+       *  When only the primary is present the wrapper would just be a frame
+       *  around a single button — drop it and centre the button at its
+       *  natural width. */}
+      {secondaryAction ? (
+        <div className="mt-4 grid gap-2 rounded-[10px] border border-[var(--v2-border)] bg-white p-2 sm:grid-cols-2">
+          {primaryAction}
+          {secondaryAction}
+        </div>
+      ) : (
+        <div className="mt-4 flex justify-center">{primaryAction}</div>
+      )}
 
       {note && <div className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">{note}</div>}
     </Card>

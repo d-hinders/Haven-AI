@@ -296,7 +296,7 @@ describe('ApprovalQueue', () => {
     expect(mockExecuteSafeTx).toHaveBeenCalled()
   })
 
-  it('uses x402-specific copy for pending and approved requests', () => {
+  it('uses x402 merchant labels without duplicating approval copy', () => {
     const baseHookValue = mockUseApprovals()
     mockUseApprovals.mockReturnValue({
       ...baseHookValue,
@@ -325,8 +325,9 @@ describe('ApprovalQueue', () => {
 
     render(<ApprovalQueue />)
 
-    expect(screen.getByText('This payment is above the remaining agent budget. Nothing moves until you approve it.')).toBeInTheDocument()
-    expect(screen.getAllByText('Approval saved. Complete the payment before the agent can retry the merchant.')).toHaveLength(2)
+    expect(screen.queryByText('This payment is above the remaining agent budget. Nothing moves until you approve it.')).not.toBeInTheDocument()
+    expect(screen.getByText('Soundside agent asked to send this payment. Nothing moves until you approve it.')).toBeInTheDocument()
+    expect(screen.getByText('Approval saved. Complete the payment before the agent can retry the merchant.')).toBeInTheDocument()
     expect(screen.getAllByText('mcp.soundside.ai').length).toBeGreaterThan(0)
   })
 

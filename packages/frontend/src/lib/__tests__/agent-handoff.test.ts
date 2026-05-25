@@ -185,7 +185,9 @@ describe('buildHandoff — paid API support', () => {
     expect(markdown).toContain('HavenPaymentStateError')
     expect(markdown).toContain('get_payment_status')
     expect(markdown).toContain('retry_original_x402_request')
-    expect(markdown).toMatch(/Do not rewrite the SDK or retry/i)
+    expect(markdown).toMatch(/Do not rewrite the SDK/i)
+    expect(markdown).toMatch(/start a new merchant\s+session/i)
+    expect(markdown).toMatch(/retry in a tight loop/i)
   })
 })
 

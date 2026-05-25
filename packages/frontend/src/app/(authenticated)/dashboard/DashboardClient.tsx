@@ -14,7 +14,7 @@ import { useBalances } from '@/hooks/useBalances'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { RESET_PERIODS } from '@/lib/allowance-module'
-import { getChainConfig } from '@/lib/chains'
+import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { agentStatusPresentation } from '@/lib/payment-status'
@@ -65,29 +65,6 @@ function formatPercent(value: number): string {
   return `${value > 0 ? '+' : value < 0 ? '-' : ''}${Math.abs(value).toFixed(2)}%`
 }
 
-function formatAllowanceAmount(amount: string, tokenSymbol: string, chainId: number | null): string {
-  const tokenConfig = chainId
-    ? Object.values(getChainConfig(chainId).tokens).find((token) => token.symbol === tokenSymbol)
-    : null
-
-  const decimals = tokenConfig?.decimals ?? 18
-  try {
-    const raw = BigInt(amount)
-    const divisor = 10n ** BigInt(decimals)
-    const whole = raw / divisor
-    const fraction = raw % divisor
-    const fractionText = fraction
-      .toString()
-      .padStart(decimals, '0')
-      .slice(0, 2)
-      .replace(/0+$/, '')
-
-    return fractionText ? `${whole}.${fractionText}` : whole.toString()
-  } catch {
-    return amount
-  }
-}
-
 function formatResetLabel(resetPeriodMin: number): string {
   const preset = RESET_PERIODS.find((item) => item.value === resetPeriodMin)
   if (preset) {
@@ -100,10 +77,10 @@ function buildSpendSummary(agent: DashboardAgentPreview): string {
   if (agent.allowances.length === 0) return 'No spend limits'
 
   const summaries = agent.allowances.slice(0, 2).map((allowance) => {
-    const amount = formatAllowanceAmount(
+    const amount = formatAllowanceForToken(
       allowance.allowanceAmount,
-      allowance.tokenSymbol,
       agent.safeChainId,
+      allowance.tokenSymbol,
     )
     return `${amount} ${allowance.tokenSymbol}/${formatResetLabel(allowance.resetPeriodMin)}`
   })

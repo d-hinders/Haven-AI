@@ -18,7 +18,10 @@ import type {
   RawPaymentStatusResult,
   X402PaymentRequired,
   X402PaymentOption,
+  X402Quote,
   X402Receipt,
+  X402RequestSnapshot,
+  X402ResumeState,
   ResumeAuthorizedX402Input,
   ResumeX402PaymentInput,
   RawX402AuthorizeResponse,
@@ -35,6 +38,7 @@ import {
 import {
   buildX402IdempotencyKey,
   parsePaymentRequiredResponse,
+  resolveTokenFromAddress,
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
 } from './x402.js'
@@ -82,6 +86,10 @@ function chainIdFromNetwork(network: string | undefined): number | undefined {
   if (!network?.startsWith('eip155:')) return undefined
   const chainId = Number(network.slice('eip155:'.length))
   return Number.isFinite(chainId) ? chainId : undefined
+}
+
+function chainIdOrNull(network: string | undefined): number | null {
+  return chainIdFromNetwork(network) ?? null
 }
 
 function phaseForStatus(status: string): PaymentPhase | null {
@@ -387,8 +395,68 @@ export class HavenClient {
 
     try {
       return await promise
+    } catch (err) {
+      this.attachX402ResumeState(err, paymentRequired, option, idempotencyKey)
+      throw err
     } finally {
       this.inFlightX402.delete(idempotencyKey)
+    }
+  }
+
+  /**
+   * Probe a paid endpoint and return its x402 quote without creating a Haven
+   * payment or approval request.
+   */
+  async quoteX402(
+    url: string,
+    init?: RequestInit,
+    options: X402AuthorizationOptions = {},
+  ): Promise<X402Quote> {
+    const initialInit = this.withX402Wallet(init, this.x402PayerAddress())
+    const request = this.snapshotX402Request(url, initialInit)
+    const response = await globalThis.fetch(url, initialInit)
+
+    if (response.status !== 402) {
+      throw new HavenApiError(
+        `Expected an x402 quote response with HTTP 402, got HTTP ${response.status}.`,
+        response.status || 400,
+      )
+    }
+
+    if (response.headers.get('MACHINE-PAYMENT-CHALLENGE')) {
+      throw new HavenApiError('quoteX402 only supports standard x402 Payment Required responses.', 400)
+    }
+
+    const paymentRequired = await parsePaymentRequiredResponse(response)
+    return this.buildX402Quote(paymentRequired, request, options.idempotencyKey)
+  }
+
+  /**
+   * Pay a previously inspected x402 quote and retry the exact captured request.
+   */
+  async payX402Quote(
+    quote: X402Quote,
+    options: X402AuthorizationOptions = {},
+  ): Promise<Response> {
+    const idempotencyKey = options.idempotencyKey ?? quote.idempotencyKey
+
+    try {
+      const receipt = await this.authorizeX402(quote.paymentRequired, { idempotencyKey })
+      return this.retryX402Request(
+        quote.request.url,
+        this.requestInitFromSnapshot(quote.request),
+        quote.paymentRequired,
+        receipt,
+      )
+    } catch (err) {
+      this.attachX402ResumeState(
+        err,
+        quote.paymentRequired,
+        quote.accepted,
+        idempotencyKey,
+        quote.request,
+      )
+      throw err
     }
   }
 
@@ -488,12 +556,20 @@ export class HavenClient {
     return receipt
   }
 
-  async resumeX402Payment(input: ResumeX402PaymentInput): Promise<Response> {
-    const initialInit = this.withX402Wallet(input.init, this.x402PayerAddress())
+  async resumeX402Payment(input: ResumeX402PaymentInput | X402ResumeState): Promise<Response> {
+    const inputInit = 'init' in input ? input.init : undefined
+    const initialInit = this.withX402Wallet(
+      inputInit ?? (input.request ? this.requestInitFromSnapshot(input.request) : undefined),
+      this.x402PayerAddress(),
+    )
     let paymentRequired = input.paymentRequired
+    const url = input.url ?? input.request?.url
 
     if (!paymentRequired) {
-      const response = await globalThis.fetch(input.url, initialInit)
+      if (!url) {
+        throw new HavenApiError('x402 resume requires the original URL or a captured request snapshot.', 400)
+      }
+      const response = await globalThis.fetch(url, initialInit)
       if (response.status !== 402) {
         throw new HavenApiError('Expected the original x402 request to return HTTP 402 before resuming.', 400)
       }
@@ -506,7 +582,7 @@ export class HavenClient {
       idempotencyKey: input.idempotencyKey,
     })
 
-    return this.retryX402Request(input.url, initialInit, paymentRequired, receipt)
+    return this.retryX402Request(url ?? paymentRequired.resource.url, initialInit, paymentRequired, receipt)
   }
 
   /**
@@ -557,7 +633,18 @@ export class HavenClient {
     }
 
     // 4. Pay through Haven
-    const receipt = await this.authorizeX402(paymentRequired, options)
+    const request = this.snapshotX402Request(url, initialInit)
+    const option = selectStandardPaymentOption(paymentRequired.accepts)
+    const idempotencyKey = options.idempotencyKey ?? (option ? buildX402IdempotencyKey(paymentRequired, option) : undefined)
+    let receipt: X402Receipt
+    try {
+      receipt = await this.authorizeX402(paymentRequired, options)
+    } catch (err) {
+      if (option && idempotencyKey) {
+        this.attachX402ResumeState(err, paymentRequired, option, idempotencyKey, request)
+      }
+      throw err
+    }
     return this.retryX402Request(url, initialInit, paymentRequired, receipt)
   }
 
@@ -1170,6 +1257,35 @@ export class HavenClient {
     return this.delegateAddress ?? this.x402Wallet
   }
 
+  private snapshotX402Request(url: string, init?: RequestInit): X402RequestSnapshot {
+    return {
+      url,
+      method: init?.method ?? 'GET',
+      headers: Array.from(new Headers(init?.headers).entries()),
+      body: this.snapshotRequestBody(init?.body),
+    }
+  }
+
+  private snapshotRequestBody(body: BodyInit | null | undefined): string | undefined {
+    if (body == null) return undefined
+    if (typeof body === 'string') return body
+    if (body instanceof URLSearchParams) return body.toString()
+
+    throw new HavenApiError(
+      'quoteX402 can only capture resumable request bodies that are strings or URLSearchParams. ' +
+      'For streams, blobs, or binary bodies, preserve the original request yourself and call resumeX402Payment with fresh init.',
+      400,
+    )
+  }
+
+  private requestInitFromSnapshot(request: X402RequestSnapshot): RequestInit {
+    return {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+    }
+  }
+
   private withX402Wallet(init?: RequestInit, wallet = this.x402PayerAddress()): RequestInit | undefined {
     if (!wallet) return init
 
@@ -1182,6 +1298,88 @@ export class HavenClient {
       ...init,
       headers,
     }
+  }
+
+  private buildX402Quote(
+    paymentRequired: X402PaymentRequired,
+    request: X402RequestSnapshot,
+    idempotencyKey?: string,
+  ): X402Quote {
+    const option = selectStandardPaymentOption(paymentRequired.accepts)
+    if (!option) {
+      throw new HavenApiError(
+        'No compatible payment option found in x402 requirements. ' +
+        'Haven supports standard x402 exact payments on Base USDC.',
+        400,
+      )
+    }
+
+    const token = resolveTokenFromAddress(option.asset, option.network)
+    return {
+      rail: 'x402',
+      idempotencyKey: idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option),
+      paymentRequired,
+      accepted: option,
+      request,
+      resourceUrl: paymentRequired.resource.url,
+      description: paymentRequired.resource.description ?? option.description ?? null,
+      mimeType: paymentRequired.resource.mimeType ?? option.mimeType ?? null,
+      amountAtomic: option.amount,
+      amount: decimalFromUsdcAtomic(option.amount),
+      token: token?.symbol ?? 'USDC',
+      asset: option.asset,
+      network: option.network,
+      chainId: chainIdOrNull(option.network),
+      merchantAddress: option.payTo,
+      maxTimeoutSeconds: option.maxTimeoutSeconds,
+    }
+  }
+
+  private buildX402ResumeState(input: {
+    paymentId: string
+    paymentRequired: X402PaymentRequired
+    accepted: X402PaymentOption
+    idempotencyKey: string
+    request?: X402RequestSnapshot
+  }): X402ResumeState {
+    const token = resolveTokenFromAddress(input.accepted.asset, input.accepted.network)
+    return {
+      rail: 'x402',
+      paymentId: input.paymentId,
+      idempotencyKey: input.idempotencyKey,
+      paymentRequired: input.paymentRequired,
+      accepted: input.accepted,
+      url: input.request?.url ?? input.paymentRequired.resource.url,
+      request: input.request,
+      resourceUrl: input.paymentRequired.resource.url,
+      description: input.paymentRequired.resource.description ?? input.accepted.description ?? null,
+      amountAtomic: input.accepted.amount,
+      amount: decimalFromUsdcAtomic(input.accepted.amount),
+      token: token?.symbol ?? 'USDC',
+      asset: input.accepted.asset,
+      network: input.accepted.network,
+      chainId: chainIdOrNull(input.accepted.network),
+      merchantAddress: input.accepted.payTo,
+    }
+  }
+
+  private attachX402ResumeState(
+    err: unknown,
+    paymentRequired: X402PaymentRequired,
+    accepted: X402PaymentOption,
+    idempotencyKey: string,
+    request?: X402RequestSnapshot,
+  ): void {
+    if (!(err instanceof HavenPaymentStateError)) return
+    if (err.state.rail !== 'x402') return
+
+    err.resumeState = this.buildX402ResumeState({
+      paymentId: err.state.paymentId,
+      paymentRequired,
+      accepted,
+      idempotencyKey,
+      request,
+    })
   }
 
   // ── Tool Execution (for agent frameworks) ────────────────────────
@@ -1397,6 +1595,7 @@ export class HavenClient {
               idempotency_key: err.state.x402.idempotencyKey,
             }
           : undefined,
+        resume_state: err.resumeState,
         expires_at: err.state.expiresAt,
         chain_id: err.state.chainId,
         message: err.state.message,

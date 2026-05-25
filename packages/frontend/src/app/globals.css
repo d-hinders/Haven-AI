@@ -61,6 +61,14 @@
      finish without changing the surface color. Use sparingly. */
   --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 
+  /* Table chrome — header band, row dividers, row hover. One shared set
+     so the transactions surfaces (history page, Safe detail, agent detail)
+     read as one primitive. */
+  --v2-table-header-bg: #f6f9fc;
+  --v2-table-header-ink: #8898aa;
+  --v2-table-row-border: #e6ebf1;
+  --v2-table-row-hover: #f0f4f9;
+
   --v2-font-weight-medium: 500;
   --v2-font-weight-semibold: 600;
   --v2-font-weight-bold: 700;

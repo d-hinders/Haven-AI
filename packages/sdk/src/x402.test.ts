@@ -131,6 +131,130 @@ describe('x402 helpers', () => {
     })
   })
 
+  it('quotes x402 payment requirements without creating a Haven payment', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const body = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'create_image' },
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    }, { idempotencyKey: 'mcp-create-image' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0][0])).toBe(paymentRequired.resource.url)
+    expect(quote).toMatchObject({
+      rail: 'x402',
+      idempotencyKey: 'mcp-create-image',
+      paymentRequired,
+      accepted,
+      resourceUrl: paymentRequired.resource.url,
+      description: paymentRequired.resource.description,
+      amountAtomic: accepted.amount,
+      amount: '0.02',
+      token: 'USDC',
+      asset: accepted.asset,
+      network: accepted.network,
+      chainId: 8453,
+      merchantAddress: accepted.payTo,
+      request: {
+        url: paymentRequired.resource.url,
+        method: 'POST',
+        body,
+      },
+    })
+
+    const headers = new Headers(quote.request.headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('x402-wallet')).toBe(delegateAddress)
+  })
+
+  it('attaches a serializable resume state when quote payment needs approval', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'pending_approval',
+        phase: 'user_approval_required',
+        next_action: 'wait_for_user_approval',
+        message: 'This x402 funding payment is waiting for user approval in Haven. Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.',
+        token: 'USDC',
+        requested: '0.02',
+        resource_url: paymentRequired.resource.url,
+        merchant_address: accepted.payTo,
+        chain_id: 8453,
+        amount_atomic: accepted.amount,
+        asset: accepted.asset,
+        network: accepted.network,
+        description: paymentRequired.resource.description,
+        idempotency_key: 'mcp-create-image',
+        expires_at: '2026-05-10T20:00:00.000Z',
+      }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call' })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    }, { idempotencyKey: 'mcp-create-image' })
+
+    let thrown: unknown
+    try {
+      await haven.payX402Quote(quote)
+    } catch (err) {
+      thrown = err
+    }
+
+    expect(thrown).toBeInstanceOf(HavenPaymentStateError)
+    expect(thrown).toMatchObject({
+      paymentId: 'approval-123',
+      resumeState: {
+        rail: 'x402',
+        paymentId: 'approval-123',
+        idempotencyKey: 'mcp-create-image',
+        paymentRequired,
+        accepted,
+        url: paymentRequired.resource.url,
+        request: {
+          url: paymentRequired.resource.url,
+          method: 'POST',
+          body,
+        },
+        amountAtomic: accepted.amount,
+        merchantAddress: accepted.payTo,
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('funds the delegate wallet and retries paid fetches with a standard x402 header', async () => {
     const backendUrl = 'https://haven.example'
     const resourceUrl = paymentRequired.resource.url
@@ -572,6 +696,73 @@ describe('x402 helpers', () => {
         network: accepted.network,
       },
     })
+  })
+
+  it('resumes an approved x402 payment from a captured resume state', async () => {
+    const fundingTxHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        amount: '0.02',
+        token: 'USDC',
+        resource_url: paymentRequired.resource.url,
+        merchant_address: accepted.payTo,
+        tx_hash: fundingTxHash,
+        expires_at: '2026-05-10T20:00:00.000Z',
+        chain_id: 8453,
+        message: 'Retry the original x402 request.',
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call' })
+    const response = await haven.resumeX402Payment({
+      rail: 'x402',
+      paymentId: 'approval-123',
+      idempotencyKey: 'mcp-create-image',
+      paymentRequired,
+      accepted,
+      url: paymentRequired.resource.url,
+      request: {
+        url: paymentRequired.resource.url,
+        method: 'POST',
+        headers: [['Content-Type', 'application/json'], ['mcp-session-id', 'session-123']],
+        body,
+      },
+      resourceUrl: paymentRequired.resource.url,
+      description: paymentRequired.resource.description ?? null,
+      amountAtomic: accepted.amount,
+      amount: '0.02',
+      token: 'USDC',
+      asset: accepted.asset,
+      network: accepted.network,
+      chainId: 8453,
+      merchantAddress: accepted.payTo,
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://haven.example/machine-payments/approval-123/status')
+
+    const retryInit = fetchMock.mock.calls[1][1] as RequestInit
+    const retryHeaders = new Headers(retryInit.headers)
+    expect(fetchMock.mock.calls[1][0]).toBe(paymentRequired.resource.url)
+    expect(retryInit.method).toBe('POST')
+    expect(retryInit.body).toBe(body)
+    expect(retryHeaders.get('mcp-session-id')).toBe('session-123')
+    expect(retryHeaders.get('X-PAYMENT')).toBeTruthy()
   })
 
   it('rejects x402 resume attempts that do not match the approved amount', async () => {

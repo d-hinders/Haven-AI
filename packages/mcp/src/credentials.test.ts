@@ -1,10 +1,40 @@
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { loadCredentials } from './credentials.js'
 
+const ENV_KEYS = [
+  'HAVEN_CREDENTIALS',
+  'HAVEN_API_KEY',
+  'HAVEN_DELEGATE_KEY',
+  'HAVEN_AGENT_ID',
+  'HAVEN_SAFE_ADDRESS',
+  'HAVEN_API_URL',
+] as const
+
 describe('loadCredentials', () => {
+  const originalEnv = new Map<string, string | undefined>()
+
+  beforeEach(() => {
+    originalEnv.clear()
+    for (const key of ENV_KEYS) {
+      originalEnv.set(key, process.env[key])
+      delete process.env[key]
+    }
+  })
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      const prev = originalEnv.get(key)
+      if (prev === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = prev
+      }
+    }
+  })
+
   it('loads snake_case Haven credential files', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-'))
     const file = join(dir, 'agent.json')
@@ -31,5 +61,52 @@ describe('loadCredentials', () => {
     await writeFile(file, JSON.stringify({ api_key: 'sk_agent_test' }))
 
     await expect(loadCredentials(file)).rejects.toThrow('delegate_key')
+  })
+
+  it('loads credentials from HAVEN_API_KEY + HAVEN_DELEGATE_KEY env vars when no file is given', async () => {
+    process.env.HAVEN_API_KEY = 'sk_agent_env'
+    process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
+    process.env.HAVEN_AGENT_ID = 'agent-env'
+    process.env.HAVEN_SAFE_ADDRESS = '0xSafeEnv'
+    process.env.HAVEN_API_URL = 'https://haven.env.example'
+
+    await expect(loadCredentials(undefined)).resolves.toEqual({
+      apiKey: 'sk_agent_env',
+      delegateKey: '0xdelegate-env',
+      agentId: 'agent-env',
+      safeAddress: '0xSafeEnv',
+      apiUrl: 'https://haven.env.example',
+    })
+  })
+
+  it('rejects partial env-var credentials', async () => {
+    process.env.HAVEN_API_KEY = 'sk_agent_env'
+    // HAVEN_DELEGATE_KEY missing on purpose
+
+    await expect(loadCredentials(undefined)).rejects.toThrow('HAVEN_DELEGATE_KEY')
+
+    delete process.env.HAVEN_API_KEY
+    process.env.HAVEN_DELEGATE_KEY = '0xdelegate-only'
+
+    await expect(loadCredentials(undefined)).rejects.toThrow('HAVEN_API_KEY')
+  })
+
+  it('prefers an explicit path over inline env vars', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-'))
+    const file = join(dir, 'agent.json')
+    await writeFile(file, JSON.stringify({
+      api_key: 'sk_agent_file',
+      delegate_key: '0xdelegate-file',
+    }))
+    process.env.HAVEN_API_KEY = 'sk_agent_env'
+    process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
+
+    const creds = await loadCredentials(file)
+    expect(creds.apiKey).toBe('sk_agent_file')
+    expect(creds.delegateKey).toBe('0xdelegate-file')
+  })
+
+  it('throws a useful error when nothing is configured', async () => {
+    await expect(loadCredentials(undefined)).rejects.toThrow(/HAVEN_CREDENTIALS|HAVEN_API_KEY/)
   })
 })

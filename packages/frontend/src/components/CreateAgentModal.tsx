@@ -27,6 +27,7 @@ import {
 } from '@/lib/safe-tx'
 import { truncate } from '@/lib/format'
 import { buildHandoff, type HandoffInput } from '@/lib/agent-handoff'
+import { buildAgentCredential, type AgentCredentialJson } from '@/lib/agent-credential'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useActiveSigner } from '@/lib/signer'
 import { SigningStatus } from './SigningStatus'
@@ -40,6 +41,7 @@ import {
   AgentRulesSummary,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
+  RuntimeConnectCard,
   WalletIdentityBlock,
 } from './haven'
 import { useToast } from './ui/Toast'
@@ -589,7 +591,52 @@ export default function CreateAgentModal({
     setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
-  function handleDownloadHandoff() {
+  /**
+   * Memoized credential artifact. The JSON is generated on demand from the
+   * form state plus the values returned by `/agents`. Nothing persists across
+   * a reload — same one-time-view guarantee as the raw secret display.
+   *
+   * Lives on the component closure (not state) because we build it inside
+   * handlers; rebuilding on every call is trivially cheap and keeps the
+   * credential out of React state for as long as possible.
+   */
+  function getAgentCredential(): { json: AgentCredentialJson; jsonText: string; filename: string } | null {
+    const input = getHandoffInput()
+    if (!input) return null
+    if (!input.credentials.delegatePrivateKey) return null
+    try {
+      return buildAgentCredential(input)
+    } catch {
+      // buildAgentCredential throws only when delegate_key is missing — that
+      // path is guarded above. Defensive null lets the UI degrade gracefully.
+      return null
+    }
+  }
+
+  function handleDownloadCredential() {
+    const cred = getAgentCredential()
+    if (!cred) return
+    triggerDownload(
+      new Blob([cred.jsonText], { type: 'application/json;charset=utf-8' }),
+      cred.filename,
+    )
+    setCredentialsSaved(true)
+  }
+
+  function handleCopyRawCredential() {
+    const cred = getAgentCredential()
+    if (!cred) return
+    copyToClipboard(cred.jsonText, setCopiedHandoff)
+    setCredentialsSaved(true)
+  }
+
+  function handleSnippetCopied() {
+    // Any copied runtime snippet contains the credential — that counts as
+    // "saved" for close-without-saving guard purposes.
+    setCredentialsSaved(true)
+  }
+
+  function handleDownloadDeveloperGuide() {
     const input = getHandoffInput()
     if (!input) return
     const { markdown, filename } = buildHandoff(input)
@@ -597,14 +644,6 @@ export default function CreateAgentModal({
       new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
       filename,
     )
-    setCredentialsSaved(true)
-  }
-
-  function handleCopyHandoff() {
-    const input = getHandoffInput()
-    if (!input) return
-    const { markdown } = buildHandoff(input)
-    copyToClipboard(markdown, setCopiedHandoff)
     setCredentialsSaved(true)
   }
 
@@ -1118,8 +1157,8 @@ export default function CreateAgentModal({
                   </h3>
                   <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--v2-ink-2)]">
                     {execStatus === 'confirmed'
-                      ? 'Add the Haven credential to your agent so it can make payments within your rules.'
-                      : 'After the approval is complete, add the Haven credential to your agent.'}
+                      ? 'Pick where the agent will run and paste the snippet — it can start spending within your rules right away.'
+                      : 'After the approval is complete, pick where the agent will run and paste the snippet.'}
                   </p>
                   {txHash && (
                     <a
@@ -1152,42 +1191,87 @@ export default function CreateAgentModal({
                 />
               </div>
 
+              {/* Primary action: connect the agent to a runtime. The snippet
+                  the user copies already contains everything the runtime
+                  needs, so this is the meaningful "save the credential" step
+                  for the typical user. */}
+              {(() => {
+                const cred = getAgentCredential()
+                if (!cred) return null
+                return (
+                  <div
+                    className="v2-animate-stagger"
+                    style={{ ['--v2-stagger-delay' as string]: '260ms' }}
+                  >
+                    <RuntimeConnectCard
+                      credential={cred.json}
+                      onSnippetCopied={handleSnippetCopied}
+                    />
+                  </div>
+                )
+              })()}
+
+              {/* Compact JSON download row. The credential JSON is the
+                  canonical artifact for users who prefer a managed-secret
+                  workflow over inline env vars in a config file. */}
               <div
                 className="v2-animate-stagger"
-                style={{ ['--v2-stagger-delay' as string]: '260ms' }}
+                style={{ ['--v2-stagger-delay' as string]: '320ms' }}
               >
                 <CredentialHandoffCard
-                  title="Save the credential file"
-                  description="Download or copy this file before closing. Your agent needs it to make payments within the rules you set."
+                  title="Save the credential JSON"
+                  description="Optional — for production setups or when you want the agent's secret on disk instead of inside a runtime config."
                   primaryAction={
-                    <Button onClick={handleDownloadHandoff} className="w-full">
-                      Download file
+                    <Button onClick={handleDownloadCredential} className="w-full">
+                      Download credential JSON
                     </Button>
                   }
-                  secondaryAction={
-                    <Button variant="ghost" onClick={handleCopyHandoff} className="w-full">
-                      {copiedHandoff ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="animate-check-pop inline-flex">
-                            <svg className="h-3.5 w-3.5 text-[var(--v2-success)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
-                              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          </span>
-                          Copied
-                        </span>
-                      ) : (
-                        'Copy file content'
-                      )}
-                    </Button>
-                  }
-                  note={generatedPrivateKey ? 'This credential is shown once. Haven cannot show it again after you close this window.' : undefined}
+                  note={generatedPrivateKey ? 'The credential is shown once. Haven cannot show it again after you close this window.' : undefined}
                   saved={credentialsSaved}
                 />
               </div>
 
+              {/* Advanced disclosure: developer guide + raw JSON copy. Kept
+                  behind a <details> so it doesn't compete with the primary
+                  connect path, but stays one click away for SDK users. */}
               <div
                 className="v2-animate-stagger"
                 style={{ ['--v2-stagger-delay' as string]: '360ms' }}
+              >
+                <details className="group rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-[12px]">
+                  <summary className="flex cursor-pointer list-none items-center justify-between text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+                    <span>Advanced — developer guide and raw credential</span>
+                    <svg className="h-3.5 w-3.5 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </summary>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <Button
+                      variant="ghost"
+                      onClick={handleDownloadDeveloperGuide}
+                      className="w-full"
+                    >
+                      Open developer guide
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={handleCopyRawCredential}
+                      className="w-full"
+                    >
+                      {copiedHandoff ? 'Copied' : 'Copy raw credential JSON'}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                    The developer guide is a Markdown reference covering the SDK, x402, and
+                    machine-payment flows. The raw JSON is the same file as the download above —
+                    useful when you want to pipe the credential into a secret manager.
+                  </p>
+                </details>
+              </div>
+
+              <div
+                className="v2-animate-stagger"
+                style={{ ['--v2-stagger-delay' as string]: '420ms' }}
               >
                 <Button
                   variant="ghost"

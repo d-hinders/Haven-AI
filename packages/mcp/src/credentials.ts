@@ -21,11 +21,39 @@ interface RawCredentialFile {
   apiUrl?: unknown
 }
 
-export async function loadCredentials(path = process.env.HAVEN_CREDENTIALS): Promise<HavenCredentialFile> {
-  if (!path) {
-    throw new Error('HAVEN_CREDENTIALS must point to a Haven agent credential JSON file.')
+/**
+ * Load Haven agent credentials for the MCP server.
+ *
+ * Resolution order — earlier sources win, later sources are fallbacks:
+ *
+ *   1. Explicit `path` argument (typically from `--credentials <path>`).
+ *   2. `HAVEN_CREDENTIALS` env var pointing at a credential JSON file.
+ *   3. Inline env vars: `HAVEN_API_KEY` + `HAVEN_DELEGATE_KEY` (+ optional
+ *      `HAVEN_AGENT_ID`, `HAVEN_SAFE_ADDRESS`, `HAVEN_API_URL`).
+ *
+ * The inline-env path exists so that runtime config snippets emitted by the
+ * Haven dashboard (Claude Desktop / Cursor / generic MCP configs) can be a
+ * single self-contained block — paste the snippet, restart the runtime, done.
+ * The values still live only in the agent operator's process environment;
+ * Haven's backend never sees the delegate key either way.
+ */
+export async function loadCredentials(
+  path: string | undefined = process.env.HAVEN_CREDENTIALS,
+): Promise<HavenCredentialFile> {
+  if (path) {
+    return loadCredentialsFromFile(path)
   }
 
+  const envCreds = loadCredentialsFromEnv()
+  if (envCreds) return envCreds
+
+  throw new Error(
+    'No Haven credentials found. Set HAVEN_CREDENTIALS to a Haven agent credential JSON file, ' +
+    'pass --credentials <path>, or set HAVEN_API_KEY and HAVEN_DELEGATE_KEY environment variables.',
+  )
+}
+
+async function loadCredentialsFromFile(path: string): Promise<HavenCredentialFile> {
   let rawText: string
   try {
     rawText = await readFile(path, 'utf8')
@@ -56,6 +84,28 @@ export async function loadCredentials(path = process.env.HAVEN_CREDENTIALS): Pro
     agentId: stringField(raw.agent_id ?? raw.agentId),
     safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
     apiUrl: stringField(raw.api_url ?? raw.apiUrl),
+  }
+}
+
+function loadCredentialsFromEnv(): HavenCredentialFile | null {
+  const apiKey = stringField(process.env.HAVEN_API_KEY)
+  const delegateKey = stringField(process.env.HAVEN_DELEGATE_KEY)
+
+  if (!apiKey && !delegateKey) return null
+
+  if (!apiKey) {
+    throw new Error('HAVEN_DELEGATE_KEY is set but HAVEN_API_KEY is missing.')
+  }
+  if (!delegateKey) {
+    throw new Error('HAVEN_API_KEY is set but HAVEN_DELEGATE_KEY is missing. Haven MCP requires a delegate key so payments can be signed locally.')
+  }
+
+  return {
+    apiKey,
+    delegateKey,
+    agentId: stringField(process.env.HAVEN_AGENT_ID),
+    safeAddress: stringField(process.env.HAVEN_SAFE_ADDRESS),
+    apiUrl: stringField(process.env.HAVEN_API_URL),
   }
 }
 

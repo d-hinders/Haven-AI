@@ -272,7 +272,7 @@ describe('CreateAgentModal recovery', () => {
     expect(mockApiPost).toHaveBeenCalledTimes(2)
   })
 
-  it('requires saving the generated credential file before finishing setup', async () => {
+  it('shows runtime connect tiles and unlocks Done when a snippet is copied', async () => {
     const onCreated = vi.fn()
     const onClose = vi.fn()
 
@@ -283,20 +283,40 @@ describe('CreateAgentModal recovery', () => {
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1))
     expect(await screen.findByText('Your agent is ready')).toBeInTheDocument()
-    expect(screen.getByText('Action required')).toBeInTheDocument()
-    expect(screen.getByText(/This credential is shown once/i)).toBeInTheDocument()
+
+    // Runtime connect tiles are the primary post-creation surface.
+    expect(screen.getByRole('tab', { name: 'Claude Desktop' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Cursor' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Generic MCP' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'SDK / CLI' })).toBeInTheDocument()
+
+    // The compact JSON download row keeps the canonical artifact available.
+    expect(screen.getByRole('button', { name: 'Download credential JSON' })).toBeInTheDocument()
+    expect(screen.getByText(/credential is shown once/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy file content' }))
+    // Copying the active snippet flips the "credential saved" gate.
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
 
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
     expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('sk_test'))
-    expect(await screen.findByText('Saved')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done' })).not.toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
-
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves the developer guide as an advanced disclosure', async () => {
+    renderModal()
+    await completeGeneratedCredentialReviewStep()
+    fireEvent.click(screen.getByRole('button', { name: 'Connect agent' }))
+    expect(await screen.findByText('Your agent is ready')).toBeInTheDocument()
+
+    // The Markdown developer guide is no longer the primary download but it
+    // must still be reachable for SDK users.
+    fireEvent.click(screen.getByText(/Advanced — developer guide/))
+    expect(screen.getByRole('button', { name: 'Open developer guide' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy raw credential JSON' })).toBeInTheDocument()
   })
 
   it('skips wallet selection for one account and uses a 3-step counter', async () => {

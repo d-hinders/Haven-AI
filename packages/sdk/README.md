@@ -195,6 +195,19 @@ const haven = new HavenClient({
 })
 ```
 
+## OpenAPI
+
+The backend serves an OpenAPI 3.1 contract at:
+
+- Production: `https://havenbackend-production-8a00.up.railway.app/openapi.json`
+- Local development: `http://localhost:3001/openapi.json`
+
+The spec covers the agent-facing payment surface: agents, direct payments,
+payment status, x402 authorization, MPP demo authorization, resume-state
+rehydration, machine-payment receipts, and transactions. Its security scheme is
+deliberate: the Haven API key identifies the agent, but payment authority still
+requires an agent-held delegate signature and on-chain Safe allowance state.
+
 ## Agent payment state machine
 
 Every payment or approval state returned by Haven includes:

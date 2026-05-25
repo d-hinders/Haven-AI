@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify'
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
@@ -149,7 +149,10 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
    * 1. Without `signature`: creates a payment intent, returns sign_hash (agent signs, then calls POST /payments/:id/sign)
    * 2. With `signature`: creates intent AND executes in one shot (for SDK convenience)
    */
-  app.post<{ Body: X402AuthorizeBody }>('/', async (request, reply) => {
+  const authorizeX402Handler = async (
+    request: FastifyRequest<{ Body: X402AuthorizeBody }>,
+    reply: FastifyReply,
+  ) => {
     const agent = request.agent as AgentContext
     const {
       url,
@@ -672,5 +675,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           'or re-call POST /x402/authorize with the signature field included for one-shot execution.',
       },
     })
-  })
+  }
+
+  app.post<{ Body: X402AuthorizeBody }>('/', authorizeX402Handler)
+  app.post<{ Body: X402AuthorizeBody }>('/authorize', authorizeX402Handler)
 }

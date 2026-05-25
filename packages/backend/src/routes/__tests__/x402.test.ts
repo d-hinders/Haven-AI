@@ -56,6 +56,17 @@ describe('x402 routes', () => {
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
   })
 
+  it('registers /x402/authorize as the explicit authorize endpoint', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402/authorize',
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(401)
+    expect(response.json()).toEqual({ error: 'Missing or invalid API key' })
+  })
+
   it('creates a funding intent to the delegate and records merchant metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })

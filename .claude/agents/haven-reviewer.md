@@ -45,6 +45,18 @@ Recurring traps to check:
 - Generated artifacts and handoffs: credential files, SDK examples, demo scripts, `.env` examples, and skill bundles are aligned with current SDK/API behavior, x402/MPP support, credential semantics, product language, and CASP guardrails.
 - Test coverage: changed loading, empty, error, proposed/submitted, approved-but-not-executed, expired, cancelled, duplicate, and selected-account/chain paths have tests when relevant.
 
+Recurring traps from the **Captain Self-Check Preflight** (must-check):
+
+These mirror the seven preflight items in `docs/ai-agent-workflow.md` and the trap families in `docs/ai-review-patterns.md`. Treat them as a backstop when the captain skipped the preflight. If a new trap family recurs, update all three lists together.
+
+- **Numeric formatters.** Sign handling on negative bigints (separate sign, format magnitude, re-attach — never let `${q}.${r}` render as `"-5.-5"`). Reject scientific-notation strings rather than silently losing precision via `Number(...).toFixed()`. One shared formatter owns both raw-bigint and already-decimal input shapes. Tests cover negative, zero, scientific notation, and both input shapes.
+- **Counter and summary buckets.** Buckets are mutually exclusive, or the UI labels them as overlapping. A failed outbound send is `failed`, not `failed AND sent`. Tone/colour wiring propagates to every caller (dashboard, detail, design-system).
+- **Conditional copy predicates.** `"Replace existing {token} budget"`, `"Update"` vs `"Add"`, `"Resume"` vs `"Start"` fire on precise identity (address **or** symbol), not on a broadened layout-driven boolean. No-match and exact-match branches both have tests.
+- **Animation discipline.** Every prominent animation gated on `@media (prefers-reduced-motion: no-preference)`, including pre-existing animations that just got a prominent placement. ClassName stacks do not toggle one animation class while another remains (causes flash). CSS variables like `--v2-stagger-delay` consumed by the right wrapper class (`v2-animate-stagger`, not `v2-animate-step-rise`).
+- **Inline gate placement.** `OnchainActionGate` / `NetworkGate` notices render above the action row, not inside `flex-1`. Pattern matches `SendModal`, `ApprovalQueue`, `CreateAgentModal`.
+- **Cross-surface display drift.** A value rendered in 2+ surfaces flows through one shared formatter. The formatter input carries chain/token context (decimals, network) and is independent of the currently-selected wallet. API responses include the metadata each row needs.
+- **Loading-state inference.** No completion / onboarding state inferred from a paginated preview list. Explicit `onboardingProgress.*` API fields. Dependent UI gated until **all** prerequisite hooks have resolved; staggered-resolution case is tested.
+
 Return:
 - findings first, with severity and file/line references
 - open questions or assumptions

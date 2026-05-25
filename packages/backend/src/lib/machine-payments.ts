@@ -1,6 +1,7 @@
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { type AgentContext } from '../middleware/agentAuth.js'
+import { AgentPaymentNextAction, AgentPaymentPhase } from './agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from './chains.js'
 import { getFiatValuesForTokenAmount } from './fiat-values.js'
 import { formatTokenValue } from './tokens.js'
@@ -163,8 +164,8 @@ function pendingApprovalResponse(
       payment_id: approval.id,
       kind: 'approval_request',
       status: 'pending_approval',
-      phase: 'user_approval_required',
-      next_action: 'wait_for_user_approval',
+      phase: AgentPaymentPhase.UserApprovalRequired,
+      next_action: AgentPaymentNextAction.WaitForUserApproval,
       message: `Payment of ${approval.amount_human} ${approval.token_symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
       remaining: remainingHuman,
       requested: approval.amount_human,

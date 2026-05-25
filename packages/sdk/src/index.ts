@@ -2,7 +2,23 @@ export { HavenClient } from './client.js'
 export { havenTools } from './tools.js'
 export { signHash, addressFromKey, verifySignature } from './signer.js'
 
+export {
+  AgentPaymentPhase,
+  AgentPaymentNextAction,
+  AgentPaymentRail,
+  AGENT_PAYMENT_PHASE_VALUES,
+  AGENT_PAYMENT_NEXT_ACTION_VALUES,
+  AGENT_PAYMENT_RAIL_VALUES,
+  AgentPaymentPhaseDescriptions,
+  AgentPaymentNextActionDescriptions,
+  AgentPaymentRailDescriptions,
+  AgentPaymentPhaseSchema,
+  AgentPaymentNextActionSchema,
+  AgentPaymentRailSchema,
+} from './types.js'
+
 export type {
+  AgentPaymentEnumSchema,
   HavenClientConfig,
   PaymentRequest,
   PaymentIntent,

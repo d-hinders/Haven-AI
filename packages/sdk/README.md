@@ -195,6 +195,49 @@ const haven = new HavenClient({
 })
 ```
 
+## Agent payment state machine
+
+Every payment or approval state returned by Haven includes:
+
+- `phase`: where the Haven-side payment currently is.
+- `nextAction`: the stable action an agent should take next.
+- `rail`: which payment rail produced the state, such as `direct`, `x402`, or `mpp`.
+- `message`: human-readable guidance for the same state.
+
+The enum values and JSON Schema fragments are exported from `@haven_ai/sdk`:
+
+```typescript
+import {
+  AgentPaymentNextAction,
+  AgentPaymentNextActionSchema,
+  AgentPaymentPhase,
+  AgentPaymentPhaseSchema,
+  AgentPaymentRail,
+  AgentPaymentRailSchema,
+} from '@haven_ai/sdk'
+```
+
+```text
+agent_signature_required -> payment_submitted -> payment_confirmed
+                              |
+                              v
+user_approval_required -> user_execution_required -> funding_sent
+                              |
+                              v
+             waiting_for_additional_approvals
+```
+
+| `nextAction` | What the agent should do |
+|--------------|--------------------------|
+| `sign_and_submit_payment` | Sign with the delegate key and submit the payment to Haven. |
+| `check_status_later` | Poll `getPaymentStatus(payment_id)` later. |
+| `none` | Stop polling; no more action is needed for this payment id. |
+| `wait_for_user_approval` | Tell the user the payment is waiting in Haven, then poll later. Do not create a duplicate payment. |
+| `wait_for_user_to_complete_payment` | The user approved the request; wait for them to finish the funding payment. |
+| `retry_original_x402_request` | Resume this payment id and retry the original x402 request with the merchant payment header. Do not start a new merchant session. |
+| `stop_and_tell_user` | Stop retrying and tell the user the payment failed or was rejected. |
+| `request_again_if_user_still_wants_it` | The request expired; ask again only if the user still wants the payment. |
+
 ## Payments above the on-chain allowance
 
 Haven's policy lives on the Safe AllowanceModule (token, amount, reset period).
@@ -226,7 +269,11 @@ let resumeState
 try {
   await haven.payX402Quote(quote)
 } catch (err) {
-  if (err instanceof HavenPaymentStateError && err.resumeState) {
+  if (
+    err instanceof HavenPaymentStateError &&
+    err.nextAction === AgentPaymentNextAction.WaitForUserApproval &&
+    err.resumeState
+  ) {
     resumeState = err.resumeState
     console.log(err.paymentId, err.phase, err.nextAction)
     console.log('Queued for owner approval. Save resumeState and wait.')
@@ -234,7 +281,7 @@ try {
 }
 
 const status = await haven.getPaymentStatus('approval-or-payment-id')
-if (status.nextAction === 'retry_original_x402_request') {
+if (status.nextAction === AgentPaymentNextAction.RetryOriginalX402Request) {
   const response = await haven.resumeX402Payment(resumeState)
   const data = await response.json()
 }

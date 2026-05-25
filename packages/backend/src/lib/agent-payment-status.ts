@@ -1,37 +1,22 @@
+import {
+  AgentPaymentNextAction,
+  AgentPaymentPhase,
+  AgentPaymentRail,
+  type AgentPaymentNextAction as AgentPaymentNextActionValue,
+  type AgentPaymentPhase as AgentPaymentPhaseValue,
+} from './agent-payment-taxonomy.js'
 import pool from '../db.js'
 import { type AgentContext } from '../middleware/agentAuth.js'
 
 export type AgentPaymentKind = 'payment_intent' | 'approval_request'
-
-export type AgentPaymentPhase =
-  | 'agent_signature_required'
-  | 'payment_submitted'
-  | 'payment_confirmed'
-  | 'user_approval_required'
-  | 'user_execution_required'
-  | 'waiting_for_additional_approvals'
-  | 'funding_sent'
-  | 'rejected'
-  | 'expired'
-  | 'failed'
-
-export type AgentPaymentNextAction =
-  | 'sign_and_submit_payment'
-  | 'check_status_later'
-  | 'none'
-  | 'wait_for_user_approval'
-  | 'wait_for_user_to_complete_payment'
-  | 'retry_original_x402_request'
-  | 'stop_and_tell_user'
-  | 'request_again_if_user_still_wants_it'
 
 export interface AgentPaymentStatus {
   payment_id: string
   kind: AgentPaymentKind
   rail: string
   status: string
-  phase: AgentPaymentPhase
-  next_action: AgentPaymentNextAction
+  phase: AgentPaymentPhaseValue
+  next_action: AgentPaymentNextActionValue
   amount: string
   token: string
   resource_url: string | null
@@ -102,7 +87,7 @@ interface MachinePaymentMetadata {
 }
 
 function railFor(row: { payment_rail: string | null; source: string | null }): string {
-  return row.payment_rail ?? row.source ?? 'direct'
+  return row.payment_rail ?? row.source ?? AgentPaymentRail.Direct
 }
 
 function metadataObject(value: unknown): MachinePaymentMetadata {
@@ -163,7 +148,7 @@ function messageForRail(
   status: string,
   fallback: string,
 ): string {
-  if (rail !== 'x402') return fallback
+  if (rail !== AgentPaymentRail.X402) return fallback
   if (status === 'pending') {
     return 'This x402 funding payment is waiting for user approval in Haven. Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.'
   }
@@ -180,104 +165,104 @@ function messageForRail(
 }
 
 function paymentIntentState(status: string): {
-  phase: AgentPaymentPhase
-  nextAction: AgentPaymentNextAction
+  phase: AgentPaymentPhaseValue
+  nextAction: AgentPaymentNextActionValue
   message: string
 } {
   if (status === 'pending_signature') {
     return {
-      phase: 'agent_signature_required',
-      nextAction: 'sign_and_submit_payment',
+      phase: AgentPaymentPhase.AgentSignatureRequired,
+      nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
       message: 'Haven is waiting for the agent to sign and submit this payment.',
     }
   }
   if (status === 'submitted') {
     return {
-      phase: 'payment_submitted',
-      nextAction: 'check_status_later',
+      phase: AgentPaymentPhase.PaymentSubmitted,
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
       message: 'The payment was submitted and is waiting for confirmation.',
     }
   }
   if (status === 'confirmed') {
     return {
-      phase: 'payment_confirmed',
-      nextAction: 'none',
+      phase: AgentPaymentPhase.PaymentConfirmed,
+      nextAction: AgentPaymentNextAction.None,
       message: 'The payment is confirmed.',
     }
   }
   if (status === 'expired') {
     return {
-      phase: 'expired',
-      nextAction: 'request_again_if_user_still_wants_it',
+      phase: AgentPaymentPhase.Expired,
+      nextAction: AgentPaymentNextAction.RequestAgainIfUserStillWantsIt,
       message: 'The payment expired before it was completed.',
     }
   }
   if (status === 'failed') {
     return {
-      phase: 'failed',
-      nextAction: 'stop_and_tell_user',
+      phase: AgentPaymentPhase.Failed,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
       message: 'The payment failed.',
     }
   }
 
   return {
-    phase: 'payment_submitted',
-    nextAction: 'check_status_later',
+    phase: AgentPaymentPhase.PaymentSubmitted,
+    nextAction: AgentPaymentNextAction.CheckStatusLater,
     message: `The payment is ${status}.`,
   }
 }
 
 function approvalState(status: string): {
-  phase: AgentPaymentPhase
-  nextAction: AgentPaymentNextAction
+  phase: AgentPaymentPhaseValue
+  nextAction: AgentPaymentNextActionValue
   message: string
 } {
   if (status === 'pending') {
     return {
-      phase: 'user_approval_required',
-      nextAction: 'wait_for_user_approval',
+      phase: AgentPaymentPhase.UserApprovalRequired,
+      nextAction: AgentPaymentNextAction.WaitForUserApproval,
       message: 'This payment is above the remaining agent budget and is waiting for user approval in Haven.',
     }
   }
   if (status === 'approved') {
     return {
-      phase: 'user_execution_required',
-      nextAction: 'wait_for_user_to_complete_payment',
+      phase: AgentPaymentPhase.UserExecutionRequired,
+      nextAction: AgentPaymentNextAction.WaitForUserToCompletePayment,
       message: 'The user approved this request, but the funding payment has not been sent yet.',
     }
   }
   if (status === 'proposed') {
     return {
-      phase: 'waiting_for_additional_approvals',
-      nextAction: 'wait_for_user_approval',
+      phase: AgentPaymentPhase.WaitingForAdditionalApprovals,
+      nextAction: AgentPaymentNextAction.WaitForUserApproval,
       message: 'The funding payment was submitted and is waiting for the remaining account approvals.',
     }
   }
   if (status === 'executed') {
     return {
-      phase: 'funding_sent',
-      nextAction: 'retry_original_x402_request',
+      phase: AgentPaymentPhase.FundingSent,
+      nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
       message: 'The user completed the funding payment. Retry the original x402 request so the agent can send the merchant payment header.',
     }
   }
   if (status === 'rejected') {
     return {
-      phase: 'rejected',
-      nextAction: 'stop_and_tell_user',
+      phase: AgentPaymentPhase.Rejected,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
       message: 'The user rejected this payment request.',
     }
   }
   if (status === 'expired') {
     return {
-      phase: 'expired',
-      nextAction: 'request_again_if_user_still_wants_it',
+      phase: AgentPaymentPhase.Expired,
+      nextAction: AgentPaymentNextAction.RequestAgainIfUserStillWantsIt,
       message: 'The approval request expired before it was completed.',
     }
   }
 
   return {
-    phase: 'user_approval_required',
-    nextAction: 'check_status_later',
+    phase: AgentPaymentPhase.UserApprovalRequired,
+    nextAction: AgentPaymentNextAction.CheckStatusLater,
     message: `The approval request is ${status}.`,
   }
 }

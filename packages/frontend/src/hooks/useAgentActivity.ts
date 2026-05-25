@@ -6,7 +6,8 @@ import type { ApprovalStatus, PaymentStatus } from '@/lib/payment-status'
 
 type ActivityStatus = ApprovalStatus | PaymentStatus
 
-export interface ActivityItem {
+/** Payment / approval rows — money-movement events that fit the transactions table. */
+export interface PaymentActivityItem {
   type: 'payment' | 'approval'
   id: string
   agent_id?: string
@@ -29,6 +30,36 @@ export interface ActivityItem {
   explorer_url: string | null
   confirmed_at?: string | null
   created_at: string
+}
+
+/**
+ * MCP tool invocation rows — audit-log entries produced by the
+ * `X-Haven-MCP-Tool` header on the backend. Surfaced separately from the
+ * transactions table because most of them never move money (status reads,
+ * quote inspections). See backend migration 015_agent_tool_invocations.
+ */
+export interface McpToolCallActivityItem {
+  type: 'mcp_tool_call'
+  id: string
+  agent_id?: string
+  agent_name?: string
+  tool_name: string
+  payment_id: string | null
+  result_status: 'ok' | 'error' | 'denied' | string
+  next_action: string | null
+  error_code: string | null
+  status_code: number | null
+  created_at: string
+}
+
+export type ActivityItem = PaymentActivityItem | McpToolCallActivityItem
+
+export function isPaymentActivityItem(item: ActivityItem): item is PaymentActivityItem {
+  return item.type === 'payment' || item.type === 'approval'
+}
+
+export function isMcpToolCallActivityItem(item: ActivityItem): item is McpToolCallActivityItem {
+  return item.type === 'mcp_tool_call'
 }
 
 export interface AgentStats {

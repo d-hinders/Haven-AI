@@ -21,6 +21,16 @@ export interface HavenClientConfig {
 
   /** Polling interval in ms when waiting for confirmation (default: 3000) */
   pollingInterval?: number
+
+  /**
+   * Extra headers to attach to every request to the Haven API.
+   *
+   * Used by the MCP server to tag requests with `X-Haven-MCP-Tool: <name>`
+   * so the backend can record an audit-log entry per tool invocation. Has
+   * no effect on outbound merchant requests (x402 / MPP) — those are
+   * standard HTTP and never carry Haven-internal headers.
+   */
+  defaultHeaders?: Record<string, string>
 }
 
 // ── Payment Types ────────────────────────────────────────────────

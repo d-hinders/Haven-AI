@@ -29,6 +29,7 @@ import demoX402Routes from './routes/demo-x402.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import demoMppRoutes from './routes/demo-mpp.js'
 import openapiRoutes from './routes/openapi.js'
+import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import pool from './db.js'
 
 const app = Fastify({
@@ -85,6 +86,12 @@ await app.register(fastifyJwt, {
 })
 
 await app.register(openapiRoutes)
+
+// Capture X-Haven-MCP-Tool header and write an agent_tool_invocations row
+// whenever an authenticated agent request advertises an MCP tool name. Must
+// be registered before routes that decorate request.agent so the onResponse
+// hook fires after them.
+registerAgentToolAuditHooks(app)
 
 // --- Routes ---
 app.get('/health', async (_request, reply) => {

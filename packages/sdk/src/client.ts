@@ -206,6 +206,7 @@ export class HavenClient {
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
   private readonly x402ReceiptCache = new Map<string, { expiresAt: number; receipt: X402Receipt }>()
   private readonly inFlightMachinePayments = new Map<string, Promise<MachinePaymentReceipt>>()
+  private defaultHeaders: Record<string, string>
 
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
@@ -218,9 +219,26 @@ export class HavenClient {
     this.requestTimeout = config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
     this.pollingInterval = config.pollingInterval ?? DEFAULT_POLLING_INTERVAL
+    this.defaultHeaders = { ...(config.defaultHeaders ?? {}) }
 
     if (this.delegateKey) {
       this.delegateAddress = addressFromKey(this.delegateKey)
+    }
+  }
+
+  /**
+   * Set or replace a default header sent on every subsequent Haven API
+   * request. Pass `undefined` to remove the header. Used by the MCP server
+   * to tag requests with `X-Haven-MCP-Tool: <name>` so the backend can
+   * write an audit-log row for the tool invocation.
+   *
+   * Has no effect on outbound merchant requests (x402 / MPP).
+   */
+  setDefaultHeader(name: string, value: string | undefined): void {
+    if (value === undefined) {
+      delete this.defaultHeaders[name]
+    } else {
+      this.defaultHeaders[name] = value
     }
   }
 
@@ -2107,6 +2125,7 @@ export class HavenClient {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`,
+          ...this.defaultHeaders,
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,

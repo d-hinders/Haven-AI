@@ -18,6 +18,9 @@ export interface ApprovalRequest {
   reason: string | null
   source: string
   x402_resource_url: string | null
+  merchant_address: string | null
+  payment_rail: string | null
+  payment_resource_url: string | null
   status: ApprovalStatus
   tx_hash: string | null
   reviewed_at: string | null

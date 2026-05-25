@@ -132,6 +132,9 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
         reason: row.reason,
         source: row.source,
         x402_resource_url: row.x402_resource_url,
+        merchant_address: row.merchant_address,
+        payment_rail: row.payment_rail,
+        payment_resource_url: row.payment_resource_url,
         status: row.status,
         tx_hash: row.tx_hash,
         reviewed_at: row.reviewed_at,
@@ -164,19 +167,27 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
         })
       }
 
+      const row = result.rows[0]
+      // Match the GET /approvals derivation: prefer payment_rail over the
+      // legacy `source` column so both endpoints report the same value when
+      // a rail is set. Falls back to 'direct' to mirror the SQL COALESCE.
+      const derivedSource = row.payment_rail ?? row.source ?? 'direct'
       return {
-        id: result.rows[0].id,
+        id: row.id,
         status: 'approved',
         message: 'Approved. Complete the payment to send it.',
         payment: {
-          token_symbol: result.rows[0].token_symbol,
-          token_address: result.rows[0].token_address,
-          to_address: result.rows[0].to_address,
-          amount_raw: result.rows[0].amount_raw,
-          amount_human: result.rows[0].amount_human,
-          safe_address: result.rows[0].safe_address,
-          source: result.rows[0].source,
-          x402_resource_url: result.rows[0].x402_resource_url,
+          token_symbol: row.token_symbol,
+          token_address: row.token_address,
+          to_address: row.to_address,
+          amount_raw: row.amount_raw,
+          amount_human: row.amount_human,
+          safe_address: row.safe_address,
+          source: derivedSource,
+          x402_resource_url: row.payment_resource_url ?? row.x402_resource_url,
+          merchant_address: row.merchant_address,
+          payment_rail: row.payment_rail,
+          payment_resource_url: row.payment_resource_url,
         },
       }
     },

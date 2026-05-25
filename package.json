@@ -17,6 +17,13 @@
     "quality": "npm run typecheck && npm run test:unit && npm run build",
     "test:e2e": "npm run test:e2e -w packages/frontend"
   },
+  "overrides": {
+    "axios": "^1.16.1",
+    "fast-uri": "^3.1.2",
+    "follow-redirects": "^1.16.0",
+    "hono": "^4.12.23",
+    "postcss": "^8.5.15"
+  },
   "devDependencies": {
     "concurrently": "^9.0.0"
   }

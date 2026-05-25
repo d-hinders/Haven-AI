@@ -290,12 +290,14 @@ describe('CreateAgentModal recovery', () => {
     expect(screen.getByRole('tab', { name: 'Generic MCP' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'SDK / CLI' })).toBeInTheDocument()
 
-    // The compact JSON download row keeps the canonical artifact available.
-    expect(screen.getByRole('button', { name: 'Download credential JSON' })).toBeInTheDocument()
-    expect(screen.getByText(/credential is shown once/i)).toBeInTheDocument()
+    // The compact credential file download keeps a single save action.
+    expect(screen.getByRole('button', { name: 'Download credentials' })).toBeInTheDocument()
+    expect(screen.getByText(/credentials are shown once/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
 
-    // Copying the active snippet flips the "credential saved" gate.
+    // The snippet stays hidden until the user picks a tile — copy lives inside it.
+    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
 
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
@@ -316,7 +318,9 @@ describe('CreateAgentModal recovery', () => {
     // must still be reachable for SDK users.
     fireEvent.click(screen.getByText(/Advanced — developer guide/))
     expect(screen.getByRole('button', { name: 'Open developer guide' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Copy raw credential JSON' })).toBeInTheDocument()
+    // The redundant "Copy raw credential JSON" action has been removed —
+    // the inline tile copy and the Download credentials button cover it.
+    expect(screen.queryByRole('button', { name: /Copy raw credential/i })).not.toBeInTheDocument()
   })
 
   it('skips wallet selection for one account and uses a 3-step counter', async () => {

@@ -37,36 +37,46 @@ describe('RuntimeConnectCard', () => {
     })
   })
 
-  it('shows tabs for every supported runtime and defaults to Claude Desktop', () => {
+  it('renders all tabs unselected and hides the credentials until a tile is clicked', () => {
     render(<RuntimeConnectCard credential={credential()} />)
-    expect(screen.getByRole('tab', { name: 'Claude Desktop' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'Cursor' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Generic MCP' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'SDK / CLI' })).toBeInTheDocument()
+
+    for (const name of ['Claude Desktop', 'Cursor', 'Generic MCP', 'SDK / CLI']) {
+      expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'false')
+    }
+    // Credentials and the Try it block stay out of the DOM until the user picks something.
+    expect(screen.queryByText(/sk_agent_TESTKEY_NEVERREAL/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/What's my Haven budget/i)).not.toBeInTheDocument()
+    // The empty-state hint nudges the user toward the tabs.
+    expect(screen.getByText(/Pick one above/i)).toBeInTheDocument()
   })
 
-  it('renders the active snippet inline with the credential secret in inline mode', () => {
+  it('reveals the snippet and Try it prompt after a tile is selected', () => {
     render(<RuntimeConnectCard credential={credential()} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
+
+    expect(screen.getByRole('tab', { name: 'Claude Desktop' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText(/sk_agent_TESTKEY_NEVERREAL/)).toBeInTheDocument()
+    expect(screen.getByText(/What's my Haven budget/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Pick one above/i)).not.toBeInTheDocument()
   })
 
   it('switches snippets when a different tab is clicked', () => {
     render(<RuntimeConnectCard credential={credential()} />)
-    // Sanity: the Claude Desktop tile is active first and its destination is shown.
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
     expect(screen.getByText('claude_desktop_config.json')).toBeInTheDocument()
     expect(screen.queryByText('~/.cursor/mcp.json')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Cursor' }))
-    // Cursor's destination chip is unique to that tile.
     expect(screen.getByText('~/.cursor/mcp.json')).toBeInTheDocument()
     expect(screen.queryByText('claude_desktop_config.json')).not.toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Cursor' })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('switching to file mode removes the secret from the visible snippet', () => {
+  it('switching to "Use a file" mode removes the secret from the visible snippet', () => {
     render(<RuntimeConnectCard credential={credential()} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
     expect(screen.getByText(/sk_agent_TESTKEY_NEVERREAL/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'With credential file' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use a file' }))
     expect(screen.queryByText(/sk_agent_TESTKEY_NEVERREAL/)).not.toBeInTheDocument()
     expect(screen.getByText(/--credentials/)).toBeInTheDocument()
   })
@@ -74,6 +84,7 @@ describe('RuntimeConnectCard', () => {
   it('copying a snippet calls the clipboard and reports it via the callback', async () => {
     const onSnippetCopied = vi.fn()
     render(<RuntimeConnectCard credential={credential()} onSnippetCopied={onSnippetCopied} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
@@ -81,10 +92,5 @@ describe('RuntimeConnectCard', () => {
     expect(onSnippetCopied).toHaveBeenCalledTimes(1)
     expect(onSnippetCopied.mock.calls[0][0].id).toBe('claude-desktop')
     expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
-  })
-
-  it("shows a Try it prompt suggesting What's my Haven budget", () => {
-    render(<RuntimeConnectCard credential={credential()} />)
-    expect(screen.getByText(/What's my Haven budget/i)).toBeInTheDocument()
   })
 })

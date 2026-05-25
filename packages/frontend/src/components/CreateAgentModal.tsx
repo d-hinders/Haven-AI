@@ -179,7 +179,6 @@ export default function CreateAgentModal({
   // Result
   const [createdApiKey, setCreatedApiKey] = useState<string | null>(null)
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null)
-  const [copiedHandoff, setCopiedHandoff] = useState(false)
   // True once the user has downloaded or copied the credential file.
   // Used to gate close-without-saving on the Done step — see handleClose.
   const [credentialsSaved, setCredentialsSaved] = useState(false)
@@ -215,7 +214,6 @@ export default function CreateAgentModal({
     setBackendSaveFailed(false)
     setCreatedApiKey(null)
     setCreatedAgentId(null)
-    setCopiedHandoff(false)
     setCredentialsSaved(false)
   }, [])
 
@@ -530,14 +528,6 @@ export default function CreateAgentModal({
     await saveAgentToHaven(authorityResult)
   }
 
-  // ── Copy helpers ───────────────────────────────────────
-
-  function copyToClipboard(text: string, setter: (v: boolean) => void) {
-    navigator.clipboard.writeText(text)
-    setter(true)
-    setTimeout(() => setter(false), 2000)
-  }
-
   // ── Handoff artefact helpers ──────────────────────────
   //
   // Assembled lazily on-click from the form state + the values that came back
@@ -620,13 +610,6 @@ export default function CreateAgentModal({
       new Blob([cred.jsonText], { type: 'application/json;charset=utf-8' }),
       cred.filename,
     )
-    setCredentialsSaved(true)
-  }
-
-  function handleCopyRawCredential() {
-    const cred = getAgentCredential()
-    if (!cred) return
-    copyToClipboard(cred.jsonText, setCopiedHandoff)
     setCredentialsSaved(true)
   }
 
@@ -1157,8 +1140,8 @@ export default function CreateAgentModal({
                   </h3>
                   <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--v2-ink-2)]">
                     {execStatus === 'confirmed'
-                      ? 'Pick where the agent will run and paste the snippet — it can start spending within your rules right away.'
-                      : 'After the approval is complete, pick where the agent will run and paste the snippet.'}
+                      ? 'Give these credentials to your agent and it can start making payments within your rules.'
+                      : 'After the approval is complete, give these credentials to your agent.'}
                   </p>
                   {txHash && (
                     <a
@@ -1211,41 +1194,43 @@ export default function CreateAgentModal({
                 )
               })()}
 
-              {/* Compact JSON download row. The credential JSON is the
-                  canonical artifact for users who prefer a managed-secret
-                  workflow over inline env vars in a config file. */}
+              {/* Compact credential file download row. Single action — the
+                  inline tile snippet above is the primary path, this row is
+                  for users who want a copy of the credentials saved to disk. */}
               <div
                 className="v2-animate-stagger"
                 style={{ ['--v2-stagger-delay' as string]: '320ms' }}
               >
                 <CredentialHandoffCard
-                  title="Save the credential JSON"
-                  description="Optional — for production setups or when you want the agent's secret on disk instead of inside a runtime config."
+                  title="Keep a copy of the credentials"
+                  description="Saves your agent's credentials as a file so you can store them alongside your other secrets."
                   primaryAction={
                     <Button onClick={handleDownloadCredential} className="w-full">
-                      Download credential JSON
+                      Download credentials
                     </Button>
                   }
-                  note={generatedPrivateKey ? 'The credential is shown once. Haven cannot show it again after you close this window.' : undefined}
+                  note={generatedPrivateKey ? 'These credentials are shown once. Haven cannot show them again after you close this window.' : undefined}
                   saved={credentialsSaved}
                 />
               </div>
 
-              {/* Advanced disclosure: developer guide + raw JSON copy. Kept
-                  behind a <details> so it doesn't compete with the primary
-                  connect path, but stays one click away for SDK users. */}
+              {/* Advanced disclosure: developer guide only. Kept behind a
+                  <details> so it doesn't compete with the primary connect
+                  path, but stays one click away for SDK users who want the
+                  Markdown reference covering SDK / x402 / machine-payment
+                  patterns. */}
               <div
                 className="v2-animate-stagger"
                 style={{ ['--v2-stagger-delay' as string]: '360ms' }}
               >
                 <details className="group rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-[12px]">
                   <summary className="flex cursor-pointer list-none items-center justify-between text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
-                    <span>Advanced — developer guide and raw credential</span>
+                    <span>Advanced — developer guide</span>
                     <svg className="h-3.5 w-3.5 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                       <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </summary>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="mt-3">
                     <Button
                       variant="ghost"
                       onClick={handleDownloadDeveloperGuide}
@@ -1253,18 +1238,11 @@ export default function CreateAgentModal({
                     >
                       Open developer guide
                     </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={handleCopyRawCredential}
-                      className="w-full"
-                    >
-                      {copiedHandoff ? 'Copied' : 'Copy raw credential JSON'}
-                    </Button>
                   </div>
                   <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-                    The developer guide is a Markdown reference covering the SDK, x402, and
-                    machine-payment flows. The raw JSON is the same file as the download above —
-                    useful when you want to pipe the credential into a secret manager.
+                    A Markdown reference covering the Haven SDK, x402, and machine-payment
+                    flows. Useful when you’re building the agent yourself rather than plugging
+                    it into Claude, Cursor, or another existing app.
                   </p>
                 </details>
               </div>

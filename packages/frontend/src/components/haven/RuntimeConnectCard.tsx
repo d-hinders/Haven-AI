@@ -15,19 +15,23 @@ import {
 /**
  * Runtime connect card — primary post-creation surface on the Done step.
  *
- * Tile-style tabs for each supported agent runtime. Each tile shows a single
- * copy-pasteable snippet. Two modes per tile:
+ * Behaviour:
  *
- *   - Inline (default): the snippet embeds the credential env vars directly.
- *     No file for the user to manage. Demo-friendly: copy → paste → restart.
- *   - With credential file: snippet references the downloaded credential JSON
- *     by absolute path. Used in production-ish setups where the secret lives
- *     in a managed location on disk.
+ *   - The card lands with no tile selected. Tiles are visible and inviting;
+ *     the code block stays out of sight until the user picks one. Reduces
+ *     visual noise on first paint and lets the user focus on the question
+ *     "which app is going to run this agent?" first.
+ *   - Picking a tile reveals the code section with the wizard's standard
+ *     `v2-animate-step-rise` entrance. Re-keying on `<tileId>:<mode>` means
+ *     switching tiles or modes also replays the animation.
+ *   - Inline mode embeds credentials directly in the snippet (one paste,
+ *     no files). File mode references the downloaded credential file path
+ *     so the snippet itself holds no secret.
  *
- * The card never displays the secret outside the snippet body — there is no
- * standalone "your secret is X" line. Secrets only appear where they are
- * actionable (inside the code block), which keeps the surface honest and
- * keeps copy-everything-to-clipboard a deliberate action.
+ * Non-custodial: the card never displays the secret outside the snippet body
+ * — there is no standalone "your secret is X" line. Secrets only appear
+ * where they are actionable (inside the code block), which keeps copy-to-
+ * clipboard a deliberate action.
  */
 
 export interface RuntimeConnectCardProps {
@@ -42,7 +46,7 @@ export interface RuntimeConnectCardProps {
   /**
    * Called when the user copies any snippet. The modal listens to this to
    * flip its "credential saved" gate — copying a snippet means the user
-   * has the credential outside this once-only view.
+   * has the credentials outside this once-only view.
    */
   onSnippetCopied?: (snippet: RuntimeSnippet) => void
   /** Suggested first-prompt copy shown beneath the snippet area. */
@@ -57,7 +61,8 @@ export function RuntimeConnectCard({
   onSnippetCopied,
   tryItPrompt = DEFAULT_TRY_IT_PROMPT,
 }: RuntimeConnectCardProps) {
-  const [activeId, setActiveId] = useState<RuntimeSnippetId>('claude-desktop')
+  // Lands with nothing selected. The first click reveals the code block.
+  const [activeId, setActiveId] = useState<RuntimeSnippetId | null>(null)
   const [mode, setMode] = useState<RuntimeSnippetMode>('inline')
   const [copiedId, setCopiedId] = useState<RuntimeSnippetId | null>(null)
 
@@ -65,7 +70,7 @@ export function RuntimeConnectCard({
     () => buildRuntimeSnippets({ credential, credentialFilePath }, mode),
     [credential, credentialFilePath, mode],
   )
-  const active = snippets.find((s) => s.id === activeId) ?? snippets[0]
+  const active = activeId ? snippets.find((s) => s.id === activeId) ?? null : null
 
   const handleCopy = useCallback(
     async (snippet: RuntimeSnippet) => {
@@ -90,19 +95,19 @@ export function RuntimeConnectCard({
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge tone="brand">Connect</StatusBadge>
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-              Add this agent to your runtime
+              Add these payment credentials to your agent
             </h3>
           </div>
           <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Pick where the agent will run. Copy the snippet, paste it into that runtime's config,
-            and the agent can start using its Haven budget right away.
+            Pick where your agent lives and copy the credentials. Once your agent has them,
+            it can start making payments within the rules you just set.
           </p>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2" role="tablist" aria-label="Agent runtimes">
+      <div className="mt-4 flex flex-wrap items-center gap-2" role="tablist" aria-label="Agent connection options">
         {snippets.map((s) => {
-          const isActive = s.id === active.id
+          const isActive = s.id === activeId
           return (
             <button
               key={s.id}
@@ -121,67 +126,84 @@ export function RuntimeConnectCard({
             </button>
           )
         })}
-        <div className="ml-auto inline-flex items-center gap-1 rounded-[10px] border border-[var(--v2-border)] bg-white p-1 text-[12px]">
-          <ModeToggleButton
-            label="Inline"
-            isActive={mode === 'inline'}
-            onClick={() => setMode('inline')}
-          />
-          <ModeToggleButton
-            label="With credential file"
-            isActive={mode === 'file'}
-            onClick={() => setMode('file')}
-          />
-        </div>
       </div>
 
-      <div className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-        {active.guidance}
-        {active.destination && (
-          <>
-            {' '}<span className="font-mono text-[var(--v2-ink-2)]">{active.destination}</span>
-          </>
-        )}
-      </div>
-
-      <div className="mt-2 overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-        <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-3 py-1.5">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
-            {active.language}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void handleCopy(active)}
-          >
-            {copiedId === active.id ? 'Copied' : 'Copy'}
-          </Button>
-        </div>
-        <pre className="overflow-x-auto px-3 py-2 text-[12px] leading-snug text-[var(--v2-ink)]">
-          <code>{active.code}</code>
-        </pre>
-      </div>
-
-      {mode === 'inline' && (
-        <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-          This snippet contains the agent’s secret. The secret authenticates the agent;
-          the on-chain Safe AllowanceModule still caps what it can spend. You can revoke this
-          agent from Haven at any time.
-        </p>
-      )}
-      {mode === 'file' && (
-        <p className="mt-2 text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-          Save the credential JSON to a private path on the machine that runs the agent, then
-          point this snippet at that path. The agent runtime config holds no secret.
+      {!active && (
+        <p
+          className="mt-3 text-[12px] italic leading-relaxed text-[var(--v2-ink-3)]"
+          aria-live="polite"
+        >
+          Pick one above to see the credentials.
         </p>
       )}
 
-      <div className="mt-4 rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
-        <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
-        <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-          {tryItPrompt}
+      {active && (
+        <div
+          key={`${active.id}:${mode}`}
+          className="v2-animate-step-rise mt-4 space-y-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              {active.guidance}
+              {active.destination && (
+                <>
+                  {' '}<span className="font-mono text-[var(--v2-ink-2)]">{active.destination}</span>
+                </>
+              )}
+            </div>
+            <div className="inline-flex items-center gap-1 rounded-[10px] border border-[var(--v2-border)] bg-white p-1 text-[12px]">
+              <ModeToggleButton
+                label="Inline"
+                isActive={mode === 'inline'}
+                onClick={() => setMode('inline')}
+              />
+              <ModeToggleButton
+                label="Use a file"
+                isActive={mode === 'file'}
+                onClick={() => setMode('file')}
+              />
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+            <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-3 py-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+                {active.language}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleCopy(active)}
+              >
+                {copiedId === active.id ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            <pre className="overflow-x-auto px-3 py-2 text-[12px] leading-snug text-[var(--v2-ink)]">
+              <code>{active.code}</code>
+            </pre>
+          </div>
+
+          {mode === 'inline' && (
+            <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+              These credentials let your agent make payments on your behalf. The budget you
+              just set still caps what it can spend, and you can revoke this agent in Haven anytime.
+            </p>
+          )}
+          {mode === 'file' && (
+            <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+              Save the credentials somewhere private on the same machine as your agent, then
+              point this snippet at that file. The snippet itself won’t contain any secret.
+            </p>
+          )}
+
+          <div className="rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
+            <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
+            <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+              {tryItPrompt}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </Card>
   )
 }

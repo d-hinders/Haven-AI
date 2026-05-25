@@ -37,6 +37,7 @@ const AGENT = {
 
 const PAYMENT_ID = '33333333-3333-3333-3333-333333333333'
 const TOKEN = '0x0000000000000000000000000000000000000000'
+const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const RECIPIENT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const SIGN_HASH = `0x${'11'.repeat(32)}`
 const SIGNATURE = `0x${'ab'.repeat(65)}`
@@ -74,6 +75,60 @@ function pendingIntent(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function x402Approval(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'approval-123',
+    chain_id: 8453,
+    token_symbol: 'USDC',
+    token_address: USDC,
+    amount_human: '0.01',
+    amount_raw: '10000',
+    status: 'pending',
+    tx_hash: null,
+    expires_at: '2099-01-02T00:00:00.000Z',
+    source: 'x402',
+    payment_rail: 'x402',
+    payment_resource_url: 'https://mcp.soundside.ai/mcp',
+    x402_resource_url: 'https://mcp.soundside.ai/mcp',
+    merchant_address: RECIPIENT.toLowerCase(),
+    machine_challenge_id: null,
+    machine_idempotency_key: 'x402:approval',
+    machine_metadata: JSON.stringify({
+      protocol: 'x402',
+      network: 'base',
+      description: 'create_image via luma',
+    }),
+    ...overrides,
+  }
+}
+
+function mppApproval(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'approval-mpp',
+    chain_id: 8453,
+    token_symbol: 'USDC',
+    token_address: USDC,
+    amount_human: '0.01',
+    amount_raw: '10000',
+    status: 'pending',
+    tx_hash: null,
+    expires_at: '2099-01-02T00:00:00.000Z',
+    source: 'mpp_demo',
+    payment_rail: 'mpp_demo',
+    payment_resource_url: 'https://haven.example/demo/mpp/market-summary',
+    x402_resource_url: null,
+    merchant_address: RECIPIENT.toLowerCase(),
+    machine_challenge_id: 'challenge-123',
+    machine_idempotency_key: 'mpp_demo:test',
+    machine_metadata: JSON.stringify({
+      protocol: 'mpp',
+      network: 'base',
+      description: 'Haven market summary demo',
+    }),
+    ...overrides,
+  }
+}
+
 describe('payment routes', () => {
   let app: FastifyInstance
 
@@ -90,6 +145,141 @@ describe('payment routes', () => {
     mockQuery.mockReset()
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
+  })
+
+  it('rehydrates x402 resume state from an approval request id', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [x402Approval()] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/payments/approval-123/resume_state',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      rail: 'x402',
+      paymentId: 'approval-123',
+      idempotencyKey: 'x402:approval',
+      url: 'https://mcp.soundside.ai/mcp',
+      resourceUrl: 'https://mcp.soundside.ai/mcp',
+      description: 'create_image via luma',
+      amountAtomic: '10000',
+      amount: '0.01',
+      token: 'USDC',
+      asset: USDC,
+      network: 'base',
+      chainId: 8453,
+      merchantAddress: RECIPIENT.toLowerCase(),
+      paymentRequired: {
+        x402Version: 2,
+        resource: {
+          url: 'https://mcp.soundside.ai/mcp',
+          description: 'create_image via luma',
+        },
+      },
+      accepted: {
+        scheme: 'exact',
+        network: 'base',
+        amount: '10000',
+        maxAmountRequired: '10000',
+        resource: 'https://mcp.soundside.ai/mcp',
+        description: 'create_image via luma',
+        asset: USDC,
+        payTo: RECIPIENT.toLowerCase(),
+        maxTimeoutSeconds: 30,
+      },
+    })
+  })
+
+  it('rehydrates MPP resume state from an approval request id', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [mppApproval()] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/payments/approval-mpp/resume_state',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      rail: 'mpp',
+      paymentRail: 'mpp_demo',
+      paymentId: 'approval-mpp',
+      idempotencyKey: 'mpp_demo:test',
+      url: 'https://haven.example/demo/mpp/market-summary',
+      resourceUrl: 'https://haven.example/demo/mpp/market-summary',
+      description: 'Haven market summary demo',
+      amountAtomic: '10000',
+      amount: '0.01',
+      token: 'USDC',
+      asset: USDC,
+      network: 'base',
+      chainId: 8453,
+      merchantAddress: RECIPIENT.toLowerCase(),
+      expiresAt: '2099-01-02T00:00:00.000Z',
+      challenge: {
+        rail: 'mpp_demo',
+        challengeId: 'challenge-123',
+        resource: 'https://haven.example/demo/mpp/market-summary',
+        description: 'Haven market summary demo',
+        network: { chainId: 8453, name: 'base' },
+        asset: { symbol: 'USDC', address: USDC, decimals: 6 },
+        amount: { display: '0.01', atomic: '10000' },
+        recipient: RECIPIENT.toLowerCase(),
+        expiresAt: '2099-01-02T00:00:00.000Z',
+      },
+    })
+  })
+
+  it('does not rehydrate resume state for another agent payment or approval', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/payments/approval-123/resume_state',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toEqual({ error: 'Payment or approval request not found' })
+  })
+
+  it('returns 410 when an approval resume state has expired', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ status: 'expired' }] })
+      .mockResolvedValueOnce({ rows: [x402Approval({ status: 'expired' })] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/payments/approval-123/resume_state',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(410)
+    expect(response.json()).toMatchObject({
+      error: 'Payment approval expired and cannot be resumed',
+      payment_id: 'approval-123',
+      status: 'expired',
+    })
   })
 
   it('claims a pending signature intent before executing on-chain', async () => {

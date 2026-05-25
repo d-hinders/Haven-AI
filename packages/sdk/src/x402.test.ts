@@ -374,6 +374,44 @@ describe('x402 helpers', () => {
     })
   })
 
+  it('gets server-side x402 resume state by payment id', async () => {
+    const resumeState = {
+      rail: 'x402',
+      paymentId: 'approval-123',
+      idempotencyKey: 'x402:approval',
+      paymentRequired,
+      accepted,
+      url: paymentRequired.resource.url,
+      resourceUrl: paymentRequired.resource.url,
+      description: paymentRequired.resource.description ?? null,
+      amountAtomic: accepted.amount,
+      amount: '0.02',
+      token: 'USDC',
+      asset: accepted.asset,
+      network: accepted.network,
+      chainId: 8453,
+      merchantAddress: accepted.payTo,
+    }
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(resumeState), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      baseUrl: 'https://haven.example',
+    })
+
+    await expect(haven.getResumeState('approval-123')).resolves.toEqual(resumeState)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://haven.example/payments/approval-123/resume_state')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      Authorization: 'Bearer sk_agent_test',
+    })
+  })
+
   it('records a reconciliation event when an x402 retry is rejected after funding', async () => {
     const backendUrl = 'https://haven.example'
     const resourceUrl = paymentRequired.resource.url

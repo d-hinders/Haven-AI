@@ -36,6 +36,7 @@ export type {
   X402RequestSnapshot,
   X402Quote,
   X402ResumeState,
+  PaymentResumeState,
   ResumeAuthorizedX402Input,
   ResumeX402PaymentInput,
   MppAuthorizationOptions,

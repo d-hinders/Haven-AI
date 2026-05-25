@@ -2,6 +2,8 @@
 
 Use this as shared memory for PR review feedback that was worth fixing. Keep it pattern-based, not PR-based, so future agents can apply it to new surfaces.
 
+The patterns below are also the items checked by the **Captain Self-Check Preflight** in `docs/ai-agent-workflow.md` and the **Recurring traps** must-check list in `.claude/agents/haven-reviewer.md`. The three lists should stay in sync.
+
 ## Data Semantics
 
 - Keep raw and formatted values separate. Raw amounts, ids, hashes, timestamps, and addresses should not be replaced with display strings.
@@ -48,6 +50,47 @@ Use this as shared memory for PR review feedback that was worth fixing. Keep it 
 - Generated artifacts should explain queued approval behavior and avoid implying the agent can spend beyond the user's rules.
 - Keep developer-facing details accurate without leaking stale primary-UX vocabulary. Prefer `Haven wallet`, `credential address`, `agent rules`, and `agent budget`; mention Safe/module details only when they are necessary for advanced integration clarity.
 - Do not remove established env vars from generated files without a compatibility plan. Add clearer aliases alongside older names when external integrations may already rely on them.
+
+## Numeric Formatters
+
+- Separate the sign before formatting bigint magnitudes. BigInt `%` preserves sign, so a naive `${quotient}.${remainder}` on a negative input renders as `"-5.-5"`. Format magnitude, then re-attach the sign.
+- Reject scientific-notation strings explicitly. `Number("1e20").toFixed(4)` silently loses precision near `MAX_SAFE_INTEGER`; pass the original through unchanged so the upstream problem stays visible instead of producing a wrong-looking number.
+- A single shared formatter must own both the raw-bigint and already-decimal input paths. Callers should not be able to reintroduce the bug by passing the "other" shape. See `packages/frontend/src/lib/allowance-format.ts` as the canonical example.
+
+## Counter And Summary Buckets
+
+- Buckets in a summary line must be mutually exclusive, or the UI must label them as overlapping. A failed outgoing send is `failed`, not `failed AND sent`; double-counting on a single row produces `1 sent · 1 failed` from one transaction.
+- Test the simplest overlap case before shipping. For direction × status summaries, the failed-outbound and failed-inbound cases are the ones that drift.
+- Propagate the same tone/colour wiring everywhere a summary is rendered. Dashboard previews routinely lag the canonical surface; audit every caller after changing a row's tone props.
+
+## Conditional Copy Predicates
+
+- When copy says "this will replace **{token} budget**", the predicate must match by precise token identity (address **or** symbol), not by "the agent has any allowance". Predicates broadened for layout or disabled-state reasons routinely leak into copy that should fire only on an exact match.
+- Audit every existing-vs-new branch (`Update` vs `Add`, `Replace` vs `Set`, `Resume` vs `Start`) after changing the underlying boolean. Add tests for the no-match and exact-match branches.
+- Disabled actions should explain what is missing in a visible caption; do not rely on a silent disabled state alone.
+
+## Animation Discipline
+
+- Every CSS animation that gets a prominent placement must be gated on `@media (prefers-reduced-motion: no-preference)`. Pre-existing animations also need the gate the moment they get a prominent placement, even if they were ungated before.
+- Toggling one animation class while another animation class remains on the same element causes browsers to re-initialize the surviving animation — visible as a flash to opacity 0 or a transform reset. Keep one-shot animations stable across state transitions (`animation-fill-mode: both` + leave the class applied).
+- A CSS variable like `--v2-stagger-delay` only takes effect on a class that consumes it. `v2-animate-step-rise` does not consume the stagger delay; `v2-animate-stagger` does. When you set a delay, confirm the consuming class is the outer wrapper.
+
+## Cross-Surface Display Drift
+
+- A value rendered in 2+ surfaces (compact card, detail card, dashboard preview, design-system page) must flow through exactly one shared formatter. Two formatters drift, especially when one is inline.
+- The input to the formatter must carry enough context (chain id, token decimals, network) to be correct independently of the currently-selected wallet. Agent budget bugs typically appear when an agent's wallet is on a different chain than the selection.
+- Backend API responses should include the chain/decimals metadata each row needs; do not require the frontend to join against the selected wallet.
+
+## Loading-State Inference
+
+- Never infer "onboarding step done" or "feature completed" from a paginated or capped preview list. The preview is a UI affordance, not a durable signal.
+- Require explicit progress fields on the API (e.g. `onboardingProgress.hasFirstAgentPayment`) and gate the dependent UI until **all** prerequisite hooks have resolved.
+- Test the staggered-resolution case: balances resolve before transactions, or transactions resolve before agents. The completed-but-dismissed and incomplete-loading states should both be covered.
+
+## Inline Gate Placement
+
+- `OnchainActionGate` and `NetworkGate` notices render **above** the action row, not inside the `flex-1` wrapper that holds the action button. Nesting the notice inside `flex-1` pushes the primary action out of line with its siblings when the gate triggers.
+- Standard pattern: `<OnchainActionNotice />` above the Cancel/Confirm row, with `showNotice={false}` on the gate so it does not double-render. Match the layout used in `SendModal`, `ApprovalQueue`, and `CreateAgentModal`.
 
 ## Test Gaps Worth Catching
 

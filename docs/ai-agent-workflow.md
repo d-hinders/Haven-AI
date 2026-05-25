@@ -47,6 +47,28 @@ After a Claude or PR review, if a comment is both relevant and fixed, add the re
 
 Workers can implement narrow slices, but the captain owns cross-surface consistency, shared abstractions, PR shape, final review judgment, and deciding which review comments become durable workflow memory.
 
+## Captain Self-Check Preflight
+
+Before opening or pushing a non-trivial PR, the captain runs this preflight. Each item is one grep or one quick read. The list maps the recurring trap families from `docs/ai-review-patterns.md` to the smallest check that would have caught each of them on the first push.
+
+Run only the items that match the changed surface. Skip the rest.
+
+- **Numeric formatters.** If the diff touches `*-format.ts`, or any file using `BigInt`, `toFixed`, `formatUnits`, or `parseUnits`: confirm the file has tests for negative inputs, zero, scientific-notation strings, and both the raw-bigint and already-decimal input shapes.
+- **Counter or summary stats.** If the diff adds a counter, summary line, or breakdown (`X received · Y sent · Z failed`): confirm there is a test with at least one row that could plausibly fall into multiple buckets (failed-outbound, failed-inbound).
+- **Conditional copy strings.** If the diff adds a string like `"This will replace…"`, `"Update budget"` vs `"Add budget"`, `"Resume"` vs `"Start"`: confirm there are tests for the no-match and exact-match branches of the predicate, and confirm the predicate matches on precise identity (token address or symbol), not on a broadened layout-driven boolean.
+- **CSS animations.** If the diff adds or moves CSS animations: grep that every new keyframe rule is wrapped in `@media (prefers-reduced-motion: no-preference)`, that pre-existing animations getting a prominent placement are also gated, and that the className stack on the animated element does not toggle one animation class while another remains.
+- **Inline gate placement.** If the diff renders `OnchainActionGate` or `NetworkGate`: confirm the notice is rendered **above** the action row, not inside the `flex-1` wrapper. Use `showNotice={false}` on the gate when rendering `<OnchainActionNotice />` separately.
+- **Cross-surface value rendering.** If the diff changes a value rendered in 2+ surfaces (dashboard preview + detail card + agent page + transactions): confirm there is one shared formatter, that the input carries chain/token context, and that the API response includes the metadata each row needs.
+- **Loading-state inference.** If the diff infers onboarding or completion progress from a paginated preview list: reject and require an explicit `onboardingProgress.*` API field. Gate the dependent UI until **all** prerequisite hooks have resolved, not just the first one.
+
+Run the matching items before invoking `haven-reviewer` so the reviewer finds fewer issues. If the reviewer surfaces a new trap family, add it to `docs/ai-review-patterns.md`, this preflight, and the reviewer agent's recurring-traps list together — the three should stay in sync.
+
+If browser verification is skipped (preview environment unavailable, slow, flaky), pair the skipped visual check with at least one **headless equivalent** in vitest:
+
+- Animation/style bugs: render assertion that the expected `className` is stable across state transitions.
+- Cross-surface display drift: assertion that the same formatter is imported and produces the same output for the fixture.
+- Loading-state flashes: assertion that the gated component does not render while any prerequisite hook is loading.
+
 ## Task Prompt Shape
 
 When the user is planning work, help turn the request into this shape before implementation:
@@ -198,10 +220,11 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 6. Keep shared files with the captain.
 7. Integrate after each meaningful slice.
 8. Run relevant build or test checks.
-9. Ask `haven-reviewer` for a final diff review when risk warrants it.
-10. Let the captain fix final issues, commit, push, and open the PR.
-11. Add the PR closeout contract and merge-readiness report before calling the work complete.
-12. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur.
+9. Run the **Captain Self-Check Preflight** above for the surfaces the diff touches. Pair any skipped browser verification with a headless equivalent vitest.
+10. Ask `haven-reviewer` for a final diff review when risk warrants it.
+11. Let the captain fix final issues, commit, push, and open the PR.
+12. Add the PR closeout contract and merge-readiness report before calling the work complete.
+13. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur. Keep `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer agent's recurring-traps list in sync.
 
 ## Files The Captain Should Usually Own
 

@@ -47,6 +47,8 @@ Good split examples:
   - what was intentionally left out
   - what reviewers should focus on
 - Include a merge-readiness section using the template below for non-trivial PRs.
+- Run the **Captain Self-Check Preflight** in `docs/ai-agent-workflow.md` for the surfaces the diff touches.
+- If this PR includes a follow-up commit that fixes a bug the original commits introduced, the fix commit must include the smallest regression test (typically a vitest case) that would have caught it. If no such test is practical, document why in the commit body. Every recent "Address reviewer findings" commit that compounded into durable quality landed 2–4 targeted vitest cases alongside the fix.
 
 ## Before Merging
 

@@ -56,6 +56,11 @@ Before completing UI work:
 - Review copy against `docs/design_system/UX_COPY_GUIDELINES.md`.
 - Review the changed UX against `docs/ux/haven-design-review.md`.
 - Run relevant frontend tests or build checks when practical.
+- Run the **Captain Self-Check Preflight** in `docs/ai-agent-workflow.md` for the surfaces the diff touches (numeric formatters, counter/summary stats, conditional copy, animations, inline gates, cross-surface values, paginated-list-derived progress).
+- If browser verification is skipped (preview environment unavailable, slow, flaky), add at least one **headless equivalent** in vitest:
+  - Animation/style bugs: assert the expected `className` is stable across state transitions.
+  - Cross-surface display drift: assert the same shared formatter is imported and produces the same output for the fixture.
+  - Loading-state flashes: assert the gated component does not render while any prerequisite hook is loading.
 
 ## PR Closeout And Merge Readiness
 

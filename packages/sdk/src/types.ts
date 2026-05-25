@@ -230,6 +230,51 @@ export interface X402ResumeState {
   merchantAddress: string
 }
 
+export interface MppAuthorizationOptions {
+  /** Stable caller-supplied key for this user intent. Prevents duplicate approvals across retries. */
+  idempotencyKey?: string
+}
+
+/** Quote parsed from an MPP challenge without creating a Haven payment. */
+export interface MppQuote {
+  rail: 'mpp'
+  paymentRail: MachinePaymentRail
+  idempotencyKey: string
+  challenge: MachinePaymentChallenge
+  request: X402RequestSnapshot
+  resourceUrl: string
+  description: string | null
+  amountAtomic: string
+  amount: string
+  token: string
+  asset: string
+  network: string
+  chainId: number
+  merchantAddress: string
+  expiresAt: string
+}
+
+/** State bundle an agent can persist while waiting for manual MPP approval. */
+export interface MppResumeState {
+  rail: 'mpp'
+  paymentRail: MachinePaymentRail
+  paymentId: string
+  idempotencyKey: string
+  challenge: MachinePaymentChallenge
+  url: string
+  request?: X402RequestSnapshot
+  resourceUrl: string
+  description: string | null
+  amountAtomic: string
+  amount: string
+  token: string
+  asset: string
+  network: string
+  chainId: number
+  merchantAddress: string
+  expiresAt: string
+}
+
 export interface ResumeAuthorizedX402Input extends X402AuthorizationOptions {
   /** Payment or approval request ID returned by authorizeX402 / haven.fetch. */
   paymentId: string
@@ -253,6 +298,31 @@ export interface ResumeX402PaymentInput extends X402AuthorizationOptions {
 
   /** Original or freshly parsed x402 requirements. Supplying this avoids an extra merchant 402 probe. */
   paymentRequired?: X402PaymentRequired
+}
+
+export interface ResumeAuthorizedMppInput extends MppAuthorizationOptions {
+  /** Payment or approval request ID returned by authorizeMachinePayment / haven.fetch. */
+  paymentId: string
+
+  /** Original MPP challenge returned by the paid resource. */
+  challenge: MachinePaymentChallenge
+}
+
+export interface ResumeMppPaymentInput extends MppAuthorizationOptions {
+  /** Payment or approval request ID returned by authorizeMachinePayment / haven.fetch. */
+  paymentId: string
+
+  /** Original paid URL. If challenge is omitted, Haven will call it once to re-read the MPP challenge. */
+  url: string
+
+  /** Original fetch options. Reused for the 402 probe and final merchant retry. */
+  init?: RequestInit
+
+  /** Serializable original request captured by quoteMpp() / pending approval errors. */
+  request?: X402RequestSnapshot
+
+  /** Original MPP challenge. Supplying this avoids an extra paid-resource 402 probe. */
+  challenge?: MachinePaymentChallenge
 }
 
 // ── Machine Payment Types ───────────────────────────────────────
@@ -462,6 +532,16 @@ export interface PaymentStatusResult {
     description: string | null
     idempotencyKey: string | null
   }
+  mpp?: {
+    amountAtomic: string | null
+    asset: string | null
+    network: string | null
+    resourceUrl: string | null
+    merchantAddress: string | null
+    description: string | null
+    idempotencyKey: string | null
+    challengeId: string | null
+  }
 }
 
 export interface PendingApproval extends PaymentStatusResult {
@@ -501,6 +581,7 @@ export interface RawMachinePaymentAuthorizeResponse {
   resource_url?: string
   rail?: string
   x402?: RawX402StateContext
+  mpp?: RawMppStateContext
   challenge_id?: string
   explorer_url?: string
   expires_at?: string
@@ -549,6 +630,8 @@ export interface RawX402AuthorizeResponse {
   resource_url?: string
   explorer_url?: string
   x402?: RawX402StateContext
+  mpp?: RawMppStateContext
+  challenge_id?: string
   expires_at?: string
   sign_data?: {
     hash: string
@@ -620,6 +703,8 @@ export interface RawSignResponse {
   resource_url?: string
   rail?: string
   x402?: RawX402StateContext
+  mpp?: RawMppStateContext
+  challenge_id?: string
   explorer_url?: string
   chain_id?: number
   expires_at?: string
@@ -667,6 +752,7 @@ export interface RawPaymentStatusResult {
   description?: string | null
   idempotency_key?: string | null
   x402?: RawX402StateContext
+  mpp?: RawMppStateContext
 }
 
 /** @internal */
@@ -678,6 +764,18 @@ export interface RawX402StateContext {
   merchant_address?: string | null
   description?: string | null
   idempotency_key?: string | null
+}
+
+/** @internal */
+export interface RawMppStateContext {
+  amount_atomic?: string | null
+  asset?: string | null
+  network?: string | null
+  resource_url?: string | null
+  merchant_address?: string | null
+  description?: string | null
+  idempotency_key?: string | null
+  challenge_id?: string | null
 }
 
 // ── Error Types ──────────────────────────────────────────────────
@@ -707,7 +805,7 @@ export class HavenApiError extends HavenError {
 }
 
 export class HavenPaymentStateError extends HavenApiError {
-  resumeState?: X402ResumeState
+  resumeState?: X402ResumeState | MppResumeState
 
   constructor(
     message: string,

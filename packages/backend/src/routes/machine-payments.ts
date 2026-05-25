@@ -183,7 +183,12 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       description: challenge.description,
       challengeId: challenge.challengeId,
       idempotencyKey,
-      metadata: challenge.metadata,
+      metadata: {
+        ...(challenge.metadata ?? {}),
+        protocol: 'mpp',
+        network: challenge.network.name,
+        description: challenge.description,
+      },
       signature,
       // TODO: add a per-rail rate limit before exposing machine payments beyond this internal demo.
     })

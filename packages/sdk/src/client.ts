@@ -24,6 +24,11 @@ import type {
   X402ResumeState,
   ResumeAuthorizedX402Input,
   ResumeX402PaymentInput,
+  MppAuthorizationOptions,
+  MppQuote,
+  MppResumeState,
+  ResumeAuthorizedMppInput,
+  ResumeMppPaymentInput,
   RawX402AuthorizeResponse,
   MachinePaymentChallenge,
   MachinePaymentReceipt,
@@ -145,6 +150,10 @@ function messageForState(
 
 function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
   return Boolean(a && b && a.toLowerCase() === b.toLowerCase())
+}
+
+function isMppRail(rail: string | null | undefined): boolean {
+  return rail === 'mpp' || Boolean(rail?.startsWith('mpp_'))
 }
 
 function decimalFromUsdcAtomic(value: string): string {
@@ -398,7 +407,12 @@ export class HavenClient {
     try {
       return await promise
     } catch (err) {
-      this.attachX402ResumeState(err, paymentRequired, option, idempotencyKey)
+      this.attachResumeState(err, {
+        rail: 'x402',
+        paymentRequired,
+        accepted: option,
+        idempotencyKey,
+      })
       throw err
     } finally {
       this.inFlightX402.delete(idempotencyKey)
@@ -451,13 +465,13 @@ export class HavenClient {
         receipt,
       )
     } catch (err) {
-      this.attachX402ResumeState(
-        err,
-        quote.paymentRequired,
-        quote.accepted,
+      this.attachResumeState(err, {
+        rail: 'x402',
+        paymentRequired: quote.paymentRequired,
+        accepted: quote.accepted,
         idempotencyKey,
-        quote.request,
-      )
+        request: quote.request,
+      })
       throw err
     }
   }
@@ -643,11 +657,73 @@ export class HavenClient {
       receipt = await this.authorizeX402(paymentRequired, options)
     } catch (err) {
       if (option && idempotencyKey) {
-        this.attachX402ResumeState(err, paymentRequired, option, idempotencyKey, request)
+        this.attachResumeState(err, {
+          rail: 'x402',
+          paymentRequired,
+          accepted: option,
+          idempotencyKey,
+          request,
+        })
       }
       throw err
     }
     return this.retryX402Request(url, initialInit, paymentRequired, receipt)
+  }
+
+  /**
+   * Probe a paid MPP endpoint or inspect an existing challenge without creating
+   * a Haven payment or approval request.
+   */
+  async quoteMpp(
+    challengeOrUrl: MachinePaymentChallenge | string,
+    init?: RequestInit,
+    options: MppAuthorizationOptions = {},
+  ): Promise<MppQuote> {
+    if (typeof challengeOrUrl !== 'string') {
+      const request = this.snapshotX402Request(challengeOrUrl.resource, init)
+      return this.buildMppQuote(challengeOrUrl, request, options.idempotencyKey)
+    }
+
+    const request = this.snapshotX402Request(challengeOrUrl, init)
+    const response = await globalThis.fetch(challengeOrUrl, init)
+
+    if (response.status !== 402) {
+      throw new HavenApiError(
+        `Expected an MPP quote response with HTTP 402, got HTTP ${response.status}.`,
+        response.status || 400,
+      )
+    }
+
+    const challenge = await parseMachinePaymentChallengeResponse(response)
+    return this.buildMppQuote(challenge, request, options.idempotencyKey)
+  }
+
+  /**
+   * Pay a previously inspected MPP quote and retry the exact captured request.
+   */
+  async payMppChallenge(
+    quote: MppQuote,
+    options: MppAuthorizationOptions = {},
+  ): Promise<Response> {
+    const idempotencyKey = options.idempotencyKey ?? quote.idempotencyKey
+
+    try {
+      const receipt = await this.authorizeMachinePayment(quote.challenge, { idempotencyKey })
+      return this.retryMppRequest(
+        quote.request.url,
+        this.requestInitFromSnapshot(quote.request),
+        quote.challenge,
+        receipt,
+      )
+    } catch (err) {
+      this.attachResumeState(err, {
+        rail: 'mpp',
+        challenge: quote.challenge,
+        idempotencyKey,
+        request: quote.request,
+      })
+      throw err
+    }
   }
 
   private async retryX402Request(
@@ -727,6 +803,7 @@ export class HavenClient {
 
   async authorizeMachinePayment(
     challenge: MachinePaymentChallenge,
+    options: MppAuthorizationOptions = {},
   ): Promise<MachinePaymentReceipt> {
     if (!this.delegateKey) {
       throw new HavenSigningError(
@@ -738,7 +815,7 @@ export class HavenClient {
       throw new HavenApiError(`Unsupported machine payment rail: ${challenge.rail}`, 400)
     }
 
-    const idempotencyKey = buildMachinePaymentIdempotencyKey(challenge)
+    const idempotencyKey = options.idempotencyKey ?? buildMachinePaymentIdempotencyKey(challenge)
     const inFlight = this.inFlightMachinePayments.get(idempotencyKey)
     if (inFlight) return inFlight
 
@@ -747,6 +824,13 @@ export class HavenClient {
 
     try {
       return await promise
+    } catch (err) {
+      this.attachResumeState(err, {
+        rail: 'mpp',
+        challenge,
+        idempotencyKey,
+      })
+      throw err
     } finally {
       this.inFlightMachinePayments.delete(idempotencyKey)
     }
@@ -784,13 +868,74 @@ export class HavenClient {
     return this.mapMachinePaymentReceipt(challenge, raw, execResult.tx_hash, execResult)
   }
 
+  async resumeAuthorizedMpp(input: ResumeAuthorizedMppInput): Promise<MachinePaymentReceipt> {
+    if (!this.delegateKey) {
+      throw new HavenSigningError(
+        'delegateKey is required for machine payments. Pass it in the HavenClient config.',
+      )
+    }
+
+    const status = await this.getPaymentStatus(input.paymentId)
+    this.assertCanResumeMpp(status, input.challenge)
+
+    return this.mapMachinePaymentReceiptFromStatus(input.challenge, status)
+  }
+
+  async resumeMppPayment(input: ResumeMppPaymentInput | MppResumeState): Promise<Response> {
+    const inputInit = 'init' in input ? input.init : undefined
+    const initialInit = inputInit ?? (input.request ? this.requestInitFromSnapshot(input.request) : undefined)
+    let challenge = input.challenge
+    const url = input.url ?? input.request?.url
+
+    if (!challenge) {
+      if (!url) {
+        throw new HavenApiError('MPP resume requires the original URL or a captured request snapshot.', 400)
+      }
+      const response = await globalThis.fetch(url, initialInit)
+      if (response.status !== 402) {
+        throw new HavenApiError('Expected the original MPP request to return HTTP 402 before resuming.', 400)
+      }
+      challenge = await parseMachinePaymentChallengeResponse(response)
+    }
+
+    const receipt = await this.resumeAuthorizedMpp({
+      paymentId: input.paymentId,
+      challenge,
+      idempotencyKey: input.idempotencyKey,
+    })
+
+    return this.retryMppRequest(url ?? challenge.resource, initialInit, challenge, receipt)
+  }
+
   private async fetchWithMachinePayment(
     url: string,
     initialInit: RequestInit | undefined,
     challenge: MachinePaymentChallenge,
   ): Promise<Response> {
-    const receipt = await this.authorizeMachinePayment(challenge)
+    const request = this.snapshotX402Request(url, initialInit)
+    const idempotencyKey = buildMachinePaymentIdempotencyKey(challenge)
+    let receipt: MachinePaymentReceipt
+    try {
+      receipt = await this.authorizeMachinePayment(challenge, { idempotencyKey })
+    } catch (err) {
+      this.attachResumeState(err, {
+        rail: 'mpp',
+        challenge,
+        idempotencyKey,
+        request,
+      })
+      throw err
+    }
 
+    return this.retryMppRequest(url, initialInit, challenge, receipt)
+  }
+
+  private async retryMppRequest(
+    url: string,
+    initialInit: RequestInit | undefined,
+    challenge: MachinePaymentChallenge,
+    receipt: MachinePaymentReceipt,
+  ): Promise<Response> {
     const retryHeaders = new Headers(initialInit?.headers)
     retryHeaders.set('MACHINE-PAYMENT-PROOF', receipt.proofHeader)
 
@@ -918,6 +1063,79 @@ export class HavenClient {
         'x402 resume request does not match the approved amount.',
         409,
         { status, selectedPayment: option },
+        status.paymentId,
+      )
+    }
+  }
+
+  private assertCanResumeMpp(
+    status: PaymentStatusResult,
+    challenge: MachinePaymentChallenge,
+  ): void {
+    if (!isMppRail(status.rail)) {
+      throw new HavenPaymentStateError(
+        `Payment ${status.paymentId} is ${status.rail}, not MPP.`,
+        409,
+        status,
+      )
+    }
+
+    if (status.nextAction !== AgentPaymentNextAction.RetryOriginalX402Request) {
+      throw new HavenPaymentStateError(status.message, PAYMENT_STATE_STATUS_CODES[status.status] ?? 409, status)
+    }
+
+    if (!status.txHash) {
+      throw new HavenApiError(
+        `MPP payment ${status.paymentId} is ready to retry but has no Haven transaction hash.`,
+        502,
+        status,
+        status.paymentId,
+      )
+    }
+
+    if (status.resourceUrl && status.resourceUrl !== challenge.resource) {
+      throw new HavenApiError(
+        'MPP resume request does not match the approved resource URL.',
+        409,
+        { status, challenge },
+        status.paymentId,
+      )
+    }
+
+    if (status.merchantAddress && !sameAddress(status.merchantAddress, challenge.recipient)) {
+      throw new HavenApiError(
+        'MPP resume request does not match the approved merchant.',
+        409,
+        { status, challenge },
+        status.paymentId,
+      )
+    }
+
+    if (status.chainId && status.chainId !== challenge.network.chainId) {
+      throw new HavenApiError(
+        'MPP resume request does not match the approved network.',
+        409,
+        { status, challenge },
+        status.paymentId,
+      )
+    }
+
+    if (status.token && status.token !== challenge.asset.symbol) {
+      throw new HavenApiError(
+        'MPP resume request does not match the approved token.',
+        409,
+        { status, challenge },
+        status.paymentId,
+      )
+    }
+
+    const approvedAmount = status.amount ? normalizeDecimal(status.amount) : ''
+    const requestedAmount = normalizeDecimal(challenge.amount.display)
+    if (approvedAmount && approvedAmount !== requestedAmount) {
+      throw new HavenApiError(
+        'MPP resume request does not match the approved amount.',
+        409,
+        { status, challenge },
         status.paymentId,
       )
     }
@@ -1101,6 +1319,39 @@ export class HavenClient {
     }
   }
 
+  private mapMachinePaymentReceiptFromStatus(
+    challenge: MachinePaymentChallenge,
+    status: PaymentStatusResult,
+  ): MachinePaymentReceipt {
+    if (!status.txHash) {
+      throw new HavenApiError(
+        `MPP payment ${status.paymentId} is ready to retry but has no Haven transaction hash.`,
+        502,
+        status,
+        status.paymentId,
+      )
+    }
+
+    const receiptWithoutHeader = {
+      success: true,
+      rail: challenge.rail,
+      paymentId: status.paymentId,
+      challengeId: challenge.challengeId,
+      txHash: status.txHash,
+      token: status.token || challenge.asset.symbol,
+      amount: status.amount || challenge.amount.display,
+      to: status.merchantAddress ?? challenge.recipient,
+      resourceUrl: status.resourceUrl ?? challenge.resource,
+      explorerUrl: explorerUrlOrEmpty(status.chainId || challenge.network.chainId, status.txHash),
+      chainId: status.chainId || challenge.network.chainId,
+    }
+
+    return {
+      ...receiptWithoutHeader,
+      proofHeader: encodeMachinePaymentProof(receiptWithoutHeader),
+    }
+  }
+
   private async recordMerchantRetryRejected(input: {
     rail: string
     paymentId: string
@@ -1236,11 +1487,11 @@ export class HavenClient {
       expiresAt: raw.expires_at ?? '',
       chainId: raw.chain_id ?? 0,
       message,
-      amountAtomic: raw.amount_atomic ?? raw.x402?.amount_atomic ?? null,
-      asset: raw.asset ?? raw.x402?.asset ?? null,
-      network: raw.network ?? raw.x402?.network ?? null,
-      description: raw.description ?? raw.x402?.description ?? null,
-      idempotencyKey: raw.idempotency_key ?? raw.x402?.idempotency_key ?? null,
+      amountAtomic: raw.amount_atomic ?? raw.x402?.amount_atomic ?? raw.mpp?.amount_atomic ?? null,
+      asset: raw.asset ?? raw.x402?.asset ?? raw.mpp?.asset ?? null,
+      network: raw.network ?? raw.x402?.network ?? raw.mpp?.network ?? null,
+      description: raw.description ?? raw.x402?.description ?? raw.mpp?.description ?? null,
+      idempotencyKey: raw.idempotency_key ?? raw.x402?.idempotency_key ?? raw.mpp?.idempotency_key ?? null,
       x402: raw.x402
         ? {
             amountAtomic: raw.x402.amount_atomic ?? raw.amount_atomic ?? null,
@@ -1250,6 +1501,18 @@ export class HavenClient {
             merchantAddress: raw.x402.merchant_address ?? raw.merchant_address ?? raw.merchant_to ?? null,
             description: raw.x402.description ?? raw.description ?? null,
             idempotencyKey: raw.x402.idempotency_key ?? raw.idempotency_key ?? null,
+          }
+        : undefined,
+      mpp: raw.mpp
+        ? {
+            amountAtomic: raw.mpp.amount_atomic ?? raw.amount_atomic ?? null,
+            asset: raw.mpp.asset ?? raw.asset ?? null,
+            network: raw.mpp.network ?? raw.network ?? null,
+            resourceUrl: raw.mpp.resource_url ?? raw.resource_url ?? null,
+            merchantAddress: raw.mpp.merchant_address ?? raw.merchant_address ?? raw.merchant_to ?? null,
+            description: raw.mpp.description ?? raw.description ?? null,
+            idempotencyKey: raw.mpp.idempotency_key ?? raw.idempotency_key ?? null,
+            challengeId: raw.mpp.challenge_id ?? raw.challenge_id ?? null,
           }
         : undefined,
     }
@@ -1274,8 +1537,8 @@ export class HavenClient {
     if (body instanceof URLSearchParams) return body.toString()
 
     throw new HavenApiError(
-      'quoteX402 can only capture resumable request bodies that are strings or URLSearchParams. ' +
-      'For streams, blobs, or binary bodies, preserve the original request yourself and call resumeX402Payment with fresh init.',
+      'Quote helpers can only capture resumable request bodies that are strings or URLSearchParams. ' +
+      'For streams, blobs, or binary bodies, preserve the original request yourself and call the matching resume method with fresh init.',
       400,
     )
   }
@@ -1365,6 +1628,94 @@ export class HavenClient {
     }
   }
 
+  private buildMppQuote(
+    challenge: MachinePaymentChallenge,
+    request: X402RequestSnapshot,
+    idempotencyKey?: string,
+  ): MppQuote {
+    return {
+      rail: 'mpp',
+      paymentRail: challenge.rail,
+      idempotencyKey: idempotencyKey ?? buildMachinePaymentIdempotencyKey(challenge),
+      challenge,
+      request,
+      resourceUrl: challenge.resource,
+      description: challenge.description ?? null,
+      amountAtomic: challenge.amount.atomic,
+      amount: challenge.amount.display,
+      token: challenge.asset.symbol,
+      asset: challenge.asset.address,
+      network: challenge.network.name,
+      chainId: challenge.network.chainId,
+      merchantAddress: challenge.recipient,
+      expiresAt: challenge.expiresAt,
+    }
+  }
+
+  private buildMppResumeState(input: {
+    paymentId: string
+    challenge: MachinePaymentChallenge
+    idempotencyKey: string
+    request?: X402RequestSnapshot
+  }): MppResumeState {
+    const quote = this.buildMppQuote(
+      input.challenge,
+      input.request ?? this.snapshotX402Request(input.challenge.resource),
+      input.idempotencyKey,
+    )
+
+    return {
+      rail: 'mpp',
+      paymentRail: quote.paymentRail,
+      paymentId: input.paymentId,
+      idempotencyKey: quote.idempotencyKey,
+      challenge: input.challenge,
+      url: input.request?.url ?? input.challenge.resource,
+      request: input.request,
+      resourceUrl: quote.resourceUrl,
+      description: quote.description,
+      amountAtomic: quote.amountAtomic,
+      amount: quote.amount,
+      token: quote.token,
+      asset: quote.asset,
+      network: quote.network,
+      chainId: quote.chainId,
+      merchantAddress: quote.merchantAddress,
+      expiresAt: quote.expiresAt,
+    }
+  }
+
+  private attachResumeState(
+    err: unknown,
+    input:
+      | {
+          rail: 'x402'
+          paymentRequired: X402PaymentRequired
+          accepted: X402PaymentOption
+          idempotencyKey: string
+          request?: X402RequestSnapshot
+        }
+      | {
+          rail: 'mpp'
+          challenge: MachinePaymentChallenge
+          idempotencyKey: string
+          request?: X402RequestSnapshot
+        },
+  ): void {
+    if (input.rail === 'x402') {
+      this.attachX402ResumeState(
+        err,
+        input.paymentRequired,
+        input.accepted,
+        input.idempotencyKey,
+        input.request,
+      )
+      return
+    }
+
+    this.attachMppResumeState(err, input.challenge, input.idempotencyKey, input.request)
+  }
+
   private attachX402ResumeState(
     err: unknown,
     paymentRequired: X402PaymentRequired,
@@ -1379,6 +1730,23 @@ export class HavenClient {
       paymentId: err.state.paymentId,
       paymentRequired,
       accepted,
+      idempotencyKey,
+      request,
+    })
+  }
+
+  private attachMppResumeState(
+    err: unknown,
+    challenge: MachinePaymentChallenge,
+    idempotencyKey: string,
+    request?: X402RequestSnapshot,
+  ): void {
+    if (!(err instanceof HavenPaymentStateError)) return
+    if (!isMppRail(err.state.rail)) return
+
+    err.resumeState = this.buildMppResumeState({
+      paymentId: err.state.paymentId,
+      challenge,
       idempotencyKey,
       request,
     })
@@ -1474,10 +1842,13 @@ export class HavenClient {
     }
 
     if (toolName === 'authorize_machine_payment') {
-      const { challenge } = input as { challenge: MachinePaymentChallenge }
+      const { challenge, idempotencyKey } = input as {
+        challenge: MachinePaymentChallenge
+        idempotencyKey?: string
+      }
 
       try {
-        const receipt = await this.authorizeMachinePayment(challenge)
+        const receipt = await this.authorizeMachinePayment(challenge, { idempotencyKey })
         return {
           success: true,
           payment_id: receipt.paymentId,
@@ -1513,6 +1884,13 @@ export class HavenClient {
         amount: result.amount,
         resource_url: result.resourceUrl,
         merchant_address: result.merchantAddress,
+        amount_atomic: result.amountAtomic,
+        asset: result.asset,
+        network: result.network,
+        description: result.description,
+        idempotency_key: result.idempotencyKey,
+        x402: result.x402,
+        mpp: result.mpp,
         expires_at: result.expiresAt,
         chain_id: result.chainId,
         message: result.message,
@@ -1595,6 +1973,18 @@ export class HavenClient {
               merchant_address: err.state.x402.merchantAddress,
               description: err.state.x402.description,
               idempotency_key: err.state.x402.idempotencyKey,
+            }
+          : undefined,
+        mpp: err.state.mpp
+          ? {
+              amount_atomic: err.state.mpp.amountAtomic,
+              asset: err.state.mpp.asset,
+              network: err.state.mpp.network,
+              resource_url: err.state.mpp.resourceUrl,
+              merchant_address: err.state.mpp.merchantAddress,
+              description: err.state.mpp.description,
+              idempotency_key: err.state.mpp.idempotencyKey,
+              challenge_id: err.state.mpp.challengeId,
             }
           : undefined,
         resume_state: err.resumeState,

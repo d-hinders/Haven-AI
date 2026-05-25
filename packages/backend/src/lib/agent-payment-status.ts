@@ -39,6 +39,16 @@ export interface AgentPaymentStatus {
     description: string | null
     idempotency_key: string | null
   }
+  mpp?: {
+    amount_atomic: string | null
+    asset: string | null
+    network: string | null
+    resource_url: string | null
+    merchant_address: string | null
+    description: string | null
+    idempotency_key: string | null
+    challenge_id: string | null
+  }
 }
 
 interface PaymentIntentStatusRow {
@@ -58,6 +68,7 @@ interface PaymentIntentStatusRow {
   merchant_address: string | null
   x402_merchant_address: string | null
   x402_idempotency_key: string | null
+  machine_challenge_id: string | null
   machine_idempotency_key: string | null
   machine_metadata: unknown
 }
@@ -77,6 +88,7 @@ interface ApprovalStatusRow {
   payment_resource_url: string | null
   x402_resource_url: string | null
   merchant_address: string | null
+  machine_challenge_id: string | null
   machine_idempotency_key: string | null
   machine_metadata: unknown
 }
@@ -84,6 +96,7 @@ interface ApprovalStatusRow {
 interface MachinePaymentMetadata {
   network?: unknown
   description?: unknown
+  protocol?: unknown
 }
 
 function railFor(row: { payment_rail: string | null; source: string | null }): string {
@@ -111,36 +124,66 @@ function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
-function x402Context(input: {
+function isMppRail(rail: string): boolean {
+  return rail === AgentPaymentRail.Mpp || rail.startsWith('mpp_')
+}
+
+function railContext(input: {
   rail: string
   amountRaw: string | null
   tokenAddress: string | null
   resourceUrl: string | null
   merchantAddress: string | null
   idempotencyKey: string | null
+  challengeId?: string | null
   machineMetadata: unknown
 }) {
-  if (input.rail !== 'x402') return {}
-
   const metadata = metadataObject(input.machineMetadata)
-  const context = {
-    amount_atomic: input.amountRaw,
-    asset: input.tokenAddress,
-    network: nullableString(metadata.network),
-    description: nullableString(metadata.description),
-    idempotency_key: input.idempotencyKey,
-    x402: {
+
+  if (input.rail === AgentPaymentRail.X402) {
+    const context = {
       amount_atomic: input.amountRaw,
       asset: input.tokenAddress,
       network: nullableString(metadata.network),
-      resource_url: input.resourceUrl,
-      merchant_address: input.merchantAddress,
       description: nullableString(metadata.description),
       idempotency_key: input.idempotencyKey,
-    },
+      x402: {
+        amount_atomic: input.amountRaw,
+        asset: input.tokenAddress,
+        network: nullableString(metadata.network),
+        resource_url: input.resourceUrl,
+        merchant_address: input.merchantAddress,
+        description: nullableString(metadata.description),
+        idempotency_key: input.idempotencyKey,
+      },
+    }
+
+    return context
   }
 
-  return context
+  if (isMppRail(input.rail)) {
+    const context = {
+      amount_atomic: input.amountRaw,
+      asset: input.tokenAddress,
+      network: nullableString(metadata.network),
+      description: nullableString(metadata.description),
+      idempotency_key: input.idempotencyKey,
+      mpp: {
+        amount_atomic: input.amountRaw,
+        asset: input.tokenAddress,
+        network: nullableString(metadata.network),
+        resource_url: input.resourceUrl,
+        merchant_address: input.merchantAddress,
+        description: nullableString(metadata.description),
+        idempotency_key: input.idempotencyKey,
+        challenge_id: input.challengeId ?? null,
+      },
+    }
+
+    return context
+  }
+
+  return {}
 }
 
 function messageForRail(
@@ -148,19 +191,37 @@ function messageForRail(
   status: string,
   fallback: string,
 ): string {
-  if (rail !== AgentPaymentRail.X402) return fallback
-  if (status === 'pending') {
-    return 'This x402 funding payment is waiting for user approval in Haven. Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.'
+  if (rail === AgentPaymentRail.X402) {
+    if (status === 'pending') {
+      return 'This x402 funding payment is waiting for user approval in Haven. Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.'
+    }
+    if (status === 'approved') {
+      return 'The user approved this x402 funding request, but the funding payment has not been sent yet. Keep the original merchant session and poll this payment id.'
+    }
+    if (status === 'proposed') {
+      return 'The x402 funding payment was submitted and is waiting for the remaining account approvals. Keep the original merchant session and poll this payment id.'
+    }
+    if (status === 'executed') {
+      return 'The user completed the Haven funding payment. Resume this payment id and retry the original x402 request with the merchant payment header; do not create a new merchant session.'
+    }
+    return fallback
   }
-  if (status === 'approved') {
-    return 'The user approved this x402 funding request, but the funding payment has not been sent yet. Keep the original merchant session and poll this payment id.'
+
+  if (isMppRail(rail)) {
+    if (status === 'pending') {
+      return 'This MPP payment is waiting for user approval in Haven. Do not start a new challenge or create another payment; poll this payment id and resume the original MPP request after approval.'
+    }
+    if (status === 'approved') {
+      return 'The user approved this MPP payment request, but the funding payment has not been sent yet. Keep the original challenge and poll this payment id.'
+    }
+    if (status === 'proposed') {
+      return 'The MPP payment was submitted and is waiting for the remaining account approvals. Keep the original challenge and poll this payment id.'
+    }
+    if (status === 'executed') {
+      return 'The user completed the Haven payment. Resume this payment id and retry the original MPP request with the machine payment proof; do not create a new challenge.'
+    }
   }
-  if (status === 'proposed') {
-    return 'The x402 funding payment was submitted and is waiting for the remaining account approvals. Keep the original merchant session and poll this payment id.'
-  }
-  if (status === 'executed') {
-    return 'The user completed the Haven funding payment. Resume this payment id and retry the original x402 request with the merchant payment header; do not create a new merchant session.'
-  }
+
   return fallback
 }
 
@@ -298,7 +359,7 @@ export async function getAgentPaymentStatus(
             status, tx_hash, expires_at,
             source, payment_rail, payment_resource_url, x402_resource_url,
             merchant_address, x402_merchant_address, x402_idempotency_key,
-            machine_idempotency_key, machine_metadata
+            machine_challenge_id, machine_idempotency_key, machine_metadata
      FROM payment_intents
      WHERE id = $1 AND agent_id = $2
      LIMIT 1`,
@@ -326,13 +387,14 @@ export async function getAgentPaymentStatus(
       expires_at: payment.expires_at,
       chain_id: payment.chain_id,
       message: messageForRail(rail, payment.status, state.message),
-      ...x402Context({
+      ...railContext({
         rail,
         amountRaw: payment.amount_raw,
         tokenAddress: payment.token_address,
         resourceUrl,
         merchantAddress,
         idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
+        challengeId: payment.machine_challenge_id,
         machineMetadata: payment.machine_metadata,
       }),
     }
@@ -349,7 +411,7 @@ export async function getAgentPaymentStatus(
     `SELECT id, chain_id, token_symbol, token_address, amount_human, amount_raw,
             status, tx_hash, expires_at,
             source, payment_rail, payment_resource_url, x402_resource_url,
-            merchant_address, machine_idempotency_key, machine_metadata
+            merchant_address, machine_challenge_id, machine_idempotency_key, machine_metadata
      FROM approval_requests
      WHERE id = $1 AND agent_id = $2
      LIMIT 1`,
@@ -377,13 +439,14 @@ export async function getAgentPaymentStatus(
     expires_at: approval.expires_at,
     chain_id: approval.chain_id,
     message: messageForRail(rail, approval.status, state.message),
-    ...x402Context({
+    ...railContext({
       rail,
       amountRaw: approval.amount_raw,
       tokenAddress: approval.token_address,
       resourceUrl,
       merchantAddress: approval.merchant_address,
       idempotencyKey: approval.machine_idempotency_key,
+      challengeId: approval.machine_challenge_id,
       machineMetadata: approval.machine_metadata,
     }),
   }

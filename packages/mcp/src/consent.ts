@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import type { HavenAllowance, HavenClient } from '@haven_ai/sdk'
+import type { HavenAllowance, HavenAllowanceSummary, HavenClient } from '@haven_ai/sdk'
 import { toolDescriptions, toolSchemas, type HavenMcpToolName } from './tools.js'
 
 /**
@@ -29,6 +29,16 @@ import { toolDescriptions, toolSchemas, type HavenMcpToolName } from './tools.js
 
 export interface ConsentInput {
   apiKeyPrefix: string
+  /** Haven API base URL the credential will hit. */
+  apiUrl?: string
+  /** Agent identity from the credential file, when present. */
+  agentId?: string
+  /** Haven wallet (Safe) the agent spends from. */
+  safeAddress?: string
+  /** Agent's delegate EOA — the local signer. */
+  delegateAddress?: string
+  /** Chain the agent operates on. */
+  chainId?: number
   toolNames: readonly HavenMcpToolName[]
   allowanceSummary: readonly { token: string; amount: string; resetMinutes: number | null }[]
 }
@@ -65,8 +75,21 @@ export function computeConsentHash(input: ConsentInput): string {
     .sort()
     .join('|')
   const toolCanonical = [...input.toolNames].sort().join(',')
+  // Identity fields are included in the hash so swapping the credential
+  // to a different Haven wallet / delegate / chain — even one with an
+  // identical allowance set — invalidates the prior sidecar and re-prompts
+  // the operator. Addresses are normalised to lowercase so casing changes
+  // in the credential file don't gratuitously re-prompt.
+  const identity = [
+    input.apiKeyPrefix,
+    input.apiUrl ?? '',
+    input.agentId ?? '',
+    (input.safeAddress ?? '').toLowerCase(),
+    (input.delegateAddress ?? '').toLowerCase(),
+    input.chainId ?? '',
+  ].join('|')
   return createHash('sha256')
-    .update(`${input.apiKeyPrefix}\n${toolCanonical}\n${allowanceCanonical}`)
+    .update(`${identity}\n${toolCanonical}\n${allowanceCanonical}`)
     .digest('hex')
     .slice(0, 16)
 }
@@ -79,9 +102,18 @@ export function renderConsentBlock(input: ConsentInput, hash: string): string {
     '────────────────────────────────────────────────────────────',
     '',
     `Credential: ${input.apiKeyPrefix}…`,
-    '',
-    'Tools this server will expose to your agent runtime:',
   ]
+  if (input.apiUrl) lines.push(`Haven API: ${input.apiUrl}`)
+  if (input.agentId) lines.push(`Agent ID:  ${input.agentId}`)
+  if (input.safeAddress) lines.push(`Haven wallet (Safe): ${input.safeAddress}`)
+  if (input.delegateAddress) lines.push(`Delegate (local signer): ${input.delegateAddress}`)
+  if (typeof input.chainId === 'number') lines.push(`Chain ID:  ${input.chainId}`)
+  lines.push('')
+  lines.push('Confirm these match the Haven wallet and chain you intend the')
+  lines.push('agent runtime to use. The delegate above is the only key that')
+  lines.push('signs payments — it lives in this process, not on Haven\'s backend.')
+  lines.push('')
+  lines.push('Tools this server will expose to your agent runtime:')
   for (const name of input.toolNames) {
     lines.push(`  • ${name}`)
     lines.push(`      ${toolDescriptions[name]}`)
@@ -190,28 +222,47 @@ async function writeAckFile(path: string, hash: string): Promise<void> {
   )
 }
 
+export interface CredentialIdentitySeed {
+  apiKey: string
+  apiUrl?: string
+  agentId?: string
+  /** Safe address from the credential file, used as a fallback. */
+  safeAddress?: string
+}
+
 /**
- * Build the consent input from the credential prefix and a live allowance
+ * Build the consent input from credential identity plus a live allowance
  * lookup. The on-chain (or configured) allowance is what the operator
- * actually cares about — that's the real spend ceiling.
+ * actually cares about — that's the real spend ceiling — but we also bind
+ * the hash to the Haven wallet / delegate / chain so a credential swap
+ * cannot quietly reuse a prior sidecar acknowledgement.
  *
  * If `getAllowances()` fails (e.g. backend unreachable on first launch) we
- * fall through to an empty summary so the operator at least sees the tool
- * list and the apiKey prefix. The consent block makes it explicit that no
- * allowance was found.
+ * fall through to whatever identity fields the credential file provided,
+ * so the operator at least sees the tool list and the api-key prefix.
  */
 export async function consentInputFromClient(
   haven: HavenClient,
-  apiKey: string,
+  seed: CredentialIdentitySeed,
   toolNames: readonly HavenMcpToolName[],
 ): Promise<ConsentInput> {
   let allowanceSummary: ConsentInput['allowanceSummary'] = []
+  let safeAddress = seed.safeAddress
+  let delegateAddress: string | undefined
+  let chainId: number | undefined
 
   try {
     const summary = await haven.getAllowances()
-    const list: HavenAllowance[] = Array.isArray(summary)
-      ? (summary as HavenAllowance[])
-      : (summary?.allowances ?? [])
+    const list: HavenAllowance[] = isAllowanceSummary(summary)
+      ? summary.allowances
+      : Array.isArray(summary)
+        ? (summary as HavenAllowance[])
+        : []
+    if (isAllowanceSummary(summary)) {
+      safeAddress = summary.safeAddress ?? safeAddress
+      delegateAddress = summary.delegateAddress
+      chainId = typeof summary.chainId === 'number' ? summary.chainId : chainId
+    }
     allowanceSummary = list.map((a) => ({
       token: a.tokenSymbol ?? 'UNKNOWN',
       amount: a.onchain?.amount ?? a.configuredAmount ?? '0',
@@ -223,14 +274,28 @@ export async function consentInputFromClient(
             : null,
     }))
   } catch {
-    // Leave the empty array; the operator will see the no-allowance message.
+    // Identity falls back to what the credential file gave us.
   }
 
   return {
-    apiKeyPrefix: derivePrefix(apiKey),
+    apiKeyPrefix: derivePrefix(seed.apiKey),
+    apiUrl: seed.apiUrl,
+    agentId: seed.agentId,
+    safeAddress,
+    delegateAddress,
+    chainId,
     toolNames,
     allowanceSummary,
   }
+}
+
+function isAllowanceSummary(value: unknown): value is HavenAllowanceSummary {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'allowances' in value &&
+    Array.isArray((value as { allowances: unknown }).allowances)
+  )
 }
 
 /**

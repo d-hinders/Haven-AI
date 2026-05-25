@@ -60,11 +60,12 @@ export async function createHavenMcpServer(options: HavenMcpServerOptions = {}):
 /**
  * Build an MCP server bound to the supplied Haven client.
  *
- * Each tool dispatch sets `X-Haven-MCP-Tool: <name>` on the underlying SDK
- * requests so the backend can write an audit-log row attributing the call
- * to this MCP tool. The header is cleared after the dispatch so that
- * follow-on internal calls (e.g. the consent-gate `getAgent`) are not
- * mis-attributed.
+ * Each tool dispatch is wrapped in `haven.withRequestContext` so every
+ * Haven API request the dispatch issues carries `X-Haven-MCP-Tool: <name>`
+ * — and *only* that dispatch's requests see the header. The SDK uses an
+ * `AsyncLocalStorage` for the context, so two tool calls running
+ * concurrently cannot leak headers into each other and the backend
+ * `agent_tool_invocations` rows are always attributed to the right tool.
  */
 export function buildMcpServer(haven: HavenClient): McpServer {
   const server = new McpServer({
@@ -79,14 +80,10 @@ export function buildMcpServer(haven: HavenClient): McpServer {
       name,
       toolDescriptions[name],
       toolSchemas[name],
-      async (args: unknown) => {
-        haven.setDefaultHeader('X-Haven-MCP-Tool', name)
-        try {
-          return toMcpResult(await handlers[name](args))
-        } finally {
-          haven.setDefaultHeader('X-Haven-MCP-Tool', undefined)
-        }
-      },
+      async (args: unknown) =>
+        haven.withRequestContext({ 'X-Haven-MCP-Tool': name }, async () =>
+          toMcpResult(await handlers[name](args)),
+        ),
     )
   }
 
@@ -120,9 +117,23 @@ export async function runConsentGate(
   options: HavenMcpServerOptions,
 ): Promise<ConsentDecision> {
   const toolNames = registeredToolNames()
-  const input = await consentInputFromClient(haven, credentials.apiKey, toolNames)
+  const input = await consentInputFromClient(
+    haven,
+    {
+      apiKey: credentials.apiKey,
+      apiUrl: credentials.apiUrl,
+      agentId: credentials.agentId,
+      safeAddress: credentials.safeAddress,
+    },
+    toolNames,
+  )
+  // Prefer the path actually used to load credentials (covers
+  // HAVEN_CREDENTIALS as well as --credentials). If neither file path is
+  // available the operator must use HAVEN_MCP_ACK; --ack has nowhere to
+  // write a sidecar in that case.
+  const credentialsPath = options.credentialsPath ?? credentials.sourcePath
   return ensureConsent(input, {
-    credentialsPath: options.credentialsPath,
+    credentialsPath,
     writeAck: options.writeAck,
   })
 }

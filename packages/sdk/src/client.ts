@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
 import { privateKeyToAccount } from 'viem/accounts'
 import { signHash, addressFromKey, verifySignature } from './signer.js'
@@ -206,7 +207,19 @@ export class HavenClient {
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
   private readonly x402ReceiptCache = new Map<string, { expiresAt: number; receipt: X402Receipt }>()
   private readonly inFlightMachinePayments = new Map<string, Promise<MachinePaymentReceipt>>()
-  private defaultHeaders: Record<string, string>
+  /**
+   * Setup-time headers configured via `HavenClientConfig.defaultHeaders`.
+   * Read-only after construction — use `withRequestContext` for per-call
+   * scoping so concurrent requests don't race on shared mutable state.
+   */
+  private readonly defaultHeaders: Record<string, string>
+  /**
+   * Async-local store for per-request context (currently: extra headers).
+   * Each `withRequestContext` invocation produces an isolated store, so
+   * overlapping async work — like two MCP tool dispatches in flight at
+   * the same time — see their own headers without stepping on each other.
+   */
+  private readonly requestContext = new AsyncLocalStorage<{ headers: Record<string, string> }>()
 
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
@@ -227,19 +240,22 @@ export class HavenClient {
   }
 
   /**
-   * Set or replace a default header sent on every subsequent Haven API
-   * request. Pass `undefined` to remove the header. Used by the MCP server
-   * to tag requests with `X-Haven-MCP-Tool: <name>` so the backend can
-   * write an audit-log row for the tool invocation.
+   * Run `fn` with extra Haven-API headers scoped to the async work it
+   * performs. Used by the MCP server to tag every Haven API request that
+   * a single tool dispatch makes with `X-Haven-MCP-Tool: <name>` so the
+   * backend can write an audit-log row attributing the call.
    *
-   * Has no effect on outbound merchant requests (x402 / MPP).
+   * The headers are held in an `AsyncLocalStorage` so overlapping
+   * dispatches do not leak headers into each other's requests. The store
+   * inherits across `await` boundaries, so any Haven API call made while
+   * `fn` is awaiting will pick up the right headers.
+   *
+   * Has no effect on outbound merchant requests (x402 / MPP) — those
+   * never go through the internal `request<T>` path that reads the
+   * context.
    */
-  setDefaultHeader(name: string, value: string | undefined): void {
-    if (value === undefined) {
-      delete this.defaultHeaders[name]
-    } else {
-      this.defaultHeaders[name] = value
-    }
+  withRequestContext<T>(headers: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+    return this.requestContext.run({ headers: { ...headers } }, fn)
   }
 
   // ── High-Level API ───────────────────────────────────────────────
@@ -2120,12 +2136,14 @@ export class HavenClient {
     const timeout = setTimeout(() => controller.abort(), this.requestTimeout)
 
     try {
+      const contextHeaders = this.requestContext.getStore()?.headers ?? {}
       const res = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`,
           ...this.defaultHeaders,
+          ...contextHeaders,
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,

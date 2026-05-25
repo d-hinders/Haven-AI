@@ -111,4 +111,55 @@ describe('Haven MCP server dispatch', () => {
     expect(havenCalls[0].headers['x-haven-mcp-tool']).toBe('haven_get_agent')
     expect(havenCalls[havenCalls.length - 1].headers['x-haven-mcp-tool']).toBeUndefined()
   })
+
+  it('attributes concurrent tool dispatches to the correct tool name without cross-talk', async () => {
+    // Regression for PR #176 review P1: a previous implementation mutated
+    // shared client state to set the header, so two overlapping dispatches
+    // could overwrite each other and produce mis-attributed audit rows.
+    // The current implementation uses AsyncLocalStorage; this test exercises
+    // two dispatches whose fetch calls *interleave* to prove the contexts
+    // stay isolated.
+    let release1: () => void = () => {}
+    const gate1 = new Promise<void>((r) => { release1 = r })
+
+    const captured: Array<{ tool: string | undefined; gate: 'first' | 'second' }> = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const headers: Record<string, string> = {}
+      const raw = init?.headers
+      if (raw && typeof raw === 'object' && !(raw instanceof Headers)) {
+        for (const [k, v] of Object.entries(raw as Record<string, string>)) {
+          headers[k.toLowerCase()] = v
+        }
+      }
+      const tool = headers['x-haven-mcp-tool']
+      if (tool === 'haven_get_agent') {
+        // Park this request until the second dispatch has started.
+        await gate1
+        captured.push({ tool, gate: 'first' })
+      } else if (tool === 'haven_get_allowances') {
+        captured.push({ tool, gate: 'second' })
+        // Let the first request proceed only after we've recorded the second.
+        release1()
+      }
+      return jsonResponse({})
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const server = buildMcpServer(haven)
+    const first = readToolByName(server as any, 'haven_get_agent')
+    const second = readToolByName(server as any, 'haven_get_allowances')
+
+    const firstP = first.handler({})
+    // Let the first dispatch reach the gated fetch before we kick off the second.
+    await Promise.resolve()
+    const secondP = second.handler({})
+    await Promise.all([firstP, secondP])
+
+    expect(captured).toContainEqual({ tool: 'haven_get_agent', gate: 'first' })
+    expect(captured).toContainEqual({ tool: 'haven_get_allowances', gate: 'second' })
+    // Each captured row's tool name matches the dispatch — no cross-talk.
+    for (const row of captured) {
+      expect(row.tool).toBe(row.gate === 'first' ? 'haven_get_agent' : 'haven_get_allowances')
+    }
+  })
 })

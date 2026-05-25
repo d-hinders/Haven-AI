@@ -24,6 +24,11 @@ function captureWriter() {
 
 const input: ConsentInput = {
   apiKeyPrefix: 'sk_agent_ab',
+  apiUrl: 'https://haven.example',
+  agentId: 'agt_test',
+  safeAddress: '0xSafe',
+  delegateAddress: '0xDelegate',
+  chainId: 100,
   toolNames: ['haven_get_agent', 'haven_pay_x402_quote'],
   allowanceSummary: [
     { token: 'USDC', amount: '50.000000', resetMinutes: 1440 },
@@ -53,6 +58,37 @@ describe('consent gate', () => {
     expect(
       computeConsentHash({ ...input, toolNames: ['haven_get_agent'] }),
     ).not.toBe(baseHash)
+  })
+
+  it('changes the hash when the Haven wallet, delegate, or chain changes', () => {
+    // Regression for PR #176 review P2: a credential swap with identical
+    // token/amount/reset summary must invalidate the prior acknowledgement.
+    const baseHash = computeConsentHash(input)
+    expect(computeConsentHash({ ...input, safeAddress: '0xOtherSafe' })).not.toBe(baseHash)
+    expect(computeConsentHash({ ...input, delegateAddress: '0xOtherDelegate' })).not.toBe(baseHash)
+    expect(computeConsentHash({ ...input, chainId: 137 })).not.toBe(baseHash)
+    expect(computeConsentHash({ ...input, apiUrl: 'https://other.example' })).not.toBe(baseHash)
+    expect(computeConsentHash({ ...input, agentId: 'agt_other' })).not.toBe(baseHash)
+  })
+
+  it('normalises address casing so cosmetic credential edits do not re-prompt', () => {
+    const baseHash = computeConsentHash(input)
+    const upper = computeConsentHash({
+      ...input,
+      safeAddress: input.safeAddress?.toUpperCase(),
+      delegateAddress: input.delegateAddress?.toUpperCase(),
+    })
+    expect(upper).toBe(baseHash)
+  })
+
+  it('renders wallet, delegate, and chain in the consent block', () => {
+    const hash = computeConsentHash(input)
+    const block = renderConsentBlock(input, hash)
+    expect(block).toContain('Haven wallet (Safe): 0xSafe')
+    expect(block).toContain('Delegate (local signer): 0xDelegate')
+    expect(block).toContain('Chain ID:  100')
+    expect(block).toContain('Haven API: https://haven.example')
+    expect(block).toContain('Agent ID:  agt_test')
   })
 
   it('accepts an env-var hash match without printing the block', async () => {

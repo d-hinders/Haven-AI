@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
+import { HavenPaymentStateError } from './types.js'
 import {
   buildMachinePaymentIdempotencyKey,
   parseMachinePaymentChallenge,
@@ -53,6 +54,210 @@ describe('MPP demo helpers', () => {
         { ...challenge, challengeId: 'challenge-456' },
       ),
     )
+  })
+
+  it('quotes MPP challenges without creating a Haven payment', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Machine payment required', challenge }), {
+        status: 402,
+        headers: {
+          'Content-Type': 'application/json',
+          'MACHINE-PAYMENT-CHALLENGE': btoa(JSON.stringify(challenge)),
+        },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven-api.example',
+    })
+
+    const quote = await haven.quoteMpp(challenge.resource, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request: 'summary' }),
+    }, { idempotencyKey: 'mpp-summary' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe(challenge.resource)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/machine-payments/authorize'))).toBe(false)
+    expect(quote).toMatchObject({
+      rail: 'mpp',
+      paymentRail: 'mpp_demo',
+      idempotencyKey: 'mpp-summary',
+      challenge,
+      resourceUrl: challenge.resource,
+      description: challenge.description,
+      amountAtomic: challenge.amount.atomic,
+      amount: challenge.amount.display,
+      token: challenge.asset.symbol,
+      asset: challenge.asset.address,
+      network: challenge.network.name,
+      chainId: challenge.network.chainId,
+      merchantAddress: challenge.recipient,
+      request: {
+        url: challenge.resource,
+        method: 'POST',
+      },
+    })
+  })
+
+  it('attaches a serializable resume state when quoted MPP payment needs approval', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Machine payment required', challenge }), {
+        status: 402,
+        headers: {
+          'Content-Type': 'application/json',
+          'MACHINE-PAYMENT-CHALLENGE': btoa(JSON.stringify(challenge)),
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'mpp_demo',
+        status: 'pending_approval',
+        phase: 'user_approval_required',
+        next_action: 'wait_for_user_approval',
+        message: 'This MPP payment is waiting for user approval in Haven.',
+        token: 'USDC',
+        requested: '0.01',
+        resource_url: challenge.resource,
+        merchant_address: challenge.recipient,
+        chain_id: 8453,
+        amount_atomic: challenge.amount.atomic,
+        asset: challenge.asset.address,
+        network: challenge.network.name,
+        description: challenge.description,
+        idempotency_key: 'mpp-summary',
+        challenge_id: challenge.challengeId,
+        mpp: {
+          amount_atomic: challenge.amount.atomic,
+          asset: challenge.asset.address,
+          network: challenge.network.name,
+          resource_url: challenge.resource,
+          merchant_address: challenge.recipient,
+          description: challenge.description,
+          idempotency_key: 'mpp-summary',
+          challenge_id: challenge.challengeId,
+        },
+        expires_at: '2026-05-12T20:00:00.000Z',
+      }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven-api.example',
+    })
+
+    const quote = await haven.quoteMpp(challenge.resource, undefined, { idempotencyKey: 'mpp-summary' })
+
+    let thrown: unknown
+    try {
+      await haven.payMppChallenge(quote)
+    } catch (err) {
+      thrown = err
+    }
+
+    expect(thrown).toBeInstanceOf(HavenPaymentStateError)
+    expect(thrown).toMatchObject({
+      paymentId: 'approval-123',
+      resumeState: {
+        rail: 'mpp',
+        paymentRail: 'mpp_demo',
+        paymentId: 'approval-123',
+        idempotencyKey: 'mpp-summary',
+        challenge,
+        url: challenge.resource,
+        resourceUrl: challenge.resource,
+        amountAtomic: challenge.amount.atomic,
+        merchantAddress: challenge.recipient,
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('resumes an approved MPP payment and retries with a machine payment proof', async () => {
+    const fundingTxHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_id: 'approval-123',
+        kind: 'approval_request',
+        rail: 'mpp_demo',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        amount: '0.01',
+        token: 'USDC',
+        resource_url: challenge.resource,
+        merchant_address: challenge.recipient,
+        tx_hash: fundingTxHash,
+        expires_at: '2026-05-12T20:00:00.000Z',
+        chain_id: 8453,
+        message: 'Retry the original MPP request.',
+        mpp: {
+          amount_atomic: challenge.amount.atomic,
+          asset: challenge.asset.address,
+          network: challenge.network.name,
+          resource_url: challenge.resource,
+          merchant_address: challenge.recipient,
+          description: challenge.description,
+          idempotency_key: 'mpp-summary',
+          challenge_id: challenge.challengeId,
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ paid: true }), {
+        status: 200,
+        headers: {
+          'Payment-Receipt': JSON.stringify({ status: 'settled', reference: 'approval-123' }),
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven-api.example',
+    })
+
+    const response = await haven.resumeMppPayment({
+      paymentId: 'approval-123',
+      url: challenge.resource,
+      challenge,
+      idempotencyKey: 'mpp-summary',
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://haven-api.example/machine-payments/approval-123/status')
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/machine-payments/authorize'))).toBe(false)
+
+    const retryInit = fetchMock.mock.calls[1][1] as RequestInit
+    const retryHeaders = new Headers(retryInit.headers)
+    const proof = decodeHeader(retryHeaders.get('MACHINE-PAYMENT-PROOF') ?? '')
+    expect(proof).toMatchObject({
+      rail: 'mpp_demo',
+      challengeId: challenge.challengeId,
+      paymentId: 'approval-123',
+      txHash: fundingTxHash,
+      settledVia: 'haven',
+      chainId: 8453,
+    })
+
+    const evidenceInit = fetchMock.mock.calls[2][1] as RequestInit
+    expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
+      paymentId: 'approval-123',
+      rail: 'mpp_demo',
+      txHash: fundingTxHash,
+      resourceUrl: challenge.resource,
+      merchantStatus: 200,
+      challengePayload: { challengeId: challenge.challengeId, rail: 'mpp_demo' },
+      paymentProofHeaderName: 'MACHINE-PAYMENT-PROOF',
+      protocolReceiptHeaderName: 'Payment-Receipt',
+      protocolReceiptPayload: { status: 'settled', reference: 'approval-123' },
+    })
   })
 
   it('pays an MPP demo challenge and retries with a machine payment proof', async () => {

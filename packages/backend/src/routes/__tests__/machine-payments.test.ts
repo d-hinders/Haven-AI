@@ -88,6 +88,12 @@ describe('machine payment routes', () => {
       payment_resource_url: challenge.resource,
       payment_rail: 'mpp_demo',
       machine_challenge_id: challenge.challengeId,
+      machine_idempotency_key: 'mpp_demo:test',
+      machine_metadata: JSON.stringify({
+        protocol: 'mpp',
+        network: challenge.network.name,
+        description: challenge.description,
+      }),
       sign_hash: SIGN_HASH,
       allowance_nonce: 3,
       ...overrides,
@@ -116,6 +122,11 @@ describe('machine payment routes', () => {
       x402_merchant_address: null,
       machine_challenge_id: challenge.challengeId,
       machine_idempotency_key: 'mpp_demo:test',
+      machine_metadata: JSON.stringify({
+        protocol: 'mpp',
+        network: challenge.network.name,
+        description: challenge.description,
+      }),
       x402_idempotency_key: null,
       confirmed_at: '2026-05-15T12:00:00.000Z',
       ...overrides,
@@ -150,7 +161,24 @@ describe('machine payment routes', () => {
       rail: 'mpp_demo',
       challenge_id: challenge.challengeId,
       amount: '0.01',
+      amount_atomic: '10000',
       token: 'USDC',
+      asset: USDC,
+      network: challenge.network.name,
+      description: challenge.description,
+      idempotency_key: 'mpp_demo:test',
+      resource_url: challenge.resource,
+      merchant_address: RECIPIENT.toLowerCase(),
+      mpp: {
+        amount_atomic: '10000',
+        asset: USDC,
+        network: challenge.network.name,
+        resource_url: challenge.resource,
+        merchant_address: RECIPIENT.toLowerCase(),
+        description: challenge.description,
+        idempotency_key: 'mpp_demo:test',
+        challenge_id: challenge.challengeId,
+      },
       to: RECIPIENT.toLowerCase(),
       sign_data: {
         hash: SIGN_HASH,
@@ -209,6 +237,15 @@ describe('machine payment routes', () => {
       tx_hash: `0x${'ab'.repeat(32)}`,
       rail: 'mpp_demo',
       challenge_id: challenge.challengeId,
+      amount_atomic: '10000',
+      asset: USDC,
+      network: challenge.network.name,
+      idempotency_key: 'mpp_demo:test',
+      mpp: {
+        challenge_id: challenge.challengeId,
+        resource_url: challenge.resource,
+        merchant_address: RECIPIENT.toLowerCase(),
+      },
     })
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
   })
@@ -242,6 +279,21 @@ describe('machine payment routes', () => {
       tx_hash: TX_HASH,
       resource_url: challenge.resource,
       merchant_address: RECIPIENT.toLowerCase(),
+      amount_atomic: '10000',
+      asset: USDC,
+      network: challenge.network.name,
+      description: challenge.description,
+      idempotency_key: 'mpp_demo:test',
+      mpp: {
+        amount_atomic: '10000',
+        asset: USDC,
+        network: challenge.network.name,
+        resource_url: challenge.resource,
+        merchant_address: RECIPIENT.toLowerCase(),
+        description: challenge.description,
+        idempotency_key: 'mpp_demo:test',
+        challenge_id: challenge.challengeId,
+      },
     })
   })
 
@@ -256,7 +308,9 @@ describe('machine payment routes', () => {
           id: 'approval-123',
           chain_id: 8453,
           token_symbol: 'USDC',
+          token_address: USDC,
           amount_human: '0.01',
+          amount_raw: '10000',
           status: 'pending',
           tx_hash: null,
           expires_at: '2099-01-02T00:00:00.000Z',
@@ -265,6 +319,13 @@ describe('machine payment routes', () => {
           payment_resource_url: challenge.resource,
           x402_resource_url: null,
           merchant_address: RECIPIENT.toLowerCase(),
+          machine_challenge_id: challenge.challengeId,
+          machine_idempotency_key: 'mpp_demo:test',
+          machine_metadata: JSON.stringify({
+            protocol: 'mpp',
+            network: challenge.network.name,
+            description: challenge.description,
+          }),
         }],
       })
 
@@ -284,6 +345,14 @@ describe('machine payment routes', () => {
       next_action: 'wait_for_user_approval',
       amount: '0.01',
       token: 'USDC',
+      amount_atomic: '10000',
+      asset: USDC,
+      network: challenge.network.name,
+      description: challenge.description,
+      idempotency_key: 'mpp_demo:test',
+      mpp: {
+        challenge_id: challenge.challengeId,
+      },
     })
   })
 
@@ -342,6 +411,23 @@ describe('machine payment routes', () => {
       challenge_id: challenge.challengeId,
       token: 'USDC',
       requested: '0.01',
+      resource_url: challenge.resource,
+      merchant_address: RECIPIENT.toLowerCase(),
+      amount_atomic: '10000',
+      asset: USDC,
+      network: challenge.network.name,
+      description: challenge.description,
+      idempotency_key: 'mpp_demo:test',
+      mpp: {
+        amount_atomic: '10000',
+        asset: USDC,
+        network: challenge.network.name,
+        resource_url: challenge.resource,
+        merchant_address: RECIPIENT.toLowerCase(),
+        description: challenge.description,
+        idempotency_key: 'mpp_demo:test',
+        challenge_id: challenge.challengeId,
+      },
     })
 
     const insertCall = mockQuery.mock.calls[4]

@@ -2,6 +2,10 @@ import { ethers } from 'ethers'
 import pool from '../db.js'
 import { type AgentContext } from '../middleware/agentAuth.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from './agent-payment-taxonomy.js'
+import {
+  agentPaymentStatusHttpCode,
+  getAgentPaymentStatus,
+} from './agent-payment-status.js'
 import { getChain, getExplorerUrl } from './chains.js'
 import { getFiatValuesForTokenAmount } from './fiat-values.js'
 import { formatTokenValue } from './tokens.js'
@@ -68,18 +72,26 @@ interface PaymentIntentRow {
   merchant_address: string | null
   machine_challenge_id: string | null
   machine_idempotency_key: string | null
+  machine_metadata: unknown
   expires_at: string
 }
 
 interface ApprovalRequestRow {
   id: string
+  chain_id: number
   status: string
   token_symbol: string
+  token_address: string | null
   amount_human: string
+  amount_raw: string | null
   expires_at: string
   tx_hash: string | null
   machine_challenge_id: string | null
   payment_rail: string | null
+  payment_resource_url: string | null
+  merchant_address: string | null
+  machine_idempotency_key: string | null
+  machine_metadata: unknown
 }
 
 export function isValidAddress(addr: string): boolean {
@@ -107,12 +119,79 @@ function merchantAddress(intent: PaymentIntentRow): string | null {
   return intent.merchant_address ?? intent.x402_merchant_address
 }
 
+interface MachineMetadata {
+  network?: unknown
+  description?: unknown
+}
+
+interface MachineRailContext {
+  resourceUrl: string | null
+  merchantAddress: string | null
+  amountAtomic: string | null
+  asset: string | null
+  network: string | null
+  description: string | null
+  idempotencyKey: string | null
+  challengeId: string | null
+}
+
+function isMppRail(rail: string | null | undefined): boolean {
+  return rail === 'mpp' || Boolean(rail?.startsWith('mpp_'))
+}
+
+function metadataObject(value: unknown): MachineMetadata {
+  if (!value) return {}
+  if (typeof value === 'object' && !Array.isArray(value)) return value as MachineMetadata
+  if (typeof value !== 'string') return {}
+
+  try {
+    const parsed = JSON.parse(value)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as MachineMetadata
+    }
+  } catch {
+    return {}
+  }
+
+  return {}
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function machineRailFields(rail: string | null | undefined, context: MachineRailContext) {
+  const base = {
+    amount_atomic: context.amountAtomic,
+    asset: context.asset,
+    network: context.network,
+    description: context.description,
+    idempotency_key: context.idempotencyKey,
+  }
+
+  if (!isMppRail(rail)) return base
+
+  return {
+    ...base,
+    mpp: {
+      ...base,
+      resource_url: context.resourceUrl,
+      merchant_address: context.merchantAddress,
+      challenge_id: context.challengeId,
+    },
+  }
+}
+
 function machinePaymentResponse(
   intent: PaymentIntentRow,
   agent: AgentContext,
   txHash?: string,
 ) {
   const resolvedTxHash = txHash ?? intent.tx_hash
+  const rail = intent.payment_rail ?? intent.source
+  const metadata = metadataObject(intent.machine_metadata)
+  const resourceUrl = paymentResourceUrl(intent)
+  const merchant = merchantAddress(intent)
   return {
     success: resolvedTxHash ? true : undefined,
     payment_id: intent.id,
@@ -124,13 +203,24 @@ function machinePaymentResponse(
     token: intent.token_symbol,
     amount: intent.amount_human,
     to: intent.to_address,
-    merchant_to: merchantAddress(intent),
-    resource_url: paymentResourceUrl(intent),
-    rail: intent.payment_rail ?? intent.source,
+    merchant_to: merchant,
+    merchant_address: merchant,
+    resource_url: resourceUrl,
+    rail,
     challenge_id: intent.machine_challenge_id,
     explorer_url: resolvedTxHash
       ? getExplorerUrl(intent.chain_id ?? agent.chain_id, 'tx', resolvedTxHash)
       : undefined,
+    ...machineRailFields(rail, {
+      resourceUrl,
+      merchantAddress: merchant,
+      amountAtomic: intent.amount_raw,
+      asset: intent.token_address,
+      network: nullableString(metadata.network),
+      description: nullableString(metadata.description),
+      idempotencyKey: intent.machine_idempotency_key ?? intent.x402_idempotency_key,
+      challengeId: intent.machine_challenge_id,
+    }),
   }
 }
 
@@ -157,7 +247,20 @@ function pendingApprovalResponse(
   approval: ApprovalRequestRow,
   remainingHuman: string | null,
   rail: MachinePaymentRail,
+  context?: MachineRailContext,
 ) {
+  const metadata = metadataObject(approval.machine_metadata)
+  const railContext = context ?? {
+    resourceUrl: approval.payment_resource_url,
+    merchantAddress: approval.merchant_address,
+    amountAtomic: approval.amount_raw,
+    asset: approval.token_address,
+    network: nullableString(metadata.network),
+    description: nullableString(metadata.description),
+    idempotencyKey: approval.machine_idempotency_key,
+    challengeId: approval.machine_challenge_id,
+  }
+
   return {
     statusCode: 202,
     body: {
@@ -173,6 +276,10 @@ function pendingApprovalResponse(
       expires_at: approval.expires_at,
       rail,
       challenge_id: approval.machine_challenge_id,
+      resource_url: railContext.resourceUrl,
+      merchant_address: railContext.merchantAddress,
+      chain_id: approval.chain_id,
+      ...machineRailFields(rail, railContext),
     },
   }
 }
@@ -218,8 +325,10 @@ async function findExistingApproval(
   if (!idempotencyKey && !challengeId) return null
 
   const result = await pool.query<ApprovalRequestRow>(
-    `SELECT id, status, token_symbol, amount_human, expires_at, tx_hash,
-            machine_challenge_id, payment_rail
+    `SELECT id, chain_id, status, token_symbol, token_address, amount_human,
+            amount_raw, expires_at, tx_hash, machine_challenge_id, payment_rail,
+            payment_resource_url, merchant_address, machine_idempotency_key,
+            machine_metadata
      FROM approval_requests
      WHERE agent_id = $1
        AND status <> 'expired'
@@ -386,6 +495,17 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       }
     }
 
+    if (existingApproval.status !== 'pending') {
+      const status = await getAgentPaymentStatus(agent, existingApproval.id)
+      if (!status) {
+        return {
+          statusCode: 409,
+          body: { error: 'Machine payment approval already exists but could not be loaded' },
+        }
+      }
+      return { statusCode: agentPaymentStatusHttpCode(status), body: status }
+    }
+
     return pendingApprovalResponse(existingApproval, null, rail)
   }
 
@@ -463,8 +583,10 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
         WHERE machine_idempotency_key IS NOT NULL
           AND status NOT IN ('expired')
       DO NOTHING
-      RETURNING id, status, token_symbol, amount_human, expires_at, tx_hash,
-                machine_challenge_id, payment_rail`,
+      RETURNING id, chain_id, status, token_symbol, token_address, amount_human,
+                amount_raw, expires_at, tx_hash, machine_challenge_id, payment_rail,
+                payment_resource_url, merchant_address, machine_idempotency_key,
+                machine_metadata`,
       [
         agent.id, agent.user_id, agent.safe_address, agent.chain_id,
         tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
@@ -490,12 +612,29 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
         ...approval,
         token_symbol: tokenConfig.symbol,
         amount_human: amountHuman,
+        amount_raw: amountRaw.toString(),
+        token_address: tokenAddress,
         tx_hash: null,
         machine_challenge_id: challengeId ?? null,
         payment_rail: rail,
+        payment_resource_url: resourceUrl,
+        merchant_address: merchantPayTo?.toLowerCase() ?? null,
+        machine_idempotency_key: idempotencyKey ?? null,
+        machine_metadata: metadata ? JSON.stringify(metadata) : null,
+        chain_id: agent.chain_id,
       },
       remainingHuman,
       rail,
+      {
+        resourceUrl,
+        merchantAddress: merchantPayTo?.toLowerCase() ?? null,
+        amountAtomic: amountRaw.toString(),
+        asset: tokenAddress,
+        network: nullableString(metadata?.network),
+        description: description ?? nullableString(metadata?.description),
+        idempotencyKey: idempotencyKey ?? null,
+        challengeId: challengeId ?? null,
+      },
     )
   }
 

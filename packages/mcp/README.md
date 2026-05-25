@@ -70,6 +70,68 @@ Environment variable form:
 - `haven_get_allowances`
 - `haven_list_receipts`
 
+## First-launch consent
+
+The first time the MCP server runs against a credential file it refuses to
+start until you've acknowledged what tools it exposes and what the agent can
+actually spend.
+
+On first launch you'll see something like this on stderr:
+
+```
+Haven MCP server — first-launch consent
+────────────────────────────────────────────────────────────
+Credential: sk_agent_ab…
+
+Tools this server will expose to your agent runtime:
+  • haven_pay_x402_quote
+      Pay a previously inspected x402 quote …
+  • haven_get_allowances
+      Return configured and on-chain allowance state …
+  …
+
+On-chain allowance (the real spend gate, Safe AllowanceModule):
+  • up to 50.000000 USDC per 1440 min
+
+Consent hash: 6f4b…d1a2
+```
+
+Acknowledge in one of two ways:
+
+- **Sidecar file (recommended).** Re-run once with `--ack`:
+
+  ```sh
+  npx @haven_ai/mcp --credentials /absolute/path/to/haven-agent.json --ack
+  ```
+
+  This writes `haven-agent.json.ack.json` next to your credential. Future
+  launches pick it up automatically. When the tool set or your on-chain
+  allowance changes, the hash changes and you'll be re-prompted.
+
+- **Environment variable.** Copy the printed hash and set
+  `HAVEN_MCP_ACK=<hash>` in the MCP client's `env` block. Useful for
+  Claude Desktop configs that prefer environment over filesystem state.
+
+For CI or scripted setups, `HAVEN_MCP_ACK=skip` bypasses the gate entirely.
+Do not set this for human-operated installs — the consent block is the only
+place a wallet owner is shown the real on-chain allowance before tools go
+live.
+
+## Audit log
+
+Every MCP tool invocation tags the underlying Haven API call with
+`X-Haven-MCP-Tool: <tool_name>`. The backend records one
+`agent_tool_invocations` row per call (tool name, payment id when present,
+result status, nextAction, error code, HTTP status, timestamp). The agent's
+activity feed in the Haven dashboard surfaces these rows alongside payments
+and approval requests, so the wallet owner can see exactly which tools the
+agent called and what happened — even for read-only calls that don't move
+money.
+
+The audit log is informational. The on-chain Safe AllowanceModule remains
+the only thing that can stop a spend; revoking the agent on-chain disables
+every MCP tool that would settle, regardless of audit state.
+
 ## Manual sanity test
 
 1. Start Claude Desktop or another MCP client with the config above.

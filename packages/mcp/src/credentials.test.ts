@@ -52,7 +52,28 @@ describe('loadCredentials', () => {
       agentId: 'agent-1',
       safeAddress: '0xSafe',
       apiUrl: 'https://haven.example',
+      sourcePath: file,
     })
+  })
+
+  it('returns sourcePath when the file path comes from HAVEN_CREDENTIALS', async () => {
+    // Regression for PR #176 review P3: the consent gate needs the
+    // resolved file path so --ack can locate a sidecar regardless of
+    // whether the path came from --credentials or HAVEN_CREDENTIALS.
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-'))
+    const file = join(dir, 'agent.json')
+    await writeFile(file, JSON.stringify({ api_key: 'sk', delegate_key: '0x' }))
+
+    process.env.HAVEN_CREDENTIALS = file
+    const creds = await loadCredentials()
+    expect(creds.sourcePath).toBe(file)
+  })
+
+  it('omits sourcePath when credentials come from inline env vars', async () => {
+    process.env.HAVEN_API_KEY = 'sk'
+    process.env.HAVEN_DELEGATE_KEY = '0x'
+    const creds = await loadCredentials(undefined)
+    expect(creds.sourcePath).toBeUndefined()
   })
 
   it('refuses to start without a delegate key', async () => {
@@ -76,6 +97,7 @@ describe('loadCredentials', () => {
       agentId: 'agent-env',
       safeAddress: '0xSafeEnv',
       apiUrl: 'https://haven.env.example',
+      sourcePath: undefined,
     })
   })
 

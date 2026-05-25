@@ -5,7 +5,13 @@ import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents } from '@/hooks/useAgents'
-import { useAgentActivity, type ActivityItem } from '@/hooks/useAgentActivity'
+import {
+  useAgentActivity,
+  isPaymentActivityItem,
+  isMcpToolCallActivityItem,
+  type PaymentActivityItem,
+  type McpToolCallActivityItem,
+} from '@/hooks/useAgentActivity'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
@@ -48,7 +54,7 @@ import {
 } from '@/components/haven'
 import type { AggregatedTransaction } from '@/types/transactions'
 
-function activityTitle(item: ActivityItem, agentName?: string): string {
+function activityTitle(item: PaymentActivityItem, agentName?: string): string {
   const sourceTitle = paymentSourceTitle(item.source)
   if (sourceTitle) {
     return agentName ? `${sourceTitle} by ${agentName}` : sourceTitle
@@ -59,7 +65,7 @@ function activityTitle(item: ActivityItem, agentName?: string): string {
   return 'Agent payment'
 }
 
-function activityMovement(item: ActivityItem, walletName: string) {
+function activityMovement(item: PaymentActivityItem, walletName: string) {
   const isX402 = isMachinePaymentSource(item.source)
   const hostname = isX402 ? parseX402Hostname(item.x402_resource_url) : null
 
@@ -80,7 +86,7 @@ function activityMovement(item: ActivityItem, walletName: string) {
 // transaction surfaces. Approval items without a tx hash render with no
 // external link via `explorerUrl: null`.
 function activityToTransaction(
-  item: ActivityItem,
+  item: PaymentActivityItem,
   agentName: string,
   walletName: string,
 ): AggregatedTransaction {
@@ -128,6 +134,72 @@ function budgetPeriodLabel(resetPeriodMin: number): string {
   if (label === 'weekly') return 'per week'
   if (label === 'monthly') return 'per month'
   return `every ${label}`
+}
+
+function mcpToolCallTone(resultStatus: string): 'success' | 'warning' | 'danger' | 'neutral' {
+  switch (resultStatus) {
+    case 'ok':
+      return 'success'
+    case 'denied':
+      return 'danger'
+    case 'error':
+      return 'warning'
+    default:
+      return 'neutral'
+  }
+}
+
+/**
+ * Surfaces the agent_tool_invocations audit log produced when an MCP server
+ * tags Haven API calls with X-Haven-MCP-Tool. Money-moving calls are still
+ * shown in the transactions table above; this panel exists so read-only
+ * tool calls (status checks, allowance reads) are also visible — that's
+ * the user-facing piece of the issue #163 audit-log requirement.
+ */
+function McpToolCallsPanel({
+  items,
+  loading,
+}: {
+  items: McpToolCallActivityItem[]
+  loading: boolean
+}) {
+  if (loading && items.length === 0) return null
+  if (!loading && items.length === 0) return null
+
+  return (
+    <div>
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-[var(--v2-ink)]">MCP tool calls</h2>
+        <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+          Tool invocations from an MCP-connected agent runtime. The on-chain
+          allowance is the real spend gate; this list is an audit trail.
+        </p>
+      </div>
+      <Card hover={false}>
+        <ul className="divide-y divide-[var(--v2-divider)]">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <code className="truncate text-sm font-medium text-[var(--v2-ink)]">{item.tool_name}</code>
+                  <StatusBadge tone={mcpToolCallTone(item.result_status)}>{item.result_status}</StatusBadge>
+                </div>
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                  {item.next_action ? `next: ${item.next_action}` : ''}
+                  {item.next_action && item.error_code ? ' · ' : ''}
+                  {item.error_code ? `error: ${item.error_code}` : ''}
+                  {!item.next_action && !item.error_code && item.payment_id
+                    ? `payment ${item.payment_id.slice(0, 8)}…`
+                    : ''}
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-[var(--v2-ink-3)]">{timeAgo(item.created_at)}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  )
 }
 
 function StatBlock({
@@ -534,7 +606,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             </div>
             <Card hover={false}>
               <TransactionsTable
-                transactions={activity.map((item) =>
+                transactions={activity.filter(isPaymentActivityItem).map((item) =>
                   activityToTransaction(item, currentAgent.name, walletName),
                 )}
                 loading={activityLoading}
@@ -551,6 +623,11 @@ export default function AgentDetailClient({ agentId }: Props) {
               />
             </Card>
           </div>
+
+          <McpToolCallsPanel
+            items={activity.filter(isMcpToolCallActivityItem)}
+            loading={activityLoading}
+          />
 
       </div>
 

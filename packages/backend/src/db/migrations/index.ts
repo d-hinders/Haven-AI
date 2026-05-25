@@ -14,6 +14,7 @@ import * as approvalRequestSource from './011_approval_request_source.js'
 import * as machinePaymentMetadata from './012_machine_payment_metadata.js'
 import * as machinePaymentReconciliationEvents from './013_machine_payment_reconciliation_events.js'
 import * as machinePaymentEvidence from './014_machine_payment_evidence.js'
+import * as agentToolInvocations from './015_agent_tool_invocations.js'
 
 export interface Migration {
   version: string
@@ -41,4 +42,5 @@ export const migrations: Migration[] = [
   machinePaymentMetadata,
   machinePaymentReconciliationEvents,
   machinePaymentEvidence,
+  agentToolInvocations,
 ]

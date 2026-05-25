@@ -6,6 +6,15 @@ export interface HavenCredentialFile {
   agentId?: string
   safeAddress?: string
   apiUrl?: string
+  /**
+   * Absolute path the credentials were loaded from, if any. Set when the
+   * caller pointed at a JSON file via `--credentials` or `HAVEN_CREDENTIALS`;
+   * left undefined when credentials came purely from environment variables.
+   * The MCP server uses this to locate the consent sidecar
+   * (`<sourcePath>.ack.json`) so `--ack` works regardless of how the
+   * credential path was supplied.
+   */
+  sourcePath?: string
 }
 
 interface RawCredentialFile {
@@ -84,6 +93,7 @@ async function loadCredentialsFromFile(path: string): Promise<HavenCredentialFil
     agentId: stringField(raw.agent_id ?? raw.agentId),
     safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
     apiUrl: stringField(raw.api_url ?? raw.apiUrl),
+    sourcePath: path,
   }
 }
 

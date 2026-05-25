@@ -46,6 +46,17 @@ interface ApprovalRow {
   created_at: string
 }
 
+interface ToolInvocationRow {
+  id: string
+  tool_name: string
+  payment_id: string | null
+  result_status: string
+  next_action: string | null
+  error_code: string | null
+  status_code: number | null
+  created_at: string
+}
+
 interface StatsRow {
   token_symbol: string
   total_spent: string
@@ -130,6 +141,17 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
       [id, limit, offset],
     )
 
+    // Fetch MCP tool invocations (audit log)
+    const invocations = await pool.query<ToolInvocationRow>(
+      `SELECT id, tool_name, payment_id, result_status, next_action, error_code,
+              status_code, created_at
+       FROM agent_tool_invocations
+       WHERE agent_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [id, limit, offset],
+    )
+
     // Merge and sort by created_at desc
     const activity = [
       ...payments.rows.map((p) => ({
@@ -168,6 +190,17 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         x402_resource_url: a.x402_resource_url,
         explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
         created_at: a.created_at,
+      })),
+      ...invocations.rows.map((inv) => ({
+        type: 'mcp_tool_call' as const,
+        id: inv.id,
+        tool_name: inv.tool_name,
+        payment_id: inv.payment_id,
+        result_status: inv.result_status,
+        next_action: inv.next_action,
+        error_code: inv.error_code,
+        status_code: inv.status_code,
+        created_at: inv.created_at,
       })),
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
@@ -323,6 +356,17 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
       [agentIds, limit, offset],
     )
 
+    // Recent MCP tool invocations (audit log)
+    const invocations = await pool.query<ToolInvocationRow & { agent_id: string }>(
+      `SELECT id, agent_id, tool_name, payment_id, result_status, next_action,
+              error_code, status_code, created_at
+       FROM agent_tool_invocations
+       WHERE agent_id = ANY($1)
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [agentIds, limit, offset],
+    )
+
     // Merge and sort
     const activity = [
       ...payments.rows.map((p) => ({
@@ -365,6 +409,19 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
         x402_resource_url: a.x402_resource_url,
         explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
         created_at: a.created_at,
+      })),
+      ...invocations.rows.map((inv) => ({
+        type: 'mcp_tool_call' as const,
+        id: inv.id,
+        agent_id: inv.agent_id,
+        agent_name: agentNames.get(inv.agent_id) ?? 'Unknown',
+        tool_name: inv.tool_name,
+        payment_id: inv.payment_id,
+        result_status: inv.result_status,
+        next_action: inv.next_action,
+        error_code: inv.error_code,
+        status_code: inv.status_code,
+        created_at: inv.created_at,
       })),
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
      .slice(0, limit)

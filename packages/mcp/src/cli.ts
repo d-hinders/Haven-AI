@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { runStdioServer } from './server.js'
+import { runStdioServer, type HavenMcpServerOptions } from './server.js'
 
-function parseArgs(argv: string[]): { credentialsPath?: string } {
-  const options: { credentialsPath?: string } = {}
+function parseArgs(argv: string[]): HavenMcpServerOptions {
+  const options: HavenMcpServerOptions = {}
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--credentials' || arg === '--credentials-path') {
@@ -15,6 +15,10 @@ function parseArgs(argv: string[]): { credentialsPath?: string } {
       if (transport !== 'stdio') {
         throw new Error('Only local stdio transport is supported. Haven does not provide a remote MCP signer mode.')
       }
+    } else if (arg === '--ack') {
+      // Write the consent-gate acknowledgement next to the credential file
+      // and proceed. Used on first-launch to opt the operator in once.
+      options.writeAck = true
     } else if (arg === '--help' || arg === '-h') {
       process.stdout.write([
         'Haven MCP server',
@@ -25,6 +29,13 @@ function parseArgs(argv: string[]): { credentialsPath?: string } {
         'Options:',
         '  --credentials <path>       Haven credential JSON file. Also supported: HAVEN_CREDENTIALS.',
         '  --transport stdio          Local stdio transport. This is the only supported mode.',
+        '  --ack                      Acknowledge the first-launch consent block and write',
+        '                             a sidecar acknowledgement file next to the credential.',
+        '',
+        'Consent:',
+        '  On first launch the server prints the tool list and the on-chain',
+        '  allowance summary, then refuses to start unless you have acknowledged.',
+        '  Acknowledge with EITHER --ack OR HAVEN_MCP_ACK=<hash> in your environment.',
         '',
       ].join('\n'))
       process.exit(0)

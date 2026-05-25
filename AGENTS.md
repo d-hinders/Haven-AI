@@ -80,7 +80,7 @@ Green CI is necessary but not sufficient for changes that touch money movement, 
 
 When a user asks to build a feature, improve a UX flow from feedback, or fix a bug from a report, use `docs/ai-agent-workflow.md`.
 
-Agentic delivery is the default decision path for non-trivial Haven work. The user does not need to explicitly ask to "use agents", "use workers", or "use parallel agents" on each request. Act as the captain, decide whether the agentic flow is useful from the task shape and risk, and proceed with it when it is the better workflow:
+Agentic delivery is the default decision path for non-trivial Haven work. This file is the user's standing instruction to use subagents, delegated workers, and parallel agent work whenever the captain decides that is the best workflow. The user does not need to explicitly ask to "use agents", "use workers", or "use parallel agents" on each request. Act as the captain, decide whether the agentic flow is useful from the task shape and risk, and proceed with it when it is the better workflow:
 
 - Use `haven-workflow-coordinator` to choose the workflow, agent plan, file ownership boundaries, and expected checks when the work is non-trivial.
 - Use `haven-explorer` for read-only discovery before implementation unless the change is trivial.

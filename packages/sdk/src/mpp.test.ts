@@ -103,6 +103,42 @@ describe('MPP demo helpers', () => {
     })
   })
 
+  it('gets server-side MPP resume state by payment id', async () => {
+    const resumeState = {
+      rail: 'mpp',
+      paymentRail: challenge.rail,
+      paymentId: 'approval-mpp',
+      idempotencyKey: 'mpp_demo:test',
+      challenge,
+      url: challenge.resource,
+      resourceUrl: challenge.resource,
+      description: challenge.description,
+      amountAtomic: challenge.amount.atomic,
+      amount: challenge.amount.display,
+      token: challenge.asset.symbol,
+      asset: challenge.asset.address,
+      network: challenge.network.name,
+      chainId: challenge.network.chainId,
+      merchantAddress: challenge.recipient,
+      expiresAt: challenge.expiresAt,
+    }
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(resumeState), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      baseUrl: 'https://haven-api.example',
+    })
+
+    await expect(haven.getResumeState('approval-mpp')).resolves.toEqual(resumeState)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://haven-api.example/payments/approval-mpp/resume_state')
+  })
+
   it('attaches a serializable resume state when quoted MPP payment needs approval', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

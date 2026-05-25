@@ -51,6 +51,94 @@ export interface AgentPaymentStatus {
   }
 }
 
+export interface AgentPaymentResumeStateLookup {
+  status: AgentPaymentStatus | null
+  resumeState: AgentPaymentResumeState | null
+  error?: string
+}
+
+export type AgentPaymentResumeState = AgentX402ResumeState | AgentMppResumeState
+
+interface AgentX402PaymentOption {
+  scheme: 'exact'
+  network: string
+  amount: string
+  maxAmountRequired: string
+  resource: string
+  description?: string
+  asset: string
+  payTo: string
+  maxTimeoutSeconds: number
+}
+
+interface AgentX402PaymentRequired {
+  x402Version: number
+  resource: {
+    url: string
+    description?: string
+  }
+  accepts: AgentX402PaymentOption[]
+}
+
+export interface AgentX402ResumeState {
+  rail: 'x402'
+  paymentId: string
+  idempotencyKey: string
+  paymentRequired: AgentX402PaymentRequired
+  accepted: AgentX402PaymentOption
+  url: string
+  resourceUrl: string
+  description: string | null
+  amountAtomic: string
+  amount: string
+  token: string
+  asset: string
+  network: string
+  chainId: number
+  merchantAddress: string
+}
+
+export interface AgentMppResumeState {
+  rail: 'mpp'
+  paymentRail: string
+  paymentId: string
+  idempotencyKey: string
+  challenge: {
+    rail: string
+    version: string
+    challengeId: string
+    resource: string
+    description: string
+    network: {
+      chainId: number
+      name: 'base'
+    }
+    asset: {
+      symbol: string
+      address: string
+      decimals: 6
+    }
+    amount: {
+      display: string
+      atomic: string
+    }
+    recipient: string
+    expiresAt: string
+    metadata?: Record<string, unknown>
+  }
+  url: string
+  resourceUrl: string
+  description: string | null
+  amountAtomic: string
+  amount: string
+  token: string
+  asset: string
+  network: string
+  chainId: number
+  merchantAddress: string
+  expiresAt: string
+}
+
 interface PaymentIntentStatusRow {
   id: string
   chain_id: number
@@ -126,6 +214,15 @@ function nullableString(value: unknown): string | null {
 
 function isMppRail(rail: string): boolean {
   return rail === AgentPaymentRail.Mpp || rail.startsWith('mpp_')
+}
+
+function chainNetwork(chainId: number): string {
+  if (chainId === 8453) return 'base'
+  return `eip155:${chainId}`
+}
+
+function nonEmpty(value: string | null | undefined): string | null {
+  return value && value.length > 0 ? value : null
 }
 
 function railContext(input: {
@@ -341,6 +438,178 @@ export function agentPaymentStatusHttpCode(status: AgentPaymentStatus): number {
   if (status.status === 'expired') return 410
   if (status.status === 'failed') return 502
   return 200
+}
+
+function buildX402ResumeState(status: AgentPaymentStatus): AgentPaymentResumeStateLookup {
+  const context = status.x402
+  const resourceUrl = nonEmpty(context?.resource_url ?? status.resource_url)
+  const merchantAddress = nonEmpty(context?.merchant_address ?? status.merchant_address)
+  const amountAtomic = nonEmpty(context?.amount_atomic ?? status.amount_atomic)
+  const asset = nonEmpty(context?.asset ?? status.asset)
+  const network = nonEmpty(context?.network ?? status.network) ?? chainNetwork(status.chain_id)
+  const description = context?.description ?? status.description ?? null
+  const idempotencyKey =
+    nonEmpty(context?.idempotency_key ?? status.idempotency_key) ??
+    `x402:${status.payment_id}`
+
+  if (!resourceUrl || !merchantAddress || !amountAtomic || !asset) {
+    return {
+      status,
+      resumeState: null,
+      error: 'Stored x402 payment context is incomplete and cannot be resumed from payment id alone',
+    }
+  }
+
+  const accepted: AgentX402PaymentOption = {
+    scheme: 'exact',
+    network,
+    amount: amountAtomic,
+    maxAmountRequired: amountAtomic,
+    resource: resourceUrl,
+    description: description ?? undefined,
+    asset,
+    payTo: merchantAddress,
+    maxTimeoutSeconds: 30,
+  }
+
+  const paymentRequired: AgentX402PaymentRequired = {
+    x402Version: 2,
+    resource: {
+      url: resourceUrl,
+      description: description ?? undefined,
+    },
+    accepts: [accepted],
+  }
+
+  return {
+    status,
+    resumeState: {
+      rail: 'x402',
+      paymentId: status.payment_id,
+      idempotencyKey,
+      paymentRequired,
+      accepted,
+      url: resourceUrl,
+      resourceUrl,
+      description,
+      amountAtomic,
+      amount: status.amount,
+      token: status.token,
+      asset,
+      network,
+      chainId: status.chain_id,
+      merchantAddress,
+    },
+  }
+}
+
+function buildMppResumeState(status: AgentPaymentStatus): AgentPaymentResumeStateLookup {
+  const context = status.mpp
+  const resourceUrl = nonEmpty(context?.resource_url ?? status.resource_url)
+  const merchantAddress = nonEmpty(context?.merchant_address ?? status.merchant_address)
+  const amountAtomic = nonEmpty(context?.amount_atomic ?? status.amount_atomic)
+  const asset = nonEmpty(context?.asset ?? status.asset)
+  const description = context?.description ?? status.description ?? null
+  const challengeId = nonEmpty(context?.challenge_id)
+  const idempotencyKey =
+    nonEmpty(context?.idempotency_key ?? status.idempotency_key) ??
+    `${status.rail}:${status.payment_id}`
+  const paymentRail = status.rail === AgentPaymentRail.Mpp ? 'mpp_demo' : status.rail
+
+  if (status.chain_id !== 8453) {
+    return {
+      status,
+      resumeState: null,
+      error: 'Stored MPP payment context uses an unsupported network for SDK resume state rehydration',
+    }
+  }
+
+  if (!resourceUrl || !merchantAddress || !amountAtomic || !asset || !challengeId) {
+    return {
+      status,
+      resumeState: null,
+      error: 'Stored MPP payment context is incomplete and cannot be resumed from payment id alone',
+    }
+  }
+
+  const challenge = {
+    rail: paymentRail,
+    version: '2026-05-12',
+    challengeId,
+    resource: resourceUrl,
+    description: description ?? 'Haven machine payment',
+    network: {
+      chainId: status.chain_id,
+      name: 'base' as const,
+    },
+    asset: {
+      symbol: status.token,
+      address: asset,
+      decimals: 6 as const,
+    },
+    amount: {
+      display: status.amount,
+      atomic: amountAtomic,
+    },
+    recipient: merchantAddress,
+    expiresAt: status.expires_at,
+    metadata: {
+      protocol: 'mpp',
+      payment_id: status.payment_id,
+    },
+  }
+
+  return {
+    status,
+    resumeState: {
+      rail: 'mpp',
+      paymentRail,
+      paymentId: status.payment_id,
+      idempotencyKey,
+      challenge,
+      url: resourceUrl,
+      resourceUrl,
+      description,
+      amountAtomic,
+      amount: status.amount,
+      token: status.token,
+      asset,
+      network: 'base',
+      chainId: status.chain_id,
+      merchantAddress,
+      expiresAt: status.expires_at,
+    },
+  }
+}
+
+export async function getAgentPaymentResumeState(
+  agent: AgentContext,
+  paymentId: string,
+): Promise<AgentPaymentResumeStateLookup> {
+  const status = await getAgentPaymentStatus(agent, paymentId)
+  if (!status) return { status: null, resumeState: null }
+
+  if (status.status === 'expired') {
+    return {
+      status,
+      resumeState: null,
+      error: 'Payment approval expired and cannot be resumed',
+    }
+  }
+
+  if (status.rail === AgentPaymentRail.X402) {
+    return buildX402ResumeState(status)
+  }
+
+  if (isMppRail(status.rail)) {
+    return buildMppResumeState(status)
+  }
+
+  return {
+    status,
+    resumeState: null,
+    error: `Payment rail ${status.rail} does not support resume-state rehydration`,
+  }
 }
 
 export async function getAgentPaymentStatus(

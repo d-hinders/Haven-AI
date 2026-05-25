@@ -264,6 +264,12 @@ When the agent used `quoteX402()` / `payX402Quote()`, pending approval errors
 include a serializable `resumeState`. Persist it with the MCP session details
 and pass it back to `resumeX402Payment()` after approval.
 
+If the agent process restarts and only kept the `payment_id`, call
+`getResumeState(payment_id)` after approval to rehydrate the stored x402/MPP
+context from Haven, then pass that state to the matching resume helper. For
+POST-based merchant or MCP calls, rebuild the live request details before
+retrying; Haven stores payment context, not the agent's local request stream.
+
 ```typescript
 let resumeState
 try {
@@ -282,6 +288,7 @@ try {
 
 const status = await haven.getPaymentStatus('approval-or-payment-id')
 if (status.nextAction === AgentPaymentNextAction.RetryOriginalX402Request) {
+  resumeState ??= await haven.getResumeState(status.paymentId)
   const response = await haven.resumeX402Payment(resumeState)
   const data = await response.json()
 }

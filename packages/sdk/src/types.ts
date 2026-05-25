@@ -275,6 +275,8 @@ export interface MppResumeState {
   expiresAt: string
 }
 
+export type PaymentResumeState = X402ResumeState | MppResumeState
+
 export interface ResumeAuthorizedX402Input extends X402AuthorizationOptions {
   /** Payment or approval request ID returned by authorizeX402 / haven.fetch. */
   paymentId: string

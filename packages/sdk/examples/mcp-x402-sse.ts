@@ -11,6 +11,7 @@ const delegateKey = process.env.HAVEN_DELEGATE_KEY
 const baseUrl = process.env.HAVEN_API_URL
 const maxUsd = Number(process.env.MAX_X402_USD ?? '0.05')
 const resumeFile = process.env.HAVEN_X402_RESUME_FILE ?? '.haven-x402-resume.json'
+const resumePaymentId = process.env.HAVEN_RESUME_PAYMENT_ID
 
 if (!mcpUrl) throw new Error('MCP_URL is required')
 if (!apiKey) throw new Error('HAVEN_API_KEY is required')
@@ -70,6 +71,15 @@ function paidToolCallInit(sessionId: string): RequestInit {
   }
 }
 
+function capturedRequest(url: string, init: RequestInit): X402ResumeState['request'] {
+  return {
+    url,
+    method: init.method ?? 'GET',
+    headers: Array.from(new Headers(init.headers).entries()),
+    body: typeof init.body === 'string' ? init.body : undefined,
+  }
+}
+
 async function printResponse(response: Response): Promise<void> {
   console.log('HTTP', response.status, response.statusText)
   console.log(await response.text())
@@ -77,6 +87,21 @@ async function printResponse(response: Response): Promise<void> {
 
 async function resumeFromSavedState(): Promise<void> {
   const state = JSON.parse(await readFile(resumeFile, 'utf8')) as X402ResumeState
+  const response = await haven.resumeX402Payment(state)
+  await printResponse(response)
+}
+
+async function resumeFromPaymentId(paymentId: string): Promise<void> {
+  const state = await haven.getResumeState(paymentId)
+  if (state.rail !== 'x402') {
+    throw new Error(`Payment ${paymentId} is ${state.rail}; this example resumes x402 payments only.`)
+  }
+
+  const sessionId = await initializeMcpSession()
+  const request = paidToolCallInit(sessionId)
+  state.request = capturedRequest(mcpUrl!, request)
+  state.url = state.request.url
+
   const response = await haven.resumeX402Payment(state)
   await printResponse(response)
 }
@@ -106,7 +131,8 @@ async function quoteAndPay(): Promise<void> {
     if (err instanceof HavenPaymentStateError && err.resumeState) {
       await writeFile(resumeFile, JSON.stringify(err.resumeState, null, 2))
       console.error(`Waiting for user approval in Haven. Resume state saved to ${resumeFile}.`)
-      console.error(`After approval, rerun with HAVEN_X402_RESUME=1.`)
+      console.error(`After approval, rerun with HAVEN_RESUME_PAYMENT_ID=${err.resumeState.paymentId}.`)
+      console.error(`The local file fallback is still available with HAVEN_X402_RESUME=1.`)
       return
     }
 
@@ -114,7 +140,9 @@ async function quoteAndPay(): Promise<void> {
   }
 }
 
-if (process.env.HAVEN_X402_RESUME === '1') {
+if (resumePaymentId) {
+  await resumeFromPaymentId(resumePaymentId)
+} else if (process.env.HAVEN_X402_RESUME === '1') {
   await resumeFromSavedState()
 } else {
   await quoteAndPay()

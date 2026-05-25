@@ -13,6 +13,7 @@ import {
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
+import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -437,6 +438,43 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       }
     },
   )
+
+  // ── GET /:id/resume_state — Rehydrate protocol resume state ─────────
+
+  /**
+   * GET /payments/:id/resume_state
+   *
+   * Reconstructs the serializable x402/MPP resume-state bundle for a payment
+   * intent or approval request owned by this agent. This returns stored payment
+   * context only; it never signs, executes, relays, or expands authority.
+   */
+  app.get<{ Params: { id: string } }>('/:id/resume_state', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const { id } = request.params
+    const result = await getAgentPaymentResumeState(agent, id)
+
+    if (!result.status) {
+      return reply.code(404).send({ error: 'Payment or approval request not found' })
+    }
+
+    if (result.status.status === 'expired') {
+      return reply.code(410).send({
+        error: result.error ?? 'Payment approval expired and cannot be resumed',
+        payment_id: result.status.payment_id,
+        status: result.status.status,
+      })
+    }
+
+    if (!result.resumeState) {
+      return reply.code(409).send({
+        error: result.error ?? 'Payment cannot be resumed',
+        payment_id: result.status.payment_id,
+        status: result.status.status,
+      })
+    }
+
+    return reply.send(result.resumeState)
+  })
 
   // ── GET /:id — Payment status ───────────────────────────
 

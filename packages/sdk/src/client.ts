@@ -10,6 +10,7 @@ import type {
   PaymentPhase,
   PaymentNextAction,
   PaymentStatusResult,
+  PaymentResumeState,
   SignData,
   X402AuthorizationOptions,
   RawCreateResponse,
@@ -339,6 +340,16 @@ export class HavenClient {
   async getPaymentStatus(paymentId: string): Promise<PaymentStatusResult> {
     const raw = await this.get<RawPaymentStatusResult>(`/machine-payments/${paymentId}/status`)
     return this.mapPaymentStatusResult(raw)
+  }
+
+  /**
+   * Rehydrate the x402/MPP resume-state bundle for a payment id.
+   *
+   * The server returns stored protocol context only. The client still signs the
+   * merchant proof locally when resumeX402Payment() or resumeMppPayment() runs.
+   */
+  async getResumeState(paymentId: string): Promise<PaymentResumeState> {
+    return this.get<PaymentResumeState>(`/payments/${paymentId}/resume_state`)
   }
 
   /**

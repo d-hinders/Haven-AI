@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, useCallback, type ReactNode } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -100,13 +100,22 @@ function ApprovalCard({
   const actionable = isActionableApprovalStatus(approval.status)
   const status = approvalStatusPresentation(approval.status)
   const [confirmReject, setConfirmReject] = useState(false)
+  const [disclosureOpen, setDisclosureOpen] = useState(false)
+  const toggleDisclosure = useCallback(() => setDisclosureOpen((v) => !v), [])
   const isX402 = approval.source === 'x402'
+  // For x402, prefer merchant_address (the actual recipient) in the resource-URL label.
+  // approvalRecipientLabel already resolves hostname-from-URL; we just make sure the
+  // address tooltip shows the merchant, not the funding leg address (to_address).
+  const x402ResourceUrl = approval.payment_resource_url ?? approval.x402_resource_url
   const recipient = approvalRecipientLabel({
     reason: approval.reason,
     source: approval.source,
-    x402ResourceUrl: approval.x402_resource_url,
-    toAddress: approval.to_address,
+    x402ResourceUrl,
+    toAddress: isX402 && approval.merchant_address ? approval.merchant_address : approval.to_address,
   })
+  // Tooltip address for the Merchant/Recipient detail: prefer merchant_address for x402
+  const recipientTooltipAddress =
+    isX402 && approval.merchant_address ? approval.merchant_address : approval.to_address
   const sourceLabel = approvalSourceLabel({
     reason: approval.reason,
     source: approval.source,
@@ -120,12 +129,29 @@ function ApprovalCard({
     : approval.status === 'approved'
       ? 'Complete payment'
       : 'Approve payment'
+  const merchantLabel = isX402
+    ? approvalRecipientLabel({
+        reason: approval.reason,
+        source: approval.source,
+        x402ResourceUrl,
+        toAddress: approval.merchant_address ?? approval.to_address,
+      })
+    : null
+  // Only name the merchant in headline copy when we have something readable
+  // (a hostname). For an address-only label, dropping the name reads better
+  // than embedding a raw 0x... mid-sentence — the recipient detail row still
+  // shows the address.
+  const hasNamedMerchant = isX402 && merchantLabel && !merchantLabel.startsWith('0x')
   const requestCopy =
     approval.status === 'approved'
-      ? isX402
-        ? 'Approval saved. Complete the payment before the agent can retry the merchant.'
+      ? hasNamedMerchant
+        ? `Approval saved. Complete the payment so ${approval.agent_name} can pay ${merchantLabel}.`
         : `${approval.agent_name} asked to send this payment. It is approved, but has not been sent yet.`
-      : `${approval.agent_name} asked to send this payment. Nothing moves until you approve it.`
+      : hasNamedMerchant
+        ? `${approval.agent_name} wants to pay ${merchantLabel}. Nothing moves until you approve it.`
+        : `${approval.agent_name} asked to send this payment. Nothing moves until you approve it.`
+  // Show "Where does the money go?" only for x402 rows that have a merchant_address
+  const showDisclosure = isX402 && Boolean(approval.merchant_address)
   return (
     <Card
       as="article"
@@ -180,7 +206,7 @@ function ApprovalCard({
               <ApprovalDetail
                 label={sourceLabel ? 'Merchant' : 'Recipient'}
                 value={
-                  <Tooltip label={approval.to_address} mono>
+                  <Tooltip label={recipientTooltipAddress} mono>
                     <span>{recipient}</span>
                   </Tooltip>
                 }
@@ -188,6 +214,67 @@ function ApprovalCard({
             </dl>
           </div>
         </div>
+
+        {showDisclosure ? (
+          <Card.Section className="pt-3 pb-3">
+            <button
+              type="button"
+              className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-1 rounded-sm"
+              aria-expanded={disclosureOpen}
+              onClick={toggleDisclosure}
+            >
+              <svg
+                className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${disclosureOpen ? 'rotate-90' : ''}`}
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Where does the money go?
+            </button>
+            {disclosureOpen ? (
+              <div className="mt-3 space-y-3">
+                <p className="text-xs text-[var(--v2-ink-2)] leading-relaxed">
+                  When you approve, your Haven wallet transfers{' '}
+                  <span className="v2-tabular font-medium text-[var(--v2-ink)]">
+                    {approval.amount_human} {approval.token_symbol}
+                  </span>{' '}
+                  to this agent&apos;s own spending wallet. The agent then pays{' '}
+                  <span className="font-medium text-[var(--v2-ink)]">{merchantLabel}</span>{' '}
+                  directly. The agent only gets to spend within the budget you set — it never
+                  has access to your Haven wallet.
+                </p>
+                <div className="space-y-1.5">
+                  <p className="text-xs text-[var(--v2-ink-3)]">
+                    Agent spending wallet:{' '}
+                    <a
+                      href={getExplorerUrl(approval.chain_id, 'address', approval.to_address)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="v2-tabular font-medium text-[var(--v2-brand)] hover:underline"
+                    >
+                      {approval.to_address.slice(0, 6)}&hellip;{approval.to_address.slice(-4)}{' '}
+                      <span aria-hidden="true">↗</span>
+                    </a>
+                  </p>
+                  <p className="text-xs text-[var(--v2-ink-3)]">
+                    Merchant:{' '}
+                    <a
+                      href={getExplorerUrl(approval.chain_id, 'address', approval.merchant_address!)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="v2-tabular font-medium text-[var(--v2-brand)] hover:underline"
+                    >
+                      {approval.merchant_address!.slice(0, 6)}&hellip;{approval.merchant_address!.slice(-4)}{' '}
+                      <span aria-hidden="true">↗</span>
+                    </a>
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </Card.Section>
+        ) : null}
 
         {showOtherDeviceNotice ? <PasskeyOtherDeviceNotice /> : null}
 
@@ -463,12 +550,16 @@ function ApprovalCardWithContext({
 function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
   const status = approvalStatusPresentation(approval.status)
   const isExecutedX402 = approval.source === 'x402' && approval.status === 'executed'
+  const isX402 = approval.source === 'x402'
+  const x402ResourceUrl = approval.payment_resource_url ?? approval.x402_resource_url
   const recipient = approvalRecipientLabel({
     reason: approval.reason,
     source: approval.source,
-    x402ResourceUrl: approval.x402_resource_url,
-    toAddress: approval.to_address,
+    x402ResourceUrl,
+    toAddress: isX402 && approval.merchant_address ? approval.merchant_address : approval.to_address,
   })
+  const historyTooltipAddress =
+    isX402 && approval.merchant_address ? approval.merchant_address : approval.to_address
 
   return (
     <div className="grid gap-3 border-b border-[var(--v2-border)] px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
@@ -481,7 +572,7 @@ function ApprovalHistoryRow({ approval }: { approval: ApprovalRequest }) {
         </div>
         <p className="mt-1 text-xs text-[var(--v2-ink-2)]">
           {approval.agent_name} to{' '}
-          <Tooltip label={approval.to_address} mono>
+          <Tooltip label={historyTooltipAddress} mono>
             <span>{recipient}</span>
           </Tooltip>
         </p>

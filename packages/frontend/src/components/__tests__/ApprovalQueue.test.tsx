@@ -115,6 +115,9 @@ describe('ApprovalQueue', () => {
           reason: null,
           source: 'direct',
           x402_resource_url: null,
+          merchant_address: null,
+          payment_rail: null,
+          payment_resource_url: null,
           status: 'pending',
           tx_hash: null,
           reviewed_at: null,
@@ -135,6 +138,9 @@ describe('ApprovalQueue', () => {
           reason: 'Payment',
           source: 'direct',
           x402_resource_url: null,
+          merchant_address: null,
+          payment_rail: null,
+          payment_resource_url: null,
           status: 'pending',
           tx_hash: null,
           reviewed_at: null,
@@ -326,9 +332,18 @@ describe('ApprovalQueue', () => {
     render(<ApprovalQueue />)
 
     expect(screen.queryByText('This payment is above the remaining agent budget. Nothing moves until you approve it.')).not.toBeInTheDocument()
-    expect(screen.getByText('Soundside agent asked to send this payment. Nothing moves until you approve it.')).toBeInTheDocument()
-    expect(screen.getByText('Approval saved. Complete the payment before the agent can retry the merchant.')).toBeInTheDocument()
+    // New copy names the merchant (resolved from x402_resource_url hostname) in the pending state
+    expect(screen.getByText('Soundside agent wants to pay mcp.soundside.ai. Nothing moves until you approve it.')).toBeInTheDocument()
+    // Approved state names merchant and agent
+    expect(screen.getByText('Approval saved. Complete the payment so Soundside agent can pay mcp.soundside.ai.')).toBeInTheDocument()
     expect(screen.getAllByText('mcp.soundside.ai').length).toBeGreaterThan(0)
+    // Disclosure toggle MUST NOT render for x402 rows that lack a merchant_address —
+    // the two-legs panel is only meaningful when we know the merchant's settlement
+    // address. Regression guard against someone dropping the `merchant_address` gate
+    // on `showDisclosure`.
+    expect(
+      screen.queryByRole('button', { name: /where does the money go/i }),
+    ).not.toBeInTheDocument()
   })
 
   it('keeps executed x402 approvals user-facing as sent with retry guidance', () => {
@@ -343,6 +358,9 @@ describe('ApprovalQueue', () => {
           source: 'x402',
           x402_resource_url: 'https://mcp.soundside.ai/mcp',
           reason: 'x402 payment for https://mcp.soundside.ai/mcp',
+          merchant_address: null,
+          payment_rail: null,
+          payment_resource_url: null,
           status: 'executed',
           tx_hash: `0x${'ab'.repeat(32)}`,
         },
@@ -354,5 +372,136 @@ describe('ApprovalQueue', () => {
 
     expect(screen.getByText('Sent')).toBeInTheDocument()
     expect(screen.getByText('Return to your agent and ask it to retry the original x402 request.')).toBeInTheDocument()
+  })
+
+  it('x402 two-legs: shows merchant hostname as recipient, hides delegate address by default', () => {
+    const baseHookValue = mockUseApprovals()
+    mockUseApprovals.mockReturnValue({
+      ...baseHookValue,
+      approvals: [
+        {
+          ...baseHookValue.approvals[1],
+          id: 'approval-x402-twoleg',
+          agent_name: 'Payments agent',
+          source: 'x402',
+          // to_address is the delegate (agent spending wallet) — must NOT appear in default card view
+          to_address: '0x1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa',
+          // merchant_address is the actual destination — MUST appear in card
+          merchant_address: '0x2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb',
+          payment_rail: 'x402',
+          payment_resource_url: 'https://api.example.com/resource',
+          x402_resource_url: null,
+          reason: null,
+          status: 'pending',
+        },
+      ],
+      actionableCount: 1,
+    })
+
+    render(<ApprovalQueue />)
+
+    // The Merchant detail should resolve to the hostname of payment_resource_url
+    expect(screen.getAllByText('api.example.com').length).toBeGreaterThan(0)
+
+    // Delegate address must NOT be visible in the default (collapsed) card
+    // (address text is split across nodes so we check textContent directly)
+    expect(document.body.textContent).not.toMatch(/0x1111aaaa/i)
+
+    // Headline copy names the merchant
+    expect(
+      screen.getByText('Payments agent wants to pay api.example.com. Nothing moves until you approve it.'),
+    ).toBeInTheDocument()
+
+    // Forbidden technical jargon must not appear anywhere
+    expect(document.body.textContent).not.toMatch(/Safe(?:\s|$)/i)
+    expect(document.body.textContent).not.toMatch(/AllowanceModule/i)
+    expect(document.body.textContent).not.toMatch(/\bdelegate\b/i)
+    expect(document.body.textContent).not.toMatch(/EIP-3009/i)
+    expect(screen.queryByText(/Haven (will )?pay/i)).toBeNull()
+  })
+
+  it('x402 two-legs: disclosure reveals both addresses with explorer links', async () => {
+    const baseHookValue = mockUseApprovals()
+    mockUseApprovals.mockReturnValue({
+      ...baseHookValue,
+      approvals: [
+        {
+          ...baseHookValue.approvals[1],
+          id: 'approval-x402-twoleg-disc',
+          agent_name: 'Payments agent',
+          source: 'x402',
+          to_address: '0x1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa',
+          merchant_address: '0x2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb',
+          payment_rail: 'x402',
+          payment_resource_url: 'https://api.example.com/resource',
+          x402_resource_url: null,
+          reason: null,
+          status: 'pending',
+        },
+      ],
+      actionableCount: 1,
+    })
+
+    render(<ApprovalQueue />)
+
+    // "Where does the money go?" toggle must be present for two-legs x402
+    const toggle = screen.getByRole('button', { name: /where does the money go/i })
+    expect(toggle).toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    // Delegate address absent before expansion
+    expect(document.body.textContent).not.toMatch(/0x1111aaaa/i)
+
+    // Click to expand
+    fireEvent.click(toggle)
+
+    await waitFor(() => {
+      expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    // Both addresses visible in disclosure — address renders as split text nodes inside <a>
+    // so we search the full body textContent for the prefix + suffix patterns
+    expect(document.body.textContent).toMatch(/0x1111.*aaaa/i)
+    expect(document.body.textContent).toMatch(/0x2222.*bbbb/i)
+
+    // Explorer links present for each address (getExplorerUrl mock returns 'https://example.com/tx')
+    const links = screen.getAllByRole('link')
+    const explorerLinks = links.filter((l) => l.getAttribute('href')?.includes('example.com/tx'))
+    expect(explorerLinks.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('x402 two-legs: approved state copy names merchant correctly', () => {
+    const baseHookValue = mockUseApprovals()
+    mockUseApprovals.mockReturnValue({
+      ...baseHookValue,
+      approvals: [
+        {
+          ...baseHookValue.approvals[1],
+          id: 'approval-x402-twoleg-approved',
+          agent_name: 'Payments agent',
+          source: 'x402',
+          to_address: '0x1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa',
+          merchant_address: '0x2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb',
+          payment_rail: 'x402',
+          payment_resource_url: 'https://api.example.com/resource',
+          x402_resource_url: null,
+          reason: null,
+          status: 'approved',
+        },
+      ],
+      actionableCount: 1,
+    })
+
+    render(<ApprovalQueue />)
+
+    expect(
+      screen.getByText('Approval saved. Complete the payment so Payments agent can pay api.example.com.'),
+    ).toBeInTheDocument()
+  })
+
+  it('non-x402 approval renders without the disclosure toggle', () => {
+    // The base fixtures are both `source: 'direct'` — no "Where does the money go?" toggle
+    render(<ApprovalQueue />)
+    expect(screen.queryByRole('button', { name: /where does the money go/i })).not.toBeInTheDocument()
   })
 })

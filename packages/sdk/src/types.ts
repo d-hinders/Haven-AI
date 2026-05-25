@@ -308,27 +308,130 @@ export interface MachinePaymentReceipt {
 
 export type PaymentStateKind = 'payment_intent' | 'approval_request'
 
-export type PaymentPhase =
-  | 'agent_signature_required'
-  | 'payment_submitted'
-  | 'payment_confirmed'
-  | 'user_approval_required'
-  | 'user_execution_required'
-  | 'waiting_for_additional_approvals'
-  | 'funding_sent'
-  | 'rejected'
-  | 'expired'
-  | 'failed'
+export interface AgentPaymentEnumSchema {
+  type: 'string'
+  enum: readonly string[]
+  description: string
+  'x-enumDescriptions': Record<string, string>
+}
 
-export type PaymentNextAction =
-  | 'sign_and_submit_payment'
-  | 'check_status_later'
-  | 'none'
-  | 'wait_for_user_approval'
-  | 'wait_for_user_to_complete_payment'
-  | 'retry_original_x402_request'
-  | 'stop_and_tell_user'
-  | 'request_again_if_user_still_wants_it'
+export const AgentPaymentPhase = {
+  /** The agent must sign and submit the prepared payment before Haven can relay it. */
+  AgentSignatureRequired: 'agent_signature_required',
+  /** Haven has received the signed payment and the agent should poll for confirmation. */
+  PaymentSubmitted: 'payment_submitted',
+  /** The direct payment is confirmed; the agent does not need to do more for this payment id. */
+  PaymentConfirmed: 'payment_confirmed',
+  /** The payment needs wallet owner approval in Haven before it can continue. */
+  UserApprovalRequired: 'user_approval_required',
+  /** The wallet owner approved the request and still needs to complete the funding payment. */
+  UserExecutionRequired: 'user_execution_required',
+  /** The funding payment was proposed and is waiting for the remaining account approvals. */
+  WaitingForAdditionalApprovals: 'waiting_for_additional_approvals',
+  /** The Haven funding leg was sent; the agent can continue the merchant/protocol leg. */
+  FundingSent: 'funding_sent',
+  /** The wallet owner rejected the request; the agent should stop and tell the user. */
+  Rejected: 'rejected',
+  /** The payment or approval request expired before completion. */
+  Expired: 'expired',
+  /** Haven could not complete the payment; the agent should stop and surface the failure. */
+  Failed: 'failed',
+} as const
+
+export type AgentPaymentPhase = (typeof AgentPaymentPhase)[keyof typeof AgentPaymentPhase]
+
+export const AgentPaymentNextAction = {
+  /** Sign with the delegate key and submit the payment to Haven. */
+  SignAndSubmitPayment: 'sign_and_submit_payment',
+  /** Poll getPaymentStatus later using this payment id. */
+  CheckStatusLater: 'check_status_later',
+  /** No further agent action is required for this payment id. */
+  None: 'none',
+  /** Wait for the wallet owner to approve or reject the request in Haven. */
+  WaitForUserApproval: 'wait_for_user_approval',
+  /** Wait for the wallet owner to finish sending the approved funding payment. */
+  WaitForUserToCompletePayment: 'wait_for_user_to_complete_payment',
+  /** Resume this payment id and retry the original x402 request with the merchant payment header. */
+  RetryOriginalX402Request: 'retry_original_x402_request',
+  /** Stop retrying this payment and tell the user what happened. */
+  StopAndTellUser: 'stop_and_tell_user',
+  /** Ask again only if the user still wants the payment after expiry. */
+  RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
+} as const
+
+export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
+
+export const AgentPaymentRail = {
+  /** Standard Haven payment from the user's Safe through an approved delegate allowance. */
+  Direct: 'direct',
+  /** x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg. */
+  X402: 'x402',
+  /** Machine Payment Protocol flow. */
+  Mpp: 'mpp',
+} as const
+
+export type AgentPaymentRail = (typeof AgentPaymentRail)[keyof typeof AgentPaymentRail]
+
+export type PaymentPhase = AgentPaymentPhase
+
+export type PaymentNextAction = AgentPaymentNextAction
+
+export const AGENT_PAYMENT_PHASE_VALUES = Object.values(AgentPaymentPhase)
+
+export const AGENT_PAYMENT_NEXT_ACTION_VALUES = Object.values(AgentPaymentNextAction)
+
+export const AGENT_PAYMENT_RAIL_VALUES = Object.values(AgentPaymentRail)
+
+export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = {
+  [AgentPaymentPhase.AgentSignatureRequired]: 'The agent must sign and submit the prepared payment before Haven can relay it.',
+  [AgentPaymentPhase.PaymentSubmitted]: 'Haven has received the signed payment and the agent should poll for confirmation.',
+  [AgentPaymentPhase.PaymentConfirmed]: 'The direct payment is confirmed; the agent does not need to do more for this payment id.',
+  [AgentPaymentPhase.UserApprovalRequired]: 'The payment needs wallet owner approval in Haven before it can continue.',
+  [AgentPaymentPhase.UserExecutionRequired]: 'The wallet owner approved the request and still needs to complete the funding payment.',
+  [AgentPaymentPhase.WaitingForAdditionalApprovals]: 'The funding payment was proposed and is waiting for the remaining account approvals.',
+  [AgentPaymentPhase.FundingSent]: 'The Haven funding leg was sent; the agent can continue the merchant/protocol leg.',
+  [AgentPaymentPhase.Rejected]: 'The wallet owner rejected the request; the agent should stop and tell the user.',
+  [AgentPaymentPhase.Expired]: 'The payment or approval request expired before completion.',
+  [AgentPaymentPhase.Failed]: 'Haven could not complete the payment; the agent should stop and surface the failure.',
+}
+
+export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, string> = {
+  [AgentPaymentNextAction.SignAndSubmitPayment]: 'Sign with the delegate key and submit the payment to Haven.',
+  [AgentPaymentNextAction.CheckStatusLater]: 'Poll getPaymentStatus later using this payment id.',
+  [AgentPaymentNextAction.None]: 'No further agent action is required for this payment id.',
+  [AgentPaymentNextAction.WaitForUserApproval]: 'Wait for the wallet owner to approve or reject the request in Haven.',
+  [AgentPaymentNextAction.WaitForUserToCompletePayment]: 'Wait for the wallet owner to finish sending the approved funding payment.',
+  [AgentPaymentNextAction.RetryOriginalX402Request]: 'Resume this payment id and retry the original x402 request with the merchant payment header.',
+  [AgentPaymentNextAction.StopAndTellUser]: 'Stop retrying this payment and tell the user what happened.',
+  [AgentPaymentNextAction.RequestAgainIfUserStillWantsIt]: 'Ask again only if the user still wants the payment after expiry.',
+}
+
+export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
+  [AgentPaymentRail.Direct]: 'Standard Haven payment from the user-controlled Safe through an approved delegate allowance.',
+  [AgentPaymentRail.X402]: 'x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg.',
+  [AgentPaymentRail.Mpp]: 'Machine Payment Protocol flow.',
+}
+
+export const AgentPaymentPhaseSchema: AgentPaymentEnumSchema = {
+  type: 'string',
+  enum: AGENT_PAYMENT_PHASE_VALUES,
+  description: 'Stable Haven agent payment state phase.',
+  'x-enumDescriptions': AgentPaymentPhaseDescriptions,
+}
+
+export const AgentPaymentNextActionSchema: AgentPaymentEnumSchema = {
+  type: 'string',
+  enum: AGENT_PAYMENT_NEXT_ACTION_VALUES,
+  description: 'Stable next action an agent should take for a Haven payment state.',
+  'x-enumDescriptions': AgentPaymentNextActionDescriptions,
+}
+
+export const AgentPaymentRailSchema: AgentPaymentEnumSchema = {
+  type: 'string',
+  enum: AGENT_PAYMENT_RAIL_VALUES,
+  description: 'Stable rail identifier for Haven agent payment states.',
+  'x-enumDescriptions': AgentPaymentRailDescriptions,
+}
 
 export interface PaymentStatusResult {
   paymentId: string
@@ -364,8 +467,8 @@ export interface PaymentStatusResult {
 export interface PendingApproval extends PaymentStatusResult {
   kind: 'approval_request'
   status: 'pending_approval' | 'pending' | string
-  phase: 'user_approval_required'
-  nextAction: 'wait_for_user_approval'
+  phase: typeof AgentPaymentPhase.UserApprovalRequired
+  nextAction: typeof AgentPaymentNextAction.WaitForUserApproval
   requested?: string
   remaining?: string | null
 }

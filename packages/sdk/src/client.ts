@@ -30,6 +30,8 @@ import type {
   RawMachinePaymentAuthorizeResponse,
 } from './types.js'
 import {
+  AgentPaymentNextAction,
+  AgentPaymentPhase,
   HavenApiError,
   HavenPaymentStateError,
   HavenSigningError,
@@ -93,30 +95,30 @@ function chainIdOrNull(network: string | undefined): number | null {
 }
 
 function phaseForStatus(status: string): PaymentPhase | null {
-  if (status === 'pending_signature') return 'agent_signature_required'
-  if (status === 'submitted') return 'payment_submitted'
-  if (status === 'confirmed') return 'payment_confirmed'
-  if (status === 'pending' || status === 'pending_approval') return 'user_approval_required'
-  if (status === 'approved') return 'user_execution_required'
-  if (status === 'proposed') return 'waiting_for_additional_approvals'
-  if (status === 'executed') return 'funding_sent'
-  if (status === 'rejected') return 'rejected'
-  if (status === 'expired') return 'expired'
-  if (status === 'failed') return 'failed'
+  if (status === 'pending_signature') return AgentPaymentPhase.AgentSignatureRequired
+  if (status === 'submitted') return AgentPaymentPhase.PaymentSubmitted
+  if (status === 'confirmed') return AgentPaymentPhase.PaymentConfirmed
+  if (status === 'pending' || status === 'pending_approval') return AgentPaymentPhase.UserApprovalRequired
+  if (status === 'approved') return AgentPaymentPhase.UserExecutionRequired
+  if (status === 'proposed') return AgentPaymentPhase.WaitingForAdditionalApprovals
+  if (status === 'executed') return AgentPaymentPhase.FundingSent
+  if (status === 'rejected') return AgentPaymentPhase.Rejected
+  if (status === 'expired') return AgentPaymentPhase.Expired
+  if (status === 'failed') return AgentPaymentPhase.Failed
   return null
 }
 
 function nextActionForStatus(status: string): PaymentNextAction | null {
-  if (status === 'pending_signature') return 'sign_and_submit_payment'
-  if (status === 'submitted') return 'check_status_later'
-  if (status === 'confirmed') return 'none'
-  if (status === 'pending' || status === 'pending_approval') return 'wait_for_user_approval'
-  if (status === 'approved') return 'wait_for_user_to_complete_payment'
-  if (status === 'proposed') return 'wait_for_user_approval'
-  if (status === 'executed') return 'retry_original_x402_request'
-  if (status === 'rejected') return 'stop_and_tell_user'
-  if (status === 'expired') return 'request_again_if_user_still_wants_it'
-  if (status === 'failed') return 'stop_and_tell_user'
+  if (status === 'pending_signature') return AgentPaymentNextAction.SignAndSubmitPayment
+  if (status === 'submitted') return AgentPaymentNextAction.CheckStatusLater
+  if (status === 'confirmed') return AgentPaymentNextAction.None
+  if (status === 'pending' || status === 'pending_approval') return AgentPaymentNextAction.WaitForUserApproval
+  if (status === 'approved') return AgentPaymentNextAction.WaitForUserToCompletePayment
+  if (status === 'proposed') return AgentPaymentNextAction.WaitForUserApproval
+  if (status === 'executed') return AgentPaymentNextAction.RetryOriginalX402Request
+  if (status === 'rejected') return AgentPaymentNextAction.StopAndTellUser
+  if (status === 'expired') return AgentPaymentNextAction.RequestAgainIfUserStillWantsIt
+  if (status === 'failed') return AgentPaymentNextAction.StopAndTellUser
   return null
 }
 
@@ -495,7 +497,7 @@ export class HavenClient {
     }
 
     const state = this.paymentStateFromRaw('x402 payment', raw)
-    if (state?.nextAction === 'retry_original_x402_request') {
+    if (state?.nextAction === AgentPaymentNextAction.RetryOriginalX402Request) {
       const receipt = this.mapX402ReceiptFromStatus(paymentRequired, option, paymentHeader, state)
       this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
       return receipt
@@ -859,7 +861,7 @@ export class HavenClient {
       )
     }
 
-    if (status.nextAction !== 'retry_original_x402_request') {
+    if (status.nextAction !== AgentPaymentNextAction.RetryOriginalX402Request) {
       throw new HavenPaymentStateError(status.message, PAYMENT_STATE_STATUS_CODES[status.status] ?? 409, status)
     }
 

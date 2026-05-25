@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
+import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../lib/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
@@ -104,10 +105,10 @@ function pendingApprovalResponse(
   return {
     payment_id: approval.id,
     kind: 'approval_request',
-    rail: 'x402',
+    rail: AgentPaymentRail.X402,
     status: 'pending_approval',
-    phase: 'user_approval_required',
-    next_action: 'wait_for_user_approval',
+    phase: AgentPaymentPhase.UserApprovalRequired,
+    next_action: AgentPaymentNextAction.WaitForUserApproval,
     message:
       `This x402 funding payment of ${approval.amount_human} ${approval.token_symbol} is waiting for user approval in Haven. ` +
       'Do not start a new merchant session or create another payment; poll this payment id and resume the original x402 request after approval.',

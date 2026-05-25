@@ -28,6 +28,7 @@ import x402ResourceRoutes from './routes/x402-resources.js'
 import demoX402Routes from './routes/demo-x402.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import demoMppRoutes from './routes/demo-mpp.js'
+import openapiRoutes from './routes/openapi.js'
 import pool from './db.js'
 
 const app = Fastify({
@@ -82,6 +83,8 @@ await app.register(cors, {
 await app.register(fastifyJwt, {
   secret: config.jwtSecret,
 })
+
+await app.register(openapiRoutes)
 
 // --- Routes ---
 app.get('/health', async (_request, reply) => {

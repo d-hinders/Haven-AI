@@ -104,6 +104,39 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     return { agents }
   })
 
+  // GET /agents/:id — fetch one agent with its on-chain allowance config
+  app.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const { id } = request.params
+
+    const agentResult = await pool.query<AgentRow>(
+      `SELECT a.id, a.name, a.description, a.delegate_address,
+              a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
+              a.api_key_prefix, a.status, a.created_at
+       FROM agents a
+       LEFT JOIN user_safes us ON a.safe_id = us.id
+       WHERE a.user_id = $1 AND a.id = $2
+       LIMIT 1`,
+      [sub, id],
+    )
+
+    const agent = agentResult.rows[0]
+    if (!agent) {
+      return reply.code(404).send({ error: 'Agent not found' })
+    }
+
+    const allowanceResult = await pool.query<AllowanceRow>(
+      `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
+       FROM agent_allowances WHERE agent_id = $1 ORDER BY created_at ASC`,
+      [id],
+    )
+
+    return {
+      ...agent,
+      allowances: allowanceResult.rows,
+    }
+  })
+
   // POST /agents — create agent with delegate address and on-chain allowance config
   app.post<{ Body: CreateAgentBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }

@@ -132,6 +132,18 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
 
+      - name: Upload frontend build
+        if: needs.changes.outputs.frontend == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-next-build
+          path: |
+            packages/frontend/.next/standalone
+            packages/frontend/.next/static
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
   browser_smoke:
     name: Frontend browser smoke
     needs: [changes, code_checks]
@@ -150,11 +162,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build -w packages/frontend
-        env:
-          NEXT_TELEMETRY_DISABLED: 1
-          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-next-build
+          path: packages/frontend/.next
 
       - name: Restore Playwright browser cache
         uses: actions/cache@v4

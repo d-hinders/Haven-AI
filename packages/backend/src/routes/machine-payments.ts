@@ -10,6 +10,7 @@ import {
   attachMachinePaymentEvidence,
   type MachinePaymentEvidenceRow,
 } from '../lib/machine-payment-evidence.js'
+import { getTokenAllowance, computeEffectiveAllowance } from '../lib/allowance-module.js'
 
 interface MachinePaymentChallengeBody {
   rail: MachinePaymentRail
@@ -63,6 +64,14 @@ interface EvidenceBody {
   protocolReceiptHeaderName?: string
   protocolReceiptHeader?: string
   protocolReceiptPayload?: Record<string, unknown>
+}
+
+interface AgentAllowanceRow {
+  id: string
+  token_address: string
+  token_symbol: string
+  allowance_amount: string
+  reset_period_min: number
 }
 
 interface ReconciliationPaymentRow {
@@ -145,6 +154,96 @@ function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): strin
 
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', agentAuthMiddleware)
+
+  app.get('/agent', async (request) => {
+    const agent = request.agent as AgentContext
+
+    return {
+      id: agent.id,
+      name: agent.name,
+      status: agent.status,
+      safe_address: agent.safe_address,
+      delegate_address: agent.delegate_address,
+      chain_id: agent.chain_id,
+    }
+  })
+
+  app.get('/allowances', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const result = await pool.query<AgentAllowanceRow>(
+      `SELECT id, token_address, token_symbol, allowance_amount, reset_period_min
+       FROM agent_allowances
+       WHERE agent_id = $1
+       ORDER BY created_at ASC`,
+      [agent.id],
+    )
+
+    const allowances = []
+    for (const row of result.rows) {
+      try {
+        const onchain = await getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          row.token_address,
+        )
+        const effective = computeEffectiveAllowance(onchain)
+
+        allowances.push({
+          id: row.id,
+          token_address: row.token_address,
+          token_symbol: row.token_symbol,
+          configured_amount: row.allowance_amount,
+          reset_period_min: row.reset_period_min,
+          onchain: {
+            amount: onchain.amount.toString(),
+            spent: onchain.spent.toString(),
+            remaining: effective.remaining.toString(),
+            effective_spent: effective.effectiveSpent.toString(),
+            reset_time_min: onchain.resetTimeMin,
+            last_reset_min: onchain.lastResetMin,
+            nonce: onchain.nonce,
+            is_reset_pending: effective.isResetPending,
+          },
+        })
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'Failed to read on-chain allowance',
+          token_address: row.token_address,
+          details: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+
+    return {
+      agent_id: agent.id,
+      safe_address: agent.safe_address,
+      delegate_address: agent.delegate_address,
+      chain_id: agent.chain_id,
+      allowances,
+    }
+  })
+
+  app.get<{ Querystring: { limit?: string } }>('/receipts', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const parsedLimit = request.query.limit ? Number(request.query.limit) : 25
+    const limit = Number.isInteger(parsedLimit)
+      ? Math.min(Math.max(parsedLimit, 1), 100)
+      : 25
+
+    const result = await pool.query<MachinePaymentEvidenceRow>(
+      `SELECT *
+       FROM machine_payment_evidence
+       WHERE agent_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [agent.id, limit],
+    )
+
+    return reply.send({
+      receipts: result.rows.map(mapEvidence),
+    })
+  })
 
   app.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {
     const agent = request.agent as AgentContext

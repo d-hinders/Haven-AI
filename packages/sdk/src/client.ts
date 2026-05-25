@@ -34,6 +34,13 @@ import type {
   MachinePaymentChallenge,
   MachinePaymentReceipt,
   RawMachinePaymentAuthorizeResponse,
+  HavenAgent,
+  HavenAllowanceSummary,
+  HavenPaymentReceipt,
+  RawHavenAgent,
+  RawHavenAllowanceSummary,
+  RawHavenPaymentReceiptsResponse,
+  RawHavenPaymentReceipt,
 } from './types.js'
 import {
   AgentPaymentNextAction,
@@ -340,6 +347,60 @@ export class HavenClient {
   async getPaymentStatus(paymentId: string): Promise<PaymentStatusResult> {
     const raw = await this.get<RawPaymentStatusResult>(`/machine-payments/${paymentId}/status`)
     return this.mapPaymentStatusResult(raw)
+  }
+
+  /**
+   * Get the agent identity tied to this API key.
+   */
+  async getAgent(): Promise<HavenAgent> {
+    const raw = await this.get<RawHavenAgent>('/machine-payments/agent')
+    return {
+      id: raw.id,
+      name: raw.name,
+      status: raw.status,
+      safeAddress: raw.safe_address,
+      delegateAddress: raw.delegate_address,
+      chainId: raw.chain_id,
+    }
+  }
+
+  /**
+   * Get configured and on-chain allowances for the authenticated agent.
+   */
+  async getAllowances(): Promise<HavenAllowanceSummary> {
+    const raw = await this.get<RawHavenAllowanceSummary>('/machine-payments/allowances')
+    return {
+      agentId: raw.agent_id,
+      safeAddress: raw.safe_address,
+      delegateAddress: raw.delegate_address,
+      chainId: raw.chain_id,
+      allowances: raw.allowances.map((allowance) => ({
+        id: allowance.id,
+        tokenAddress: allowance.token_address,
+        tokenSymbol: allowance.token_symbol,
+        configuredAmount: allowance.configured_amount,
+        resetPeriodMin: allowance.reset_period_min,
+        onchain: {
+          amount: allowance.onchain.amount,
+          spent: allowance.onchain.spent,
+          remaining: allowance.onchain.remaining,
+          effectiveSpent: allowance.onchain.effective_spent,
+          resetTimeMin: allowance.onchain.reset_time_min,
+          lastResetMin: allowance.onchain.last_reset_min,
+          nonce: allowance.onchain.nonce,
+          isResetPending: allowance.onchain.is_reset_pending,
+        },
+      })),
+    }
+  }
+
+  /**
+   * List recent machine-payment receipts/evidence for bookkeeping.
+   */
+  async listReceipts(options: { limit?: number } = {}): Promise<HavenPaymentReceipt[]> {
+    const query = options.limit ? `?limit=${encodeURIComponent(String(options.limit))}` : ''
+    const raw = await this.get<RawHavenPaymentReceiptsResponse>(`/machine-payments/receipts${query}`)
+    return raw.receipts.map((receipt) => this.mapPaymentReceipt(receipt))
   }
 
   /**
@@ -2128,6 +2189,36 @@ export class HavenClient {
             idempotencyKey: raw.x402.idempotency_key ?? raw.idempotency_key ?? null,
           }
         : undefined,
+    }
+  }
+
+  private mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentReceipt {
+    return {
+      id: raw.id,
+      paymentId: raw.payment_id,
+      rail: raw.rail,
+      proofStatus: raw.proof_status,
+      txHash: raw.tx_hash,
+      chainId: raw.chain_id,
+      resourceUrl: raw.resource_url,
+      merchantAddress: raw.merchant_address,
+      payerAddress: raw.payer_address,
+      settlementAddress: raw.settlement_address,
+      tokenSymbol: raw.token_symbol,
+      tokenAddress: raw.token_address,
+      amountRaw: raw.amount_raw,
+      amount: raw.amount_human,
+      challengeId: raw.challenge_id,
+      idempotencyKey: raw.idempotency_key,
+      challengePayload: raw.challenge_payload,
+      selectedPayment: raw.selected_payment,
+      paymentProofHeaderName: raw.payment_proof_header_name,
+      protocolReceiptHeaderName: raw.protocol_receipt_header_name,
+      protocolReceiptPayload: raw.protocol_receipt_payload,
+      merchantStatus: raw.merchant_status,
+      confirmedAt: raw.confirmed_at,
+      createdAt: raw.created_at,
+      updatedAt: raw.updated_at,
     }
   }
 }

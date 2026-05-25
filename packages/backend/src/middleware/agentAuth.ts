@@ -11,6 +11,7 @@ export interface AgentContext {
   delegate_address: string
   safe_address: string
   chain_id: number
+  status: string
 }
 
 // Extend Fastify request
@@ -109,5 +110,6 @@ export async function agentAuthMiddleware(
     delegate_address: row.delegate_address,
     safe_address: row.safe_address,
     chain_id: row.chain_id,
+    status: row.status,
   }
 }

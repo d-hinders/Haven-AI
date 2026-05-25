@@ -376,6 +376,69 @@ export interface MachinePaymentReceipt {
   proofHeader: string
 }
 
+export interface HavenAgent {
+  id: string
+  name: string
+  status: string
+  safeAddress: string
+  delegateAddress: string
+  chainId: number
+}
+
+export interface HavenAllowance {
+  id: string
+  tokenAddress: string
+  tokenSymbol: string
+  configuredAmount: string
+  resetPeriodMin: number
+  onchain: {
+    amount: string
+    spent: string
+    remaining: string
+    effectiveSpent: string
+    resetTimeMin: number
+    lastResetMin: number
+    nonce: number
+    isResetPending: boolean
+  }
+}
+
+export interface HavenAllowanceSummary {
+  agentId: string
+  safeAddress: string
+  delegateAddress: string
+  chainId: number
+  allowances: HavenAllowance[]
+}
+
+export interface HavenPaymentReceipt {
+  id: string
+  paymentId: string
+  rail: string
+  proofStatus: string
+  txHash: string
+  chainId: number
+  resourceUrl: string
+  merchantAddress: string | null
+  payerAddress: string
+  settlementAddress: string
+  tokenSymbol: string
+  tokenAddress: string
+  amountRaw: string
+  amount: string
+  challengeId: string | null
+  idempotencyKey: string | null
+  challengePayload?: Record<string, unknown> | null
+  selectedPayment?: Record<string, unknown> | null
+  paymentProofHeaderName: string | null
+  protocolReceiptHeaderName: string | null
+  protocolReceiptPayload?: Record<string, unknown> | null
+  merchantStatus: number | null
+  confirmedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 // ── Agent Payment State Types ────────────────────────────────────
 
 export type PaymentStateKind = 'payment_intent' | 'approval_request'
@@ -755,6 +818,78 @@ export interface RawPaymentStatusResult {
   idempotency_key?: string | null
   x402?: RawX402StateContext
   mpp?: RawMppStateContext
+}
+
+/** @internal */
+export interface RawHavenAgent {
+  id: string
+  name: string
+  status: string
+  safe_address: string
+  delegate_address: string
+  chain_id: number
+}
+
+/** @internal */
+export interface RawHavenAllowance {
+  id: string
+  token_address: string
+  token_symbol: string
+  configured_amount: string
+  reset_period_min: number
+  onchain: {
+    amount: string
+    spent: string
+    remaining: string
+    effective_spent: string
+    reset_time_min: number
+    last_reset_min: number
+    nonce: number
+    is_reset_pending: boolean
+  }
+}
+
+/** @internal */
+export interface RawHavenAllowanceSummary {
+  agent_id: string
+  safe_address: string
+  delegate_address: string
+  chain_id: number
+  allowances: RawHavenAllowance[]
+}
+
+/** @internal */
+export interface RawHavenPaymentReceipt {
+  id: string
+  payment_id: string
+  rail: string
+  proof_status: string
+  tx_hash: string
+  chain_id: number
+  resource_url: string
+  merchant_address: string | null
+  payer_address: string
+  settlement_address: string
+  token_symbol: string
+  token_address: string
+  amount_raw: string
+  amount_human: string
+  challenge_id: string | null
+  idempotency_key: string | null
+  challenge_payload?: Record<string, unknown> | null
+  selected_payment?: Record<string, unknown> | null
+  payment_proof_header_name: string | null
+  protocol_receipt_header_name: string | null
+  protocol_receipt_payload?: Record<string, unknown> | null
+  merchant_status: number | null
+  confirmed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** @internal */
+export interface RawHavenPaymentReceiptsResponse {
+  receipts: RawHavenPaymentReceipt[]
 }
 
 /** @internal */

@@ -47,6 +47,10 @@ export type {
   MachinePaymentRail,
   MachinePaymentChallenge,
   MachinePaymentReceipt,
+  HavenAgent,
+  HavenAllowance,
+  HavenAllowanceSummary,
+  HavenPaymentReceipt,
 } from './types.js'
 
 export type { ClaudeTool, OpenAITool } from './tools.js'

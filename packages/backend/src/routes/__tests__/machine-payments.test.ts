@@ -133,6 +133,166 @@ describe('machine payment routes', () => {
     }
   }
 
+  it('returns the authenticated agent identity for MCP clients', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      id: AGENT.id,
+      name: AGENT.name,
+      status: AGENT.status,
+      safe_address: AGENT.safe_address,
+      delegate_address: AGENT.delegate_address,
+      chain_id: AGENT.chain_id,
+    })
+  })
+
+  it('returns configured allowances with on-chain remaining spend', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+      amount: 10000n,
+      spent: 2500n,
+      resetTimeMin: 60,
+      lastResetMin: 100,
+      nonce: 7,
+    })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
+      remaining: 7500n,
+      effectiveSpent: 2500n,
+      isResetPending: false,
+    })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'allowance-1',
+          token_address: USDC,
+          token_symbol: 'USDC',
+          allowance_amount: '10000',
+          reset_period_min: 60,
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/allowances',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      agent_id: AGENT.id,
+      safe_address: AGENT.safe_address,
+      delegate_address: AGENT.delegate_address,
+      chain_id: AGENT.chain_id,
+      allowances: [{
+        id: 'allowance-1',
+        token_address: USDC,
+        token_symbol: 'USDC',
+        configured_amount: '10000',
+        reset_period_min: 60,
+        onchain: {
+          amount: '10000',
+          spent: '2500',
+          remaining: '7500',
+          effective_spent: '2500',
+          reset_time_min: 60,
+          last_reset_min: 100,
+          nonce: 7,
+          is_reset_pending: false,
+        },
+      }],
+    })
+    expect(allowanceMocks.getTokenAllowance).toHaveBeenCalledWith(
+      AGENT.chain_id,
+      AGENT.safe_address,
+      AGENT.delegate_address,
+      USDC,
+    )
+  })
+
+  it('lists recent receipts without returning payment proof headers', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'evidence-1',
+          payment_intent_id: PAYMENT_ID,
+          agent_id: AGENT.id,
+          user_id: AGENT.user_id,
+          rail: 'mpp_demo',
+          proof_status: 'payment_confirmed',
+          tx_hash: TX_HASH,
+          chain_id: 8453,
+          resource_url: challenge.resource,
+          merchant_address: RECIPIENT.toLowerCase(),
+          payer_address: AGENT.safe_address.toLowerCase(),
+          settlement_address: RECIPIENT.toLowerCase(),
+          token_symbol: 'USDC',
+          token_address: USDC,
+          amount_raw: '10000',
+          amount_human: '0.01',
+          challenge_id: challenge.challengeId,
+          idempotency_key: 'mpp_demo:test',
+          challenge_payload: { rail: 'mpp_demo' },
+          selected_payment: null,
+          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+          payment_proof_header: 'secret-proof-header',
+          protocol_receipt_header_name: 'Payment-Receipt',
+          protocol_receipt_header: 'receipt-header',
+          protocol_receipt_payload: { ok: true },
+          merchant_status: 200,
+          confirmed_at: '2026-05-15T12:00:00.000Z',
+          created_at: '2026-05-15T12:00:01.000Z',
+          updated_at: '2026-05-15T12:00:01.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=10',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      receipts: [{
+        id: 'evidence-1',
+        payment_id: PAYMENT_ID,
+        rail: 'mpp_demo',
+        proof_status: 'payment_confirmed',
+        tx_hash: TX_HASH,
+        chain_id: 8453,
+        resource_url: challenge.resource,
+        merchant_address: RECIPIENT.toLowerCase(),
+        payer_address: AGENT.safe_address.toLowerCase(),
+        settlement_address: RECIPIENT.toLowerCase(),
+        token_symbol: 'USDC',
+        token_address: USDC,
+        amount_raw: '10000',
+        amount_human: '0.01',
+        challenge_id: challenge.challengeId,
+        idempotency_key: 'mpp_demo:test',
+        challenge_payload: { rail: 'mpp_demo' },
+        selected_payment: null,
+        payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+        protocol_receipt_header_name: 'Payment-Receipt',
+        protocol_receipt_payload: { ok: true },
+        merchant_status: 200,
+        confirmed_at: '2026-05-15T12:00:00.000Z',
+        created_at: '2026-05-15T12:00:01.000Z',
+        updated_at: '2026-05-15T12:00:01.000Z',
+      }],
+    })
+    expect(JSON.stringify(response.json())).not.toContain('secret-proof-header')
+  })
+
   it('creates an MPP demo payment intent with generic rail metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })

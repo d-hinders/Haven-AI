@@ -1,0 +1,51 @@
+{
+  "name": "@haven_ai/mcp",
+  "version": "0.1.0-alpha",
+  "description": "Haven MCP server for local, non-custodial agent payments",
+  "type": "module",
+  "bin": {
+    "haven-mcp": "./dist/cli.js"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm --prefix ../sdk run build && tsup",
+    "test": "npm --prefix ../sdk run build && vitest run",
+    "typecheck": "npm --prefix ../sdk run build && tsc --noEmit"
+  },
+  "keywords": [
+    "haven",
+    "mcp",
+    "agent",
+    "payments",
+    "x402"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@haven_ai/sdk": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}

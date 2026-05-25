@@ -6,7 +6,7 @@ The captain is the main interactive session. It owns product judgment, git, shar
 
 ## Default Delegation Policy
 
-The captain decides whether the agentic flow is useful from the work itself. The user does not need to explicitly ask for agents, workers, subagents, or parallel delivery on every request.
+The captain decides whether the agentic flow is useful from the work itself. This document is the user's standing instruction to use subagents, delegated workers, and parallel delivery whenever the captain decides that is the best workflow. The user does not need to explicitly ask for agents, workers, subagents, or parallel delivery on every request.
 
 For non-trivial feature delivery, UX feedback iteration, and bug fixing, use `haven-workflow-coordinator` by default before other agents. If the coordinator recommends explorer, worker, or reviewer agents, apply that plan without asking for another permission step. Inform the user briefly which agents are being used, what stays with the captain, and what checks are expected.
 

@@ -3,7 +3,7 @@
 Minimal non-TypeScript x402 proof of concept for the Haven OpenAPI surface.
 
 Requires:
-  pip install requests eth-account
+  pip install requests eth-keys
 
 Environment:
   HAVEN_API_KEY        sk_agent_* from Haven
@@ -23,7 +23,7 @@ import os
 import sys
 
 import requests
-from eth_account import Account
+from eth_keys import keys
 
 
 API = os.environ.get("HAVEN_API_URL", "https://havenbackend-production-8a00.up.railway.app").rstrip("/")
@@ -56,6 +56,20 @@ def post_haven(path, payload):
   return body
 
 
+def sign_raw_hash(sign_hash, private_key):
+  """Sign the raw Safe hash exactly as /payments/{id}/sign expects."""
+  key_hex = private_key[2:] if private_key.startswith("0x") else private_key
+  hash_hex = sign_hash[2:] if sign_hash.startswith("0x") else sign_hash
+  signature = keys.PrivateKey(bytes.fromhex(key_hex)).sign_msg_hash(bytes.fromhex(hash_hex))
+  v = signature.v + 27 if signature.v in (0, 1) else signature.v
+  return (
+    "0x"
+    + signature.r.to_bytes(32, "big").hex()
+    + signature.s.to_bytes(32, "big").hex()
+    + bytes([v]).hex()
+  )
+
+
 spec = requests.get(f"{API}/openapi.json", timeout=30).json()
 authorize_path = "/x402/authorize" if "/x402/authorize" in spec["paths"] else "/x402"
 
@@ -86,9 +100,7 @@ if authorization.get("status") == "pending_approval":
   sys.exit("Payment is waiting for approval in Haven. Re-run after approval and use /payments/{id}/resume_state.")
 
 sign_hash = authorization["sign_data"]["hash"]
-signature = Account._sign_hash(sign_hash, private_key=DELEGATE_KEY).signature.hex()
-if not signature.startswith("0x"):
-  signature = "0x" + signature
+signature = sign_raw_hash(sign_hash, DELEGATE_KEY)
 
 result = post_haven(f"/payments/{authorization['payment_id']}/sign", {"signature": signature})
 tx_hash = result["tx_hash"]

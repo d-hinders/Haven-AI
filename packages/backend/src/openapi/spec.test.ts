@@ -21,6 +21,8 @@ describe('openapiSpec', () => {
     expect(openapiSpec.paths).toHaveProperty('/x402/authorize')
     expect(openapiSpec.paths).toHaveProperty('/machine-payments/authorize')
     expect(openapiSpec.paths).toHaveProperty('/machine-payments/{id}/status')
+    expect(openapiSpec.paths).toHaveProperty('/machine-payments/evidence')
+    expect(openapiSpec.paths).toHaveProperty('/machine-payments/reconciliation-events')
     expect(openapiSpec.paths).toHaveProperty('/transactions')
   })
 

@@ -20,6 +20,7 @@ server:
 - x402 funding authorization at `POST /x402/authorize`
 - the legacy `POST /x402` alias used by older SDK clients
 - MPP demo authorization and status under `/machine-payments/*`
+- machine-payment evidence and reconciliation event writes
 - machine-payment allowance and receipt reads
 - wallet transaction listing
 - health and OpenAPI discovery
@@ -44,6 +45,12 @@ This is the current round-trip tolerance: generated clients should treat the
 OpenAPI enum values and response field names as stable, while SDK-only helpers
 such as `quoteX402()` and `resumeX402Payment()` remain documented as local
 client behavior.
+
+Issue #161 also calls for a generated-client round-trip check. This PR keeps
+the CI guard narrower than that full acceptance criterion: it pins required
+paths, taxonomy enum values, served-spec parity, and authority-boundary copy.
+A deeper `openapi-typescript` comparison remains a follow-up before treating
+the spec as a complete generated-client compatibility gate.
 
 ## Non-Custodial Boundary
 

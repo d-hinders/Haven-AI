@@ -582,7 +582,7 @@ export const openapiSpec = {
         operationId: 'authorizeMachinePayment',
         summary: 'Authorize an MPP demo machine payment.',
         description:
-          'Authorizes the internal MPP demo rail with the same non-custodial boundary as x402: the delegate key signs locally, Haven validates and relays, and on-chain allowance state enforces spend.',
+          'Authorizes the internal MPP demo rail with the same non-custodial boundary as x402: the delegate key signs locally, Haven validates and relays, and on-chain allowance state enforces spend. The current MPP rail is an internal demo surface; production MPP merchant settlement needs separate product and legal review.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,
@@ -674,6 +674,77 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+        },
+      },
+    },
+    '/machine-payments/evidence': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'attachMachinePaymentEvidence',
+        summary: 'Attach merchant proof evidence for a confirmed machine payment.',
+        description:
+          'Records proof-loop evidence after a confirmed x402 or MPP payment. This does not authorize or execute payment; it attaches merchant/protocol evidence to an already confirmed payment intent owned by the authenticated agent.',
+        security: [{ AgentApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/MachinePaymentEvidenceRequest' },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Evidence accepted.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['evidence'],
+                  properties: {
+                    evidence: { $ref: '#/components/schemas/MachinePaymentReceipt' },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/machine-payments/reconciliation-events': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'recordMachinePaymentReconciliationEvent',
+        summary: 'Record a merchant retry reconciliation event.',
+        description:
+          'Records a post-payment reconciliation marker when the merchant/protocol retry rejects or needs follow-up after a confirmed payment. The event is audit context only; it does not move funds.',
+        security: [{ AgentApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/MachinePaymentReconciliationEventRequest' },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Reconciliation event recorded.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MachinePaymentReconciliationEventResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
         },
       },
     },
@@ -881,6 +952,8 @@ export const openapiSpec = {
           token: { type: 'string' },
           expires_at: isoDateTime,
         },
+        // Direct approvals, x402 approvals, and future rail-specific approvals
+        // share this base shape while adding their own context fields.
         additionalProperties: true,
       },
       PaymentIntentStatus: {
@@ -1087,7 +1160,7 @@ export const openapiSpec = {
           token: { type: 'string' },
           asset: address,
           network: { type: 'string' },
-          chainId: { type: 'integer' },
+          chainId: { type: ['integer', 'null'] },
           merchantAddress: address,
         },
         additionalProperties: false,
@@ -1281,6 +1354,51 @@ export const openapiSpec = {
           updated_at: isoDateTime,
         },
         additionalProperties: true,
+      },
+      MachinePaymentEvidenceRequest: {
+        type: 'object',
+        required: ['paymentId', 'rail', 'txHash'],
+        properties: {
+          paymentId: uuid,
+          rail: { type: 'string' },
+          txHash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          resourceUrl: { type: 'string', format: 'uri' },
+          merchantStatus: { type: 'integer', minimum: 100, maximum: 599 },
+          challengePayload: { type: 'object', additionalProperties: true },
+          selectedPayment: { type: 'object', additionalProperties: true },
+          paymentProofHeaderName: { type: 'string' },
+          paymentProofHeader: { type: 'string' },
+          protocolReceiptHeaderName: { type: 'string' },
+          protocolReceiptHeader: { type: 'string' },
+          protocolReceiptPayload: { type: 'object', additionalProperties: true },
+        },
+        additionalProperties: false,
+      },
+      MachinePaymentReconciliationEventRequest: {
+        type: 'object',
+        required: ['paymentId', 'rail', 'eventType'],
+        properties: {
+          paymentId: uuid,
+          rail: { type: 'string' },
+          eventType: { type: 'string', enum: ['merchant_retry_rejected_after_payment'] },
+          txHash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          reason: { type: 'string' },
+          details: { type: 'object', additionalProperties: true },
+        },
+        additionalProperties: false,
+      },
+      MachinePaymentReconciliationEventResponse: {
+        type: 'object',
+        required: ['event_id', 'status', 'payment_id', 'rail', 'event_type', 'created_at'],
+        properties: {
+          event_id: uuid,
+          status: { type: 'string' },
+          payment_id: uuid,
+          rail: { type: 'string' },
+          event_type: { type: 'string' },
+          created_at: isoDateTime,
+        },
+        additionalProperties: false,
       },
       Transaction: {
         type: 'object',

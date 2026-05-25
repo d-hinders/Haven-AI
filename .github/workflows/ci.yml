@@ -27,6 +27,10 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+      sdk: ${{ steps.filter.outputs.sdk }}
+      mcp: ${{ steps.filter.outputs.mcp }}
+      full: ${{ steps.filter.outputs.full }}
 
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +49,10 @@ jobs:
             {
               echo "code=true"
               echo "frontend=true"
+              echo "backend=true"
+              echo "sdk=true"
+              echo "mcp=true"
+              echo "full=true"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -57,6 +65,10 @@ jobs:
 
           code=false
           frontend=false
+          backend=false
+          sdk=false
+          mcp=false
+          full=false
 
           while IFS= read -r file; do
             case "$file" in
@@ -66,29 +78,87 @@ jobs:
             esac
 
             case "$file" in
-              .github/workflows/*.yml|.github/workflows/*.yaml|package.json|package-lock.json|packages/*|tsconfig*.json)
+              .github/workflows/*.yml|.github/workflows/*.yaml|package.json|package-lock.json|tsconfig*.json)
                 code=true
+                full=true
                 ;;
-            esac
-
-            case "$file" in
-              .github/workflows/*.yml|.github/workflows/*.yaml|package.json|package-lock.json|packages/frontend/*)
+              packages/frontend/*)
+                code=true
                 frontend=true
+                ;;
+              packages/backend/*)
+                code=true
+                backend=true
+                ;;
+              packages/sdk/*)
+                code=true
+                sdk=true
+                ;;
+              packages/mcp/*)
+                code=true
+                mcp=true
+                ;;
+              packages/*)
+                code=true
+                full=true
                 ;;
             esac
           done < changed-files.txt
 
+          if [ "$full" = "true" ]; then
+            frontend=true
+            backend=true
+            sdk=true
+            mcp=true
+          fi
+
+          if [ "$sdk" = "true" ]; then
+            backend=true
+            mcp=true
+          fi
+
           {
             echo "code=$code"
             echo "frontend=$frontend"
+            echo "backend=$backend"
+            echo "sdk=$sdk"
+            echo "mcp=$mcp"
+            echo "full=$full"
           } >> "$GITHUB_OUTPUT"
 
-  code_checks:
-    name: Code checks
+  sdk_checks:
+    name: SDK checks
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.sdk == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check SDK
+        run: npm run typecheck -w packages/sdk
+
+      - name: Run SDK unit tests
+        run: npm run test -w packages/sdk
+
+      - name: Build SDK
+        run: npm run build -w packages/sdk
+
+  backend_checks:
+    name: Backend checks
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
 
     services:
       postgres:
@@ -120,20 +190,73 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type-check workspaces
-        run: npm run typecheck
+      - name: Type-check backend
+        run: npm run typecheck -w packages/backend
 
-      - name: Run unit tests
-        run: npm run test:unit
+      - name: Run backend unit tests
+        run: npm run test -w packages/backend
 
-      - name: Build workspaces
-        run: npm run build
+      - name: Build backend
+        run: npm run build -w packages/backend
+
+  mcp_checks:
+    name: MCP checks
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check MCP
+        run: npm run typecheck -w packages/mcp
+
+      - name: Run MCP unit tests
+        run: npm run test -w packages/mcp
+
+      - name: Build MCP
+        run: npm run build -w packages/mcp
+
+  frontend_checks:
+    name: Frontend checks
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check frontend
+        run: npm run typecheck -w packages/frontend
+
+      - name: Run frontend unit tests
+        run: npm run test -w packages/frontend
+
+      - name: Build frontend
+        run: npm run build -w packages/frontend
         env:
           NEXT_TELEMETRY_DISABLED: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
 
       - name: Upload frontend build
-        if: needs.changes.outputs.frontend == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: frontend-next-build
@@ -146,10 +269,10 @@ jobs:
 
   browser_smoke:
     name: Frontend browser smoke
-    needs: [changes, code_checks]
-    if: always() && needs.changes.outputs.frontend == 'true' && needs.code_checks.result == 'success'
+    needs: [changes, frontend_checks]
+    if: always() && needs.changes.outputs.frontend == 'true' && needs.frontend_checks.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
 
     steps:
       - uses: actions/checkout@v4
@@ -206,7 +329,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, code_checks]
+    needs: [changes, sdk_checks, backend_checks, mcp_checks, frontend_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -225,9 +348,24 @@ jobs:
             exit 0
           fi
 
-          if [ "${{ needs.code_checks.result }}" != "success" ]; then
-            echo "Code checks result: ${{ needs.code_checks.result }}"
+          if [ "${{ needs.changes.outputs.sdk }}" = "true" ] && [ "${{ needs.sdk_checks.result }}" != "success" ]; then
+            echo "SDK checks result: ${{ needs.sdk_checks.result }}"
             exit 1
           fi
 
-          echo "Code checks passed. Browser smoke, when applicable, runs as a separate check."
+          if [ "${{ needs.changes.outputs.backend }}" = "true" ] && [ "${{ needs.backend_checks.result }}" != "success" ]; then
+            echo "Backend checks result: ${{ needs.backend_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.mcp }}" = "true" ] && [ "${{ needs.mcp_checks.result }}" != "success" ]; then
+            echo "MCP checks result: ${{ needs.mcp_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.frontend }}" = "true" ] && [ "${{ needs.frontend_checks.result }}" != "success" ]; then
+            echo "Frontend checks result: ${{ needs.frontend_checks.result }}"
+            exit 1
+          fi
+
+          echo "Required package checks passed. Browser smoke, when applicable, runs as a separate check."

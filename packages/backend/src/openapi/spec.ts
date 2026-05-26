@@ -136,7 +136,8 @@ export const openapiSpec = {
     version: '0.1.0',
     summary: 'Machine-readable contract for Haven agent payments.',
     description:
-      'Haven is non-custodial smart account software. These endpoints let authenticated agents create payment intents, fetch payment state, and relay independently signed payment payloads. Haven never receives the agent delegate private key and never treats an API key as payment authority.',
+      'Haven is non-custodial smart account software. These endpoints let authenticated agents create payment intents, fetch payment state, and relay independently signed payment payloads. Haven never receives the agent delegate private key and never treats an API key as payment authority. ' +
+      'Note: x402 quoting (`quoteX402`) is a client-side operation and has no Haven endpoint — the agent probes the merchant directly. Resume is consolidated under `GET /payments/{id}/resume_state`; there is no separate `/x402/resume` endpoint. See docs/architecture/05-agent-api-openapi.md for the full rationale.',
   },
   servers: [
     { url: 'https://havenbackend-production-8a00.up.railway.app', description: 'Production Railway backend' },

@@ -193,6 +193,14 @@ jobs:
       - name: Type-check backend
         run: npm run typecheck -w packages/backend
 
+      - name: OpenAPI drift check
+        # Surfaces the openapi spec drift assertions as a named step so a
+        # failure is immediately visible in the workflow summary. The same
+        # assertions also run as part of the full backend test suite below;
+        # this step exists to make drift failures unambiguous on the GitHub
+        # PR check list without scanning a 100+ line test output.
+        run: npm run test -w packages/backend -- src/openapi/spec.test.ts
+
       - name: Run backend unit tests
         run: npm run test -w packages/backend
 

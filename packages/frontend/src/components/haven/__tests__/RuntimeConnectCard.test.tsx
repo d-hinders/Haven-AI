@@ -79,7 +79,8 @@ describe('RuntimeConnectCard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Use a file' }))
     expect(screen.queryByText(/sk_agent_TESTKEY_NEVERREAL/)).not.toBeInTheDocument()
-    expect(screen.getByText(/--credentials/)).toBeInTheDocument()
+    // --credentials appears in both the code block and the consent note in file mode
+    expect(screen.getAllByText(/--credentials/).length).toBeGreaterThan(0)
   })
 
   it('copying a snippet calls the clipboard and reports it via the callback', async () => {

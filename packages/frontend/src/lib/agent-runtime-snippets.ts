@@ -67,15 +67,22 @@ const MCP_PACKAGE = '@haven_ai/mcp'
  * start (see packages/mcp/src/consent.ts from EPIC 1). Without it the
  * process exits immediately with HAVEN_MCP_NO_CONSENT.
  *
- * Users must run `npx @haven_ai/mcp --ack` once in a terminal and follow the
- * prompt. The resulting .ack.json sidecar is written next to the credential
- * file, or the env var HAVEN_MCP_ACK can be pre-set to the consent hash for
- * CI / headless environments.
+ * Users must run `npx @haven_ai/mcp --credentials <path> --ack` once in a
+ * terminal and follow the prompt. The resulting .ack.json sidecar is written
+ * next to the credential file, or the env var HAVEN_MCP_ACK can be pre-set
+ * to the consent hash for CI / headless environments.
  *
+ * In inline mode (no credential file) use the placeholder path as a reminder
+ * to substitute the real path after the credential file has been saved.
  */
-const CONSENT_NOTE =
-  'Before first use, run this once in a terminal to accept the consent prompt:\n' +
-  '  npx @haven_ai/mcp --ack'
+function consentNote(credentialsPath: string): string {
+  return (
+    'Before first use, run this once in a terminal to review and accept the consent prompt:\n' +
+    `  npx @haven_ai/mcp --credentials ${credentialsPath} --ack`
+  )
+}
+
+const CONSENT_NOTE_INLINE = consentNote('/path/to/haven-agent.json')
 
 function jsonBlock(value: unknown): string {
   return JSON.stringify(value, null, 2)
@@ -108,13 +115,13 @@ function claudeDesktopInline(cred: AgentCredentialJson): RuntimeSnippet {
     label: 'Claude Desktop',
     language: 'json',
     guidance:
-      'Open Claude Desktop’s MCP settings and paste this in. Restart Claude when you’re done. ' +
+      'Open Claude Desktop\'s MCP settings and paste this in. Restart Claude when you\'re done. ' +
       '(The settings live at ~/Library/Application Support/Claude/claude_desktop_config.json on macOS · ' +
       '%APPDATA%\\Claude\\claude_desktop_config.json on Windows.)',
     destination: 'claude_desktop_config.json',
     code: jsonBlock(config),
     mode: 'inline',
-    consentNote: CONSENT_NOTE,
+    consentNote: CONSENT_NOTE_INLINE,
   }
 }
 
@@ -131,10 +138,10 @@ function claudeDesktopFile(cred: AgentCredentialJson, path: string): RuntimeSnip
     ...claudeDesktopInline(cred),
     guidance:
       'First download the credentials below and save them somewhere private. Then paste this into ' +
-      'Claude Desktop’s MCP settings and restart Claude.',
+      'Claude Desktop\'s MCP settings and restart Claude.',
     code: jsonBlock(config),
     mode: 'file',
-    consentNote: CONSENT_NOTE,
+    consentNote: consentNote(path),
   }
 }
 
@@ -161,12 +168,12 @@ function cursorInline(cred: AgentCredentialJson): RuntimeSnippet {
     label: 'Cursor',
     language: 'json',
     guidance:
-      'Open Cursor’s MCP settings and paste this in. Reload Cursor when you’re done. ' +
-      '(The settings live at ~/.cursor/mcp.json — create the file if it’s not there yet.)',
+      'Open Cursor\'s MCP settings and paste this in. Reload Cursor when you\'re done. ' +
+      '(The settings live at ~/.cursor/mcp.json — create the file if it\'s not there yet.)',
     destination: '~/.cursor/mcp.json',
     code: jsonBlock(config),
     mode: 'inline',
-    consentNote: CONSENT_NOTE,
+    consentNote: CONSENT_NOTE_INLINE,
   }
 }
 
@@ -183,10 +190,10 @@ function cursorFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
     ...cursorInline(cred),
     guidance:
       'First download the credentials below and save them somewhere private. Then paste this into ' +
-      'Cursor’s MCP settings and reload Cursor.',
+      'Cursor\'s MCP settings and reload Cursor.',
     code: jsonBlock(config),
     mode: 'file',
-    consentNote: CONSENT_NOTE,
+    consentNote: consentNote(path),
   }
 }
 
@@ -210,7 +217,7 @@ function genericInline(cred: AgentCredentialJson): RuntimeSnippet {
       'starts in stdio mode and your agent connects to it as an MCP tool.',
     code,
     mode: 'inline',
-    consentNote: CONSENT_NOTE,
+    consentNote: CONSENT_NOTE_INLINE,
   }
 }
 
@@ -223,7 +230,7 @@ function genericFile(_cred: AgentCredentialJson, path: string): RuntimeSnippet {
       'command wherever your agent runs — the Haven MCP server reads everything from that file.',
     code,
     mode: 'file',
-    consentNote: CONSENT_NOTE,
+    consentNote: consentNote(path),
   }
 }
 
@@ -255,7 +262,7 @@ function windsurfInline(cred: AgentCredentialJson): RuntimeSnippet {
     destination: '~/.codeium/windsurf/mcp_config.json',
     code: jsonBlock(config),
     mode: 'inline',
-    consentNote: CONSENT_NOTE,
+    consentNote: CONSENT_NOTE_INLINE,
   }
 }
 
@@ -275,7 +282,7 @@ function windsurfFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
       'Windsurf\'s MCP settings and reload Windsurf.',
     code: jsonBlock(config),
     mode: 'file',
-    consentNote: CONSENT_NOTE,
+    consentNote: consentNote(path),
   }
 }
 
@@ -308,7 +315,7 @@ function vsCodeInline(cred: AgentCredentialJson): RuntimeSnippet {
     destination: '.vscode/mcp.json',
     code: jsonBlock(config),
     mode: 'inline',
-    consentNote: CONSENT_NOTE,
+    consentNote: CONSENT_NOTE_INLINE,
   }
 }
 
@@ -329,7 +336,7 @@ function vsCodeFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
       'your VS Code MCP settings and reload the window.',
     code: jsonBlock(config),
     mode: 'file',
-    consentNote: CONSENT_NOTE,
+    consentNote: consentNote(path),
   }
 }
 
@@ -410,7 +417,7 @@ function sdkInline(cred: AgentCredentialJson): RuntimeSnippet {
     label: 'SDK / CLI',
     language: 'typescript',
     guidance:
-      'Drop this into your agent’s code. The SDK reads the credentials from environment variables ' +
+      'Drop this into your agent\'s code. The SDK reads the credentials from environment variables ' +
       '— no config file to edit.',
     code,
     mode: 'inline',
@@ -434,7 +441,7 @@ function sdkFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
     ...sdkInline(cred),
     guidance:
       'First download the credentials below and save them somewhere private. Then drop this into ' +
-      'your agent’s code — it reads the saved file directly.',
+      'your agent\'s code — it reads the saved file directly.',
     code,
     mode: 'file',
   }

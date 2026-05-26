@@ -65,6 +65,7 @@ export function RuntimeConnectCard({
   const [activeId, setActiveId] = useState<RuntimeSnippetId | null>(null)
   const [mode, setMode] = useState<RuntimeSnippetMode>('inline')
   const [copiedId, setCopiedId] = useState<RuntimeSnippetId | null>(null)
+  const [copyError, setCopyError] = useState<RuntimeSnippetId | null>(null)
 
   const snippets = useMemo(
     () => buildRuntimeSnippets({ credential, credentialFilePath }, mode),
@@ -74,13 +75,23 @@ export function RuntimeConnectCard({
 
   const handleCopy = useCallback(
     async (snippet: RuntimeSnippet) => {
+      // Only mark the snippet as copied (and fire the modal's "saved" gate)
+      // when the clipboard write actually resolves. Browsers can reject
+      // clipboard writes silently in restricted contexts (insecure origin,
+      // permissions, headless test runners); swallowing the error and
+      // flipping the gate anyway would let the user advance through the
+      // handoff without ever having the credential outside this view.
       try {
         await navigator.clipboard.writeText(snippet.code)
       } catch {
-        /* Clipboard can fail in restricted contexts. Treat as a no-op rather
-         * than blocking the modal — the user can still select the code by
-         * hand from the visible <pre> block. */
+        setCopyError(snippet.id)
+        setTimeout(
+          () => setCopyError((id) => (id === snippet.id ? null : id)),
+          4000,
+        )
+        return
       }
+      setCopyError(null)
       setCopiedId(snippet.id)
       setTimeout(() => setCopiedId((id) => (id === snippet.id ? null : id)), 2000)
       onSnippetCopied?.(snippet)
@@ -183,6 +194,17 @@ export function RuntimeConnectCard({
             </pre>
           </div>
 
+          {copyError === active.id && (
+            <p
+              role="alert"
+              className="text-[11px] leading-relaxed text-[var(--v2-danger)]"
+            >
+              Couldn’t copy automatically — select the snippet above and copy it
+              by hand. The “credentials saved” step won’t unlock until the copy
+              succeeds.
+            </p>
+          )}
+
           {mode === 'inline' && (
             <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
               The credentials are right there in the snippet — copy it once and you’re done.
@@ -191,10 +213,22 @@ export function RuntimeConnectCard({
             </p>
           )}
           {mode === 'file' && (
-            <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-              The credentials live in a separate file you save. The snippet only references that
-              file by path — no secret in the snippet itself.
-            </p>
+            <>
+              <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                The credentials live in a separate file you save. The snippet only references that
+                file by path — no secret in the snippet itself.
+              </p>
+              <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                After saving, restrict the file to your user:
+                {' '}
+                <span className="font-mono text-[var(--v2-ink-2)]">chmod 600</span>
+                {' '}
+                on macOS/Linux, or <span className="font-mono text-[var(--v2-ink-2)]">icacls</span>
+                {' '}
+                with <span className="font-mono text-[var(--v2-ink-2)]">/inheritance:r</span> on
+                Windows. Avoid cloud-synced folders.
+              </p>
+            </>
           )}
 
           <div className="rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">

@@ -27,6 +27,22 @@ Create a private JSON file from the values in the Haven agent handoff:
 
 `delegate_key` is required. Without it the MCP server cannot sign locally.
 
+### Credential file permissions
+
+The credential file contains a private key. Restrict it to your user
+immediately after downloading:
+
+- macOS / Linux: `chmod 600 /path/to/haven-agent.json`
+- Windows (PowerShell): `icacls "path\to\haven-agent.json" /inheritance:r /grant:r "$env:UserName:R"`
+
+On POSIX systems the MCP server checks the file's mode bits at load time and
+prints a warning to stderr if it's readable beyond the owner (e.g. world-
+or group-readable). It does not refuse to start — some controlled
+deployments intentionally widen access — but unattended warnings are a
+strong signal something needs tightening. Avoid storing credentials in
+cloud-synced folders (iCloud, Dropbox, OneDrive) or shared dotfile
+repositories.
+
 ## Claude Desktop
 
 ```json

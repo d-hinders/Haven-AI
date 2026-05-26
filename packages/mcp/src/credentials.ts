@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 
 export interface HavenCredentialFile {
   apiKey: string
@@ -70,6 +70,8 @@ async function loadCredentialsFromFile(path: string): Promise<HavenCredentialFil
     throw new Error(`Could not read Haven credentials at ${path}: ${err instanceof Error ? err.message : String(err)}`)
   }
 
+  await warnIfCredentialFilePermissive(path)
+
   let raw: RawCredentialFile
   try {
     raw = JSON.parse(rawText) as RawCredentialFile
@@ -121,4 +123,41 @@ function loadCredentialsFromEnv(): HavenCredentialFile | null {
 
 function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+/**
+ * Warn (but do not block) when the credential file is readable by users
+ * other than the owner. The check is best-effort: it only runs on POSIX
+ * filesystems where the stat mode bits map cleanly. Windows ACLs require
+ * `icacls`-style introspection that doesn't fit a single stat call, so we
+ * skip the check there and the dashboard handoff text guides the user
+ * separately.
+ *
+ * Exported for testing.
+ */
+export async function warnIfCredentialFilePermissive(
+  path: string,
+  log: (message: string) => void = (message) => process.stderr.write(`${message}\n`),
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  if (platform === 'win32') return
+
+  let mode: number
+  try {
+    const stats = await stat(path)
+    mode = stats.mode
+  } catch {
+    // The credential read already failed cleanly above if the file is
+    // unreadable. A stat failure here is not worth blocking on.
+    return
+  }
+
+  const groupOrOther = mode & 0o077
+  if (groupOrOther !== 0) {
+    const octal = (mode & 0o777).toString(8).padStart(4, '0')
+    log(
+      `haven-mcp: warning: credential file at ${path} is readable beyond the owner ` +
+      `(mode ${octal}). Run: chmod 600 ${path}`,
+    )
+  }
 }

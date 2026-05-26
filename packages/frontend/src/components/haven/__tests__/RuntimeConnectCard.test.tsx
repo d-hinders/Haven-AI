@@ -94,4 +94,24 @@ describe('RuntimeConnectCard', () => {
     expect(onSnippetCopied.mock.calls[0][0].id).toBe('claude-desktop')
     expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
   })
+
+  it('does not unlock the saved gate when clipboard.writeText rejects', async () => {
+    // Regression: PR #173 swallowed clipboard failures and still fired
+    // onSnippetCopied, which let the modal's "credential saved" gate unlock
+    // even though no secret reached the clipboard. The fix surfaces an
+    // inline error and keeps the gate locked.
+    const onSnippetCopied = vi.fn()
+    clipboardWriteText.mockRejectedValueOnce(new Error('Document is not focused.'))
+    render(<RuntimeConnectCard credential={credential()} onSnippetCopied={onSnippetCopied} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
+
+    expect(onSnippetCopied).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument()
+    expect(
+      await screen.findByText(/Couldn’t copy automatically/i),
+    ).toBeInTheDocument()
+  })
 })

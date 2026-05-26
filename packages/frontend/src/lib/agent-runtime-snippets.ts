@@ -63,17 +63,15 @@ export interface RuntimeSnippetInput {
 const MCP_PACKAGE = '@haven_ai/mcp'
 
 /**
- * The MCP server requires a one-time consent acknowledgement before it will
- * start (see packages/mcp/src/consent.ts from EPIC 1). Without it the
- * process exits immediately with HAVEN_MCP_NO_CONSENT.
+ * Consent note wording.
  *
- * Users must run `npx @haven_ai/mcp --credentials <path> --ack` once in a
- * terminal and follow the prompt. The resulting .ack.json sidecar is written
- * next to the credential file, or the env var HAVEN_MCP_ACK can be pre-set
- * to the consent hash for CI / headless environments.
+ * File mode: user has a credential file at a known path — tell them to run
+ *   `npx @haven_ai/mcp --credentials <path> --ack` once to write the sidecar.
  *
- * In inline mode (no credential file) use the placeholder path as a reminder
- * to substitute the real path after the credential file has been saved.
+ * Inline mode: credentials live in env vars so there is no credential file
+ *   and no sidecar can be written. On first launch the server prints the
+ *   consent block to stderr and exits; the user copies the hash and adds
+ *   HAVEN_MCP_ACK=<hash> to the env vars in the snippet above.
  */
 function consentNote(credentialsPath: string): string {
   return (
@@ -82,7 +80,9 @@ function consentNote(credentialsPath: string): string {
   )
 }
 
-const CONSENT_NOTE_INLINE = consentNote('/path/to/haven-agent.json')
+const CONSENT_NOTE_INLINE =
+  'On first launch the server prints a consent prompt to stderr and exits.\n' +
+  'Copy the HAVEN_MCP_ACK=<hash> line it shows and add it to the env vars above.'
 
 function jsonBlock(value: unknown): string {
   return JSON.stringify(value, null, 2)

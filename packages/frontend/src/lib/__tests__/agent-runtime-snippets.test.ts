@@ -108,12 +108,29 @@ describe('buildRuntimeSnippets — inline mode', () => {
     for (const id of mcpIds) {
       const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
       expect(snippet.consentNote, `${id} should have a consentNote`).toBeTruthy()
-      expect(snippet.consentNote).toContain('--ack')
+      // Inline mode uses env-var acknowledgement path (no credential file to write --ack sidecar)
+      expect(snippet.consentNote).toContain('HAVEN_MCP_ACK')
     }
     const nonMcpIds = ['sdk-cli', 'python'] as const
     for (const id of nonMcpIds) {
       const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
       expect(snippet.consentNote, `${id} should NOT have a consentNote`).toBeUndefined()
+    }
+  })
+
+  it('file-mode MCP snippets use --ack with --credentials in the consent note', () => {
+    const PATH = '/Users/example/secrets/haven-agent.json'
+    const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
+    for (const id of mcpIds) {
+      const snippet = buildRuntimeSnippet(
+        { credential: credential(), credentialFilePath: PATH },
+        id,
+        'file',
+      )
+      expect(snippet.consentNote, `${id} file-mode should have a consentNote`).toBeTruthy()
+      expect(snippet.consentNote).toContain('--ack')
+      expect(snippet.consentNote).toContain('--credentials')
+      expect(snippet.consentNote).toContain(PATH)
     }
   })
 })

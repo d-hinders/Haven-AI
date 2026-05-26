@@ -514,7 +514,11 @@ function buildMppResumeState(status: AgentPaymentStatus): AgentPaymentResumeStat
   const idempotencyKey =
     nonEmpty(context?.idempotency_key ?? status.idempotency_key) ??
     `${status.rail}:${status.payment_id}`
-  const paymentRail = status.rail === AgentPaymentRail.Mpp ? 'mpp_demo' : status.rail
+  // status.rail is the wire value persisted on the row (e.g. `mpp_demo`,
+  // `mpp_crypto`). We carry it through verbatim onto the resume state's
+  // granular `paymentRail` field; the categorical `rail: 'mpp'` below is the
+  // SDK discriminator and is set independently.
+  const paymentRail = status.rail
 
   if (status.chain_id !== 8453) {
     return {

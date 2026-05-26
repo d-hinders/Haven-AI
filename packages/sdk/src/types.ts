@@ -506,13 +506,39 @@ export const AgentPaymentNextAction = {
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
 
+/**
+ * Stable rail identifier carried on Haven agent payment responses and resume
+ * state.
+ *
+ * Two layers of vocabulary share this enum because both reach the wire:
+ *
+ *   - **Categorical rails** identify the rail family and are used as
+ *     discriminators on `PaymentResumeState`: `direct`, `x402`, `mpp`.
+ *   - **Granular rails** identify the specific protocol the backend persists
+ *     and returns on response bodies: `mpp_demo`, `mpp_crypto`,
+ *     `stripe_deposit`, `spt`. `x402` doubles as both categorical and
+ *     granular.
+ *
+ * Consumers reading the top-level `rail` field on a payment status response
+ * should treat any `mpp*` value as the MPP family; consumers reading the
+ * `rail` field on a `MppResumeState` will always see the categorical `mpp`,
+ * with the granular value on `paymentRail`.
+ */
 export const AgentPaymentRail = {
   /** Standard Haven payment from the user's Safe through an approved delegate allowance. */
   Direct: 'direct',
   /** x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg. */
   X402: 'x402',
-  /** Machine Payment Protocol flow. */
+  /** Machine Payment Protocol family — categorical value used as a resume-state discriminator. */
   Mpp: 'mpp',
+  /** Haven internal MPP demo rail. Not for production traffic. */
+  MppDemo: 'mpp_demo',
+  /** Crypto-settled MPP rail. */
+  MppCrypto: 'mpp_crypto',
+  /** Stripe-deposit-backed MPP rail. */
+  StripeDeposit: 'stripe_deposit',
+  /** Stripe Payment Token MPP rail. */
+  Spt: 'spt',
 } as const
 
 export type AgentPaymentRail = (typeof AgentPaymentRail)[keyof typeof AgentPaymentRail]
@@ -554,7 +580,11 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
   [AgentPaymentRail.Direct]: 'Standard Haven payment from the user-controlled Safe through an approved delegate allowance.',
   [AgentPaymentRail.X402]: 'x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg.',
-  [AgentPaymentRail.Mpp]: 'Machine Payment Protocol flow.',
+  [AgentPaymentRail.Mpp]: 'Categorical MPP rail value used as a resume-state discriminator. Response bodies carry a granular mpp_* value instead.',
+  [AgentPaymentRail.MppDemo]: 'Haven internal MPP demo rail. Not for production traffic.',
+  [AgentPaymentRail.MppCrypto]: 'Crypto-settled MPP rail.',
+  [AgentPaymentRail.StripeDeposit]: 'Stripe-deposit-backed MPP rail.',
+  [AgentPaymentRail.Spt]: 'Stripe Payment Token MPP rail.',
 }
 
 export const AgentPaymentPhaseSchema: AgentPaymentEnumSchema = {

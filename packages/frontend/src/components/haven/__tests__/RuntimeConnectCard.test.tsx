@@ -40,14 +40,14 @@ describe('RuntimeConnectCard', () => {
   it('renders all tabs unselected and hides the credentials until a tile is clicked', () => {
     render(<RuntimeConnectCard credential={credential()} />)
 
-    for (const name of ['Claude Desktop', 'Cursor', 'Other agents', 'SDK / CLI']) {
+    for (const name of ['Claude Desktop', 'Cursor', 'Windsurf', 'VS Code', 'Other agents', 'SDK / CLI', 'Python']) {
       expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'false')
     }
     // Credentials and the Try it block stay out of the DOM until the user picks something.
     expect(screen.queryByText(/sk_agent_TESTKEY_NEVERREAL/)).not.toBeInTheDocument()
     expect(screen.queryByText(/What's my Haven budget/i)).not.toBeInTheDocument()
     // The empty-state hint nudges the user toward the tabs.
-    expect(screen.getByText(/Pick one above/i)).toBeInTheDocument()
+    expect(screen.getByText(/Select a runtime above/i)).toBeInTheDocument()
   })
 
   it('reveals the snippet and Try it prompt after a tile is selected', () => {
@@ -57,7 +57,7 @@ describe('RuntimeConnectCard', () => {
     expect(screen.getByRole('tab', { name: 'Claude Desktop' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText(/sk_agent_TESTKEY_NEVERREAL/)).toBeInTheDocument()
     expect(screen.getByText(/What's my Haven budget/i)).toBeInTheDocument()
-    expect(screen.queryByText(/Pick one above/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Select a runtime above/i)).not.toBeInTheDocument()
   })
 
   it('switches snippets when a different tab is clicked', () => {
@@ -87,7 +87,7 @@ describe('RuntimeConnectCard', () => {
     render(<RuntimeConnectCard credential={credential()} onSnippetCopied={onSnippetCopied} />)
     fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to clipboard' }))
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
     expect(clipboardWriteText.mock.calls[0][0]).toContain('sk_agent_TESTKEY_NEVERREAL')
     expect(onSnippetCopied).toHaveBeenCalledTimes(1)

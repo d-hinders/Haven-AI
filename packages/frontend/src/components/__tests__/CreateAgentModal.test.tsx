@@ -296,9 +296,9 @@ describe('CreateAgentModal recovery', () => {
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
 
     // The snippet stays hidden until the user picks a tile — copy lives inside it.
-    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy to clipboard' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to clipboard' }))
 
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
     expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('sk_test'))

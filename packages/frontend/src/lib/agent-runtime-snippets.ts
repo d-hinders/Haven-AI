@@ -72,12 +72,16 @@ const MCP_PACKAGE = '@haven_ai/mcp'
  * file, or the env var HAVEN_MCP_ACK can be pre-set to the consent hash for
  * CI / headless environments.
  *
- * We surface this as a separate guidance line on every snippet so users
- * aren't surprised by a silent failure on first connect.
+ * PUBLISHING NOTE: @haven_ai/mcp is not yet published to npm. The consentNote
+ * is intentionally left undefined until the package is available so users are
+ * not shown a command that would fail with E404. Restore this constant once
+ * the package is live:
+ *
+ *   const CONSENT_NOTE =
+ *     'Before first use, run this once in a terminal:\n' +
+ *     '  npx @haven_ai/mcp --ack'
  */
-const CONSENT_NOTE =
-  'Before first use, run this once in a terminal to accept the consent prompt:\n' +
-  '  npx @haven_ai/mcp --ack'
+const CONSENT_NOTE: string | undefined = undefined
 
 function jsonBlock(value: unknown): string {
   return JSON.stringify(value, null, 2)

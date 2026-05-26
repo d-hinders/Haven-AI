@@ -113,29 +113,70 @@ const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const
 
 /**
  * Extract Fastify route registrations from a route file's source text.
- * Matches `app.<method>('<path>'` and `fastify.<method>('<path>'` and
- * `<name>.<method>('<path>'`. Quote-aware for both single and double
- * quotes. Strips inline comments to avoid matching example-snippets in
- * comments.
+ *
+ * Matches `<identifier>.<method>(<optional generic>)(<path>` for the standard
+ * HTTP methods. The optional generic is consumed by `[^'"\`(]*` — anything
+ * that is not a string quote or an opening paren — so nested type parameters
+ * like `Record<K,V>` or multi-line `{\n  Body: ...\n}` work without a regex
+ * brace-balancer. Quote-aware for single/double/backtick string literals.
+ * Strips comments before matching so example snippets in JSDoc don't appear
+ * as live registrations.
  */
 function extractRoutes(source: string): Array<{ method: string; path: string }> {
-  const noLineComments = source.replace(/\/\/[^\n]*/g, '')
-  const noBlockComments = noLineComments.replace(/\/\*[\s\S]*?\*\//g, '')
+  // Strip comments outside string literals so we don't (a) match example
+  // routes inside JSDoc, (b) eat `://` inside a URL string literal.
+  const noComments = stripCommentsOutsideStrings(source)
   const re = new RegExp(
-    `\\b[A-Za-z_$][A-Za-z0-9_$]*\\.(?:${HTTP_METHODS.join('|')})\\s*<[^>]*>?\\s*\\(\\s*(['"\`])([^'"\`]+)\\1`,
+    `\\b[A-Za-z_$][A-Za-z0-9_$]*\\.(${HTTP_METHODS.join('|')})[^'"\`(]*\\(\\s*(['"\`])([^'"\`]+)\\2`,
     'g',
   )
   const routes: Array<{ method: string; path: string }> = []
   let match: RegExpExecArray | null
-  while ((match = re.exec(noBlockComments)) !== null) {
-    // The first capture group is the quote character; the second is the path.
-    // Extract method from the matched text.
-    const methodMatch = /\.(get|post|put|patch|delete)\s*</.exec(match[0])
-      ?? /\.(get|post|put|patch|delete)\s*\(/.exec(match[0])
-    if (!methodMatch) continue
-    routes.push({ method: methodMatch[1].toUpperCase(), path: match[2] })
+  while ((match = re.exec(noComments)) !== null) {
+    routes.push({ method: match[1].toUpperCase(), path: match[3] })
   }
   return routes
+}
+
+// Strip JS line and block comments from `source`, leaving content inside
+// string literals untouched. A naive `source.replace(/\/\/[^\n]*/g, '')`
+// would eat the rest of any line that contains `://` inside a URL string,
+// dropping route registrations on that line. This walks the text
+// character-by-character with a small state machine instead.
+function stripCommentsOutsideStrings(source: string): string {
+  let out = ''
+  let i = 0
+  // States: 'code' | 'line-comment' | 'block-comment' | 'single' | 'double' | 'template'
+  let state: 'code' | 'line-comment' | 'block-comment' | 'single' | 'double' | 'template' = 'code'
+  while (i < source.length) {
+    const c = source[i]
+    const next = source[i + 1]
+    if (state === 'code') {
+      if (c === '/' && next === '/') { state = 'line-comment'; i += 2; continue }
+      if (c === '/' && next === '*') { state = 'block-comment'; i += 2; continue }
+      if (c === "'") { state = 'single'; out += c; i++; continue }
+      if (c === '"') { state = 'double'; out += c; i++; continue }
+      if (c === '`') { state = 'template'; out += c; i++; continue }
+      out += c; i++; continue
+    }
+    if (state === 'line-comment') {
+      if (c === '\n') { state = 'code'; out += c; i++; continue }
+      i++; continue
+    }
+    if (state === 'block-comment') {
+      if (c === '*' && next === '/') { state = 'code'; i += 2; continue }
+      i++; continue
+    }
+    // Inside a string literal — preserve content as-is, honor backslash escapes.
+    if (c === '\\' && i + 1 < source.length) {
+      out += c + source[i + 1]; i += 2; continue
+    }
+    if (state === 'single' && c === "'") { state = 'code'; out += c; i++; continue }
+    if (state === 'double' && c === '"') { state = 'code'; out += c; i++; continue }
+    if (state === 'template' && c === '`') { state = 'code'; out += c; i++; continue }
+    out += c; i++
+  }
+  return out
 }
 
 /**
@@ -204,6 +245,64 @@ describe('openapiSpec', () => {
 
     await app.close()
   })
+})
+
+describe('extractRoutes', () => {
+  // Regression coverage for the issues the route walker is supposed to catch.
+  // Before these were added, bare `app.get('/path', h)` registrations and
+  // routes with nested type generics were silently invisible to the drift
+  // check.
+  const cases: Array<{ src: string; expected: Array<{ method: string; path: string }> }> = [
+    {
+      src: `app.get('/', h)`,
+      expected: [{ method: 'GET', path: '/' }],
+    },
+    {
+      src: `app.post('/foo', h)`,
+      expected: [{ method: 'POST', path: '/foo' }],
+    },
+    {
+      src: `app.get<{ Params: { id: string } }>('/:id', h)`,
+      expected: [{ method: 'GET', path: '/:id' }],
+    },
+    {
+      // Nested generic — previous regex `[^>]*>?` consumed up to the inner
+      // `>` and failed the trailing `(`.
+      src: `app.put<{ Body: Record<string, T> }>('/x', h)`,
+      expected: [{ method: 'PUT', path: '/x' }],
+    },
+    {
+      // Multi-line typed generic.
+      src: `app.get<{\n  Body: { a: number },\n}>('/multi', h)`,
+      expected: [{ method: 'GET', path: '/multi' }],
+    },
+    {
+      // `://` inside a string literal must not be treated as a line comment.
+      src: `const u = 'https://example.com/api'; app.get('/p', h)`,
+      expected: [{ method: 'GET', path: '/p' }],
+    },
+    {
+      // Path with `//` is preserved.
+      src: `app.get('/a//b', h)`,
+      expected: [{ method: 'GET', path: '/a//b' }],
+    },
+    {
+      // JSDoc example must NOT be extracted.
+      src: `/**\n * Example: app.get('/draft', h)\n */\napp.get('/real', h)`,
+      expected: [{ method: 'GET', path: '/real' }],
+    },
+    {
+      // Inline comment after a route must not corrupt extraction.
+      src: `app.get('/x', h) // todo: rename to /y`,
+      expected: [{ method: 'GET', path: '/x' }],
+    },
+  ]
+
+  for (const { src, expected } of cases) {
+    it(`extracts ${JSON.stringify(expected)} from ${JSON.stringify(src.slice(0, 60))}`, () => {
+      expect(extractRoutes(src)).toEqual(expected)
+    })
+  }
 })
 
 /**

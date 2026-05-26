@@ -53,34 +53,112 @@ interface CapturedRequest {
 
 /**
  * Non-custody assertion: the delegate private key must never appear anywhere
- * in an outgoing HTTP call — URL, header value, or body. Headers are
- * serialised both via the `Headers` view and the raw `init.headers` value
- * because callers may pass either form.
+ * in an outgoing HTTP call — URL, header name, header value, or body. The
+ * checks handle every variant of the WHATWG fetch RequestInit shape:
+ *
+ *   - `init.headers` can be `Headers`, a plain record, or an array of
+ *     `[name, value]` tuples. `JSON.stringify(new Headers(...))` returns
+ *     `"{}"` (Headers does not implement toJSON), so we cannot rely on
+ *     stringification alone — every shape is iterated explicitly.
+ *   - `init.body` can be `string`, `URLSearchParams`, `FormData`, `Blob`,
+ *     `Uint8Array`, or `ReadableStream`. `String(body)` on non-strings
+ *     produces `"[object X]"` placeholders that would silently pass a
+ *     substring check, so non-string bodies are inspected via their own
+ *     iteration where possible and explicitly REJECTED with a clear test
+ *     failure otherwise — we'd rather force the caller to widen the helper
+ *     than silently green-light a leak.
+ *
+ * The substring check is case-folded and also tested against the unprefixed
+ * (`key.slice(2)`) and URL-encoded (`encodeURIComponent(key)`) variants:
+ * ABI encoders emit unprefixed hex, and a URL query parameter would emit the
+ * encoded form.
  */
 function assertNoDelegateKeyLeak(requests: CapturedRequest[], key: string): void {
+  const variants = collectKeyVariants(key)
   for (const request of requests) {
-    expect(request.url).not.toContain(key)
-    const headersString = JSON.stringify(request.init?.headers ?? {})
-    expect(headersString).not.toContain(key)
-    if (request.init?.headers instanceof Headers) {
-      for (const [, value] of request.init.headers) {
-        expect(value).not.toContain(key)
-      }
-    }
-    const body = typeof request.init?.body === 'string'
-      ? request.init.body
-      : request.init?.body
-        ? String(request.init.body)
-        : ''
-    expect(body).not.toContain(key)
+    assertNoVariantPresent(request.url, variants, `request URL ${request.url}`)
+    iterateHeaders(request.init?.headers, (name, value) => {
+      assertNoVariantPresent(name, variants, `header name in ${request.url}`)
+      assertNoVariantPresent(value, variants, `header value in ${request.url}`)
+    })
+    inspectBody(request.init?.body, (text, label) => {
+      assertNoVariantPresent(text, variants, `${label} in ${request.url}`)
+    })
   }
 }
 
+function collectKeyVariants(key: string): string[] {
+  const unprefixed = key.startsWith('0x') ? key.slice(2) : key
+  const variants = new Set<string>([
+    key,
+    key.toLowerCase(),
+    key.toUpperCase(),
+    unprefixed,
+    unprefixed.toLowerCase(),
+    unprefixed.toUpperCase(),
+    encodeURIComponent(key),
+    encodeURIComponent(unprefixed),
+  ])
+  return Array.from(variants).filter((v) => v.length > 0)
+}
+
+function assertNoVariantPresent(haystack: string, variants: string[], label: string): void {
+  if (!haystack) return
+  const lower = haystack.toLowerCase()
+  for (const variant of variants) {
+    expect(lower, `${label} contains delegate key (variant: ${variant.slice(0, 12)}…)`)
+      .not.toContain(variant.toLowerCase())
+  }
+}
+
+type HeadersLike = Headers | Record<string, string | string[]> | Array<[string, string]>
+
+function iterateHeaders(
+  headers: HeadersInit | undefined,
+  visit: (name: string, value: string) => void,
+): void {
+  if (!headers) return
+  if (headers instanceof Headers) {
+    for (const [name, value] of headers) visit(name, value)
+    return
+  }
+  if (Array.isArray(headers)) {
+    for (const [name, value] of headers) visit(String(name), String(value))
+    return
+  }
+  for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (Array.isArray(value)) for (const v of value) visit(name, String(v))
+    else if (value != null) visit(name, String(value))
+  }
+}
+
+function inspectBody(
+  body: BodyInit | null | undefined,
+  visit: (text: string, label: string) => void,
+): void {
+  if (body == null) return
+  if (typeof body === 'string') { visit(body, 'body string'); return }
+  if (body instanceof URLSearchParams) {
+    for (const [k, v] of body) { visit(k, 'body param name'); visit(v, 'body param value') }
+    return
+  }
+  // Force the test to fail loudly if a future SDK call uses a body shape we
+  // don't inspect (Blob, FormData, Uint8Array, ReadableStream). Silently
+  // passing on `'[object Blob]'` would defeat the non-custody invariant.
+  throw new Error(
+    `assertNoDelegateKeyLeak does not yet inspect body of type ${Object.prototype.toString.call(body)}; ` +
+    `widen the helper before adding a Haven request that uses this body shape.`,
+  )
+}
+
 describe('Haven MCP tool descriptions', () => {
-  // Drift guard: every MCP tool description must start with the shared
-  // summary from `@haven_ai/sdk`. If a tool's description is overwritten with
-  // ad-hoc prose instead of composing from the shared source, this test
-  // fails loudly and points at the shared module as the place to update.
+  // Drift guard: every MCP tool description must contain ALL fragments of the
+  // shared description (summary, behavior, nextActionGuidance) — not just the
+  // summary. The previous version only asserted .toContain(summary), which
+  // (a) missed drift in behavior/nextActionGuidance, and (b) was vacuously
+  // true if a summary was ever set to an empty string (every string contains
+  // ''). Asserting each fragment individually catches partial drift; the
+  // non-empty assertion catches the empty-summary degenerate case.
   const cases: Array<{ tool: keyof typeof toolDescriptions; key: keyof typeof sharedDescriptions }> = [
     { tool: 'haven_quote_x402', key: 'quoteX402' },
     { tool: 'haven_pay_x402_quote', key: 'payX402' },
@@ -96,8 +174,15 @@ describe('Haven MCP tool descriptions', () => {
   ]
 
   for (const { tool, key } of cases) {
-    it(`${tool} description starts with shared ${key} summary`, () => {
-      expect(toolDescriptions[tool]).toContain(sharedDescriptions[key].summary)
+    it(`${tool} composes every fragment from the shared ${key} description`, () => {
+      const shared = sharedDescriptions[key]
+      const desc = toolDescriptions[tool]
+      // Every entry must have a non-empty summary so the substring check
+      // below has a real anchor rather than the vacuously-true `''`.
+      expect(shared.summary.length).toBeGreaterThan(10)
+      expect(desc).toContain(shared.summary)
+      if (shared.behavior) expect(desc).toContain(shared.behavior)
+      if (shared.nextActionGuidance) expect(desc).toContain(shared.nextActionGuidance)
     })
   }
 })
@@ -357,26 +442,43 @@ describe('Haven MCP tool handlers', () => {
   })
 
   it('negative control: assertNoDelegateKeyLeak fails when the key is present', () => {
-    // Without this test the non-custody assertion could be silently weakened
+    // Without these the non-custody assertion could be silently weakened
     // (e.g. comparing against a stripped version of the key) and still pass.
+    // Each case targets a different leak path the helper claims to cover.
+    const unprefixed = delegateKey.slice(2)
+    const cases: Array<{ label: string; req: CapturedRequest }> = [
+      { label: 'URL query', req: { url: `https://haven.example/leak?k=${delegateKey}` } },
+      { label: 'string body', req: { url: 'https://haven.example/x', init: { body: `{"key":"${delegateKey}"}` } } },
+      { label: 'plain-object header value', req: { url: 'https://haven.example/x', init: { headers: { 'X-Leak': delegateKey } } } },
+      { label: 'plain-object header name', req: { url: 'https://haven.example/x', init: { headers: { [delegateKey]: '1' } } } },
+      { label: 'Headers instance value', req: { url: 'https://haven.example/x', init: { headers: new Headers([['X-Leak', delegateKey]]) } } },
+      { label: 'Headers instance name', req: { url: 'https://haven.example/x', init: { headers: new Headers([[`x-${delegateKey.toLowerCase()}`, '1']]) } } },
+      { label: 'header-array tuples', req: { url: 'https://haven.example/x', init: { headers: [['X-Leak', delegateKey]] } } },
+      { label: 'URL-encoded variant', req: { url: `https://haven.example/leak?k=${encodeURIComponent(delegateKey)}` } },
+      { label: 'unprefixed hex (ABI encoder style)', req: { url: 'https://haven.example/x', init: { body: `{"k":"${unprefixed}"}` } } },
+      { label: 'uppercased hex', req: { url: 'https://haven.example/x', init: { body: `{"k":"${delegateKey.toUpperCase()}"}` } } },
+      { label: 'URLSearchParams body value', req: { url: 'https://haven.example/x', init: { body: new URLSearchParams({ key: delegateKey }) } } },
+    ]
+    for (const { label, req } of cases) {
+      expect(
+        () => assertNoDelegateKeyLeak([req], delegateKey),
+        `should detect leak in: ${label}`,
+      ).toThrow()
+    }
+  })
+
+  it('negative control: assertNoDelegateKeyLeak loudly rejects unknown body shapes', () => {
+    // If a future SDK switches a Haven call to a body shape this helper
+    // doesn't inspect (Blob, FormData, ReadableStream, Uint8Array), it must
+    // fail loudly rather than green-light the call. The test confirms the
+    // helper throws on unknown shapes instead of silently passing.
+    const blob = new Blob([delegateKey])
     expect(() =>
       assertNoDelegateKeyLeak(
-        [{ url: `https://haven.example/leak?k=${delegateKey}` }],
+        [{ url: 'https://haven.example/x', init: { body: blob } }],
         delegateKey,
       ),
-    ).toThrow()
-    expect(() =>
-      assertNoDelegateKeyLeak(
-        [{ url: 'https://haven.example/x', init: { body: `{"key":"${delegateKey}"}` } }],
-        delegateKey,
-      ),
-    ).toThrow()
-    expect(() =>
-      assertNoDelegateKeyLeak(
-        [{ url: 'https://haven.example/x', init: { headers: { 'X-Leak': delegateKey } } }],
-        delegateKey,
-      ),
-    ).toThrow()
+    ).toThrow(/does not yet inspect body of type/)
   })
 
   it('returns structured payment state errors with nextAction and resume_state', async () => {

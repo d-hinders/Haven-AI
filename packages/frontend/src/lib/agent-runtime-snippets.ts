@@ -15,9 +15,11 @@
  *     who already manage their secret store; the credential JSON is the only
  *     secret-bearing artifact and the runtime config holds no secret.
  *
- * The MCP package version is read from the SDK package version at build time
- * so the snippet pins to a known-working version rather than always grabbing
- * @latest.
+ * When `consentHash` is provided in the input (computed by `computeMcpConsentHash`
+ * from `mcp-consent-hash.ts`), it is embedded as `HAVEN_MCP_ACK=<hash>` in
+ * every MCP config snippet. This eliminates the one-time `--ack` terminal
+ * step: the user has already reviewed the agent's tools and allowances in
+ * the UI, so the consent is captured at creation time.
  */
 
 import type { AgentCredentialJson } from './agent-credential'
@@ -46,10 +48,9 @@ export interface RuntimeSnippet {
   /** Modes the snippet supports. `inline` is always defined. */
   mode: RuntimeSnippetMode
   /**
-   * One-time setup instruction shown beneath the snippet. Present for all
-   * MCP-based runtimes because the consent gate (EPIC 1) must be accepted
-   * before the server will start. Absent for non-MCP runtimes (sdk-cli,
-   * python) where no MCP server is launched.
+   * Fallback one-time setup note shown when `consentHash` is not yet
+   * available (e.g. while the async hash computation is still pending).
+   * Absent once the hash is embedded in the snippet.
    */
   consentNote?: string
 }
@@ -58,31 +59,31 @@ export interface RuntimeSnippetInput {
   credential: AgentCredentialJson
   /** Absolute file path the credential JSON will be saved to in file mode. */
   credentialFilePath?: string
+  /**
+   * Pre-computed MCP consent hash from `computeMcpConsentHash()`.
+   * When present, embedded as `HAVEN_MCP_ACK=<hash>` in every MCP config
+   * so the server starts without prompting. When absent (hash still loading)
+   * a fallback `consentNote` is shown instead.
+   */
+  consentHash?: string
 }
 
 const MCP_PACKAGE = '@haven_ai/mcp'
 
 /**
- * Consent note wording.
- *
- * File mode: user has a credential file at a known path — tell them to run
- *   `npx @haven_ai/mcp --credentials <path> --ack` once to write the sidecar.
- *
- * Inline mode: credentials live in env vars so there is no credential file
- *   and no sidecar can be written. On first launch the server prints the
- *   consent block to stderr and exits; the user copies the hash and adds
- *   HAVEN_MCP_ACK=<hash> to the env vars in the snippet above.
+ * Fallback consent notes shown while `consentHash` is still being computed
+ * (async Web Crypto call in the parent component).
  */
-function consentNote(credentialsPath: string): string {
+const CONSENT_NOTE_INLINE =
+  'On first launch the server prints a consent prompt to stderr and exits.\n' +
+  'Copy the HAVEN_MCP_ACK=<hash> line it shows and add it to the env vars above.'
+
+function consentNoteFile(credentialsPath: string): string {
   return (
     'Before first use, run this once in a terminal to review and accept the consent prompt:\n' +
     `  npx @haven_ai/mcp --credentials ${credentialsPath} --ack`
   )
 }
-
-const CONSENT_NOTE_INLINE =
-  'On first launch the server prints a consent prompt to stderr and exits.\n' +
-  'Copy the HAVEN_MCP_ACK=<hash> line it shows and add it to the env vars above.'
 
 function jsonBlock(value: unknown): string {
   return JSON.stringify(value, null, 2)
@@ -92,9 +93,17 @@ function defaultCredentialPath(filenameSlug: string): string {
   return `/absolute/path/to/haven-agent-${filenameSlug}.json`
 }
 
+function stripUndefined<T extends Record<string, unknown>>(value: T): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof v === 'string' && v.length > 0) out[k] = v
+  }
+  return out
+}
+
 // ── Claude Desktop ────────────────────────────────────────────────
 
-function claudeDesktopInline(cred: AgentCredentialJson): RuntimeSnippet {
+function claudeDesktopInline(cred: AgentCredentialJson, consentHash?: string): RuntimeSnippet {
   const config = {
     mcpServers: {
       haven: {
@@ -106,6 +115,7 @@ function claudeDesktopInline(cred: AgentCredentialJson): RuntimeSnippet {
           HAVEN_AGENT_ID: cred.agent_id,
           HAVEN_SAFE_ADDRESS: cred.safe_address,
           HAVEN_API_URL: cred.api_url ?? undefined,
+          HAVEN_MCP_ACK: consentHash,
         }),
       },
     },
@@ -121,33 +131,35 @@ function claudeDesktopInline(cred: AgentCredentialJson): RuntimeSnippet {
     destination: 'claude_desktop_config.json',
     code: jsonBlock(config),
     mode: 'inline',
-    consentNote: CONSENT_NOTE_INLINE,
+    consentNote: consentHash ? undefined : CONSENT_NOTE_INLINE,
   }
 }
 
-function claudeDesktopFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
+function claudeDesktopFile(cred: AgentCredentialJson, path: string, consentHash?: string): RuntimeSnippet {
+  const env = consentHash ? { HAVEN_MCP_ACK: consentHash } : undefined
   const config = {
     mcpServers: {
       haven: {
         command: 'npx',
         args: ['-y', MCP_PACKAGE, '--credentials', path],
+        ...(env ? { env } : {}),
       },
     },
   }
   return {
-    ...claudeDesktopInline(cred),
+    ...claudeDesktopInline(cred, consentHash),
     guidance:
       'First download the credentials below and save them somewhere private. Then paste this into ' +
       'Claude Desktop\'s MCP settings and restart Claude.',
     code: jsonBlock(config),
     mode: 'file',
-    consentNote: consentNote(path),
+    consentNote: consentHash ? undefined : consentNoteFile(path),
   }
 }
 
 // ── Cursor ────────────────────────────────────────────────────────
 
-function cursorInline(cred: AgentCredentialJson): RuntimeSnippet {
+function cursorInline(cred: AgentCredentialJson, consentHash?: string): RuntimeSnippet {
   const config = {
     mcpServers: {
       haven: {
@@ -159,6 +171,7 @@ function cursorInline(cred: AgentCredentialJson): RuntimeSnippet {
           HAVEN_AGENT_ID: cred.agent_id,
           HAVEN_SAFE_ADDRESS: cred.safe_address,
           HAVEN_API_URL: cred.api_url ?? undefined,
+          HAVEN_MCP_ACK: consentHash,
         }),
       },
     },
@@ -173,33 +186,35 @@ function cursorInline(cred: AgentCredentialJson): RuntimeSnippet {
     destination: '~/.cursor/mcp.json',
     code: jsonBlock(config),
     mode: 'inline',
-    consentNote: CONSENT_NOTE_INLINE,
+    consentNote: consentHash ? undefined : CONSENT_NOTE_INLINE,
   }
 }
 
-function cursorFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
+function cursorFile(cred: AgentCredentialJson, path: string, consentHash?: string): RuntimeSnippet {
+  const env = consentHash ? { HAVEN_MCP_ACK: consentHash } : undefined
   const config = {
     mcpServers: {
       haven: {
         command: 'npx',
         args: ['-y', MCP_PACKAGE, '--credentials', path],
+        ...(env ? { env } : {}),
       },
     },
   }
   return {
-    ...cursorInline(cred),
+    ...cursorInline(cred, consentHash),
     guidance:
       'First download the credentials below and save them somewhere private. Then paste this into ' +
       'Cursor\'s MCP settings and reload Cursor.',
     code: jsonBlock(config),
     mode: 'file',
-    consentNote: consentNote(path),
+    consentNote: consentHash ? undefined : consentNoteFile(path),
   }
 }
 
 // ── Other agents (any other MCP-aware app or custom script) ──────
 
-function genericInline(cred: AgentCredentialJson): RuntimeSnippet {
+function genericInline(cred: AgentCredentialJson, consentHash?: string): RuntimeSnippet {
   const envLines = [
     `HAVEN_API_KEY=${cred.api_key}`,
     `HAVEN_DELEGATE_KEY=${cred.delegate_key}`,
@@ -207,6 +222,7 @@ function genericInline(cred: AgentCredentialJson): RuntimeSnippet {
   if (cred.agent_id) envLines.push(`HAVEN_AGENT_ID=${cred.agent_id}`)
   if (cred.safe_address) envLines.push(`HAVEN_SAFE_ADDRESS=${cred.safe_address}`)
   if (cred.api_url) envLines.push(`HAVEN_API_URL=${cred.api_url}`)
+  if (consentHash) envLines.push(`HAVEN_MCP_ACK=${consentHash}`)
   const code = `${envLines.join(' \\\n  ')} \\\n  npx -y ${MCP_PACKAGE}`
   return {
     id: 'generic-mcp',
@@ -217,26 +233,27 @@ function genericInline(cred: AgentCredentialJson): RuntimeSnippet {
       'starts in stdio mode and your agent connects to it as an MCP tool.',
     code,
     mode: 'inline',
-    consentNote: CONSENT_NOTE_INLINE,
+    consentNote: consentHash ? undefined : CONSENT_NOTE_INLINE,
   }
 }
 
-function genericFile(_cred: AgentCredentialJson, path: string): RuntimeSnippet {
-  const code = `HAVEN_CREDENTIALS=${path} npx -y ${MCP_PACKAGE}`
+function genericFile(_cred: AgentCredentialJson, path: string, consentHash?: string): RuntimeSnippet {
+  const ackPart = consentHash ? ` HAVEN_MCP_ACK=${consentHash}` : ''
+  const code = `HAVEN_CREDENTIALS=${path}${ackPart} npx -y ${MCP_PACKAGE}`
   return {
-    ...genericInline(_cred),
+    ...genericInline(_cred, consentHash),
     guidance:
       'First download the credentials below and save them somewhere private. Then run this ' +
       'command wherever your agent runs — the Haven MCP server reads everything from that file.',
     code,
     mode: 'file',
-    consentNote: consentNote(path),
+    consentNote: consentHash ? undefined : consentNoteFile(path),
   }
 }
 
 // ── Windsurf ──────────────────────────────────────────────────────
 
-function windsurfInline(cred: AgentCredentialJson): RuntimeSnippet {
+function windsurfInline(cred: AgentCredentialJson, consentHash?: string): RuntimeSnippet {
   const config = {
     mcpServers: {
       haven: {
@@ -248,6 +265,7 @@ function windsurfInline(cred: AgentCredentialJson): RuntimeSnippet {
           HAVEN_AGENT_ID: cred.agent_id,
           HAVEN_SAFE_ADDRESS: cred.safe_address,
           HAVEN_API_URL: cred.api_url ?? undefined,
+          HAVEN_MCP_ACK: consentHash,
         }),
       },
     },
@@ -262,33 +280,35 @@ function windsurfInline(cred: AgentCredentialJson): RuntimeSnippet {
     destination: '~/.codeium/windsurf/mcp_config.json',
     code: jsonBlock(config),
     mode: 'inline',
-    consentNote: CONSENT_NOTE_INLINE,
+    consentNote: consentHash ? undefined : CONSENT_NOTE_INLINE,
   }
 }
 
-function windsurfFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
+function windsurfFile(cred: AgentCredentialJson, path: string, consentHash?: string): RuntimeSnippet {
+  const env = consentHash ? { HAVEN_MCP_ACK: consentHash } : undefined
   const config = {
     mcpServers: {
       haven: {
         command: 'npx',
         args: ['-y', MCP_PACKAGE, '--credentials', path],
+        ...(env ? { env } : {}),
       },
     },
   }
   return {
-    ...windsurfInline(cred),
+    ...windsurfInline(cred, consentHash),
     guidance:
       'First download the credentials below and save them somewhere private. Then paste this into ' +
       'Windsurf\'s MCP settings and reload Windsurf.',
     code: jsonBlock(config),
     mode: 'file',
-    consentNote: consentNote(path),
+    consentNote: consentHash ? undefined : consentNoteFile(path),
   }
 }
 
 // ── VS Code ───────────────────────────────────────────────────────
 
-function vsCodeInline(cred: AgentCredentialJson): RuntimeSnippet {
+function vsCodeInline(cred: AgentCredentialJson, consentHash?: string): RuntimeSnippet {
   const config = {
     servers: {
       haven: {
@@ -301,6 +321,7 @@ function vsCodeInline(cred: AgentCredentialJson): RuntimeSnippet {
           HAVEN_AGENT_ID: cred.agent_id,
           HAVEN_SAFE_ADDRESS: cred.safe_address,
           HAVEN_API_URL: cred.api_url ?? undefined,
+          HAVEN_MCP_ACK: consentHash,
         }),
       },
     },
@@ -315,28 +336,30 @@ function vsCodeInline(cred: AgentCredentialJson): RuntimeSnippet {
     destination: '.vscode/mcp.json',
     code: jsonBlock(config),
     mode: 'inline',
-    consentNote: CONSENT_NOTE_INLINE,
+    consentNote: consentHash ? undefined : CONSENT_NOTE_INLINE,
   }
 }
 
-function vsCodeFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
+function vsCodeFile(cred: AgentCredentialJson, path: string, consentHash?: string): RuntimeSnippet {
+  const env = consentHash ? { HAVEN_MCP_ACK: consentHash } : undefined
   const config = {
     servers: {
       haven: {
         type: 'stdio',
         command: 'npx',
         args: ['-y', MCP_PACKAGE, '--credentials', path],
+        ...(env ? { env } : {}),
       },
     },
   }
   return {
-    ...vsCodeInline(cred),
+    ...vsCodeInline(cred, consentHash),
     guidance:
       'First download the credentials below and save them somewhere private. Then add this to ' +
       'your VS Code MCP settings and reload the window.',
     code: jsonBlock(config),
     mode: 'file',
-    consentNote: consentNote(path),
+    consentNote: consentHash ? undefined : consentNoteFile(path),
   }
 }
 
@@ -451,26 +474,27 @@ function sdkFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
 
 /** Build all runtime snippets for the given credential in the given mode. */
 export function buildRuntimeSnippets(input: RuntimeSnippetInput, mode: RuntimeSnippetMode): RuntimeSnippet[] {
-  const path = input.credentialFilePath ?? defaultCredentialPath(input.credential.agent_slug)
+  const { credential: cred, consentHash } = input
+  const path = input.credentialFilePath ?? defaultCredentialPath(cred.agent_slug)
   if (mode === 'file') {
     return [
-      claudeDesktopFile(input.credential, path),
-      cursorFile(input.credential, path),
-      windsurfFile(input.credential, path),
-      vsCodeFile(input.credential, path),
-      genericFile(input.credential, path),
-      sdkFile(input.credential, path),
-      pythonFile(input.credential, path),
+      claudeDesktopFile(cred, path, consentHash),
+      cursorFile(cred, path, consentHash),
+      windsurfFile(cred, path, consentHash),
+      vsCodeFile(cred, path, consentHash),
+      genericFile(cred, path, consentHash),
+      sdkFile(cred, path),
+      pythonFile(cred, path),
     ]
   }
   return [
-    claudeDesktopInline(input.credential),
-    cursorInline(input.credential),
-    windsurfInline(input.credential),
-    vsCodeInline(input.credential),
-    genericInline(input.credential),
-    sdkInline(input.credential),
-    pythonInline(input.credential),
+    claudeDesktopInline(cred, consentHash),
+    cursorInline(cred, consentHash),
+    windsurfInline(cred, consentHash),
+    vsCodeInline(cred, consentHash),
+    genericInline(cred, consentHash),
+    sdkInline(cred),
+    pythonInline(cred),
   ]
 }
 
@@ -484,12 +508,4 @@ export function buildRuntimeSnippet(
   const found = all.find((s) => s.id === id)
   if (!found) throw new Error(`Unknown runtime snippet id: ${id}`)
   return found
-}
-
-function stripUndefined<T extends Record<string, unknown>>(value: T): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(value)) {
-    if (typeof v === 'string' && v.length > 0) out[k] = v
-  }
-  return out
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -12,6 +12,7 @@ import {
   type RuntimeSnippetId,
   type RuntimeSnippetMode,
 } from '@/lib/agent-runtime-snippets'
+import { computeMcpConsentHash } from '@/lib/mcp-consent-hash'
 
 /**
  * Runtime connect card — primary post-creation surface on the Done step.
@@ -68,9 +69,18 @@ export function RuntimeConnectCard({
   const [activeId, setActiveId] = useState<RuntimeSnippetId | null>(null)
   const [mode, setMode] = useState<RuntimeSnippetMode>('inline')
 
+  // Pre-compute the MCP consent hash so it can be embedded directly in the
+  // generated config snippets — no terminal `--ack` step needed.
+  const [consentHash, setConsentHash] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    computeMcpConsentHash(credential).then(setConsentHash).catch(() => {
+      // Web Crypto unavailable (very old browser) — fall back to consent note.
+    })
+  }, [credential])
+
   const snippets = useMemo(
-    () => buildRuntimeSnippets({ credential, credentialFilePath }, mode),
-    [credential, credentialFilePath, mode],
+    () => buildRuntimeSnippets({ credential, credentialFilePath, consentHash }, mode),
+    [credential, credentialFilePath, consentHash, mode],
   )
   const active = activeId ? snippets.find((s) => s.id === activeId) ?? null : null
 

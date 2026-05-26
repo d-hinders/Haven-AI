@@ -29,6 +29,8 @@ function credential() {
   return buildAgentCredential(BASE_INPUT).json
 }
 
+const FAKE_HASH = 'a3f9c12e4b7d0e81'
+
 describe('buildRuntimeSnippets — inline mode', () => {
   it('builds one snippet per supported runtime', () => {
     const all = buildRuntimeSnippets({ credential: credential() }, 'inline')
@@ -103,35 +105,82 @@ describe('buildRuntimeSnippets — inline mode', () => {
     expect(snippet.code).toContain('HAVEN_API_KEY')
   })
 
-  it('MCP-based snippets include a consentNote; non-MCP do not', () => {
-    const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
-    for (const id of mcpIds) {
-      const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
-      expect(snippet.consentNote, `${id} should have a consentNote`).toBeTruthy()
-      // Inline mode uses env-var acknowledgement path (no credential file to write --ack sidecar)
-      expect(snippet.consentNote).toContain('HAVEN_MCP_ACK')
-    }
-    const nonMcpIds = ['sdk-cli', 'python'] as const
-    for (const id of nonMcpIds) {
-      const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
-      expect(snippet.consentNote, `${id} should NOT have a consentNote`).toBeUndefined()
-    }
+  describe('consent gate — without pre-computed hash (fallback)', () => {
+    it('MCP-based snippets show a fallback consentNote; non-MCP do not', () => {
+      const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
+      for (const id of mcpIds) {
+        const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
+        expect(snippet.consentNote, `${id} should have a fallback consentNote`).toBeTruthy()
+        // Inline fallback: env-var acknowledgement (no credential file to write sidecar)
+        expect(snippet.consentNote).toContain('HAVEN_MCP_ACK')
+      }
+      const nonMcpIds = ['sdk-cli', 'python'] as const
+      for (const id of nonMcpIds) {
+        const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
+        expect(snippet.consentNote, `${id} should NOT have a consentNote`).toBeUndefined()
+      }
+    })
+
+    it('file-mode MCP snippets show --ack --credentials fallback note', () => {
+      const PATH = '/Users/example/secrets/haven-agent.json'
+      const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
+      for (const id of mcpIds) {
+        const snippet = buildRuntimeSnippet(
+          { credential: credential(), credentialFilePath: PATH },
+          id,
+          'file',
+        )
+        expect(snippet.consentNote, `${id} file-mode should have a fallback consentNote`).toBeTruthy()
+        expect(snippet.consentNote).toContain('--ack')
+        expect(snippet.consentNote).toContain('--credentials')
+        expect(snippet.consentNote).toContain(PATH)
+      }
+    })
   })
 
-  it('file-mode MCP snippets use --ack with --credentials in the consent note', () => {
-    const PATH = '/Users/example/secrets/haven-agent.json'
-    const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
-    for (const id of mcpIds) {
+  describe('consent gate — with pre-computed hash (happy path)', () => {
+    it('MCP snippets embed HAVEN_MCP_ACK and have no consentNote', () => {
+      const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode'] as const
+      for (const id of mcpIds) {
+        const snippet = buildRuntimeSnippet(
+          { credential: credential(), consentHash: FAKE_HASH },
+          id,
+          'inline',
+        )
+        expect(snippet.consentNote, `${id} should NOT have a consentNote when hash is set`).toBeUndefined()
+        const config = JSON.parse(snippet.code)
+        const env = config.mcpServers?.haven?.env ?? config.servers?.haven?.env
+        expect(env.HAVEN_MCP_ACK).toBe(FAKE_HASH)
+      }
+    })
+
+    it('generic-mcp inline embeds HAVEN_MCP_ACK in the bash command', () => {
       const snippet = buildRuntimeSnippet(
-        { credential: credential(), credentialFilePath: PATH },
-        id,
-        'file',
+        { credential: credential(), consentHash: FAKE_HASH },
+        'generic-mcp',
+        'inline',
       )
-      expect(snippet.consentNote, `${id} file-mode should have a consentNote`).toBeTruthy()
-      expect(snippet.consentNote).toContain('--ack')
-      expect(snippet.consentNote).toContain('--credentials')
-      expect(snippet.consentNote).toContain(PATH)
-    }
+      expect(snippet.consentNote).toBeUndefined()
+      expect(snippet.code).toContain(`HAVEN_MCP_ACK=${FAKE_HASH}`)
+    })
+
+    it('file-mode MCP snippets embed HAVEN_MCP_ACK in config env and have no consentNote', () => {
+      const PATH = '/Users/example/secrets/haven-agent.json'
+      const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode'] as const
+      for (const id of mcpIds) {
+        const snippet = buildRuntimeSnippet(
+          { credential: credential(), credentialFilePath: PATH, consentHash: FAKE_HASH },
+          id,
+          'file',
+        )
+        expect(snippet.consentNote).toBeUndefined()
+        const config = JSON.parse(snippet.code)
+        const env = config.mcpServers?.haven?.env ?? config.servers?.haven?.env
+        expect(env?.HAVEN_MCP_ACK).toBe(FAKE_HASH)
+        // Secrets still not in file-mode snippets
+        expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+      }
+    })
   })
 })
 

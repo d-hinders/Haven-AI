@@ -103,20 +103,17 @@ describe('buildRuntimeSnippets — inline mode', () => {
     expect(snippet.code).toContain('HAVEN_API_KEY')
   })
 
-  it('consentNote is undefined for all runtimes until @haven_ai/mcp is published to npm', () => {
-    // CONSENT_NOTE is intentionally undefined while the package is not yet on npm.
-    // Restore the assertion below once @haven_ai/mcp is published:
-    //
-    //   const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp']
-    //   for (const id of mcpIds) {
-    //     expect(buildRuntimeSnippet(..., id, 'inline').consentNote).toContain('--ack')
-    //   }
-    //
-    // Non-MCP runtimes (sdk-cli, python) must never have a consentNote.
-    const allIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp', 'sdk-cli', 'python'] as const
-    for (const id of allIds) {
+  it('MCP-based snippets include a consentNote; non-MCP do not', () => {
+    const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
+    for (const id of mcpIds) {
       const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
-      expect(snippet.consentNote, `${id} consentNote should be undefined until package is published`).toBeUndefined()
+      expect(snippet.consentNote, `${id} should have a consentNote`).toBeTruthy()
+      expect(snippet.consentNote).toContain('--ack')
+    }
+    const nonMcpIds = ['sdk-cli', 'python'] as const
+    for (const id of nonMcpIds) {
+      const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
+      expect(snippet.consentNote, `${id} should NOT have a consentNote`).toBeUndefined()
     }
   })
 })

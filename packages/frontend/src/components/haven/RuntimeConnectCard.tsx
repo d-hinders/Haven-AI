@@ -33,6 +33,14 @@ import {
  * — there is no standalone "your secret is X" line. Secrets only appear
  * where they are actionable (inside the code block), which keeps copy-to-
  * clipboard a deliberate action.
+ *
+ * Copy-failure handling: `CodeBlock` only fires `onCopy` when the clipboard
+ * write actually resolved. If the browser rejects the write (insecure
+ * origin, permissions, headless context), `onCopyFailed` fires instead. We
+ * surface that as an inline error AND skip the toast/`onSnippetCopied`
+ * call so the parent modal's "credentials saved" gate stays locked until
+ * the user successfully copies the snippet (or copies it by hand and the
+ * gate is satisfied another way).
  */
 
 export interface RuntimeConnectCardProps {
@@ -67,6 +75,7 @@ export function RuntimeConnectCard({
   // Lands with nothing selected. The first click reveals the code block.
   const [activeId, setActiveId] = useState<RuntimeSnippetId | null>(null)
   const [mode, setMode] = useState<RuntimeSnippetMode>('inline')
+  const [copyError, setCopyError] = useState<RuntimeSnippetId | null>(null)
 
   const snippets = useMemo(
     () => buildRuntimeSnippets({ credential, credentialFilePath }, mode),
@@ -76,10 +85,24 @@ export function RuntimeConnectCard({
 
   const handleCopy = useCallback(
     (snippet: RuntimeSnippet) => {
+      setCopyError((id) => (id === snippet.id ? null : id))
       toast.success('Configuration copied')
       onSnippetCopied?.(snippet)
     },
     [toast, onSnippetCopied],
+  )
+
+  const handleCopyFailed = useCallback(
+    (snippet: RuntimeSnippet) => {
+      setCopyError(snippet.id)
+      // Auto-clear after a few seconds so the inline error doesn't linger
+      // forever if the user navigates away and back.
+      setTimeout(
+        () => setCopyError((id) => (id === snippet.id ? null : id)),
+        4000,
+      )
+    },
+    [],
   )
 
   return (
@@ -168,9 +191,21 @@ export function RuntimeConnectCard({
             language={active.language}
             filename={active.destination}
             onCopy={() => handleCopy(active)}
+            onCopyFailed={() => handleCopyFailed(active)}
           >
             {active.code}
           </CodeBlock>
+
+          {copyError === active.id && (
+            <p
+              role="alert"
+              className="text-[11px] leading-relaxed text-[var(--v2-danger)]"
+            >
+              Couldn’t copy automatically — select the snippet above and copy it
+              by hand. The “credentials saved” step won’t unlock until the copy
+              succeeds.
+            </p>
+          )}
 
           {/* Credential format note */}
           <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
@@ -178,6 +213,20 @@ export function RuntimeConnectCard({
               ? 'Credentials are embedded in the snippet — paste once and you\'re done. Your agent budget still caps what it can spend.'
               : 'The snippet references your saved credential file by path. No secret is stored in the configuration.'}
           </p>
+
+          {/* File-mode permission hint — the file holds a private key */}
+          {mode === 'file' && (
+            <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+              After saving, restrict the file to your user:
+              {' '}
+              <span className="font-mono text-[var(--v2-ink-2)]">chmod 600</span>
+              {' '}
+              on macOS/Linux, or <span className="font-mono text-[var(--v2-ink-2)]">icacls</span>
+              {' '}
+              with <span className="font-mono text-[var(--v2-ink-2)]">/inheritance:r</span> on
+              Windows. Avoid cloud-synced folders.
+            </p>
+          )}
 
           {/* Consent gate note — only for MCP-based runtimes */}
           {active.consentNote && (

@@ -460,15 +460,24 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     if (result.status.status === 'expired') {
       return reply.code(410).send({
         error: result.error ?? 'Payment approval expired and cannot be resumed',
+        error_code: result.errorCode,
         payment_id: result.status.payment_id,
+        rail: result.status.rail,
         status: result.status.status,
       })
     }
 
     if (!result.resumeState) {
-      return reply.code(409).send({
+      // 422 instead of 409 specifically for "this rail is documented as a
+      // valid AgentPaymentRail value but the resume-state surface doesn't
+      // currently rehydrate it." Generic 409 stays for other "cannot resume
+      // right now" cases (incomplete context, wrong status).
+      const code = result.errorCode === 'rail_not_resumable' ? 422 : 409
+      return reply.code(code).send({
         error: result.error ?? 'Payment cannot be resumed',
+        error_code: result.errorCode,
         payment_id: result.status.payment_id,
+        rail: result.status.rail,
         status: result.status.status,
       })
     }

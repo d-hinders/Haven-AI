@@ -94,4 +94,29 @@ describe('RuntimeConnectCard', () => {
     expect(onSnippetCopied.mock.calls[0][0].id).toBe('claude-desktop')
     expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
   })
+
+  it('does not unlock the saved gate when clipboard.writeText rejects', async () => {
+    // Regression: PR #173 swallowed clipboard failures and still fired
+    // onSnippetCopied, which let the modal's "credential saved" gate unlock
+    // even though no secret reached the clipboard. After the merge of EPIC 2,
+    // the bug moved into CodeBlock — the copy logic now lives there. The
+    // fix in CodeBlock calls `onCopy` only on success and exposes a new
+    // `onCopyFailed` hook; RuntimeConnectCard uses that to surface an
+    // inline error and keep the gate locked.
+    const onSnippetCopied = vi.fn()
+    clipboardWriteText.mockRejectedValueOnce(new Error('Document is not focused.'))
+    render(<RuntimeConnectCard credential={credential()} onSnippetCopied={onSnippetCopied} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to clipboard' }))
+    await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
+
+    expect(onSnippetCopied).not.toHaveBeenCalled()
+    // The CodeBlock's "copied" check-mark replaces "Copy to clipboard"
+    // only on success. On failure the label stays as "Copy to clipboard".
+    expect(screen.getByRole('button', { name: 'Copy to clipboard' })).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Couldn’t copy automatically/i),
+    ).toBeInTheDocument()
+  })
 })

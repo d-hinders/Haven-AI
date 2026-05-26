@@ -277,8 +277,39 @@ describe('payment routes', () => {
     expect(response.statusCode).toBe(410)
     expect(response.json()).toMatchObject({
       error: 'Payment approval expired and cannot be resumed',
+      error_code: 'expired',
       payment_id: 'approval-123',
+      rail: 'x402',
       status: 'expired',
+    })
+  })
+
+  it('returns 422 with rail_not_resumable for documented rails the resume surface does not implement', async () => {
+    // `AgentPaymentRail` declares `stripe_deposit` and `spt` as valid rails
+    // (the wire / OpenAPI surface accepts them) but the resume-state
+    // endpoint only implements x402 and MPP today. Clients must be able to
+    // distinguish "rail not supported" from generic "cannot resume right
+    // now" — the structured error_code makes that pattern-matchable.
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ status: 'pending' }] })
+      .mockResolvedValueOnce({
+        rows: [x402Approval({ source: 'stripe_deposit', payment_rail: 'stripe_deposit' })],
+      })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/payments/approval-123/resume_state',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.json()).toMatchObject({
+      error_code: 'rail_not_resumable',
+      payment_id: 'approval-123',
+      rail: 'stripe_deposit',
     })
   })
 

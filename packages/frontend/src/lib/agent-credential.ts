@@ -129,7 +129,12 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
       custody:
         'Haven is non-custodial. The delegate_key in this file lives only on this machine. ' +
         'Haven\'s backend never receives it. Treat this file like a private key — keep it offline ' +
-        'and revoke the agent at revoke_url if it leaks.',
+        'and revoke the agent at revoke_url if it leaks. ' +
+        'Restrict file permissions immediately after saving: ' +
+        'macOS/Linux: `chmod 600 path/to/this/file.json`. ' +
+        'Windows (PowerShell): ' +
+        '`icacls path\\to\\this\\file.json /inheritance:r /grant:r "$env:UserName:R"`. ' +
+        'Do not store this file in cloud-synced folders (iCloud, Dropbox, OneDrive) or shared dotfile repositories.',
       budget_summary:
         'budget_summary is a snapshot of the on-chain Safe AllowanceModule limits at credential ' +
         'creation. The on-chain limits are the authoritative gate. If you change allowances in ' +

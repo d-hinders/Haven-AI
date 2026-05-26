@@ -136,7 +136,8 @@ export const openapiSpec = {
     version: '0.1.0',
     summary: 'Machine-readable contract for Haven agent payments.',
     description:
-      'Haven is non-custodial smart account software. These endpoints let authenticated agents create payment intents, fetch payment state, and relay independently signed payment payloads. Haven never receives the agent delegate private key and never treats an API key as payment authority.',
+      'Haven is non-custodial smart account software. These endpoints let authenticated agents create payment intents, fetch payment state, and relay independently signed payment payloads. Haven never receives the agent delegate private key and never treats an API key as payment authority. ' +
+      'Note: x402 quoting (`quoteX402`) is a client-side operation and has no Haven endpoint — the agent probes the merchant directly. Resume is consolidated under `GET /payments/{id}/resume_state`; there is no separate `/x402/resume` endpoint. See docs/architecture/05-agent-api-openapi.md for the full rationale.',
   },
   servers: [
     { url: 'https://havenbackend-production-8a00.up.railway.app', description: 'Production Railway backend' },
@@ -436,7 +437,8 @@ export const openapiSpec = {
         operationId: 'getPaymentResumeState',
         summary: 'Rehydrate x402 or MPP resume state for a payment id.',
         description:
-          'Returns stored protocol context only. This endpoint does not sign, execute, relay, or authorize a payment. The agent still signs locally when it resumes the x402 or MPP flow.',
+          'Returns stored protocol context only. This endpoint does not sign, execute, relay, or authorize a payment. The agent still signs locally when it resumes the x402 or MPP flow.\n\n' +
+          'Supported rails today: `x402`, `mpp_demo`, `mpp_crypto`. The widened `AgentPaymentRail` enum also declares `direct`, `mpp`, `stripe_deposit`, and `spt` so that wire validation can accept every documented rail value, but resume-state rehydration is not implemented for those — calls return 422 with `error_code: "rail_not_resumable"`.',
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
@@ -450,8 +452,30 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
-          '409': errorResponse,
-          '410': errorResponse,
+          '409': {
+            description: 'Resume context incomplete (missing fields the agent must rebuild locally).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResumeStateErrorBody' },
+              },
+            },
+          },
+          '410': {
+            description: 'Payment approval expired and cannot be resumed.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResumeStateErrorBody' },
+              },
+            },
+          },
+          '422': {
+            description: 'Payment rail is not supported by the resume-state surface.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResumeStateErrorBody' },
+              },
+            },
+          },
         },
       },
     },
@@ -1273,6 +1297,24 @@ export const openapiSpec = {
           { $ref: '#/components/schemas/X402ResumeState' },
           { $ref: '#/components/schemas/MppResumeState' },
         ],
+      },
+      ResumeStateErrorCode: {
+        type: 'string',
+        enum: ['expired', 'rail_not_resumable', 'context_incomplete'],
+        description:
+          'Stable identifier for the resume-state error case. Pattern-match on this rather than on the human-readable `error` string.',
+      },
+      ResumeStateErrorBody: {
+        type: 'object',
+        required: ['error'],
+        properties: {
+          error: { type: 'string', description: 'Human-readable failure reason.' },
+          error_code: { $ref: '#/components/schemas/ResumeStateErrorCode' },
+          payment_id: uuid,
+          rail: { $ref: '#/components/schemas/AgentPaymentRail' },
+          status: { type: 'string' },
+        },
+        additionalProperties: false,
       },
       MachinePaymentAgent: {
         type: 'object',

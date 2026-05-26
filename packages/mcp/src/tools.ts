@@ -5,6 +5,8 @@ import {
   HavenError,
   HavenPaymentStateError,
   HavenSigningError,
+  composeDescription,
+  toolDescriptions as sharedDescriptions,
   type MachinePaymentChallenge,
   type MppQuote,
   type MppResumeState,
@@ -73,29 +75,24 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   },
 }
 
+/**
+ * MCP tool descriptions, composed from the shared semantic source in
+ * `@haven_ai/sdk`'s `tool-descriptions.ts`. Keeping both the SDK tool-calling
+ * surface and the MCP surface pointed at the same prose source means new
+ * guidance lands in both places at once and a parity test can catch drift.
+ */
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
-  haven_quote_x402:
-    'Inspect an HTTP 402 x402 paid resource without creating a Haven payment, signature, approval, or on-chain transaction.',
-  haven_pay_x402_quote:
-    'Pay a previously inspected x402 quote. The delegate key signs locally; Haven only validates and relays signed, on-chain-constrained payment transactions. If approval is needed, preserve the returned resume_state and wait for nextAction=retry_original_x402_request before resuming.',
-  haven_resume_x402_payment:
-    'Resume an x402 payment after the Haven wallet owner approved the funding step. Accepts either resume_state or payment_id. Only use when get status returns nextAction=retry_original_x402_request; do not start a new merchant session.',
-  haven_quote_mpp:
-    'Inspect a Haven MPP challenge or paid MPP URL without creating a Haven payment, signature, approval, or on-chain transaction.',
-  haven_pay_mpp_challenge:
-    'Pay a previously inspected MPP challenge. The delegate key signs locally; Haven only validates and relays signed, on-chain-constrained payment transactions. If approval is needed, preserve resume_state or payment_id.',
-  haven_resume_mpp_payment:
-    'Resume an MPP payment after the Haven wallet owner approved the funding step. Accepts either resume_state or payment_id and retries the original paid resource.',
-  haven_get_payment_status:
-    'Fetch structured Haven payment status, including phase and nextAction taxonomy for agent recovery.',
-  haven_get_resume_state:
-    'Rehydrate stored x402/MPP resume_state by payment_id. This returns context only; signing still happens locally when a resume tool is called.',
-  haven_get_agent:
-    'Return the authenticated agent identity, Haven wallet, delegate address, chain, and status.',
-  haven_get_allowances:
-    'Return configured and on-chain allowance state for the authenticated agent. On-chain allowance is the real spend gate.',
-  haven_list_receipts:
-    'List recent machine-payment receipts/evidence for bookkeeping. Proof header values are not returned.',
+  haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
+  haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
+  haven_resume_x402_payment: composeDescription(sharedDescriptions.resumeX402),
+  haven_quote_mpp: composeDescription(sharedDescriptions.quoteMpp),
+  haven_pay_mpp_challenge: composeDescription(sharedDescriptions.payMpp),
+  haven_resume_mpp_payment: composeDescription(sharedDescriptions.resumeMpp),
+  haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
+  haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
+  haven_get_agent: composeDescription(sharedDescriptions.getAgent),
+  haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
+  haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
 }
 
 export interface ToolSuccess<T> {

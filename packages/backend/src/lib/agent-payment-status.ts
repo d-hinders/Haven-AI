@@ -51,10 +51,23 @@ export interface AgentPaymentStatus {
   }
 }
 
+/**
+ * Stable identifiers for the structured-error cases the resume-state
+ * endpoint can return. Documented in the OpenAPI spec so clients can
+ * pattern-match on the code rather than the human-readable message.
+ */
+export const ResumeStateErrorCode = {
+  Expired: 'expired',
+  RailNotResumable: 'rail_not_resumable',
+  ContextIncomplete: 'context_incomplete',
+} as const
+export type ResumeStateErrorCode = (typeof ResumeStateErrorCode)[keyof typeof ResumeStateErrorCode]
+
 export interface AgentPaymentResumeStateLookup {
   status: AgentPaymentStatus | null
   resumeState: AgentPaymentResumeState | null
   error?: string
+  errorCode?: ResumeStateErrorCode
 }
 
 export type AgentPaymentResumeState = AgentX402ResumeState | AgentMppResumeState
@@ -457,6 +470,7 @@ function buildX402ResumeState(status: AgentPaymentStatus): AgentPaymentResumeSta
       status,
       resumeState: null,
       error: 'Stored x402 payment context is incomplete and cannot be resumed from payment id alone',
+      errorCode: ResumeStateErrorCode.ContextIncomplete,
     }
   }
 
@@ -514,13 +528,18 @@ function buildMppResumeState(status: AgentPaymentStatus): AgentPaymentResumeStat
   const idempotencyKey =
     nonEmpty(context?.idempotency_key ?? status.idempotency_key) ??
     `${status.rail}:${status.payment_id}`
-  const paymentRail = status.rail === AgentPaymentRail.Mpp ? 'mpp_demo' : status.rail
+  // status.rail is the wire value persisted on the row (e.g. `mpp_demo`,
+  // `mpp_crypto`). We carry it through verbatim onto the resume state's
+  // granular `paymentRail` field; the categorical `rail: 'mpp'` below is the
+  // SDK discriminator and is set independently.
+  const paymentRail = status.rail
 
   if (status.chain_id !== 8453) {
     return {
       status,
       resumeState: null,
       error: 'Stored MPP payment context uses an unsupported network for SDK resume state rehydration',
+      errorCode: ResumeStateErrorCode.ContextIncomplete,
     }
   }
 
@@ -529,6 +548,7 @@ function buildMppResumeState(status: AgentPaymentStatus): AgentPaymentResumeStat
       status,
       resumeState: null,
       error: 'Stored MPP payment context is incomplete and cannot be resumed from payment id alone',
+      errorCode: ResumeStateErrorCode.ContextIncomplete,
     }
   }
 
@@ -594,6 +614,7 @@ export async function getAgentPaymentResumeState(
       status,
       resumeState: null,
       error: 'Payment approval expired and cannot be resumed',
+      errorCode: ResumeStateErrorCode.Expired,
     }
   }
 
@@ -605,10 +626,15 @@ export async function getAgentPaymentResumeState(
     return buildMppResumeState(status)
   }
 
+  // `AgentPaymentRail` declares `stripe_deposit` and `spt` as valid rails so
+  // wire validation matches the database, but the resume-state surface only
+  // supports x402 and MPP today. Return a structured code so OpenAPI clients
+  // can match on it instead of grepping the human message.
   return {
     status,
     resumeState: null,
     error: `Payment rail ${status.rail} does not support resume-state rehydration`,
+    errorCode: ResumeStateErrorCode.RailNotResumable,
   }
 }
 

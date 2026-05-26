@@ -36,7 +36,10 @@ describe('buildRuntimeSnippets — inline mode', () => {
       'claude-desktop',
       'cursor',
       'generic-mcp',
+      'python',
       'sdk-cli',
+      'vscode',
+      'windsurf',
     ])
   })
 
@@ -74,6 +77,45 @@ describe('buildRuntimeSnippets — inline mode', () => {
     expect(snippet.code).toContain('process.env.HAVEN_API_KEY')
     expect(snippet.code).toContain('process.env.HAVEN_DELEGATE_KEY')
   })
+
+  it('Windsurf snippet has the correct destination path', () => {
+    const snippet = buildRuntimeSnippet({ credential: credential() }, 'windsurf', 'inline')
+    expect(snippet.language).toBe('json')
+    expect(snippet.destination).toBe('~/.codeium/windsurf/mcp_config.json')
+    const config = JSON.parse(snippet.code)
+    expect(config.mcpServers.haven.env.HAVEN_API_KEY).toBe('sk_agent_TESTKEY_NEVERREAL')
+  })
+
+  it('VS Code snippet uses the servers (not mcpServers) schema and stdio type', () => {
+    const snippet = buildRuntimeSnippet({ credential: credential() }, 'vscode', 'inline')
+    expect(snippet.language).toBe('json')
+    const config = JSON.parse(snippet.code)
+    expect(config.servers).toBeDefined()
+    expect(config.servers.haven.type).toBe('stdio')
+    expect(config.servers.haven.env.HAVEN_API_KEY).toBe('sk_agent_TESTKEY_NEVERREAL')
+  })
+
+  it('Python snippet has python language and pip install comment', () => {
+    const snippet = buildRuntimeSnippet({ credential: credential() }, 'python', 'inline')
+    expect(snippet.language).toBe('python')
+    expect(snippet.code).toContain('pip install haven-ai-sdk')
+    expect(snippet.code).toContain('HavenClient')
+    expect(snippet.code).toContain('HAVEN_API_KEY')
+  })
+
+  it('MCP-based snippets include a consentNote; non-MCP do not', () => {
+    const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
+    for (const id of mcpIds) {
+      const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
+      expect(snippet.consentNote, `${id} should have a consentNote`).toBeTruthy()
+      expect(snippet.consentNote).toContain('--ack')
+    }
+    const nonMcpIds = ['sdk-cli', 'python'] as const
+    for (const id of nonMcpIds) {
+      const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
+      expect(snippet.consentNote, `${id} should NOT have a consentNote`).toBeUndefined()
+    }
+  })
 })
 
 describe('buildRuntimeSnippets — file mode', () => {
@@ -106,5 +148,40 @@ describe('buildRuntimeSnippets — file mode', () => {
   it('falls back to a placeholder path when none is provided', () => {
     const snippet = buildRuntimeSnippet({ credential: credential() }, 'claude-desktop', 'file')
     expect(snippet.code).toContain('/absolute/path/to/haven-agent-research-agent.json')
+  })
+
+  it('Windsurf file-mode snippet references the credential path via --credentials', () => {
+    const snippet = buildRuntimeSnippet(
+      { credential: credential(), credentialFilePath: PATH },
+      'windsurf',
+      'file',
+    )
+    const config = JSON.parse(snippet.code)
+    expect(config.mcpServers.haven.args).toContain('--credentials')
+    expect(config.mcpServers.haven.args).toContain(PATH)
+    expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+  })
+
+  it('VS Code file-mode snippet references the credential path via --credentials', () => {
+    const snippet = buildRuntimeSnippet(
+      { credential: credential(), credentialFilePath: PATH },
+      'vscode',
+      'file',
+    )
+    const config = JSON.parse(snippet.code)
+    expect(config.servers.haven.args).toContain('--credentials')
+    expect(config.servers.haven.args).toContain(PATH)
+    expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+  })
+
+  it('Python file-mode snippet reads the credential file instead of env vars', () => {
+    const snippet = buildRuntimeSnippet(
+      { credential: credential(), credentialFilePath: PATH },
+      'python',
+      'file',
+    )
+    expect(snippet.code).toContain(PATH)
+    expect(snippet.code).toContain('json.load')
+    expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
   })
 })

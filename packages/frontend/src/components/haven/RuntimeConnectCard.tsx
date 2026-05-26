@@ -2,8 +2,9 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { Card } from '@/components/ui/Card'
+import { CodeBlock } from '@/components/ui/CodeBlock'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { Button } from '@/components/ui/Button'
+import { useToast } from '@/components/ui/Toast'
 import type { AgentCredentialJson } from '@/lib/agent-credential'
 import {
   buildRuntimeSnippets,
@@ -32,6 +33,14 @@ import {
  * — there is no standalone "your secret is X" line. Secrets only appear
  * where they are actionable (inside the code block), which keeps copy-to-
  * clipboard a deliberate action.
+ *
+ * Copy-failure handling: `CodeBlock` only fires `onCopy` when the clipboard
+ * write actually resolved. If the browser rejects the write (insecure
+ * origin, permissions, headless context), `onCopyFailed` fires instead. We
+ * surface that as an inline error AND skip the toast/`onSnippetCopied`
+ * call so the parent modal's "credentials saved" gate stays locked until
+ * the user successfully copies the snippet (or copies it by hand and the
+ * gate is satisfied another way).
  */
 
 export interface RuntimeConnectCardProps {
@@ -53,7 +62,7 @@ export interface RuntimeConnectCardProps {
   tryItPrompt?: string
 }
 
-const DEFAULT_TRY_IT_PROMPT = "Ask your agent: “What's my Haven budget?”"
+const DEFAULT_TRY_IT_PROMPT = `Ask your agent: "What's my Haven budget?"`
 
 export function RuntimeConnectCard({
   credential,
@@ -61,10 +70,11 @@ export function RuntimeConnectCard({
   onSnippetCopied,
   tryItPrompt = DEFAULT_TRY_IT_PROMPT,
 }: RuntimeConnectCardProps) {
+  const { toast } = useToast()
+
   // Lands with nothing selected. The first click reveals the code block.
   const [activeId, setActiveId] = useState<RuntimeSnippetId | null>(null)
   const [mode, setMode] = useState<RuntimeSnippetMode>('inline')
-  const [copiedId, setCopiedId] = useState<RuntimeSnippetId | null>(null)
   const [copyError, setCopyError] = useState<RuntimeSnippetId | null>(null)
 
   const snippets = useMemo(
@@ -74,49 +84,47 @@ export function RuntimeConnectCard({
   const active = activeId ? snippets.find((s) => s.id === activeId) ?? null : null
 
   const handleCopy = useCallback(
-    async (snippet: RuntimeSnippet) => {
-      // Only mark the snippet as copied (and fire the modal's "saved" gate)
-      // when the clipboard write actually resolves. Browsers can reject
-      // clipboard writes silently in restricted contexts (insecure origin,
-      // permissions, headless test runners); swallowing the error and
-      // flipping the gate anyway would let the user advance through the
-      // handoff without ever having the credential outside this view.
-      try {
-        await navigator.clipboard.writeText(snippet.code)
-      } catch {
-        setCopyError(snippet.id)
-        setTimeout(
-          () => setCopyError((id) => (id === snippet.id ? null : id)),
-          4000,
-        )
-        return
-      }
-      setCopyError(null)
-      setCopiedId(snippet.id)
-      setTimeout(() => setCopiedId((id) => (id === snippet.id ? null : id)), 2000)
+    (snippet: RuntimeSnippet) => {
+      setCopyError((id) => (id === snippet.id ? null : id))
+      toast.success('Configuration copied')
       onSnippetCopied?.(snippet)
     },
-    [onSnippetCopied],
+    [toast, onSnippetCopied],
+  )
+
+  const handleCopyFailed = useCallback(
+    (snippet: RuntimeSnippet) => {
+      setCopyError(snippet.id)
+      // Auto-clear after a few seconds so the inline error doesn't linger
+      // forever if the user navigates away and back.
+      setTimeout(
+        () => setCopyError((id) => (id === snippet.id ? null : id)),
+        4000,
+      )
+    },
+    [],
   )
 
   return (
     <Card hover={false} className="p-4" elevation="anchor">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge tone="brand">Connect</StatusBadge>
-            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-              Add these payment credentials to your agent
-            </h3>
-          </div>
-          <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Pick where your agent lives and copy the credentials. Once your agent has them,
-            it can start making payments within the rules you just set.
-          </p>
-        </div>
+      {/* Header */}
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge tone="brand">Connect</StatusBadge>
+        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+          Connect your agent
+        </h3>
       </div>
+      <p className="mt-1 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+        Pick where your agent runs and copy the configuration. Once it has the
+        credentials it can start making payments within the rules you just set.
+      </p>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2" role="tablist" aria-label="Agent connection options">
+      {/* Runtime tiles */}
+      <div
+        className="mt-4 flex flex-wrap items-center gap-2"
+        role="tablist"
+        aria-label="Agent runtime"
+      >
         {snippets.map((s) => {
           const isActive = s.id === activeId
           return (
@@ -127,7 +135,7 @@ export function RuntimeConnectCard({
               aria-selected={isActive}
               onClick={() => setActiveId(s.id)}
               className={
-                'rounded-[10px] border px-3 h-9 text-[13px] font-medium transition-colors ' +
+                'rounded-[6px] border px-3 h-8 text-[13px] font-medium transition-colors ' +
                 (isActive
                   ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]'
                   : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]')
@@ -139,30 +147,32 @@ export function RuntimeConnectCard({
         })}
       </div>
 
+      {/* Empty prompt */}
       {!active && (
         <p
-          className="mt-3 text-[12px] italic leading-relaxed text-[var(--v2-ink-3)]"
+          className="mt-3 text-[12px] text-[var(--v2-ink-3)]"
           aria-live="polite"
         >
-          Pick one above to see the credentials.
+          Select a runtime above to see the setup instructions.
         </p>
       )}
 
+      {/* Active snippet */}
       {active && (
         <div
           key={`${active.id}:${mode}`}
           className="v2-animate-step-rise mt-4 space-y-3"
         >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+          {/* Guidance + mode toggle */}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="text-[12px] leading-relaxed text-[var(--v2-ink-2)] max-w-prose">
               {active.guidance}
-              {active.destination && (
-                <>
-                  {' '}<span className="font-mono text-[var(--v2-ink-2)]">{active.destination}</span>
-                </>
-              )}
-            </div>
-            <div className="inline-flex items-center gap-1 rounded-[10px] border border-[var(--v2-border)] bg-white p-1 text-[12px]">
+            </p>
+            <div
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-[8px] border border-[var(--v2-border)] bg-white p-0.5 text-[12px]"
+              role="group"
+              aria-label="Credential format"
+            >
               <ModeToggleButton
                 label="Inline"
                 isActive={mode === 'inline'}
@@ -176,23 +186,15 @@ export function RuntimeConnectCard({
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-            <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-3 py-1.5">
-              <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
-                {active.language}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => void handleCopy(active)}
-              >
-                {copiedId === active.id ? 'Copied' : 'Copy'}
-              </Button>
-            </div>
-            <pre className="overflow-x-auto px-3 py-2 text-[12px] leading-snug text-[var(--v2-ink)]">
-              <code>{active.code}</code>
-            </pre>
-          </div>
+          {/* Code block — uses the design system CodeBlock (dark surface) */}
+          <CodeBlock
+            language={active.language}
+            filename={active.destination}
+            onCopy={() => handleCopy(active)}
+            onCopyFailed={() => handleCopyFailed(active)}
+          >
+            {active.code}
+          </CodeBlock>
 
           {copyError === active.id && (
             <p
@@ -205,38 +207,48 @@ export function RuntimeConnectCard({
             </p>
           )}
 
-          {mode === 'inline' && (
+          {/* Credential format note */}
+          <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+            {mode === 'inline'
+              ? 'Credentials are embedded in the snippet — paste once and you\'re done. Your agent budget still caps what it can spend.'
+              : 'The snippet references your saved credential file by path. No secret is stored in the configuration.'}
+          </p>
+
+          {/* File-mode permission hint — the file holds a private key */}
+          {mode === 'file' && (
             <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-              The credentials are right there in the snippet — copy it once and you’re done.
-              Your budget still caps what the agent can spend, and you can revoke it in Haven
-              anytime.
+              After saving, restrict the file to your user:
+              {' '}
+              <span className="font-mono text-[var(--v2-ink-2)]">chmod 600</span>
+              {' '}
+              on macOS/Linux, or <span className="font-mono text-[var(--v2-ink-2)]">icacls</span>
+              {' '}
+              with <span className="font-mono text-[var(--v2-ink-2)]">/inheritance:r</span> on
+              Windows. Avoid cloud-synced folders.
             </p>
           )}
-          {mode === 'file' && (
-            <>
-              <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-                The credentials live in a separate file you save. The snippet only references that
-                file by path — no secret in the snippet itself.
+
+          {/* Consent gate note — only for MCP-based runtimes */}
+          {active.consentNote && (
+            <div className="rounded-[8px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-3 py-2.5">
+              <p className="text-[11px] font-medium text-[var(--v2-warning)]">
+                One-time setup required
               </p>
-              <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-                After saving, restrict the file to your user:
-                {' '}
-                <span className="font-mono text-[var(--v2-ink-2)]">chmod 600</span>
-                {' '}
-                on macOS/Linux, or <span className="font-mono text-[var(--v2-ink-2)]">icacls</span>
-                {' '}
-                with <span className="font-mono text-[var(--v2-ink-2)]">/inheritance:r</span> on
-                Windows. Avoid cloud-synced folders.
-              </p>
-            </>
+              <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[var(--v2-warning)]">
+                {active.consentNote}
+              </pre>
+            </div>
           )}
 
-          <div className="rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
-            <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
-            <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+          {/* Try it — Card.Section inset for secondary context */}
+          <Card.Section inset className="py-3">
+            <p className="text-[11px] font-medium text-[var(--v2-ink-3)] uppercase tracking-tight">
+              Try it
+            </p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
               {tryItPrompt}
-            </div>
-          </div>
+            </p>
+          </Card.Section>
         </div>
       )}
     </Card>
@@ -258,7 +270,7 @@ function ModeToggleButton({
       aria-pressed={isActive}
       onClick={onClick}
       className={
-        'rounded-[6px] px-2 h-7 transition-colors ' +
+        'rounded-[6px] px-2.5 h-7 text-[12px] font-medium transition-colors ' +
         (isActive
           ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]'
           : 'text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]')

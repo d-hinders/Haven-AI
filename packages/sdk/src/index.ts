@@ -2,6 +2,9 @@ export { HavenClient } from './client.js'
 export { havenTools } from './tools.js'
 export { signHash, addressFromKey, verifySignature } from './signer.js'
 
+export { toolDescriptions, composeDescription } from './tool-descriptions.js'
+export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
+
 export {
   AgentPaymentPhase,
   AgentPaymentNextAction,

@@ -4,6 +4,13 @@
  * These definitions describe the `make_payment` and `get_payment_status` tools
  * in the formats expected by Claude (Anthropic) and OpenAI.
  *
+ * The agent payment surface used by these tools is shared with the
+ * `@haven_ai/mcp` server — both consume `toolDescriptions` from
+ * `./tool-descriptions.ts`. Each consumer composes its own user-visible string
+ * from the same semantic fragments, so guidance lands in both surfaces at
+ * once and a downstream test asserts the shared summary appears in every
+ * consumer description.
+ *
  * Usage with Claude:
  *   const response = await anthropic.messages.create({
  *     tools: havenTools.claude(),
@@ -16,6 +23,8 @@
  *     ...
  *   })
  */
+
+import { toolDescriptions as sharedDescriptions } from './tool-descriptions.js'
 
 // ── JSON Schema (shared across formats) ──────────────────────────
 
@@ -143,24 +152,30 @@ const MAKE_PAYMENT_DESCRIPTION =
   'Haven authenticates the agent, validates the signed intent, and relays the Safe AllowanceModule transaction; it does not hold keys or control funds. ' +
   'Gnosis Chain tokens: EURe, USDC.e, xDAI. Base tokens: USDC, ETH.'
 
+// Descriptions are composed from the shared semantic source so the SDK and MCP
+// surfaces stay in lockstep. Each constant prepends the shared `summary` (the
+// stable substring tests assert on) and then appends the SDK-specific guidance
+// for tool-calling consumers.
+
 const GET_STATUS_DESCRIPTION =
-  'Check the status of a previously initiated payment. ' +
+  sharedDescriptions.getPaymentStatus.summary + ' ' +
   'Accepts payment intent IDs and approval request IDs. Returns the current status, phase, next_action, transaction hash if available, and payment details.'
 
 const AUTHORIZE_X402_DESCRIPTION =
-  'Authorize payment for an HTTP 402 (Payment Required) response. ' +
+  sharedDescriptions.payX402.summary + ' ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key and request a policy-limited Safe AllowanceModule top-up when needed. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
   'If this returns pending_approval, tell the user it is waiting in Haven, preserve the original merchant/MCP session and x402 details, call get_payment_status later, and use resume_x402_payment only when next_action is retry_original_x402_request. Do not start a new merchant session or loop retries while approval is pending. ' +
   'Use the returned payment_header as the X-PAYMENT header on the retry request when doing a manual HTTP retry.'
 
 const RESUME_X402_DESCRIPTION =
-  'Resume an x402 payment after the user approved it in Haven. ' +
+  sharedDescriptions.resumeX402.summary + ' ' +
   'Use this only after get_payment_status returns next_action=retry_original_x402_request. ' +
   'It checks the approved payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new approval request or merchant session.'
 
 const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =
-  'Authorize a Haven machine-payment challenge, currently for the internal MPP demo rail. ' +
+  sharedDescriptions.payMpp.summary + ' ' +
+  'Currently scoped to the internal MPP demo rail. ' +
   'The agent signs the payment, Haven relays it within the on-chain allowance, and the tool returns a proof header for the retry request.'
 
 // ── Claude (Anthropic) format ────────────────────────────────────

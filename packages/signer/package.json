@@ -1,0 +1,54 @@
+{
+  "name": "@haven_ai/signer",
+  "version": "0.1.0-alpha",
+  "description": "Haven edge signer — holds the delegate key locally and signs payment hashes + x402 headers. Pairs with the hosted, keyless @haven_ai/mcp-server.",
+  "type": "module",
+  "bin": {
+    "haven-signer": "./dist/cli.js"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm --prefix ../sdk run build && tsup",
+    "test": "npm --prefix ../sdk run build && vitest run",
+    "typecheck": "npm --prefix ../sdk run build && tsc --noEmit"
+  },
+  "keywords": [
+    "haven",
+    "mcp",
+    "signer",
+    "non-custodial",
+    "x402"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@haven_ai/sdk": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "viem": "^2.51.0",
+    "x402": "^1.2.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}

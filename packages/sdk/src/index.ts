@@ -71,6 +71,8 @@ export {
   parsePaymentRequired,
   parsePaymentRequiredResponse,
   selectPaymentOption,
+  selectStandardPaymentOption,
+  toStandardPaymentRequirements,
   encodePaymentProof,
 } from './x402.js'
 

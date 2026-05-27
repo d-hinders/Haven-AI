@@ -20,6 +20,7 @@ import type {
   RawPaymentStatusResult,
   X402PaymentRequired,
   X402PaymentOption,
+  X402Intent,
   X402Quote,
   X402Receipt,
   X402RequestSnapshot,
@@ -316,6 +317,77 @@ export class HavenClient {
       status: 'pending_signature',
       expiresAt: raw.expires_at,
       signData: raw.sign_data,
+    }
+  }
+
+  /**
+   * Keyless x402 construct.
+   *
+   * The non-custodial half of an x402 payment: posts the funding request to
+   * `/x402` and returns the unsigned funding hash plus the data the caller
+   * needs to build and sign the EIP-3009 merchant header itself. Crucially it
+   * does **not** sign — neither the funding hash nor the merchant header — so
+   * it works without a `delegateKey`. Both delegate signatures happen on the
+   * machine that holds the key (the edge); the hosted MCP server relays only.
+   *
+   * Use this from the hosted, keyless server. The all-in-one `authorizeX402`
+   * remains for local clients that hold the key.
+   *
+   * Throws (via the shared payment-state path) when the amount exceeds the
+   * on-chain allowance — there is nothing to sign until the user approves.
+   */
+  async createX402Intent(
+    paymentRequired: X402PaymentRequired,
+    options: X402AuthorizationOptions = {},
+  ): Promise<X402Intent> {
+    const option = selectStandardPaymentOption(paymentRequired.accepts)
+    if (!option) {
+      throw new HavenApiError(
+        'No compatible payment option found in x402 requirements. ' +
+          'Haven supports standard x402 exact payments on Base USDC.',
+        400,
+      )
+    }
+
+    // The funding transfer tops up the agent's delegate EOA. With no local key
+    // we resolve that address from the authenticated agent record rather than
+    // deriving it from a private key.
+    const agent = await this.getAgent()
+    const fundingTo = agent.delegateAddress
+    if (!fundingTo) {
+      throw new HavenApiError('Authenticated agent has no delegate address registered.', 502)
+    }
+
+    const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
+    const raw = await this.post<RawX402AuthorizeResponse>('/x402', {
+      url: paymentRequired.resource.url,
+      payTo: fundingTo,
+      merchantPayTo: option.payTo,
+      amount: option.amount,
+      asset: option.asset,
+      network: option.network,
+      description: paymentRequired.resource.description,
+      idempotencyKey,
+    })
+
+    // Anything other than a signable funding intent (pending_approval,
+    // expired, already-executed, error) is surfaced through the shared path.
+    if (raw.status !== 'pending_signature') {
+      this.throwPaymentStateError('x402 payment', raw)
+    }
+    if (!raw.sign_data?.hash) {
+      throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
+    }
+
+    return {
+      paymentId: raw.payment_id,
+      status: 'pending_signature',
+      expiresAt: raw.expires_at,
+      signData: raw.sign_data,
+      accepted: option,
+      resourceUrl: paymentRequired.resource.url,
+      merchantTo: raw.merchant_to ?? option.payTo,
+      fundingTo,
     }
   }
 

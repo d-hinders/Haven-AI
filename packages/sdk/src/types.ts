@@ -192,6 +192,33 @@ export interface X402AuthorizationOptions {
   idempotencyKey?: string
 }
 
+/**
+ * Keyless x402 construct result.
+ *
+ * Returned by `createX402Intent` — the non-custodial half of an x402 payment.
+ * It carries the unsigned funding hash (`signData.hash`, Safe → delegate EOA)
+ * plus everything the *edge* needs to build and sign the EIP-3009 merchant
+ * header itself. The construct path never signs; both delegate signatures
+ * (funding hash + merchant header) happen on the machine that holds the key.
+ */
+export interface X402Intent {
+  /** Haven payment id for the funding transfer. */
+  paymentId: string
+  status: 'pending_signature'
+  /** ISO 8601 expiry of the funding intent, if returned. */
+  expiresAt?: string
+  /** The unsigned funding hash to sign with the delegate key (Safe → delegate EOA). */
+  signData: SignData
+  /** The selected x402 option — the edge needs this to build the EIP-3009 header. */
+  accepted: X402PaymentOption
+  /** Resource URL the 402 came from. */
+  resourceUrl: string
+  /** Merchant payTo address (the final recipient of the EIP-3009 transfer). */
+  merchantTo: string
+  /** Delegate EOA the funding transfer tops up (the x402 payer). */
+  fundingTo: string
+}
+
 /** Serializable HTTP request state for retrying the same x402 merchant request. */
 export interface X402RequestSnapshot {
   url: string

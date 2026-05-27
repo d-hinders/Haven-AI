@@ -42,6 +42,7 @@ interface AgentRow {
   api_key_prefix: string | null
   status: string
   created_at: string
+  last_seen_at: string | null
 }
 
 interface AllowanceRow {
@@ -69,7 +70,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const agentResult = await pool.query<AgentRow>(
       `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
-              a.api_key_prefix, a.status, a.created_at
+              a.api_key_prefix, a.status, a.created_at, a.last_seen_at
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1
@@ -112,7 +113,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const agentResult = await pool.query<AgentRow>(
       `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
-              a.api_key_prefix, a.status, a.created_at
+              a.api_key_prefix, a.status, a.created_at, a.last_seen_at
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1 AND a.id = $2

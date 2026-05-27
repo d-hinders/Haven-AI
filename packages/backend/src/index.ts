@@ -30,6 +30,7 @@ import machinePaymentRoutes from './routes/machine-payments.js'
 import demoMppRoutes from './routes/demo-mpp.js'
 import openapiRoutes from './routes/openapi.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
+import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
 import pool from './db.js'
 
 const app = Fastify({
@@ -92,6 +93,12 @@ await app.register(openapiRoutes)
 // be registered before routes that decorate request.agent so the onResponse
 // hook fires after them.
 registerAgentToolAuditHooks(app)
+
+// Record agent liveness (last_seen_at) after each authenticated agent request,
+// powering the dashboard "Connected · last seen" indicator. Registered as an
+// onResponse hook so it runs after route handlers, never interleaving with
+// their queries.
+registerAgentLastSeenHook(app)
 
 // --- Routes ---
 app.get('/health', async (_request, reply) => {

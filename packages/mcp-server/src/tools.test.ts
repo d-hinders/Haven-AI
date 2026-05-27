@@ -143,3 +143,74 @@ describe('haven_submit', () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+const PAYMENT_REQUIRED = {
+  x402Version: 1,
+  resource: { url: 'https://merchant.test/paid', description: 'paid data' },
+  accepts: [
+    {
+      scheme: 'exact',
+      network: 'base',
+      amount: '1000000',
+      // Base USDC — selectStandardPaymentOption only accepts this asset.
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      payTo: '0xMerchant',
+      maxTimeoutSeconds: 60,
+    },
+  ],
+}
+
+describe('haven_x402_authorize', () => {
+  it('returns the unsigned funding hash + x402 data for the edge, signing nothing', async () => {
+    stubFetch({
+      // createX402Intent resolves the delegate address from the agent record first.
+      'GET /machine-payments/agent': {
+        status: 200,
+        body: { id: 'agt_1', name: 'A', status: 'active', delegate_address: '0xDelegate', chain_id: 8453 },
+      },
+      'POST /x402': {
+        status: 201,
+        body: {
+          payment_id: 'pay_x402',
+          status: 'pending_signature',
+          merchant_to: '0xMerchant',
+          sign_data: { hash: '0xfunding' },
+        },
+      },
+    })
+
+    const result = ok<{ payment_id: string; payload_hash: string; x402: Record<string, unknown> }>(
+      await handlers().haven_x402_authorize({ payment_required: PAYMENT_REQUIRED }),
+    )
+
+    expect(result.data.payment_id).toBe('pay_x402')
+    expect(result.data.payload_hash).toBe('0xfunding')
+    expect(result.data.x402.funding_to).toBe('0xDelegate')
+    expect(result.data.x402.merchant_to).toBe('0xMerchant')
+
+    // Custody: the funding request tops up the delegate EOA but carries no key.
+    const x402Call = calls.find((c) => c.url.endsWith('/x402'))
+    expect(x402Call?.body).toMatchObject({ payTo: '0xDelegate', merchantPayTo: '0xMerchant' })
+    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+    expect(JSON.stringify(calls)).not.toContain('delegate_key')
+  })
+
+  it('surfaces pending_approval (no hash) when the x402 amount is over budget', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': {
+        status: 200,
+        body: { id: 'agt_1', name: 'A', status: 'active', delegate_address: '0xDelegate', chain_id: 8453 },
+      },
+      'POST /x402': {
+        status: 202,
+        body: { payment_id: 'pay_over', status: 'pending_approval' },
+      },
+    })
+
+    const result = ok<{ status: string; payload_hash: unknown }>(
+      await handlers().haven_x402_authorize({ payment_required: PAYMENT_REQUIRED }),
+    )
+    expect(result.data.status).toBe('pending_approval')
+    expect(result.data.payload_hash).toBeNull()
+  })
+})

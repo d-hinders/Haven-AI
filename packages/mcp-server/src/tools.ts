@@ -5,6 +5,7 @@ import {
   HavenPaymentStateError,
   composeDescription,
   toolDescriptions as sharedDescriptions,
+  type X402PaymentRequired,
 } from '@haven_ai/sdk'
 import { z } from 'zod/v3'
 
@@ -25,6 +26,7 @@ export type HostedToolName =
   | 'haven_get_allowances'
   | 'haven_pay'
   | 'haven_submit'
+  | 'haven_x402_authorize'
   | 'haven_get_payment_status'
   | 'haven_list_transactions'
 
@@ -41,6 +43,13 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     signature: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
+  },
+  haven_x402_authorize: {
+    // The parsed HTTP 402 PaymentRequired the agent received from the merchant.
+    // Validated downstream by the SDK (selectStandardPaymentOption); kept loose
+    // here so we don't fork the x402 schema in two places.
+    payment_required: z.unknown(),
+    idempotency_key: z.string().optional(),
   },
   haven_get_payment_status: {
     payment_id: z.string().min(1),
@@ -61,8 +70,19 @@ const PAY_DESCRIPTION = [
 
 const SUBMIT_DESCRIPTION = [
   'Relay a delegate signature produced on your machine to execute a previously constructed',
-  'payment. Pass the payment_id from haven_pay and the signature over its payload_hash.',
-  'Only { payment_id, signature } is sent to Haven — never the key. Returns { status, tx_hash }.',
+  'payment. Pass the payment_id from haven_pay (or haven_x402_authorize) and the signature over',
+  'its payload_hash. Only { payment_id, signature } is sent to Haven — never the key. Returns',
+  '{ status, tx_hash }.',
+].join(' ')
+
+const X402_AUTHORIZE_DESCRIPTION = [
+  'Construct the funding step for a standard x402 payment and return the unsigned hash to sign.',
+  'Pass the parsed HTTP 402 payment_required you got from the merchant. Returns { payment_id,',
+  'payload_hash, x402 } where x402 carries the accepted option, resource_url, merchant_to and',
+  'funding_to. Next: sign payload_hash with the delegate key on your machine, call haven_submit',
+  'to fund the delegate wallet, then build + sign the EIP-3009 X-PAYMENT header locally and retry',
+  'the merchant request. Returns { status: "pending_approval" } (no hash) when the amount exceeds',
+  'the budget. Haven never receives the signing key and never talks to the merchant.',
 ].join(' ')
 
 export const toolDescriptions: Record<HostedToolName, string> = {
@@ -70,6 +90,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
+  haven_x402_authorize: X402_AUTHORIZE_DESCRIPTION,
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_list_transactions: composeDescription(sharedDescriptions.listReceipts),
 }
@@ -134,6 +155,36 @@ export function createToolHandlers(
         const args = parse('haven_submit', input)
         const result = await haven.submitSignature(args.payment_id, args.signature)
         return { status: result.status, tx_hash: result.txHash ?? null }
+      }),
+
+    haven_x402_authorize: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_x402_authorize', input)
+        try {
+          const intent = await haven.createX402Intent(
+            args.payment_required as X402PaymentRequired,
+            { idempotencyKey: args.idempotency_key },
+          )
+          return {
+            payment_id: intent.paymentId,
+            status: intent.status,
+            payload_hash: intent.signData.hash,
+            expires_at: intent.expiresAt,
+            // The edge needs these to build + sign the EIP-3009 merchant header
+            // locally after the funding transfer is relayed.
+            x402: {
+              accepted: intent.accepted,
+              resource_url: intent.resourceUrl,
+              merchant_to: intent.merchantTo,
+              funding_to: intent.fundingTo,
+            },
+          }
+        } catch (err) {
+          if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
+            return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }
+          }
+          throw err
+        }
       }),
 
     haven_get_payment_status: async (input) =>

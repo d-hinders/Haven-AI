@@ -36,6 +36,7 @@ export type {
   X402PaymentOption,
   X402Receipt,
   X402AuthorizationOptions,
+  X402Intent,
   X402RequestSnapshot,
   X402Quote,
   X402ResumeState,

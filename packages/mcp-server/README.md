@@ -30,6 +30,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_get_allowances` | `GET /machine-payments/allowances` | no |
 | `haven_pay` | `POST /payments` (returns `payload_hash`) | no — edge signs |
 | `haven_submit` | `POST /payments/:id/sign` (relays signature) | no |
+| `haven_x402_authorize` | `POST /x402` (returns funding `payload_hash`) | no — edge signs |
 | `haven_get_payment_status` | `GET /machine-payments/:id/status` | no |
 | `haven_list_transactions` | `GET /machine-payments/receipts` | no |
 
@@ -37,9 +38,21 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 `{ status: "pending_approval", payload_hash: null }` when the amount exceeds the
 on-chain allowance (nothing to sign; the user approves in Haven).
 
-> `x402_authorize` over the hosted transport is a follow-up — it needs a keyless
-> x402 construct primitive in `@haven_ai/sdk` that doesn't exist yet (the
-> current `authorizeX402` requires a delegate key). Tracked for #181.
+### x402 (keyless)
+
+`haven_x402_authorize` takes the parsed HTTP 402 `payment_required` and returns
+the **funding** step's unsigned hash plus the `x402` data (accepted option,
+`resource_url`, `merchant_to`, `funding_to`) the edge needs. It signs nothing —
+backed by the SDK's keyless `createX402Intent`. The full round trip:
+
+1. `haven_x402_authorize` → unsigned funding `payload_hash` (+ `x402` context)
+2. edge signs the funding hash → `haven_submit` (funds `Safe → delegate EOA`)
+3. **edge** builds + signs the EIP-3009 `X-PAYMENT` header with the delegate key
+4. **edge** retries the merchant with the header
+
+Steps 3–4 are intentionally at the edge: the EIP-3009 header is a delegate-key
+signature, so it can't run on the keyless hosted server, and Haven never talks
+to the merchant. The header-builder lives in the edge signer (#184).
 
 ## Run
 

@@ -1,4 +1,4 @@
-import { FastifyRequest, FastifyReply } from 'fastify'
+import { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify'
 import { createHash } from 'crypto'
 import pool from '../db.js'
 
@@ -19,6 +19,61 @@ declare module 'fastify' {
   interface FastifyRequest {
     agent?: AgentContext
   }
+}
+
+/** Minimal queryable surface — matches `db.ts` and a fake for tests. */
+export interface QueryableLike {
+  query: (text: string, values?: unknown[]) => Promise<unknown>
+}
+
+/**
+ * How recently an agent must have been seen before we skip the write. The
+ * dashboard's "last seen N ago" indicator doesn't need sub-throttle precision,
+ * and this keeps a busy agent from writing on every single request.
+ */
+export const LAST_SEEN_THROTTLE_SECONDS = 10
+
+/**
+ * Record that an agent just talked to Haven. Best-effort and throttled: the
+ * write only happens if the agent hasn't been seen in the last
+ * `LAST_SEEN_THROTTLE_SECONDS`, and any failure is swallowed — liveness
+ * tracking must never break or slow an authenticated request.
+ *
+ * Exported for testing; called fire-and-forget from the middleware.
+ */
+export async function touchAgentLastSeen(
+  agentId: string,
+  db: QueryableLike = pool as unknown as QueryableLike,
+): Promise<void> {
+  try {
+    await db.query(
+      `UPDATE agents
+         SET last_seen_at = NOW()
+       WHERE id = $1
+         AND (last_seen_at IS NULL
+              OR last_seen_at < NOW() - INTERVAL '${LAST_SEEN_THROTTLE_SECONDS} seconds')`,
+      [agentId],
+    )
+  } catch {
+    // Best-effort: the response has its own path; never surface this.
+  }
+}
+
+/**
+ * Register an `onResponse` hook that records agent liveness after each
+ * request. It runs *after* the route handler so it never interleaves with the
+ * handler's own queries, and it only fires when `agentAuthMiddleware` set
+ * `request.agent`. Mirrors the agent-tool-audit hook's lifecycle.
+ */
+export function registerAgentLastSeenHook(
+  app: FastifyInstance,
+  db: QueryableLike = pool as unknown as QueryableLike,
+): void {
+  app.addHook('onResponse', async (request) => {
+    const agent = request.agent
+    if (!agent) return
+    await touchAgentLastSeen(agent.id, db)
+  })
 }
 
 // ── Middleware ─────────────────────────────────────────────────────

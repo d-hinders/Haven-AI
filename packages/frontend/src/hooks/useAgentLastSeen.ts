@@ -34,40 +34,49 @@ export function useAgentLastSeen(agentId: string | null | undefined): UseAgentLa
   const [lastSeenAt, setLastSeenAt] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isMountedRef = useRef(true)
+  // Generation counter: incremented each time the effect re-runs (agentId change
+  // or unmount+remount). An in-flight fetch from the *previous* cycle captures its
+  // generation at call time; if the ref has advanced by the time the fetch resolves,
+  // the response belongs to a stale cycle and is discarded — preventing dual-polling
+  // and stale-agent data being written into state for the new agentId.
+  const genRef = useRef(0)
 
-  const poll = useCallback(async () => {
-    if (!agentId || !isMountedRef.current) return
+  const poll = useCallback(
+    async (gen: number) => {
+      if (!agentId || !isMountedRef.current || gen !== genRef.current) return
 
-    try {
-      const res = await api.get<AgentLastSeenResponse>(`/agents/${agentId}`)
-      const ts = res.mcp_last_seen_at ?? null
-      if (isMountedRef.current) {
+      try {
+        const res = await api.get<AgentLastSeenResponse>(`/agents/${agentId}`)
+        // Re-check generation and mount status after the async fetch completes.
+        if (!isMountedRef.current || gen !== genRef.current) return
+        const ts = res.mcp_last_seen_at ?? null
         setLastSeenAt(ts)
+        // Schedule next poll — guard required: the component may have unmounted
+        // while the fetch was in-flight. Without this check, setTimeout fires
+        // after cleanup and creates an infinite polling loop after unmount.
+        const delay = ts ? POLL_INTERVAL_CONNECTED : POLL_INTERVAL_WAITING
+        timerRef.current = setTimeout(() => void poll(gen), delay)
+      } catch {
+        // Swallow errors — network hiccups shouldn't break the UI.
+        // Retry at the waiting interval.
+        if (isMountedRef.current && gen === genRef.current) {
+          timerRef.current = setTimeout(() => void poll(gen), POLL_INTERVAL_WAITING)
+        }
       }
-      // Schedule next poll — guard required: the component may have unmounted
-      // while the fetch was in-flight. Without this check, setTimeout fires
-      // after cleanup and creates an infinite polling loop after unmount.
-      const delay = ts ? POLL_INTERVAL_CONNECTED : POLL_INTERVAL_WAITING
-      if (isMountedRef.current) {
-        timerRef.current = setTimeout(poll, delay)
-      }
-    } catch {
-      // Swallow errors — network hiccups shouldn't break the UI.
-      // Retry at the waiting interval.
-      if (isMountedRef.current) {
-        timerRef.current = setTimeout(poll, POLL_INTERVAL_WAITING)
-      }
-    }
-  }, [agentId])
+    },
+    [agentId],
+  )
 
   useEffect(() => {
     isMountedRef.current = true
+    genRef.current += 1 // Invalidate any in-flight fetch from the previous cycle.
+    const gen = genRef.current
     setLastSeenAt(null) // Reset when agentId changes
 
     if (!agentId) return
 
     // Kick off immediately
-    void poll()
+    void poll(gen)
 
     return () => {
       isMountedRef.current = false

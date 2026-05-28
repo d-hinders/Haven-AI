@@ -265,7 +265,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
          )
          SELECT updated.id, updated.name, updated.description, updated.delegate_address,
                 updated.safe_id, us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
-                updated.api_key_prefix, updated.status, updated.created_at
+                updated.api_key_prefix, updated.status, updated.created_at,
+                (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = updated.id) AS mcp_last_seen_at
          FROM updated
          LEFT JOIN user_safes us ON updated.safe_id = us.id`,
         [id, sub, name?.trim() ?? null, description?.trim() ?? null],

@@ -147,19 +147,22 @@ export function buildDeepLink(
       type: 'http',
       headers: { Authorization: `Bearer ${token}` },
     })
-    // btoa is available in all modern browsers; Node environments use Buffer.from(…).toString('base64')
+    // btoa is Latin-1 only — use the encodeURIComponent + unescape idiom to
+    // safely handle any Unicode characters that may appear in hostedUrl or token
+    // (e.g. IDN hostnames set via NEXT_PUBLIC_HAVEN_MCP_URL). Without this,
+    // btoa throws a DOMException for characters outside the Latin-1 range.
     const encoded =
       typeof btoa !== 'undefined'
-        ? btoa(payload)
+        ? btoa(unescape(encodeURIComponent(payload)))
         : Buffer.from(payload).toString('base64')
     return `claude://settings/integrations/mcpServers?add=${encodeURIComponent(encoded)}`
   }
 
-  // Cursor
+  // Cursor — same unicode-safe encoding
   const headersJson = JSON.stringify({ Authorization: `Bearer ${token}` })
   const headersB64 =
     typeof btoa !== 'undefined'
-      ? btoa(headersJson)
+      ? btoa(unescape(encodeURIComponent(headersJson)))
       : Buffer.from(headersJson).toString('base64')
   return (
     `cursor://anysphere.cursor-deeplink/mcp/install` +

@@ -208,4 +208,88 @@ describe('HostedConnectCard', () => {
     expect(copied).not.toContain(DELEGATE_KEY)
     expect(onCredentialSaved).toHaveBeenCalled()
   })
+
+  // ── #189: Connected state ────────────────────────────────────────────────
+
+  it('shows "Connected" badge and "last seen" banner when lastSeenAt is set', () => {
+    const lastSeenAt = new Date(Date.now() - 5_000).toISOString() // 5s ago
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onSaveSigningKey={vi.fn()}
+        lastSeenAt={lastSeenAt}
+      />,
+    )
+
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: /agent connected/i })).toBeInTheDocument()
+    // "last seen Xs ago" is shown (exact text varies with timing)
+    expect(screen.getByRole('status').textContent).toMatch(/last seen/i)
+  })
+
+  it('collapses setup steps when connected and shows "Try it" prompt', () => {
+    const lastSeenAt = new Date(Date.now() - 5_000).toISOString()
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onSaveSigningKey={vi.fn()}
+        lastSeenAt={lastSeenAt}
+      />,
+    )
+
+    // Setup steps (client tabs) should be hidden
+    expect(screen.queryByRole('tablist', { name: /connect target/i })).not.toBeInTheDocument()
+    // "Try it" prompt is shown in the collapsed view
+    expect(screen.getByText(/Try it/i)).toBeInTheDocument()
+  })
+
+  it('"Show setup" toggle re-expands the client picker when connected', () => {
+    const lastSeenAt = new Date(Date.now() - 5_000).toISOString()
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onSaveSigningKey={vi.fn()}
+        lastSeenAt={lastSeenAt}
+      />,
+    )
+
+    // Initially collapsed
+    expect(screen.queryByRole('tablist', { name: /connect target/i })).not.toBeInTheDocument()
+
+    // Click the toggle
+    fireEvent.click(screen.getByRole('button', { name: /show setup steps/i }))
+
+    // Now the client picker is visible
+    expect(screen.getByRole('tablist', { name: /connect target/i })).toBeInTheDocument()
+    for (const name of ['Claude Code', 'Claude Desktop', 'Cursor', 'Other / SDK']) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('shows "Connect" badge (not "Connected") when lastSeenAt is absent', () => {
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onSaveSigningKey={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Connect')).toBeInTheDocument()
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: /agent connected/i })).not.toBeInTheDocument()
+  })
+
+  it('never exposes the delegate private key in the connected state', () => {
+    const lastSeenAt = new Date(Date.now() - 5_000).toISOString()
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onSaveSigningKey={vi.fn()}
+        lastSeenAt={lastSeenAt}
+      />,
+    )
+
+    const allText = document.body.textContent ?? ''
+    expect(allText).not.toContain(DELEGATE_KEY)
+  })
 })

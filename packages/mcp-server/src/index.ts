@@ -22,3 +22,15 @@ export {
   createHostedHttpServer,
   type HostedHttpServerOptions,
 } from './http.js'
+
+export {
+  assertHostedEnv,
+  CustodyError,
+} from './boot.js'
+
+export {
+  defaultAccessLogWriter,
+  deriveToolName,
+  type AccessLogEntry,
+  type AccessLogWriter,
+} from './log.js'

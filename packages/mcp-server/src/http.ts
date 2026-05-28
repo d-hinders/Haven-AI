@@ -2,12 +2,19 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { extractBearerToken } from './auth.js'
 import { buildHostedMcpServer, createHostedHavenClient } from './server.js'
+import { defaultAccessLogWriter, deriveToolName, type AccessLogWriter } from './log.js'
 
 export interface HostedHttpServerOptions {
   /** Haven backend base URL the server relays through. */
   baseUrl?: string
   /** Path the MCP endpoint is served on. Default `/v1`. */
   path?: string
+  /**
+   * Structured per-request access log sink. Defaults to one JSON line per
+   * request on stdout. Never receives the Authorization header, the api key,
+   * or any request/response body — only metadata.
+   */
+  logger?: AccessLogWriter
 }
 
 const MAX_BODY_BYTES = 1_000_000
@@ -25,9 +32,30 @@ const MAX_BODY_BYTES = 1_000_000
  */
 export function createHostedHttpServer(options: HostedHttpServerOptions = {}): Server {
   const path = options.path ?? '/v1'
+  const logger = options.logger ?? defaultAccessLogWriter
 
   return createServer((req, res) => {
-    handle(req, res, { ...options, path }).catch((err) => {
+    const start = Date.now()
+    const method = req.method ?? 'GET'
+    const reqPath = new URL(req.url ?? '/', 'http://localhost').pathname
+    let tool: string | undefined
+
+    // Emit one structured access-log line per request once the response is
+    // fully flushed. Never carries body content or the Authorization header.
+    res.on('finish', () => {
+      logger({
+        ts: new Date().toISOString(),
+        method,
+        path: reqPath,
+        status: res.statusCode,
+        ms: Date.now() - start,
+        tool,
+      })
+    })
+
+    handle(req, res, { ...options, path }, (name) => {
+      tool = name
+    }).catch((err) => {
       writeJson(res, 500, {
         jsonrpc: '2.0',
         error: { code: -32603, message: err instanceof Error ? err.message : String(err) },
@@ -41,6 +69,7 @@ async function handle(
   req: IncomingMessage,
   res: ServerResponse,
   options: Required<Pick<HostedHttpServerOptions, 'path'>> & HostedHttpServerOptions,
+  setTool: (name: string | undefined) => void,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
 
@@ -77,6 +106,10 @@ async function handle(
     writeJson(res, 400, jsonRpcError(-32700, err instanceof Error ? err.message : 'Invalid JSON body'))
     return
   }
+
+  // Attribute the access-log line to the MCP tool, when this is a tools/call.
+  // Pure metadata derived from the JSON-RPC envelope — no body content leaks.
+  setTool(deriveToolName(body))
 
   const haven = createHostedHavenClient({ apiKey: token, baseUrl: options.baseUrl })
   const server = buildHostedMcpServer(haven)

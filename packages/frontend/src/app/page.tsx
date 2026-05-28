@@ -67,28 +67,28 @@ const POLICY_METRICS = [
 
 const DIFFERENTIATORS = [
   {
-    title: 'You stay in control',
-    body: 'Your funds live in your Haven wallet. You approve actions; Haven never moves money on its own. If we disappear tomorrow, your money is safe.',
-  },
-  {
-    title: 'Rules‑first',
-    body: 'Every payment is checked against your rules before it goes through. Nothing reaches the network without clearing your rules.',
-  },
-  {
-    title: 'Built for agents',
-    body: 'Agents express intent in plain terms — pay, transfer, approve. Haven handles the blockchain complexity so agents never need to.',
-  },
-  {
-    title: 'Open standards',
-    body: 'Built‑in support for x402 (HTTP 402 paywalls) and Stripe MPP. Stablecoin settlement today, fiat rails next.',
+    title: 'Agent‑native by design',
+    body: 'Agents send simple requests — “pay this merchant 50 USDC.” Haven takes it from there, so your agent never has to deal with the moving parts underneath.',
   },
   {
     title: 'Works with any agent',
-    body: 'Works with Claude, GPT, custom scripts, and any orchestration framework. Haven makes no assumptions about where your agents run.',
+    body: 'Plugs into Claude, GPT, custom scripts, or any agent framework you already use. Haven doesn’t care where or how your agents run — bring your own setup.',
+  },
+  {
+    title: 'Audit‑first',
+    body: 'Every payment is logged — which agent asked, which rule let it through, and when it cleared. Pull a complete trail for any agent, anytime — for ops, for compliance, or for your own peace of mind.',
   },
   {
     title: 'Layered security',
-    body: 'Five independent layers — your Haven account, your rules, scoped agent credentials, approval flows, and a full audit trail.',
+    body: 'Five independent layers — your Haven account, your rules, your agent credentials, your approval flows, and a full audit trail. No single point of failure.',
+  },
+  {
+    title: 'Live today',
+    body: 'Live on Gnosis Chain and Base, with USDC and EURe supported. More networks and fiat support coming next.',
+  },
+  {
+    title: 'Built to integrate',
+    body: 'A clean API, a credential to drop in, and the open standards your agent already uses. Connect Haven to your existing setup in minutes — not weeks.',
   },
 ]
 
@@ -331,7 +331,8 @@ export default function Home() {
       {/* Why Haven */}
       <Section
         eyebrow="Why Haven"
-        title="Built for the way agents actually transact."
+        title="The hard parts of agent payments, already solved."
+        lede="Safe agent payments take more than a wallet. Policy, credentials, audit, and open‑standard rails — Haven gives you all of it, wired together, on day one."
         className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

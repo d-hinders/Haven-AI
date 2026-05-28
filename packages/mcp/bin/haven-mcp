@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+import('../dist/cli.js').catch((e) => {
+  process.stderr.write(String(e) + '\n')
+  process.exit(1)
+})

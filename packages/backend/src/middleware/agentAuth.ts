@@ -138,7 +138,11 @@ export async function agentAuthMiddleware(
 
   const row = result.rows[0]
 
-  if (row.status === 'revoked') {
+  // Positive allow-list: only 'active' and 'paused' agents are recognised;
+  // everything else (including 'revoked' and any future status strings) is
+  // rejected. Using an explicit allow-list prevents unknown future statuses
+  // from silently authenticating as active agents.
+  if (row.status === 'revoked' || (row.status !== 'active' && row.status !== 'paused')) {
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
 

@@ -161,7 +161,7 @@ export default function Home() {
       {/* The problem */}
       <Section
         eyebrow="The problem"
-        title="Agents need money. Today, that's an open wound."
+        title="Agents need money. Today, there's no safe way to give it to them."
         lede="Hardcoded credentials, shared cards, manual approvals — every workaround undoes the value of automation."
         className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
       >

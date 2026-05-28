@@ -46,6 +46,7 @@ import {
 } from './haven'
 import { useToast } from './ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { useAgentLastSeen } from '@/hooks/useAgentLastSeen'
 
 
 interface AllowanceEntry {
@@ -182,6 +183,10 @@ export default function CreateAgentModal({
   // True once the user has downloaded or copied the credential file.
   // Used to gate close-without-saving on the Done step — see handleClose.
   const [credentialsSaved, setCredentialsSaved] = useState(false)
+
+  // #189: Poll for the agent's first MCP tool call to show "Connected" status.
+  // Only active after the agent is created (Done step).
+  const { lastSeenAt: agentLastSeenAt } = useAgentLastSeen(step === 'done' ? createdAgentId : null)
 
   // Wagmi
   const publicClient = usePublicClient({ chainId })
@@ -1194,6 +1199,7 @@ export default function CreateAgentModal({
                       onSaveSigningKey={handleDownloadCredential}
                       onCredentialSaved={handleSnippetCopied}
                       signingKeySaved={credentialsSaved}
+                      lastSeenAt={agentLastSeenAt}
                     />
                   </div>
                 )

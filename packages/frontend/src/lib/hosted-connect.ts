@@ -6,20 +6,16 @@
  * — the URL + Bearer token go to Haven (identity), and signing stays on the
  * user's machine via the credential file (authority).
  *
- * Scope for #187: produce a usable `claude mcp add` command per client so the
- * redesigned card is functional. Richer per-client artifacts (deep links,
- * "Add to Cursor" buttons, SDK code blocks) are #188.
+ * #187 scope: working command per client.
+ * #188 scope: deep links (Claude Desktop / Cursor) + SDK advanced disclosure.
  */
 
 import type { AgentCredentialJson } from './agent-credential'
 
 /**
  * Default hosted MCP endpoint.
- *
- * Currently points at the Railway-issued URL because Haven doesn't yet have a
- * custom domain — that's a public endpoint, no secret to keep out of source.
- * Override at deploy time via `NEXT_PUBLIC_HAVEN_MCP_URL` once a real domain
- * (e.g. `mcp.haven.ai/v1`) is mapped; see `docs/deploy/hosted-mcp.md`.
+ * Override via `NEXT_PUBLIC_HAVEN_MCP_URL` at deploy time.
+ * See `docs/deploy/hosted-mcp.md`.
  */
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
 
@@ -53,9 +49,8 @@ export interface HostedConnectSnippet {
 }
 
 /**
- * Resolve the hosted MCP base URL. Env override wins so a fresh Railway URL
- * can be used before the `mcp.haven.ai` DNS is mapped. See
- * `docs/deploy/hosted-mcp.md`.
+ * Resolve the hosted MCP base URL.
+ * Env override wins so a Railway URL can be used before DNS is mapped.
  */
 export function resolveHostedMcpUrl(envOverride?: string | null): string {
   const fromEnv = envOverride ?? process.env.NEXT_PUBLIC_HAVEN_MCP_URL
@@ -64,12 +59,7 @@ export function resolveHostedMcpUrl(envOverride?: string | null): string {
 }
 
 /**
- * Build the connect snippet a user pastes to wire their agent client at the
- * hosted MCP. Identity only — no delegate key is ever in the snippet.
- *
- * Claude Code / Claude Desktop / Cursor all support `claude mcp add` style or
- * the JSON MCP config block; the snippet variant picks the most useful for
- * each. "Other / SDK" shows the env-var form for arbitrary runtimes.
+ * Build the connect snippet. Identity only — the delegate key is NEVER included.
  */
 export function buildHostedConnectSnippet(
   client: HostedClientId,
@@ -91,15 +81,11 @@ export function buildHostedConnectSnippet(
       }
     case 'claude-desktop':
     case 'cursor': {
-      // Both clients accept the same MCP-config block shape. Per-client deep
-      // links / one-click installers land in #188.
       const config = {
         mcpServers: {
           haven: {
             url: hostedUrl,
-            headers: {
-              Authorization: `Bearer ${credential.api_key}`,
-            },
+            headers: { Authorization: `Bearer ${credential.api_key}` },
           },
         },
       }
@@ -108,8 +94,8 @@ export function buildHostedConnectSnippet(
         language: 'json',
         guidance:
           client === 'claude-desktop'
-            ? 'Open Claude Desktop’s MCP settings and paste this in. Restart Claude when you’re done.'
-            : 'Open Cursor’s MCP settings and paste this in. Reload Cursor when you’re done.',
+            ? "Open Claude Desktop's MCP settings and paste this in. Restart Claude when you're done."
+            : "Open Cursor's MCP settings and paste this in. Reload Cursor when you're done.",
         code: JSON.stringify(config, null, 2),
       }
     }
@@ -132,4 +118,73 @@ export function buildHostedConnectSnippet(
         ].join('\n'),
       }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #188: Deep links + local-MCP advanced disclosure
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build a one-click deep link for Claude Desktop or Cursor.
+ *
+ * Carries the hosted MCP URL and Bearer token (identity).
+ * The delegate private key is NEVER in the link.
+ *
+ * Claude Desktop: `claude://settings/integrations/mcpServers?add=<b64-json>`
+ * Cursor:         `cursor://anysphere.cursor-deeplink/mcp/install?...`
+ */
+export function buildDeepLink(
+  client: 'claude-desktop' | 'cursor',
+  credential: AgentCredentialJson,
+  hostedUrl: string = resolveHostedMcpUrl(),
+): string {
+  const token = credential.api_key
+
+  if (client === 'claude-desktop') {
+    const payload = JSON.stringify({
+      name: 'haven',
+      url: hostedUrl,
+      type: 'http',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    // btoa is Latin-1 only — use the encodeURIComponent + unescape idiom to
+    // safely handle any Unicode characters that may appear in hostedUrl or token
+    // (e.g. IDN hostnames set via NEXT_PUBLIC_HAVEN_MCP_URL). Without this,
+    // btoa throws a DOMException for characters outside the Latin-1 range.
+    const encoded =
+      typeof btoa !== 'undefined'
+        ? btoa(unescape(encodeURIComponent(payload)))
+        : Buffer.from(payload).toString('base64')
+    return `claude://settings/integrations/mcpServers?add=${encodeURIComponent(encoded)}`
+  }
+
+  // Cursor — same unicode-safe encoding
+  const headersJson = JSON.stringify({ Authorization: `Bearer ${token}` })
+  const headersB64 =
+    typeof btoa !== 'undefined'
+      ? btoa(unescape(encodeURIComponent(headersJson)))
+      : Buffer.from(headersJson).toString('base64')
+  return (
+    `cursor://anysphere.cursor-deeplink/mcp/install` +
+    `?name=haven` +
+    `&url=${encodeURIComponent(hostedUrl)}` +
+    `&transport=http` +
+    `&headers=${encodeURIComponent(headersB64)}`
+  )
+}
+
+/**
+ * CTA label for each deep-link button.
+ */
+export const DEEP_LINK_LABEL: Record<'claude-desktop' | 'cursor', string> = {
+  'claude-desktop': 'Add to Claude',
+  cursor: 'Add to Cursor',
+}
+
+/**
+ * Whether a client has a deep-link path (as opposed to only a manual config
+ * block). Used by `HostedConnectCard` to decide whether to render a button.
+ */
+export function hasDeepLink(client: HostedClientId): client is 'claude-desktop' | 'cursor' {
+  return client === 'claude-desktop' || client === 'cursor'
 }

@@ -78,11 +78,12 @@ test.describe('Hosted MCP — in-budget path', () => {
     const modal = page.getByRole('dialog')
     await expect(modal).toBeVisible()
 
-    // The name field is the first thing the user fills in
-    await expect(modal.getByLabel(/Agent name/i)).toBeVisible()
+    // The name field is the first thing the user fills in.
+    // The label element is not associated via htmlFor, so use the placeholder.
+    await expect(modal.getByPlaceholder(/Research Agent/i)).toBeVisible()
 
-    // Progress stepper is rendered (details → account → policy → review)
-    await expect(modal.getByText(/Details/i)).toBeVisible()
+    // The details-step subtitle confirms we are on step 1
+    await expect(modal.getByText(/Name the agent/i)).toBeVisible()
 
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
@@ -93,8 +94,10 @@ test.describe('Hosted MCP — in-budget path', () => {
     await page.goto('/dashboard')
     await dismissMobileSidebar(page)
 
-    // The dashboard overview card shows the agent as connected
-    await expect(page.getByRole('link', { name: /Research agent/i })).toBeVisible()
+    // The dashboard overview card shows the agent as connected.
+    // Multiple "Research agent" links can appear (agent card + activity row),
+    // so pin to the first occurrence.
+    await expect(page.getByRole('link', { name: /Research agent/i }).first()).toBeVisible()
 
     // Spend metrics are shown (mocked at $12.50)
     await expect(page.getByText(/12\.50/)).toBeVisible()
@@ -121,8 +124,9 @@ test.describe('Hosted MCP — over-budget path', () => {
     // The approvals page must be reachable
     await expect(page.getByRole('heading', { name: 'Approvals' })).toBeVisible()
 
-    // The pending x402 approval from the mock is shown with the agent name
-    await expect(page.getByText('Research agent')).toBeVisible()
+    // The pending x402 approval from the mock is shown with the agent name.
+    // The name appears in both the approval row and a heading, so use .first().
+    await expect(page.getByText('Research agent').first()).toBeVisible()
 
     // The approval shows the amount and token
     await expect(page.getByText(/12\.50/)).toBeVisible()
@@ -196,7 +200,8 @@ test.describe('Hosted MCP — connected state', () => {
     // The mock dashboard overview has connectedAgents: 1.
     // At minimum the agent card is present, proving the connected count
     // flows through the overview endpoint.
-    await expect(page.getByRole('link', { name: /Research agent/i })).toBeVisible()
+    // Multiple links match "Research agent" (agent card + activity row) — pin to first.
+    await expect(page.getByRole('link', { name: /Research agent/i }).first()).toBeVisible()
 
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })

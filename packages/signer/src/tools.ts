@@ -5,6 +5,12 @@ import {
   type X402PaymentRequired,
 } from '@haven_ai/sdk'
 import { z } from 'zod/v3'
+import {
+  appendSigningAuditEntry,
+  createSigningAuditEntry,
+  hashPayloadForAudit,
+  type SigningAuditContext,
+} from './audit.js'
 import type { EdgeSigner } from './core.js'
 
 /**
@@ -59,14 +65,21 @@ export interface ToolFailure {
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
 
+export interface ToolHandlerOptions {
+  audit?: SigningAuditContext & { auditPath: string }
+}
+
 export function createToolHandlers(
   signer: EdgeSigner,
+  options: ToolHandlerOptions = {},
 ): Record<SignerToolName, (input: unknown) => Promise<ToolPayload>> {
   return {
     haven_sign: async (input) =>
       runTool(async () => {
         const args = parse('haven_sign', input)
-        return { signature: signer.signPaymentHash(args.payload_hash) }
+        const signature = signer.signPaymentHash(args.payload_hash)
+        await auditSigning('haven_sign', args.payload_hash)
+        return { signature }
       }),
 
     haven_x402_sign_header: async (input) =>
@@ -75,8 +88,24 @@ export function createToolHandlers(
         const result = await signer.buildX402PaymentHeader(
           args.payment_required as X402PaymentRequired,
         )
+        await auditSigning(
+          'haven_x402_sign_header',
+          hashPayloadForAudit(args.payment_required),
+        )
         return { payment_header: result.paymentHeader, accepted: result.accepted }
       }),
+  }
+
+  async function auditSigning(tool: SignerToolName, payloadHash: string): Promise<void> {
+    if (!options.audit) return
+    const { auditPath, ...context } = options.audit
+    await appendSigningAuditEntry(
+      createSigningAuditEntry(tool, payloadHash, {
+        ...context,
+        delegateAddress: signer.delegateAddress,
+      }),
+      auditPath,
+    )
   }
 }
 

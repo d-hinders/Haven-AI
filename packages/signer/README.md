@@ -19,6 +19,11 @@ HAVEN_DELEGATE_KEY=0x... npx @haven_ai/signer
 npx @haven_ai/signer --credentials /path/to/haven-agent.json
 ```
 
+On first launch, the signer prints the delegate address, any wallet/network
+metadata found in the credential file, and the sign-only tool list. It refuses
+to start until acknowledged with either `HAVEN_SIGNER_ACK=<hash>` or
+`npx @haven_ai/signer --credentials /path/to/haven-agent.json --ack`.
+
 It exposes two stdio MCP tools:
 
 | Tool | Does | Emits |
@@ -60,3 +65,11 @@ The delegate key is read from `HAVEN_DELEGATE_KEY` or a `--credentials` file's
 `delegate_key` (with a permissive-file warning). It stays in this process. The
 signer makes no network calls — it can't leak the key to Haven or anyone else.
 It needs no `api_key`: identity lives with the hosted connection, not here.
+
+## Local audit
+
+Every MCP signing operation appends a JSONL row locally. File-backed runs write
+next to the credential as `<credential>.signer-audit.jsonl`; env-only runs use
+`~/.haven/signer-audit.jsonl`. Rows include timestamp, tool, payload hash, and
+delegate address. They never include the delegate key, signature, or x402
+payment header.

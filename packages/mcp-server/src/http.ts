@@ -74,7 +74,9 @@ async function handle(
   const url = new URL(req.url ?? '/', 'http://localhost')
 
   // Lightweight liveness probe for infra (#186) — no auth, no MCP.
-  if (req.method === 'GET' && url.pathname === '/healthz') {
+  // Accept HEAD so uptime monitors and CDN preflights see 200, not 404. Node's
+  // http server suppresses the body on HEAD responses automatically.
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/healthz') {
     writeJson(res, 200, { status: 'ok' })
     return
   }

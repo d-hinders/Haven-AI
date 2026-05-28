@@ -65,6 +65,17 @@ describe('access logging', () => {
     expect(JSON.stringify(entries)).not.toContain('Authorization')
   })
 
+  it('responds 200 to HEAD /healthz so uptime monitors and CDNs are happy', async () => {
+    const server = createHostedHttpServer({ logger: () => {} })
+    await new Promise<void>((resolve) => server.listen(0, resolve))
+    const port = (server.address() as { port: number }).port
+
+    const res = await fetch(`http://127.0.0.1:${port}/healthz`, { method: 'HEAD' })
+    expect(res.status).toBe(200)
+
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
   it('attributes a tools/call entry to its tool name', async () => {
     const entries: AccessLogEntry[] = []
     const logger = vi.fn((e: AccessLogEntry) => {

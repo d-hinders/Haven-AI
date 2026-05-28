@@ -3,6 +3,12 @@ import { HavenClient } from '@haven_ai/sdk'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
+const X402_EXPECTED_AUTH = {
+  version: 1 as const,
+  message: 'Haven x402 expected context v1\n{}',
+  signature: '0x' + '11'.repeat(65),
+  signer: '0x000000000000000000000000000000000000bEEF',
+}
 
 interface CapturedCall {
   url: string
@@ -152,6 +158,7 @@ const PAYMENT_REQUIRED = {
       scheme: 'exact',
       network: 'base',
       amount: '1000000',
+      maxAmountRequired: '1500000',
       // Base USDC — selectStandardPaymentOption only accepts this asset.
       asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
       payTo: '0xMerchant',
@@ -174,6 +181,7 @@ describe('haven_x402_authorize', () => {
           payment_id: 'pay_x402',
           status: 'pending_signature',
           merchant_to: '0xMerchant',
+          x402_expected_auth: X402_EXPECTED_AUTH,
           sign_data: { hash: '0xfunding' },
         },
       },
@@ -187,10 +195,26 @@ describe('haven_x402_authorize', () => {
     expect(result.data.payload_hash).toBe('0xfunding')
     expect(result.data.x402.funding_to).toBe('0xDelegate')
     expect(result.data.x402.merchant_to).toBe('0xMerchant')
+    expect(result.data.x402.expected).toEqual({
+      payment_id: 'pay_x402',
+      payload_hash: '0xfunding',
+      resource_url:
+        (PAYMENT_REQUIRED.accepts[0] as { resource?: string }).resource ??
+        PAYMENT_REQUIRED.resource.url,
+      merchant_to: '0xMerchant',
+      amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+      asset: PAYMENT_REQUIRED.accepts[0].asset,
+      network: PAYMENT_REQUIRED.accepts[0].network,
+      auth: X402_EXPECTED_AUTH,
+    })
 
     // Custody: the funding request tops up the delegate EOA but carries no key.
     const x402Call = calls.find((c) => c.url.endsWith('/x402'))
-    expect(x402Call?.body).toMatchObject({ payTo: '0xDelegate', merchantPayTo: '0xMerchant' })
+    expect(x402Call?.body).toMatchObject({
+      payTo: '0xDelegate',
+      merchantPayTo: '0xMerchant',
+      amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+    })
     expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
     expect(JSON.stringify(calls)).not.toContain('delegate_key')
   })

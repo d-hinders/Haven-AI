@@ -28,8 +28,8 @@ It exposes two stdio MCP tools:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign the `payload_hash` from `haven_pay` / `haven_x402_authorize` | `{ signature }` |
-| `haven_x402_sign_header` | Build + sign the EIP-3009 `X-PAYMENT` header for the merchant leg | `{ payment_header }` |
+| `haven_sign` | Sign the `payload_hash` from `haven_pay` / `haven_x402_authorize`; for x402, record `x402.expected` and return a binding | `{ signature }` or `{ signature, x402_binding }` |
+| `haven_x402_sign_header` | Build + sign the EIP-3009 `X-PAYMENT` header only when `payment_required` matches the recorded `x402_binding` | `{ payment_header }` |
 
 **As a library** (for SDK / autonomous agents):
 
@@ -38,7 +38,15 @@ import { createEdgeSigner } from '@haven_ai/signer'
 
 const signer = createEdgeSigner(process.env.HAVEN_DELEGATE_KEY!)
 const signature = signer.signPaymentHash(payloadHash)
-const { paymentHeader } = await signer.buildX402PaymentHeader(paymentRequired)
+const funding = signer.signX402FundingHash(payloadHash, {
+  resourceUrl,
+  merchantTo,
+  amount,
+  asset,
+  network,
+  auth,
+})
+const { paymentHeader } = await signer.buildX402PaymentHeader(paymentRequired, funding.x402Binding)
 ```
 
 ## Orchestration
@@ -52,12 +60,24 @@ hosted:  haven_submit           -> { status, tx_hash }
 x402 (two delegate signatures, both local):
 
 ```
-hosted:  haven_x402_authorize   -> { payment_id, payload_hash, x402 }
-local:   haven_sign             -> funding signature
+hosted:  haven_x402_authorize   -> { payment_id, payload_hash, x402.expected }
+local:   haven_sign + expected  -> funding signature + x402_binding
 hosted:  haven_submit           -> funds Safe -> delegate EOA
-local:   haven_x402_sign_header -> X-PAYMENT header
+local:   haven_x402_sign_header -> X-PAYMENT header only if binding matches
 agent:   retry merchant with X-PAYMENT
 ```
+
+For x402, pass `x402.expected` from the hosted `haven_x402_authorize` response
+unchanged into the local `haven_sign` call. The signer records that context and
+returns a process-local `x402_binding`; pass that binding into
+`haven_x402_sign_header` after `haven_submit` confirms. The signer refuses to
+authorize the merchant header when the fresh merchant challenge has a different
+amount, merchant recipient, resource URL, token asset, or network than the
+recorded funding intent, and consumes the binding after one successful header.
+The expected context must also carry Haven's `auth` signature; configure
+`HAVEN_X402_BINDING_SIGNER` (or `x402_binding_signer` in the credential file) so
+the signer can reject locally invented or tampered x402 contexts before signing
+the funding hash.
 
 ## Custody
 
@@ -73,3 +93,11 @@ next to the credential as `<credential>.signer-audit.jsonl`; env-only runs use
 `~/.haven/signer-audit.jsonl`. Rows include timestamp, tool, payload hash, and
 delegate address. They never include the delegate key, signature, or x402
 payment header.
+
+## Hot-wallet minimization
+
+Standard x402 briefly funds the delegate EOA before the merchant settles the
+EIP-3009 authorization. Keep delegate balances transient: use small/reset-bound
+x402 allowances, retry the original merchant session only after funding
+confirms, and reconcile or sweep stranded delegate balances when the merchant
+retry fails or does not settle before authorization expiry.

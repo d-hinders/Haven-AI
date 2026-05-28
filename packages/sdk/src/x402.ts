@@ -11,7 +11,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { X402PaymentRequired, X402PaymentOption } from './types.js'
+import type { X402ExpectedContext, X402PaymentRequired, X402PaymentOption } from './types.js'
 import type { PaymentRequirements } from 'x402/types'
 
 const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
@@ -255,6 +255,24 @@ export function selectStandardPaymentOption(
   return null
 }
 
+export function x402AuthorizationAmount(option: X402PaymentOption): string {
+  return option.maxAmountRequired ?? option.amount
+}
+
+export function buildX402ExpectedMessage(context: X402ExpectedContext): string {
+  return `Haven x402 expected context v1\n${stableStringify({
+    version: 1,
+    kind: 'haven.x402.expected',
+    paymentId: context.paymentId,
+    payloadHash: context.payloadHash.toLowerCase(),
+    resourceUrl: context.resourceUrl,
+    merchantTo: context.merchantTo.toLowerCase(),
+    amount: context.amount,
+    asset: context.asset.toLowerCase(),
+    network: context.network,
+  })}`
+}
+
 export function toStandardPaymentRequirements(
   paymentRequired: X402PaymentRequired,
   option: X402PaymentOption,
@@ -271,7 +289,7 @@ export function toStandardPaymentRequirements(
   return {
     scheme: 'exact',
     network,
-    maxAmountRequired: option.maxAmountRequired ?? option.amount,
+    maxAmountRequired: x402AuthorizationAmount(option),
     resource: option.resource ?? paymentRequired.resource.url,
     description:
       option.description ??
@@ -299,7 +317,7 @@ export function buildX402IdempotencyKey(
     paymentRequired.resource.description ?? '',
     option.payTo.toLowerCase(),
     option.asset.toLowerCase(),
-    option.amount,
+    x402AuthorizationAmount(option),
     option.network,
     bucket,
   ].join('|')
@@ -357,4 +375,17 @@ export function resolveTokenFromAddress(
   }
 
   return ALL_TOKENS[lower] ?? null
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    const primitive = JSON.stringify(value)
+    return primitive === undefined ? 'undefined' : primitive
+  }
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`
+  const object = value as Record<string, unknown>
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(object[key])}`)
+    .join(',')}}`
 }

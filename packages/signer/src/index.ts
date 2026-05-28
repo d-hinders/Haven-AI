@@ -1,6 +1,9 @@
 export {
   createEdgeSigner,
+  assertX402MatchesExpected,
   type EdgeSigner,
+  type X402ExpectedPayment,
+  type X402FundingSignatureResult,
   type X402HeaderResult,
 } from './core.js'
 

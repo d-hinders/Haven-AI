@@ -40,6 +40,8 @@ export interface SignerOptions {
   consentEnv?: Record<string, string | undefined>
   /** Override the stream the consent block is printed to. Reserved for tests. */
   consentOut?: { write: (chunk: string) => unknown }
+  /** Trusted Haven signer address for x402 expected-context bindings. */
+  x402BindingSigner?: string
 }
 
 export async function resolveEdgeSigner(options: SignerOptions = {}): Promise<EdgeSigner> {
@@ -55,9 +57,21 @@ export interface ResolvedSignerRuntime {
 export async function resolveSignerRuntime(
   options: SignerOptions = {},
 ): Promise<ResolvedSignerRuntime> {
-  if (options.delegateKey) return { signer: createEdgeSigner(options.delegateKey) }
+  if (options.delegateKey) {
+    return {
+      signer: createEdgeSigner(options.delegateKey, {
+        x402BindingSigner: options.x402BindingSigner ?? process.env.HAVEN_X402_BINDING_SIGNER,
+      }),
+    }
+  }
   const creds = await loadSignerCredentials(options.credentialsPath)
-  return { signer: createEdgeSigner(creds.delegateKey), credentials: creds }
+  return {
+    signer: createEdgeSigner(creds.delegateKey, {
+      x402BindingSigner:
+        options.x402BindingSigner ?? creds.x402BindingSigner ?? process.env.HAVEN_X402_BINDING_SIGNER,
+    }),
+    credentials: creds,
+  }
 }
 
 /**

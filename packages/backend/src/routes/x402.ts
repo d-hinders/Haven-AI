@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
+import { buildX402ExpectedMessage } from '@haven_ai/sdk'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../lib/agent-payment-taxonomy.js'
@@ -48,6 +49,16 @@ interface X402ApprovalRow {
   machine_challenge_id: string | null
 }
 
+interface X402ExpectedContext {
+  paymentId: string
+  payloadHash: string
+  resourceUrl: string
+  merchantTo: string
+  amount: string
+  asset: string
+  network: string
+}
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 function isValidAddress(addr: string): boolean {
@@ -76,6 +87,21 @@ function chainIdFromX402Network(network: string): number | null {
     return Number.isInteger(chainId) ? chainId : null
   }
   return null
+}
+
+async function signX402ExpectedContext(context: X402ExpectedContext) {
+  const privateKey = process.env.X402_BINDING_PRIVATE_KEY || process.env.RELAYER_PRIVATE_KEY
+  if (!privateKey) {
+    throw new Error('X402_BINDING_PRIVATE_KEY or RELAYER_PRIVATE_KEY must be set to authenticate x402 expected context')
+  }
+  const wallet = new ethers.Wallet(privateKey)
+  const message = buildX402ExpectedMessage(context)
+  return {
+    version: 1 as const,
+    message,
+    signature: await wallet.signMessage(message),
+    signer: wallet.address,
+  }
 }
 
 /** Resolve a token from its contract address for a specific chain. */
@@ -301,6 +327,16 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           )
         }
 
+        const x402ExpectedAuth = await signX402ExpectedContext({
+          paymentId: existing.id,
+          payloadHash: existingHash,
+          resourceUrl: existing.x402_resource_url,
+          merchantTo: existing.x402_merchant_address ?? existing.to_address,
+          amount: existing.amount_raw,
+          asset: existing.token_address,
+          network,
+        })
+
         return reply.code(200).send({
           payment_id: existing.id,
           status: existing.status,
@@ -313,6 +349,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           to: existing.to_address,
           merchant_to: existing.x402_merchant_address,
           resource_url: existing.x402_resource_url,
+          x402_expected_auth: x402ExpectedAuth,
           sign_data: {
             hash: existingHash,
             components: {
@@ -645,6 +682,16 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       }
     }
 
+    const x402ExpectedAuth = await signX402ExpectedContext({
+      paymentId: intent.id,
+      payloadHash: signHash,
+      resourceUrl: url,
+      merchantTo: merchantPayTo?.toLowerCase() ?? payTo.toLowerCase(),
+      amount: amountRaw.toString(),
+      asset: tokenAddress,
+      network,
+    })
+
     // 12. No signature — return intent for client-side signing
     return reply.code(201).send({
       payment_id: intent.id,
@@ -658,6 +705,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       to: payTo.toLowerCase(),
       merchant_to: merchantPayTo?.toLowerCase() ?? null,
       resource_url: url,
+      x402_expected_auth: x402ExpectedAuth,
       sign_data: {
         hash: signHash,
         components: {

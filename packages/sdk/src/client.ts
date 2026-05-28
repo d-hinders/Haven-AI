@@ -58,6 +58,7 @@ import {
   resolveTokenFromAddress,
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
+  x402AuthorizationAmount,
 } from './x402.js'
 import {
   buildMachinePaymentIdempotencyKey,
@@ -363,7 +364,7 @@ export class HavenClient {
       url: paymentRequired.resource.url,
       payTo: fundingTo,
       merchantPayTo: option.payTo,
-      amount: option.amount,
+      amount: x402AuthorizationAmount(option),
       asset: option.asset,
       network: option.network,
       description: paymentRequired.resource.description,
@@ -378,6 +379,9 @@ export class HavenClient {
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
     }
+    if (!raw.x402_expected_auth) {
+      throw new HavenApiError('No x402 expected-context binding returned from x402/authorize', 500, raw)
+    }
 
     return {
       paymentId: raw.payment_id,
@@ -387,6 +391,10 @@ export class HavenClient {
       accepted: option,
       resourceUrl: paymentRequired.resource.url,
       merchantTo: raw.merchant_to ?? option.payTo,
+      amountAtomic: x402AuthorizationAmount(option),
+      asset: option.asset,
+      network: option.network,
+      expectedAuth: raw.x402_expected_auth,
       fundingTo,
     }
   }
@@ -674,7 +682,7 @@ export class HavenClient {
       url: paymentRequired.resource.url,
       payTo: this.delegateAddress,
       merchantPayTo: option.payTo,
-      amount: option.amount,
+      amount: x402AuthorizationAmount(option),
       asset: option.asset,
       network: option.network,
       description: paymentRequired.resource.description,
@@ -1235,7 +1243,7 @@ export class HavenClient {
     }
 
     const approvedAmount = status.amount ? normalizeDecimal(status.amount) : ''
-    const requestedAmount = normalizeDecimal(decimalFromUsdcAtomic(option.amount))
+    const requestedAmount = normalizeDecimal(decimalFromUsdcAtomic(x402AuthorizationAmount(option)))
     if (approvedAmount && approvedAmount !== requestedAmount) {
       throw new HavenApiError(
         'x402 resume request does not match the approved amount.',
@@ -1329,7 +1337,7 @@ export class HavenClient {
     const txHash = execResult?.tx_hash ?? raw.tx_hash ?? ''
     const chainId = execResult?.chain_id ?? raw.chain_id ?? chainIdFromNetwork(option.network)
     const token = execResult?.token ?? raw.token ?? 'USDC'
-    const amount = execResult?.amount ?? raw.amount ?? decimalFromUsdcAtomic(option.amount)
+    const amount = execResult?.amount ?? raw.amount ?? decimalFromUsdcAtomic(x402AuthorizationAmount(option))
     const to = execResult?.to ?? raw.to ?? this.delegateAddress ?? ''
     const explorerUrl = execResult?.explorer_url ?? raw.explorer_url ?? explorerUrlOrEmpty(chainId, txHash)
     const merchantTo = execResult?.merchant_to ?? raw.merchant_to ?? option.payTo
@@ -1370,7 +1378,7 @@ export class HavenClient {
       paymentId: status.paymentId,
       txHash: status.txHash,
       token: status.token || 'USDC',
-      amount: status.amount || decimalFromUsdcAtomic(option.amount),
+      amount: status.amount || decimalFromUsdcAtomic(x402AuthorizationAmount(option)),
       to: this.delegateAddress ?? '',
       resourceUrl: paymentRequired.resource.url,
       explorerUrl: explorerUrlOrEmpty(status.chainId, status.txHash),
@@ -1421,7 +1429,7 @@ export class HavenClient {
         payTo: input.merchantTo ?? input.accepted.payTo,
       },
       x402: {
-        amount: input.accepted.amount,
+        amount: x402AuthorizationAmount(input.accepted),
         token: input.token,
         network: input.accepted.network,
         asset: input.accepted.asset,
@@ -1767,8 +1775,8 @@ export class HavenClient {
       resourceUrl: paymentRequired.resource.url,
       description: paymentRequired.resource.description ?? option.description ?? null,
       mimeType: paymentRequired.resource.mimeType ?? option.mimeType ?? null,
-      amountAtomic: option.amount,
-      amount: decimalFromUsdcAtomic(option.amount),
+      amountAtomic: x402AuthorizationAmount(option),
+      amount: decimalFromUsdcAtomic(x402AuthorizationAmount(option)),
       token: token?.symbol ?? 'USDC',
       asset: option.asset,
       network: option.network,
@@ -1796,8 +1804,8 @@ export class HavenClient {
       request: input.request,
       resourceUrl: input.paymentRequired.resource.url,
       description: input.paymentRequired.resource.description ?? input.accepted.description ?? null,
-      amountAtomic: input.accepted.amount,
-      amount: decimalFromUsdcAtomic(input.accepted.amount),
+      amountAtomic: x402AuthorizationAmount(input.accepted),
+      amount: decimalFromUsdcAtomic(x402AuthorizationAmount(input.accepted)),
       token: token?.symbol ?? 'USDC',
       asset: input.accepted.asset,
       network: input.accepted.network,

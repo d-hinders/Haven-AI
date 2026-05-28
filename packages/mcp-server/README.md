@@ -42,17 +42,25 @@ on-chain allowance (nothing to sign; the user approves in Haven).
 
 `haven_x402_authorize` takes the parsed HTTP 402 `payment_required` and returns
 the **funding** step's unsigned hash plus the `x402` data (accepted option,
-`resource_url`, `merchant_to`, `funding_to`) the edge needs. It signs nothing —
-backed by the SDK's keyless `createX402Intent`. The full round trip:
+`resource_url`, `merchant_to`, `funding_to`, and `expected`) the edge needs. It
+signs nothing — backed by the SDK's keyless `createX402Intent`. The full round trip:
 
 1. `haven_x402_authorize` → unsigned funding `payload_hash` (+ `x402` context)
-2. edge signs the funding hash → `haven_submit` (funds `Safe → delegate EOA`)
-3. **edge** builds + signs the EIP-3009 `X-PAYMENT` header with the delegate key
+2. edge signs the funding hash with `x402.expected` → `haven_submit` (funds `Safe → delegate EOA`)
+3. **edge** builds + signs the EIP-3009 `X-PAYMENT` header with the delegate key,
+   but only after the current `payment_required` matches the process-local
+   `x402_binding` returned by the funding signature step
 4. **edge** retries the merchant with the header
 
 Steps 3–4 are intentionally at the edge: the EIP-3009 header is a delegate-key
 signature, so it can't run on the keyless hosted server, and Haven never talks
-to the merchant. The header-builder lives in the edge signer (#184).
+to the merchant. The header-builder lives in the edge signer (#184). Pass
+`x402.expected` unchanged to the local `haven_sign` call, then pass the returned
+`x402_binding` to `haven_x402_sign_header` so mismatched amount, merchant,
+resource, asset, or network challenges are rejected before the delegate hot
+wallet signs the merchant header. `x402.expected.auth` is signed by Haven; the
+edge signer must be configured with the trusted `HAVEN_X402_BINDING_SIGNER`
+address so it can reject locally invented expected contexts.
 
 ## Run
 

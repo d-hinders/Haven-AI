@@ -186,7 +186,10 @@ checked twice independently; neither check is Haven holding a key.
 
 `whoami` / `get_agent`, `get_allowances`, `list_transactions`, and
 `x402_authorize` are read or construct-only. `x402_authorize` follows the same
-construct → edge-sign → relay shape as `pay` (see
+construct → edge-sign → relay shape as `pay`, and its response includes
+Haven-authenticated `x402.expected` so the edge signer can reject locally
+invented contexts or merchant headers whose amount, merchant, resource URL,
+asset, or network differ from the funded intent (see
 [04-x402-payment-sequence.md](04-x402-payment-sequence.md)); its one-shot mode
 is **not** used over the hosted MCP, because one-shot requires the signature in
 the initial request and the MCP must obtain the hash before the edge signer can

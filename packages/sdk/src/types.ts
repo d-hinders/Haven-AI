@@ -215,8 +215,33 @@ export interface X402Intent {
   resourceUrl: string
   /** Merchant payTo address (the final recipient of the EIP-3009 transfer). */
   merchantTo: string
+  /** Atomic amount the edge signer must authorize in the merchant header. */
+  amountAtomic: string
+  /** Token contract the merchant header must pay. */
+  asset: string
+  /** x402 network the merchant header must use. */
+  network: string
+  /** Haven-authenticated binding over the x402 expected context. */
+  expectedAuth: X402ExpectedAuth
   /** Delegate EOA the funding transfer tops up (the x402 payer). */
   fundingTo: string
+}
+
+export interface X402ExpectedContext {
+  paymentId: string
+  payloadHash: string
+  resourceUrl: string
+  merchantTo: string
+  amount: string
+  asset: string
+  network: string
+}
+
+export interface X402ExpectedAuth {
+  version: 1
+  message: string
+  signature: string
+  signer: string
 }
 
 /** Serializable HTTP request state for retrying the same x402 merchant request. */
@@ -759,6 +784,7 @@ export interface RawX402AuthorizeResponse {
   to?: string
   merchant_to?: string | null
   merchant_address?: string | null
+  x402_expected_auth?: X402ExpectedAuth
   resource_url?: string
   explorer_url?: string
   x402?: RawX402StateContext

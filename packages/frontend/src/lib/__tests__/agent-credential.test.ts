@@ -35,6 +35,9 @@ describe('buildAgentCredential', () => {
     expect(json.agent_id).toBe('agt_abc123')
     expect(json.safe_address).toBe('0xbf35beb0f587db2527b64e58d61f78bbf840860f')
     expect(json.api_url).toBe('https://havenbackend.example')
+    // #188: mcp_url is present so edge signers know where to connect.
+    expect(json.mcp_url).toBeTruthy()
+    expect(typeof json.mcp_url).toBe('string')
 
     // jsonText must round-trip and use snake_case keys (the MCP loader prefers
     // these — camelCase is accepted but snake_case is the documented shape).

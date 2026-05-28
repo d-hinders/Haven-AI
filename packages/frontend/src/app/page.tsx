@@ -105,7 +105,7 @@ export default function Home() {
             <div>
               <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-                Agent‑first wallet infrastructure
+                Payment guardrails for AI agents
               </div>
 
               <h1 className="text-[44px] md:text-[64px] font-semibold tracking-[-0.03em] leading-[1.02] text-[var(--v2-ink)] mb-6">
@@ -128,7 +128,7 @@ export default function Home() {
 
               <p className="text-[17px] md:text-[18px] leading-relaxed text-[var(--v2-ink-2)] mb-8 max-w-[520px]">
                 An account for your agents. You set the rules — they pay within them,
-                never beyond. No raw keys, no shared cards.
+                never beyond. No shared cards. No unlimited access.
               </p>
 
               <div className="flex flex-wrap items-center gap-3 mb-10">

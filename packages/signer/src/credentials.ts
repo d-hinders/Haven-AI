@@ -7,6 +7,10 @@ import { readFile, stat } from 'node:fs/promises'
  */
 export interface SignerCredentials {
   delegateKey: string
+  agentId?: string
+  safeAddress?: string
+  chainId?: number
+  network?: string
   /** Absolute path the key was loaded from, if a file was used. */
   sourcePath?: string
 }
@@ -14,6 +18,13 @@ export interface SignerCredentials {
 interface RawCredentialFile {
   delegate_key?: unknown
   delegateKey?: unknown
+  agent_id?: unknown
+  agentId?: unknown
+  safe_address?: unknown
+  safeAddress?: unknown
+  chain_id?: unknown
+  chainId?: unknown
+  network?: unknown
 }
 
 /**
@@ -33,7 +44,15 @@ export async function loadSignerCredentials(
   if (path) return loadFromFile(path)
 
   const envKey = stringField(process.env.HAVEN_DELEGATE_KEY)
-  if (envKey) return { delegateKey: envKey }
+  if (envKey) {
+    return {
+      delegateKey: envKey,
+      agentId: stringField(process.env.HAVEN_AGENT_ID),
+      safeAddress: stringField(process.env.HAVEN_SAFE_ADDRESS),
+      chainId: numberField(process.env.HAVEN_CHAIN_ID),
+      network: stringField(process.env.HAVEN_NETWORK),
+    }
+  }
 
   throw new Error(
     'No delegate key found. Set HAVEN_DELEGATE_KEY, pass --credentials <path>, ' +
@@ -65,11 +84,28 @@ async function loadFromFile(path: string): Promise<SignerCredentials> {
     throw new Error('Haven credentials are missing delegate_key — the edge signer needs it to sign.')
   }
 
-  return { delegateKey, sourcePath: path }
+  const chainId = numberField(raw.chain_id ?? raw.chainId)
+  return {
+    delegateKey,
+    agentId: stringField(raw.agent_id ?? raw.agentId),
+    safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
+    chainId,
+    network: stringField(raw.network),
+    sourcePath: path,
+  }
 }
 
 function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function numberField(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
 }
 
 /**

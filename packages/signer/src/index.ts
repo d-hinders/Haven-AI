@@ -13,9 +13,12 @@ export {
 export {
   buildSignerMcpServer,
   resolveEdgeSigner,
+  resolveSignerRuntime,
+  runSignerConsentGate,
   runSignerStdioServer,
   SIGNER_NAME,
   SIGNER_VERSION,
+  type ResolvedSignerRuntime,
   type SignerOptions,
 } from './server.js'
 
@@ -28,3 +31,22 @@ export {
   type ToolPayload,
   type ToolSuccess,
 } from './tools.js'
+
+export {
+  computeSignerConsentHash,
+  ensureSignerConsent,
+  renderSignerConsentBlock,
+  SIGNER_ACK_ENV,
+  type SignerConsentDecision,
+  type SignerConsentInput,
+  type SignerConsentOptions,
+} from './consent.js'
+
+export {
+  appendSigningAuditEntry,
+  createSigningAuditEntry,
+  defaultSigningAuditPath,
+  hashPayloadForAudit,
+  type SigningAuditContext,
+  type SigningAuditEntry,
+} from './audit.js'

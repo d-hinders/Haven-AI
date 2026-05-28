@@ -150,14 +150,20 @@ export function createEdgeSigner(
         return { paymentHeader: header, accepted: option }
       }
 
-      const payment = decodeBase64Json<{ payload: unknown }>(header)
-      const wrapped = encodeBase64Json({
-        x402Version: paymentRequired.x402Version,
-        accepted: option,
-        payload: payment.payload,
-      })
-      x402Bindings.delete(x402Binding)
-      return { paymentHeader: wrapped, accepted: option }
+      // Always delete the binding — even if encode/decode throws — to prevent the
+      // in-process Map from accumulating stale X402ExpectedPayment entries (memory
+      // leak + data-retention violation for user payment context).
+      try {
+        const payment = decodeBase64Json<{ payload: unknown }>(header)
+        const wrapped = encodeBase64Json({
+          x402Version: paymentRequired.x402Version,
+          accepted: option,
+          payload: payment.payload,
+        })
+        return { paymentHeader: wrapped, accepted: option }
+      } finally {
+        x402Bindings.delete(x402Binding)
+      }
     },
   }
 }

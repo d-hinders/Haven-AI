@@ -90,9 +90,13 @@ function chainIdFromX402Network(network: string): number | null {
 }
 
 async function signX402ExpectedContext(context: X402ExpectedContext) {
-  const privateKey = process.env.X402_BINDING_PRIVATE_KEY || process.env.RELAYER_PRIVATE_KEY
+  const privateKey = process.env.X402_BINDING_PRIVATE_KEY
   if (!privateKey) {
-    throw new Error('X402_BINDING_PRIVATE_KEY or RELAYER_PRIVATE_KEY must be set to authenticate x402 expected context')
+    throw new Error(
+      'X402_BINDING_PRIVATE_KEY must be set to authenticate x402 expected context. ' +
+        'Do not fall back to RELAYER_PRIVATE_KEY — the binding signer must be a dedicated key ' +
+        'so that the edge signer can verify it against HAVEN_X402_BINDING_SIGNER.',
+    )
   }
   const wallet = new ethers.Wallet(privateKey)
   const message = buildX402ExpectedMessage(context)
@@ -304,7 +308,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           existing.token_address,
         )
 
-        if (Number(refreshedAllowance.nonce) !== Number(existing.allowance_nonce)) {
+        if (BigInt(refreshedAllowance.nonce) !== BigInt(existing.allowance_nonce)) {
           existingNonce = refreshedAllowance.nonce
           existingHash = await generateTransferHash(
             agent.chain_id,
@@ -613,9 +617,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         })
       }
 
-      // Update intent with signature
+      // Record the signature first (pending_signature → signed), then execute on-chain.
+      // We do NOT set status='submitted' until we have a txHash in hand — if the process
+      // crashes between a premature 'submitted' write and the RPC call, the intent would be
+      // permanently stuck (idempotency check blocks retry on any status not in
+      // ('failed','expired')). Instead we keep the record in 'pending_signature' until
+      // execution succeeds, then flip it to 'confirmed' in one atomic write.
       await pool.query(
-        `UPDATE payment_intents SET signature = $1, signed_at = NOW(), status = 'submitted', submitted_at = NOW() WHERE id = $2`,
+        `UPDATE payment_intents SET signature = $1, signed_at = NOW() WHERE id = $2`,
         [signature, intent.id],
       )
 
@@ -642,6 +651,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           `UPDATE payment_intents
            SET status = 'confirmed',
                tx_hash = $1,
+               submitted_at = NOW(),
                confirmed_at = NOW(),
                usd_value = $3,
                eur_value = $4

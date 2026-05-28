@@ -13,8 +13,15 @@
 
 import type { AgentCredentialJson } from './agent-credential'
 
-/** Resolved at runtime so an unmapped DNS / different env can override. */
-const DEFAULT_HOSTED_MCP_URL = 'https://mcp.haven.ai/v1'
+/**
+ * Default hosted MCP endpoint.
+ *
+ * Currently points at the Railway-issued URL because Haven doesn't yet have a
+ * custom domain — that's a public endpoint, no secret to keep out of source.
+ * Override at deploy time via `NEXT_PUBLIC_HAVEN_MCP_URL` once a real domain
+ * (e.g. `mcp.haven.ai/v1`) is mapped; see `docs/deploy/hosted-mcp.md`.
+ */
+const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
 
 export type HostedClientId =
   | 'claude-code'

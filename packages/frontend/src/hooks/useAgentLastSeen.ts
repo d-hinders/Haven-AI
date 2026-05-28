@@ -44,9 +44,13 @@ export function useAgentLastSeen(agentId: string | null | undefined): UseAgentLa
       if (isMountedRef.current) {
         setLastSeenAt(ts)
       }
-      // Schedule next poll
+      // Schedule next poll — guard required: the component may have unmounted
+      // while the fetch was in-flight. Without this check, setTimeout fires
+      // after cleanup and creates an infinite polling loop after unmount.
       const delay = ts ? POLL_INTERVAL_CONNECTED : POLL_INTERVAL_WAITING
-      timerRef.current = setTimeout(poll, delay)
+      if (isMountedRef.current) {
+        timerRef.current = setTimeout(poll, delay)
+      }
     } catch {
       // Swallow errors — network hiccups shouldn't break the UI.
       // Retry at the waiting interval.

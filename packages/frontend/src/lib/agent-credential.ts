@@ -22,6 +22,7 @@
 
 import { getChainConfig } from '@/lib/chains'
 import type { HandoffInput } from './agent-handoff'
+import { resolveHostedMcpUrl } from './hosted-connect'
 
 /** Slug used in the downloaded filename. Identical rule to agent-handoff.ts. */
 function slugify(name: string): string {
@@ -54,6 +55,13 @@ export interface AgentCredentialJson {
   chain_id: number
   network: string | null
   api_url: string | null
+  /**
+   * Hosted MCP endpoint for this credential. Edge signers use this to connect
+   * without a local server. Resolves from `NEXT_PUBLIC_HAVEN_MCP_URL` at
+   * build/runtime; falls back to the default Railway-issued URL.
+   * See `docs/deploy/hosted-mcp.md`.
+   */
+  mcp_url: string
   budget_summary: AgentCredentialBudgetEntry[]
   revoke_url: string
   created_at: string
@@ -118,6 +126,7 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
     chain_id: agent.chainId,
     network: resolveNetworkName(agent.chainId),
     api_url: apiBaseUrl ?? null,
+    mcp_url: resolveHostedMcpUrl(),
     budget_summary: policy.allowances.map((a) => ({
       token: a.tokenSymbol,
       amount: a.amount,
@@ -129,7 +138,12 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
       custody:
         'Haven is non-custodial. The delegate_key in this file lives only on this machine. ' +
         'Haven\'s backend never receives it. Treat this file like a private key — keep it offline ' +
-        'and revoke the agent at revoke_url if it leaks.',
+        'and revoke the agent at revoke_url if it leaks. ' +
+        'Restrict file permissions immediately after saving: ' +
+        'macOS/Linux: `chmod 600 path/to/this/file.json`. ' +
+        'Windows (PowerShell): ' +
+        '`icacls path\\to\\this\\file.json /inheritance:r /grant:r "$env:UserName:R"`. ' +
+        'Do not store this file in cloud-synced folders (iCloud, Dropbox, OneDrive) or shared dotfile repositories.',
       budget_summary:
         'budget_summary is a snapshot of the on-chain Safe AllowanceModule limits at credential ' +
         'creation. The on-chain limits are the authoritative gate. If you change allowances in ' +

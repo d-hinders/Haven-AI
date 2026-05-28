@@ -7,12 +7,20 @@ export function CodeBlock({
   children,
   filename,
   onCopy,
+  onCopyFailed,
 }: {
   language?: string
   children: string
   filename?: string
-  /** Called after the snippet has been written to the clipboard. */
+  /** Called only when the clipboard write actually succeeded. */
   onCopy?: () => void
+  /**
+   * Called when `navigator.clipboard.writeText` rejects (insecure origin,
+   * permission denied, headless context, etc.). Consumers that gate UI on a
+   * successful copy must hook this to surface the failure — otherwise the
+   * gate stays locked silently and the user has no idea why.
+   */
+  onCopyFailed?: () => void
 }) {
   const [copied, setCopied] = useState(false)
 
@@ -20,7 +28,11 @@ export function CodeBlock({
     try {
       await navigator.clipboard.writeText(children)
     } catch {
-      /* Clipboard unavailable in restricted contexts — treat as no-op. */
+      // Don't fire onCopy on failure — that previously let consumers (e.g.
+      // the Create Agent handoff modal) advance through a "credential
+      // saved" gate even though no secret reached the clipboard.
+      onCopyFailed?.()
+      return
     }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)

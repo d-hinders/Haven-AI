@@ -214,7 +214,7 @@ Every payment or approval state returned by Haven includes:
 
 - `phase`: where the Haven-side payment currently is.
 - `nextAction`: the stable action an agent should take next.
-- `rail`: which payment rail produced the state, such as `direct`, `x402`, or `mpp`.
+- `rail`: which payment rail produced the state. Categorical values (`direct`, `x402`, `mpp`) appear on resume-state discriminators; granular values (`mpp_demo`, `mpp_crypto`, `stripe_deposit`, `spt`) appear on response bodies.
 - `message`: human-readable guidance for the same state.
 
 The enum values and JSON Schema fragments are exported from `@haven_ai/sdk`:
@@ -230,22 +230,74 @@ import {
 } from '@haven_ai/sdk'
 ```
 
+### Flow diagram
+
 ```text
-agent_signature_required -> payment_submitted -> payment_confirmed
-                              |
-                              v
-user_approval_required -> user_execution_required -> funding_sent
-                              |
-                              v
-             waiting_for_additional_approvals
+                                ┌─────────────────────────┐
+                                │ agent_signature_required│
+                                └──────────┬──────────────┘
+                                           │  sign_and_submit_payment
+                                           ▼
+                                ┌─────────────────────────┐
+                                │ payment_submitted       │
+                                └──────────┬──────────────┘
+                                           │  check_status_later
+                                ┌──────────┴──────────────┐
+                                ▼                         ▼
+                  ┌────────────────────────┐  ┌──────────────────────┐
+                  │ payment_confirmed (✔)  │  │ user_approval_required│
+                  └────────────────────────┘  └──────────┬───────────┘
+                                                         │ wait_for_user_approval
+                                       ┌─────────────────┴───────────────────┐
+                                       │ single-owner Safe                   │ multisig Safe
+                                       ▼                                     ▼
+                          ┌──────────────────────────┐    ┌──────────────────────────────────┐
+                          │ user_execution_required  │    │ waiting_for_additional_approvals │
+                          └──────────┬───────────────┘    └────────────────┬─────────────────┘
+                                     │ wait_for_user_to_complete_payment   │ wait_for_user_approval
+                                     └─────────────────┬───────────────────┘
+                                                       ▼
+                                          ┌───────────────────────┐
+                                          │ funding_sent          │
+                                          └──────────┬────────────┘
+                                                     │ retry_original_x402_request (x402)
+                                                     │ none (direct)
+                                                     ▼
+                                          ┌───────────────────────┐
+                                          │ executed (✔)          │
+                                          └───────────────────────┘
+
+Terminal from any non-confirmed phase:
+   rejected → stop_and_tell_user
+   failed   → stop_and_tell_user
+   expired  → request_again_if_user_still_wants_it
 ```
+
+### `phase` reference
+
+| `phase` | Meaning | Terminal? |
+|---------|---------|-----------|
+| `agent_signature_required` | Haven prepared a payment intent; the agent must sign and submit. | no |
+| `payment_submitted` | Haven received the signed payment; the agent should poll for confirmation. | no |
+| `payment_confirmed` | Direct payment is confirmed on chain. | yes |
+| `user_approval_required` | Payment exceeds remaining on-chain allowance; wallet owner must approve in Haven. | no |
+| `user_execution_required` | Owner approved; the funding payment has not been sent yet (single-owner Safe). | no |
+| `waiting_for_additional_approvals` | Funding payment was proposed and is waiting for the remaining multisig approvals. | no |
+| `funding_sent` | Haven funding leg landed; the agent can continue the merchant/protocol leg. | no |
+| `rejected` | Owner rejected the request. | yes |
+| `expired` | Payment or approval request expired before completion. | yes |
+| `failed` | Haven could not complete the payment. | yes |
+
+The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with `X-PAYMENT` (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
+
+### `nextAction` reference
 
 | `nextAction` | What the agent should do |
 |--------------|--------------------------|
 | `sign_and_submit_payment` | Sign with the delegate key and submit the payment to Haven. |
 | `check_status_later` | Poll `getPaymentStatus(payment_id)` later. |
 | `none` | Stop polling; no more action is needed for this payment id. |
-| `wait_for_user_approval` | Tell the user the payment is waiting in Haven, then poll later. Do not create a duplicate payment. |
+| `wait_for_user_approval` | Tell the user the payment is waiting in Haven, then poll later. Do not create a duplicate payment. Same `nextAction` covers both the single-owner case (waiting for one owner to approve) and the multisig case (waiting for additional approvals after the first one). |
 | `wait_for_user_to_complete_payment` | The user approved the request; wait for them to finish the funding payment. |
 | `retry_original_x402_request` | Resume this payment id and retry the original x402 request with the merchant payment header. Do not start a new merchant session. |
 | `stop_and_tell_user` | Stop retrying and tell the user the payment failed or was rejected. |

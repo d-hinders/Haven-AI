@@ -2,6 +2,9 @@ export { HavenClient } from './client.js'
 export { havenTools } from './tools.js'
 export { signHash, addressFromKey, verifySignature } from './signer.js'
 
+export { toolDescriptions, composeDescription } from './tool-descriptions.js'
+export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
+
 export {
   AgentPaymentPhase,
   AgentPaymentNextAction,
@@ -33,6 +36,9 @@ export type {
   X402PaymentOption,
   X402Receipt,
   X402AuthorizationOptions,
+  X402Intent,
+  X402ExpectedAuth,
+  X402ExpectedContext,
   X402RequestSnapshot,
   X402Quote,
   X402ResumeState,
@@ -67,6 +73,10 @@ export {
   parsePaymentRequired,
   parsePaymentRequiredResponse,
   selectPaymentOption,
+  selectStandardPaymentOption,
+  toStandardPaymentRequirements,
+  x402AuthorizationAmount,
+  buildX402ExpectedMessage,
   encodePaymentProof,
 } from './x402.js'
 

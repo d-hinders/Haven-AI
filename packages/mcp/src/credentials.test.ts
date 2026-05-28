@@ -1,8 +1,8 @@
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { loadCredentials } from './credentials.js'
+import { loadCredentials, warnIfCredentialFilePermissive } from './credentials.js'
 
 const ENV_KEYS = [
   'HAVEN_CREDENTIALS',
@@ -45,6 +45,7 @@ describe('loadCredentials', () => {
       safe_address: '0xSafe',
       api_url: 'https://haven.example',
     }))
+    await chmod(file, 0o600)
 
     await expect(loadCredentials(file)).resolves.toEqual({
       apiKey: 'sk_agent_test',
@@ -63,6 +64,7 @@ describe('loadCredentials', () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-'))
     const file = join(dir, 'agent.json')
     await writeFile(file, JSON.stringify({ api_key: 'sk', delegate_key: '0x' }))
+    await chmod(file, 0o600)
 
     process.env.HAVEN_CREDENTIALS = file
     const creds = await loadCredentials()
@@ -80,6 +82,7 @@ describe('loadCredentials', () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-'))
     const file = join(dir, 'agent.json')
     await writeFile(file, JSON.stringify({ api_key: 'sk_agent_test' }))
+    await chmod(file, 0o600)
 
     await expect(loadCredentials(file)).rejects.toThrow('delegate_key')
   })
@@ -120,6 +123,7 @@ describe('loadCredentials', () => {
       api_key: 'sk_agent_file',
       delegate_key: '0xdelegate-file',
     }))
+    await chmod(file, 0o600)
     process.env.HAVEN_API_KEY = 'sk_agent_env'
     process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
 
@@ -130,5 +134,49 @@ describe('loadCredentials', () => {
 
   it('throws a useful error when nothing is configured', async () => {
     await expect(loadCredentials(undefined)).rejects.toThrow(/HAVEN_CREDENTIALS|HAVEN_API_KEY/)
+  })
+})
+
+describe('warnIfCredentialFilePermissive', () => {
+  it('stays silent when the file is owner-only (0600)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-perm-'))
+    const file = join(dir, 'agent.json')
+    await writeFile(file, '{}')
+    await chmod(file, 0o600)
+
+    const logged: string[] = []
+    await warnIfCredentialFilePermissive(file, (m) => logged.push(m), 'linux')
+    expect(logged).toEqual([])
+  })
+
+  it('warns when the file is readable by group or world', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-perm-'))
+    const file = join(dir, 'agent.json')
+    await writeFile(file, '{}')
+    await chmod(file, 0o644)
+
+    const logged: string[] = []
+    await warnIfCredentialFilePermissive(file, (m) => logged.push(m), 'linux')
+    expect(logged).toHaveLength(1)
+    expect(logged[0]).toContain(file)
+    expect(logged[0]).toMatch(/chmod 600/)
+    expect(logged[0]).toMatch(/0644/)
+  })
+
+  it('skips the check on Windows where mode bits do not map cleanly', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-perm-'))
+    const file = join(dir, 'agent.json')
+    await writeFile(file, '{}')
+    await chmod(file, 0o644)
+
+    const logged: string[] = []
+    await warnIfCredentialFilePermissive(file, (m) => logged.push(m), 'win32')
+    expect(logged).toEqual([])
+  })
+
+  it('silently ignores stat failures', async () => {
+    const logged: string[] = []
+    await warnIfCredentialFilePermissive('/nonexistent/path/agent.json', (m) => logged.push(m), 'linux')
+    expect(logged).toEqual([])
   })
 })

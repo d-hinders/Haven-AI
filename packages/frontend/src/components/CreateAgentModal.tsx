@@ -41,7 +41,7 @@ import {
   AgentRulesSummary,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
-  RuntimeConnectCard,
+  HostedConnectCard,
   WalletIdentityBlock,
 } from './haven'
 import { useToast } from './ui/Toast'
@@ -1174,10 +1174,13 @@ export default function CreateAgentModal({
                 />
               </div>
 
-              {/* Primary action: connect the agent to a runtime. The snippet
-                  the user copies already contains everything the runtime
-                  needs, so this is the meaningful "save the credential" step
-                  for the typical user. */}
+              {/* Primary action: connect the agent to where it runs. The new
+                  hosted-MCP redesign (#187) splits identity (Connect token,
+                  sent to Haven) from authority (Signing key, stays local) into
+                  two visually distinct steps so the non-custodial model is
+                  legible in the UI. Copying the box-1 command or saving the
+                  signing key both flip the "credential saved" gate that
+                  backstops handleClose. */}
               {(() => {
                 const cred = getAgentCredential()
                 if (!cred) return null
@@ -1186,9 +1189,11 @@ export default function CreateAgentModal({
                     className="v2-animate-stagger"
                     style={{ ['--v2-stagger-delay' as string]: '260ms' }}
                   >
-                    <RuntimeConnectCard
+                    <HostedConnectCard
                       credential={cred.json}
-                      onSnippetCopied={handleSnippetCopied}
+                      onSaveSigningKey={handleDownloadCredential}
+                      onCredentialSaved={handleSnippetCopied}
+                      signingKeySaved={credentialsSaved}
                     />
                   </div>
                 )
@@ -1202,11 +1207,11 @@ export default function CreateAgentModal({
                 style={{ ['--v2-stagger-delay' as string]: '320ms' }}
               >
                 <CredentialHandoffCard
-                  title="Keep a copy of the credentials"
-                  description="Saves your agent's credentials as a file so you can store them alongside your other secrets."
+                  title="Backup the full credential file"
+                  description="Optional: keep a full backup alongside your other secrets. Handy if you ever lose the signing key from step 2 above."
                   primaryAction={
                     <Button onClick={handleDownloadCredential}>
-                      Download credentials
+                      Download backup
                     </Button>
                   }
                   note={generatedPrivateKey ? 'These credentials are shown once. Haven cannot show them again after you close this window.' : undefined}

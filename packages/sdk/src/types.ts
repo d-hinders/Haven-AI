@@ -192,6 +192,58 @@ export interface X402AuthorizationOptions {
   idempotencyKey?: string
 }
 
+/**
+ * Keyless x402 construct result.
+ *
+ * Returned by `createX402Intent` — the non-custodial half of an x402 payment.
+ * It carries the unsigned funding hash (`signData.hash`, Safe → delegate EOA)
+ * plus everything the *edge* needs to build and sign the EIP-3009 merchant
+ * header itself. The construct path never signs; both delegate signatures
+ * (funding hash + merchant header) happen on the machine that holds the key.
+ */
+export interface X402Intent {
+  /** Haven payment id for the funding transfer. */
+  paymentId: string
+  status: 'pending_signature'
+  /** ISO 8601 expiry of the funding intent, if returned. */
+  expiresAt?: string
+  /** The unsigned funding hash to sign with the delegate key (Safe → delegate EOA). */
+  signData: SignData
+  /** The selected x402 option — the edge needs this to build the EIP-3009 header. */
+  accepted: X402PaymentOption
+  /** Resource URL the 402 came from. */
+  resourceUrl: string
+  /** Merchant payTo address (the final recipient of the EIP-3009 transfer). */
+  merchantTo: string
+  /** Atomic amount the edge signer must authorize in the merchant header. */
+  amountAtomic: string
+  /** Token contract the merchant header must pay. */
+  asset: string
+  /** x402 network the merchant header must use. */
+  network: string
+  /** Haven-authenticated binding over the x402 expected context. */
+  expectedAuth: X402ExpectedAuth
+  /** Delegate EOA the funding transfer tops up (the x402 payer). */
+  fundingTo: string
+}
+
+export interface X402ExpectedContext {
+  paymentId: string
+  payloadHash: string
+  resourceUrl: string
+  merchantTo: string
+  amount: string
+  asset: string
+  network: string
+}
+
+export interface X402ExpectedAuth {
+  version: 1
+  message: string
+  signature: string
+  signer: string
+}
+
 /** Serializable HTTP request state for retrying the same x402 merchant request. */
 export interface X402RequestSnapshot {
   url: string
@@ -506,13 +558,39 @@ export const AgentPaymentNextAction = {
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
 
+/**
+ * Stable rail identifier carried on Haven agent payment responses and resume
+ * state.
+ *
+ * Two layers of vocabulary share this enum because both reach the wire:
+ *
+ *   - **Categorical rails** identify the rail family and are used as
+ *     discriminators on `PaymentResumeState`: `direct`, `x402`, `mpp`.
+ *   - **Granular rails** identify the specific protocol the backend persists
+ *     and returns on response bodies: `mpp_demo`, `mpp_crypto`,
+ *     `stripe_deposit`, `spt`. `x402` doubles as both categorical and
+ *     granular.
+ *
+ * Consumers reading the top-level `rail` field on a payment status response
+ * should treat any `mpp*` value as the MPP family; consumers reading the
+ * `rail` field on a `MppResumeState` will always see the categorical `mpp`,
+ * with the granular value on `paymentRail`.
+ */
 export const AgentPaymentRail = {
   /** Standard Haven payment from the user's Safe through an approved delegate allowance. */
   Direct: 'direct',
   /** x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg. */
   X402: 'x402',
-  /** Machine Payment Protocol flow. */
+  /** Machine Payment Protocol family — categorical value used as a resume-state discriminator. */
   Mpp: 'mpp',
+  /** Haven internal MPP demo rail. Not for production traffic. */
+  MppDemo: 'mpp_demo',
+  /** Crypto-settled MPP rail. */
+  MppCrypto: 'mpp_crypto',
+  /** Stripe-deposit-backed MPP rail. */
+  StripeDeposit: 'stripe_deposit',
+  /** Stripe Payment Token MPP rail. */
+  Spt: 'spt',
 } as const
 
 export type AgentPaymentRail = (typeof AgentPaymentRail)[keyof typeof AgentPaymentRail]
@@ -554,7 +632,11 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
   [AgentPaymentRail.Direct]: 'Standard Haven payment from the user-controlled Safe through an approved delegate allowance.',
   [AgentPaymentRail.X402]: 'x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg.',
-  [AgentPaymentRail.Mpp]: 'Machine Payment Protocol flow.',
+  [AgentPaymentRail.Mpp]: 'Categorical MPP rail value used as a resume-state discriminator. Response bodies carry a granular mpp_* value instead.',
+  [AgentPaymentRail.MppDemo]: 'Haven internal MPP demo rail. Not for production traffic.',
+  [AgentPaymentRail.MppCrypto]: 'Crypto-settled MPP rail.',
+  [AgentPaymentRail.StripeDeposit]: 'Stripe-deposit-backed MPP rail.',
+  [AgentPaymentRail.Spt]: 'Stripe Payment Token MPP rail.',
 }
 
 export const AgentPaymentPhaseSchema: AgentPaymentEnumSchema = {
@@ -702,6 +784,7 @@ export interface RawX402AuthorizeResponse {
   to?: string
   merchant_to?: string | null
   merchant_address?: string | null
+  x402_expected_auth?: X402ExpectedAuth
   resource_url?: string
   explorer_url?: string
   x402?: RawX402StateContext

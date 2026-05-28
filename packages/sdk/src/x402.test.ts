@@ -6,6 +6,7 @@ import {
   encodePaymentProof,
   parsePaymentRequired,
   parsePaymentRequiredResponse,
+  x402AuthorizationAmount,
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 
@@ -1092,6 +1093,14 @@ describe('x402 helpers', () => {
     )
     expect(buildX402IdempotencyKey(paymentRequired, accepted, now)).not.toBe(
       buildX402IdempotencyKey(paymentRequired, accepted, now + 300_000),
+    )
+  })
+
+  it('uses maxAmountRequired as the EIP-3009 authorization amount when present', () => {
+    const option = { ...accepted, amount: '10000', maxAmountRequired: '20000' }
+    expect(x402AuthorizationAmount(option)).toBe('20000')
+    expect(buildX402IdempotencyKey(paymentRequired, option, 1778440000000)).not.toBe(
+      buildX402IdempotencyKey(paymentRequired, { ...option, maxAmountRequired: '30000' }, 1778440000000),
     )
   })
 })

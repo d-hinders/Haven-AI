@@ -34,6 +34,7 @@ const AGENT = {
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const SIGN_HASH = `0x${'11'.repeat(32)}`
+const X402_BINDING_PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 
 function authRow() {
   return { rows: [AGENT] }
@@ -52,6 +53,7 @@ describe('x402 routes', () => {
   })
 
   beforeEach(() => {
+    process.env.X402_BINDING_PRIVATE_KEY = X402_BINDING_PRIVATE_KEY
     mockQuery.mockReset()
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
   })
@@ -108,6 +110,12 @@ describe('x402 routes', () => {
       chain_id: 8453,
       to: AGENT.delegate_address.toLowerCase(),
       merchant_to: MERCHANT.toLowerCase(),
+      x402_expected_auth: {
+        version: 1,
+        message: expect.stringContaining('Haven x402 expected context v1'),
+        signature: expect.stringMatching(/^0x[0-9a-f]{130}$/i),
+        signer: expect.stringMatching(/^0x[0-9a-f]{40}$/i),
+      },
       sign_data: {
         hash: SIGN_HASH,
         components: {

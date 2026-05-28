@@ -30,6 +30,8 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       sdk: ${{ steps.filter.outputs.sdk }}
       mcp: ${{ steps.filter.outputs.mcp }}
+      mcp_server: ${{ steps.filter.outputs.mcp_server }}
+      signer: ${{ steps.filter.outputs.signer }}
       full: ${{ steps.filter.outputs.full }}
 
     steps:
@@ -52,6 +54,8 @@ jobs:
               echo "backend=true"
               echo "sdk=true"
               echo "mcp=true"
+              echo "mcp_server=true"
+              echo "signer=true"
               echo "full=true"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -68,6 +72,8 @@ jobs:
           backend=false
           sdk=false
           mcp=false
+          mcp_server=false
+          signer=false
           full=false
 
           while IFS= read -r file; do
@@ -98,6 +104,14 @@ jobs:
                 code=true
                 mcp=true
                 ;;
+              packages/mcp-server/*)
+                code=true
+                mcp_server=true
+                ;;
+              packages/signer/*)
+                code=true
+                signer=true
+                ;;
               packages/*)
                 code=true
                 full=true
@@ -110,11 +124,15 @@ jobs:
             backend=true
             sdk=true
             mcp=true
+            mcp_server=true
+            signer=true
           fi
 
           if [ "$sdk" = "true" ]; then
             backend=true
             mcp=true
+            mcp_server=true
+            signer=true
           fi
 
           {
@@ -123,6 +141,8 @@ jobs:
             echo "backend=$backend"
             echo "sdk=$sdk"
             echo "mcp=$mcp"
+            echo "mcp_server=$mcp_server"
+            echo "signer=$signer"
             echo "full=$full"
           } >> "$GITHUB_OUTPUT"
 
@@ -193,6 +213,14 @@ jobs:
       - name: Type-check backend
         run: npm run typecheck -w packages/backend
 
+      - name: OpenAPI drift check
+        # Surfaces the openapi spec drift assertions as a named step so a
+        # failure is immediately visible in the workflow summary. The same
+        # assertions also run as part of the full backend test suite below;
+        # this step exists to make drift failures unambiguous on the GitHub
+        # PR check list without scanning a 100+ line test output.
+        run: npm run test -w packages/backend -- src/openapi/spec.test.ts
+
       - name: Run backend unit tests
         run: npm run test -w packages/backend
 
@@ -225,6 +253,72 @@ jobs:
 
       - name: Build MCP
         run: npm run build -w packages/mcp
+
+  mcp_server_checks:
+    name: MCP server checks
+    needs: changes
+    if: needs.changes.outputs.mcp_server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check MCP server
+        run: npm run typecheck -w packages/mcp-server
+
+      - name: Run MCP server unit tests
+        run: npm run test -w packages/mcp-server
+
+      - name: Build MCP server
+        run: npm run build -w packages/mcp-server
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker build (MCP server) — catches a broken Dockerfile before deploy
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/mcp-server/Dockerfile
+          push: false
+          load: false
+          tags: haven-mcp-server:ci
+
+  signer_checks:
+    name: Signer checks
+    needs: changes
+    if: needs.changes.outputs.signer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check signer
+        run: npm run typecheck -w packages/signer
+
+      - name: Run signer unit tests
+        run: npm run test -w packages/signer
+
+      - name: Build signer
+        run: npm run build -w packages/signer
 
   frontend_checks:
     name: Frontend checks
@@ -329,7 +423,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, backend_checks, mcp_checks, frontend_checks]
+    needs: [changes, sdk_checks, backend_checks, mcp_checks, mcp_server_checks, signer_checks, frontend_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -360,6 +454,16 @@ jobs:
 
           if [ "${{ needs.changes.outputs.mcp }}" = "true" ] && [ "${{ needs.mcp_checks.result }}" != "success" ]; then
             echo "MCP checks result: ${{ needs.mcp_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.mcp_server }}" = "true" ] && [ "${{ needs.mcp_server_checks.result }}" != "success" ]; then
+            echo "MCP server checks result: ${{ needs.mcp_server_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.signer }}" = "true" ] && [ "${{ needs.signer_checks.result }}" != "success" ]; then
+            echo "Signer checks result: ${{ needs.signer_checks.result }}"
             exit 1
           fi
 

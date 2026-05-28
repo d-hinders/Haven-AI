@@ -11,6 +11,8 @@ exported PNG and SVG alongside.
 | 3 | [Payment Execution Sequence](03-payment-sequence.md) | Tracing a payment from API call to on-chain settlement; auto-execute vs over-allowance branches. |
 | 4 | [x402 Payment Sequence](04-x402-payment-sequence.md) | Agent encounters HTTP 402 from a resource server and pays through Haven; one-shot vs two-step modes. |
 | 5 | [Agent API OpenAPI Contract](05-agent-api-openapi.md) | Public OpenAPI surface for non-TypeScript agent integrators and external reviewers. |
+| 6 | [Hosted MCP Connect Flow & Edge-Signing Contract](06-hosted-mcp-connect-flow.md) | Designing/reviewing the hosted MCP server — the wire contract, the two-credential split, and the non-custodial rule that the delegate key never reaches Haven. |
+| 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |
 
 ## Regenerating exports
 

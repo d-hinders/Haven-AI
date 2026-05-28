@@ -37,6 +37,8 @@ export type {
   X402Receipt,
   X402AuthorizationOptions,
   X402Intent,
+  X402ExpectedAuth,
+  X402ExpectedContext,
   X402RequestSnapshot,
   X402Quote,
   X402ResumeState,
@@ -73,6 +75,8 @@ export {
   selectPaymentOption,
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
+  x402AuthorizationAmount,
+  buildX402ExpectedMessage,
   encodePaymentProof,
 } from './x402.js'
 

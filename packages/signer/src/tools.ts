@@ -20,30 +20,60 @@ import type { EdgeSigner } from './core.js'
  */
 export type SignerToolName = 'haven_sign' | 'haven_x402_sign_header'
 
+const x402ExpectedSchema = z.object({
+  payment_id: z.string().min(1),
+  payload_hash: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string'),
+  resource_url: z.string().url(),
+  merchant_to: z.string().min(1),
+  amount: z.string().min(1),
+  asset: z.string().min(1),
+  network: z.string().min(1),
+  auth: z.object({
+    version: z.literal(1),
+    message: z.string().min(1),
+    signature: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
+    signer: z.string().min(1),
+  }),
+})
+
 export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
   haven_sign: {
     // The unsigned hash from haven_pay / haven_x402_authorize (payload_hash).
     payload_hash: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string'),
+    // Pass x402.expected from hosted haven_x402_authorize when this hash funds
+    // a standard x402 merchant retry. The signer records it locally and returns
+    // an opaque x402_binding for the later header-signing step.
+    x402_expected: x402ExpectedSchema.optional(),
   },
   haven_x402_sign_header: {
     // The parsed HTTP 402 PaymentRequired from the merchant.
     payment_required: z.unknown(),
+    // Opaque binding returned by haven_sign when x402_expected was supplied.
+    x402_binding: z.string().min(1),
   },
 }
 
 const SIGN_DESCRIPTION = [
   'Sign an unsigned Haven payment hash with the delegate key on this machine.',
-  'Pass the payload_hash returned by haven_pay or haven_x402_authorize; returns { signature }',
-  'to hand to haven_submit. The delegate key never leaves this process.',
+  'Pass the payload_hash returned by haven_pay or haven_x402_authorize. For x402, also pass',
+  'x402_expected from haven_x402_authorize; the signer records it locally and returns',
+  '{ signature, x402_binding }. Hand signature to haven_submit, then use x402_binding for',
+  'haven_x402_sign_header. The delegate key never leaves this process.',
 ].join(' ')
 
 const X402_SIGN_HEADER_DESCRIPTION = [
   'Build and sign the EIP-3009 X-PAYMENT header for the merchant leg of an x402 payment, using',
-  'the delegate key on this machine. Pass the same payment_required you gave haven_x402_authorize;',
-  'returns { payment_header } to send to the merchant as the X-PAYMENT header on your retry.',
-  'Do this only after the funding step (haven_submit) has confirmed.',
+  'the delegate key on this machine. Pass the same payment_required you gave haven_x402_authorize',
+  'and the x402_binding returned by haven_sign. The signer consumes the recorded funding context',
+  'and rejects mismatched amount, merchant, resource, asset, or network before signing. Returns',
+  '{ payment_header } to send to the merchant as the X-PAYMENT header on your retry. Do this only',
+  'after the funding step (haven_submit) has confirmed.',
 ].join(' ')
 
 export const toolDescriptions: Record<SignerToolName, string> = {
@@ -77,9 +107,28 @@ export function createToolHandlers(
     haven_sign: async (input) =>
       runTool(async () => {
         const args = parse('haven_sign', input)
-        const signature = signer.signPaymentHash(args.payload_hash)
+        const x402Expected = args.x402_expected
+          ? {
+              paymentId: args.x402_expected.payment_id,
+              payloadHash: args.x402_expected.payload_hash,
+              resourceUrl: args.x402_expected.resource_url,
+              merchantTo: args.x402_expected.merchant_to,
+              amount: args.x402_expected.amount,
+              asset: args.x402_expected.asset,
+              network: args.x402_expected.network,
+              auth: args.x402_expected.auth,
+            }
+          : null
+        const result = x402Expected
+          ? signer.signX402FundingHash(args.payload_hash, x402Expected)
+          : null
+        if (!result) {
+          const signature = signer.signPaymentHash(args.payload_hash)
+          await auditSigning('haven_sign', args.payload_hash)
+          return { signature }
+        }
         await auditSigning('haven_sign', args.payload_hash)
-        return { signature }
+        return { signature: result.signature, x402_binding: result.x402Binding }
       }),
 
     haven_x402_sign_header: async (input) =>
@@ -87,6 +136,7 @@ export function createToolHandlers(
         const args = parse('haven_x402_sign_header', input)
         const result = await signer.buildX402PaymentHeader(
           args.payment_required as X402PaymentRequired,
+          args.x402_binding,
         )
         await auditSigning(
           'haven_x402_sign_header',

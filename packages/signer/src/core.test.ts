@@ -1,10 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { addressFromKey, verifySignature, HavenSigningError } from '@haven_ai/sdk'
+import { privateKeyToAccount } from 'viem/accounts'
+import {
+  addressFromKey,
+  buildX402ExpectedMessage,
+  verifySignature,
+  HavenSigningError,
+} from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
 
 // Well-known test key (Hardhat account #0). Never used for real funds.
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
+const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
+const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 const HASH = '0x' + 'ab'.repeat(32)
+const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 
 const PAYMENT_REQUIRED = {
   x402Version: 1,
@@ -19,6 +28,31 @@ const PAYMENT_REQUIRED = {
       maxTimeoutSeconds: 60,
     },
   ],
+}
+
+const EXPECTED_X402_BASE = {
+  paymentId: 'pay_x402',
+  payloadHash: FUNDING_HASH,
+  resourceUrl: PAYMENT_REQUIRED.resource.url,
+  merchantTo: PAYMENT_REQUIRED.accepts[0].payTo,
+  amount: PAYMENT_REQUIRED.accepts[0].amount,
+  asset: PAYMENT_REQUIRED.accepts[0].asset,
+  network: PAYMENT_REQUIRED.accepts[0].network,
+}
+
+async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) {
+  const context = { ...EXPECTED_X402_BASE, ...overrides }
+  const message = buildX402ExpectedMessage(context)
+  const account = privateKeyToAccount(BINDING_KEY)
+  return {
+    ...context,
+    auth: {
+      version: 1 as const,
+      message,
+      signature: await account.signMessage({ message }),
+      signer: account.address,
+    },
+  }
 }
 
 describe('createEdgeSigner', () => {
@@ -42,8 +76,9 @@ describe('createEdgeSigner', () => {
 
 describe('buildX402PaymentHeader', () => {
   it('builds a merchant header for a Base USDC option', async () => {
-    const signer = createEdgeSigner(TEST_KEY)
-    const result = await signer.buildX402PaymentHeader(PAYMENT_REQUIRED)
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const result = await signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)
     expect(typeof result.paymentHeader).toBe('string')
     expect(result.paymentHeader.length).toBeGreaterThan(0)
     expect(result.accepted.asset.toLowerCase()).toBe(
@@ -52,7 +87,8 @@ describe('buildX402PaymentHeader', () => {
   })
 
   it('rejects unsupported payment options', async () => {
-    const signer = createEdgeSigner(TEST_KEY)
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
     await expect(
       signer.buildX402PaymentHeader({
         x402Version: 1,
@@ -60,7 +96,109 @@ describe('buildX402PaymentHeader', () => {
         accepts: [
           { scheme: 'exact', network: 'base', amount: '1', asset: '0xNotUsdc', payTo: '0x1', maxTimeoutSeconds: 60 },
         ],
-      }),
+      }, funding.x402Binding),
     ).rejects.toThrow()
+  })
+
+  it('requires a locally recorded x402 funding binding before header signing', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    await expect(signer.buildX402PaymentHeader(PAYMENT_REQUIRED, 'not-recorded')).rejects.toThrow(
+      'funding binding',
+    )
+  })
+
+  it('rejects unauthenticated or tampered expected contexts before signing the funding hash', async () => {
+    const expected = await expectedX402()
+    const unconfigured = createEdgeSigner(TEST_KEY)
+    expect(() => unconfigured.signX402FundingHash(FUNDING_HASH, expected)).toThrow(
+      'verifier is not configured',
+    )
+
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    expect(() =>
+      signer.signX402FundingHash(FUNDING_HASH, {
+        ...expected,
+        amount: '2000000',
+      }),
+    ).toThrow('authentication message')
+    expect(() =>
+      signer.signX402FundingHash('0x' + 'ef'.repeat(32), expected),
+    ).toThrow('funding hash')
+  })
+
+  it('consumes the x402 binding after signing a merchant header', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    await signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)
+    await expect(signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)).rejects.toThrow(
+      'funding binding',
+    )
+  })
+
+  it('rejects a merchant mismatch before signing a header', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
+      merchantTo: '0x000000000000000000000000000000000000bEEF',
+    }))
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
+    ).rejects.toThrow('merchant recipient')
+  })
+
+  it('rejects an amount mismatch before signing a header', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
+      amount: '2000000',
+    }))
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
+    ).rejects.toThrow('amount')
+  })
+
+  it('rejects resource, asset, and network mismatches', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const resourceBinding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
+      resourceUrl: 'https://merchant.test/other',
+    }))
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, resourceBinding.x402Binding),
+    ).rejects.toThrow('resource')
+    const assetBinding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
+      asset: '0x000000000000000000000000000000000000bEEF',
+    }))
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, assetBinding.x402Binding),
+    ).rejects.toThrow('asset')
+    const networkBinding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
+      network: 'eip155:8453',
+    }))
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, networkBinding.x402Binding),
+    ).rejects.toThrow('network')
+  })
+
+  it('uses maxAmountRequired for the bound merchant header amount when present', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const paymentRequired = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        {
+          ...PAYMENT_REQUIRED.accepts[0],
+          amount: '1000000',
+          maxAmountRequired: '1500000',
+        },
+      ],
+    }
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
+      amount: '1500000',
+    }))
+    await expect(signer.buildX402PaymentHeader(paymentRequired, funding.x402Binding)).resolves.toEqual(
+      expect.objectContaining({ paymentHeader: expect.any(String) }),
+    )
+
+    const mismatch = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    await expect(signer.buildX402PaymentHeader(paymentRequired, mismatch.x402Binding)).rejects.toThrow(
+      'amount',
+    )
   })
 })

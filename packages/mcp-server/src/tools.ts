@@ -78,11 +78,13 @@ const SUBMIT_DESCRIPTION = [
 const X402_AUTHORIZE_DESCRIPTION = [
   'Construct the funding step for a standard x402 payment and return the unsigned hash to sign.',
   'Pass the parsed HTTP 402 payment_required you got from the merchant. Returns { payment_id,',
-  'payload_hash, x402 } where x402 carries the accepted option, resource_url, merchant_to and',
-  'funding_to. Next: sign payload_hash with the delegate key on your machine, call haven_submit',
-  'to fund the delegate wallet, then build + sign the EIP-3009 X-PAYMENT header locally and retry',
-  'the merchant request. Returns { status: "pending_approval" } (no hash) when the amount exceeds',
-  'the budget. Haven never receives the signing key and never talks to the merchant.',
+  'payload_hash, x402 } where x402 carries the accepted option, resource_url, merchant_to,',
+  'funding_to, and expected context. Next: sign payload_hash with x402.expected on your machine,',
+  'call haven_submit to fund the delegate wallet, then pass payment_required plus the returned',
+  'x402_binding to the local signer so it can reject mismatched amount or merchant challenges',
+  'before building the EIP-3009 X-PAYMENT header. Returns { status: "pending_approval" } (no',
+  'hash) when the amount exceeds the budget. Haven never receives the signing key and never talks',
+  'to the merchant.',
 ].join(' ')
 
 export const toolDescriptions: Record<HostedToolName, string> = {
@@ -177,6 +179,16 @@ export function createToolHandlers(
               resource_url: intent.resourceUrl,
               merchant_to: intent.merchantTo,
               funding_to: intent.fundingTo,
+              expected: {
+                payment_id: intent.paymentId,
+                payload_hash: intent.signData.hash,
+                resource_url: intent.accepted.resource ?? intent.resourceUrl,
+                merchant_to: intent.merchantTo,
+                amount: intent.amountAtomic,
+                asset: intent.asset,
+                network: intent.network,
+                auth: intent.expectedAuth,
+              },
             },
           }
         } catch (err) {

@@ -4,13 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { verifySignature } from '@haven_ai/sdk'
+import { privateKeyToAccount } from 'viem/accounts'
+import { buildX402ExpectedMessage, verifySignature } from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
 import { buildSignerMcpServer, resolveEdgeSigner, runSignerConsentGate } from './server.js'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 import { computeSignerConsentHash, type SignerConsentInput } from './consent.js'
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
+const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
+const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 const HASH = '0x' + 'cd'.repeat(32)
 const PAYMENT_REQUIRED = {
   x402Version: 1,
@@ -25,6 +28,38 @@ const PAYMENT_REQUIRED = {
       maxTimeoutSeconds: 60,
     },
   ],
+}
+const EXPECTED_X402_BASE = {
+  payment_id: 'pay_x402',
+  payload_hash: HASH,
+  resource_url: PAYMENT_REQUIRED.resource.url,
+  merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+  amount: PAYMENT_REQUIRED.accepts[0].amount,
+  asset: PAYMENT_REQUIRED.accepts[0].asset,
+  network: PAYMENT_REQUIRED.accepts[0].network,
+}
+
+async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) {
+  const expected = { ...EXPECTED_X402_BASE, ...overrides }
+  const message = buildX402ExpectedMessage({
+    paymentId: expected.payment_id,
+    payloadHash: expected.payload_hash,
+    resourceUrl: expected.resource_url,
+    merchantTo: expected.merchant_to,
+    amount: expected.amount,
+    asset: expected.asset,
+    network: expected.network,
+  })
+  const account = privateKeyToAccount(BINDING_KEY)
+  return {
+    ...expected,
+    auth: {
+      version: 1 as const,
+      message,
+      signature: await account.signMessage({ message }),
+      signer: account.address,
+    },
+  }
 }
 
 function ok<T = unknown>(payload: ToolPayload): ToolSuccess<T> {
@@ -118,7 +153,7 @@ describe('haven_sign tool', () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-signer-tool-audit-'))
     const auditPath = join(dir, 'audit.jsonl')
     try {
-      const signer = createEdgeSigner(TEST_KEY)
+      const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
       const handlers = createToolHandlers(signer, {
         audit: {
           auditPath,
@@ -160,18 +195,27 @@ describe('haven_x402_sign_header tool', () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-signer-x402-audit-'))
     const auditPath = join(dir, 'audit.jsonl')
     try {
-      const signer = createEdgeSigner(TEST_KEY)
+      const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
       const handlers = createToolHandlers(signer, {
         audit: { auditPath, delegateAddress: signer.delegateAddress },
       })
+      const signed = ok<{ signature: string; x402_binding: string }>(
+        await handlers.haven_sign({
+          payload_hash: HASH,
+          x402_expected: await expectedX402(),
+        }),
+      )
 
       const result = ok<{ payment_header: string }>(
-        await handlers.haven_x402_sign_header({ payment_required: PAYMENT_REQUIRED }),
+        await handlers.haven_x402_sign_header({
+          payment_required: PAYMENT_REQUIRED,
+          x402_binding: signed.data.x402_binding,
+        }),
       )
       const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
-      expect(rows).toHaveLength(1)
+      expect(rows).toHaveLength(2)
 
-      const entry = JSON.parse(rows[0])
+      const entry = JSON.parse(rows[1])
       expect(entry).toMatchObject({
         version: 1,
         tool: 'haven_x402_sign_header',
@@ -187,5 +231,26 @@ describe('haven_x402_sign_header tool', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  it('rejects a merchant header when expected context is missing or mismatched', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+    const missing = await handlers.haven_x402_sign_header({ payment_required: PAYMENT_REQUIRED })
+    expect(missing.success).toBe(false)
+
+    const signed = ok<{ x402_binding: string }>(
+      await handlers.haven_sign({
+        payload_hash: HASH,
+        x402_expected: await expectedX402({
+          amount: '2000000',
+        }),
+      }),
+    )
+    const mismatched = await handlers.haven_x402_sign_header({
+      payment_required: PAYMENT_REQUIRED,
+      x402_binding: signed.data.x402_binding,
+    })
+    expect(mismatched.success).toBe(false)
+    expect(JSON.stringify(mismatched)).toContain('amount')
   })
 })

@@ -11,6 +11,7 @@ export interface SignerCredentials {
   safeAddress?: string
   chainId?: number
   network?: string
+  x402BindingSigner?: string
   /** Absolute path the key was loaded from, if a file was used. */
   sourcePath?: string
 }
@@ -25,6 +26,8 @@ interface RawCredentialFile {
   chain_id?: unknown
   chainId?: unknown
   network?: unknown
+  x402_binding_signer?: unknown
+  x402BindingSigner?: unknown
 }
 
 /**
@@ -51,6 +54,7 @@ export async function loadSignerCredentials(
       safeAddress: stringField(process.env.HAVEN_SAFE_ADDRESS),
       chainId: numberField(process.env.HAVEN_CHAIN_ID),
       network: stringField(process.env.HAVEN_NETWORK),
+      x402BindingSigner: stringField(process.env.HAVEN_X402_BINDING_SIGNER),
     }
   }
 
@@ -91,6 +95,11 @@ async function loadFromFile(path: string): Promise<SignerCredentials> {
     safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
     chainId,
     network: stringField(raw.network),
+    x402BindingSigner: stringField(
+      raw.x402_binding_signer ??
+        raw.x402BindingSigner ??
+        process.env.HAVEN_X402_BINDING_SIGNER,
+    ),
     sourcePath: path,
   }
 }

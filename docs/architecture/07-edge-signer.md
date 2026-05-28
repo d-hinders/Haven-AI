@@ -16,10 +16,15 @@ The edge signer ships as a new package, **`@haven_ai/signer`**, in two layers:
    from a local secret and exposes pure operations:
    - `signPaymentHash(hash)` → raw ECDSA signature (the AllowanceModule
      funding/transfer hash). Reuses the SDK's `signHash` + `verifySignature`.
-   - `buildX402PaymentHeader(paymentRequired)` → the EIP-3009 `X-PAYMENT`
-     header for the merchant leg of an x402 payment. Reuses the SDK's
-     `selectStandardPaymentOption` + `toStandardPaymentRequirements` + the
-     `x402` library.
+   - `signX402FundingHash(hash, expected)` → verifies Haven's signature over the
+     expected context, then returns the funding signature plus a process-local
+     `x402_binding` that records the funded merchant-header context returned by
+     the hosted MCP.
+   - `buildX402PaymentHeader(paymentRequired, x402Binding)` → the EIP-3009
+     `X-PAYMENT` header for the merchant leg of an x402 payment, after
+     consuming the recorded binding and checking the merchant challenge against
+     it. Reuses the SDK's `selectStandardPaymentOption` +
+     `toStandardPaymentRequirements` + the `x402` library.
    - Returns signatures/headers only — never the key.
 
 2. **Local stdio MCP signer** — a thin MCP server exposing sign-only tools
@@ -55,10 +60,10 @@ hosted:  haven_submit     -> { status, tx_hash }
 
 **x402** — two delegate signatures, both local:
 ```
-hosted:  haven_x402_authorize     -> { payment_id, payload_hash, x402 }
-local:   haven_sign               -> funding signature
+hosted:  haven_x402_authorize     -> { payment_id, payload_hash, x402.expected }
+local:   haven_sign + expected    -> funding signature + x402_binding
 hosted:  haven_submit             -> funds Safe -> delegate EOA
-local:   haven_x402_sign_header   -> EIP-3009 X-PAYMENT header
+local:   haven_x402_sign_header   -> EIP-3009 X-PAYMENT header if binding matches
 agent:   retry merchant with X-PAYMENT                 (no Haven involvement)
 ```
 
@@ -70,6 +75,11 @@ agent:   retry merchant with X-PAYMENT                 (no Haven involvement)
   host entirely); it gets only `{ payment_id, signature }` via `haven_submit`.
 - The merchant gets only the standard EIP-3009 header; Haven never talks to the
   merchant.
+- The edge signer refuses to build the merchant header unless the caller first
+  signed the funding hash with a Haven-authenticated `x402.expected`; the
+  resulting binding is process-local and is consumed after one successful
+  merchant header. The fresh `payment_required` must match the recorded amount,
+  merchant, resource URL, asset, and network.
 - Local secret handling mirrors `@haven_ai/mcp`: key from `HAVEN_DELEGATE_KEY`
   or a `--credentials` file's `delegate_key`, with a permissive-file warning.
 
@@ -79,3 +89,11 @@ agent:   retry merchant with X-PAYMENT                 (no Haven involvement)
   the architecture set.
 - The signer needs no `api_key` — it only signs. Identity (the API key) lives
   with the hosted connection, not the signer.
+- Hosted x402 construct requires Haven to sign the expected context with
+  `X402_BINDING_PRIVATE_KEY` (falling back to `RELAYER_PRIVATE_KEY`); the edge
+  signer verifies it against `HAVEN_X402_BINDING_SIGNER` or
+  `x402_binding_signer` in the credential file.
+- Standard x402 briefly creates a delegate hot-wallet balance. Keep x402
+  allowances small and reset-bound, retry the original merchant session after
+  funding confirms, and reconcile or sweep stranded delegate balances when a
+  merchant retry fails or the authorization expires unsettled.

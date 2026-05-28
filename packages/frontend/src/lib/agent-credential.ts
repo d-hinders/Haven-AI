@@ -22,6 +22,7 @@
 
 import { getChainConfig } from '@/lib/chains'
 import type { HandoffInput } from './agent-handoff'
+import { resolveHostedMcpUrl } from './hosted-connect'
 
 /** Slug used in the downloaded filename. Identical rule to agent-handoff.ts. */
 function slugify(name: string): string {
@@ -54,6 +55,13 @@ export interface AgentCredentialJson {
   chain_id: number
   network: string | null
   api_url: string | null
+  /**
+   * Hosted MCP endpoint for this credential. Edge signers use this to connect
+   * without a local server. Resolves from `NEXT_PUBLIC_HAVEN_MCP_URL` at
+   * build/runtime; falls back to the default Railway-issued URL.
+   * See `docs/deploy/hosted-mcp.md`.
+   */
+  mcp_url: string
   budget_summary: AgentCredentialBudgetEntry[]
   revoke_url: string
   created_at: string
@@ -118,6 +126,7 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
     chain_id: agent.chainId,
     network: resolveNetworkName(agent.chainId),
     api_url: apiBaseUrl ?? null,
+    mcp_url: resolveHostedMcpUrl(),
     budget_summary: policy.allowances.map((a) => ({
       token: a.tokenSymbol,
       amount: a.amount,

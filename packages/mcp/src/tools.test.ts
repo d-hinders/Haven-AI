@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { HavenClient } from '@haven_ai/sdk'
-import { createToolHandlers } from './tools.js'
+import { HavenClient, toolDescriptions as sharedDescriptions } from '@haven_ai/sdk'
+import { createToolHandlers, toolDescriptions } from './tools.js'
 
 const delegateKey = '0x59c6995e998f97a5a0044966f09453843a4bba3e18a70e0614612ece7c1e4568'
+const delegateAddress = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
+const safeAddress = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 const baseUrl = 'https://haven.example'
 const txHash = `0x${'ab'.repeat(32)}`
 
@@ -23,30 +25,170 @@ const challenge = {
   expiresAt: '2099-01-01T00:00:00.000Z',
 } as const
 
-// ── x402 fixtures ────────────────────────────────────────────────────────────
-
-const resourceUrl = 'https://merchant.example/resource'
-const delegateAddress = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
-const safeAddress = '0x135a9215604711AC70d970e12Caa812c53537EF4'
-
 const x402PaymentRequired = {
   x402Version: 2,
   error: 'Payment required',
   resource: {
-    url: resourceUrl,
-    description: 'Test resource $0.01 USDC',
+    url: 'https://merchant.example/data',
+    description: 'Premium data',
     mimeType: 'application/json',
   },
-  accepts: [{
-    scheme: 'exact',
-    network: 'eip155:8453',
-    asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    amount: '10000',
-    payTo: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
-    maxTimeoutSeconds: 300,
-    extra: { name: 'USD Coin', version: '2' },
-  }],
+  accepts: [
+    {
+      scheme: 'exact' as const,
+      network: 'eip155:8453',
+      asset: challenge.asset.address,
+      amount: challenge.amount.atomic,
+      payTo: challenge.recipient,
+      maxTimeoutSeconds: 300,
+      extra: { name: 'USD Coin', version: '2' },
+    },
+  ],
 }
+
+// resourceUrl is used by the #190 security tests below
+const resourceUrl = challenge.resource
+
+interface CapturedRequest {
+  url: string
+  init?: RequestInit
+}
+
+/**
+ * Non-custody assertion: the delegate private key must never appear anywhere
+ * in an outgoing HTTP call — URL, header name, header value, or body. The
+ * checks handle every variant of the WHATWG fetch RequestInit shape:
+ *
+ *   - `init.headers` can be `Headers`, a plain record, or an array of
+ *     `[name, value]` tuples. `JSON.stringify(new Headers(...))` returns
+ *     `"{}"` (Headers does not implement toJSON), so we cannot rely on
+ *     stringification alone — every shape is iterated explicitly.
+ *   - `init.body` can be `string`, `URLSearchParams`, `FormData`, `Blob`,
+ *     `Uint8Array`, or `ReadableStream`. `String(body)` on non-strings
+ *     produces `"[object X]"` placeholders that would silently pass a
+ *     substring check, so non-string bodies are inspected via their own
+ *     iteration where possible and explicitly REJECTED with a clear test
+ *     failure otherwise — we'd rather force the caller to widen the helper
+ *     than silently green-light a leak.
+ *
+ * The substring check is case-folded and also tested against the unprefixed
+ * (`key.slice(2)`) and URL-encoded (`encodeURIComponent(key)`) variants:
+ * ABI encoders emit unprefixed hex, and a URL query parameter would emit the
+ * encoded form.
+ */
+function assertNoDelegateKeyLeak(requests: CapturedRequest[], key: string): void {
+  const variants = collectKeyVariants(key)
+  for (const request of requests) {
+    assertNoVariantPresent(request.url, variants, `request URL ${request.url}`)
+    iterateHeaders(request.init?.headers, (name, value) => {
+      assertNoVariantPresent(name, variants, `header name in ${request.url}`)
+      assertNoVariantPresent(value, variants, `header value in ${request.url}`)
+    })
+    inspectBody(request.init?.body, (text, label) => {
+      assertNoVariantPresent(text, variants, `${label} in ${request.url}`)
+    })
+  }
+}
+
+function collectKeyVariants(key: string): string[] {
+  const unprefixed = key.startsWith('0x') ? key.slice(2) : key
+  const variants = new Set<string>([
+    key,
+    key.toLowerCase(),
+    key.toUpperCase(),
+    unprefixed,
+    unprefixed.toLowerCase(),
+    unprefixed.toUpperCase(),
+    encodeURIComponent(key),
+    encodeURIComponent(unprefixed),
+  ])
+  return Array.from(variants).filter((v) => v.length > 0)
+}
+
+function assertNoVariantPresent(haystack: string, variants: string[], label: string): void {
+  if (!haystack) return
+  const lower = haystack.toLowerCase()
+  for (const variant of variants) {
+    expect(lower, `${label} contains delegate key (variant: ${variant.slice(0, 12)}…)`)
+      .not.toContain(variant.toLowerCase())
+  }
+}
+
+type HeadersLike = Headers | Record<string, string | string[]> | Array<[string, string]>
+
+function iterateHeaders(
+  headers: HeadersInit | undefined,
+  visit: (name: string, value: string) => void,
+): void {
+  if (!headers) return
+  if (headers instanceof Headers) {
+    for (const [name, value] of headers) visit(name, value)
+    return
+  }
+  if (Array.isArray(headers)) {
+    for (const [name, value] of headers) visit(String(name), String(value))
+    return
+  }
+  for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (Array.isArray(value)) for (const v of value) visit(name, String(v))
+    else if (value != null) visit(name, String(value))
+  }
+}
+
+function inspectBody(
+  body: BodyInit | null | undefined,
+  visit: (text: string, label: string) => void,
+): void {
+  if (body == null) return
+  if (typeof body === 'string') { visit(body, 'body string'); return }
+  if (body instanceof URLSearchParams) {
+    for (const [k, v] of body) { visit(k, 'body param name'); visit(v, 'body param value') }
+    return
+  }
+  // Force the test to fail loudly if a future SDK call uses a body shape we
+  // don't inspect (Blob, FormData, Uint8Array, ReadableStream). Silently
+  // passing on `'[object Blob]'` would defeat the non-custody invariant.
+  throw new Error(
+    `assertNoDelegateKeyLeak does not yet inspect body of type ${Object.prototype.toString.call(body)}; ` +
+    `widen the helper before adding a Haven request that uses this body shape.`,
+  )
+}
+
+describe('Haven MCP tool descriptions', () => {
+  // Drift guard: every MCP tool description must contain ALL fragments of the
+  // shared description (summary, behavior, nextActionGuidance) — not just the
+  // summary. The previous version only asserted .toContain(summary), which
+  // (a) missed drift in behavior/nextActionGuidance, and (b) was vacuously
+  // true if a summary was ever set to an empty string (every string contains
+  // ''). Asserting each fragment individually catches partial drift; the
+  // non-empty assertion catches the empty-summary degenerate case.
+  const cases: Array<{ tool: keyof typeof toolDescriptions; key: keyof typeof sharedDescriptions }> = [
+    { tool: 'haven_quote_x402', key: 'quoteX402' },
+    { tool: 'haven_pay_x402_quote', key: 'payX402' },
+    { tool: 'haven_resume_x402_payment', key: 'resumeX402' },
+    { tool: 'haven_quote_mpp', key: 'quoteMpp' },
+    { tool: 'haven_pay_mpp_challenge', key: 'payMpp' },
+    { tool: 'haven_resume_mpp_payment', key: 'resumeMpp' },
+    { tool: 'haven_get_payment_status', key: 'getPaymentStatus' },
+    { tool: 'haven_get_resume_state', key: 'getResumeState' },
+    { tool: 'haven_get_agent', key: 'getAgent' },
+    { tool: 'haven_get_allowances', key: 'getAllowances' },
+    { tool: 'haven_list_receipts', key: 'listReceipts' },
+  ]
+
+  for (const { tool, key } of cases) {
+    it(`${tool} composes every fragment from the shared ${key} description`, () => {
+      const shared = sharedDescriptions[key]
+      const desc = toolDescriptions[tool]
+      // Every entry must have a non-empty summary so the substring check
+      // below has a real anchor rather than the vacuously-true `''`.
+      expect(shared.summary.length).toBeGreaterThan(10)
+      expect(desc).toContain(shared.summary)
+      if (shared.behavior) expect(desc).toContain(shared.behavior)
+      if (shared.nextActionGuidance) expect(desc).toContain(shared.nextActionGuidance)
+    })
+  }
+})
 
 describe('Haven MCP tool handlers', () => {
   afterEach(() => {
@@ -54,7 +196,7 @@ describe('Haven MCP tool handlers', () => {
   })
 
   it('pays MPP challenges without leaking the delegate key over HTTP', async () => {
-    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const requests: CapturedRequest[] = []
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
       requests.push({ url: String(url), init })
 
@@ -106,12 +248,202 @@ describe('Haven MCP tool handlers', () => {
     expect(paid.success).toBe(true)
     expect(JSON.stringify(paid)).toContain('delivered')
 
-    for (const request of requests) {
-      expect(request.url).not.toContain(delegateKey)
-      expect(JSON.stringify(request.init?.headers ?? {})).not.toContain(delegateKey)
-      expect(String(request.init?.body ?? '')).not.toContain(delegateKey)
-    }
+    assertNoDelegateKeyLeak(requests, delegateKey)
   })
+
+  it('pays x402 quotes without leaking the delegate key over HTTP', async () => {
+    const requests: CapturedRequest[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      requests.push({ url: String(url), init })
+      const u = String(url)
+
+      // First call: merchant returns 402 with x402 payload (used by quoteX402).
+      // Second call: merchant returns 402 again on the pay path (Haven re-probes).
+      if (u === x402PaymentRequired.resource.url) {
+        // Has X-PAYMENT header? It's the retry — return the paid response.
+        const headers = init?.headers ? new Headers(init.headers) : new Headers()
+        if (headers.has('X-PAYMENT')) {
+          return new Response(JSON.stringify({ ok: true, data: 'paid-x402' }), {
+            status: 200,
+            headers: {
+              'PAYMENT-RESPONSE': btoa(JSON.stringify({
+                success: true,
+                transaction: txHash,
+                network: x402PaymentRequired.accepts[0].network,
+              })),
+            },
+          })
+        }
+        return new Response(JSON.stringify(x402PaymentRequired), {
+          status: 402,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      if (u.endsWith('/x402')) {
+        // Haven funding leg — returns sign_data for the delegate to sign.
+        return jsonResponse({
+          payment_id: 'x402-pay-1',
+          status: 'pending_signature',
+          chain_id: 8453,
+          safe_address: safeAddress,
+          token: 'USDC',
+          amount: '0.01',
+          to: delegateAddress,
+          resource_url: x402PaymentRequired.resource.url,
+          sign_data: {
+            hash: `0x${'22'.repeat(32)}`,
+            components: {
+              safe: safeAddress,
+              token: x402PaymentRequired.accepts[0].asset,
+              to: delegateAddress,
+              amount: x402PaymentRequired.accepts[0].amount,
+              payment_token: '0x0000000000000000000000000000000000000000',
+              payment: '0',
+              nonce: 1,
+            },
+            instructions: 'Sign with delegate key',
+          },
+        }, 201)
+      }
+
+      if (u.endsWith('/payments/x402-pay-1/sign')) {
+        return jsonResponse({
+          payment_id: 'x402-pay-1',
+          status: 'confirmed',
+          tx_hash: txHash,
+          token: 'USDC',
+          amount: '0.01',
+          to: delegateAddress,
+          explorer_url: `https://basescan.org/tx/${txHash}`,
+        })
+      }
+
+      if (u.endsWith('/machine-payments/evidence')) {
+        return jsonResponse({ evidence: { id: 'evidence-1' } }, 202)
+      }
+
+      return jsonResponse({})
+    })
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl,
+      x402Wallet: safeAddress,
+    })
+    const handlers = createToolHandlers(haven)
+
+    const quote = await handlers.haven_quote_x402({ url: x402PaymentRequired.resource.url })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+
+    const paid = await handlers.haven_pay_x402_quote({ quote: quote.data })
+    expect(paid.success).toBe(true)
+    expect(JSON.stringify(paid)).toContain('paid-x402')
+
+    // Haven traffic must have happened (sign data + sign endpoint) and
+    // delegate_key must not appear in any request URL, header, or body.
+    expect(requests.some((r) => r.url.endsWith('/x402'))).toBe(true)
+    expect(requests.some((r) => r.url.endsWith('/payments/x402-pay-1/sign'))).toBe(true)
+    assertNoDelegateKeyLeak(requests, delegateKey)
+  })
+
+  it('resumes x402 payments by payment_id without leaking the delegate key', async () => {
+    const requests: CapturedRequest[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      requests.push({ url: String(url), init })
+      const u = String(url)
+
+      if (u.endsWith('/payments/approval-9/resume_state')) {
+        // Server-side resume rehydration — returns the captured x402 context.
+        return jsonResponse({
+          rail: 'x402',
+          paymentId: 'approval-9',
+          idempotencyKey: 'x402:approval-9',
+          paymentRequired: x402PaymentRequired,
+          accepted: x402PaymentRequired.accepts[0],
+          url: x402PaymentRequired.resource.url,
+          resourceUrl: x402PaymentRequired.resource.url,
+          description: x402PaymentRequired.resource.description,
+          amountAtomic: x402PaymentRequired.accepts[0].amount,
+          amount: '0.01',
+          token: 'USDC',
+          asset: x402PaymentRequired.accepts[0].asset,
+          network: x402PaymentRequired.accepts[0].network,
+          chainId: 8453,
+          merchantAddress: x402PaymentRequired.accepts[0].payTo,
+        })
+      }
+
+      if (u.endsWith('/machine-payments/approval-9/status')) {
+        // resumeX402Payment calls getPaymentStatus and requires status.rail
+        // to be x402 with nextAction=retry_original_x402_request and a real
+        // txHash on the funding leg.
+        return jsonResponse({
+          payment_id: 'approval-9',
+          kind: 'approval_request',
+          rail: 'x402',
+          status: 'executed',
+          phase: 'funding_sent',
+          next_action: 'retry_original_x402_request',
+          amount: '0.01',
+          token: 'USDC',
+          resource_url: x402PaymentRequired.resource.url,
+          merchant_address: x402PaymentRequired.accepts[0].payTo,
+          tx_hash: txHash,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          chain_id: 8453,
+          message: 'Resume the original x402 request.',
+          amount_atomic: x402PaymentRequired.accepts[0].amount,
+          asset: x402PaymentRequired.accepts[0].asset,
+          network: x402PaymentRequired.accepts[0].network,
+        })
+      }
+
+      if (u === x402PaymentRequired.resource.url) {
+        return new Response(JSON.stringify({ ok: true, data: 'resumed-x402' }), {
+          status: 200,
+          headers: {
+            'PAYMENT-RESPONSE': btoa(JSON.stringify({
+              success: true,
+              transaction: txHash,
+              network: x402PaymentRequired.accepts[0].network,
+            })),
+          },
+        })
+      }
+
+      if (u.endsWith('/machine-payments/evidence')) {
+        return jsonResponse({ evidence: { id: 'evidence-1' } }, 202)
+      }
+
+      return jsonResponse({})
+    })
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl,
+      x402Wallet: safeAddress,
+    })
+    const handlers = createToolHandlers(haven)
+
+    // Path 1: rehydrate via getResumeState tool and pass the state in.
+    const state = await handlers.haven_get_resume_state({ payment_id: 'approval-9' })
+    expect(state.success).toBe(true)
+    if (!state.success) throw new Error('get_resume_state failed')
+
+    const resumed = await handlers.haven_resume_x402_payment({ resume_state: state.data })
+    expect(resumed.success).toBe(true)
+
+    // Path 2: pass only payment_id — the tool fetches resume state internally.
+    const resumedById = await handlers.haven_resume_x402_payment({ payment_id: 'approval-9' })
+    expect(resumedById.success).toBe(true)
+
+    assertNoDelegateKeyLeak(requests, delegateKey)
+  })
+
 
   // ── #190 Security & regulatory tests ────────────────────────────────────
 
@@ -227,8 +559,6 @@ describe('Haven MCP tool handlers', () => {
     // Regression guard: when the Safe AllowanceModule has insufficient headroom,
     // Haven MUST queue the payment for user approval rather than reject it
     // outright or — critically — attempt to bypass the on-chain constraint.
-    // Policy-only rejection (database says no, chain says yes) would violate
-    // the casp-risk-guardrails "off-chain-only spend control" red line.
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, _init) => {
       if (String(url) === resourceUrl) {
         return new Response(JSON.stringify(x402PaymentRequired), {
@@ -237,8 +567,6 @@ describe('Haven MCP tool handlers', () => {
         })
       }
       if (String(url).endsWith('/x402')) {
-        // Backend signals that the AllowanceModule headroom is exhausted:
-        // the payment cannot execute without user approval.
         return new Response(JSON.stringify({
           payment_id: 'pay-overbudget-1',
           kind: 'approval_request',
@@ -285,7 +613,6 @@ describe('Haven MCP tool handlers', () => {
 
   it('[#190] over-budget MPP payment queues for user approval (regression — unchanged)', async () => {
     // Mirror of the x402 regression but for the MPP rail.
-    // The approval path must work identically regardless of payment rail.
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({
       payment_id: 'pay-mpp-budget-1',
       kind: 'approval_request',
@@ -346,8 +673,6 @@ describe('Haven MCP tool handlers', () => {
 
   it('[#190] read-only tools (get_agent, get_allowances) never transmit the delegate key', async () => {
     // Non-payment tools must also uphold the key-isolation invariant.
-    // Any tool that triggers an HTTP request must not include the delegate
-    // private key in the payload, URL, or headers.
     const requests: Array<{ url: string; body: string; headers: string }> = []
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
@@ -380,6 +705,46 @@ describe('Haven MCP tool handlers', () => {
       expect(all, `read-only tool: delegate key must not appear in request to ${req.url}`)
         .not.toContain(delegateKey)
     }
+  })
+
+  it('negative control: assertNoDelegateKeyLeak fails when the key is present', () => {
+    // Without these the non-custody assertion could be silently weakened
+    // (e.g. comparing against a stripped version of the key) and still pass.
+    // Each case targets a different leak path the helper claims to cover.
+    const unprefixed = delegateKey.slice(2)
+    const cases: Array<{ label: string; req: CapturedRequest }> = [
+      { label: 'URL query', req: { url: `https://haven.example/leak?k=${delegateKey}` } },
+      { label: 'string body', req: { url: 'https://haven.example/x', init: { body: `{"key":"${delegateKey}"}` } } },
+      { label: 'plain-object header value', req: { url: 'https://haven.example/x', init: { headers: { 'X-Leak': delegateKey } } } },
+      { label: 'plain-object header name', req: { url: 'https://haven.example/x', init: { headers: { [delegateKey]: '1' } } } },
+      { label: 'Headers instance value', req: { url: 'https://haven.example/x', init: { headers: new Headers([['X-Leak', delegateKey]]) } } },
+      { label: 'Headers instance name', req: { url: 'https://haven.example/x', init: { headers: new Headers([[`x-${delegateKey.toLowerCase()}`, '1']]) } } },
+      { label: 'header-array tuples', req: { url: 'https://haven.example/x', init: { headers: [['X-Leak', delegateKey]] } } },
+      { label: 'URL-encoded variant', req: { url: `https://haven.example/leak?k=${encodeURIComponent(delegateKey)}` } },
+      { label: 'unprefixed hex (ABI encoder style)', req: { url: 'https://haven.example/x', init: { body: `{"k":"${unprefixed}"}` } } },
+      { label: 'uppercased hex', req: { url: 'https://haven.example/x', init: { body: `{"k":"${delegateKey.toUpperCase()}"}` } } },
+      { label: 'URLSearchParams body value', req: { url: 'https://haven.example/x', init: { body: new URLSearchParams({ key: delegateKey }) } } },
+    ]
+    for (const { label, req } of cases) {
+      expect(
+        () => assertNoDelegateKeyLeak([req], delegateKey),
+        `should detect leak in: ${label}`,
+      ).toThrow()
+    }
+  })
+
+  it('negative control: assertNoDelegateKeyLeak loudly rejects unknown body shapes', () => {
+    // If a future SDK switches a Haven call to a body shape this helper
+    // doesn't inspect (Blob, FormData, ReadableStream, Uint8Array), it must
+    // fail loudly rather than green-light the call. The test confirms the
+    // helper throws on unknown shapes instead of silently passing.
+    const blob = new Blob([delegateKey])
+    expect(() =>
+      assertNoDelegateKeyLeak(
+        [{ url: 'https://haven.example/x', init: { body: blob } }],
+        delegateKey,
+      ),
+    ).toThrow(/does not yet inspect body of type/)
   })
 
   it('returns structured payment state errors with nextAction and resume_state', async () => {
@@ -453,3 +818,4 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: { 'Content-Type': 'application/json' },
   })
 }
+

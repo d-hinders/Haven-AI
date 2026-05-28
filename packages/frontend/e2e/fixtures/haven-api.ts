@@ -316,6 +316,12 @@ const ignoredBrowserErrorPatterns = [
   /web3modal/i,
   /reown/i,
   /failed to load resource.*\.well-known/i,
+  // On-chain allowance reads fire when the Safe module config page opens;
+  // in E2E there is no real blockchain provider, so these contract calls
+  // return empty data. They do not affect the UI flows under test.
+  /Failed to fetch on-chain allowances/i,
+  /ContractFunctionExecutionError/i,
+  /isModuleEnabled/i,
 ]
 
 export function collectBrowserErrors(page: Page) {

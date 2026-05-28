@@ -99,8 +99,9 @@ test.describe('Hosted MCP — in-budget path', () => {
     // so pin to the first occurrence.
     await expect(page.getByRole('link', { name: /Research agent/i }).first()).toBeVisible()
 
-    // Spend metrics are shown (mocked at $12.50)
-    await expect(page.getByText(/12\.50/)).toBeVisible()
+    // Spend metrics are shown (mocked at $12.50).
+    // Multiple elements may show "12.50" (stat + activity row) — pin to first.
+    await expect(page.getByText(/12\.50/).first()).toBeVisible()
 
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
@@ -128,9 +129,10 @@ test.describe('Hosted MCP — over-budget path', () => {
     // The name appears in both the approval row and a heading, so use .first().
     await expect(page.getByText('Research agent').first()).toBeVisible()
 
-    // The approval shows the amount and token
-    await expect(page.getByText(/12\.50/)).toBeVisible()
-    await expect(page.getByText(/USDC/)).toBeVisible()
+    // The approval shows the amount and token.
+    // Multiple elements may show "12.50" or "USDC" — pin to first.
+    await expect(page.getByText(/12\.50/).first()).toBeVisible()
+    await expect(page.getByText(/USDC/).first()).toBeVisible()
 
     // The source URL is shown (proves x402 provenance)
     await expect(page.getByText(/research\.example/i)).toBeVisible()

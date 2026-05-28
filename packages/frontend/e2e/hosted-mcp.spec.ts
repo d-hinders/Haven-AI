@@ -134,8 +134,9 @@ test.describe('Hosted MCP — over-budget path', () => {
     await expect(page.getByText(/12\.50/).first()).toBeVisible()
     await expect(page.getByText(/USDC/).first()).toBeVisible()
 
-    // The source URL is shown (proves x402 provenance)
-    await expect(page.getByText(/research\.example/i)).toBeVisible()
+    // The source URL is shown (proves x402 provenance).
+    // The URL can appear multiple times (row + detail) — pin to first.
+    await expect(page.getByText(/research\.example/i).first()).toBeVisible()
 
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
@@ -38,7 +38,13 @@ import {
 
 /** Format a timestamp into a human-readable "X ago" string. */
 function formatRelativeTime(isoTs: string): string {
-  const diffMs = Date.now() - new Date(isoTs).getTime()
+  const d = new Date(isoTs)
+  // Guard: invalid ISO string → getTime() returns NaN → all comparisons are false
+  // → would produce "NaNd ago" without this check.
+  if (isNaN(d.getTime())) return 'just now'
+  const diffMs = Date.now() - d.getTime()
+  // Guard: server clock slightly ahead of client → negative diff.
+  if (diffMs < 0) return 'just now'
   const diffSec = Math.floor(diffMs / 1000)
   if (diffSec < 5) return 'just now'
   if (diffSec < 60) return `${diffSec}s ago`
@@ -100,8 +106,14 @@ export function HostedConnectCard({
   const [copiedKey, setCopiedKey] = useState(false)
   // Per-client: whether the manual config fallback is expanded
   const [showConfigFallback, setShowConfigFallback] = useState(false)
-  // #189: when connected, setup steps are collapsed; user can re-open them
+  // #189: when connected, setup steps are collapsed; user can re-open them.
+  // Initialised to !isConnected — but since lastSeenAt starts null the hook
+  // resolves asynchronously, so we also sync via useEffect when isConnected
+  // changes from false → true (the auto-collapse-on-first-connect behaviour).
   const [showSetupSteps, setShowSetupSteps] = useState(!isConnected)
+  useEffect(() => {
+    if (isConnected) setShowSetupSteps(false)
+  }, [isConnected])
 
   const active = useMemo<HostedClientOption | null>(
     () => HOSTED_CLIENT_OPTIONS.find((c) => c.id === activeId) ?? null,

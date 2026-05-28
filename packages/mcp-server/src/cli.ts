@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHostedHttpServer } from './http.js'
+import { assertHostedEnv, CustodyError } from './boot.js'
 
 function parsePort(value: string | undefined): number {
   const port = Number(value ?? 8788)
@@ -11,6 +12,18 @@ function parsePort(value: string | undefined): number {
 }
 
 function main(): void {
+  // Process-level custody guard — refuses to boot if a delegate key was
+  // accidentally injected. See boot.ts.
+  try {
+    assertHostedEnv()
+  } catch (err) {
+    if (err instanceof CustodyError) {
+      process.stderr.write(`${err.message}\n`)
+      process.exit(2)
+    }
+    throw err
+  }
+
   const port = parsePort(process.env.PORT)
   const baseUrl = process.env.HAVEN_API_URL
   const path = process.env.HAVEN_MCP_PATH ?? '/v1'

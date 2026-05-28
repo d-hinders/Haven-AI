@@ -280,8 +280,8 @@ export default function Home() {
       {/* Protocol native */}
       <Section
         eyebrow="Protocol native"
-        title="One set of rules. Open standards. Built on stablecoins."
-        lede="Agents move at machine speed and need money that does too. Stablecoins settle in seconds, 24/7, with spend rules enforced by smart contracts — not by a bank that takes days. Haven speaks the open standards on those rails — x402 for pay‑per‑request flows, Stripe MPP for broader agent commerce — under one agent rules layer."
+        title="Open standards on stablecoin rails."
+        lede="Stablecoins give agents money that moves at their speed. Haven speaks the open standards that ride on those rails — x402 for pay‑per‑request flows, Stripe MPP for broader agent commerce — all under the same rule set."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">
@@ -314,8 +314,8 @@ export default function Home() {
                 Stripe MPP — agent‑initiated payments
               </h3>
               <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)] mb-4">
-                Stripe's Machine Payments Protocol is rail‑agnostic — stablecoins on‑chain or
-                fiat via Shared Payment Tokens. Haven implements the stablecoin path today.
+                Stripe's Machine Payments Protocol works across rails — stablecoins on‑chain
+                today, fiat to follow. Haven implements the stablecoin path now.
               </p>
               <span className="text-[13px] font-medium text-[var(--v2-brand)] inline-flex items-center gap-1 group-hover:gap-2 transition-all">
                 See the MPP flow

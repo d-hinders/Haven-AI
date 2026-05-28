@@ -13,15 +13,30 @@ const INTEGRATIONS = ['Base', 'Gnosis Chain', 'x402', 'Stripe MPP', 'USDC', 'EUR
 const PROBLEM_CARDS = [
   {
     title: 'Agents hit paywalls and stop',
-    body: 'Most agents have no way to handle payment‑gated services. When they encounter a paywall, the workflow breaks — requiring human intervention to continue.',
+    body: 'Most agents have no way to pay for the services they need. The moment they hit a paywall — an API call, a subscription, a per‑use fee — the workflow stalls and a human has to step in. Autonomy ends at the checkout.',
   },
   {
-    title: 'Hardcoded keys are a disaster',
-    body: 'Giving agents raw wallet access means zero controls. One compromised agent can drain everything. There is no way to limit scope, revoke access, or audit what happened.',
+    title: "Traditional payments weren't built for agents",
+    body: 'Cards, bank transfers, and checkout flows assume a human is present to approve, sign in, or solve a captcha. Agents get blocked, abandoned, or forced into shared credentials. The rails simply don’t speak agent.',
   },
   {
-    title: "Workarounds don't scale",
-    body: 'Manual approvals and shared credit cards negate the value of automation. You end up babysitting every transaction, defeating the purpose entirely.',
+    title: 'Stablecoins are the obvious rail — and the obvious risk',
+    body: 'Stablecoins were practically built for AI agents: instant, programmable, global, machine‑native. But giving an agent a private key means unlimited authority, no spend caps, and no audit trail. The right rail becomes the fastest way to lose control.',
+  },
+]
+
+const HAVEN_MODEL = [
+  {
+    title: 'A non‑custodial account',
+    body: 'Your funds live in a Haven account that only you control. Nothing moves without your rules clearing first — if Haven vanished tomorrow, your money would still be yours.',
+  },
+  {
+    title: 'A policy engine',
+    body: 'Every payment is checked against your rules before it moves. Spending limits, approved currencies, approval thresholds — your policies, enforced before the transaction is sent.',
+  },
+  {
+    title: 'A scoped agent credential',
+    body: 'Agents carry a payment credential — scoped to what you allow and revocable at any time. If a credential leaks, you rotate it; your funds stay exactly where they were.',
   },
 ]
 
@@ -34,7 +49,7 @@ const HOW_IT_WORKS = [
   {
     step: '02',
     title: 'Set agent rules',
-    body: 'Choose how much each agent can spend, who it can pay, and what it can pay for.',
+    body: 'Set how much each agent can spend, and over what period. Anything outside that budget waits for your manual approval.',
   },
   {
     step: '03',
@@ -45,35 +60,35 @@ const HOW_IT_WORKS = [
 
 const POLICY_METRICS = [
   { value: '$500', label: 'Daily budget' },
-  { value: 'USDC', label: 'Allowed tokens' },
+  { value: 'USDC', label: 'Allowed currencies' },
   { value: '>$100', label: 'Requires approval' },
   { value: '100%', label: 'Audited payments' },
 ]
 
 const DIFFERENTIATORS = [
   {
-    title: 'You stay in control',
-    body: 'Your funds live in your Haven wallet. You approve actions; Haven never moves money on its own. If we disappear tomorrow, your money is safe.',
-  },
-  {
-    title: 'Rules‑first',
-    body: 'Every payment is checked against your rules before it goes through. Nothing reaches the network without clearing your rules.',
-  },
-  {
-    title: 'Built for agents',
-    body: 'Agents express intent in plain terms — pay, transfer, approve. Haven handles the blockchain complexity so agents never need to.',
-  },
-  {
-    title: 'Open standards',
-    body: 'Built‑in support for x402 (HTTP 402 paywalls) and Stripe MPP. Stablecoin settlement today, fiat rails next.',
+    title: 'Agent‑native by design',
+    body: 'Agents send simple requests — “pay this merchant 50 USDC.” Haven takes it from there, so your agent never has to deal with the moving parts underneath.',
   },
   {
     title: 'Works with any agent',
-    body: 'Works with Claude, GPT, custom scripts, and any orchestration framework. Haven makes no assumptions about where your agents run.',
+    body: 'Plugs into Claude, GPT, custom scripts, or any agent framework you already use. Haven doesn’t care where or how your agents run — bring your own setup.',
+  },
+  {
+    title: 'Audit‑first',
+    body: 'Every payment is logged — which agent asked, which rule let it through, and when it cleared. Pull a complete trail for any agent, anytime — for ops, for compliance, or for your own peace of mind.',
   },
   {
     title: 'Layered security',
-    body: 'Five independent layers — your Haven account, your rules, scoped agent credentials, approval flows, and a full audit trail.',
+    body: 'Five independent layers — your Haven account, your rules, your agent credentials, your approval flows, and a full audit trail. No single point of failure.',
+  },
+  {
+    title: 'Live today',
+    body: 'Live on Gnosis Chain and Base, with USDC and EURe supported. More networks and fiat support coming next.',
+  },
+  {
+    title: 'Built to integrate',
+    body: 'A clean API, a credential to drop in, and the open standards your agent already uses. Connect Haven to your existing setup in minutes — not weeks.',
   },
 ]
 
@@ -90,7 +105,7 @@ export default function Home() {
             <div>
               <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-                Agent‑first wallet infrastructure
+                Payment guardrails for AI agents
               </div>
 
               <h1 className="text-[44px] md:text-[64px] font-semibold tracking-[-0.03em] leading-[1.02] text-[var(--v2-ink)] mb-6">
@@ -113,7 +128,7 @@ export default function Home() {
 
               <p className="text-[17px] md:text-[18px] leading-relaxed text-[var(--v2-ink-2)] mb-8 max-w-[520px]">
                 An account for your agents. You set the rules — they pay within them,
-                never beyond. No raw keys, no shared cards.
+                never beyond. No shared cards. No unlimited access.
               </p>
 
               <div className="flex flex-wrap items-center gap-3 mb-10">
@@ -146,7 +161,7 @@ export default function Home() {
       {/* The problem */}
       <Section
         eyebrow="The problem"
-        title="Agents need money. Today, that's an open wound."
+        title="Agents need money. Today, there's no safe way to give it to them."
         lede="Hardcoded credentials, shared cards, manual approvals — every workaround undoes the value of automation."
         className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
       >
@@ -162,22 +177,25 @@ export default function Home() {
         </div>
       </Section>
 
-      {/* How it works */}
+      {/* The Haven model */}
       <Section
-        eyebrow="How it works"
-        title="Three steps. One set of rules. Zero raw keys."
-        lede="An account holds funds. Rules define what each agent can do. Haven checks them before any money moves."
+        eyebrow="The Haven model"
+        title="A wallet built around rules — not keys."
+        lede="Your money stays in your account. Haven is the rules layer between your agents and your funds, checking every payment against the policies you set. Three pieces work together to make that possible."
       >
-        <StepList steps={HOW_IT_WORKS} />
-
-        <div className="mt-10 flex justify-start">
-          <Button href="/how-it-works" variant="ghost" size="md" trailingIcon>
-            See the full walkthrough
-          </Button>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {HAVEN_MODEL.map((card) => (
+            <Card key={card.title} className="p-7">
+              <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
+                {card.title}
+              </h3>
+              <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)]">{card.body}</p>
+            </Card>
+          ))}
         </div>
       </Section>
 
-      {/* Agent rules — striking dark indigo band */}
+      {/* How it works — striking dark indigo band, with policy tiles as proof */}
       <section
         data-v2-dark-section
         className="relative overflow-hidden text-white"
@@ -203,29 +221,58 @@ export default function Home() {
           <div className="max-w-2xl mb-12">
             <div className="text-[12px] font-medium tracking-tight text-fuchsia-200 mb-3">
               <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-300 inline-block mr-2" />
-              Agent rules
+              How it works
             </div>
             <h2 className="text-[28px] md:text-[40px] font-semibold tracking-[-0.025em] leading-[1.1] mb-4">
-              The rules that gate every payment.
+              Three steps. One set of rules.
             </h2>
             <p className="text-[16px] leading-relaxed text-white/75">
-              Every payment is checked against your rules before any money moves.
-              Agents request — you decide.
+              Set up your account, define your rules, plug in your agent. Your rules
+              decide every payment before any money moves.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-px rounded-[12px] overflow-hidden bg-white/10 border border-white/10 backdrop-blur">
-            {POLICY_METRICS.map((metric) => (
-              <div
-                key={metric.label}
-                className="bg-white/[0.04] hover:bg-white/[0.08] transition-colors px-6 py-7"
-              >
-                <div className="text-[28px] md:text-[32px] font-semibold tracking-[-0.02em] text-white v2-tabular">
-                  {metric.value}
+          <StepList steps={HOW_IT_WORKS} tone="dark" />
+
+          <div className="mt-12">
+            <div className="text-[12px] font-medium tracking-tight text-fuchsia-200/90 mb-4">
+              A sample agent rule set
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-px rounded-[12px] overflow-hidden bg-white/10 border border-white/10 backdrop-blur">
+              {POLICY_METRICS.map((metric) => (
+                <div
+                  key={metric.label}
+                  className="bg-white/[0.04] hover:bg-white/[0.08] transition-colors px-6 py-7"
+                >
+                  <div className="text-[28px] md:text-[32px] font-semibold tracking-[-0.02em] text-white v2-tabular">
+                    {metric.value}
+                  </div>
+                  <div className="text-[13px] text-white/70 mt-1">{metric.label}</div>
                 </div>
-                <div className="text-[13px] text-white/70 mt-1">{metric.label}</div>
-              </div>
-            ))}
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-10">
+            <Link
+              href="/how-it-works"
+              className="inline-flex items-center gap-1.5 text-[14px] font-medium text-white hover:text-white/90 transition-colors group"
+            >
+              See the full walkthrough
+              <svg
+                className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.75}
+              >
+                <path
+                  d="M3.5 8h9M9 4.5L12.5 8 9 11.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </Link>
           </div>
         </div>
       </section>
@@ -233,8 +280,8 @@ export default function Home() {
       {/* Protocol native */}
       <Section
         eyebrow="Protocol native"
-        title="One set of rules. Open standards. Built on stablecoins."
-        lede="Agents move at machine speed and need money that does too. Stablecoins settle in seconds, 24/7, with spend rules enforced by smart contracts — not by a bank that takes days. Haven speaks the open standards on those rails — x402 for pay‑per‑request flows, Stripe MPP for broader agent commerce — under one agent rules layer."
+        title="Open standards on stablecoin rails."
+        lede="Stablecoins give agents money that moves at their speed. Haven speaks the open standards that ride on those rails — x402 for pay‑per‑request flows, Stripe MPP for broader agent commerce — all under the same rule set."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">
@@ -267,8 +314,8 @@ export default function Home() {
                 Stripe MPP — agent‑initiated payments
               </h3>
               <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)] mb-4">
-                Stripe's Machine Payments Protocol is rail‑agnostic — stablecoins on‑chain or
-                fiat via Shared Payment Tokens. Haven implements the stablecoin path today.
+                Stripe's Machine Payments Protocol works across rails — stablecoins on‑chain
+                today, fiat to follow. Haven implements the stablecoin path now.
               </p>
               <span className="text-[13px] font-medium text-[var(--v2-brand)] inline-flex items-center gap-1 group-hover:gap-2 transition-all">
                 See the MPP flow
@@ -284,7 +331,8 @@ export default function Home() {
       {/* Why Haven */}
       <Section
         eyebrow="Why Haven"
-        title="Built for the way agents actually transact."
+        title="The hard parts of agent payments, already solved."
+        lede="Safe agent payments take more than a wallet. Policy, credentials, audit, and open‑standard rails — Haven gives you all of it, wired together, on day one."
         className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

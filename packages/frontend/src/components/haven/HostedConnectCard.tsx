@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
@@ -17,7 +17,7 @@ import {
 } from '@/lib/hosted-connect'
 
 /**
- * Hosted Connect card — the redesigned Done-step surface (#187 + #188).
+ * Hosted Connect card — the redesigned Done-step surface (#187, #188, #189).
  *
  * Replaces `RuntimeConnectCard` for the hosted-MCP world. Renders a header,
  * a client picker, and (once a client is picked) the two-credential split:
@@ -31,8 +31,29 @@ import {
  *   - Other / SDK: advanced disclosure (<details>) that exposes the
  *     local-server env-var and SDK snippet for power users.
  *
- * Live "Connected · last seen" is #189 (uses backend `last_seen_at`).
+ * #189 additions:
+ *   - `lastSeenAt` prop — when non-null, renders a green "Connected · last seen
+ *     Xs ago" banner and collapses the setup steps. A toggle re-expands them.
  */
+
+/** Format a timestamp into a human-readable "X ago" string. */
+function formatRelativeTime(isoTs: string): string {
+  const d = new Date(isoTs)
+  // Guard: invalid ISO string → getTime() returns NaN → all comparisons are false
+  // → would produce "NaNd ago" without this check.
+  if (isNaN(d.getTime())) return 'just now'
+  const diffMs = Date.now() - d.getTime()
+  // Guard: server clock slightly ahead of client → negative diff.
+  if (diffMs < 0) return 'just now'
+  const diffSec = Math.floor(diffMs / 1000)
+  if (diffSec < 5) return 'just now'
+  if (diffSec < 60) return `${diffSec}s ago`
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  return `${Math.floor(diffHr / 24)}d ago`
+}
 
 export interface HostedConnectCardProps {
   credential: AgentCredentialJson
@@ -56,6 +77,12 @@ export interface HostedConnectCardProps {
   signingKeySaved?: boolean
   /** Suggested first-prompt copy shown beneath the snippet area. */
   tryItPrompt?: string
+  /**
+   * ISO timestamp of the agent's most recent MCP tool call, supplied by the
+   * parent via `useAgentLastSeen`. When non-null the card flips into a
+   * "Connected" summary view and the setup steps are collapsed.
+   */
+  lastSeenAt?: string | null
 }
 
 const DEFAULT_TRY_IT_PROMPT = "Ask your agent: “What’s my Haven budget?”"
@@ -68,14 +95,25 @@ export function HostedConnectCard({
   onCredentialSaved,
   signingKeySaved = false,
   tryItPrompt = DEFAULT_TRY_IT_PROMPT,
+  lastSeenAt,
 }: HostedConnectCardProps) {
   const resolvedUrl = useMemo(() => resolveHostedMcpUrl(hostedUrl), [hostedUrl])
+
+  const isConnected = Boolean(lastSeenAt)
 
   const [activeId, setActiveId] = useState<HostedClientId | null>(null)
   const [copiedConnect, setCopiedConnect] = useState(false)
   const [copiedKey, setCopiedKey] = useState(false)
   // Per-client: whether the manual config fallback is expanded
   const [showConfigFallback, setShowConfigFallback] = useState(false)
+  // #189: when connected, setup steps are collapsed; user can re-open them.
+  // Initialised to !isConnected — but since lastSeenAt starts null the hook
+  // resolves asynchronously, so we also sync via useEffect when isConnected
+  // changes from false → true (the auto-collapse-on-first-connect behaviour).
+  const [showSetupSteps, setShowSetupSteps] = useState(!isConnected)
+  useEffect(() => {
+    if (isConnected) setShowSetupSteps(false)
+  }, [isConnected])
 
   const active = useMemo<HostedClientOption | null>(
     () => HOSTED_CLIENT_OPTIONS.find((c) => c.id === activeId) ?? null,
@@ -132,55 +170,110 @@ export function HostedConnectCard({
   return (
     <Card hover={false} elevation="anchor" className="p-5">
       {/* Header */}
-      <div className="flex items-start gap-2">
-        <StatusBadge tone="brand">Connect</StatusBadge>
-        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-          Connect {credential.agent_name} to where it runs
-        </h3>
-      </div>
-      <p className="mt-1.5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-        Pick the app your agent runs in. The connection token goes to Haven; the signing key
-        never does.
-      </p>
-
-      {/* Client picker */}
-      <div
-        className="mt-4 flex flex-wrap items-center gap-2"
-        role="tablist"
-        aria-label="Connect target"
-      >
-        {HOSTED_CLIENT_OPTIONS.map((option) => {
-          const isActive = option.id === activeId
-          return (
-            <button
-              key={option.id}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => handlePickClient(option.id)}
-              className={
-                'rounded-[10px] border px-3 h-9 text-[13px] font-medium transition-colors ' +
-                (isActive
-                  ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]'
-                  : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]')
-              }
-            >
-              {option.label}
-            </button>
-          )
-        })}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
+          {isConnected ? (
+            <StatusBadge tone="success">Connected</StatusBadge>
+          ) : (
+            <StatusBadge tone="brand">Connect</StatusBadge>
+          )}
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+            Connect {credential.agent_name} to where it runs
+          </h3>
+        </div>
+        {/* #189: re-expand toggle when connected */}
+        {isConnected && (
+          <button
+            type="button"
+            onClick={() => setShowSetupSteps((v) => !v)}
+            className="shrink-0 text-[12px] text-[var(--v2-ink-3)] underline-offset-2 hover:text-[var(--v2-ink)] hover:underline"
+            aria-label={showSetupSteps ? 'Hide setup steps' : 'Show setup steps'}
+          >
+            {showSetupSteps ? 'Hide setup' : 'Show setup'}
+          </button>
+        )}
       </div>
 
-      {!active && (
-        <p
-          className="mt-3 text-[12px] italic leading-relaxed text-[var(--v2-ink-3)]"
-          aria-live="polite"
+      {/* #189: Connected banner */}
+      {isConnected && lastSeenAt && (
+        <div
+          className="mt-3 flex items-center gap-2 rounded-[10px] border border-[var(--v2-success)]/25 bg-[var(--v2-success-soft)] px-3 py-2"
+          role="status"
+          aria-label="Agent connected"
         >
-          Pick one above to see the connect steps.
-        </p>
+          <svg
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success-strong)]"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="text-[12px] font-medium text-[var(--v2-success-strong)]">
+            Connected &middot; last seen {formatRelativeTime(lastSeenAt)}
+          </span>
+        </div>
       )}
 
-      {active && snippet && (
+      {/* #189: "Try it" prompt when connected + steps collapsed */}
+      {isConnected && !showSetupSteps && (
+        <div className="mt-3 rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
+          <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+            {tryItPrompt}
+          </div>
+        </div>
+      )}
+
+      {(!isConnected || showSetupSteps) && (
+        <>
+          <p className="mt-1.5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            Pick the app your agent runs in. The connection token goes to Haven; the signing key
+            never does.
+          </p>
+
+          {/* Client picker */}
+          <div
+            className="mt-4 flex flex-wrap items-center gap-2"
+            role="tablist"
+            aria-label="Connect target"
+          >
+            {HOSTED_CLIENT_OPTIONS.map((option) => {
+              const isActive = option.id === activeId
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => handlePickClient(option.id)}
+                  className={
+                    'rounded-[10px] border px-3 h-9 text-[13px] font-medium transition-colors ' +
+                    (isActive
+                      ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]'
+                      : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]')
+                  }
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {!active && (
+            <p
+              className="mt-3 text-[12px] italic leading-relaxed text-[var(--v2-ink-3)]"
+              aria-live="polite"
+            >
+              Pick one above to see the connect steps.
+            </p>
+          )}
+        </>
+      )}
+
+      {active && snippet && (!isConnected || showSetupSteps) && (
         <div key={active.id} className="v2-animate-step-rise mt-4 space-y-4">
           {/* ── 1 · Connect ───────────────────────────────────────────── */}
           <Card.Section>

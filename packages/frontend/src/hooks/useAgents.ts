@@ -27,6 +27,8 @@ export interface Agent {
   status: AgentStatus
   created_at: string
   allowances: AgentAllowance[]
+  /** ISO timestamp of the most recent MCP tool call. Null until first contact. */
+  mcp_last_seen_at?: string | null
 }
 
 interface CreateAgentParams {

@@ -194,7 +194,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const agentResult = await client.query<AgentRow>(
         `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, safe_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at`,
+         RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at,
+                   NULL::timestamptz AS mcp_last_seen_at`,
         [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKeyHash, apiKeyPrefix, resolvedSafeId],
       )
       const agent = agentResult.rows[0]

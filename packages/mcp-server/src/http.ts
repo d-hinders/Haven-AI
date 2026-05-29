@@ -73,6 +73,18 @@ async function handle(
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
 
+  // CORS: the Haven dashboard probes `tools/list` from the browser as a
+  // connect-time sanity check. The Bearer token is the agent's identity and
+  // authorizes nothing without an edge signature, so allowing cross-origin
+  // POSTs does not weaken the security model — the same request from any
+  // origin would have to carry the same bearer to do anything at all.
+  applyCorsHeaders(res)
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
   // Lightweight liveness probe for infra (#186) — no auth, no MCP.
   // Accept HEAD so uptime monitors and CDN preflights see 200, not 404. Node's
   // http server suppresses the body on HEAD responses automatically.
@@ -89,7 +101,7 @@ async function handle(
   // Stateless transport: only POST carries JSON-RPC. GET/DELETE (used for SSE
   // streams and session teardown in stateful mode) are not supported here.
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST')
+    res.setHeader('Allow', 'POST, OPTIONS')
     writeJson(res, 405, jsonRpcError(-32000, 'Method not allowed; this endpoint is stateless and accepts POST only.'))
     return
   }
@@ -165,4 +177,12 @@ function writeJson(res: ServerResponse, status: number, payload: unknown): void 
   const text = JSON.stringify(payload)
   res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(text)
+}
+
+function applyCorsHeaders(res: ServerResponse): void {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, MCP-Protocol-Version')
+  res.setHeader('Access-Control-Max-Age', '86400')
+  res.setHeader('Vary', 'Origin')
 }

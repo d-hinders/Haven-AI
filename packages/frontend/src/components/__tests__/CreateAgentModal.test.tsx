@@ -285,22 +285,28 @@ describe('CreateAgentModal recovery', () => {
     expect(await screen.findByText('Your agent is ready')).toBeInTheDocument()
 
     // The new hosted Connect card is the primary post-creation surface (#187).
-    expect(screen.getByRole('tab', { name: 'Claude Code' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Claude Desktop' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Cursor' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Other / SDK' })).toBeInTheDocument()
+    // Tile accessible name is "<label><tagline>" concatenated — anchor on the
+    // label since no registry entry's label is a prefix of another's.
+    expect(screen.getByRole('tab', { name: /^Claude Code/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Claude Desktop/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Cursor/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Other \/ SDK/ })).toBeInTheDocument()
 
-    // The backup credential download is now demoted to a backup line.
+    // The backup credential download is a quiet bordered row below the
+    // main HostedConnectCard, with a ghost Download backup button. Previous
+    // brand-soft "Action required" treatment moved up to this lighter row
+    // so it doesn't compete with the primary connect action.
+    expect(screen.getByRole('heading', { name: /Save a backup/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Download backup' })).toBeInTheDocument()
-    expect(screen.getByText(/credentials are shown once/i)).toBeInTheDocument()
+    expect(screen.getByText(/Shown once\./i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
 
     // The two-credential split stays hidden until a client is picked.
-    expect(screen.queryByRole('button', { name: /Save signing key/i })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }))
+    expect(screen.queryByRole('button', { name: /Copy signing key/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /^Claude Code/ }))
 
     // Copying the connect snippet flips the close-without-saving gate. The
-    // Save-signing-key path also flips it, exercised in HostedConnectCard.test.tsx.
+    // Copy-signing-key path also flips it, exercised in HostedConnectCard.test.tsx.
     fireEvent.click(screen.getAllByRole('button', { name: /^Copy$/i })[0])
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
     expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('sk_test'))

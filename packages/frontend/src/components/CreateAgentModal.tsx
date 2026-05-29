@@ -40,7 +40,6 @@ import {
   AgentBudgetCard,
   AgentRulesSummary,
   ApprovalRequiredBanner,
-  CredentialHandoffCard,
   HostedConnectCard,
   WalletIdentityBlock,
 } from './haven'
@@ -683,7 +682,7 @@ export default function CreateAgentModal({
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Create agent" className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Create agent" className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto overflow-x-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
           <div>
@@ -1145,8 +1144,8 @@ export default function CreateAgentModal({
                   </h3>
                   <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--v2-ink-2)]">
                     {execStatus === 'confirmed'
-                      ? 'Give these credentials to your agent and it can start making payments within your rules.'
-                      : 'After the approval is complete, give these credentials to your agent.'}
+                      ? 'Hand the credentials below to your agent.'
+                      : 'Once the approval lands, hand the credentials below to your agent.'}
                   </p>
                   {txHash && (
                     <a
@@ -1196,33 +1195,37 @@ export default function CreateAgentModal({
                   >
                     <HostedConnectCard
                       credential={cred.json}
-                      onSaveSigningKey={handleDownloadCredential}
                       onCredentialSaved={handleSnippetCopied}
-                      signingKeySaved={credentialsSaved}
                       lastSeenAt={agentLastSeenAt}
                     />
                   </div>
                 )
               })()}
 
-              {/* Compact credential file download row. Single action — the
-                  inline tile snippet above is the primary path, this row is
-                  for users who want a copy of the credentials saved to disk. */}
+              {/* Optional credential backup. Intentionally low-attention —
+                  the primary path is "copy the signing key into your agent"
+                  from the section above, and the brand-soft "Action required"
+                  treatment of the old CredentialHandoffCard competed for the
+                  user's eye with that primary action. Plain bordered row +
+                  ghost button reads as a secondary option. */}
               <div
                 className="v2-animate-stagger"
                 style={{ ['--v2-stagger-delay' as string]: '320ms' }}
               >
-                <CredentialHandoffCard
-                  title="Backup the full credential file"
-                  description="Optional: keep a full backup alongside your other secrets. Handy if you ever lose the signing key from step 2 above."
-                  primaryAction={
-                    <Button onClick={handleDownloadCredential}>
-                      Download backup
-                    </Button>
-                  }
-                  note={generatedPrivateKey ? 'These credentials are shown once. Haven cannot show them again after you close this window.' : undefined}
-                  saved={credentialsSaved}
-                />
+                <div className="flex items-start justify-between gap-3 rounded-[10px] border border-[var(--v2-border)] bg-white px-4 py-3">
+                  <div className="min-w-0">
+                    <h4 className="text-[13px] font-semibold text-[var(--v2-ink)]">
+                      Save a backup
+                    </h4>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                      One file with everything — paste it back in if you ever lose the signing key.
+                      {generatedPrivateKey ? ' Shown once.' : ''}
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={handleDownloadCredential} className="shrink-0">
+                    {credentialsSaved ? 'Download again' : 'Download backup'}
+                  </Button>
+                </div>
               </div>
 
               {/* Advanced disclosure: developer guide only. Kept behind a

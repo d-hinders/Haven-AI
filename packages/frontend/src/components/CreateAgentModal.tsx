@@ -462,6 +462,10 @@ export default function CreateAgentModal({
             ? 'Face ID or Touch ID was cancelled'
             : 'Transaction rejected in wallet',
         )
+      } else if (message.includes('not yet confirmed after 2 minutes')) {
+        // Transaction submitted but receipt timed out — surface the tx hash so
+        // the user can track it on the block explorer and retry saving later.
+        setExecError(message)
       } else {
         setExecError(message)
       }
@@ -1047,13 +1051,29 @@ export default function CreateAgentModal({
                   </div>
                   <div>
                     <p className={`text-sm font-medium ${backendSaveFailed ? 'text-[var(--v2-warning)]' : 'text-[var(--v2-danger)]'}`}>
-                      {backendSaveFailed ? 'Finish saving this agent' : 'Setup failed'}
+                      {backendSaveFailed
+                        ? 'Finish saving this agent'
+                        : execError?.includes('not yet confirmed after 2 minutes')
+                          ? 'Transaction pending'
+                          : 'Setup failed'}
                     </p>
                     <p className="text-xs text-[var(--v2-ink-2)] mt-1 max-w-xs mx-auto">
                       {backendSaveFailed
                         ? 'The agent rules were created in your Haven wallet, but Haven could not save the agent. Try finishing the save before creating another agent.'
-                        : execError}
+                        : execError?.includes('not yet confirmed after 2 minutes')
+                          ? 'The transaction was submitted but has not confirmed yet. It may still land — check the block explorer using the link below.'
+                          : execError}
                     </p>
+                    {!backendSaveFailed && execError?.includes('not yet confirmed after 2 minutes') && txHash && (
+                      <a
+                        href={`${getChainConfig(chainId ?? 100).explorerUrl}/tx/${txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-block text-xs text-[var(--v2-brand)] underline underline-offset-2"
+                      >
+                        View transaction →
+                      </a>
+                    )}
                     {backendSaveFailed && execError && (
                       <p className="mt-2 text-xs text-[var(--v2-ink-3)] max-w-xs mx-auto">
                         {execError}

@@ -2,6 +2,7 @@ import {
   encodeFunctionData,
   hashTypedData,
   parseUnits,
+  WaitForTransactionReceiptTimeoutError,
   type Address,
   type Hash,
   type PublicClient,
@@ -300,7 +301,20 @@ export async function executeSafeTx(
       account: signer.address,
     })
 
-    await publicClient.waitForTransactionReceipt({ hash: txHash })
+    // Wait up to 120 s for the receipt. If the chain is congested or gas was
+    // underpriced the tx may still land — throw a user-friendly error that
+    // includes the hash so the UI can surface a block-explorer link.
+    try {
+      await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 })
+    } catch (err) {
+      if (err instanceof WaitForTransactionReceiptTimeoutError) {
+        throw new Error(
+          `Transaction submitted but not yet confirmed after 2 minutes. ` +
+            `It may still land — check the block explorer for ${txHash}`,
+        )
+      }
+      throw err
+    }
 
     return { txHash }
   }

@@ -46,6 +46,18 @@ export interface HostedConnectSnippet {
   code: string
   /** Short instruction to render above the code block. */
   guidance: string
+  /**
+   * Optional one-liner rendered under the code block. Used to call out
+   * follow-up actions that aren't part of the snippet itself — e.g.
+   * "restart Claude Code so MCP servers re-load at session start".
+   */
+  postNote?: string
+  /**
+   * Optional platform-specific destination paths shown alongside the snippet
+   * (e.g. the Claude Desktop config file location on each OS). Rendered as a
+   * small key/value list so users know where to paste the JSON.
+   */
+  destinationPaths?: { label: string; path: string }[]
 }
 
 /**
@@ -78,6 +90,8 @@ export function buildHostedConnectSnippet(
           `  ${hostedUrl} \\`,
           `  --header "Authorization: Bearer ${credential.api_key}"`,
         ].join('\n'),
+        postNote:
+          'Then exit this Claude Code session and run `claude` again — MCP servers load at session start, so a running session won’t pick up the new tools until you restart it.',
       }
     case 'claude-desktop':
     case 'cursor': {
@@ -94,9 +108,17 @@ export function buildHostedConnectSnippet(
         language: 'json',
         guidance:
           client === 'claude-desktop'
-            ? "Open Claude Desktop's MCP settings and paste this in. Restart Claude when you're done."
-            : "Open Cursor's MCP settings and paste this in. Reload Cursor when you're done.",
+            ? "Open Claude Desktop’s config file (path below), paste this JSON in, then fully quit and reopen Claude Desktop."
+            : "Open Cursor’s MCP settings and paste this in. Reload Cursor when you’re done.",
         code: JSON.stringify(config, null, 2),
+        destinationPaths:
+          client === 'claude-desktop'
+            ? [
+                { label: 'macOS', path: '~/Library/Application Support/Claude/claude_desktop_config.json' },
+                { label: 'Windows', path: '%APPDATA%\\Claude\\claude_desktop_config.json' },
+                { label: 'Linux', path: '~/.config/Claude/claude_desktop_config.json' },
+              ]
+            : undefined,
       }
     }
     case 'other':
@@ -125,41 +147,33 @@ export function buildHostedConnectSnippet(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Build a one-click deep link for Claude Desktop or Cursor.
+ * Build a one-click deep link for Cursor.
  *
  * Carries the hosted MCP URL and Bearer token (identity).
  * The delegate private key is NEVER in the link.
  *
- * Claude Desktop: `claude://settings/integrations/mcpServers?add=<b64-json>`
- * Cursor:         `cursor://anysphere.cursor-deeplink/mcp/install?...`
+ * Cursor: `cursor://anysphere.cursor-deeplink/mcp/install?...`
+ *
+ * Note: Claude Desktop previously had a `claude://settings/integrations/...`
+ * deep link, but Anthropic has not shipped a `claude://` URL handler — the
+ * click was a silent no-op on every platform. Until that scheme is real,
+ * Claude Desktop uses the manual JSON-config path instead.
  */
 export function buildDeepLink(
-  client: 'claude-desktop' | 'cursor',
+  client: 'cursor',
   credential: AgentCredentialJson,
   hostedUrl: string = resolveHostedMcpUrl(),
 ): string {
+  // `client` is currently always 'cursor', kept as a parameter so future
+  // runtimes with real deep-link schemes can re-join here without an API break.
+  void client
+
   const token = credential.api_key
-
-  if (client === 'claude-desktop') {
-    const payload = JSON.stringify({
-      name: 'haven',
-      url: hostedUrl,
-      type: 'http',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    // btoa is Latin-1 only — use the encodeURIComponent + unescape idiom to
-    // safely handle any Unicode characters that may appear in hostedUrl or token
-    // (e.g. IDN hostnames set via NEXT_PUBLIC_HAVEN_MCP_URL). Without this,
-    // btoa throws a DOMException for characters outside the Latin-1 range.
-    const encoded =
-      typeof btoa !== 'undefined'
-        ? btoa(unescape(encodeURIComponent(payload)))
-        : Buffer.from(payload).toString('base64')
-    return `claude://settings/integrations/mcpServers?add=${encodeURIComponent(encoded)}`
-  }
-
-  // Cursor — same unicode-safe encoding
   const headersJson = JSON.stringify({ Authorization: `Bearer ${token}` })
+  // btoa is Latin-1 only — use the encodeURIComponent + unescape idiom to
+  // safely handle any Unicode characters that may appear in hostedUrl or token
+  // (e.g. IDN hostnames set via NEXT_PUBLIC_HAVEN_MCP_URL). Without this,
+  // btoa throws a DOMException for characters outside the Latin-1 range.
   const headersB64 =
     typeof btoa !== 'undefined'
       ? btoa(unescape(encodeURIComponent(headersJson)))
@@ -176,8 +190,7 @@ export function buildDeepLink(
 /**
  * CTA label for each deep-link button.
  */
-export const DEEP_LINK_LABEL: Record<'claude-desktop' | 'cursor', string> = {
-  'claude-desktop': 'Add to Claude',
+export const DEEP_LINK_LABEL: Record<'cursor', string> = {
   cursor: 'Add to Cursor',
 }
 
@@ -185,6 +198,134 @@ export const DEEP_LINK_LABEL: Record<'claude-desktop' | 'cursor', string> = {
  * Whether a client has a deep-link path (as opposed to only a manual config
  * block). Used by `HostedConnectCard` to decide whether to render a button.
  */
-export function hasDeepLink(client: HostedClientId): client is 'claude-desktop' | 'cursor' {
-  return client === 'claude-desktop' || client === 'cursor'
+export function hasDeepLink(client: HostedClientId): client is 'cursor' {
+  return client === 'cursor'
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test connection — browser-side probe against the hosted MCP endpoint.
+// Catches >80% of the silent-failure modes (broken bearer, wrong URL, DNS
+// errors, CORS misconfiguration) so the user sees something actionable in the
+// modal rather than waiting for the connected-banner that never lights up.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ProbeStatus = 'ok' | 'unauthorized' | 'network-error' | 'bad-response'
+
+export interface ProbeResult {
+  status: ProbeStatus
+  /** Number of tools the server advertised — only set when status === 'ok'. */
+  toolCount?: number
+  /** Detail string suitable for rendering under the result chip. */
+  detail?: string
+}
+
+/**
+ * Probe the hosted MCP endpoint with an unsigned `tools/list` JSON-RPC call.
+ *
+ * Returns a structured result rather than throwing — the UI renders one of
+ * four states (ok / unauthorized / network-error / bad-response) and never
+ * surfaces a raw thrown error to the user.
+ */
+export async function probeHostedConnection(
+  apiKey: string,
+  hostedUrl: string = resolveHostedMcpUrl(),
+  fetchImpl: typeof fetch = fetch,
+): Promise<ProbeResult> {
+  let res: Response
+  try {
+    res = await fetchImpl(hostedUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    })
+  } catch (err) {
+    return {
+      status: 'network-error',
+      detail: err instanceof Error ? err.message : 'Could not reach the hosted MCP endpoint.',
+    }
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    return {
+      status: 'unauthorized',
+      detail: 'Haven rejected the connect token. Re-issue the agent credential and try again.',
+    }
+  }
+
+  if (!res.ok) {
+    return {
+      status: 'bad-response',
+      detail: `Server returned HTTP ${res.status}.`,
+    }
+  }
+
+  // The streamable-HTTP transport may respond with SSE or JSON depending on
+  // negotiation. Either way the response body carries a JSON-RPC envelope.
+  let raw: string
+  try {
+    raw = await res.text()
+  } catch {
+    return { status: 'bad-response', detail: 'Could not read the server response body.' }
+  }
+
+  const payload = parseJsonRpcPayload(raw)
+  if (!payload) {
+    return { status: 'bad-response', detail: 'Server response was not a JSON-RPC envelope.' }
+  }
+  if ('error' in payload && payload.error) {
+    return {
+      status: 'bad-response',
+      detail: typeof payload.error.message === 'string' ? payload.error.message : 'JSON-RPC error',
+    }
+  }
+  const tools = (payload.result as { tools?: unknown[] } | undefined)?.tools
+  const toolCount = Array.isArray(tools) ? tools.length : undefined
+  return {
+    status: 'ok',
+    toolCount,
+    detail:
+      toolCount !== undefined
+        ? `Hosted MCP reachable — ${toolCount} tool${toolCount === 1 ? '' : 's'} advertised.`
+        : 'Hosted MCP reachable.',
+  }
+}
+
+interface JsonRpcEnvelope {
+  jsonrpc?: string
+  id?: unknown
+  result?: unknown
+  error?: { code?: number; message?: unknown }
+}
+
+/**
+ * Best-effort JSON-RPC envelope extractor that copes with both JSON and SSE
+ * (`data: { ... }\n\n`) framings used by the streamable-HTTP transport.
+ */
+function parseJsonRpcPayload(raw: string): JsonRpcEnvelope | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(trimmed) as JsonRpcEnvelope
+    } catch {
+      return null
+    }
+  }
+  // SSE framing: pick the last `data:` line, which is the final response.
+  const dataLines = trimmed
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith('data:'))
+    .map((l) => l.slice(5).trim())
+  for (let i = dataLines.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(dataLines[i]) as JsonRpcEnvelope
+    } catch {
+      /* try the next data line */
+    }
+  }
+  return null
 }

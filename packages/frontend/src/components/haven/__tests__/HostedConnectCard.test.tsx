@@ -74,25 +74,49 @@ describe('HostedConnectCard', () => {
       const allText = document.body.textContent ?? ''
       expect(allText, `${tab}: delegate key must not appear in card body`).not.toContain(DELEGATE_KEY)
 
-      // For deep-link clients (Claude Desktop, Cursor), the API key is encoded
-      // inside the deep-link URL, not rendered as visible text in the card body.
-      // For command-based clients (Claude Code, Other) it appears in the code block.
-      const isDeepLinkClient = tab === 'Claude Desktop' || tab === 'Cursor'
-      if (!isDeepLinkClient) {
+      // For Cursor (the only remaining deep-link client) the API key is
+      // encoded inside the cursor:// URL, not rendered as visible text.
+      // For Claude Code, Claude Desktop, and Other, the key appears in the
+      // code block directly.
+      if (tab !== 'Cursor') {
         expect(allText, `${tab}: api key (identity) should be present`).toContain(API_KEY)
       }
     }
   })
 
-  // ── #188: Deep-link clients ──────────────────────────────────────────────
+  // ── Deep-link clients ────────────────────────────────────────────────────
 
-  it('Claude Desktop shows "Add to Claude" button instead of an immediate code block', () => {
+  it('Claude Desktop renders the JSON config directly (no broken deep-link button)', () => {
+    // Anthropic has not shipped a real `claude://` URL handler, so the prior
+    // "Add to Claude" button was a silent no-op. The tab now drops straight
+    // to the manual config-paste path.
     render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
     fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
 
-    expect(screen.getByRole('button', { name: 'Add to Claude' })).toBeInTheDocument()
-    // The JSON config is hidden behind the fallback toggle — not on the page yet.
-    expect(screen.queryByText('json')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add to Claude' })).not.toBeInTheDocument()
+    expect(screen.getByText('json')).toBeInTheDocument()
+  })
+
+  it('Claude Desktop shows the OS-specific config-file paths inline', () => {
+    render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
+
+    const allText = document.body.textContent ?? ''
+    expect(allText).toContain('claude_desktop_config.json')
+    expect(screen.getByText('macOS')).toBeInTheDocument()
+    expect(screen.getByText('Windows')).toBeInTheDocument()
+    expect(screen.getByText('Linux')).toBeInTheDocument()
+  })
+
+  it('Claude Code shows the restart-required hint under the snippet', () => {
+    // The running Claude Code session caches the MCP server list at startup,
+    // so a successful `claude mcp add` doesn't surface tools until the user
+    // restarts. The hint makes that explicit instead of silent.
+    render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }))
+
+    const allText = document.body.textContent ?? ''
+    expect(allText).toMatch(/exit this Claude Code session|MCP servers load at session start/i)
   })
 
   it('Cursor shows "Add to Cursor" button', () => {
@@ -101,22 +125,6 @@ describe('HostedConnectCard', () => {
 
     expect(screen.getByRole('button', { name: 'Add to Cursor' })).toBeInTheDocument()
     expect(screen.queryByText('json')).not.toBeInTheDocument()
-  })
-
-  it('"Add to Claude" opens a claude:// deep link via window.open', () => {
-    render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
-    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Claude' }))
-
-    expect(windowOpen).toHaveBeenCalledTimes(1)
-    const [url] = windowOpen.mock.calls[0] as [string, string]
-    expect(url).toMatch(/^claude:\/\//)
-    expect(url).not.toContain(DELEGATE_KEY)
-    // The API key is base64-encoded in the payload — decode it to verify it's there.
-    const match = url.match(/\?add=([^&]+)/)
-    expect(match).not.toBeNull()
-    const decoded = atob(decodeURIComponent(match![1]))
-    expect(decoded).toContain(API_KEY)
   })
 
   it('"Add to Cursor" opens a cursor:// deep link', () => {
@@ -130,9 +138,9 @@ describe('HostedConnectCard', () => {
     expect(url).not.toContain(DELEGATE_KEY)
   })
 
-  it('"Didn\'t work? Show config" toggle reveals the JSON block for Claude Desktop', () => {
+  it('"Didn\'t work? Show config" toggle reveals the JSON block for Cursor', () => {
     render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
-    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Cursor' }))
 
     // Initially hidden
     expect(screen.queryByText('json')).not.toBeInTheDocument()
@@ -140,7 +148,6 @@ describe('HostedConnectCard', () => {
     // Click the toggle
     fireEvent.click(screen.getByText(/Didn't work/i))
     expect(screen.getByText('json')).toBeInTheDocument()
-    // The fallback shows the api key (identity) but not the delegate key
     const allText = document.body.textContent ?? ''
     expect(allText).toContain(API_KEY)
     expect(allText).not.toContain(DELEGATE_KEY)
@@ -173,7 +180,7 @@ describe('HostedConnectCard', () => {
     expect(onCredentialSaved).toHaveBeenCalled()
   })
 
-  it('clicking "Add to Claude" fires onCredentialSaved', () => {
+  it('clicking "Add to Cursor" fires onCredentialSaved', () => {
     const onCredentialSaved = vi.fn()
     render(
       <HostedConnectCard
@@ -183,8 +190,8 @@ describe('HostedConnectCard', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Claude Desktop' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Claude' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Cursor' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Cursor' }))
 
     expect(onCredentialSaved).toHaveBeenCalled()
   })
@@ -291,5 +298,106 @@ describe('HostedConnectCard', () => {
 
     const allText = document.body.textContent ?? ''
     expect(allText).not.toContain(DELEGATE_KEY)
+  })
+
+  // ── Test connection ──────────────────────────────────────────────────────
+
+  it('renders the "Test connection" button once a client is picked', () => {
+    render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
+
+    expect(screen.queryByRole('button', { name: /test connection/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }))
+    expect(screen.getByRole('button', { name: /test connection/i })).toBeInTheDocument()
+  })
+
+  it('shows a "Connected" chip with the tool count on a successful probe', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: { tools: [{ name: 'haven_pay' }, { name: 'haven_get_agent' }] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    ) as typeof fetch
+
+    try {
+      render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
+      fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }))
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+
+      await waitFor(() => {
+        const chip = screen.getByLabelText(/test connection result: connected/i)
+        expect(chip.textContent).toMatch(/Connected/i)
+        expect(chip.textContent).toMatch(/2 tools/)
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('shows a "Token rejected" chip when the probe returns 401', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response('', { status: 401 })) as typeof fetch
+
+    try {
+      render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
+      fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }))
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/test connection result: token rejected/i)).toBeInTheDocument()
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('shows a "Couldn\'t reach" chip when fetch throws (CORS / DNS / offline)', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError('Failed to fetch')
+    }) as typeof fetch
+
+    try {
+      render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
+      fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }))
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/test connection result: couldn.t reach/i)).toBeInTheDocument()
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('clears the probe chip when the user switches client tabs', async () => {
+    // A stale "Connected" chip on a different client would be misleading —
+    // the bearer is the same but the snippet/instructions are not.
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ) as typeof fetch
+
+    try {
+      render(<HostedConnectCard credential={credential()} onSaveSigningKey={vi.fn()} />)
+      fireEvent.click(screen.getByRole('tab', { name: 'Claude Code' }))
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/test connection result: connected/i)).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Cursor' }))
+      expect(screen.queryByLabelText(/test connection result/i)).not.toBeInTheDocument()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

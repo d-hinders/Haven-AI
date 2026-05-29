@@ -12,8 +12,11 @@ import {
   hasDeepLink,
   DEEP_LINK_LABEL,
   resolveHostedMcpUrl,
+  probeHostedConnection,
   type HostedClientId,
   type HostedClientOption,
+  type ProbeResult,
+  type ProbeStatus,
 } from '@/lib/hosted-connect'
 
 /**
@@ -106,6 +109,11 @@ export function HostedConnectCard({
   const [copiedKey, setCopiedKey] = useState(false)
   // Per-client: whether the manual config fallback is expanded
   const [showConfigFallback, setShowConfigFallback] = useState(false)
+  // Test-connection probe state. `pending` is the in-flight state; a fresh
+  // `null` is shown either at first paint or after the user re-picks a client.
+  const [probeState, setProbeState] = useState<
+    { status: 'pending' } | (ProbeResult & { status: ProbeStatus }) | null
+  >(null)
   // #189: when connected, setup steps are collapsed; user can re-open them.
   // Initialised to !isConnected — but since lastSeenAt starts null the hook
   // resolves asynchronously, so we also sync via useEffect when isConnected
@@ -125,11 +133,20 @@ export function HostedConnectCard({
     [activeId, credential, resolvedUrl],
   )
 
-  // Reset the fallback toggle whenever the user picks a different client.
+  // Reset the fallback toggle + probe result whenever the user picks a
+  // different client — the probe is per-bearer, but the visual association
+  // is with the active client card, so a stale chip would be misleading.
   const handlePickClient = useCallback((id: HostedClientId) => {
     setActiveId(id)
     setShowConfigFallback(false)
+    setProbeState(null)
   }, [])
+
+  const handleTestConnection = useCallback(async () => {
+    setProbeState({ status: 'pending' })
+    const result = await probeHostedConnection(credential.api_key, resolvedUrl)
+    setProbeState(result)
+  }, [credential.api_key, resolvedUrl])
 
   const handleCopyConnect = useCallback(async () => {
     if (!snippet) return
@@ -292,7 +309,10 @@ export function HostedConnectCard({
                 talk to Haven &mdash; it can&rsquo;t move money on its own.
               </p>
 
-              {/* Deep-link clients: primary button + collapsible config fallback */}
+              {/* Deep-link clients (Cursor only): primary button + collapsible
+                  config fallback. Claude Desktop falls through to the direct
+                  config-block branch below — the claude:// scheme isn't real
+                  yet, so a button there would silently no-op. */}
               {hasDeepLink(active.id) ? (
                 <div className="mt-3 space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
@@ -322,7 +342,7 @@ export function HostedConnectCard({
                   )}
                 </div>
               ) : (
-                /* Claude Code / Other: show the command block directly */
+                /* Claude Code / Claude Desktop / Other: show the snippet directly */
                 <div className="mt-3">
                   <p className="text-[12px] leading-relaxed text-[var(--v2-ink-3)]">
                     {snippet.guidance}
@@ -332,7 +352,56 @@ export function HostedConnectCard({
                     copied={copiedConnect}
                     onCopy={() => void handleCopyConnect()}
                   />
+                  {snippet.destinationPaths && snippet.destinationPaths.length > 0 && (
+                    <dl
+                      className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-[var(--v2-ink-3)]"
+                      aria-label="Config file paths"
+                    >
+                      {snippet.destinationPaths.map((p) => (
+                        <div key={p.label} className="contents">
+                          <dt className="font-medium text-[var(--v2-ink-2)]">{p.label}</dt>
+                          <dd className="font-mono break-all">{p.path}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {snippet.postNote && (
+                    <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                      {snippet.postNote}
+                    </p>
+                  )}
                 </div>
+              )}
+
+              {/* Test connection — browser-side probe against the hosted MCP
+                  endpoint. Surfaces 401/network/CORS in-modal instead of
+                  waiting for the never-arriving "Connected" banner. */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void handleTestConnection()}
+                  disabled={probeState?.status === 'pending'}
+                  aria-label="Test connection"
+                >
+                  {probeState?.status === 'pending' ? 'Testing…' : 'Test connection'}
+                </Button>
+                {probeState && probeState.status !== 'pending' && (
+                  <ProbeResultChip result={probeState} />
+                )}
+              </div>
+              {probeState && probeState.status !== 'pending' && probeState.detail && (
+                <p
+                  role="status"
+                  className={
+                    'mt-1.5 text-[11px] leading-relaxed ' +
+                    (probeState.status === 'ok'
+                      ? 'text-[var(--v2-success)]'
+                      : 'text-[var(--v2-ink-3)]')
+                  }
+                >
+                  {probeState.detail}
+                </p>
               )}
 
               {/* Other / SDK: advanced disclosure for local-server path */}
@@ -435,6 +504,31 @@ export function HostedConnectCard({
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
+
+function ProbeResultChip({ result }: { result: ProbeResult }) {
+  // Tones reuse the defined v2-* tokens. `*-strong` isn't a defined token, so
+  // we use the base `--v2-success` / `--v2-warning` / `--v2-danger` colors
+  // (which all have AA contrast against the `-soft` backgrounds).
+  const tone =
+    result.status === 'ok'
+      ? { bg: 'bg-[var(--v2-success-soft)]', fg: 'text-[var(--v2-success)]', label: 'Connected' }
+      : result.status === 'unauthorized'
+        ? { bg: 'bg-[var(--v2-danger-soft)]', fg: 'text-[var(--v2-danger)]', label: 'Token rejected' }
+        : result.status === 'network-error'
+          ? { bg: 'bg-[var(--v2-warning-soft)]', fg: 'text-[var(--v2-warning)]', label: "Couldn't reach" }
+          : { bg: 'bg-[var(--v2-warning-soft)]', fg: 'text-[var(--v2-warning)]', label: 'Unexpected response' }
+
+  return (
+    <span
+      role="status"
+      aria-label={`Test connection result: ${tone.label}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${tone.bg} ${tone.fg}`}
+    >
+      {tone.label}
+      {result.status === 'ok' && typeof result.toolCount === 'number' ? ` · ${result.toolCount} tools` : null}
+    </span>
+  )
+}
 
 function ConnectCodeBlock({
   snippet,

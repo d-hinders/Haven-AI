@@ -4,8 +4,8 @@ import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { Card } from '@/components/ui/Card'
 import { HavenMark } from '@/components/brand/HavenMark'
 
-const CONTACT_DANIEL_HREF =
-  'mailto:replace-this-email-before-sharing@example.com?subject=Haven%20investor%20briefing'
+const CONTACT_TEAM_HREF =
+  'mailto:daniel.hinders@gmail.com?subject=Haven%20investor%20briefing'
 
 export const metadata: Metadata = {
   title: 'Haven Investor Briefing',
@@ -184,8 +184,8 @@ export default function InvestorBriefingPage() {
               </p>
 
               <div className="flex flex-wrap items-center gap-3 mb-10">
-                <InvestorButton href={CONTACT_DANIEL_HREF} variant="primary">
-                  Contact Daniel
+                <InvestorButton href={CONTACT_TEAM_HREF} variant="primary">
+                  Contact the team
                 </InvestorButton>
                 <InvestorButton href="#product" variant="ghost">
                   View product thesis
@@ -430,14 +430,14 @@ export default function InvestorBriefingPage() {
           </h2>
           <p className="text-[16px] text-white/80 mb-9 max-w-[600px] mx-auto">
             For a deeper conversation on the product, roadmap, and fundraising path,
-            contact Daniel directly.
+            contact the team directly.
           </p>
           <div className="flex justify-center">
             <a
-              href={CONTACT_DANIEL_HREF}
+              href={CONTACT_TEAM_HREF}
               className="inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors h-12 px-6 text-[15px] bg-white text-[var(--v2-ink)] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-brand)]"
             >
-              Contact Daniel
+              Contact the team
               <ArrowIcon />
             </a>
           </div>
@@ -469,8 +469,8 @@ function InvestorHeader() {
           ))}
         </nav>
 
-        <InvestorButton href={CONTACT_DANIEL_HREF} variant="primary" size="sm">
-          Contact Daniel
+        <InvestorButton href={CONTACT_TEAM_HREF} variant="primary" size="sm">
+          Contact the team
         </InvestorButton>
       </div>
     </header>

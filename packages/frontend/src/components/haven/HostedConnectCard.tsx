@@ -472,9 +472,11 @@ export function HostedConnectCard({
                 </SigningKeyChip>
               </div>
               <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                Copy this into your agent&rsquo;s config so it can sign payments. Unlike a regular
-                wallet key, this one can&rsquo;t move money beyond the allowance you set — even if
-                it leaks, your budget still caps it.
+                Copy this and hand it to your agent so it can sign payments. Unlike a regular
+                wallet key, this one can only spend within the allowance you set — even if it
+                leaks, your budget still caps it. For chat agents (Claude, Cursor, …), use
+                the starter message below — it tells them to hold the key in this session
+                only, not write it to a file.
               </p>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">

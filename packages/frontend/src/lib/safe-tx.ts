@@ -3,6 +3,7 @@ import {
   hashTypedData,
   parseUnits,
   WaitForTransactionReceiptTimeoutError,
+  ContractFunctionRevertedError,
   type Address,
   type Hash,
   type PublicClient,
@@ -281,22 +282,48 @@ export async function executeSafeTx(
     const adjustedSig = normaliseSignatureV(signature)
     const { viemChain } = getChainConfig(chainId)
 
+    const execArgs = [
+      tx.to,
+      tx.value,
+      tx.data,
+      tx.operation,
+      tx.safeTxGas,
+      tx.baseGas,
+      tx.gasPrice,
+      tx.gasToken,
+      tx.refundReceiver,
+      adjustedSig,
+    ] as const
+
+    // Pre-flight simulation — catch reverts BEFORE MetaMask shows the
+    // confirmation prompt. Without this, a reverted tx causes MetaMask to
+    // display "Your transaction was canceled" while `writeContract` keeps its
+    // promise pending until the user dismisses the popup, freezing the UI.
+    try {
+      await publicClient.simulateContract({
+        address: safeAddress,
+        abi: SAFE_EXEC_ABI,
+        functionName: 'execTransaction',
+        args: execArgs,
+        account: signer.address,
+      })
+    } catch (err) {
+      if (err instanceof ContractFunctionRevertedError) {
+        const reason = err.data?.errorName ?? err.shortMessage ?? 'unknown revert'
+        throw new Error(
+          `Transaction would revert on-chain: ${reason}. ` +
+            `Check that the Safe has the AllowanceModule enabled and the delegate address is valid.`,
+        )
+      }
+      // For any other simulation error (network, RPC, etc.) re-throw as-is.
+      throw err
+    }
+
     const txHash = await signer.walletClient.writeContract({
       address: safeAddress,
       abi: SAFE_EXEC_ABI,
       functionName: 'execTransaction',
-      args: [
-        tx.to,
-        tx.value,
-        tx.data,
-        tx.operation,
-        tx.safeTxGas,
-        tx.baseGas,
-        tx.gasPrice,
-        tx.gasToken,
-        tx.refundReceiver,
-        adjustedSig,
-      ],
+      args: execArgs,
       chain: viemChain,
       account: signer.address,
     })

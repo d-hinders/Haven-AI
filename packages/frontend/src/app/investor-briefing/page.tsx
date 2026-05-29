@@ -26,41 +26,41 @@ const NAV_ITEMS = [
 
 const SIGNAL_CARDS = [
   { label: 'Category', value: 'Agentic payments', footer: 'AI workflows need controlled spending before they can scale' },
-  { label: 'Wedge', value: 'Controlled agent payments', footer: 'Start with developer and agent infrastructure' },
+  { label: 'Wedge', value: 'Payment guardrails for AI agents', footer: 'Start with developer and agent infrastructure' },
   { label: 'Timing', value: 'Payment protocols forming', footer: 'x402, MPP, and stablecoins are converging' },
 ]
 
 const PROBLEM_CARDS = [
   {
-    title: 'Agents need to transact',
-    body: 'Useful agents will pay for APIs, data, compute, software, and services as part of their work. The current checkout stack assumes a human is present.',
+    title: 'Agents hit paywalls and stop',
+    body: 'Most agents have no way to pay for the services they need. The moment they hit a paywall — an API call, a subscription, a per‑use fee — the workflow stalls and a human has to step in. Autonomy ends at the checkout.',
   },
   {
-    title: 'Raw keys do not work',
-    body: 'A private key or shared card turns an agent into an unrestricted financial actor. It is hard to scope, revoke, audit, or explain after something goes wrong.',
+    title: "Traditional payments weren't built for agents",
+    body: 'Cards, bank transfers, and checkout flows assume a human is present to approve, sign in, or solve a captcha. Agents get blocked, abandoned, or forced into shared credentials. The rails simply don’t speak agent.',
   },
   {
-    title: 'Manual approval kills the workflow',
-    body: 'Putting a person in every payment loop removes the speed and autonomy that make agents valuable in the first place.',
+    title: 'Stablecoins are the obvious rail — and the obvious risk',
+    body: 'Stablecoins were practically built for AI agents: instant, programmable, global, machine‑native. But giving an agent a private key means unlimited authority, no spend caps, and no audit trail. The right rail becomes the fastest way to lose control.',
   },
 ]
 
 const PRODUCT_POINTS = [
   {
-    title: 'Haven wallet',
-    body: 'Funds stay in a user-controlled Haven wallet. Agents never receive unrestricted access to the money.',
+    title: 'A non‑custodial account',
+    body: 'Funds live in a Haven account the user controls. Haven never holds them and can never move them outside the rules the user has set.',
   },
   {
-    title: 'Agent rules',
-    body: 'Budgets, tokens, recipients, protocols, thresholds, and approval paths define what each agent can do.',
+    title: 'A policy engine',
+    body: 'Every payment is checked against the user’s rules before it moves. The spending limit — per‑currency budget and reset window — is enforced on‑chain by the smart account itself.',
   },
   {
-    title: 'Portable credential',
-    body: 'Agents connect from Claude, GPT, scripts, or custom frameworks with a credential that can request actions, not bypass rules.',
+    title: 'A scoped agent credential',
+    body: 'Agents connect from Claude, GPT, scripts, or custom frameworks with a payment credential that’s scoped to the rules and revocable at any time. Never unlimited authority over the wallet.',
   },
   {
-    title: 'Audit trail',
-    body: 'Every request, rule check, approval, and settlement is visible after the fact.',
+    title: 'Full audit trail',
+    body: 'Every request, rule check, approval, and payment is logged — which agent asked, which rule cleared it, when it went through.',
   },
 ]
 
@@ -88,12 +88,12 @@ const INVESTOR_STEPS = [
   {
     step: '05',
     title: 'Connect the agent',
-    body: 'The external agent receives a scoped Haven credential, not raw wallet access.',
+    body: 'The external agent receives a scoped Haven credential — not unlimited access to the wallet.',
   },
   {
     step: '06',
     title: 'Agent initiates payment',
-    body: 'The external agent requests payment. Haven checks the rules, then settles and records the receipt.',
+    body: 'The external agent requests payment. Haven checks the rules; the payment goes through from the user’s wallet, and Haven records the receipt.',
   },
 ]
 
@@ -114,22 +114,22 @@ const WHY_NOW = [
 
 const STABLECOIN_REASONS = [
   {
-    title: 'Enforced on-chain, not by an admin',
-    body: "Stablecoins are enforced by smart contracts, not banks. Haven's policy engine operates at the protocol level — spend rules that are verifiable on-chain and can't be bypassed by any admin.",
+    title: 'Enforced on‑chain, not by an admin',
+    body: 'Stablecoins are enforced by smart contracts, not banks. Haven’s spend rules live on‑chain in the smart‑account allowance itself — verifiable, and impossible to bypass by anyone, including Haven.',
   },
   {
     title: 'Settles in seconds, not days',
-    body: 'Bank wires take days. Card networks can cut off in 48 hours. On Base or Gnosis Chain, a stablecoin settles in seconds, 24/7, globally — no correspondent bank to fail mid-workflow.',
+    body: 'Bank wires take days. Card networks can cut off in 48 hours. On Base or Gnosis Chain, a stablecoin settles in seconds, 24/7, globally — no correspondent bank to fail mid‑workflow.',
   },
 ]
 
 const DIFFERENTIATORS = [
-  'Non-custodial by design',
-  'Rules checked before money moves',
-  'Built for any external agent',
-  'Protocol-native for x402 and MPP',
-  'Approval and audit surface included',
-  'Developer-friendly SDK path',
+  'Agent‑native by design',
+  'Works with any agent',
+  'Audit‑first',
+  'Layered security',
+  'Live today',
+  'Built to integrate',
 ]
 
 const MODEL_CARDS = [
@@ -178,9 +178,9 @@ export default function InvestorBriefingPage() {
               </h1>
 
               <p className="text-[17px] md:text-[18px] leading-relaxed text-[var(--v2-ink-2)] mb-8 max-w-[580px]">
-                Haven is the control layer for autonomous agent spending. Agents can pay
-                for services, data, and compute while users keep custody, budgets,
-                approvals, and auditability.
+                Haven is the guardrails layer for AI agents that spend money. Users keep
+                custody, budgets, approvals, and audit; agents get a scoped credential,
+                never unlimited authority over the wallet.
               </p>
 
               <div className="flex flex-wrap items-center gap-3 mb-10">
@@ -237,8 +237,8 @@ export default function InvestorBriefingPage() {
       <BriefingSection
         id="product"
         eyebrow="The product"
-        title="A Haven account gives agents constrained financial authority."
-        lede="Haven separates the ability to request a financial action from the ability to execute it. The user controls the wallet and the rules; the agent gets a narrow capability."
+        title="A wallet built around rules — not keys."
+        lede="Haven separates the agent’s right to request a payment from the rules that govern whether it goes through. The user controls the wallet and the policy; the agent gets a scoped credential, never unlimited authority."
       >
         <div className="grid grid-cols-1 lg:grid-cols-[0.9fr_1.1fr] gap-8 lg:gap-12 items-start">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -612,7 +612,7 @@ function ControlSurfaceMock() {
 
             <div className="divide-y divide-[var(--v2-border)] bg-white">
               <SurfaceRow label="Budget" value="$500 / day" status="Active" tone="brand" />
-              <SurfaceRow label="Allowed protocols" value="x402, MPP" status="Scoped" tone="brand" />
+              <SurfaceRow label="Reset window" value="Daily" status="Active" tone="brand" />
               <SurfaceRow label="Latest request" value="23.40 USDC" status="Approved" tone="success" />
             </div>
           </div>
@@ -685,13 +685,13 @@ function RulesTrace() {
     {
       step: '02',
       title: 'Rules checked',
-      detail: 'Within budget, allowed token, approved protocol, and below review threshold.',
+      detail: 'Within the per‑currency budget and below the manual‑approval threshold.',
       tone: 'brand',
     },
     {
       step: '03',
       title: 'Payment settles',
-      detail: 'Haven executes from the user-controlled wallet and returns proof to the agent.',
+      detail: 'The payment goes through from the user‑controlled wallet and proof returns to the agent.',
       tone: 'success',
     },
     {
@@ -738,7 +738,7 @@ function RulesTrace() {
         ))}
       </ol>
       <div className="px-6 py-4 border-t border-[var(--v2-border)] bg-[var(--v2-surface)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[12px]">
-        <span className="text-[var(--v2-ink-2)]">Agent never receives raw wallet access.</span>
+        <span className="text-[var(--v2-ink-2)]">Agent never receives unlimited authority over the wallet.</span>
         <span className="font-mono text-[var(--v2-ink-3)]">tx 0x7a9e...d8e9</span>
       </div>
     </Card>

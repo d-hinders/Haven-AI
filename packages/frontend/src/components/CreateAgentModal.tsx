@@ -472,6 +472,9 @@ export default function CreateAgentModal({
         setExecError(
           'Setup transaction would fail. Make sure your Safe is on the correct network and try again.',
         )
+      } else if (message.includes('Could not verify the transaction')) {
+        // RPC/network error during simulation pre-flight.
+        setExecError('Network error — check your connection and try again.')
       } else {
         setExecError(message)
       }

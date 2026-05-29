@@ -4,6 +4,7 @@ import {
   parseUnits,
   WaitForTransactionReceiptTimeoutError,
   ContractFunctionRevertedError,
+  ContractFunctionExecutionError,
   type Address,
   type Hash,
   type PublicClient,
@@ -308,6 +309,7 @@ export async function executeSafeTx(
         account: signer.address,
       })
     } catch (err) {
+      // Case 1: direct revert from simulateContract
       if (err instanceof ContractFunctionRevertedError) {
         const reason = err.data?.errorName ?? err.shortMessage ?? 'unknown revert'
         throw new Error(
@@ -315,8 +317,24 @@ export async function executeSafeTx(
             `Check that the Safe has the AllowanceModule enabled and the delegate address is valid.`,
         )
       }
-      // For any other simulation error (network, RPC, etc.) re-throw as-is.
-      throw err
+      // Case 2: viem wraps the revert inside ContractFunctionExecutionError
+      if (
+        err instanceof ContractFunctionExecutionError &&
+        err.cause instanceof ContractFunctionRevertedError
+      ) {
+        const reason = err.cause.data?.errorName ?? err.cause.shortMessage ?? 'unknown revert'
+        throw new Error(
+          `Transaction would revert on-chain: ${reason}. ` +
+            `Check that the Safe has the AllowanceModule enabled and the delegate address is valid.`,
+        )
+      }
+      // Case 3: network / RPC failure — replace raw viem internals with a
+      // human-readable message so the modal never shows "RPC Request failed."
+      const raw = err instanceof Error ? err.message : String(err)
+      throw new Error(
+        `Could not verify the transaction — network or RPC error. ` +
+          `Check your connection and try again. (${raw})`,
+      )
     }
 
     const txHash = await signer.walletClient.writeContract({

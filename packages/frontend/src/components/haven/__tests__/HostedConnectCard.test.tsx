@@ -81,11 +81,26 @@ describe('HostedConnectCard', () => {
     // copy can stay short.
     expect(screen.getByText(/stays on your machine/i)).toBeInTheDocument()
     expect(screen.getByText(/spends only your budget/i)).toBeInTheDocument()
-    // Reassurance about safe key-sharing — the key can't move money beyond
-    // the allowance the user already set. That's why copy-and-paste into an
-    // agent config is the chosen UX.
-    expect(screen.getByText(/can.t move money beyond the allowance|even if it leaks/i)).toBeInTheDocument()
+    // Reassurance about safe key-sharing — the key can only spend within
+    // the allowance the user already set. That's why pasting into the
+    // agent's chat session is an acceptable trade-off.
+    expect(
+      screen.getByText(/can only spend within the allowance|can.t move money beyond|even if it leaks/i),
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Copy signing key/i })).toBeInTheDocument()
+  })
+
+  it('does NOT instruct the user to paste the signing key into the agent\'s config file', () => {
+    // Regression: an earlier version of section 2 said "Copy this into
+    // your agent's config" — directly contradicting the starter prompt,
+    // which tells chat agents NOT to write the key to a file. The
+    // bearer goes in the MCP config (section 1); the signing key
+    // goes into the chat session OR an env var for SDK users. Saying
+    // "config" here muddled the two and confused users (and Claude).
+    render(<HostedConnectCard credential={credential()} />)
+    fireEvent.click(tabByLabel('Claude Code'))
+    const allText = document.body.textContent ?? ''
+    expect(allText).not.toMatch(/into your agent.s config/i)
   })
 
   it('no longer renders a "Save signing key" button — that responsibility moved to "Download backup"', () => {

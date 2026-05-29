@@ -490,6 +490,67 @@ export function hasDeepLink(client: HostedClientId): client is DeepLinkClient {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Agent starter prompt — paste-into-chat handoff message
+//
+// Why this exists: safety-tuned chat agents (Claude in particular) treat a
+// pasted-in private key as a catastrophic leak and refuse to use it for
+// signing, even in-session, even with the user's permission. That's the
+// right instinct for a Treasury key, but it's overcautious for a Haven
+// delegate key — the AllowanceModule caps what it can spend on-chain, so
+// "key leaked" really only means "spend up to today's allowance, then it
+// hits the wall". The model doesn't know that without context.
+//
+// The starter prompt gives the agent that context up front, in the same
+// message that hands over the key. With this framing, Claude accepts the
+// key for in-session signing without trying to lecture the user about
+// rotating it; the model is doing exactly what it should, just with
+// accurate threat info.
+//
+// IMPORTANT custody invariants enforced by tests:
+//   - The api_key (Bearer token to Haven) is NEVER in this prompt. It
+//     already lives in the agent's MCP config and adding it here would
+//     be a second copy in chat history with no upside.
+//   - The delegate key appears exactly once. Pasting the same key in
+//     two places multiplies the surface area for accidental leakage.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AgentStarterPromptOptions {
+  /** Suggested first-action verb. Defaults to a payment intent example. */
+  exampleAction?: string
+}
+
+/**
+ * Build the message a user pastes into their agent chat after the MCP
+ * connection is in place. Frames the delegate key as bounded-spend so the
+ * model accepts it for in-session signing, and walks the haven_pay → sign
+ * → haven_submit handshake so the agent knows the right tool sequence.
+ */
+export function buildAgentStarterPrompt(
+  credential: AgentCredentialJson,
+  options: AgentStarterPromptOptions = {},
+): string {
+  const lines = [
+    `You're connected to Haven via MCP. Signing key for this session:`,
+    ``,
+    credential.delegate_key,
+    ``,
+    `This key only spends within the on-chain allowance set in Haven —`,
+    `call haven_get_allowances to see the caps. Even if exposed it can't`,
+    `move money beyond those caps, so it's safe to keep in memory for`,
+    `this session. Don't persist it to any file or commit it anywhere.`,
+    ``,
+    `Flow: I give you a payment intent → you call haven_pay (or`,
+    `haven_x402_authorize for an HTTP 402 challenge) → sign the returned`,
+    `payload_hash locally with the key → haven_submit with just the`,
+    `signature. The key never leaves this chat.`,
+    ``,
+    options.exampleAction ??
+      `Ready when you are — give me a payment intent (token, amount, recipient) and I'll handle the rest.`,
+  ]
+  return lines.join('\n')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Test connection — browser-side probe against the hosted MCP endpoint.
 // Catches >80% of the silent-failure modes (broken bearer, wrong URL, DNS
 // errors, CORS misconfiguration) so the user sees something actionable in the

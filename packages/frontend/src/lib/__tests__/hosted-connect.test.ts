@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  buildAgentStarterPrompt,
   buildDeepLink,
   buildHostedConnectSnippet,
   HOSTED_CLIENT_REGISTRY,
@@ -254,6 +255,58 @@ describe('buildDeepLink', () => {
     expect(parsed.type).toBe('http')
     expect(parsed.url).toBe(HOST)
     expect(parsed.headers.Authorization).toBe(`Bearer ${API_KEY}`)
+  })
+})
+
+describe('buildAgentStarterPrompt', () => {
+  // Custody invariants for the paste-into-chat handoff message. Failing
+  // these would leak credentials into chat history in unexpected ways.
+  it('includes the delegate key exactly once', () => {
+    const prompt = buildAgentStarterPrompt(credential())
+    const occurrences = prompt.split(DELEGATE_KEY).length - 1
+    expect(occurrences).toBe(1)
+  })
+
+  it('NEVER includes the api key (bearer token)', () => {
+    // The Bearer token already lives in the MCP config. Including it in
+    // the chat message would be a second copy in chat history with zero
+    // benefit and real downside (e.g. transcript exports leak it).
+    const prompt = buildAgentStarterPrompt(credential())
+    expect(prompt).not.toContain(API_KEY)
+  })
+
+  it('frames the key as bounded-spend so safety-tuned agents accept it for in-session signing', () => {
+    // The whole point of this prompt is to defuse the "key leaked = drain
+    // the wallet" reflex. The bounded-spend property MUST be stated in
+    // plain language — call out the AllowanceModule's safety property
+    // without naming the mechanism.
+    const prompt = buildAgentStarterPrompt(credential())
+    expect(prompt).toMatch(/can.t move money beyond|spends within the on-chain allowance/i)
+  })
+
+  it('walks the haven_pay → sign → haven_submit flow so the agent knows the tool sequence', () => {
+    // Without this, Claude correctly refuses to "store the key" but then
+    // doesn't know what to do with it either. The prompt names the right
+    // tool sequence so the agent has a path forward.
+    const prompt = buildAgentStarterPrompt(credential())
+    expect(prompt).toContain('haven_pay')
+    expect(prompt).toContain('haven_submit')
+    expect(prompt).toMatch(/haven_get_allowances/)
+  })
+
+  it('tells the agent NOT to persist the key to disk', () => {
+    // Persisting a delegate key into a dotfile is the failure mode the
+    // user wants to avoid. The prompt must instruct the agent to keep
+    // it in memory only.
+    const prompt = buildAgentStarterPrompt(credential())
+    expect(prompt).toMatch(/don.t persist|keep in memory|in memory for/i)
+  })
+
+  it('honours a custom example action when supplied', () => {
+    const prompt = buildAgentStarterPrompt(credential(), {
+      exampleAction: 'First, look up x402-enabled API foo.example and pay for one call.',
+    })
+    expect(prompt).toContain('First, look up x402-enabled API foo.example')
   })
 })
 

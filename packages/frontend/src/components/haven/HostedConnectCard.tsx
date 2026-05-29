@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import type { AgentCredentialJson } from '@/lib/agent-credential'
 import {
   HOSTED_CLIENT_REGISTRY,
+  buildAgentStarterPrompt,
   buildHostedConnectSnippet,
   buildDeepLink,
   hasDeepLink,
@@ -106,6 +107,14 @@ export function HostedConnectCard({
   const [activeId, setActiveId] = useState<HostedClientId | null>(null)
   const [copiedConnect, setCopiedConnect] = useState(false)
   const [copiedKey, setCopiedKey] = useState(false)
+  const [copiedStarterPrompt, setCopiedStarterPrompt] = useState(false)
+  // The starter-prompt disclosure uses React state (not `<details>`) so the
+  // prompt body — which embeds the delegate key — is genuinely unmounted
+  // when collapsed. `<details>` only CSS-hides its content; the key would
+  // still appear in document.body.textContent and break the custody-
+  // invariant test that asserts the delegate key isn't in the visible
+  // card body for unrelated runtimes.
+  const [showStarterPrompt, setShowStarterPrompt] = useState(false)
   // Per-client: whether the manual config fallback is expanded
   const [showConfigFallback, setShowConfigFallback] = useState(false)
   // Test-connection probe state. `pending` is the in-flight state; a fresh
@@ -132,9 +141,13 @@ export function HostedConnectCard({
   // Reset the fallback toggle + probe result whenever the user picks a
   // different client — the probe is per-bearer, but the visual association
   // is with the active client card, so a stale chip would be misleading.
+  // Also collapse the starter-prompt disclosure so its content unmounts;
+  // the prompt embeds the delegate key and we don't want it sitting in
+  // the DOM across runtime switches.
   const handlePickClient = useCallback((id: HostedClientId) => {
     setActiveId(id)
     setShowConfigFallback(false)
+    setShowStarterPrompt(false)
     setProbeState(null)
   }, [])
 
@@ -167,6 +180,23 @@ export function HostedConnectCard({
     onCopySigningKey?.()
     onCredentialSaved?.()
   }, [credential.delegate_key, onCopySigningKey, onCredentialSaved])
+
+  const starterPrompt = useMemo(() => buildAgentStarterPrompt(credential), [credential])
+
+  const handleCopyStarterPrompt = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(starterPrompt)
+    } catch {
+      /* clipboard can fail */
+    }
+    setCopiedStarterPrompt(true)
+    setTimeout(() => setCopiedStarterPrompt(false), 2000)
+    // The starter prompt embeds the delegate key, so a copy counts as
+    // "user has the credential in hand" — flip the same gate as the
+    // direct Copy-signing-key path.
+    onCopySigningKey?.()
+    onCredentialSaved?.()
+  }, [starterPrompt, onCopySigningKey, onCredentialSaved])
 
   const handleOpenDeepLink = useCallback(() => {
     if (!activeId || !hasDeepLink(activeId)) return
@@ -454,6 +484,67 @@ export function HostedConnectCard({
                 <span className="ml-1 text-[11px] text-[var(--v2-ink-3)]">
                   Shown once. Full backup below.
                 </span>
+              </div>
+
+              {/* Starter-prompt disclosure. Safety-tuned chat agents (Claude
+                  especially) refuse to use a pasted-in private key for
+                  signing unless they know the key is bounded by an on-chain
+                  allowance. The starter prompt gives the model that
+                  framing up front so the in-session signing flow works on
+                  first try, without the user having to debate threat
+                  models with their assistant. Collapsed by default to keep
+                  this section calm; uses React state (not `<details>`) so
+                  the key-bearing body actually unmounts when closed. */}
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowStarterPrompt((v) => !v)}
+                  aria-expanded={showStarterPrompt}
+                  className="flex items-center gap-1 text-[12px] font-medium text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]"
+                >
+                  <svg
+                    aria-hidden="true"
+                    className={
+                      'h-3 w-3 shrink-0 transition-transform ' +
+                      (showStarterPrompt ? 'rotate-90' : '')
+                    }
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                  >
+                    <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Pasting into a chat agent? Use this starter message
+                </button>
+
+                {showStarterPrompt && (
+                  <div className="mt-2 space-y-2">
+                    <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                      Sends the key with the context the agent needs to keep it in memory
+                      and sign locally — instead of refusing or trying to harden a key
+                      that&rsquo;s already bounded by your allowance.
+                    </p>
+                    <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+                      <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-3 py-1.5">
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+                          starter prompt
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void handleCopyStarterPrompt()}
+                          aria-label="Copy starter prompt"
+                        >
+                          {copiedStarterPrompt ? 'Copied' : 'Copy prompt'}
+                        </Button>
+                      </div>
+                      <pre className="overflow-x-auto whitespace-pre-wrap px-3 py-2 text-[12px] leading-snug text-[var(--v2-ink)]">
+                        <code>{starterPrompt}</code>
+                      </pre>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </Card.Section>

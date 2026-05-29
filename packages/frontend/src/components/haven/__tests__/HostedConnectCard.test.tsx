@@ -315,6 +315,77 @@ describe('HostedConnectCard', () => {
     expect(onCredentialSaved).toHaveBeenCalled()
   })
 
+  // ── Starter prompt (chat handoff) ───────────────────────────────────────
+
+  it('renders a "starter message" disclosure under the Copy signing key button', () => {
+    // Safety-tuned chat agents refuse to use a pasted-in private key for
+    // signing unless they know the key is bounded by an allowance. The
+    // disclosure surfaces a paste-ready message that defuses that.
+    render(<HostedConnectCard credential={credential()} />)
+    fireEvent.click(tabByLabel('Claude Code'))
+
+    expect(
+      screen.getByText(/Pasting into a chat agent\? Use this starter message/i),
+    ).toBeInTheDocument()
+  })
+
+  it('starter prompt content is collapsed by default and reveals on click', () => {
+    render(<HostedConnectCard credential={credential()} />)
+    fireEvent.click(tabByLabel('Claude Code'))
+
+    const toggle = screen.getByRole('button', { name: /Pasting into a chat agent/i })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: /Copy prompt/i })).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /Copy prompt/i })).toBeInTheDocument()
+  })
+
+  it('keeps the delegate key OUT of the DOM until the disclosure is opened', () => {
+    // The custody invariant relies on the disclosure body being genuinely
+    // unmounted when collapsed. `<details>` only CSS-hides — the key
+    // would still be in textContent. React state-controlled rendering
+    // is what makes this assertion possible.
+    render(<HostedConnectCard credential={credential()} />)
+    fireEvent.click(tabByLabel('Claude Code'))
+
+    // Closed: key only appears once (inside the runtime snippet on
+    // section 1), not a second time in the starter prompt.
+    const closedText = document.body.textContent ?? ''
+    const closedOccurrences = closedText.split(DELEGATE_KEY).length - 1
+    expect(closedOccurrences).toBe(0)
+    // (Section 1's snippet never includes the delegate key, only the
+    // bearer; the assertion above is exact for the closed-disclosure case.)
+  })
+
+  it('copies the starter prompt with the delegate key embedded but NOT the api key', async () => {
+    const onCredentialSaved = vi.fn()
+    const onCopySigningKey = vi.fn()
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onCredentialSaved={onCredentialSaved}
+        onCopySigningKey={onCopySigningKey}
+      />,
+    )
+    fireEvent.click(tabByLabel('Claude Code'))
+    fireEvent.click(screen.getByRole('button', { name: /Pasting into a chat agent/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Copy prompt/i }))
+
+    await waitFor(() => expect(clipboardWriteText).toHaveBeenCalled())
+    const copied = clipboardWriteText.mock.calls[0][0] as string
+    expect(copied).toContain(DELEGATE_KEY)
+    expect(copied).not.toContain(API_KEY)
+    expect(copied).toMatch(/haven_pay|haven_submit/)
+    // Copying the prompt counts as "user has the credential in hand" —
+    // flip the same gates the direct Copy-signing-key path does.
+    expect(onCopySigningKey).toHaveBeenCalledTimes(1)
+    expect(onCredentialSaved).toHaveBeenCalled()
+  })
+
   it('section 2 (Signing key) stays visible after the agent connects', () => {
     // Regression guard for an early-shipping bug where the connected state
     // collapsed the WHOLE setup block, hiding the signing key even when

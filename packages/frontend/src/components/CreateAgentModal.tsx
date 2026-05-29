@@ -683,7 +683,7 @@ export default function CreateAgentModal({
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Create agent" className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Create agent" className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto overflow-x-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--v2-border)]">
           <div>
@@ -1196,9 +1196,7 @@ export default function CreateAgentModal({
                   >
                     <HostedConnectCard
                       credential={cred.json}
-                      onSaveSigningKey={handleDownloadCredential}
                       onCredentialSaved={handleSnippetCopied}
-                      signingKeySaved={credentialsSaved}
                       lastSeenAt={agentLastSeenAt}
                     />
                   </div>

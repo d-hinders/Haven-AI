@@ -64,18 +64,21 @@ export interface HostedConnectCardProps {
    */
   hostedUrl?: string
   /**
-   * Trigger the "save signing key" action.
-   * Called when the user clicks Save in box 2.
+   * Optional callback fired when the user copies the delegate key from
+   * section 2. The parent uses it for analytics and "credentials saved"
+   * gating. The card no longer renders a separate "Save signing key"
+   * download button — that responsibility moved to the standalone
+   * "Download backup" row in CreateAgentModal, which dumps the full
+   * credential file (including the key) to disk in one action.
    */
-  onSaveSigningKey: () => void
   onCopySigningKey?: () => void
   /**
-   * Fired whenever the user copies the connect snippet or saves/copies the
-   * signing key. The modal listens to flip its "credentials saved" gate.
+   * Fired whenever the user copies the connect snippet OR the signing
+   * key. The modal listens to flip its "credentials saved" gate so the
+   * Done button unlocks once at least one credential-bearing action has
+   * happened.
    */
   onCredentialSaved?: () => void
-  /** Whether the signing key has been saved/copied already (UI affordance). */
-  signingKeySaved?: boolean
   /** Suggested first-prompt copy shown beneath the snippet area. */
   tryItPrompt?: string
   /**
@@ -91,10 +94,8 @@ const DEFAULT_TRY_IT_PROMPT = "Ask your agent: “What’s my Haven budget?”"
 export function HostedConnectCard({
   credential,
   hostedUrl,
-  onSaveSigningKey,
   onCopySigningKey,
   onCredentialSaved,
-  signingKeySaved = false,
   tryItPrompt = DEFAULT_TRY_IT_PROMPT,
   lastSeenAt,
 }: HostedConnectCardProps) {
@@ -166,11 +167,6 @@ export function HostedConnectCard({
     onCopySigningKey?.()
     onCredentialSaved?.()
   }, [credential.delegate_key, onCopySigningKey, onCredentialSaved])
-
-  const handleSaveKey = useCallback(() => {
-    onSaveSigningKey()
-    onCredentialSaved?.()
-  }, [onSaveSigningKey, onCredentialSaved])
 
   const handleOpenDeepLink = useCallback(() => {
     if (!activeId || !hasDeepLink(activeId)) return
@@ -275,9 +271,16 @@ export function HostedConnectCard({
         </>
       )}
 
-      {active && snippet && (!isConnected || showSetupSteps) && (
+      {active && snippet && (
         <div key={active.id} className="v2-animate-step-rise mt-4 space-y-4">
-          {/* ── 1 · Connect ───────────────────────────────────────────── */}
+          {/* ── 1 · Connect ─────────────────────────────────────────────
+              Collapses once the agent has connected. The Signing-key
+              section below intentionally stays visible — the user is
+              shown the delegate key exactly once, and the agent calling
+              back in via the bearer is independent of whether the user
+              has saved the signing key. Hiding section 2 on connect
+              would silently strand users whose key is still un-copied. */}
+          {(!isConnected || showSetupSteps) && (
           <Card.Section>
             <div className="py-4">
               <div className="flex items-center gap-2">
@@ -399,8 +402,12 @@ export function HostedConnectCard({
               )}
             </div>
           </Card.Section>
+          )}
 
-          {/* ── 2 · Signing key ──────────────────────────────────────── */}
+          {/* ── 2 · Signing key ────────────────────────────────────────
+              Always visible after a tile is picked, including after the
+              agent has connected — see comment on section 1. The key is
+              shown exactly once and the user may not have copied it yet. */}
           <Card.Section>
             <div className="py-4">
               <div className="flex items-center gap-2">
@@ -424,31 +431,31 @@ export function HostedConnectCard({
                 </span>
               </div>
               <p className="mt-1 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                Saves the key your agent signs with. Haven never receives it &mdash; your budget caps
-                it either way.
+                Copy this and paste it into your agent&rsquo;s config — it&rsquo;s how your agent
+                signs payments. Haven never receives it; your budget caps it either way.
               </p>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button onClick={handleSaveKey}>
-                  {signingKeySaved ? 'Saved · Save again' : 'Save signing key'}
-                </Button>
-                <Button variant="ghost" onClick={() => void handleCopyKey()}>
-                  {copiedKey ? 'Copied' : 'Copy'}
+                <Button onClick={() => void handleCopyKey()}>
+                  {copiedKey ? 'Copied' : 'Copy signing key'}
                 </Button>
                 <span className="ml-1 text-[11px] text-[var(--v2-ink-3)]">
-                  Shown once. Haven can&rsquo;t show it again.
+                  Shown once. The Download backup below keeps the full credential bundle.
                 </span>
               </div>
             </div>
           </Card.Section>
 
-          {/* Try it */}
-          <div className="rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
-            <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
-            <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-              {tryItPrompt}
+          {/* Try it — only meaningful while the user is still in the setup
+              flow; collapses with section 1 once connected. */}
+          {(!isConnected || showSetupSteps) && (
+            <div className="rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
+              <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
+              <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                {tryItPrompt}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </Card>
@@ -481,20 +488,23 @@ function RuntimeTile({
       aria-selected={active}
       onClick={onPick}
       className={
-        'group flex h-full min-h-[68px] flex-col items-start justify-between gap-2 rounded-[10px] border px-3 py-2.5 text-left transition-colors ' +
+        // `min-w-0` lets the tile shrink below its intrinsic content width so
+        // long taglines can't blow out the grid column and force the modal
+        // to scroll horizontally. The tagline span clips with ellipsis below.
+        'group flex h-full min-h-[68px] min-w-0 flex-col items-start justify-between gap-2 rounded-[10px] border px-3 py-2.5 text-left transition-colors ' +
         (active
           ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]'
           : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink)] hover:border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]')
       }
     >
-      <div className="flex w-full items-center justify-between gap-2">
-        <span className="text-[13px] font-semibold leading-tight">{option.label}</span>
+      <div className="flex w-full min-w-0 items-center justify-between gap-2">
+        <span className="truncate text-[13px] font-semibold leading-tight">{option.label}</span>
         {option.oneClick && <OneClickChip active={active} />}
       </div>
       {option.tagline && (
         <span
           className={
-            'text-[11px] leading-tight ' +
+            'block w-full truncate text-[11px] leading-tight ' +
             (active ? 'text-[var(--v2-brand-strong)]/70' : 'text-[var(--v2-ink-3)]')
           }
         >
@@ -615,7 +625,11 @@ function DestinationPathRow({
         {showLabel && (
           <span className="text-[11px] font-medium text-[var(--v2-ink-2)]">{path.label}</span>
         )}
-        <code className="overflow-x-auto whitespace-nowrap font-mono text-[12px] leading-snug text-[var(--v2-ink)]">
+        {/* `<code>` is inline-level by default — `overflow-x-auto` only takes
+            effect on block (or inline-block) elements. Without `block` here
+            a long path (e.g. Cline's 110-char Windows path) blows past the
+            modal width and forces the panel itself to scroll horizontally. */}
+        <code className="block overflow-x-auto whitespace-nowrap font-mono text-[12px] leading-snug text-[var(--v2-ink)]">
           {path.path}
         </code>
       </div>

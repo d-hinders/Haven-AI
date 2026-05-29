@@ -298,11 +298,11 @@ describe('CreateAgentModal recovery', () => {
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
 
     // The two-credential split stays hidden until a client is picked.
-    expect(screen.queryByRole('button', { name: /Save signing key/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Copy signing key/i })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /^Claude Code/ }))
 
     // Copying the connect snippet flips the close-without-saving gate. The
-    // Save-signing-key path also flips it, exercised in HostedConnectCard.test.tsx.
+    // Copy-signing-key path also flips it, exercised in HostedConnectCard.test.tsx.
     fireEvent.click(screen.getAllByRole('button', { name: /^Copy$/i })[0])
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
     expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('sk_test'))

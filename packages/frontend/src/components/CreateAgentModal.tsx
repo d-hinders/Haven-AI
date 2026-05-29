@@ -466,6 +466,12 @@ export default function CreateAgentModal({
         // Transaction submitted but receipt timed out — surface the tx hash so
         // the user can track it on the block explorer and retry saving later.
         setExecError(message)
+      } else if (message.includes('would revert on-chain')) {
+        // Simulation pre-flight detected a revert — avoid showing the raw
+        // technical message; give the user a clear actionable hint instead.
+        setExecError(
+          'Setup transaction would fail. Make sure your Safe is on the correct network and try again.',
+        )
       } else {
         setExecError(message)
       }

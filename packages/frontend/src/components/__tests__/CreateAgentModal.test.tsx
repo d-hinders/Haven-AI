@@ -292,9 +292,13 @@ describe('CreateAgentModal recovery', () => {
     expect(screen.getByRole('tab', { name: /^Cursor/ })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /^Other \/ SDK/ })).toBeInTheDocument()
 
-    // The backup credential download is now demoted to a backup line.
+    // The backup credential download is a quiet bordered row below the
+    // main HostedConnectCard, with a ghost Download backup button. Previous
+    // brand-soft "Action required" treatment moved up to this lighter row
+    // so it doesn't compete with the primary connect action.
+    expect(screen.getByRole('heading', { name: /Save a backup/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Download backup' })).toBeInTheDocument()
-    expect(screen.getByText(/credentials are shown once/i)).toBeInTheDocument()
+    expect(screen.getByText(/Shown once\./i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled()
 
     // The two-credential split stays hidden until a client is picked.

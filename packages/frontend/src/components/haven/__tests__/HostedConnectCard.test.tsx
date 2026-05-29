@@ -77,8 +77,14 @@ describe('HostedConnectCard', () => {
 
     expect(screen.getByRole('heading', { name: 'Connect' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Signing key' })).toBeInTheDocument()
+    // Two chips together carry the non-custodial story so the description
+    // copy can stay short.
     expect(screen.getByText(/stays on your machine/i)).toBeInTheDocument()
-    expect(screen.getByText(/Haven never receives it/i)).toBeInTheDocument()
+    expect(screen.getByText(/spends only your budget/i)).toBeInTheDocument()
+    // Reassurance about safe key-sharing — the key can't move money beyond
+    // the allowance the user already set. That's why copy-and-paste into an
+    // agent config is the chosen UX.
+    expect(screen.getByText(/can.t move money beyond the allowance|even if it leaks/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Copy signing key/i })).toBeInTheDocument()
   })
 

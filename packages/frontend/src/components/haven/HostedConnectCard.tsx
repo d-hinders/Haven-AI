@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
@@ -225,14 +225,12 @@ export function HostedConnectCard({
         </div>
       )}
 
-      {/* "Try it" prompt when connected + steps collapsed */}
+      {/* "Try it" prompt when connected + steps collapsed — inline, quiet */}
       {isConnected && !showSetupSteps && (
-        <div className="mt-3 rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
-          <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-            {tryItPrompt}
-          </div>
-        </div>
+        <p className="mt-3 text-[12px] leading-relaxed text-[var(--v2-ink-3)]">
+          <span className="font-medium text-[var(--v2-ink-2)]">Try it · </span>
+          {tryItPrompt}
+        </p>
       )}
 
       {(!isConnected || showSetupSteps) && (
@@ -292,9 +290,11 @@ export function HostedConnectCard({
                   <span className="text-[11px] text-[var(--v2-ink-3)]">{active.tagline}</span>
                 )}
               </div>
+              {/* Intro paragraph intentionally short. The custody story (this
+                  token can't move money) is carried by the two chips in
+                  section 2 so this section can stay focused on the action. */}
               <p className="mt-1 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                Adds Haven&rsquo;s hosted tools to {active.label}. This token only lets your agent
-                talk to Haven &mdash; it can&rsquo;t move money on its own.
+                Add Haven&rsquo;s tools to {active.label}.
               </p>
 
               {/* Deep-link clients: primary button + collapsible config fallback.
@@ -410,29 +410,41 @@ export function HostedConnectCard({
               shown exactly once and the user may not have copied it yet. */}
           <Card.Section>
             <div className="py-4">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[11px] font-semibold text-[var(--v2-brand-strong)]">
                   2
                 </span>
                 <h4 className="text-[13px] font-semibold text-[var(--v2-ink)]">Signing key</h4>
-                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-2)]">
-                  <svg
-                    aria-hidden="true"
-                    className="h-3 w-3"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <rect x="4" y="11" width="16" height="9" rx="2" />
-                    <path d="M8 11V8a4 4 0 1 1 8 0v3" strokeLinecap="round" />
-                  </svg>
+                {/* Two chips that together carry the non-custodial story so
+                    section 1's intro paragraph can stay calm. The first
+                    speaks to *where* the key lives; the second speaks to
+                    *what it can do* — which is what makes copying it into
+                    an agent's config a reasonable trade-off rather than a
+                    scary "leak your wallet" moment. */}
+                <SigningKeyChip
+                  icon={
+                    <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <rect x="4" y="11" width="16" height="9" rx="2" />
+                      <path d="M8 11V8a4 4 0 1 1 8 0v3" strokeLinecap="round" />
+                    </svg>
+                  }
+                >
                   stays on your machine
-                </span>
+                </SigningKeyChip>
+                <SigningKeyChip
+                  icon={
+                    <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
+                      <path d="M5 12l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  }
+                >
+                  spends only your budget
+                </SigningKeyChip>
               </div>
-              <p className="mt-1 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                Copy this and paste it into your agent&rsquo;s config — it&rsquo;s how your agent
-                signs payments. Haven never receives it; your budget caps it either way.
+              <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                Copy this into your agent&rsquo;s config so it can sign payments. Unlike a regular
+                wallet key, this one can&rsquo;t move money beyond the allowance you set — even if
+                it leaks, your budget still caps it.
               </p>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -440,21 +452,19 @@ export function HostedConnectCard({
                   {copiedKey ? 'Copied' : 'Copy signing key'}
                 </Button>
                 <span className="ml-1 text-[11px] text-[var(--v2-ink-3)]">
-                  Shown once. The Download backup below keeps the full credential bundle.
+                  Shown once. Full backup below.
                 </span>
               </div>
             </div>
           </Card.Section>
 
-          {/* Try it — only meaningful while the user is still in the setup
-              flow; collapses with section 1 once connected. */}
+          {/* Try-it hint — quiet inline tip, not a separate dashed card.
+              Collapses with section 1 once the agent has connected. */}
           {(!isConnected || showSetupSteps) && (
-            <div className="rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
-              <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
-              <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                {tryItPrompt}
-              </div>
-            </div>
+            <p className="text-[12px] leading-relaxed text-[var(--v2-ink-3)]">
+              <span className="font-medium text-[var(--v2-ink-2)]">Try it · </span>
+              {tryItPrompt}
+            </p>
           )}
         </div>
       )}
@@ -512,6 +522,20 @@ function RuntimeTile({
         </span>
       )}
     </button>
+  )
+}
+
+/**
+ * Small surface-tinted chip used in the Signing-key section header. Two of
+ * these together carry the non-custodial story (key locality + allowance
+ * cap) so the body copy can stay short.
+ */
+function SigningKeyChip({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-2)]">
+      {icon}
+      {children}
+    </span>
   )
 }
 

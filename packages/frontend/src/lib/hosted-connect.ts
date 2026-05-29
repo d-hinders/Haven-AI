@@ -1,13 +1,16 @@
 /**
  * Hosted-MCP connect-command generation.
  *
- * Produces the "1 · Connect" command/snippet for the new Done step in the
- * Create Agent flow (#187). Pairs with the hosted, keyless `@haven_ai/mcp-server`
- * — the URL + Bearer token go to Haven (identity), and signing stays on the
- * user's machine via the credential file (authority).
+ * Produces the "1 · Connect" snippet for the Done step of the Create Agent
+ * flow. Pairs with the hosted, keyless `@haven_ai/mcp-server` — the URL +
+ * Bearer token go to Haven (identity), and signing stays on the user's
+ * machine via the credential file (authority).
  *
- * #187 scope: working command per client.
- * #188 scope: deep links (Claude Desktop / Cursor) + SDK advanced disclosure.
+ * The registry below is the single source of truth for which agent runtimes
+ * the connect card surfaces. Adding a runtime is a matter of declaring it in
+ * `HOSTED_CLIENT_REGISTRY` and adding a case to `buildHostedConnectSnippet`.
+ * The custody invariant — the delegate private key never appears in the
+ * snippet or in any deep link — is enforced by tests.
  */
 
 import type { AgentCredentialJson } from './agent-credential'
@@ -23,25 +26,75 @@ export type HostedClientId =
   | 'claude-code'
   | 'claude-desktop'
   | 'cursor'
+  | 'vscode'
+  | 'windsurf'
+  | 'continue'
+  | 'cline'
+  | 'codex-cli'
+  | 'opencode'
+  | 'goose'
+  | 'amp'
   | 'other'
+
+/**
+ * High-level runtime category for the tile grid. Tiles inside the same group
+ * stay adjacent in the picker, which makes "find the editor you use" easy
+ * even when the registry grows past a dozen entries.
+ */
+export type HostedClientGroup = 'agent-cli' | 'editor' | 'desktop' | 'custom'
 
 export interface HostedClientOption {
   id: HostedClientId
   label: string
-  /** Where in the client this connects from. Shown beside the snippet. */
-  destination?: string
+  /**
+   * One-line hint shown under the label in the tile — answers "what is this".
+   * Keep under ~32 chars; longer strings will wrap and break the grid rhythm.
+   */
+  tagline?: string
+  group: HostedClientGroup
+  /**
+   * True when the runtime has a working `*://` deep link. Tiles with this set
+   * render a small ⚡ chip so users can spot one-click installs at a glance.
+   * NEVER set this true on speculation — broken deep links erode trust.
+   */
+  oneClick?: boolean
 }
 
-export const HOSTED_CLIENT_OPTIONS: HostedClientOption[] = [
-  { id: 'claude-code', label: 'Claude Code', destination: 'CLI' },
-  { id: 'claude-desktop', label: 'Claude Desktop', destination: 'MCP settings' },
-  { id: 'cursor', label: 'Cursor', destination: 'MCP settings' },
-  { id: 'other', label: 'Other / SDK' },
+/**
+ * Registry of supported runtimes, ordered for the tile grid:
+ * agent CLIs first (Claude Code is the largest cohort), then editors, then
+ * desktop apps, then the generic SDK escape hatch.
+ */
+export const HOSTED_CLIENT_REGISTRY: HostedClientOption[] = [
+  // ── Agent CLIs ──────────────────────────────────────────────────────────
+  { id: 'claude-code', label: 'Claude Code', tagline: 'CLI command', group: 'agent-cli' },
+  { id: 'codex-cli', label: 'Codex CLI', tagline: '~/.codex/config.toml', group: 'agent-cli' },
+  { id: 'opencode', label: 'OpenCode', tagline: 'opencode.ai · TUI', group: 'agent-cli' },
+  { id: 'goose', label: 'Goose', tagline: 'block.github.io', group: 'agent-cli' },
+  { id: 'amp', label: 'Amp', tagline: 'Sourcegraph', group: 'agent-cli' },
+
+  // ── Editors ─────────────────────────────────────────────────────────────
+  { id: 'cursor', label: 'Cursor', tagline: 'MCP settings', group: 'editor', oneClick: true },
+  { id: 'vscode', label: 'VS Code', tagline: 'Copilot · MCP', group: 'editor', oneClick: true },
+  { id: 'windsurf', label: 'Windsurf', tagline: 'Cascade · MCP', group: 'editor' },
+  { id: 'continue', label: 'Continue.dev', tagline: 'config.yaml', group: 'editor' },
+  { id: 'cline', label: 'Cline', tagline: 'VS Code extension', group: 'editor' },
+
+  // ── Desktop ─────────────────────────────────────────────────────────────
+  { id: 'claude-desktop', label: 'Claude Desktop', tagline: 'desktop app', group: 'desktop' },
+
+  // ── Custom / SDK ────────────────────────────────────────────────────────
+  { id: 'other', label: 'Other / SDK', tagline: 'custom agent', group: 'custom' },
 ]
+
+/** Back-compat alias kept so existing imports don't break. */
+export const HOSTED_CLIENT_OPTIONS = HOSTED_CLIENT_REGISTRY
+
+export type HostedConnectLanguage = 'bash' | 'json' | 'yaml' | 'toml'
 
 export interface HostedConnectSnippet {
   client: HostedClientId
-  language: 'bash' | 'json'
+  language: HostedConnectLanguage
   /** Multi-line code body, no leading/trailing blank lines. */
   code: string
   /** Short instruction to render above the code block. */
@@ -53,9 +106,11 @@ export interface HostedConnectSnippet {
    */
   postNote?: string
   /**
-   * Optional platform-specific destination paths shown alongside the snippet
-   * (e.g. the Claude Desktop config file location on each OS). Rendered as a
-   * small key/value list so users know where to paste the JSON.
+   * Destination(s) the snippet should be saved to. One entry for runtimes
+   * with a single canonical path; multiple entries for runtimes whose path
+   * varies by OS (Claude Desktop) or scope (workspace vs user, e.g. VS Code).
+   * Absent for runtimes whose snippet IS the action — e.g. Claude Code's
+   * `claude mcp add ...` command, which doesn't paste anywhere.
    */
   destinationPaths?: { label: string; path: string }[]
 }
@@ -71,14 +126,20 @@ export function resolveHostedMcpUrl(envOverride?: string | null): string {
 }
 
 /**
- * Build the connect snippet. Identity only — the delegate key is NEVER included.
+ * Build the connect snippet for a given runtime. Identity only — the delegate
+ * private key is NEVER included in the snippet, in any header, or in any
+ * deep link. The custody invariant is asserted by tests for every runtime.
  */
 export function buildHostedConnectSnippet(
   client: HostedClientId,
   credential: AgentCredentialJson,
   hostedUrl: string = resolveHostedMcpUrl(),
 ): HostedConnectSnippet {
+  const bearer = `Bearer ${credential.api_key}`
+  const authHeader = { Authorization: bearer }
+
   switch (client) {
+    // ── Claude Code (CLI command) ─────────────────────────────────────────
     case 'claude-code':
       return {
         client,
@@ -88,39 +149,254 @@ export function buildHostedConnectSnippet(
         code: [
           `claude mcp add --transport http haven \\`,
           `  ${hostedUrl} \\`,
-          `  --header "Authorization: Bearer ${credential.api_key}"`,
+          `  --header "Authorization: ${bearer}"`,
         ].join('\n'),
         postNote:
           'Then exit this Claude Code session and run `claude` again — MCP servers load at session start, so a running session won’t pick up the new tools until you restart it.',
       }
-    case 'claude-desktop':
-    case 'cursor': {
-      const config = {
-        mcpServers: {
-          haven: {
-            url: hostedUrl,
-            headers: { Authorization: `Bearer ${credential.api_key}` },
-          },
-        },
-      }
+
+    // ── Claude Desktop (multi-OS JSON config) ─────────────────────────────
+    case 'claude-desktop': {
       return {
         client,
         language: 'json',
         guidance:
-          client === 'claude-desktop'
-            ? "Open Claude Desktop’s config file (path below), paste this JSON in, then fully quit and reopen Claude Desktop."
-            : "Open Cursor’s MCP settings and paste this in. Reload Cursor when you’re done.",
-        code: JSON.stringify(config, null, 2),
-        destinationPaths:
-          client === 'claude-desktop'
-            ? [
-                { label: 'macOS', path: '~/Library/Application Support/Claude/claude_desktop_config.json' },
-                { label: 'Windows', path: '%APPDATA%\\Claude\\claude_desktop_config.json' },
-                { label: 'Linux', path: '~/.config/Claude/claude_desktop_config.json' },
-              ]
-            : undefined,
+          'Save this into Claude Desktop’s config file at the path below, then fully quit and reopen Claude Desktop.',
+        code: JSON.stringify(
+          { mcpServers: { haven: { url: hostedUrl, headers: authHeader } } },
+          null,
+          2,
+        ),
+        destinationPaths: [
+          { label: 'macOS', path: '~/Library/Application Support/Claude/claude_desktop_config.json' },
+          { label: 'Windows', path: '%APPDATA%\\Claude\\claude_desktop_config.json' },
+          { label: 'Linux', path: '~/.config/Claude/claude_desktop_config.json' },
+        ],
       }
     }
+
+    // ── Cursor (JSON config + cursor:// deep link) ────────────────────────
+    case 'cursor':
+      return {
+        client,
+        language: 'json',
+        guidance:
+          'Save this into Cursor’s MCP config at the path below. Reload Cursor when you’re done.',
+        code: JSON.stringify(
+          { mcpServers: { haven: { url: hostedUrl, headers: authHeader } } },
+          null,
+          2,
+        ),
+        destinationPaths: [{ label: 'Global', path: '~/.cursor/mcp.json' }],
+      }
+
+    // ── VS Code (JSON config + vscode:mcp/install? deep link) ─────────────
+    case 'vscode':
+      return {
+        client,
+        language: 'json',
+        guidance:
+          'Save this where VS Code reads MCP servers. Workspace is recommended; user-scope is in the Command Palette → "MCP: Open User Configuration".',
+        code: JSON.stringify(
+          {
+            servers: {
+              haven: { type: 'http', url: hostedUrl, headers: authHeader },
+            },
+          },
+          null,
+          2,
+        ),
+        destinationPaths: [
+          { label: 'Workspace', path: '.vscode/mcp.json' },
+          { label: 'User · macOS', path: '~/Library/Application Support/Code/User/mcp.json' },
+          { label: 'User · Windows', path: '%APPDATA%\\Code\\User\\mcp.json' },
+          { label: 'User · Linux', path: '~/.config/Code/User/mcp.json' },
+        ],
+        postNote:
+          'VS Code restarts the MCP server on config save — no window reload needed.',
+      }
+
+    // ── Windsurf ──────────────────────────────────────────────────────────
+    case 'windsurf':
+      return {
+        client,
+        language: 'json',
+        guidance:
+          'Save this into Windsurf’s MCP config. Reload Windsurf (or click the refresh icon in the Cascade MCP panel) when you’re done.',
+        code: JSON.stringify(
+          {
+            mcpServers: {
+              haven: { serverUrl: hostedUrl, headers: authHeader },
+            },
+          },
+          null,
+          2,
+        ),
+        destinationPaths: [{ label: 'Global', path: '~/.codeium/windsurf/mcp_config.json' }],
+      }
+
+    // ── Continue.dev (YAML) ───────────────────────────────────────────────
+    case 'continue':
+      return {
+        client,
+        language: 'yaml',
+        guidance:
+          'Add this under `mcpServers` in your Continue config. Continue hot-reloads on save.',
+        code: [
+          'mcpServers:',
+          '  - name: haven',
+          '    type: streamable-http',
+          `    url: ${hostedUrl}`,
+          '    requestOptions:',
+          '      headers:',
+          `        Authorization: ${bearer}`,
+        ].join('\n'),
+        destinationPaths: [
+          { label: 'Global', path: '~/.continue/config.yaml' },
+          { label: 'Workspace', path: '.continue/config.yaml' },
+        ],
+      }
+
+    // ── Cline (VS Code extension, separate config) ────────────────────────
+    case 'cline':
+      return {
+        client,
+        language: 'json',
+        guidance:
+          'Open Cline → MCP Servers → Configure. Paste this into `cline_mcp_settings.json`. Cline hot-reloads on save.',
+        code: JSON.stringify(
+          {
+            mcpServers: {
+              haven: {
+                url: hostedUrl,
+                headers: authHeader,
+                disabled: false,
+                autoApprove: [],
+              },
+            },
+          },
+          null,
+          2,
+        ),
+        destinationPaths: [
+          {
+            label: 'macOS · VS Code',
+            path: '~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json',
+          },
+          {
+            label: 'Windows · VS Code',
+            path: '%APPDATA%\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\settings\\cline_mcp_settings.json',
+          },
+        ],
+      }
+
+    // ── Codex CLI (TOML) ──────────────────────────────────────────────────
+    case 'codex-cli':
+      // Codex sends the bearer via an env var rather than inlining the
+      // header, so the snippet is two parts: the TOML block plus the
+      // `export` you need to run before launching `codex`.
+      return {
+        client,
+        language: 'toml',
+        guidance:
+          'Append this to your Codex config, then export the bearer in the shell where you launch `codex`.',
+        code: [
+          '[mcp_servers.haven]',
+          `url = "${hostedUrl}"`,
+          'bearer_token_env_var = "HAVEN_TOKEN"',
+          '',
+          `# Then in your shell:`,
+          `# export HAVEN_TOKEN=${credential.api_key}`,
+        ].join('\n'),
+        destinationPaths: [
+          { label: 'Global', path: '~/.codex/config.toml' },
+          { label: 'Project', path: '.codex/config.toml' },
+        ],
+        postNote: 'Restart your `codex` session — Codex loads its config at startup.',
+      }
+
+    // ── OpenCode (JSON) ───────────────────────────────────────────────────
+    case 'opencode':
+      return {
+        client,
+        language: 'json',
+        guidance:
+          'Add this under the `mcp` key of your OpenCode config. Restart the `opencode` TUI to reload.',
+        code: JSON.stringify(
+          {
+            $schema: 'https://opencode.ai/config.json',
+            mcp: {
+              haven: {
+                type: 'remote',
+                url: hostedUrl,
+                enabled: true,
+                headers: authHeader,
+              },
+            },
+          },
+          null,
+          2,
+        ),
+        destinationPaths: [
+          { label: 'Global', path: '~/.config/opencode/opencode.json' },
+          { label: 'Project', path: 'opencode.json' },
+        ],
+      }
+
+    // ── Goose (YAML) ──────────────────────────────────────────────────────
+    case 'goose':
+      return {
+        client,
+        language: 'yaml',
+        guidance:
+          'Add this under `extensions` in Goose’s config. Goose Desktop picks it up on toggle; the CLI rereads on the next `goose session`.',
+        code: [
+          'extensions:',
+          '  haven:',
+          '    type: streamable_http',
+          `    url: ${hostedUrl}`,
+          '    headers:',
+          `      Authorization: ${bearer}`,
+          '    timeout: 300',
+          '    enabled: true',
+        ].join('\n'),
+        destinationPaths: [{ label: 'Global', path: '~/.config/goose/config.yaml' }],
+      }
+
+    // ── Amp (JSON OR amp CLI command) ─────────────────────────────────────
+    case 'amp':
+      // Amp accepts MCP servers via the CLI subcommand or its settings.json
+      // — the CLI form is shorter and avoids any chance of the user editing
+      // the wrong settings file, so we lead with it and show settings.json
+      // as a fallback under a small detail.
+      return {
+        client,
+        language: 'bash',
+        guidance:
+          'Run this in any terminal — Amp persists the server into its settings for you.',
+        code: [
+          `amp mcp add haven \\`,
+          `  ${hostedUrl} \\`,
+          `  --header "Authorization: ${bearer}"`,
+          '',
+          `# Or edit settings.json directly:`,
+          `# {`,
+          `#   "amp.mcpServers": {`,
+          `#     "haven": {`,
+          `#       "url": "${hostedUrl}",`,
+          `#       "headers": { "Authorization": "${bearer}" }`,
+          `#     }`,
+          `#   }`,
+          `# }`,
+        ].join('\n'),
+        destinationPaths: [
+          { label: 'Settings · macOS / Linux', path: '~/.config/amp/settings.json' },
+          { label: 'Settings · Windows', path: '%USERPROFILE%\\.config\\amp\\settings.json' },
+        ],
+        postNote: 'Reload the Amp panel (editor) or restart the `amp` CLI session.',
+      }
+
+    // ── Generic SDK / curl escape hatch ───────────────────────────────────
     case 'other':
       return {
         client,
@@ -143,37 +419,49 @@ export function buildHostedConnectSnippet(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// #188: Deep links + local-MCP advanced disclosure
+// Deep links
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Runtimes that have a verified, working deep-link install scheme. */
+type DeepLinkClient = 'cursor' | 'vscode'
+
 /**
- * Build a one-click deep link for Cursor.
+ * Build a one-click install deep link.
  *
  * Carries the hosted MCP URL and Bearer token (identity).
  * The delegate private key is NEVER in the link.
  *
  * Cursor: `cursor://anysphere.cursor-deeplink/mcp/install?...`
+ * VS Code: `vscode:mcp/install?<url-encoded JSON>` (vscode-insiders: variant
+ *          supported by VS Code Insiders).
  *
  * Note: Claude Desktop previously had a `claude://settings/integrations/...`
- * deep link, but Anthropic has not shipped a `claude://` URL handler — the
- * click was a silent no-op on every platform. Until that scheme is real,
- * Claude Desktop uses the manual JSON-config path instead.
+ * scheme — Anthropic has not shipped a `claude://` URL handler, so the
+ * click was a silent no-op. Until that scheme is real, Claude Desktop and
+ * the other runtimes use the manual JSON-config path instead.
  */
 export function buildDeepLink(
-  client: 'cursor',
+  client: DeepLinkClient,
   credential: AgentCredentialJson,
   hostedUrl: string = resolveHostedMcpUrl(),
 ): string {
-  // `client` is currently always 'cursor', kept as a parameter so future
-  // runtimes with real deep-link schemes can re-join here without an API break.
-  void client
-
   const token = credential.api_key
+
+  if (client === 'vscode') {
+    // VS Code expects a URL-encoded JSON object describing the server.
+    const payload = JSON.stringify({
+      name: 'haven',
+      type: 'http',
+      url: hostedUrl,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return `vscode:mcp/install?${encodeURIComponent(payload)}`
+  }
+
+  // Cursor — base64-encoded headers blob.
   const headersJson = JSON.stringify({ Authorization: `Bearer ${token}` })
-  // btoa is Latin-1 only — use the encodeURIComponent + unescape idiom to
-  // safely handle any Unicode characters that may appear in hostedUrl or token
-  // (e.g. IDN hostnames set via NEXT_PUBLIC_HAVEN_MCP_URL). Without this,
-  // btoa throws a DOMException for characters outside the Latin-1 range.
+  // btoa is Latin-1 only — the encodeURIComponent + unescape idiom keeps
+  // Unicode (e.g. IDN hosts via NEXT_PUBLIC_HAVEN_MCP_URL) from throwing.
   const headersB64 =
     typeof btoa !== 'undefined'
       ? btoa(unescape(encodeURIComponent(headersJson)))
@@ -187,19 +475,18 @@ export function buildDeepLink(
   )
 }
 
-/**
- * CTA label for each deep-link button.
- */
-export const DEEP_LINK_LABEL: Record<'cursor', string> = {
+/** CTA label for each deep-link button. */
+export const DEEP_LINK_LABEL: Record<DeepLinkClient, string> = {
   cursor: 'Add to Cursor',
+  vscode: 'Add to VS Code',
 }
 
 /**
- * Whether a client has a deep-link path (as opposed to only a manual config
- * block). Used by `HostedConnectCard` to decide whether to render a button.
+ * Whether a client has a working deep-link install scheme. Driven by the
+ * registry's `oneClick` flag so it stays in sync with the tile chip.
  */
-export function hasDeepLink(client: HostedClientId): client is 'cursor' {
-  return client === 'cursor'
+export function hasDeepLink(client: HostedClientId): client is DeepLinkClient {
+  return client === 'cursor' || client === 'vscode'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
 import type { AgentCredentialJson } from '@/lib/agent-credential'
 import {
-  HOSTED_CLIENT_OPTIONS,
+  HOSTED_CLIENT_REGISTRY,
   buildHostedConnectSnippet,
   buildDeepLink,
   hasDeepLink,
@@ -15,28 +15,26 @@ import {
   probeHostedConnection,
   type HostedClientId,
   type HostedClientOption,
+  type HostedConnectSnippet,
   type ProbeResult,
   type ProbeStatus,
 } from '@/lib/hosted-connect'
 
 /**
- * Hosted Connect card — the redesigned Done-step surface (#187, #188, #189).
+ * Hosted Connect card — the Done-step surface for the Create Agent flow.
  *
- * Replaces `RuntimeConnectCard` for the hosted-MCP world. Renders a header,
- * a client picker, and (once a client is picked) the two-credential split:
+ * Layout:
+ *   - Header: status badge + agent name
+ *   - Tile grid: pick the runtime your agent runs in
+ *   - 1 · Connect section (revealed when a tile is picked):
+ *       · destination-path block with copy-path button
+ *       · code block with copy-snippet button
+ *       · post-note (e.g. "restart Claude Code")
+ *       · Test connection button + result chip
+ *   - 2 · Signing key section (delegate key stays on the user's machine)
  *
- *   1 · Connect            ←  remote URL + Bearer token, sent to Haven
- *   2 · Signing key 🔒     ←  delegate key, stays on the user's machine
- *
- * #188 additions:
- *   - Claude Desktop / Cursor: primary "Add to [App]" deep-link button
- *     + collapsible config fallback for manual placement.
- *   - Other / SDK: advanced disclosure (<details>) that exposes the
- *     local-server env-var and SDK snippet for power users.
- *
- * #189 additions:
- *   - `lastSeenAt` prop — when non-null, renders a green "Connected · last seen
- *     Xs ago" banner and collapses the setup steps. A toggle re-expands them.
+ * Custody invariant: the delegate private key never appears in the card body
+ * apart from the explicit Signing-key save/copy controls in section 2.
  */
 
 /** Format a timestamp into a human-readable "X ago" string. */
@@ -114,17 +112,14 @@ export function HostedConnectCard({
   const [probeState, setProbeState] = useState<
     { status: 'pending' } | (ProbeResult & { status: ProbeStatus }) | null
   >(null)
-  // #189: when connected, setup steps are collapsed; user can re-open them.
-  // Initialised to !isConnected — but since lastSeenAt starts null the hook
-  // resolves asynchronously, so we also sync via useEffect when isConnected
-  // changes from false → true (the auto-collapse-on-first-connect behaviour).
+  // When connected, setup steps are collapsed; user can re-open them.
   const [showSetupSteps, setShowSetupSteps] = useState(!isConnected)
   useEffect(() => {
     if (isConnected) setShowSetupSteps(false)
   }, [isConnected])
 
   const active = useMemo<HostedClientOption | null>(
-    () => HOSTED_CLIENT_OPTIONS.find((c) => c.id === activeId) ?? null,
+    () => HOSTED_CLIENT_REGISTRY.find((c) => c.id === activeId) ?? null,
     [activeId],
   )
 
@@ -198,7 +193,7 @@ export function HostedConnectCard({
             Connect {credential.agent_name} to where it runs
           </h3>
         </div>
-        {/* #189: re-expand toggle when connected */}
+        {/* Re-expand toggle when connected */}
         {isConnected && (
           <button
             type="button"
@@ -211,7 +206,7 @@ export function HostedConnectCard({
         )}
       </div>
 
-      {/* #189: Connected banner */}
+      {/* Connected banner */}
       {isConnected && lastSeenAt && (
         <div
           className="mt-3 flex items-center gap-2 rounded-[10px] border border-[var(--v2-success)]/25 bg-[var(--v2-success-soft)] px-3 py-2"
@@ -220,7 +215,7 @@ export function HostedConnectCard({
         >
           <svg
             aria-hidden="true"
-            className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success-strong)]"
+            className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -228,13 +223,13 @@ export function HostedConnectCard({
           >
             <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <span className="text-[12px] font-medium text-[var(--v2-success-strong)]">
+          <span className="text-[12px] font-medium text-[var(--v2-success)]">
             Connected &middot; last seen {formatRelativeTime(lastSeenAt)}
           </span>
         </div>
       )}
 
-      {/* #189: "Try it" prompt when connected + steps collapsed */}
+      {/* "Try it" prompt when connected + steps collapsed */}
       {isConnected && !showSetupSteps && (
         <div className="mt-3 rounded-[10px] border border-dashed border-[var(--v2-border)] bg-white p-3">
           <div className="text-[12px] font-medium text-[var(--v2-ink)]">Try it</div>
@@ -251,32 +246,22 @@ export function HostedConnectCard({
             never does.
           </p>
 
-          {/* Client picker */}
+          {/* Tile grid — 3 cols on sm+, 2 cols below. Tiles are toggle buttons,
+              not nested Cards (Haven UX guideline: tinted surfaces are reserved
+              for callouts/chips/code-blocks, not for grouping inside a Card). */}
           <div
-            className="mt-4 flex flex-wrap items-center gap-2"
+            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3"
             role="tablist"
             aria-label="Connect target"
           >
-            {HOSTED_CLIENT_OPTIONS.map((option) => {
-              const isActive = option.id === activeId
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  onClick={() => handlePickClient(option.id)}
-                  className={
-                    'rounded-[10px] border px-3 h-9 text-[13px] font-medium transition-colors ' +
-                    (isActive
-                      ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]'
-                      : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)]')
-                  }
-                >
-                  {option.label}
-                </button>
-              )
-            })}
+            {HOSTED_CLIENT_REGISTRY.map((option) => (
+              <RuntimeTile
+                key={option.id}
+                option={option}
+                active={option.id === activeId}
+                onPick={() => handlePickClient(option.id)}
+              />
+            ))}
           </div>
 
           {!active && (
@@ -300,8 +285,8 @@ export function HostedConnectCard({
                   1
                 </span>
                 <h4 className="text-[13px] font-semibold text-[var(--v2-ink)]">Connect</h4>
-                {active.destination && (
-                  <span className="text-[11px] text-[var(--v2-ink-3)]">{active.destination}</span>
+                {active.tagline && (
+                  <span className="text-[11px] text-[var(--v2-ink-3)]">{active.tagline}</span>
                 )}
               </div>
               <p className="mt-1 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
@@ -309,10 +294,8 @@ export function HostedConnectCard({
                 talk to Haven &mdash; it can&rsquo;t move money on its own.
               </p>
 
-              {/* Deep-link clients (Cursor only): primary button + collapsible
-                  config fallback. Claude Desktop falls through to the direct
-                  config-block branch below — the claude:// scheme isn't real
-                  yet, so a button there would silently no-op. */}
+              {/* Deep-link clients: primary button + collapsible config fallback.
+                  Others fall through to the inline destination + snippet pair. */}
               {hasDeepLink(active.id) ? (
                 <div className="mt-3 space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
@@ -329,48 +312,19 @@ export function HostedConnectCard({
                   </div>
 
                   {showConfigFallback && (
-                    <div>
-                      <p className="text-[12px] leading-relaxed text-[var(--v2-ink-3)]">
-                        {snippet.guidance}
-                      </p>
-                      <ConnectCodeBlock
-                        snippet={snippet}
-                        copied={copiedConnect}
-                        onCopy={() => void handleCopyConnect()}
-                      />
-                    </div>
+                    <ManualConfigBlock
+                      snippet={snippet}
+                      copied={copiedConnect}
+                      onCopy={() => void handleCopyConnect()}
+                    />
                   )}
                 </div>
               ) : (
-                /* Claude Code / Claude Desktop / Other: show the snippet directly */
-                <div className="mt-3">
-                  <p className="text-[12px] leading-relaxed text-[var(--v2-ink-3)]">
-                    {snippet.guidance}
-                  </p>
-                  <ConnectCodeBlock
-                    snippet={snippet}
-                    copied={copiedConnect}
-                    onCopy={() => void handleCopyConnect()}
-                  />
-                  {snippet.destinationPaths && snippet.destinationPaths.length > 0 && (
-                    <dl
-                      className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-[var(--v2-ink-3)]"
-                      aria-label="Config file paths"
-                    >
-                      {snippet.destinationPaths.map((p) => (
-                        <div key={p.label} className="contents">
-                          <dt className="font-medium text-[var(--v2-ink-2)]">{p.label}</dt>
-                          <dd className="font-mono break-all">{p.path}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
-                  {snippet.postNote && (
-                    <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                      {snippet.postNote}
-                    </p>
-                  )}
-                </div>
+                <ManualConfigBlock
+                  snippet={snippet}
+                  copied={copiedConnect}
+                  onCopy={() => void handleCopyConnect()}
+                />
               )}
 
               {/* Test connection — browser-side probe against the hosted MCP
@@ -505,6 +459,195 @@ export function HostedConnectCard({
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A single runtime tile. Acts as a toggle button — does not render as a
+ * nested filled Card (Haven UX guideline). The selected state uses
+ * brand-soft for clear differentiation; the chip-style is reserved for the
+ * one-click ⚡ badge which sits inside the tile.
+ */
+function RuntimeTile({
+  option,
+  active,
+  onPick,
+}: {
+  option: HostedClientOption
+  active: boolean
+  onPick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onPick}
+      className={
+        'group flex h-full min-h-[68px] flex-col items-start justify-between gap-2 rounded-[10px] border px-3 py-2.5 text-left transition-colors ' +
+        (active
+          ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]'
+          : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink)] hover:border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]')
+      }
+    >
+      <div className="flex w-full items-center justify-between gap-2">
+        <span className="text-[13px] font-semibold leading-tight">{option.label}</span>
+        {option.oneClick && <OneClickChip active={active} />}
+      </div>
+      {option.tagline && (
+        <span
+          className={
+            'text-[11px] leading-tight ' +
+            (active ? 'text-[var(--v2-brand-strong)]/70' : 'text-[var(--v2-ink-3)]')
+          }
+        >
+          {option.tagline}
+        </span>
+      )}
+    </button>
+  )
+}
+
+function OneClickChip({ active }: { active: boolean }) {
+  return (
+    <span
+      aria-label="one-click install"
+      className={
+        'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ' +
+        (active
+          ? 'bg-white/70 text-[var(--v2-brand-strong)]'
+          : 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]')
+      }
+    >
+      <svg
+        aria-hidden="true"
+        className="h-2.5 w-2.5"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        strokeLinejoin="round"
+      >
+        <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" />
+      </svg>
+      1-click
+    </span>
+  )
+}
+
+/**
+ * The "manual config" pair: destination-path block above + code block below.
+ * Used for non-one-click runtimes, and inside the "Didn't work? Show config"
+ * fallback for one-click runtimes too.
+ */
+function ManualConfigBlock({
+  snippet,
+  copied,
+  onCopy,
+}: {
+  snippet: HostedConnectSnippet
+  copied: boolean
+  onCopy: () => void
+}) {
+  return (
+    <div className="mt-3 space-y-2.5">
+      <p className="text-[12px] leading-relaxed text-[var(--v2-ink-3)]">{snippet.guidance}</p>
+      {snippet.destinationPaths && snippet.destinationPaths.length > 0 && (
+        <DestinationPathBlock paths={snippet.destinationPaths} />
+      )}
+      <ConnectCodeBlock snippet={snippet} copied={copied} onCopy={onCopy} />
+      {snippet.postNote && (
+        <p className="text-[12px] leading-relaxed text-[var(--v2-ink-2)]">{snippet.postNote}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Prominent destination-path block. Renders the file path(s) where the
+ * snippet should be saved, each with a Copy-path button so the user can
+ * navigate straight to the file without having to read the snippet to
+ * figure out where it goes.
+ *
+ * Single-path runtimes (e.g. Cursor) render as one row with a folder
+ * marker. Multi-path runtimes (Claude Desktop OS variants, VS Code
+ * workspace vs user) render as a labelled row list.
+ */
+function DestinationPathBlock({ paths }: { paths: { label: string; path: string }[] }) {
+  const isMulti = paths.length > 1
+
+  return (
+    <div
+      className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white"
+      aria-label="Where to save"
+    >
+      <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-1.5">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+          {isMulti ? 'Save to one of' : 'Save to'}
+        </span>
+      </div>
+      <ul className="divide-y divide-[var(--v2-border)]">
+        {paths.map((p) => (
+          <DestinationPathRow key={`${p.label}-${p.path}`} path={p} showLabel={isMulti} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function DestinationPathRow({
+  path,
+  showLabel,
+}: {
+  path: { label: string; path: string }
+  showLabel: boolean
+}) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(path.path)
+    } catch {
+      /* clipboard can fail in restricted contexts */
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [path.path])
+
+  return (
+    <li className="flex items-center gap-3 px-3 py-2">
+      <FolderIcon className="h-3.5 w-3.5 shrink-0 text-[var(--v2-ink-3)]" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {showLabel && (
+          <span className="text-[11px] font-medium text-[var(--v2-ink-2)]">{path.label}</span>
+        )}
+        <code className="overflow-x-auto whitespace-nowrap font-mono text-[12px] leading-snug text-[var(--v2-ink)]">
+          {path.path}
+        </code>
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => void handleCopy()}
+        aria-label={`Copy ${path.label} path`}
+      >
+        {copied ? 'Copied' : 'Copy path'}
+      </Button>
+    </li>
+  )
+}
+
+function FolderIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+    </svg>
+  )
+}
+
 function ProbeResultChip({ result }: { result: ProbeResult }) {
   // Tones reuse the defined v2-* tokens. `*-strong` isn't a defined token, so
   // we use the base `--v2-success` / `--v2-warning` / `--v2-danger` colors
@@ -540,12 +683,12 @@ function ConnectCodeBlock({
   onCopy: () => void
 }) {
   return (
-    <div className="mt-2 overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+    <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]">
       <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-3 py-1.5">
         <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
           {snippet.language}
         </span>
-        <Button variant="ghost" size="sm" onClick={onCopy}>
+        <Button variant="ghost" size="sm" onClick={onCopy} aria-label="Copy snippet">
           {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>

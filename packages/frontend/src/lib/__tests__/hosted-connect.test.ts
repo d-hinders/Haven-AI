@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  buildDeepLink,
   buildHostedConnectSnippet,
-  HOSTED_CLIENT_OPTIONS,
+  HOSTED_CLIENT_REGISTRY,
   hasDeepLink,
   probeHostedConnection,
   resolveHostedMcpUrl,
@@ -43,13 +44,18 @@ describe('resolveHostedMcpUrl', () => {
 describe('buildHostedConnectSnippet', () => {
   const HOST = 'https://mcp.test.example/v1'
 
-  for (const client of HOSTED_CLIENT_OPTIONS.map((o) => o.id) as HostedClientId[]) {
-    it(`includes the api key and URL but never the delegate key for ${client}`, () => {
-      const snippet = buildHostedConnectSnippet(client, credential(), HOST)
+  // Custody invariant: every registered runtime — including any new ones
+  // added in the future — must carry the bearer (identity) but never the
+  // delegate private key (authority). The loop is the regression net.
+  for (const option of HOSTED_CLIENT_REGISTRY) {
+    it(`includes the api key + URL but never the delegate key for ${option.id}`, () => {
+      const snippet = buildHostedConnectSnippet(option.id, credential(), HOST)
       expect(snippet.code).toContain(API_KEY)
+      // Most runtimes inline the URL. Codex CLI uses an env-var pattern that
+      // moves the actual bearer into the shell — that's fine, but the
+      // hosted URL must still appear in the snippet so the user knows where
+      // their agent is pointed.
       expect(snippet.code).toContain(HOST)
-      // Custody invariant at the snippet boundary: the delegate key never
-      // appears in the box-1 connect command.
       expect(snippet.code).not.toContain(DELEGATE_KEY)
     })
   }
@@ -73,10 +79,86 @@ describe('buildHostedConnectSnippet', () => {
     }
   })
 
+  it('emits VS Code\'s `servers.<name>.type = "http"` shape', () => {
+    // VS Code's MCP config uses `servers` (not `mcpServers`) and requires
+    // an explicit `type: "http"`. Getting this wrong silently puts the
+    // server in stdio mode and produces "Failed to start" with no clue why.
+    const s = buildHostedConnectSnippet('vscode', credential(), HOST)
+    expect(s.language).toBe('json')
+    const parsed = JSON.parse(s.code) as {
+      servers: { haven: { type: string; url: string; headers: Record<string, string> } }
+    }
+    expect(parsed.servers.haven.type).toBe('http')
+    expect(parsed.servers.haven.url).toBe(HOST)
+    expect(parsed.servers.haven.headers.Authorization).toBe(`Bearer ${API_KEY}`)
+  })
+
+  it('emits Windsurf\'s `serverUrl` (not `url`) shape', () => {
+    // Windsurf is the odd one out among the JSON runtimes — its MCP config
+    // expects `serverUrl`, not `url`. Easy to miss in a copy-from-Cursor.
+    const s = buildHostedConnectSnippet('windsurf', credential(), HOST)
+    const parsed = JSON.parse(s.code) as {
+      mcpServers: { haven: { serverUrl: string; headers: Record<string, string> } }
+    }
+    expect(parsed.mcpServers.haven.serverUrl).toBe(HOST)
+    expect(parsed.mcpServers.haven.headers.Authorization).toBe(`Bearer ${API_KEY}`)
+  })
+
+  it('emits Continue.dev\'s YAML shape with type: streamable-http', () => {
+    const s = buildHostedConnectSnippet('continue', credential(), HOST)
+    expect(s.language).toBe('yaml')
+    expect(s.code).toMatch(/type:\s*streamable-http/)
+    expect(s.code).toMatch(/url:\s*https:\/\/mcp\.test\.example\/v1/)
+    expect(s.code).toContain(`Authorization: Bearer ${API_KEY}`)
+  })
+
+  it('emits Cline\'s JSON shape with the saoudrizwan settings path', () => {
+    const s = buildHostedConnectSnippet('cline', credential(), HOST)
+    const parsed = JSON.parse(s.code) as {
+      mcpServers: { haven: { url: string; headers: Record<string, string>; disabled: boolean } }
+    }
+    expect(parsed.mcpServers.haven.url).toBe(HOST)
+    expect(parsed.mcpServers.haven.disabled).toBe(false)
+    const macPath = s.destinationPaths?.find((p) => p.label.startsWith('macOS'))?.path
+    expect(macPath).toContain('saoudrizwan.claude-dev')
+  })
+
+  it('emits Codex CLI\'s TOML shape with the bearer in an env var', () => {
+    // Codex's config references an env var rather than inlining the
+    // bearer — that's better hygiene (no token in the dotfile) and is the
+    // documented pattern. The snippet must include the export line so
+    // users don't paste the TOML and then wonder where to put the token.
+    const s = buildHostedConnectSnippet('codex-cli', credential(), HOST)
+    expect(s.language).toBe('toml')
+    expect(s.code).toMatch(/\[mcp_servers\.haven\]/)
+    expect(s.code).toMatch(/bearer_token_env_var\s*=\s*"HAVEN_TOKEN"/)
+    expect(s.code).toContain(`export HAVEN_TOKEN=${API_KEY}`)
+  })
+
+  it('emits OpenCode\'s JSON shape under `mcp.<name>` with type: remote', () => {
+    const s = buildHostedConnectSnippet('opencode', credential(), HOST)
+    const parsed = JSON.parse(s.code) as {
+      mcp: { haven: { type: string; url: string; headers: Record<string, string> } }
+    }
+    expect(parsed.mcp.haven.type).toBe('remote')
+    expect(parsed.mcp.haven.url).toBe(HOST)
+  })
+
+  it('emits Goose\'s YAML shape under `extensions.<name>`', () => {
+    const s = buildHostedConnectSnippet('goose', credential(), HOST)
+    expect(s.language).toBe('yaml')
+    expect(s.code).toMatch(/extensions:\s*\n\s*haven:/)
+    expect(s.code).toContain(`Authorization: Bearer ${API_KEY}`)
+  })
+
+  it('emits an `amp mcp add` CLI command for Amp', () => {
+    const s = buildHostedConnectSnippet('amp', credential(), HOST)
+    expect(s.language).toBe('bash')
+    expect(s.code).toMatch(/amp mcp add haven/)
+    expect(s.code).toContain(`Bearer ${API_KEY}`)
+  })
+
   it('attaches platform-specific config paths to the Claude Desktop snippet', () => {
-    // The claude:// deep link doesn't exist yet, so Claude Desktop falls back
-    // to the manual config-file paste path. Users need the OS-specific path
-    // surfaced inline — otherwise they have to leave the modal to find it.
     const s = buildHostedConnectSnippet('claude-desktop', credential(), HOST)
     expect(s.destinationPaths).toBeDefined()
     const labels = (s.destinationPaths ?? []).map((p) => p.label).sort()
@@ -85,32 +167,93 @@ describe('buildHostedConnectSnippet', () => {
     expect(macPath).toContain('claude_desktop_config.json')
   })
 
+  it('attaches workspace + user paths to the VS Code snippet', () => {
+    // VS Code is the multi-scope runtime — workspace `.vscode/mcp.json`
+    // lands at the project level while user-scope is in the VS Code
+    // user-data dir. Both must be discoverable from the modal.
+    const s = buildHostedConnectSnippet('vscode', credential(), HOST)
+    const labels = (s.destinationPaths ?? []).map((p) => p.label)
+    expect(labels).toContain('Workspace')
+    expect(labels.some((l) => l.startsWith('User'))).toBe(true)
+  })
+
   it('attaches a restart-required postNote to the Claude Code snippet', () => {
-    // Claude Code caches the MCP server list at session start, so the
-    // running session won't pick up the new tools until it's restarted.
     const s = buildHostedConnectSnippet('claude-code', credential(), HOST)
     expect(s.postNote).toBeDefined()
     expect(s.postNote!).toMatch(/restart|session start|run `?claude`?/i)
   })
 
   it('does not attach a postNote or destinationPaths to runtimes that do not need one', () => {
+    // Cursor's primary surface is the one-click button — there's no file
+    // to surface a path for in the primary flow. Same for `other` (the
+    // generic SDK escape hatch).
     for (const c of ['cursor', 'other'] as HostedClientId[]) {
       const s = buildHostedConnectSnippet(c, credential(), HOST)
       expect(s.postNote).toBeUndefined()
-      expect(s.destinationPaths).toBeUndefined()
+      if (c === 'other') expect(s.destinationPaths).toBeUndefined()
     }
   })
 })
 
 describe('hasDeepLink', () => {
-  // The claude:// scheme is not registered by Claude Desktop today, so the
-  // "Add to Claude" button silently no-ops. Until Anthropic ships a real
-  // handler, only Cursor's deep link works.
-  it('reports Cursor as the only runtime with a working deep link', () => {
+  // Real deep-link schemes only — Cursor's `cursor://` and VS Code's
+  // `vscode:mcp/install?`. Adding a third requires real verification
+  // that the scheme is actually registered by the runtime; broken
+  // deep links erode trust faster than missing ones.
+  it('reports Cursor and VS Code as the runtimes with working deep links', () => {
     expect(hasDeepLink('cursor')).toBe(true)
+    expect(hasDeepLink('vscode')).toBe(true)
     expect(hasDeepLink('claude-desktop')).toBe(false)
     expect(hasDeepLink('claude-code')).toBe(false)
+    expect(hasDeepLink('windsurf')).toBe(false)
+    expect(hasDeepLink('continue')).toBe(false)
+    expect(hasDeepLink('cline')).toBe(false)
+    expect(hasDeepLink('codex-cli')).toBe(false)
+    expect(hasDeepLink('opencode')).toBe(false)
+    expect(hasDeepLink('goose')).toBe(false)
+    expect(hasDeepLink('amp')).toBe(false)
     expect(hasDeepLink('other')).toBe(false)
+  })
+
+  it('matches the registry\'s `oneClick` flag — chip and deep link stay in sync', () => {
+    // A drift between the chip ("1-click" badge on the tile) and the actual
+    // deep-link availability would mean a user clicks a one-click tile and
+    // gets… a config snippet. Catch that here.
+    for (const option of HOSTED_CLIENT_REGISTRY) {
+      expect(hasDeepLink(option.id)).toBe(Boolean(option.oneClick))
+    }
+  })
+})
+
+describe('buildDeepLink', () => {
+  const HOST = 'https://mcp.test.example/v1'
+
+  it('builds a cursor:// URL that carries the bearer base64-encoded and never the delegate key', () => {
+    const url = buildDeepLink('cursor', credential(), HOST)
+    expect(url).toMatch(/^cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?/)
+    expect(url).not.toContain(DELEGATE_KEY)
+    // Headers blob is base64-encoded in the `headers` query param.
+    const headersParam = url.match(/headers=([^&]+)/)?.[1]
+    expect(headersParam).toBeDefined()
+    const decoded = atob(decodeURIComponent(headersParam!))
+    expect(decoded).toContain(`Bearer ${API_KEY}`)
+  })
+
+  it('builds a vscode:mcp/install URL with URL-encoded JSON and never the delegate key', () => {
+    const url = buildDeepLink('vscode', credential(), HOST)
+    expect(url).toMatch(/^vscode:mcp\/install\?/)
+    expect(url).not.toContain(DELEGATE_KEY)
+    const payload = decodeURIComponent(url.replace(/^vscode:mcp\/install\?/, ''))
+    const parsed = JSON.parse(payload) as {
+      name: string
+      type: string
+      url: string
+      headers: Record<string, string>
+    }
+    expect(parsed.name).toBe('haven')
+    expect(parsed.type).toBe('http')
+    expect(parsed.url).toBe(HOST)
+    expect(parsed.headers.Authorization).toBe(`Bearer ${API_KEY}`)
   })
 })
 

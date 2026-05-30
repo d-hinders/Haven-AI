@@ -27,13 +27,13 @@ import {
  * Layout:
  *   - Header: status badge + agent name
  *   - Tile grid: pick the runtime your agent runs in
- *   - 1 · Copy setup prompt (revealed when a tile is picked)
- *   - 2 · Manual setup disclosure:
+ *   - Recommended path: copy setup prompt (revealed when a tile is picked)
+ *   - Optional fallback: manual setup disclosure:
  *       · destination-path block with copy-path button
  *       · code block with copy-snippet button
  *       · post-note (e.g. "restart Claude Code")
- *       · Test connection button + result chip
  *       · Signing key copy for manual setup
+ *   - Test connection button beside the recommended handoff path
  *
  * Custody invariant: the delegate private key never appears in the card body
  * until the user explicitly expands manual setup.
@@ -305,16 +305,14 @@ export function HostedConnectCard({
 
       {active && snippet && setupPrompt && (
         <div key={active.id} className="v2-animate-step-rise mt-4 space-y-4">
-          {/* ── 1 · Copy setup prompt ──────────────────────────────────
+          {/* ── Recommended path · Copy setup prompt ───────────────────
               The full prompt contains the connect token and signing key, so
               it is copied directly and never rendered in the card by default. */}
           {(!isConnected || showSetupSteps) && (
             <Card.Section>
               <div className="py-4">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[11px] font-semibold text-[var(--v2-brand-strong)]">
-                    1
-                  </span>
+                  <StatusBadge tone="brand">Recommended</StatusBadge>
                   <h4 className="text-[13px] font-semibold text-[var(--v2-ink)]">
                     Copy setup prompt
                   </h4>
@@ -335,11 +333,42 @@ export function HostedConnectCard({
                     Paste only into an agent or workspace you trust.
                   </span>
                 </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void handleTestConnection()}
+                    disabled={probeState?.status === 'pending'}
+                    aria-label="Test connection"
+                  >
+                    {probeState?.status === 'pending' ? 'Testing…' : 'Test connection'}
+                  </Button>
+                  <span className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                    Checks that Haven&rsquo;s tools can be reached with this credential.
+                  </span>
+                  {probeState && probeState.status !== 'pending' && (
+                    <ProbeResultChip result={probeState} />
+                  )}
+                </div>
+                {probeState && probeState.status !== 'pending' && probeState.detail && (
+                  <p
+                    role="status"
+                    className={
+                      'mt-1.5 text-[11px] leading-relaxed ' +
+                      (probeState.status === 'ok'
+                        ? 'text-[var(--v2-success)]'
+                        : 'text-[var(--v2-ink-3)]')
+                    }
+                  >
+                    {probeState.detail}
+                  </p>
+                )}
               </div>
             </Card.Section>
           )}
 
-          {/* ── 2 · Manual setup ─────────────────────────────────────── */}
+          {/* ── Optional fallback · Manual setup ─────────────────────── */}
           {(!isConnected || showSetupSteps) && (
             <Card.Section>
               <div className="py-4">
@@ -351,15 +380,16 @@ export function HostedConnectCard({
                 >
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[11px] font-semibold text-[var(--v2-brand-strong)]">
-                        2
+                      <span className="inline-flex items-center rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-2)]">
+                        Optional
                       </span>
                       <span className="text-[13px] font-semibold text-[var(--v2-ink)]">
-                        Set up manually
+                        Manual setup
                       </span>
                     </span>
                     <span className="mt-1.5 block text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                      Use this if you want to add the config yourself or copy only the signing key.
+                      Not needed if you use the setup prompt. Open this only if you want to add the
+                      config yourself or copy only the signing key.
                     </span>
                   </span>
                   <svg
@@ -408,34 +438,6 @@ export function HostedConnectCard({
                         copied={copiedConnect}
                         onCopy={() => void handleCopyConnect()}
                       />
-                    )}
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void handleTestConnection()}
-                        disabled={probeState?.status === 'pending'}
-                        aria-label="Test connection"
-                      >
-                        {probeState?.status === 'pending' ? 'Testing…' : 'Test connection'}
-                      </Button>
-                      {probeState && probeState.status !== 'pending' && (
-                        <ProbeResultChip result={probeState} />
-                      )}
-                    </div>
-                    {probeState && probeState.status !== 'pending' && probeState.detail && (
-                      <p
-                        role="status"
-                        className={
-                          'text-[11px] leading-relaxed ' +
-                          (probeState.status === 'ok'
-                            ? 'text-[var(--v2-success)]'
-                            : 'text-[var(--v2-ink-3)]')
-                        }
-                      >
-                        {probeState.detail}
-                      </p>
                     )}
 
                     <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3">

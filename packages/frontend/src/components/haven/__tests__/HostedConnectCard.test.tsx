@@ -46,7 +46,7 @@ function escapeRegExp(s: string): string {
 }
 
 function openManualSetup() {
-  fireEvent.click(screen.getByRole('button', { name: /Set up manually/i }))
+  fireEvent.click(screen.getByRole('button', { name: /Manual setup/i }))
 }
 
 describe('HostedConnectCard', () => {
@@ -79,14 +79,20 @@ describe('HostedConnectCard', () => {
 
     fireEvent.click(tabByLabel('Claude Code'))
 
+    expect(screen.getByText('Recommended')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Copy setup prompt' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Copy setup prompt/i })).toBeInTheDocument()
     expect(screen.getByText(/connect your Haven credential/i)).toBeInTheDocument()
     expect(screen.getByText(/agent budget/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Set up manually/i })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /Test connection/i })).toBeInTheDocument()
+    expect(screen.getByText(/Haven.s tools can be reached with this credential/i)).toBeInTheDocument()
+    expect(screen.getByText('Optional')).toBeInTheDocument()
+    expect(screen.getByText(/Not needed if you use the setup prompt/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Manual setup/i })).toHaveAttribute(
       'aria-expanded',
       'false',
     )
+    expect(screen.queryByText('Set up manually')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Signing key' })).not.toBeInTheDocument()
   })
 
@@ -387,8 +393,10 @@ describe('HostedConnectCard', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Codex CLI'))
 
-    const toggle = screen.getByRole('button', { name: /Set up manually/i })
+    const toggle = screen.getByRole('button', { name: /Manual setup/i })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveTextContent(/optional/i)
+    expect(toggle).toHaveTextContent(/not needed if you use the setup prompt/i)
     expect(screen.queryByText('toml')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Copy signing key/i })).not.toBeInTheDocument()
 
@@ -422,7 +430,7 @@ describe('HostedConnectCard', () => {
     rerender(<HostedConnectCard credential={credential()} lastSeenAt={lastSeenAt} />)
 
     expect(screen.getByRole('status', { name: /agent connected/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Set up manually/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Manual setup/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /show setup steps/i }))
     openManualSetup()
@@ -554,9 +562,8 @@ describe('HostedConnectCard', () => {
 
     expect(screen.queryByRole('button', { name: /test connection/i })).not.toBeInTheDocument()
     fireEvent.click(tabByLabel('Claude Code'))
-    expect(screen.queryByRole('button', { name: /test connection/i })).not.toBeInTheDocument()
-    openManualSetup()
     expect(screen.getByRole('button', { name: /test connection/i })).toBeInTheDocument()
+    expect(screen.getByText(/Haven.s tools can be reached with this credential/i)).toBeInTheDocument()
   })
 
   it('shows a "Connected" chip with the tool count on a successful probe', async () => {
@@ -575,7 +582,6 @@ describe('HostedConnectCard', () => {
     try {
       render(<HostedConnectCard credential={credential()} />)
       fireEvent.click(tabByLabel('Claude Code'))
-      openManualSetup()
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
       await waitFor(() => {
@@ -595,7 +601,6 @@ describe('HostedConnectCard', () => {
     try {
       render(<HostedConnectCard credential={credential()} />)
       fireEvent.click(tabByLabel('Claude Code'))
-      openManualSetup()
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
       await waitFor(() => {
@@ -615,7 +620,6 @@ describe('HostedConnectCard', () => {
     try {
       render(<HostedConnectCard credential={credential()} />)
       fireEvent.click(tabByLabel('Claude Code'))
-      openManualSetup()
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
       await waitFor(() => {
@@ -638,7 +642,6 @@ describe('HostedConnectCard', () => {
     try {
       render(<HostedConnectCard credential={credential()} />)
       fireEvent.click(tabByLabel('Claude Code'))
-      openManualSetup()
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
       await waitFor(() => {

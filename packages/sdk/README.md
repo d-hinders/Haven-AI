@@ -178,8 +178,12 @@ for (const block of response.content) {
 |------|-------------|
 | `make_payment` | Request and sign a payment from the user-controlled Safe within approved limits |
 | `get_payment_status` | Check the status of a payment intent or approval request |
+| `get_allowances` | Read configured and on-chain allowance state, including spent and remaining allowance |
 | `authorize_x402_payment` | Authorize a policy-limited x402 payment and return a payment header for an HTTP 402 resource |
 | `resume_x402_payment` | Resume an approved x402 payment and return a merchant payment header without creating a duplicate approval |
+| `authorize_machine_payment` | Authorize an internal Haven MPP demo challenge and return proof details |
+
+Use `get_allowances` for allowance, budget, spend-limit, remaining amount, reset-period, or "what can I spend?" questions. Payment tools still require the agent-held delegate key and on-chain Safe allowance state; the Haven API key identifies the agent but does not authorize spending by itself.
 
 ## Configuration
 

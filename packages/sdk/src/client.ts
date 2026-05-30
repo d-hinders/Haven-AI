@@ -2083,6 +2083,10 @@ export class HavenClient {
       }
     }
 
+    if (toolName === 'get_allowances') {
+      return { ...await this.getAllowances() }
+    }
+
     throw new Error(`Unknown tool: ${toolName}`)
   }
 

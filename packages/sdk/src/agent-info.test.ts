@@ -42,57 +42,19 @@ describe('agent info helpers', () => {
   })
 
   it('maps allowance summaries', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({
-        agent_id: 'agent-1',
-        safe_address: '0xSafe',
-        delegate_address: '0xDelegate',
-        chain_id: 8453,
-        allowances: [{
-          id: 'allowance-1',
-          token_address: '0xToken',
-          token_symbol: 'USDC',
-          configured_amount: '10000',
-          reset_period_min: 60,
-          onchain: {
-            amount: '10000',
-            spent: '2500',
-            remaining: '7500',
-            effective_spent: '2500',
-            reset_time_min: 60,
-            last_reset_min: 100,
-            nonce: 7,
-            is_reset_pending: false,
-          },
-        }],
-      })),
-    )
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(allowancesResponse())
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
 
-    await expect(haven.getAllowances()).resolves.toEqual({
-      agentId: 'agent-1',
-      safeAddress: '0xSafe',
-      delegateAddress: '0xDelegate',
-      chainId: 8453,
-      allowances: [{
-        id: 'allowance-1',
-        tokenAddress: '0xToken',
-        tokenSymbol: 'USDC',
-        configuredAmount: '10000',
-        resetPeriodMin: 60,
-        onchain: {
-          amount: '10000',
-          spent: '2500',
-          remaining: '7500',
-          effectiveSpent: '2500',
-          resetTimeMin: 60,
-          lastResetMin: 100,
-          nonce: 7,
-          isResetPending: false,
-        },
-      }],
-    })
+    await expect(haven.getAllowances()).resolves.toEqual(mappedAllowances)
+  })
+
+  it('executes the get_allowances tool with the same allowance summary mapping', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(allowancesResponse())
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+
+    await expect(haven.executeTool('get_allowances', {})).resolves.toEqual(mappedAllowances)
   })
 
   it('maps receipt listings and omits proof header values', async () => {
@@ -159,3 +121,53 @@ describe('agent info helpers', () => {
     }])
   })
 })
+
+const mappedAllowances = {
+  agentId: 'agent-1',
+  safeAddress: '0xSafe',
+  delegateAddress: '0xDelegate',
+  chainId: 8453,
+  allowances: [{
+    id: 'allowance-1',
+    tokenAddress: '0xToken',
+    tokenSymbol: 'USDC',
+    configuredAmount: '10000',
+    resetPeriodMin: 60,
+    onchain: {
+      amount: '10000',
+      spent: '2500',
+      remaining: '7500',
+      effectiveSpent: '2500',
+      resetTimeMin: 60,
+      lastResetMin: 100,
+      nonce: 7,
+      isResetPending: false,
+    },
+  }],
+}
+
+function allowancesResponse(): Response {
+  return new Response(JSON.stringify({
+    agent_id: 'agent-1',
+    safe_address: '0xSafe',
+    delegate_address: '0xDelegate',
+    chain_id: 8453,
+    allowances: [{
+      id: 'allowance-1',
+      token_address: '0xToken',
+      token_symbol: 'USDC',
+      configured_amount: '10000',
+      reset_period_min: 60,
+      onchain: {
+        amount: '10000',
+        spent: '2500',
+        remaining: '7500',
+        effective_spent: '2500',
+        reset_time_min: 60,
+        last_reset_min: 100,
+        nonce: 7,
+        is_reset_pending: false,
+      },
+    }],
+  }))
+}

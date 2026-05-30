@@ -1,8 +1,8 @@
 /**
  * Pre-built tool definitions for AI agent frameworks.
  *
- * These definitions describe the `make_payment` and `get_payment_status` tools
- * in the formats expected by Claude (Anthropic) and OpenAI.
+ * These definitions describe Haven's direct SDK tool-calling surface in the
+ * formats expected by Claude (Anthropic) and OpenAI.
  *
  * The agent payment surface used by these tools is shared with the
  * `@haven_ai/mcp` server — both consume `toolDescriptions` from
@@ -24,7 +24,7 @@
  *   })
  */
 
-import { toolDescriptions as sharedDescriptions } from './tool-descriptions.js'
+import { composeDescription, toolDescriptions as sharedDescriptions } from './tool-descriptions.js'
 
 // ── JSON Schema (shared across formats) ──────────────────────────
 
@@ -60,6 +60,12 @@ const getPaymentStatusSchema = {
     },
   },
   required: ['payment_id'] as const,
+}
+
+const getAllowancesSchema = {
+  type: 'object' as const,
+  properties: {},
+  required: [] as const,
 }
 
 const authorizeX402Schema = {
@@ -149,6 +155,7 @@ const authorizeMachinePaymentSchema = {
 
 const MAKE_PAYMENT_DESCRIPTION =
   'Request and sign a payment from the user-controlled Safe within approved on-chain limits. ' +
+  'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions, use get_allowances instead of making a payment. ' +
   'Haven authenticates the agent, validates the signed intent, and relays the Safe AllowanceModule transaction; it does not hold keys or control funds. ' +
   'Gnosis Chain tokens: EURe, USDC.e, xDAI. Base tokens: USDC, ETH.'
 
@@ -161,8 +168,11 @@ const GET_STATUS_DESCRIPTION =
   sharedDescriptions.getPaymentStatus.summary + ' ' +
   'Accepts payment intent IDs and approval request IDs. Returns the current status, phase, next_action, transaction hash if available, and payment details.'
 
+const GET_ALLOWANCES_DESCRIPTION = composeDescription(sharedDescriptions.getAllowances)
+
 const AUTHORIZE_X402_DESCRIPTION =
-  sharedDescriptions.payX402.summary + ' ' +
+  composeDescription(sharedDescriptions.payX402) + ' ' +
+  'In this SDK tool set, the allowance lookup tool is get_allowances. ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key and request a policy-limited Safe AllowanceModule top-up when needed. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
   'If this returns pending_approval, tell the user it is waiting in Haven, preserve the original merchant/MCP session and x402 details, call get_payment_status later, and use resume_x402_payment only when next_action is retry_original_x402_request. Do not start a new merchant session or loop retries while approval is pending. ' +
@@ -174,7 +184,8 @@ const RESUME_X402_DESCRIPTION =
   'It checks the approved payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new approval request or merchant session.'
 
 const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =
-  sharedDescriptions.payMpp.summary + ' ' +
+  composeDescription(sharedDescriptions.payMpp) + ' ' +
+  'In this SDK tool set, the allowance lookup tool is get_allowances. ' +
   'Currently scoped to the internal MPP demo rail. ' +
   'The agent signs the payment, Haven relays it within the on-chain allowance, and the tool returns a proof header for the retry request.'
 
@@ -201,6 +212,11 @@ function claudeTools(): ClaudeTool[] {
       name: 'get_payment_status',
       description: GET_STATUS_DESCRIPTION,
       input_schema: getPaymentStatusSchema,
+    },
+    {
+      name: 'get_allowances',
+      description: GET_ALLOWANCES_DESCRIPTION,
+      input_schema: getAllowancesSchema,
     },
     {
       name: 'authorize_x402_payment',
@@ -251,6 +267,14 @@ function openaiTools(): OpenAITool[] {
         name: 'get_payment_status',
         description: GET_STATUS_DESCRIPTION,
         parameters: getPaymentStatusSchema,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_allowances',
+        description: GET_ALLOWANCES_DESCRIPTION,
+        parameters: getAllowancesSchema,
       },
     },
     {

@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/Button'
 import type { AgentCredentialJson } from '@/lib/agent-credential'
 import {
   HOSTED_CLIENT_REGISTRY,
-  buildAgentStarterPrompt,
   buildHostedConnectSnippet,
+  buildHostedSetupPrompt,
   buildDeepLink,
   hasDeepLink,
   DEEP_LINK_LABEL,
@@ -27,15 +27,16 @@ import {
  * Layout:
  *   - Header: status badge + agent name
  *   - Tile grid: pick the runtime your agent runs in
- *   - 1 · Connect section (revealed when a tile is picked):
+ *   - Recommended path: copy setup prompt (revealed when a tile is picked)
+ *   - Optional fallback: manual setup disclosure:
  *       · destination-path block with copy-path button
  *       · code block with copy-snippet button
  *       · post-note (e.g. "restart Claude Code")
- *       · Test connection button + result chip
- *   - 2 · Signing key section (delegate key stays on the user's machine)
+ *       · Signing key copy for manual setup
+ *   - Test connection button beside the recommended handoff path
  *
  * Custody invariant: the delegate private key never appears in the card body
- * apart from the explicit Signing-key save/copy controls in section 2.
+ * until the user explicitly expands manual setup.
  */
 
 /** Format a timestamp into a human-readable "X ago" string. */
@@ -107,14 +108,11 @@ export function HostedConnectCard({
   const [activeId, setActiveId] = useState<HostedClientId | null>(null)
   const [copiedConnect, setCopiedConnect] = useState(false)
   const [copiedKey, setCopiedKey] = useState(false)
-  const [copiedStarterPrompt, setCopiedStarterPrompt] = useState(false)
-  // The starter-prompt disclosure uses React state (not `<details>`) so the
-  // prompt body — which embeds the delegate key — is genuinely unmounted
-  // when collapsed. `<details>` only CSS-hides its content; the key would
-  // still appear in document.body.textContent and break the custody-
-  // invariant test that asserts the delegate key isn't in the visible
-  // card body for unrelated runtimes.
-  const [showStarterPrompt, setShowStarterPrompt] = useState(false)
+  const [copiedSetupPrompt, setCopiedSetupPrompt] = useState(false)
+  const [copyError, setCopyError] = useState<string | null>(null)
+  // The manual setup disclosure uses React state so secret-bearing content is
+  // genuinely absent from the DOM until the user asks for it.
+  const [showManualSetup, setShowManualSetup] = useState(false)
   // Per-client: whether the manual config fallback is expanded
   const [showConfigFallback, setShowConfigFallback] = useState(false)
   // Test-connection probe state. `pending` is the in-flight state; a fresh
@@ -137,18 +135,22 @@ export function HostedConnectCard({
     () => (activeId ? buildHostedConnectSnippet(activeId, credential, resolvedUrl) : null),
     [activeId, credential, resolvedUrl],
   )
+  const setupPrompt = useMemo(
+    () => (activeId ? buildHostedSetupPrompt(activeId, credential, resolvedUrl) : null),
+    [activeId, credential, resolvedUrl],
+  )
 
   // Reset the fallback toggle + probe result whenever the user picks a
   // different client — the probe is per-bearer, but the visual association
   // is with the active client card, so a stale chip would be misleading.
-  // Also collapse the starter-prompt disclosure so its content unmounts;
-  // the prompt embeds the delegate key and we don't want it sitting in
-  // the DOM across runtime switches.
+  // Also collapse manual setup so secret-bearing content unmounts across
+  // runtime switches.
   const handlePickClient = useCallback((id: HostedClientId) => {
     setActiveId(id)
+    setShowManualSetup(false)
     setShowConfigFallback(false)
-    setShowStarterPrompt(false)
     setProbeState(null)
+    setCopyError(null)
   }, [])
 
   const handleTestConnection = useCallback(async () => {
@@ -162,48 +164,50 @@ export function HostedConnectCard({
     try {
       await navigator.clipboard.writeText(snippet.code)
     } catch {
-      /* clipboard can fail in restricted contexts */
+      setCopyError('Could not copy. Check clipboard permission and try again.')
+      return
     }
+    setCopyError(null)
     setCopiedConnect(true)
     setTimeout(() => setCopiedConnect(false), 2000)
-    onCredentialSaved?.()
-  }, [snippet, onCredentialSaved])
+  }, [snippet])
 
   const handleCopyKey = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(credential.delegate_key)
     } catch {
-      /* clipboard can fail */
+      setCopyError('Could not copy the signing key. Check clipboard permission and try again.')
+      return
     }
+    setCopyError(null)
     setCopiedKey(true)
     setTimeout(() => setCopiedKey(false), 2000)
     onCopySigningKey?.()
     onCredentialSaved?.()
   }, [credential.delegate_key, onCopySigningKey, onCredentialSaved])
 
-  const starterPrompt = useMemo(() => buildAgentStarterPrompt(credential), [credential])
-
-  const handleCopyStarterPrompt = useCallback(async () => {
+  const handleCopySetupPrompt = useCallback(async () => {
+    if (!setupPrompt) return
     try {
-      await navigator.clipboard.writeText(starterPrompt)
+      await navigator.clipboard.writeText(setupPrompt)
     } catch {
-      /* clipboard can fail */
+      setCopyError('Could not copy the setup prompt. Check clipboard permission and try again.')
+      return
     }
-    setCopiedStarterPrompt(true)
-    setTimeout(() => setCopiedStarterPrompt(false), 2000)
-    // The starter prompt embeds the delegate key, so a copy counts as
-    // "user has the credential in hand" — flip the same gate as the
-    // direct Copy-signing-key path.
+    setCopyError(null)
+    setCopiedSetupPrompt(true)
+    setTimeout(() => setCopiedSetupPrompt(false), 2000)
+    // The setup prompt embeds both connection identity and the signing key,
+    // so copying it counts as having the Haven credential in hand.
     onCopySigningKey?.()
     onCredentialSaved?.()
-  }, [starterPrompt, onCopySigningKey, onCredentialSaved])
+  }, [setupPrompt, onCopySigningKey, onCredentialSaved])
 
   const handleOpenDeepLink = useCallback(() => {
     if (!activeId || !hasDeepLink(activeId)) return
     const url = buildDeepLink(activeId, credential, resolvedUrl)
     window.open(url, '_self')
-    onCredentialSaved?.()
-  }, [activeId, credential, resolvedUrl, onCredentialSaved])
+  }, [activeId, credential, resolvedUrl])
 
   return (
     <Card hover={false} elevation="anchor" className="p-5">
@@ -299,216 +303,100 @@ export function HostedConnectCard({
         </>
       )}
 
-      {active && snippet && (
+      {active && snippet && setupPrompt && (
         <div key={active.id} className="v2-animate-step-rise mt-4 space-y-4">
-          {/* ── 1 · Connect ─────────────────────────────────────────────
-              Collapses once the agent has connected. The Signing-key
-              section below intentionally stays visible — the user is
-              shown the delegate key exactly once, and the agent calling
-              back in via the bearer is independent of whether the user
-              has saved the signing key. Hiding section 2 on connect
-              would silently strand users whose key is still un-copied. */}
+          {/* ── Recommended path · Copy setup prompt ───────────────────
+              The full prompt contains the connect token and signing key, so
+              it is copied directly and never rendered in the card by default. */}
           {(!isConnected || showSetupSteps) && (
-          <Card.Section>
-            <div className="py-4">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[11px] font-semibold text-[var(--v2-brand-strong)]">
-                  1
-                </span>
-                <h4 className="text-[13px] font-semibold text-[var(--v2-ink)]">Connect</h4>
-                {active.tagline && (
-                  <span className="text-[11px] text-[var(--v2-ink-3)]">{active.tagline}</span>
-                )}
-              </div>
-              {/* Intro paragraph intentionally short. The custody story (this
-                  token can't move money) is carried by the two chips in
-                  section 2 so this section can stay focused on the action. */}
-              <p className="mt-1 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                Add Haven&rsquo;s tools to {active.label}.
-              </p>
-
-              {/* Deep-link clients: primary button + collapsible config fallback.
-                  Others fall through to the inline destination + snippet pair. */}
-              {hasDeepLink(active.id) ? (
-                <div className="mt-3 space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button onClick={handleOpenDeepLink} aria-label={DEEP_LINK_LABEL[active.id]}>
-                      {DEEP_LINK_LABEL[active.id]}
-                    </Button>
-                    <button
-                      type="button"
-                      onClick={() => setShowConfigFallback((v) => !v)}
-                      className="text-[12px] text-[var(--v2-ink-3)] underline-offset-2 hover:text-[var(--v2-ink)] hover:underline"
-                    >
-                      {showConfigFallback ? 'Hide config' : "Didn't work? Show config"}
-                    </button>
-                  </div>
-
-                  {showConfigFallback && (
-                    <ManualConfigBlock
-                      snippet={snippet}
-                      copied={copiedConnect}
-                      onCopy={() => void handleCopyConnect()}
-                    />
+            <Card.Section>
+              <div className="py-4">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <StatusBadge tone="brand">Recommended</StatusBadge>
+                  <h4 className="text-[13px] font-semibold text-[var(--v2-ink)]">
+                    Copy setup prompt
+                  </h4>
+                  {active.tagline && (
+                    <span className="text-[11px] text-[var(--v2-ink-3)]">{active.tagline}</span>
                   )}
                 </div>
-              ) : (
-                <ManualConfigBlock
-                  snippet={snippet}
-                  copied={copiedConnect}
-                  onCopy={() => void handleCopyConnect()}
-                />
-              )}
+                <p className="mt-1.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                  Copy one prompt into {active.label}. It asks the agent to connect your Haven
+                  credential, keep the signing key local, and check the agent budget before
+                  payments from your Haven wallet.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button onClick={() => void handleCopySetupPrompt()}>
+                    {copiedSetupPrompt ? 'Copied' : 'Copy setup prompt'}
+                  </Button>
+                  <span className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                    Paste only into an agent or workspace you trust.
+                  </span>
+                </div>
 
-              {/* Test connection — browser-side probe against the hosted MCP
-                  endpoint. Surfaces 401/network/CORS in-modal instead of
-                  waiting for the never-arriving "Connected" banner. */}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void handleTestConnection()}
-                  disabled={probeState?.status === 'pending'}
-                  aria-label="Test connection"
-                >
-                  {probeState?.status === 'pending' ? 'Testing…' : 'Test connection'}
-                </Button>
-                {probeState && probeState.status !== 'pending' && (
-                  <ProbeResultChip result={probeState} />
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void handleTestConnection()}
+                    disabled={probeState?.status === 'pending'}
+                    aria-label="Test connection"
+                  >
+                    {probeState?.status === 'pending' ? 'Testing…' : 'Test connection'}
+                  </Button>
+                  <span className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                    Checks that Haven&rsquo;s tools can be reached with this credential.
+                  </span>
+                  {probeState && probeState.status !== 'pending' && (
+                    <ProbeResultChip result={probeState} />
+                  )}
+                </div>
+                {probeState && probeState.status !== 'pending' && probeState.detail && (
+                  <p
+                    role="status"
+                    className={
+                      'mt-1.5 text-[11px] leading-relaxed ' +
+                      (probeState.status === 'ok'
+                        ? 'text-[var(--v2-success)]'
+                        : 'text-[var(--v2-ink-3)]')
+                    }
+                  >
+                    {probeState.detail}
+                  </p>
                 )}
               </div>
-              {probeState && probeState.status !== 'pending' && probeState.detail && (
-                <p
-                  role="status"
-                  className={
-                    'mt-1.5 text-[11px] leading-relaxed ' +
-                    (probeState.status === 'ok'
-                      ? 'text-[var(--v2-success)]'
-                      : 'text-[var(--v2-ink-3)]')
-                  }
-                >
-                  {probeState.detail}
-                </p>
-              )}
-
-              {/* Other / SDK: advanced disclosure for local-server path */}
-              {active.id === 'other' && (
-                <details className="mt-3 group">
-                  <summary className="cursor-pointer list-none text-[12px] font-medium text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] flex items-center gap-1">
-                    <svg
-                      aria-hidden="true"
-                      className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2.5}
-                    >
-                      <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    Self-hosted / local server (advanced)
-                  </summary>
-                  <div className="mt-2 rounded-[8px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                    <p>
-                      Use <code className="text-[11px] font-mono">npx -y @haven_ai/mcp</code> with{' '}
-                      <code className="text-[11px] font-mono">HAVEN_API_KEY</code> +{' '}
-                      <code className="text-[11px] font-mono">HAVEN_DELEGATE_KEY</code> for a local
-                      stdio server — no hosted URL needed. See the{' '}
-                      <a
-                        href="https://www.npmjs.com/package/@haven_ai/mcp"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[var(--v2-brand)] underline underline-offset-2"
-                      >
-                        @haven_ai/mcp docs
-                      </a>{' '}
-                      for the full env-var reference.
-                    </p>
-                    <p className="mt-1.5 text-[var(--v2-ink-3)]">
-                      With the local server your delegate key sits in the config file rather than in
-                      a separate signing process. Use the hosted path above for lower key exposure.
-                    </p>
-                  </div>
-                </details>
-              )}
-            </div>
-          </Card.Section>
+            </Card.Section>
           )}
 
-          {/* ── 2 · Signing key ────────────────────────────────────────
-              Always visible after a tile is picked, including after the
-              agent has connected — see comment on section 1. The key is
-              shown exactly once and the user may not have copied it yet. */}
-          <Card.Section>
-            <div className="py-4">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[11px] font-semibold text-[var(--v2-brand-strong)]">
-                  2
-                </span>
-                <h4 className="text-[13px] font-semibold text-[var(--v2-ink)]">Signing key</h4>
-                {/* Two chips that together carry the non-custodial story so
-                    section 1's intro paragraph can stay calm. The first
-                    speaks to *where* the key lives; the second speaks to
-                    *what it can do* — which is what makes copying it into
-                    an agent's config a reasonable trade-off rather than a
-                    scary "leak your wallet" moment. */}
-                <SigningKeyChip
-                  icon={
-                    <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <rect x="4" y="11" width="16" height="9" rx="2" />
-                      <path d="M8 11V8a4 4 0 1 1 8 0v3" strokeLinecap="round" />
-                    </svg>
-                  }
-                >
-                  stays on your machine
-                </SigningKeyChip>
-                <SigningKeyChip
-                  icon={
-                    <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
-                      <path d="M5 12l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  }
-                >
-                  spends only your budget
-                </SigningKeyChip>
-              </div>
-              <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                Copy this and hand it to your agent so it can sign payments. Unlike a regular
-                wallet key, this one can only spend within the allowance you set — even if it
-                leaks, your budget still caps it. For chat agents (Claude, Cursor, …), use
-                the starter message below — it tells them to hold the key in this session
-                only, not write it to a file.
-              </p>
-
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button onClick={() => void handleCopyKey()}>
-                  {copiedKey ? 'Copied' : 'Copy signing key'}
-                </Button>
-                <span className="ml-1 text-[11px] text-[var(--v2-ink-3)]">
-                  Shown once. Full backup below.
-                </span>
-              </div>
-
-              {/* Starter-prompt disclosure. Safety-tuned chat agents (Claude
-                  especially) refuse to use a pasted-in private key for
-                  signing unless they know the key is bounded by an on-chain
-                  allowance. The starter prompt gives the model that
-                  framing up front so the in-session signing flow works on
-                  first try, without the user having to debate threat
-                  models with their assistant. Collapsed by default to keep
-                  this section calm; uses React state (not `<details>`) so
-                  the key-bearing body actually unmounts when closed. */}
-              <div className="mt-3">
+          {/* ── Optional fallback · Manual setup ─────────────────────── */}
+          {(!isConnected || showSetupSteps) && (
+            <Card.Section>
+              <div className="py-4">
                 <button
                   type="button"
-                  onClick={() => setShowStarterPrompt((v) => !v)}
-                  aria-expanded={showStarterPrompt}
-                  className="flex items-center gap-1 text-[12px] font-medium text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]"
+                  onClick={() => setShowManualSetup((v) => !v)}
+                  aria-expanded={showManualSetup}
+                  className="flex w-full items-start justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-2"
                 >
+                  <span className="min-w-0">
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="inline-flex items-center rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-2)]">
+                        Optional
+                      </span>
+                      <span className="text-[13px] font-semibold text-[var(--v2-ink)]">
+                        Manual setup
+                      </span>
+                    </span>
+                    <span className="mt-1.5 block text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                      Not needed if you use the setup prompt. Open this only if you want to add the
+                      config yourself or copy only the signing key.
+                    </span>
+                  </span>
                   <svg
                     aria-hidden="true"
                     className={
-                      'h-3 w-3 shrink-0 transition-transform ' +
-                      (showStarterPrompt ? 'rotate-90' : '')
+                      'mt-1 h-3.5 w-3.5 shrink-0 text-[var(--v2-ink-3)] transition-transform ' +
+                      (showManualSetup ? 'rotate-90' : '')
                     }
                     viewBox="0 0 24 24"
                     fill="none"
@@ -517,39 +405,125 @@ export function HostedConnectCard({
                   >
                     <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  Pasting into a chat agent? Use this starter message
                 </button>
 
-                {showStarterPrompt && (
-                  <div className="mt-2 space-y-2">
-                    <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
-                      Sends the key with the context the agent needs to keep it in memory
-                      and sign locally — instead of refusing or trying to harden a key
-                      that&rsquo;s already bounded by your allowance.
-                    </p>
-                    <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-                      <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-3 py-1.5">
-                        <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
-                          starter prompt
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void handleCopyStarterPrompt()}
-                          aria-label="Copy starter prompt"
-                        >
-                          {copiedStarterPrompt ? 'Copied' : 'Copy prompt'}
-                        </Button>
+                {showManualSetup && (
+                  <div className="mt-3 space-y-4">
+                    {hasDeepLink(active.id) ? (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button onClick={handleOpenDeepLink} aria-label={DEEP_LINK_LABEL[active.id]}>
+                            {DEEP_LINK_LABEL[active.id]}
+                          </Button>
+                          <button
+                            type="button"
+                            onClick={() => setShowConfigFallback((v) => !v)}
+                            className="rounded-sm text-[12px] text-[var(--v2-ink-3)] underline-offset-2 hover:text-[var(--v2-ink)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                          >
+                            {showConfigFallback ? 'Hide config' : "Didn't work? Show config"}
+                          </button>
+                        </div>
+
+                        {showConfigFallback && (
+                          <ManualConfigBlock
+                            snippet={snippet}
+                            copied={copiedConnect}
+                            onCopy={() => void handleCopyConnect()}
+                          />
+                        )}
                       </div>
-                      <pre className="overflow-x-auto whitespace-pre-wrap px-3 py-2 text-[12px] leading-snug text-[var(--v2-ink)]">
-                        <code>{starterPrompt}</code>
-                      </pre>
+                    ) : (
+                      <ManualConfigBlock
+                        snippet={snippet}
+                        copied={copiedConnect}
+                        onCopy={() => void handleCopyConnect()}
+                      />
+                    )}
+
+                    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <h5 className="text-[12px] font-semibold text-[var(--v2-ink)]">
+                          Signing key
+                        </h5>
+                        <SigningKeyChip
+                          icon={
+                            <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <rect x="4" y="11" width="16" height="9" rx="2" />
+                              <path d="M8 11V8a4 4 0 1 1 8 0v3" strokeLinecap="round" />
+                            </svg>
+                          }
+                        >
+                          stays local
+                        </SigningKeyChip>
+                        <SigningKeyChip
+                          icon={
+                            <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
+                              <path d="M5 12l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          }
+                        >
+                          follows agent rules
+                        </SigningKeyChip>
+                      </div>
+                      <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                        Copy this only if you are setting up manually. It lets the agent sign
+                        payments locally, and the agent budget still limits what can be spent.
+                      </p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Button onClick={() => void handleCopyKey()}>
+                          {copiedKey ? 'Copied' : 'Copy signing key'}
+                        </Button>
+                        <span className="text-[11px] text-[var(--v2-ink-3)]">
+                          Shown once. Full backup below.
+                        </span>
+                      </div>
                     </div>
+
+                    {active.id === 'other' && (
+                      <details className="group">
+                        <summary className="flex cursor-pointer list-none items-center gap-1 text-[12px] font-medium text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]">
+                          <svg
+                            aria-hidden="true"
+                            className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                          >
+                            <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          Self-hosted / local server (advanced)
+                        </summary>
+                        <div className="mt-2 rounded-[8px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                          <p>
+                            Use <code className="font-mono text-[11px]">npx -y @haven_ai/mcp</code> with{' '}
+                            <code className="font-mono text-[11px]">HAVEN_API_KEY</code> +{' '}
+                            <code className="font-mono text-[11px]">HAVEN_DELEGATE_KEY</code> for a local
+                            stdio server with no hosted URL. See the{' '}
+                            <a
+                              href="https://www.npmjs.com/package/@haven_ai/mcp"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[var(--v2-brand)] underline underline-offset-2"
+                            >
+                              @haven_ai/mcp docs
+                            </a>{' '}
+                            for the full env-var reference.
+                          </p>
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )}
               </div>
-            </div>
-          </Card.Section>
+            </Card.Section>
+          )}
+
+          {copyError && (!isConnected || showSetupSteps) && (
+            <p role="alert" className="text-[12px] leading-relaxed text-[var(--v2-danger)]">
+              {copyError}
+            </p>
+          )}
 
           {/* Try-it hint — quiet inline tip, not a separate dashed card.
               Collapses with section 1 once the agent has connected. */}
@@ -620,7 +594,7 @@ function RuntimeTile({
 
 /**
  * Small surface-tinted chip used in the Signing-key section header. Two of
- * these together carry the non-custodial story (key locality + allowance
+ * these together carry the non-custodial story (key locality + agent budget
  * cap) so the body copy can stay short.
  */
 function SigningKeyChip({ icon, children }: { icon: ReactNode; children: ReactNode }) {

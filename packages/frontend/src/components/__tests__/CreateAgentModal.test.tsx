@@ -272,7 +272,7 @@ describe('CreateAgentModal recovery', () => {
     expect(mockApiPost).toHaveBeenCalledTimes(2)
   })
 
-  it('shows the hosted-MCP connect card and unlocks Done when the signing key is saved', async () => {
+  it('shows the hosted-MCP connect card and unlocks Done when the setup prompt is copied', async () => {
     const onCreated = vi.fn()
     const onClose = vi.fn()
 
@@ -283,6 +283,7 @@ describe('CreateAgentModal recovery', () => {
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1))
     expect(await screen.findByText('Your agent is ready')).toBeInTheDocument()
+    expect(screen.getByText(/Copy the setup prompt into your agent/i)).toBeInTheDocument()
 
     // The new hosted Connect card is the primary post-creation surface (#187).
     // Tile accessible name is "<label><tagline>" concatenated — anchor on the
@@ -305,11 +306,11 @@ describe('CreateAgentModal recovery', () => {
     expect(screen.queryByRole('button', { name: /Copy signing key/i })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /^Claude Code/ }))
 
-    // Copying the connect snippet flips the close-without-saving gate. The
-    // Copy-signing-key path also flips it, exercised in HostedConnectCard.test.tsx.
-    fireEvent.click(screen.getAllByRole('button', { name: /^Copy$/i })[0])
+    // Copying the setup prompt flips the close-without-saving gate.
+    fireEvent.click(screen.getByRole('button', { name: /^Copy setup prompt$/i }))
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
     expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('sk_test'))
+    expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('0x'))
     expect(screen.getByRole('button', { name: 'Done' })).not.toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))

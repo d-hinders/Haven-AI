@@ -1173,8 +1173,8 @@ export default function CreateAgentModal({
                   </h3>
                   <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-[var(--v2-ink-2)]">
                     {execStatus === 'confirmed'
-                      ? 'Hand the credentials below to your agent.'
-                      : 'Once the approval lands, hand the credentials below to your agent.'}
+                      ? 'Copy the setup prompt into your agent.'
+                      : 'Once the approval lands, copy the setup prompt into your agent.'}
                   </p>
                   {txHash && (
                     <a
@@ -1232,7 +1232,7 @@ export default function CreateAgentModal({
               })()}
 
               {/* Optional credential backup. Intentionally low-attention —
-                  the primary path is "copy the signing key into your agent"
+                  the primary path is "copy the setup prompt into your agent"
                   from the section above, and the brand-soft "Action required"
                   treatment of the old CredentialHandoffCard competed for the
                   user's eye with that primary action. Plain bordered row +

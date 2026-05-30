@@ -519,6 +519,90 @@ export interface AgentStarterPromptOptions {
   exampleAction?: string
 }
 
+function setupResetLabel(mins: number): string {
+  if (mins === 0) return 'one-time'
+  if (mins === 60) return 'per hour'
+  if (mins === 1440) return 'per day'
+  if (mins === 10080) return 'per week'
+  if (mins === 43200) return 'per 30 days'
+  if (mins < 60) return `per ${mins}m`
+  if (mins % 1440 === 0) return `per ${mins / 1440}d`
+  if (mins % 60 === 0) return `per ${mins / 60}h`
+  return `per ${mins}m`
+}
+
+function setupPromptLanguage(language: HostedConnectLanguage): string {
+  return language === 'toml' ? 'toml' : language
+}
+
+/**
+ * Build the default copy-ready prompt for the Connect Agent done step.
+ *
+ * This is intentionally copied directly from the UI and not rendered by
+ * default: it contains both the Haven connect token (identity) and the agent
+ * signing key (authority). Runtime-specific config still comes from
+ * buildHostedConnectSnippet so the manual and prompt-first paths cannot drift.
+ */
+export function buildHostedSetupPrompt(
+  client: HostedClientId,
+  credential: AgentCredentialJson,
+  hostedUrl: string = resolveHostedMcpUrl(),
+): string {
+  const option = HOSTED_CLIENT_REGISTRY.find((c) => c.id === client)
+  const runtimeLabel = option?.label ?? client
+  const snippet = buildHostedConnectSnippet(client, credential, hostedUrl)
+  const network = credential.network ?? `Chain ${credential.chain_id}`
+  const budgets =
+    credential.budget_summary.length > 0
+      ? credential.budget_summary.map(
+          (b) => `- ${b.amount} ${b.token} ${setupResetLabel(b.reset_period_min)}`,
+        )
+      : ['- No agent budget was included. Ask me to review the agent rules before payment.']
+  const destinations =
+    snippet.destinationPaths && snippet.destinationPaths.length > 0
+      ? [
+          '',
+          'Save the config in the right place for this runtime:',
+          ...snippet.destinationPaths.map((p) => `- ${p.label}: ${p.path}`),
+        ]
+      : []
+
+  return [
+    `Please connect this agent to Haven in ${runtimeLabel}.`,
+    '',
+    'What to set up',
+    `- Agent: ${credential.agent_name}`,
+    `- Runtime: ${runtimeLabel}`,
+    `- Haven wallet: ${credential.safe_address}`,
+    `- Network: ${network}`,
+    '- Agent budget:',
+    ...budgets,
+    '',
+    'Important control model',
+    '- The Haven connect token identifies this agent. It is not enough to authorize payments by itself.',
+    '- The signing key authorizes payments locally, and payments must stay within the user-approved agent budget and on-chain rules.',
+    '- Haven does not hold this signing key and cannot use the connect token alone to move money.',
+    '',
+    `Set up ${runtimeLabel}`,
+    snippet.guidance,
+    ...destinations,
+    '',
+    `\`\`\`${setupPromptLanguage(snippet.language)}`,
+    snippet.code,
+    '```',
+    ...(snippet.postNote ? ['', snippet.postNote] : []),
+    '',
+    'Signing key',
+    credential.delegate_key,
+    '',
+    'Rules for this key',
+    '- Keep the signing key in memory or in the agent runtime\'s local secret store only.',
+    '- Do not commit it, upload it, paste it into shared logs, or send it to Haven.',
+    '- Before attempting a payment, check the active agent budget and ask me to approve actions in Haven when a request is outside the rules.',
+    `- If this credential may have leaked, tell me to pause or revoke the agent in Haven: ${credential.revoke_url}`,
+  ].join('\n')
+}
+
 /**
  * Build the message a user pastes into their agent chat after the MCP
  * connection is in place. Frames the delegate key as bounded-spend so the

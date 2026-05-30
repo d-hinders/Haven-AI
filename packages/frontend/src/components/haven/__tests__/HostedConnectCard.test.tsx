@@ -45,6 +45,10 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function openManualSetup() {
+  fireEvent.click(screen.getByRole('button', { name: /Set up manually/i }))
+}
+
 describe('HostedConnectCard', () => {
   const clipboardWriteText = vi.fn().mockResolvedValue(undefined)
   const windowOpen = vi.fn()
@@ -56,7 +60,7 @@ describe('HostedConnectCard', () => {
     vi.stubGlobal('open', windowOpen)
   })
 
-  it('lands with no client picked and the two-credential split hidden', () => {
+  it('lands with no client picked and secret-bearing setup hidden', () => {
     render(<HostedConnectCard credential={credential()} />)
 
     expect(screen.getByText(/Connect Research Agent to where it runs/i)).toBeInTheDocument()
@@ -66,37 +70,79 @@ describe('HostedConnectCard', () => {
       expect(tabByLabel(option.label)).toHaveAttribute('aria-selected', 'false')
     }
     expect(screen.queryByText('Signing key')).not.toBeInTheDocument()
-    expect(screen.queryByText(/stays on your machine/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/stays local/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Copy signing key/i })).not.toBeInTheDocument()
   })
 
-  it('reveals the two-credential split with the custody label when a client is picked', () => {
+  it('reveals the prompt-first setup path when a client is picked', () => {
     render(<HostedConnectCard credential={credential()} />)
 
     fireEvent.click(tabByLabel('Claude Code'))
 
-    expect(screen.getByRole('heading', { name: 'Connect' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Signing key' })).toBeInTheDocument()
-    // Two chips together carry the non-custodial story so the description
-    // copy can stay short.
-    expect(screen.getByText(/stays on your machine/i)).toBeInTheDocument()
-    expect(screen.getByText(/spends only your budget/i)).toBeInTheDocument()
-    // Reassurance about safe key-sharing — the key can only spend within
-    // the allowance the user already set. That's why pasting into the
-    // agent's chat session is an acceptable trade-off.
-    expect(
-      screen.getByText(/can only spend within the allowance|can.t move money beyond|even if it leaks/i),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Copy signing key/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Copy setup prompt' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Copy setup prompt/i })).toBeInTheDocument()
+    expect(screen.getByText(/connect your Haven credential/i)).toBeInTheDocument()
+    expect(screen.getByText(/agent budget/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Set up manually/i })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(screen.queryByRole('heading', { name: 'Signing key' })).not.toBeInTheDocument()
+  })
+
+  it('copying the setup prompt writes both credentials and fires saved callbacks', async () => {
+    const onCredentialSaved = vi.fn()
+    const onCopySigningKey = vi.fn()
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onCredentialSaved={onCredentialSaved}
+        onCopySigningKey={onCopySigningKey}
+      />,
+    )
+
+    fireEvent.click(tabByLabel('Codex CLI'))
+    fireEvent.click(screen.getByRole('button', { name: /Copy setup prompt/i }))
+
+    await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
+    const copied = clipboardWriteText.mock.calls[0][0] as string
+    expect(copied).toContain(API_KEY)
+    expect(copied).toContain(DELEGATE_KEY)
+    expect(copied).toContain('Codex CLI')
+    expect(copied).toMatch(/agent budget/i)
+    expect(onCopySigningKey).toHaveBeenCalledTimes(1)
+    expect(onCredentialSaved).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not mark credentials saved when setup prompt copy fails', async () => {
+    clipboardWriteText.mockRejectedValueOnce(new Error('Permission denied'))
+    const onCredentialSaved = vi.fn()
+    const onCopySigningKey = vi.fn()
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onCredentialSaved={onCredentialSaved}
+        onCopySigningKey={onCopySigningKey}
+      />,
+    )
+
+    fireEvent.click(tabByLabel('Codex CLI'))
+    fireEvent.click(screen.getByRole('button', { name: /Copy setup prompt/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/could not copy the setup prompt/i)
+    })
+    expect(onCopySigningKey).not.toHaveBeenCalled()
+    expect(onCredentialSaved).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Copy setup prompt/i })).toHaveTextContent(
+      'Copy setup prompt',
+    )
   })
 
   it('does NOT instruct the user to paste the signing key into the agent\'s config file', () => {
     // Regression: an earlier version of section 2 said "Copy this into
-    // your agent's config" — directly contradicting the starter prompt,
-    // which tells chat agents NOT to write the key to a file. The
-    // bearer goes in the MCP config (section 1); the signing key
-    // goes into the chat session OR an env var for SDK users. Saying
-    // "config" here muddled the two and confused users (and Claude).
+    // your agent's config" — muddling the connect token and signing key.
+    // The setup prompt and manual path both keep that distinction clear.
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Claude Code'))
     const allText = document.body.textContent ?? ''
@@ -112,7 +158,7 @@ describe('HostedConnectCard', () => {
     expect(screen.queryByRole('button', { name: /Save signing key/i })).not.toBeInTheDocument()
   })
 
-  it('never includes the delegate private key in the rendered card body for any runtime', () => {
+  it('never includes credentials in the rendered card body by default for any runtime', () => {
     // Custody invariant — assert for every registry entry, not just the
     // pre-Tier-3 four. As we add runtimes this is the regression net.
     render(<HostedConnectCard credential={credential()} />)
@@ -124,16 +170,7 @@ describe('HostedConnectCard', () => {
         allText,
         `${option.label}: delegate key must not appear in card body`,
       ).not.toContain(DELEGATE_KEY)
-
-      // For deep-link runtimes the API key is encoded inside the URL and
-      // not rendered as visible text (until the user opens the fallback).
-      // For everyone else, the bearer is visible in the snippet.
-      if (!hasDeepLink(option.id)) {
-        expect(
-          allText,
-          `${option.label}: api key (identity) should be present`,
-        ).toContain(API_KEY)
-      }
+      expect(allText, `${option.label}: api key must not appear in card body`).not.toContain(API_KEY)
     }
   })
 
@@ -172,6 +209,7 @@ describe('HostedConnectCard', () => {
     // the manual config-paste path.
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Claude Desktop'))
+    openManualSetup()
 
     expect(screen.queryByRole('button', { name: 'Add to Claude' })).not.toBeInTheDocument()
     expect(screen.getByText('json')).toBeInTheDocument()
@@ -180,6 +218,7 @@ describe('HostedConnectCard', () => {
   it('Claude Desktop shows the OS-specific config-file paths inline', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Claude Desktop'))
+    openManualSetup()
 
     const allText = document.body.textContent ?? ''
     expect(allText).toContain('claude_desktop_config.json')
@@ -191,6 +230,7 @@ describe('HostedConnectCard', () => {
   it('Claude Code shows the restart-required hint under the snippet', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Claude Code'))
+    openManualSetup()
 
     const allText = document.body.textContent ?? ''
     expect(allText).toMatch(/exit this Claude Code session|MCP servers load at session start/i)
@@ -199,6 +239,7 @@ describe('HostedConnectCard', () => {
   it('Cursor shows "Add to Cursor" deep-link button', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Cursor'))
+    openManualSetup()
 
     expect(screen.getByRole('button', { name: 'Add to Cursor' })).toBeInTheDocument()
     expect(screen.queryByText('json')).not.toBeInTheDocument()
@@ -207,6 +248,7 @@ describe('HostedConnectCard', () => {
   it('VS Code shows "Add to VS Code" deep-link button', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('VS Code'))
+    openManualSetup()
 
     expect(screen.getByRole('button', { name: 'Add to VS Code' })).toBeInTheDocument()
     // JSON config hidden by default — only the deep-link button is shown.
@@ -216,6 +258,7 @@ describe('HostedConnectCard', () => {
   it('"Add to Cursor" opens a cursor:// deep link', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Cursor'))
+    openManualSetup()
     fireEvent.click(screen.getByRole('button', { name: 'Add to Cursor' }))
 
     expect(windowOpen).toHaveBeenCalledTimes(1)
@@ -227,6 +270,7 @@ describe('HostedConnectCard', () => {
   it('"Add to VS Code" opens a vscode:mcp/install deep link carrying the bearer', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('VS Code'))
+    openManualSetup()
     fireEvent.click(screen.getByRole('button', { name: 'Add to VS Code' }))
 
     expect(windowOpen).toHaveBeenCalledTimes(1)
@@ -243,6 +287,7 @@ describe('HostedConnectCard', () => {
   it('"Didn\'t work? Show config" toggle reveals the JSON block for Cursor', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Cursor'))
+    openManualSetup()
 
     expect(screen.queryByText('json')).not.toBeInTheDocument()
 
@@ -256,6 +301,7 @@ describe('HostedConnectCard', () => {
   it('"Other / SDK" shows advanced <details> disclosure for the local-server path', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Other / SDK'))
+    openManualSetup()
 
     expect(screen.getByText(/Self-hosted \/ local server/i)).toBeInTheDocument()
   })
@@ -265,6 +311,7 @@ describe('HostedConnectCard', () => {
   it('renders the destination-path block with a Copy path button for runtimes that save to a file', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Cursor'))
+    openManualSetup()
     // Cursor's primary surface is the deep link — open the manual config
     // fallback to reach the destination-path block.
     fireEvent.click(screen.getByText(/Didn't work/i))
@@ -279,6 +326,7 @@ describe('HostedConnectCard', () => {
     // Continue.dev is a multi-path runtime (Global + Workspace) that drops
     // straight to the manual config path — no deep-link toggle needed.
     fireEvent.click(tabByLabel('Continue.dev'))
+    openManualSetup()
 
     const copyPath = screen.getAllByRole('button', { name: /^Copy path$/i })[0]
     fireEvent.click(copyPath)
@@ -291,6 +339,7 @@ describe('HostedConnectCard', () => {
   it('multi-path runtimes (Claude Desktop) render each OS path as a separate Copy row', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Claude Desktop'))
+    openManualSetup()
 
     // One Copy-path button per OS path — three total for Claude Desktop.
     const copyButtons = screen.getAllByRole('button', { name: /^Copy path$/i })
@@ -301,6 +350,7 @@ describe('HostedConnectCard', () => {
     // The snippet IS the action — there's no file to paste into.
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Claude Code'))
+    openManualSetup()
 
     expect(screen.queryByLabelText(/where to save/i)).not.toBeInTheDocument()
   })
@@ -308,8 +358,8 @@ describe('HostedConnectCard', () => {
   // ── Copy gates ───────────────────────────────────────────────────────────
 
   it('copying the signing key writes the delegate key to the clipboard and fires onCredentialSaved', async () => {
-    // Section 2's primary action: hand the key to the agent's config.
-    // The download path moved to the modal's "Download backup" row.
+    // Manual setup keeps the signing key out of the DOM and copies it only on
+    // explicit user action.
     const onCredentialSaved = vi.fn()
     const onCopySigningKey = vi.fn()
     render(
@@ -321,6 +371,7 @@ describe('HostedConnectCard', () => {
     )
 
     fireEvent.click(tabByLabel('Claude Code'))
+    openManualSetup()
     fireEvent.click(screen.getByRole('button', { name: /Copy signing key/i }))
 
     await waitFor(() => expect(clipboardWriteText).toHaveBeenCalled())
@@ -330,103 +381,57 @@ describe('HostedConnectCard', () => {
     expect(onCredentialSaved).toHaveBeenCalled()
   })
 
-  // ── Starter prompt (chat handoff) ───────────────────────────────────────
+  // ── Manual setup disclosure ─────────────────────────────────────────────
 
-  it('renders a "starter message" disclosure under the Copy signing key button', () => {
-    // Safety-tuned chat agents refuse to use a pasted-in private key for
-    // signing unless they know the key is bounded by an allowance. The
-    // disclosure surfaces a paste-ready message that defuses that.
+  it('manual setup is collapsed by default and reveals config plus signing-key controls on click', () => {
     render(<HostedConnectCard credential={credential()} />)
-    fireEvent.click(tabByLabel('Claude Code'))
+    fireEvent.click(tabByLabel('Codex CLI'))
 
-    expect(
-      screen.getByText(/Pasting into a chat agent\? Use this starter message/i),
-    ).toBeInTheDocument()
-  })
-
-  it('starter prompt content is collapsed by default and reveals on click', () => {
-    render(<HostedConnectCard credential={credential()} />)
-    fireEvent.click(tabByLabel('Claude Code'))
-
-    const toggle = screen.getByRole('button', { name: /Pasting into a chat agent/i })
+    const toggle = screen.getByRole('button', { name: /Set up manually/i })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('button', { name: /Copy prompt/i })).not.toBeInTheDocument()
+    expect(screen.queryByText('toml')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Copy signing key/i })).not.toBeInTheDocument()
 
     fireEvent.click(toggle)
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('button', { name: /Copy prompt/i })).toBeInTheDocument()
+    expect(screen.getByText('toml')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Copy signing key/i })).toBeInTheDocument()
   })
 
-  it('keeps the delegate key OUT of the DOM until the disclosure is opened', () => {
-    // The custody invariant relies on the disclosure body being genuinely
-    // unmounted when collapsed. `<details>` only CSS-hides — the key
-    // would still be in textContent. React state-controlled rendering
-    // is what makes this assertion possible.
+  it('keeps the delegate key OUT of the DOM before and after manual setup expands', () => {
     render(<HostedConnectCard credential={credential()} />)
     fireEvent.click(tabByLabel('Claude Code'))
 
-    // Closed: key only appears once (inside the runtime snippet on
-    // section 1), not a second time in the starter prompt.
     const closedText = document.body.textContent ?? ''
-    const closedOccurrences = closedText.split(DELEGATE_KEY).length - 1
-    expect(closedOccurrences).toBe(0)
-    // (Section 1's snippet never includes the delegate key, only the
-    // bearer; the assertion above is exact for the closed-disclosure case.)
+    expect(closedText).not.toContain(DELEGATE_KEY)
+
+    openManualSetup()
+
+    const openText = document.body.textContent ?? ''
+    expect(openText).not.toContain(DELEGATE_KEY)
   })
 
-  it('copies the starter prompt with the delegate key embedded but NOT the api key', async () => {
-    const onCredentialSaved = vi.fn()
-    const onCopySigningKey = vi.fn()
-    render(
-      <HostedConnectCard
-        credential={credential()}
-        onCredentialSaved={onCredentialSaved}
-        onCopySigningKey={onCopySigningKey}
-      />,
-    )
-    fireEvent.click(tabByLabel('Claude Code'))
-    fireEvent.click(screen.getByRole('button', { name: /Pasting into a chat agent/i }))
-
-    fireEvent.click(screen.getByRole('button', { name: /Copy prompt/i }))
-
-    await waitFor(() => expect(clipboardWriteText).toHaveBeenCalled())
-    const copied = clipboardWriteText.mock.calls[0][0] as string
-    expect(copied).toContain(DELEGATE_KEY)
-    expect(copied).not.toContain(API_KEY)
-    expect(copied).toMatch(/haven_pay|haven_submit/)
-    // Copying the prompt counts as "user has the credential in hand" —
-    // flip the same gates the direct Copy-signing-key path does.
-    expect(onCopySigningKey).toHaveBeenCalledTimes(1)
-    expect(onCredentialSaved).toHaveBeenCalled()
-  })
-
-  it('section 2 (Signing key) stays visible after the agent connects', () => {
-    // Regression guard for an early-shipping bug where the connected state
-    // collapsed the WHOLE setup block, hiding the signing key even when
-    // the user hadn't copied it yet. Section 2 must stay visible — the
-    // delegate key is shown exactly once.
+  it('connected state can re-open setup without rendering the signing key value', () => {
     const lastSeenAt = new Date(Date.now() - 5_000).toISOString()
     const { rerender } = render(
       <HostedConnectCard credential={credential()} />,
     )
 
-    // Pick a tile before the connect signal fires (mimics the real flow).
     fireEvent.click(tabByLabel('Claude Code'))
-    expect(screen.getByRole('heading', { name: 'Signing key' })).toBeInTheDocument()
-
-    // Now the agent connects. The Connect banner should appear AND the
-    // Signing key section should still be there.
     rerender(<HostedConnectCard credential={credential()} lastSeenAt={lastSeenAt} />)
 
     expect(screen.getByRole('status', { name: /agent connected/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Signing key' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Set up manually/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /show setup steps/i }))
+    openManualSetup()
+
     expect(screen.getByRole('button', { name: /Copy signing key/i })).toBeInTheDocument()
-    // Section 1's Connect heading should be hidden in the collapsed state.
-    expect(screen.queryByRole('heading', { name: 'Connect' })).not.toBeInTheDocument()
+    expect(document.body.textContent ?? '').not.toContain(DELEGATE_KEY)
   })
 
-  it('clicking "Add to Cursor" fires onCredentialSaved', () => {
+  it('clicking "Add to Cursor" does not mark the full credential saved', () => {
     const onCredentialSaved = vi.fn()
     render(
       <HostedConnectCard
@@ -437,12 +442,13 @@ describe('HostedConnectCard', () => {
     )
 
     fireEvent.click(tabByLabel('Cursor'))
+    openManualSetup()
     fireEvent.click(screen.getByRole('button', { name: 'Add to Cursor' }))
 
-    expect(onCredentialSaved).toHaveBeenCalled()
+    expect(onCredentialSaved).not.toHaveBeenCalled()
   })
 
-  it('copying the connect snippet writes the api_key but NOT the delegate key', async () => {
+  it('copying the connect snippet writes the api_key but does not mark the full credential saved', async () => {
     const onCredentialSaved = vi.fn()
     render(
       <HostedConnectCard
@@ -453,6 +459,7 @@ describe('HostedConnectCard', () => {
     )
 
     fireEvent.click(tabByLabel('Claude Code'))
+    openManualSetup()
     // The snippet copy button visible text is just "Copy" — distinguishable
     // from "Copy path" rows by the exact-match regex. The signing-key copy
     // (section 2) also says "Copy", so we take the first match in DOM order,
@@ -463,7 +470,7 @@ describe('HostedConnectCard', () => {
     const copied = clipboardWriteText.mock.calls[0][0] as string
     expect(copied).toContain(API_KEY)
     expect(copied).not.toContain(DELEGATE_KEY)
-    expect(onCredentialSaved).toHaveBeenCalled()
+    expect(onCredentialSaved).not.toHaveBeenCalled()
   })
 
   // ── Connected state ──────────────────────────────────────────────────────
@@ -547,6 +554,8 @@ describe('HostedConnectCard', () => {
 
     expect(screen.queryByRole('button', { name: /test connection/i })).not.toBeInTheDocument()
     fireEvent.click(tabByLabel('Claude Code'))
+    expect(screen.queryByRole('button', { name: /test connection/i })).not.toBeInTheDocument()
+    openManualSetup()
     expect(screen.getByRole('button', { name: /test connection/i })).toBeInTheDocument()
   })
 
@@ -566,6 +575,7 @@ describe('HostedConnectCard', () => {
     try {
       render(<HostedConnectCard credential={credential()} />)
       fireEvent.click(tabByLabel('Claude Code'))
+      openManualSetup()
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
       await waitFor(() => {
@@ -585,6 +595,7 @@ describe('HostedConnectCard', () => {
     try {
       render(<HostedConnectCard credential={credential()} />)
       fireEvent.click(tabByLabel('Claude Code'))
+      openManualSetup()
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
       await waitFor(() => {
@@ -604,6 +615,7 @@ describe('HostedConnectCard', () => {
     try {
       render(<HostedConnectCard credential={credential()} />)
       fireEvent.click(tabByLabel('Claude Code'))
+      openManualSetup()
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
       await waitFor(() => {
@@ -626,6 +638,7 @@ describe('HostedConnectCard', () => {
     try {
       render(<HostedConnectCard credential={credential()} />)
       fireEvent.click(tabByLabel('Claude Code'))
+      openManualSetup()
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
       await waitFor(() => {

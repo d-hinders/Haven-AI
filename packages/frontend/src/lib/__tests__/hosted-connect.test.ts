@@ -3,6 +3,7 @@ import {
   buildAgentStarterPrompt,
   buildDeepLink,
   buildHostedConnectSnippet,
+  buildHostedSetupPrompt,
   HOSTED_CLIENT_REGISTRY,
   hasDeepLink,
   probeHostedConnection,
@@ -23,7 +24,7 @@ const INPUT: HandoffInput = {
     safeAddress: '0xbf35beb0f587db2527b64e58d61f78bbf840860f',
     chainId: 100,
   },
-  policy: { allowances: [] },
+  policy: { allowances: [{ tokenSymbol: 'USDC', amount: '25', resetPeriodMin: 1440 }] },
   credentials: { apiKey: API_KEY, delegatePrivateKey: DELEGATE_KEY },
 }
 
@@ -255,6 +256,48 @@ describe('buildDeepLink', () => {
     expect(parsed.type).toBe('http')
     expect(parsed.url).toBe(HOST)
     expect(parsed.headers.Authorization).toBe(`Bearer ${API_KEY}`)
+  })
+})
+
+describe('buildHostedSetupPrompt', () => {
+  const HOST = 'https://mcp.test.example/v1'
+
+  it('builds a runtime-specific setup prompt for Codex CLI', () => {
+    const prompt = buildHostedSetupPrompt('codex-cli', credential(), HOST)
+
+    expect(prompt).toContain('Codex CLI')
+    expect(prompt).toContain('~/.codex/config.toml')
+    expect(prompt).toContain('bearer_token_env_var = "HAVEN_TOKEN"')
+    expect(prompt).toContain(API_KEY)
+    expect(prompt).toContain(DELEGATE_KEY)
+  })
+
+  it('includes budget, network, Haven wallet, and revoke context', () => {
+    const prompt = buildHostedSetupPrompt('claude-desktop', credential(), HOST)
+
+    expect(prompt).toContain('Haven wallet:')
+    expect(prompt).toContain(INPUT.agent.safeAddress)
+    expect(prompt).toContain('Network:')
+    expect(prompt).toContain('25 USDC per day')
+    expect(prompt).toMatch(/pause or revoke the agent in Haven/i)
+  })
+
+  it('states that API auth identifies the agent but does not authorize payment by itself', () => {
+    const prompt = buildHostedSetupPrompt('windsurf', credential(), HOST)
+
+    expect(prompt).toMatch(/connect token identifies this agent/i)
+    expect(prompt).toMatch(/not enough to authorize payments by itself/i)
+    expect(prompt).toMatch(/signing key authorizes payments locally/i)
+    expect(prompt).toMatch(/Haven does not hold this signing key/i)
+    expect(prompt).toMatch(/cannot use the connect token alone to move money/i)
+    expect(prompt).not.toMatch(/Haven holds your funds|Haven transfers money for you/i)
+  })
+
+  it('includes the delegate key exactly once', () => {
+    const prompt = buildHostedSetupPrompt('continue', credential(), HOST)
+    const occurrences = prompt.split(DELEGATE_KEY).length - 1
+
+    expect(occurrences).toBe(1)
   })
 })
 

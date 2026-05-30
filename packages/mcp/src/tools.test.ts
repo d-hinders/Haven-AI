@@ -184,10 +184,45 @@ describe('Haven MCP tool descriptions', () => {
       // below has a real anchor rather than the vacuously-true `''`.
       expect(shared.summary.length).toBeGreaterThan(10)
       expect(desc).toContain(shared.summary)
+      if ('selectionGuidance' in shared && shared.selectionGuidance) {
+        expect(desc).toContain(shared.selectionGuidance)
+      }
       if (shared.behavior) expect(desc).toContain(shared.behavior)
       if (shared.nextActionGuidance) expect(desc).toContain(shared.nextActionGuidance)
     })
   }
+
+  it('points budget and remaining-spend questions at the allowance tool', () => {
+    const desc = toolDescriptions.haven_get_allowances.toLowerCase()
+
+    expect(desc).toContain('budget')
+    expect(desc).toContain('spend limit')
+    expect(desc).toContain('remaining amount')
+    expect(desc).toContain('remaining allowance')
+    expect(desc).toContain('remaining budget')
+    expect(desc).toContain('daily limit')
+    expect(desc).toContain('what can i spend')
+    expect(desc).toContain('what the agent can still spend')
+  })
+
+  it('keeps receipts routed away from remaining-budget questions', () => {
+    const desc = toolDescriptions.haven_list_receipts.toLowerCase()
+
+    expect(desc).toContain('transaction history')
+    expect(desc).toContain('use the allowance tool instead')
+    expect(desc).toContain('remaining allowance')
+    expect(desc).toContain('what-can-i-spend')
+  })
+
+  it('keeps payment tools routed away from read-only budget questions', () => {
+    for (const tool of ['haven_pay_x402_quote', 'haven_pay_mpp_challenge'] as const) {
+      const desc = toolDescriptions[tool].toLowerCase()
+
+      expect(desc).toContain('do not use this for read-only allowance')
+      expect(desc).toContain('what-can-i-spend')
+      expect(desc).toContain('use the allowance lookup tool instead')
+    }
+  })
 })
 
 describe('Haven MCP tool handlers', () => {
@@ -821,4 +856,3 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: { 'Content-Type': 'application/json' },
   })
 }
-

@@ -20,6 +20,9 @@ export interface ToolDescription {
   /** One-line summary of the operation. Used as the first sentence of every
    * downstream description and as a stable substring for drift tests. */
   summary: string
+  /** Natural-language user intents that should make an agent prefer this
+   * tool over adjacent tools. Empty or omitted when the summary is enough. */
+  selectionGuidance?: string
   /** Concrete behaviour the tool performs end-to-end, including which
    * non-custodial guarantee applies. */
   behavior: string
@@ -33,7 +36,9 @@ export interface ToolDescription {
  * spaces so consumers can split on the summary substring if they need to.
  */
 export function composeDescription(d: ToolDescription): string {
-  return [d.summary, d.behavior, d.nextActionGuidance].filter(Boolean).join(' ')
+  return [d.summary, d.selectionGuidance, d.behavior, d.nextActionGuidance]
+    .filter(Boolean)
+    .join(' ')
 }
 
 export const toolDescriptions = {
@@ -47,6 +52,8 @@ export const toolDescriptions = {
   payX402: {
     summary:
       'Pay an inspected x402 quote. The delegate key signs locally; Haven only validates and relays signed, on-chain-constrained payment transactions.',
+    selectionGuidance:
+      'Do not use this for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
       'Signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, and returns the merchant response or a pending-approval state.',
     nextActionGuidance:
@@ -70,6 +77,8 @@ export const toolDescriptions = {
   payMpp: {
     summary:
       'Pay an inspected MPP challenge. The delegate key signs locally; Haven only validates and relays signed, on-chain-constrained payment transactions.',
+    selectionGuidance:
+      'Do not use this for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
       'Authorizes the payment through Haven within the on-chain allowance, signs the challenge proof, and returns the proof header for retrying the original paid resource.',
     nextActionGuidance:
@@ -106,6 +115,8 @@ export const toolDescriptions = {
   getAllowances: {
     summary:
       'Return configured and on-chain allowance state for the authenticated agent. On-chain allowance is the real spend gate.',
+    selectionGuidance:
+      'Use this when the user asks about allowance, budget, spend limit, remaining amount, remaining allowance, remaining budget, daily limit, reset period, what can I spend, or what the agent can still spend.',
     behavior:
       'Reads the Safe AllowanceModule snapshot per token (allowance, spent, remaining, reset window). Configured amounts from Haven are returned alongside the on-chain truth.',
     nextActionGuidance: '',
@@ -113,6 +124,8 @@ export const toolDescriptions = {
   listReceipts: {
     summary:
       'List recent machine-payment receipts and evidence for bookkeeping.',
+    selectionGuidance:
+      'Use this for transaction history, receipts, payment evidence, or bookkeeping; use the allowance tool instead for remaining allowance, budget, spend-limit, or what-can-I-spend questions.',
     behavior:
       'Returns the agent\'s recent machine-payment receipts ordered by recency. Proof header values are not returned.',
     nextActionGuidance: '',

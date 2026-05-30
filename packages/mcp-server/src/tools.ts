@@ -61,6 +61,8 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
 
 const PAY_DESCRIPTION = [
   'Construct a payment within the agent budget and return the unsigned hash to sign.',
+  'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions,',
+  'call haven_get_allowances instead of constructing a payment.',
   'Returns { payment_id, payload_hash, expires_at } when the amount fits the remaining',
   'on-chain allowance — sign payload_hash with the delegate key on your machine, then call',
   'haven_submit. Returns { status: "pending_approval" } (no hash) when the amount exceeds the',
@@ -77,6 +79,8 @@ const SUBMIT_DESCRIPTION = [
 
 const X402_AUTHORIZE_DESCRIPTION = [
   'Construct the funding step for a standard x402 payment and return the unsigned hash to sign.',
+  'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions,',
+  'call haven_get_allowances instead of authorizing an x402 payment.',
   'Pass the parsed HTTP 402 payment_required you got from the merchant. Returns { payment_id,',
   'payload_hash, x402 } where x402 carries the accepted option, resource_url, merchant_to,',
   'funding_to, and expected context. Next: sign payload_hash with x402.expected on your machine,',

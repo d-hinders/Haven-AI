@@ -46,4 +46,29 @@ describe('buildHostedMcpServer', () => {
     await client.close()
     await server.close()
   })
+
+  it('publishes allowance routing guidance for budget questions', async () => {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const server = buildHostedMcpServer(haven)
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const { tools } = await client.listTools()
+    const allowances = tools.find((tool) => tool.name === 'haven_get_allowances')
+    const pay = tools.find((tool) => tool.name === 'haven_pay')
+    const x402Authorize = tools.find((tool) => tool.name === 'haven_x402_authorize')
+    const transactions = tools.find((tool) => tool.name === 'haven_list_transactions')
+
+    expect(allowances?.description?.toLowerCase()).toContain('what can i spend')
+    expect(allowances?.description?.toLowerCase()).toContain('remaining budget')
+    expect(pay?.description?.toLowerCase()).toContain('call haven_get_allowances instead')
+    expect(x402Authorize?.description?.toLowerCase()).toContain('call haven_get_allowances instead')
+    expect(transactions?.description?.toLowerCase()).toContain('use the allowance tool instead')
+
+    await client.close()
+    await server.close()
+  })
 })

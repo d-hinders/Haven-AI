@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { buildMerchantMcpServer } from './server.js'
-import { buildPaymentRequired, PaymentError } from './x402.js'
+import { verifyXPayment, buildPaymentRequired, PaymentError, type VerifiedPayment } from './x402.js'
 import { PRODUCTS, type ProductId } from './products.js'
 import type { Address } from 'viem'
 
@@ -73,6 +73,9 @@ async function handle(
   }
 
   // ── x402 payment gate ──────────────────────────────────────────────────────
+  // Declared here so it's in scope for buildMerchantMcpServer below.
+  let preVerifiedPayment: (VerifiedPayment & { productId: ProductId }) | undefined
+
   const paymentToolInfo = extractPaymentToolInfo(body)
   if (paymentToolInfo) {
     const { productId, product } = paymentToolInfo
@@ -91,12 +94,12 @@ async function handle(
       return
     }
 
-    // Verify payment before passing to MCP layer. Import here to avoid
-    // circular deps — verifyXPayment is also used in tool handlers for the
-    // tool-parameter path (agents that don't support HTTP 402 directly).
-    const { verifyXPayment } = await import('./x402.js')
+    // Verify payment before passing to MCP layer. The result is forwarded to
+    // buildMerchantMcpServer so tool handlers can skip their own verification
+    // (nonce is consumed here; a second verifyXPayment call would fail as replay).
     try {
-      await verifyXPayment(xPayment, options.merchantAddress, product.price_usdc)
+      const verified = await verifyXPayment(xPayment, options.merchantAddress, product.price_usdc)
+      preVerifiedPayment = { ...verified, productId }
     } catch (err) {
       const msg = err instanceof PaymentError ? err.message : 'Betalningsfel'
       res.writeHead(402, { 'Content-Type': 'application/json' })
@@ -119,6 +122,7 @@ async function handle(
   const server = buildMerchantMcpServer({
     merchantAddress: options.merchantAddress,
     baseUrl: options.baseUrl,
+    preVerifiedPayment,
   })
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
 

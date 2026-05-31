@@ -2,12 +2,18 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { PRODUCTS, formatUsdc, type ProductId } from './products.js'
 import { generateInvoice, nextInvoiceNumber } from './invoice.js'
-import { verifyXPayment, buildPaymentRequired, PaymentError } from './x402.js'
+import { verifyXPayment, buildPaymentRequired, PaymentError, type VerifiedPayment } from './x402.js'
 import type { Address } from 'viem'
 
 export interface MerchantConfig {
   merchantAddress: Address
   baseUrl: string
+  /**
+   * Payment already verified by the HTTP-layer x402 middleware.
+   * When set, tool handlers skip their own `verifyXPayment` call —
+   * the nonce was already consumed and a second call would fail as replay.
+   */
+  preVerifiedPayment?: VerifiedPayment & { productId: ProductId }
 }
 
 /** Build the demo merchant MCP server. */
@@ -68,38 +74,45 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
       const product = PRODUCTS[productId]
       const resource = `${config.baseUrl}/mcp`
 
-      if (!x_payment) {
-        const requirements = buildPaymentRequired({
-          merchantAddress: config.merchantAddress,
-          amountUsdc: product.price_usdc,
-          resource,
-          description: `${product.name} — 1 månads abonnemang`,
-        })
-        return {
-          content: [
-            {
-              type: 'text',
-              text:
-                `Betalning krävs för ${product.name}.\n\n` +
-                `Pris: $${formatUsdc(product.price_usdc)} USDC (inkl. 25% moms)\n` +
-                `Betalningsadress: ${config.merchantAddress}\n` +
-                `Nätverk: Base (chain ID 8453)\n\n` +
-                `x402 betalningskrav:\n${JSON.stringify(requirements, null, 2)}\n\n` +
-                `Skicka om anropet med x_payment-parametern ifylld med din X-PAYMENT header.`,
-            },
-          ],
-        }
-      }
+      // Resolve payment: prefer HTTP-layer pre-verified result (nonce already consumed),
+      // fall back to tool-argument verification for clients that don't support HTTP 402.
+      let payment: VerifiedPayment | undefined =
+        config.preVerifiedPayment?.productId === productId
+          ? config.preVerifiedPayment
+          : undefined
 
-      // Verify payment
-      let payment
-      try {
-        payment = await verifyXPayment(x_payment, config.merchantAddress, product.price_usdc)
-      } catch (err) {
-        const msg = err instanceof PaymentError ? err.message : 'Betalningsfel'
-        return {
-          isError: true,
-          content: [{ type: 'text', text: `Betalningsfel: ${msg}` }],
+      if (!payment) {
+        if (!x_payment) {
+          const requirements = buildPaymentRequired({
+            merchantAddress: config.merchantAddress,
+            amountUsdc: product.price_usdc,
+            resource,
+            description: `${product.name} — 1 månads abonnemang`,
+          })
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  `Betalning krävs för ${product.name}.\n\n` +
+                  `Pris: $${formatUsdc(product.price_usdc)} USDC (inkl. 25% moms)\n` +
+                  `Betalningsadress: ${config.merchantAddress}\n` +
+                  `Nätverk: Base (chain ID 8453)\n\n` +
+                  `x402 betalningskrav:\n${JSON.stringify(requirements, null, 2)}\n\n` +
+                  `Skicka om anropet med x_payment-parametern ifylld med din X-PAYMENT header.`,
+              },
+            ],
+          }
+        }
+
+        try {
+          payment = await verifyXPayment(x_payment, config.merchantAddress, product.price_usdc)
+        } catch (err) {
+          const msg = err instanceof PaymentError ? err.message : 'Betalningsfel'
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Betalningsfel: ${msg}` }],
+          }
         }
       }
 
@@ -152,38 +165,44 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
       const product = PRODUCTS[productId]
       const resource = `${config.baseUrl}/mcp`
 
-      if (!x_payment) {
-        const requirements = buildPaymentRequired({
-          merchantAddress: config.merchantAddress,
-          amountUsdc: product.price_usdc,
-          resource,
-          description: `${product.name} — 1 månads lagring`,
-        })
-        return {
-          content: [
-            {
-              type: 'text',
-              text:
-                `Betalning krävs för ${product.name}.\n\n` +
-                `Pris: $${formatUsdc(product.price_usdc)} USDC (inkl. 25% moms)\n` +
-                `Betalningsadress: ${config.merchantAddress}\n` +
-                `Nätverk: Base (chain ID 8453)\n\n` +
-                `x402 betalningskrav:\n${JSON.stringify(requirements, null, 2)}\n\n` +
-                `Skicka om anropet med x_payment-parametern ifylld med din X-PAYMENT header.`,
-            },
-          ],
-        }
-      }
+      // Resolve payment: prefer HTTP-layer pre-verified result, fall back to tool-argument path.
+      let payment: VerifiedPayment | undefined =
+        config.preVerifiedPayment?.productId === productId
+          ? config.preVerifiedPayment
+          : undefined
 
-      // Verify payment
-      let payment
-      try {
-        payment = await verifyXPayment(x_payment, config.merchantAddress, product.price_usdc)
-      } catch (err) {
-        const msg = err instanceof PaymentError ? err.message : 'Betalningsfel'
-        return {
-          isError: true,
-          content: [{ type: 'text', text: `Betalningsfel: ${msg}` }],
+      if (!payment) {
+        if (!x_payment) {
+          const requirements = buildPaymentRequired({
+            merchantAddress: config.merchantAddress,
+            amountUsdc: product.price_usdc,
+            resource,
+            description: `${product.name} — 1 månads lagring`,
+          })
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  `Betalning krävs för ${product.name}.\n\n` +
+                  `Pris: $${formatUsdc(product.price_usdc)} USDC (inkl. 25% moms)\n` +
+                  `Betalningsadress: ${config.merchantAddress}\n` +
+                  `Nätverk: Base (chain ID 8453)\n\n` +
+                  `x402 betalningskrav:\n${JSON.stringify(requirements, null, 2)}\n\n` +
+                  `Skicka om anropet med x_payment-parametern ifylld med din X-PAYMENT header.`,
+              },
+            ],
+          }
+        }
+
+        try {
+          payment = await verifyXPayment(x_payment, config.merchantAddress, product.price_usdc)
+        } catch (err) {
+          const msg = err instanceof PaymentError ? err.message : 'Betalningsfel'
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Betalningsfel: ${msg}` }],
+          }
         }
       }
 

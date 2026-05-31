@@ -270,6 +270,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   const [editOpen, setEditOpen] = useState(false)
   const [editMode, setEditMode] = useState<EditAgentModalMode>('all')
   const [credentialsOpen, setCredentialsOpen] = useState(false)
+  const [rotatedKeyPatch, setRotatedKeyPatch] = useState<{ api_key: string; api_key_prefix: string } | null>(null)
   const openEditAgent = () => {
     setEditMode('agent')
     setEditOpen(true)
@@ -318,7 +319,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     )
   }
 
-  const currentAgent = agent
+  const currentAgent = rotatedKeyPatch ? { ...agent, ...rotatedKeyPatch } : agent
   const walletName = currentAgent.safe_name ?? safe?.name ?? 'Unassigned Haven wallet'
   const networkName = chainConfig?.name ?? 'Unknown network'
   const budgetLines = currentAgent.allowances.map((allowance) => {
@@ -686,6 +687,9 @@ export default function AgentDetailClient({ agentId }: Props) {
         open={credentialsOpen}
         onClose={() => setCredentialsOpen(false)}
         agent={currentAgent}
+        onKeyRotated={(newKey, newPrefix) => {
+          setRotatedKeyPatch({ api_key: newKey, api_key_prefix: newPrefix })
+        }}
       />
     </div>
   )

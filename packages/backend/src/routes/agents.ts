@@ -339,6 +339,39 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  // POST /agents/:id/rotate-key — generate a new API key for an active agent
+  app.post<{ Params: { id: string } }>(
+    '/:id/rotate-key',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { id } = request.params
+
+      const newKey = `sk_agent_${crypto.randomBytes(24).toString('hex')}`
+      const newKeyHash = crypto.createHash('sha256').update(newKey).digest('hex')
+      const prefix = newKey.slice(0, 12)
+
+      const result = await pool.query(
+        `UPDATE agents SET api_key_hash = $1, api_key_prefix = $2, updated_at = NOW()
+         WHERE id = $3 AND user_id = $4 AND status = 'active'
+         RETURNING id`,
+        [newKeyHash, prefix, id, sub],
+      )
+
+      if (result.rows.length === 0) {
+        const existing = await pool.query(
+          'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
+          [id, sub],
+        )
+        if (existing.rows.length === 0) {
+          return reply.code(404).send({ error: 'Agent not found' })
+        }
+        return reply.code(409).send({ error: 'Agent is not active' })
+      }
+
+      return { api_key: newKey, api_key_prefix: prefix }
+    },
+  )
+
   // POST /agents/:id/pause — block new API-initiated payments in Haven
   app.post<{ Params: { id: string } }>(
     '/:id/pause',

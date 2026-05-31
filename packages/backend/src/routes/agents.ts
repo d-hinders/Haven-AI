@@ -185,7 +185,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     const apiKey = `sk_agent_${crypto.randomBytes(24).toString('hex')}`
     const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest('hex')
-    const apiKeyPrefix = apiKey.slice(0, 12)
+    const apiKeyPrefix = apiKey.slice(0, 20)
 
     const client = await pool.connect()
     try {

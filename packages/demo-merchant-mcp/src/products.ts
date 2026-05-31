@@ -64,8 +64,9 @@ export const PRODUCTS: Record<ProductId, Product> = {
   },
 }
 
-/** Format USDC base units as a human-readable USD string. */
+/** Format USDC base units as a human-readable USD string.
+ *  Strips trailing zeros so micropayments show correctly (e.g. 0.001 not 0.00). */
 export function formatUsdc(units: bigint): string {
   const dollars = Number(units) / 1_000_000
-  return dollars.toFixed(2)
+  return parseFloat(dollars.toFixed(6)).toString()
 }

@@ -50,7 +50,20 @@ export interface VerifiedPayment {
 }
 
 // In-memory nonce registry — prevents replay within a server lifetime.
+// NOTE: resets on process restart; use persistent storage for production.
 const usedNonces = new Set<string>()
+
+/** Safely parse a bigint field from untrusted JSON, throwing PaymentError on bad input. */
+function parseBigInt(value: unknown, field: string): bigint {
+  try {
+    if (value === null || value === undefined || value === '') {
+      throw new Error('empty')
+    }
+    return BigInt(String(value))
+  } catch {
+    throw new PaymentError(`Ogiltigt betalningsfält '${field}': ${JSON.stringify(value)}`)
+  }
+}
 
 /**
  * Parse and verify an X-PAYMENT header value.
@@ -80,14 +93,17 @@ export async function verifyXPayment(
   const { authorization, signature } = payment.payload
   const nowSec = BigInt(Math.floor(Date.now() / 1000))
 
+  // Parse numeric fields early — throws PaymentError (not SyntaxError) on bad input.
+  const validBefore = parseBigInt(authorization.validBefore, 'validBefore')
+  const validAfter  = parseBigInt(authorization.validAfter,  'validAfter')
+  const value       = parseBigInt(authorization.value,       'value')
+
   // Expiry check
-  const validBefore = BigInt(authorization.validBefore)
   if (validBefore > 0n && nowSec >= validBefore) {
     throw new PaymentError('Betalningsauktoriseringen har löpt ut')
   }
 
   // validAfter check
-  const validAfter = BigInt(authorization.validAfter)
   if (nowSec < validAfter) {
     throw new PaymentError('Betalningsauktoriseringen är inte giltig ännu')
   }
@@ -101,42 +117,51 @@ export async function verifyXPayment(
   }
 
   // Amount check
-  const value = BigInt(authorization.value)
   if (value < expectedAmount) {
     throw new PaymentError(
       `Otillräckligt belopp: förväntade ${expectedAmount}, fick ${value}`,
     )
   }
 
-  // Nonce replay check
+  // Nonce replay check — claim the nonce atomically (before the async verify) so
+  // two concurrent requests with the same nonce cannot both pass this check.
+  // If signature verification fails below, we remove it again so a legitimate
+  // retry with a valid signature still works.
   const nonceKey = authorization.nonce.toLowerCase()
   if (usedNonces.has(nonceKey)) {
     throw new PaymentError('Betalningsnonce har redan använts (replay attack)')
   }
+  usedNonces.add(nonceKey)
 
   // EIP-712 signature verification
-  const valid = await verifyTypedData({
-    address: authorization.from as Address,
-    domain: USDC_DOMAIN,
-    types: TRANSFER_WITH_AUTH_TYPES,
-    primaryType: 'TransferWithAuthorization',
-    message: {
-      from: authorization.from as Address,
-      to: authorization.to as Address,
-      value: BigInt(authorization.value),
-      validAfter: BigInt(authorization.validAfter),
-      validBefore: BigInt(authorization.validBefore),
-      nonce: authorization.nonce as `0x${string}`,
-    },
-    signature: signature as `0x${string}`,
-  })
-
-  if (!valid) {
-    throw new PaymentError('Ogiltig EIP-3009 signatur')
+  let valid: boolean
+  try {
+    valid = await verifyTypedData({
+      address: authorization.from as Address,
+      domain: USDC_DOMAIN,
+      types: TRANSFER_WITH_AUTH_TYPES,
+      primaryType: 'TransferWithAuthorization',
+      message: {
+        from: authorization.from as Address,
+        to: authorization.to as Address,
+        value,
+        validAfter,
+        validBefore,
+        nonce: authorization.nonce as `0x${string}`,
+      },
+      signature: signature as `0x${string}`,
+    })
+  } catch (err) {
+    // Unexpected verification error — release the nonce so a valid retry can succeed.
+    usedNonces.delete(nonceKey)
+    throw err
   }
 
-  // Mark nonce as consumed
-  usedNonces.add(nonceKey)
+  if (!valid) {
+    // Signature is genuinely bad — release the nonce so the payer can correct and retry.
+    usedNonces.delete(nonceKey)
+    throw new PaymentError('Ogiltig EIP-3009 signatur')
+  }
 
   return {
     from: authorization.from as Address,

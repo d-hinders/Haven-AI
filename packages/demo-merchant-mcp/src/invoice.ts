@@ -13,8 +13,10 @@ const MERCHANT = {
   crypto_address: process.env.MERCHANT_ADDRESS ?? '0x0000000000000000000000000000000000000000',
 }
 
-// In-memory invoice counter — resets on restart (fine for demo).
-let invoiceSeq = 1000
+// Invoice counter seeded from Unix timestamp (seconds) at startup so restarts
+// don't produce the same sequence and collide with earlier invoices.
+// For production, persist this counter in a database.
+let invoiceSeq = Math.floor(Date.now() / 1000)
 
 function nextInvoiceNumber(): string {
   invoiceSeq++

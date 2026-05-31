@@ -197,6 +197,10 @@ class ApiClient {
   execSafe(body: ExecSafeBody): Promise<ExecSafeResponse> {
     return this.post<ExecSafeResponse>('/safe/exec', body)
   }
+
+  rotateAgentKey(agentId: string): Promise<{ api_key: string; api_key_prefix: string }> {
+    return this.post<{ api_key: string; api_key_prefix: string }>(`/agents/${agentId}/rotate-key`)
+  }
 }
 
 export class ApiRequestError extends Error {

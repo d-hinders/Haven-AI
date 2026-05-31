@@ -6,6 +6,7 @@ import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
 import { timeAgo } from '@/lib/format'
+import { api } from '@/lib/api'
 
 interface PaymentCredentialsAgent {
   id: string
@@ -20,6 +21,7 @@ interface Props {
   open: boolean
   onClose: () => void
   agent: PaymentCredentialsAgent
+  onKeyRotated?: (newKey: string, newPrefix: string) => void
 }
 
 /**
@@ -31,12 +33,13 @@ interface Props {
  * Pure presentation — no API calls. Reads everything it needs from the
  * agent prop the caller already has in hand.
  */
-export default function PaymentCredentialsModal({ open, onClose, agent }: Props) {
+export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRotated }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const [showCredential, setShowCredential] = useState(false)
   const [credentialCopied, setCredentialCopied] = useState(false)
   const [addressCopied, setAddressCopied] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
+  const [rotating, setRotating] = useState(false)
   const { toast } = useToast()
 
   useFocusTrap(panelRef, open)
@@ -94,6 +97,19 @@ export default function PaymentCredentialsModal({ open, onClose, agent }: Props)
       toast.error('Could not copy agent ID')
     }
   }, [agent.id, toast])
+
+  const rotateKey = useCallback(async () => {
+    setRotating(true)
+    try {
+      const result = await api.rotateAgentKey(agent.id)
+      onKeyRotated?.(result.api_key, result.api_key_prefix)
+      toast.success("API key rotated — save it now, it won't be shown again")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not rotate API key')
+    } finally {
+      setRotating(false)
+    }
+  }, [agent.id, onKeyRotated, toast])
 
   if (!open) return null
 
@@ -153,9 +169,30 @@ export default function PaymentCredentialsModal({ open, onClose, agent }: Props)
                   </Button>
                 </div>
               ) : (
-                <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  If you lost the credential, create a new agent — Haven cannot show it again.
-                </p>
+                <div className="mt-3 space-y-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void rotateKey()}
+                    disabled={rotating}
+                    className="text-amber-600 hover:text-amber-700"
+                  >
+                    {rotating ? (
+                      <span className="flex items-center gap-1.5">
+                        <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a10 10 0 100 10z" />
+                        </svg>
+                        Rotating…
+                      </span>
+                    ) : (
+                      'Rotate API key'
+                    )}
+                  </Button>
+                  <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                    Rotating generates a new key immediately. The old key stops working right away.
+                  </p>
+                </div>
               )}
             </div>
           </section>

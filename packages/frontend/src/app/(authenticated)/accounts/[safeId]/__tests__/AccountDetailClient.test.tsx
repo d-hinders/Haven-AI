@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
 const mockUseOwnerDirectory = vi.fn()
@@ -178,6 +178,10 @@ describe('AccountDetailClient', () => {
     })
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('leads with wallet control, agent access, and advanced account details', () => {
     render(<AccountDetailClient />)
 
@@ -187,7 +191,7 @@ describe('AccountDetailClient', () => {
     expect(screen.getByText('1 of 1 approver required')).toBeInTheDocument()
     expect(screen.getByText('Agent access')).toBeInTheDocument()
     expect(screen.getByText('Research agent')).toBeInTheDocument()
-    expect(screen.getByText('100.00 USDC.e per day')).toBeInTheDocument()
+    expect(screen.getByText('100.00 USDC.e per day · No activity yet')).toBeInTheDocument()
     expect(screen.getByText('Advanced account details')).toBeInTheDocument()
     expect(screen.getByText('Approvers')).toBeInTheDocument()
     expect(screen.getByText('Wallet')).toBeInTheDocument()
@@ -236,5 +240,39 @@ describe('AccountDetailClient', () => {
 
     expect(screen.getByText('Agent access could not load')).toBeInTheDocument()
     expect(screen.queryByText('No agents connected')).not.toBeInTheDocument()
+  })
+
+  it('shows last-activity metadata for agents', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Research agent',
+          safe_id: 'safe-1',
+          status: 'active',
+          mcp_last_seen_at: '2026-06-01T10:00:00Z',
+          allowances: [
+            {
+              id: 'allowance-1',
+              agent_id: 'agent-1',
+              token_address: '0x0000000000000000000000000000000000000000',
+              token_symbol: 'USDC.e',
+              allowance_amount: '100000000',
+              reset_period_min: 1440,
+            },
+          ],
+        },
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<AccountDetailClient />)
+
+    expect(screen.getByText('100.00 USDC.e per day · Last activity 2h ago')).toBeInTheDocument()
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument()
   })
 })

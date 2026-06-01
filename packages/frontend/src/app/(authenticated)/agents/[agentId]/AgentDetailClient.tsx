@@ -20,6 +20,7 @@ import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { getChainConfig } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
+import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
 import {
   activityStatusPresentation,
   agentStatusPresentation,
@@ -413,9 +414,11 @@ export default function AgentDetailClient({ agentId }: Props) {
         title={currentAgent.name}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <StatusBadge tone={agentStatus.tone}>
-              {agentStatus.label}
-            </StatusBadge>
+            {currentAgent.status === 'active' ? null : (
+              <StatusBadge tone={agentStatus.tone}>
+                {agentStatus.label}
+              </StatusBadge>
+            )}
             {!isRevoked ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -454,7 +457,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
           {currentAgent.description || 'This agent can make payments within the rules you set.'}
         </p>
-        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
             <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
@@ -466,6 +469,15 @@ export default function AgentDetailClient({ agentId }: Props) {
           <div>
             <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
             <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Last activity</dt>
+            <dd
+              className="mt-1 font-medium text-[var(--v2-ink)] v2-tabular"
+              title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}
+            >
+              {formatAgentLastActivityValue(currentAgent.mcp_last_seen_at)}
+            </dd>
           </div>
         </dl>
       </Card>

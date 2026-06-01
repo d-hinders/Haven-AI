@@ -20,7 +20,7 @@ import { truncate } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import { formatAllowanceAmount, getTokenDecimals } from '@/lib/allowance-format'
-import { formatAgentLastSeen, formatAgentLastSeenTitle } from '@/lib/agent-last-seen'
+import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { entityCardClassName } from './ui/entityCardStyles'
@@ -361,19 +361,19 @@ function AgentCard({
               <h3 className="text-sm font-semibold text-[var(--v2-ink)] truncate">
                 {agent.name}
               </h3>
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                  isActive
-                    ? 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-                    : isPaused
+              {!isActive ? (
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                    isPaused
                       ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
-                    : agent.status === 'revoked'
-                      ? 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
-                      : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-                }`}
-              >
-                {agent.status}
-              </span>
+                      : agent.status === 'revoked'
+                        ? 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
+                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
+                  }`}
+                >
+                  {agent.status}
+                </span>
+              ) : null}
             </div>
             {agent.safe_name && (
               <p className="text-xs text-[var(--v2-ink-2)] mt-0.5">
@@ -387,9 +387,9 @@ function AgentCard({
             )}
             <p
               className="mt-0.5 text-xs text-[var(--v2-ink-3)]"
-              title={formatAgentLastSeenTitle(agent.mcp_last_seen_at)}
+              title={formatAgentLastActivityTitle(agent.mcp_last_seen_at)}
             >
-              {formatAgentLastSeen(agent.mcp_last_seen_at)}
+              {formatAgentLastActivity(agent.mcp_last_seen_at)}
             </p>
           </div>
       </div>

@@ -79,7 +79,7 @@ function baseAgent(overrides = {}) {
   }
 }
 
-describe('AgentPanel last-seen metadata', () => {
+describe('AgentPanel last-activity metadata', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
@@ -120,13 +120,13 @@ describe('AgentPanel last-seen metadata', () => {
     vi.useRealTimers()
   })
 
-  it('shows populated and empty last-seen states without changing agent status', () => {
+  it('shows populated and empty last-activity states without a default active badge', () => {
     render(<AgentPanel />)
 
     expect(screen.getByText('Research agent')).toBeInTheDocument()
     expect(screen.getByText('Travel agent')).toBeInTheDocument()
-    expect(screen.getByText('Last seen 2h ago')).toBeInTheDocument()
-    expect(screen.getByText('Not connected yet')).toBeInTheDocument()
-    expect(screen.getAllByText('active')).toHaveLength(2)
+    expect(screen.getByText('Last activity 2h ago')).toBeInTheDocument()
+    expect(screen.getByText('No activity yet')).toBeInTheDocument()
+    expect(screen.queryByText('active')).not.toBeInTheDocument()
   })
 })

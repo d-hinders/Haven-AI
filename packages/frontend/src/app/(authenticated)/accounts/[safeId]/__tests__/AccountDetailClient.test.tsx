@@ -191,7 +191,7 @@ describe('AccountDetailClient', () => {
     expect(screen.getByText('1 of 1 approver required')).toBeInTheDocument()
     expect(screen.getByText('Agent access')).toBeInTheDocument()
     expect(screen.getByText('Research agent')).toBeInTheDocument()
-    expect(screen.getByText('100.00 USDC.e per day · Not connected yet')).toBeInTheDocument()
+    expect(screen.getByText('100.00 USDC.e per day · No activity yet')).toBeInTheDocument()
     expect(screen.getByText('Advanced account details')).toBeInTheDocument()
     expect(screen.getByText('Approvers')).toBeInTheDocument()
     expect(screen.getByText('Wallet')).toBeInTheDocument()
@@ -242,7 +242,7 @@ describe('AccountDetailClient', () => {
     expect(screen.queryByText('No agents connected')).not.toBeInTheDocument()
   })
 
-  it('shows last-seen metadata for connected agents', () => {
+  it('shows last-activity metadata for agents', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
     mockUseAgents.mockReturnValue({
@@ -272,6 +272,7 @@ describe('AccountDetailClient', () => {
 
     render(<AccountDetailClient />)
 
-    expect(screen.getByText('100.00 USDC.e per day · Last seen 2h ago')).toBeInTheDocument()
+    expect(screen.getByText('100.00 USDC.e per day · Last activity 2h ago')).toBeInTheDocument()
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument()
   })
 })

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  formatAgentLastSeen,
-  formatAgentLastSeenValue,
-  formatAgentLastSeenTitle,
+  formatAgentLastActivity,
+  formatAgentLastActivityValue,
+  formatAgentLastActivityTitle,
 } from '../agent-last-seen'
 
-describe('agent last-seen formatting', () => {
+describe('agent last-activity formatting', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
@@ -15,19 +15,19 @@ describe('agent last-seen formatting', () => {
     vi.useRealTimers()
   })
 
-  it('formats a populated timestamp as calm last-seen copy', () => {
-    expect(formatAgentLastSeen('2026-06-01T10:00:00Z')).toBe('Last seen 2h ago')
-    expect(formatAgentLastSeenValue('2026-06-01T10:00:00Z')).toBe('2h ago')
+  it('formats a populated timestamp as calm last-activity copy', () => {
+    expect(formatAgentLastActivity('2026-06-01T10:00:00Z')).toBe('Last activity 2h ago')
+    expect(formatAgentLastActivityValue('2026-06-01T10:00:00Z')).toBe('2h ago')
   })
 
-  it('uses a clear empty-state label when the agent has not connected yet', () => {
-    expect(formatAgentLastSeen(null)).toBe('Not connected yet')
-    expect(formatAgentLastSeenValue(undefined)).toBe('Not connected yet')
+  it('uses a clear empty-state label when the agent has no activity yet', () => {
+    expect(formatAgentLastActivity(null)).toBe('No activity yet')
+    expect(formatAgentLastActivityValue(undefined)).toBe('No activity yet')
   })
 
-  it('treats invalid timestamps as not connected', () => {
-    expect(formatAgentLastSeen('not-a-date')).toBe('Not connected yet')
-    expect(formatAgentLastSeenValue('not-a-date')).toBe('Not connected yet')
-    expect(formatAgentLastSeenTitle('not-a-date')).toBeUndefined()
+  it('treats invalid timestamps as no activity', () => {
+    expect(formatAgentLastActivity('not-a-date')).toBe('No activity yet')
+    expect(formatAgentLastActivityValue('not-a-date')).toBe('No activity yet')
+    expect(formatAgentLastActivityTitle('not-a-date')).toBeUndefined()
   })
 })

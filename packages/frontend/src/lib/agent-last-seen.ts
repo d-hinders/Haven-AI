@@ -1,6 +1,6 @@
 import { timeAgo } from '@/lib/format'
 
-const NOT_CONNECTED_COPY = 'Not connected yet'
+const NO_ACTIVITY_COPY = 'No activity yet'
 
 function parseLastSeenMs(lastSeenAt: string | null | undefined): number | null {
   if (!lastSeenAt) return null
@@ -8,19 +8,19 @@ function parseLastSeenMs(lastSeenAt: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null
 }
 
-export function formatAgentLastSeen(lastSeenAt: string | null | undefined): string {
+export function formatAgentLastActivity(lastSeenAt: string | null | undefined): string {
   const ms = parseLastSeenMs(lastSeenAt)
-  if (ms === null) return NOT_CONNECTED_COPY
-  return `Last seen ${timeAgo(ms)}`
+  if (ms === null) return NO_ACTIVITY_COPY
+  return `Last activity ${timeAgo(ms)}`
 }
 
-export function formatAgentLastSeenValue(lastSeenAt: string | null | undefined): string {
+export function formatAgentLastActivityValue(lastSeenAt: string | null | undefined): string {
   const ms = parseLastSeenMs(lastSeenAt)
-  if (ms === null) return NOT_CONNECTED_COPY
+  if (ms === null) return NO_ACTIVITY_COPY
   return timeAgo(ms)
 }
 
-export function formatAgentLastSeenTitle(lastSeenAt: string | null | undefined): string | undefined {
+export function formatAgentLastActivityTitle(lastSeenAt: string | null | undefined): string | undefined {
   const ms = parseLastSeenMs(lastSeenAt)
   if (ms === null) return undefined
   return new Date(ms).toLocaleString()

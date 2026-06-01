@@ -37,7 +37,7 @@ import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
-import { formatAgentLastSeen } from '@/lib/agent-last-seen'
+import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
@@ -107,7 +107,7 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
 }
 
 function agentAccessSummary(agent: Agent, chainId: number | null): string {
-  return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastSeen(agent.mcp_last_seen_at)}`
+  return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
 }
 
 export default function AccountDetailClient() {
@@ -416,7 +416,7 @@ export default function AccountDetailClient() {
             </Link>
           </div>
           <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Connected agents can request payments from this Haven wallet when their status and agent budget allow it.
+            Agents can request payments from this Haven wallet when their status and agent budget allow it.
           </p>
         </div>
 
@@ -448,7 +448,11 @@ export default function AccountDetailClient() {
                   href={`/agents/${agent.id}`}
                   title={agent.name}
                   subtitle={agentAccessSummary(agent, chainId)}
-                  trailing={<StatusBadge tone={status.tone}>{status.label}</StatusBadge>}
+                  trailing={
+                    agent.status === 'active'
+                      ? undefined
+                      : <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                  }
                 />
               )
             })}

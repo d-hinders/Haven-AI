@@ -20,7 +20,7 @@ import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { getChainConfig } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
-import { formatAgentLastSeenTitle, formatAgentLastSeenValue } from '@/lib/agent-last-seen'
+import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
 import {
   activityStatusPresentation,
   agentStatusPresentation,
@@ -414,9 +414,11 @@ export default function AgentDetailClient({ agentId }: Props) {
         title={currentAgent.name}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <StatusBadge tone={agentStatus.tone}>
-              {agentStatus.label}
-            </StatusBadge>
+            {currentAgent.status === 'active' ? null : (
+              <StatusBadge tone={agentStatus.tone}>
+                {agentStatus.label}
+              </StatusBadge>
+            )}
             {!isRevoked ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -469,12 +471,12 @@ export default function AgentDetailClient({ agentId }: Props) {
             <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
           </div>
           <div>
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Last seen</dt>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Last activity</dt>
             <dd
               className="mt-1 font-medium text-[var(--v2-ink)] v2-tabular"
-              title={formatAgentLastSeenTitle(currentAgent.mcp_last_seen_at)}
+              title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}
             >
-              {formatAgentLastSeenValue(currentAgent.mcp_last_seen_at)}
+              {formatAgentLastActivityValue(currentAgent.mcp_last_seen_at)}
             </dd>
           </div>
         </dl>

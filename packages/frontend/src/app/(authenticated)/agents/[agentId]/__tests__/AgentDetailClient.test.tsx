@@ -95,7 +95,7 @@ const SAFE = {
   chain_id: 100,
 }
 
-describe('AgentDetailClient last-seen metadata', () => {
+describe('AgentDetailClient last-activity metadata', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
@@ -152,11 +152,12 @@ describe('AgentDetailClient last-seen metadata', () => {
     vi.useRealTimers()
   })
 
-  it('renders the compact last-seen field in the summary card', () => {
+  it('renders the compact last-activity field without a default connected badge', () => {
     render(<AgentDetailClient agentId="agent-1" />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Research agent' })).toBeInTheDocument()
-    expect(screen.getByText('Last seen')).toBeInTheDocument()
+    expect(screen.getByText('Last activity')).toBeInTheDocument()
     expect(screen.getByText('2h ago')).toBeInTheDocument()
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument()
   })
 })

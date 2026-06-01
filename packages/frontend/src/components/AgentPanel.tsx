@@ -20,6 +20,7 @@ import { truncate } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import { formatAllowanceAmount, getTokenDecimals } from '@/lib/allowance-format'
+import { formatAgentLastSeen, formatAgentLastSeenTitle } from '@/lib/agent-last-seen'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { entityCardClassName } from './ui/entityCardStyles'
@@ -384,6 +385,12 @@ function AgentCard({
                 {agent.description}
               </p>
             )}
+            <p
+              className="mt-0.5 text-xs text-[var(--v2-ink-3)]"
+              title={formatAgentLastSeenTitle(agent.mcp_last_seen_at)}
+            >
+              {formatAgentLastSeen(agent.mcp_last_seen_at)}
+            </p>
           </div>
       </div>
 

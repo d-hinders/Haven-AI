@@ -37,6 +37,7 @@ import { getExplorerUrl, getChainConfig } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { formatAgentLastSeen } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
@@ -103,6 +104,10 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
     allowance.token_symbol,
   )
   return `${amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
+}
+
+function agentAccessSummary(agent: Agent, chainId: number | null): string {
+  return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastSeen(agent.mcp_last_seen_at)}`
 }
 
 export default function AccountDetailClient() {
@@ -442,7 +447,7 @@ export default function AccountDetailClient() {
                   key={agent.id}
                   href={`/agents/${agent.id}`}
                   title={agent.name}
-                  subtitle={agentBudgetSummary(agent, chainId)}
+                  subtitle={agentAccessSummary(agent, chainId)}
                   trailing={<StatusBadge tone={status.tone}>{status.label}</StatusBadge>}
                 />
               )

@@ -697,7 +697,10 @@ export default function AgentDetailClient({ agentId }: Props) {
 
       <PaymentCredentialsModal
         open={credentialsOpen}
-        onClose={() => setCredentialsOpen(false)}
+        onClose={() => {
+          setCredentialsOpen(false)
+          setRotatedKeyPatch(null)
+        }}
         agent={currentAgent}
         onKeyRotated={(newKey, newPrefix) => {
           setRotatedKeyPatch({ api_key: newKey, api_key_prefix: newPrefix })

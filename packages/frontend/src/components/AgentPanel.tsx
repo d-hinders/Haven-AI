@@ -356,7 +356,7 @@ function AgentCard({
           >
             <BotIcon size={17} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-[var(--v2-ink)] truncate">
                 {agent.name}
@@ -385,13 +385,13 @@ function AgentCard({
                 {agent.description}
               </p>
             )}
-            <p
-              className="mt-0.5 text-xs text-[var(--v2-ink-3)]"
-              title={formatAgentLastActivityTitle(agent.mcp_last_seen_at)}
-            >
-              {formatAgentLastActivity(agent.mcp_last_seen_at)}
-            </p>
           </div>
+          <p
+            className="ml-auto shrink-0 pt-0.5 text-right text-xs text-[var(--v2-ink-3)]"
+            title={formatAgentLastActivityTitle(agent.mcp_last_seen_at)}
+          >
+            {formatAgentLastActivity(agent.mcp_last_seen_at)}
+          </p>
       </div>
 
       {isPaused && (

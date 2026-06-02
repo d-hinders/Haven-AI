@@ -1,99 +1,137 @@
-# Haven — x402 Payment Execution Sequence
+# Haven - x402 Payment Execution Sequence
 
-How an agent pays for an x402-protected resource through Haven. The interesting
-piece is the **left edge** of this diagram — the HTTP 402 challenge from the
-resource server — which is what x402 is for. Once Haven is involved, the
-mechanics overlap heavily with the normal `/payments` flow but with a few
-differences worth knowing.
+How an agent pays for an x402-protected resource through Haven today.
 
-Source of truth: [packages/backend/src/routes/x402.ts](../../packages/backend/src/routes/x402.ts) and
-[packages/backend/src/lib/allowance-module.ts](../../packages/backend/src/lib/allowance-module.ts).
+Standard merchant x402 has two legs:
+
+1. Haven funding leg: a Safe AllowanceModule transfer funds the agent delegate
+   wallet within the user's agent budget.
+2. Merchant leg: the agent signs the standard EIP-3009 `X-PAYMENT` header from
+   the delegate wallet and retries the merchant/resource request.
+
+Haven does not talk to the merchant, settle merchant balances, act as a
+facilitator/acquirer, or hold merchant funds in this flow. The merchant leg is
+the agent's retry request.
+
+Source of truth:
+
+- [`packages/sdk/src/x402.ts`](../../packages/sdk/src/x402.ts)
+- [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts)
+- [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
+- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
+- [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
+
+## Standard SDK / Local MCP Flow
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant Agent as Agent runtime
-  participant Resource as x402 resource<br/>server
+  participant Resource as x402 resource server
+  participant SDK as Haven SDK / local MCP
   participant API as Haven backend
-  participant DB as Postgres
-  participant RPC as Gnosis RPC
-  participant AM as AllowanceModule
-  participant Safe
+  participant AM as Safe AllowanceModule
+  participant Safe as Haven wallet / Safe
 
-  Agent->>Resource: GET /protected
-  Resource-->>Agent: 402 Payment Required<br/>X-PAYMENT challenge:<br/>{ payTo, amount, asset, network }
-
-  Note over Agent: Agent holds the delegate EOA key.<br/>Signs the transfer hash up front<br/>for one-shot mode.
-
-  Agent->>API: POST /x402/authorize<br/>{ url, payTo, amount, asset, network, category, signature }<br/>Authorization: Bearer sk_agent_*
-  API->>DB: SELECT agent WHERE api_key_hash = sha256(key)
-  API->>DB: SELECT agent_allowances WHERE token_address = asset
-
-  API->>DB: COUNT payment_intents<br/>(source='x402') in last hour
-  alt count ≥ max_x402_per_hour (default 100)
-    API-->>Agent: 429 { error: rate limit, retry_after_seconds: 60 }
-  else within rate limit
-    API->>RPC: AllowanceModule.getTokenAllowance(safe, delegate, asset)
-    RPC-->>API: [amount, spent, resetMin, lastResetMin, nonce]
-
-    alt amount > remaining (over allowance)
-      API->>DB: INSERT approval_requests<br/>reason includes url + category<br/>expires_at = NOW()+24h
-      API-->>Agent: 202 { status: pending_approval, expires_at }
-      Note over Agent,API: Agent cannot complete x402 now. User must approve in dashboard. Agent must retry POST /x402/authorize after approval lands.
-
-    else within allowance (one-shot with signature)
-      API->>RPC: generateTransferHash(safe, asset, payTo, amount, 0x0, 0, nonce)
-      RPC-->>API: sign_hash (bytes32)
-      API->>API: ecrecover(sign_hash, signature) == delegate_address ?
-      API->>DB: INSERT payment_intents<br/>status = submitted,<br/>source = 'x402',<br/>x402_resource_url = url,<br/>x402_category = category
-      API->>RPC: relayer.executeAllowanceTransfer(<br/>safe, asset, payTo, amount,<br/>0x0, 0, delegate, signature)
-      RPC->>AM: tx (signed by relayer wallet)
-      AM->>Safe: transfer within allowance
-      Safe-->>AM: ok
-      RPC-->>API: tx_hash, confirmed
-      API->>DB: UPDATE status = confirmed,<br/>tx_hash, usd_value, eur_value
-      API-->>Agent: 201 { status: confirmed, tx_hash, resource_url, explorer_url }
-
-      Note over Agent,Resource: Agent retries the resource with payment proof
-      Agent->>Resource: GET /protected<br/>X-PAYMENT-PROOF: tx_hash
-      Resource-->>Agent: 200 OK (resource delivered)
-    end
+  Agent->>Resource: Request paid resource
+  Resource-->>Agent: 402 Payment Required { amount, asset, network, payTo }
+  Agent->>SDK: quoteX402 / haven_quote_x402
+  SDK-->>Agent: Parsed quote (read-only)
+  Agent->>SDK: payX402Quote / haven_pay_x402_quote
+  SDK->>API: Authorize funding with Bearer sk_agent_*
+  API->>AM: Read remaining allowance
+  alt within budget
+    API->>AM: Relay signed Safe-to-delegate funding transfer
+    AM->>Safe: Transfer within approved budget
+    API-->>SDK: funding_sent / retry_original_x402_request
+    SDK->>SDK: Build EIP-3009 X-PAYMENT from delegate key
+    SDK->>Resource: Retry original request with X-PAYMENT
+    Resource-->>SDK: 200 OK / merchant response
+    SDK-->>Agent: Response
+  else over budget
+    API-->>SDK: pending_approval + payment_id + resume state
+    SDK-->>Agent: Tell user to approve in Haven and preserve resume state
   end
 ```
 
-## Differences vs the regular `/payments` flow
+`quoteX402()` and `haven_quote_x402` are read-only. They parse the merchant's
+HTTP 402 response but do not create a Haven payment, approval request,
+signature, or on-chain transaction.
 
-The on-chain mechanics are identical (same `payment_intents` table, same
-`executeAllowanceTransfer`, same delegate signature verification). The x402
-endpoint adds four things on top:
+## Hosted MCP Flow
 
-| Concern | Regular `/payments` | `/x402/authorize` |
+Hosted MCP is keyless, so the funding signature and merchant header signature
+are local edge-signing steps.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Agent as Agent runtime
+  participant Resource as x402 resource server
+  participant MCP as Hosted MCP (keyless)
+  participant Signer as Edge signer / local key
+  participant API as Haven backend
+
+  Agent->>Resource: Request paid resource
+  Resource-->>Agent: 402 Payment Required
+  Agent->>MCP: haven_x402_authorize { payment_required }
+  MCP->>API: Construct funding intent
+  API-->>MCP: { payment_id, payload_hash, x402.expected } or pending_approval
+  MCP-->>Agent: Unsigned funding context
+  Agent->>Signer: haven_sign { payload_hash, x402_expected }
+  Signer-->>Agent: { signature, x402_binding }
+  Agent->>MCP: haven_submit { payment_id, signature }
+  MCP->>API: Relay funding signature
+  API-->>MCP: funding status
+  Agent->>Signer: haven_x402_sign_header { payment_required, x402_binding }
+  Signer-->>Agent: { payment_header }
+  Agent->>Resource: Retry with X-PAYMENT
+  Resource-->>Agent: 200 OK / merchant response
+```
+
+The signer validates that the live merchant challenge still matches the funded
+amount, merchant recipient, resource URL, asset, and network before it signs the
+merchant header.
+
+## Approval Resume
+
+When an x402 funding leg exceeds the remaining on-chain agent budget, Haven
+queues a pending approval and returns `next_action:
+"wait_for_user_approval"`. The agent must not loop or create duplicate merchant
+sessions.
+
+The correct behavior is:
+
+1. Preserve the returned `payment_id`, `idempotencyKey`, and `resumeState` when
+   available.
+2. Tell the user the payment is waiting in Haven.
+3. Poll `getPaymentStatus(payment_id)`.
+4. When status returns `next_action: "retry_original_x402_request"`, call the
+   matching resume helper.
+5. Retry the original merchant/resource request with `X-PAYMENT`.
+
+If the process restarted and only the `payment_id` remains, call
+`getResumeState(payment_id)` after approval to rehydrate Haven's stored x402
+context. Haven stores payment context, not the agent's local request stream, so
+POST bodies and MCP sessions may still need to be reconstructed by the agent.
+
+## Differences From Direct Payments
+
+| Concern | Direct `/payments` | x402 |
 |---|---|---|
-| Token resolution | by **symbol** | by **address** (asset field from X-PAYMENT) |
-| Amount units | human-readable + decimals | **atomic units** straight from the x402 challenge |
-| Rate limit | none | per-agent `max_x402_per_hour` (default 100) — 429 if exceeded |
-| Metadata | none | `source='x402'`, `x402_resource_url`, `x402_category` stored on the intent |
-| Modes | always two-step (sign separately) | optional **one-shot** when `signature` is included in the body |
+| Payment target | Recipient address from agent intent | Merchant `payTo` from HTTP 402 challenge |
+| Amount units | Human decimal string | Atomic amount from x402 option |
+| Agent action after funding | None for direct confirmed payment | Retry original merchant/resource request |
+| Header sent to merchant | None | `X-PAYMENT` |
+| Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
+| Approval resume | Poll payment status | Poll status, then resume original x402 request |
 
-## Two-step mode (alternative happy path)
+## Guardrails
 
-If the agent posts `/x402/authorize` **without** a `signature`, the endpoint
-returns `201 { status: 'pending_signature', sign_data }` instead of executing.
-The agent then signs `sign_data.hash` with its delegate key and either:
-
-1. `POST /payments/:id/sign` — same path as the regular `/payments` flow
-   ([packages/backend/src/routes/payments.ts:264](../../packages/backend/src/routes/payments.ts)), or
-2. `POST /x402/authorize` again with the `signature` field — one-shot
-   execution against the same nonce.
-
-Both routes converge on `executeAllowanceTransfer` via the relayer wallet.
-
-## Why x402 is not just a `/payments` alias
-
-The protocol-shaped concerns live entirely on the **left half** of the diagram
-(the resource server's 402 challenge and the agent's retry with proof). Haven
-does not talk to the resource server or any x402 facilitator directly — that
-is the agent's job. Haven's contribution is: accept the wire-format inputs
-that x402 hands to the agent (atomic amount, asset address, CAIP-2 network),
-enforce per-protocol guardrails (rate limit, category tagging), and settle
-on-chain in one round-trip when possible.
+- Keep x402 budgets small and reset-bound.
+- Treat the delegate key as a hot payment key for x402.
+- Reconcile or sweep stranded delegate balances before scaling.
+- Do not describe demo x402 endpoints as production merchant settlement,
+  facilitator, acquiring, fiat/card, or merchant-of-record products.
+- Use [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
+  before changing x402/MPP flows or merchant-facing demos.

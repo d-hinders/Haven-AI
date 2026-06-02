@@ -68,6 +68,15 @@ The agent will pay a tiny amount (~0.01 EURe on Gnosis Chain), receive the demo 
 | Gnosis Chain | `eip155:100` | EURe, USDC.e, xDAI |
 | Base | `eip155:8453` | USDC, ETH |
 
+## Credential Lifecycle
+
+- The Haven API key identifies the agent. It is not payment authority.
+- The delegate key signs payment payloads locally. Haven's backend never receives it.
+- On-chain Safe AllowanceModule state enforces the agent budget.
+- `getAllowances()` / `get_allowances` is the right path for budget, remaining amount, reset period, or "what can I spend?" questions.
+- If an API key is exposed or lost, rotate it from the Haven agent detail page. The new key is shown once and the old key stops working.
+- If a delegate key is exposed or lost, pause or revoke the agent and create a new signing path.
+
 ## Step-by-Step API
 
 For agents that need control over each step (e.g., external signing):
@@ -94,7 +103,7 @@ const result = await haven.waitForConfirmation(intent.paymentId)
 
 Production merchant acceptance, facilitator, settlement, fiat, or acquiring functionality needs separate product and legal review under the repo's [CASP / MiCA guardrails](../../docs/regulatory/casp-risk-guardrails.md). The hosted x402 endpoint is an internal technical demo, not a merchant settlement product.
 
-Haven natively supports the [x402](https://x402.org) payment protocol. When an API returns HTTP 402, the SDK evaluates the challenge against the agent's approved limits, uses the configured delegate key for the required signature, and retries automatically:
+The SDK supports [x402](https://x402.org) client flows. When an API returns HTTP 402, the SDK evaluates the challenge against the agent's approved limits, uses the configured delegate key for the required signature, and retries automatically:
 
 ```typescript
 // Automatic — fetch() intercepts 402, pays, and retries.

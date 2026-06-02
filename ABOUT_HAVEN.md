@@ -23,10 +23,15 @@ Haven is non-custodial smart account software. It helps users configure, verify,
 - Haven account and Haven wallet flows.
 - Agent creation with per-token budget and reset period.
 - Agent credential generation and handoff artifacts.
+- Prompt-first **Connect your agent** handoff with hosted MCP snippets for common runtimes.
+- Hosted/keyless MCP server and local edge signer split.
+- Local MCP server for runtime-local credential-file integrations.
 - Direct agent payments through the Haven SDK.
-- x402 and Haven machine-payment challenge handling in the SDK.
-- Dashboard, account, agent, approval, and transaction surfaces.
-- Agent pause and revoke flows.
+- x402 and Haven machine-payment challenge quote/pay/resume handling in the SDK and local MCP.
+- `get_allowances` tooling for live "what can this agent spend?" questions.
+- Dashboard, account, agent, approval, transaction, activity, and tool-invocation surfaces.
+- Agent pause, resume, revoke, and API-key rotation flows.
+- Internal demo merchant MCP package for Base USDC x402 test purchases and Swedish invoice output.
 - Quality, review, and agent workflow documentation for implementation work.
 
 ## Agent Credentials
@@ -41,9 +46,27 @@ Current credential context should include:
 - Haven wallet / Safe address.
 - Credential address / delegate address.
 - Chain ID and token context when needed by the runtime.
+- Current budget summary as a snapshot, not the authority source.
+- Revoke URL and creation timestamp where useful.
 - Delegate private key only when Haven generated it client-side for the user and shows it once.
 
 If the user brings their own credential address, Haven must not invent, recover, or store the private key. The generated instructions should tell the user or agent runtime to provide the matching delegate key through their own secret handling.
+
+Haven stores only API-key hashes and display prefixes. Rotating an API key creates a new one-time-visible key and invalidates the old API key immediately. API-key rotation is useful when the API key was exposed or lost; it does not rotate the delegate signing key. If the delegate private key was exposed or lost, the user should pause or revoke the agent and create a new key path.
+
+## Connect-Agent And MCP
+
+The primary connect-agent flow is now hosted MCP plus local signing:
+
+- Hosted MCP receives the agent API key as Bearer identity.
+- Hosted MCP reads state, constructs unsigned payment payloads, and relays signatures.
+- The local runtime or `@haven_ai/signer` holds the delegate private key and signs.
+- Hosted snippets and deep links must never include the delegate private key.
+- MCP tool calls are tagged and audited so users can see activity and last-seen status.
+
+The local `@haven_ai/mcp` package remains available for stdio deployments where the MCP server runs beside the agent and reads a local credential file. It signs locally and should not be run as a hosted multi-tenant signer.
+
+Audit logs and last-seen timestamps are informational UX and debugging surfaces. They are not the spend gate. On-chain Safe AllowanceModule state remains the spend gate.
 
 ## Payment Flow
 
@@ -59,16 +82,16 @@ Haven can help construct and relay the transaction, but it must not alter the si
 
 ## x402 And Machine Payments
 
-The SDK supports `haven.fetch()` for standard x402 and Haven machine-payment challenge flows.
+The SDK supports `haven.fetch()`, quote-first helpers, and resume helpers for standard x402 and Haven machine-payment challenge flows.
 
 For standard x402 merchant payments, the delegate wallet is the merchant-facing payer because the merchant protocol verifies an EIP-3009 authorization from an externally owned account. The current flow is:
 
 1. Agent encounters an HTTP 402 challenge.
 2. Haven checks agent identity, wallet context, and remaining allowance.
-3. Haven can fund the delegate wallet from the Safe within budget.
+3. Haven can construct and relay a budget-constrained Safe-to-delegate funding step.
 4. The agent signs the merchant-facing EIP-3009 payment from the delegate wallet.
-5. The SDK retries the request with the payment proof.
-6. Haven tracks funded, settled, failed, and stranded-payment states where relevant.
+5. The SDK retries the request with the standard `X-PAYMENT` header.
+6. Haven tracks funded, executed, failed, and stranded-payment states where relevant.
 
 This means the delegate key is a hot payment key and should be treated carefully. Keep x402 budgets small and reset-bound, rotate exposed keys, and reconcile/sweep stranded delegate balances before scaling high-volume payment traffic.
 
@@ -108,9 +131,10 @@ Avoid exposing Safe, module, relayer, signer, owner, transaction hash, and raw a
 - Frontend: Next.js and React.
 - Backend: Fastify, TypeScript, and PostgreSQL.
 - SDK: `@haven_ai/sdk`.
+- MCP: local `@haven_ai/mcp`, hosted/keyless `@haven_ai/mcp-server`, and local `@haven_ai/signer`.
 - Smart account model: Safe plus AllowanceModule.
-- Current chain focus: Gnosis for Safe/AllowanceModule flows and Base-relevant x402 flows.
-- Payment surfaces: direct payments, x402, and Haven machine-payment challenge demos.
+- Current chain focus: Gnosis and Base for Safe/AllowanceModule flows; Base USDC for standard x402 demo merchant flows.
+- Payment surfaces: direct payments, x402, Haven machine-payment challenge demos, and internal demo merchant MCP.
 
 ## Mental Model
 

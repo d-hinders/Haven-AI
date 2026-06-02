@@ -3,6 +3,12 @@
 `@haven_ai/mcp` exposes Haven payment primitives as local MCP tools. It is a
 thin wrapper around `@haven_ai/sdk`.
 
+For most user-facing setup, the current Haven app leads with hosted MCP plus a
+local edge signer. See [`@haven_ai/mcp-server`](../mcp-server/README.md) and
+[`@haven_ai/signer`](../signer/README.md). This local package remains useful
+when the MCP server itself should run beside the agent runtime and read the
+credential file locally.
+
 The server is intentionally local-only:
 
 - It runs in the agent operator's environment, usually as a stdio subprocess.

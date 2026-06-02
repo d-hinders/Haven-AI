@@ -1,7 +1,7 @@
 # Haven — Architecture Diagrams
 
 Internal engineering reference for how identity, custody, and authority flow
-through Haven today. Each diagram is Mermaid in markdown (canonical) with
+through Haven today. Mermaid in markdown is canonical; some diagrams also have
 exported PNG and SVG alongside.
 
 | # | Diagram | Use when |
@@ -16,7 +16,8 @@ exported PNG and SVG alongside.
 
 ## Regenerating exports
 
-Mermaid is the source of truth. Regenerate PNG/SVG after editing:
+Mermaid is the source of truth. Regenerate PNG/SVG after editing when the
+Mermaid CLI is available:
 
 ```sh
 for f in docs/architecture/0*-*.md; do
@@ -30,7 +31,9 @@ done
 
 ## Scope notes
 
-- POC state on **Gnosis Chain (id 100)**. Multi-chain is future work.
+- Current code supports **Gnosis Chain (id 100)** and **Base (id 8453)** for
+  Haven wallet/Safe flows where configured. Standard merchant x402 demos focus
+  on Base USDC.
 - **API-key agents only.** A self-sign (EIP-191) agent path also exists in
   the code but is intentionally excluded from these diagrams.
 - Diagrams reflect what the code does, not the aspirational model in

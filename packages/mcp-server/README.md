@@ -13,6 +13,22 @@ be a custodial agent wallet. See
 and [`docs/regulatory/casp-risk-guardrails.md`](../../docs/regulatory/casp-risk-guardrails.md)
 (Red Line #2).
 
+## Connect-agent role
+
+The Haven dashboard's **Connect your agent** flow points agent runtimes at the
+hosted MCP URL and sends the agent API key as a Bearer token. That token is
+identity only. The delegate private key stays with the agent runtime, usually
+through `@haven_ai/signer` or a runtime-local secret store.
+
+Hosted MCP tools are deliberately split:
+
+- read state: agent info, live allowances, payment status, transactions
+- construct: return unsigned direct-payment or x402 funding hashes
+- relay: submit `{ payment_id, signature }` after the edge signs
+
+It does not expose local signing tools. Those live in `@haven_ai/signer`
+(`haven_sign`, `haven_x402_sign_header`).
+
 ## Custody invariant
 
 > Only `{ payment_id, signature }` ever crosses the wire to this server. The

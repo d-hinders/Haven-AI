@@ -1,19 +1,21 @@
 # Haven
 
-Agent-first wallet infrastructure for the autonomous economy. Haven lets AI agents request payments within strict, user-approved guardrails without requiring agents to manage Safe owner keys or understand blockchain mechanics.
+Haven is an agentic stablecoin payment wallet. Users create or link a Haven account, add funds to a Haven wallet, and give AI agents constrained spending ability through agent rules and budgets.
 
-## Core Concept
+Haven is non-custodial smart account software. User funds stay in a user-controlled Safe, shown in product copy as a Haven wallet. Haven helps users configure agent authority, construct payment payloads, relay independently signed transactions, and understand activity. It does not hold user or agent private keys, make API credentials sufficient to spend, or make discretionary transfer decisions.
 
-Agents should not be wallets. They should be **financial actors with constrained authority**. Haven separates the ability to *request* a financial action from the authority to approve and settle it, with deterministic checks and on-chain enforcement in between.
+## Core Model
+
+Agents should not be wallets. They should be payment actors with constrained authority.
 
 ```
-User -> Safe (funds held in a user-controlled smart account)
-Haven -> UI, transaction construction, pre-checks, relay, status
-Agent -> Requests payments via signed intents
-Safe AllowanceModule -> Enforces on-chain spending limits
+User -> Haven wallet / Safe (funds and owner authority)
+Agent -> Haven credential (identity) + delegate signing key (payment signatures)
+Haven -> UI, API, pre-checks, relay, receipts, approval state
+Safe AllowanceModule -> On-chain agent budget enforcement
 ```
 
-**Non-custodial by design:** Haven never holds user or agent private keys. API keys authenticate agents to Haven, but signatures and on-chain Safe/module constraints are the source of payment authority.
+API auth is identity. Signature is authority. On-chain module state is enforcement.
 
 ## What's in the Repo
 
@@ -21,12 +23,19 @@ This is a TypeScript monorepo:
 
 | Package | Description |
 |---|---|
-| `packages/backend` | Fastify API — auth, agents, payments, Safe integration |
-| `packages/frontend` | Next.js dashboard — wallet connect, Safe deploy, agent management |
-| `packages/sdk` | `@haven_ai/sdk` — TypeScript SDK for agent payment integration |
+| `packages/backend` | Fastify API for auth, Haven wallets, agents, approvals, payments, x402/MPP demos, receipts, and OpenAPI |
+| `packages/frontend` | Next.js dashboard for Haven accounts, Haven wallets, agent rules, connect-agent handoff, approvals, and activity |
+| `packages/sdk` | `@haven_ai/sdk` for direct agent integrations, tool definitions, x402/MPP quote/pay/resume helpers, and payment state handling |
+| `packages/mcp` | `@haven_ai/mcp` local stdio MCP server that reads a local credential file and signs locally |
+| `packages/mcp-server` | `@haven_ai/mcp-server` hosted/keyless Streamable HTTP MCP server that constructs and relays but never signs |
+| `packages/signer` | `@haven_ai/signer` local edge signer used with hosted MCP; it holds the delegate key locally and exposes sign-only tools |
+| `packages/demo-merchant-mcp` | Internal x402 demo merchant MCP server for Base USDC test purchases and Swedish invoice output |
 
 ## Team Docs
 
+- [About Haven](ABOUT_HAVEN.md)
+- [Architecture diagrams](docs/architecture/README.md)
+- [Hosted MCP connect flow](docs/architecture/06-hosted-mcp-connect-flow.md)
 - [PR Workflow Checklist](docs/pr-workflow-checklist.md)
 - [CASP / MiCA Risk Minimisation Guardrails](docs/regulatory/casp-risk-guardrails.md)
 
@@ -57,14 +66,18 @@ Edit `.env` and fill in the required values:
 | Variable | Required | Description |
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string (default works with Docker) |
-| `JWT_SECRET` | Yes | Secret for auth tokens — use a long random string in production |
-| `GNOSIS_RPC_URL` | No | Gnosis Chain RPC (default: `https://rpc.gnosischain.com`) |
-| `BASE_RPC_URL` | No | Base RPC (default: `https://mainnet.base.org`) |
-| `RELAYER_PRIVATE_KEY` | Yes | Private key of EOA that pays gas for agent payments (see below) |
-| `ETHERSCAN_API_KEY` | No | For transaction display on both Gnosis and Base — get from [etherscan.io](https://etherscan.io/apis) |
-| `COINGECKO_API_KEY` | No | For token prices — get from [coingecko.com](https://www.coingecko.com/en/api) |
-| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | WalletConnect — MetaMask works without it |
-| `ANTHROPIC_API_KEY` | No | Only for Claude agent demo (`npm run agent:demo`) |
+| `JWT_SECRET` | Yes | Secret for dashboard auth tokens; use a long random string in production |
+| `RPC_URL` | No | Gnosis Chain RPC (default: `https://rpc.gnosischain.com`) |
+| `RPC_URL_BASE` | No | Base RPC (default: `https://mainnet.base.org`) |
+| `RELAYER_PRIVATE_KEY` | Yes for on-chain execution | EOA private key that pays gas for relayed Safe/module transactions; it cannot access user funds |
+| `GNOSISSCAN_API_KEY` | No | Gnosis explorer API key for transaction display |
+| `BASESCAN_API_KEY` | No | Base explorer API key when using an Etherscan-style Base source; Base currently defaults to Blockscout for transactions |
+| `COINGECKO_API_KEY` | No | Token price lookups |
+| `FRONTEND_URL` | No | Backend CORS/link base (default: `http://localhost:3000`) |
+| `NEXT_PUBLIC_API_URL` | No | Frontend backend URL override (default through local rewrite: `http://localhost:3001`) |
+| `NEXT_PUBLIC_HAVEN_MCP_URL` | No | Hosted MCP URL shown in connect-agent snippets |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | WalletConnect project id; injected wallet connectors can still work without it |
+| `ANTHROPIC_API_KEY` | No | Only for the optional Claude agent demo script |
 
 **Setting up the relayer wallet:**
 
@@ -112,15 +125,19 @@ npm run dev
 
 1. Go to the **Agents** tab in the dashboard
 2. Click **Create Agent**
-3. Choose **Generate new** to create a delegate keypair in-browser, or **Use existing** to provide your own wallet address
-4. If you generated a key: **copy and save the private key** — it's shown once and Haven never stores it
-5. Add spending limits (token, amount, reset period)
-6. Click **Deploy Agent** and confirm in your wallet
-7. Save the **API key** and **delegate private key** from the success screen
+3. Pick the Haven wallet and network the agent will spend from
+4. Set the agent budget: token, amount, and reset period
+5. Confirm the Safe transaction in your wallet so the on-chain allowance is created
+6. Save the one-time Haven credential when the Done step appears
+7. Use **Connect your agent** to add Haven to Claude Code, Cursor, VS Code, Codex CLI, OpenCode, Goose, Amp, or another runtime
 
-## SDK — Agent Integration
+The credential contains an agent API key and a delegate signing key. Haven stores only the API-key hash/prefix and never stores the delegate private key. If the API key is exposed or lost, use **Payment credentials** on the agent detail page to rotate it; the new key is shown once and the old key stops working. If the delegate signing key is exposed or lost, pause or revoke the agent and create a new credential path.
 
-The `@haven_ai/sdk` package wraps the 3-step payment API into a single function call. This is what developers use to give their agents payment capabilities.
+## Agent Integration
+
+Most users connect an agent through the dashboard's **Connect your agent** flow. The hosted MCP path sends only the API key to the hosted MCP endpoint; the delegate signing key stays local with the runtime or `@haven_ai/signer`.
+
+Developers can also integrate directly with `@haven_ai/sdk`. The SDK wraps direct payments, quote-first x402/MPP flows, manual approval resume state, and ready-made tool definitions for Claude/OpenAI-style tool calling.
 
 ### Install
 
@@ -128,14 +145,14 @@ The `@haven_ai/sdk` package wraps the 3-step payment API into a single function 
 npm install @haven_ai/sdk
 ```
 
-### One-liner payment
+### Direct SDK payment
 
 ```typescript
 import { HavenClient } from '@haven_ai/sdk'
 
 const haven = new HavenClient({
   apiKey: 'sk_agent_xxx',          // from Haven dashboard
-  delegateKey: '0x...',             // agent's delegate private key
+  delegateKey: '0x...',             // delegate signing key held by the agent runtime
   baseUrl: 'http://localhost:3001',
 })
 
@@ -149,38 +166,45 @@ console.log(result.txHash)      // 0x...
 console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x... (or basescan.org for Base)
 ```
 
-### AI agent integration
+### Tool-calling integration
 
 The SDK ships with pre-built tool definitions for Claude and OpenAI:
 
 ```typescript
 import { HavenClient, havenTools } from '@haven_ai/sdk'
-import Anthropic from '@anthropic-ai/sdk'
 
 const haven = new HavenClient({ apiKey, delegateKey })
-const anthropic = new Anthropic()
 
-const response = await anthropic.messages.create({
-  model: 'claude-opus-4-7',
-  tools: havenTools.claude(),  // ready-made tool schemas
-  messages: [{ role: 'user', content: 'Pay 5 EURe to 0xabc for API access' }],
-})
+const tools = havenTools.claude() // or havenTools.openai()
 
-// Handle tool calls — one line per tool
-for (const block of response.content) {
-  if (block.type === 'tool_use') {
-    const result = await haven.executeTool(block.name, block.input)
-  }
+// When your model returns a Haven tool call:
+const toolCall = { name: 'get_allowances', input: {} }
+const result = await haven.executeTool(toolCall.name, toolCall.input)
+
+if (toolCall.name === 'get_allowances') {
+  // Use this for budget, remaining amount, reset-period, or "what can I spend?" questions.
 }
 ```
 
-See [`packages/sdk/README.md`](packages/sdk/README.md) for the full API reference (step-by-step flow, error handling, configuration options).
+See [`packages/sdk/README.md`](packages/sdk/README.md) for the full SDK reference, payment state machine, x402/MPP helpers, and error handling.
+
+### MCP paths
+
+| Path | Package | Use when | Custody boundary |
+|---|---|---|---|
+| Hosted MCP | `@haven_ai/mcp-server` + `@haven_ai/signer` | You want one hosted URL across agent runtimes | Hosted server receives API identity only; local signer holds the delegate key |
+| Local MCP | `@haven_ai/mcp` | You want a local stdio server beside the agent runtime | Local process reads the credential file and signs locally |
+| Direct SDK | `@haven_ai/sdk` | You are writing custom TypeScript agent code | Your runtime holds the delegate key and calls Haven with signed payloads |
 
 ## Testing the Payment Flow
 
-After creating an agent, you can test payments two ways:
+After creating an agent, you can test payments several ways:
 
-### Option A: Simulation script
+### Option A: Hosted MCP connection
+
+Use the dashboard's **Connect your agent** Done step. It creates runtime-specific snippets and one-click deep links where supported. The hosted snippets include the API key only; they do not include the delegate signing key. The local signer or runtime secret store handles signing.
+
+### Option B: SDK simulation script
 
 Tests the raw API flow — no AI involved:
 
@@ -196,9 +220,9 @@ npm run test:payment
 
 This creates a payment intent, signs it with the delegate key, submits it, and confirms on-chain. Output includes the Gnosisscan transaction link.
 
-### Option B: Claude AI agent
+### Option C: Claude agent demo
 
-A real Claude-powered agent that reasons about a task and autonomously decides to make a payment:
+An optional Claude-powered demo that turns a user task into a Haven tool call:
 
 ```bash
 # Add to .env:
@@ -215,7 +239,7 @@ Or with a custom task:
 npm run agent:demo -- "Pay 0.01 EURe to 0xABC... for API access"
 ```
 
-Claude receives the task, decides a payment is needed, calls the `make_payment` tool, Haven validates the signed request and relays it on-chain, and Claude summarizes the result.
+Claude receives the task, calls the `make_payment` tool when appropriate, Haven validates the signed request and relays it on-chain, and Claude summarizes the result.
 
 **What this proves:** A real AI agent requested and signed a payment from a Safe within strict on-chain guardrails, without holding keys to the Safe and without understanding blockchain mechanics.
 
@@ -224,18 +248,19 @@ Claude receives the task, decides a payment is needed, calls the `make_payment` 
 ### Architecture
 
 ```
-┌─────────────┐     ┌───────────────────┐     ┌──────────────────┐
-│   Agent      │────▶│    Haven API      │────▶│  Gnosis Chain    │
-│  (any LLM)  │     │  Policy + Routing │     │                  │
-│              │◀────│                   │◀────│  Safe + Module   │
-└─────────────┘     └───────────────────┘     └──────────────────┘
+Agent runtime
+  -> SDK / local MCP / hosted MCP
+  -> Haven API (identity, policy mirror, construct, relay, status)
+  -> Safe AllowanceModule (on-chain budget enforcement)
+  -> Haven wallet / Safe (user funds)
 ```
 
 1. **Agent** sends a simple payment intent: `{ token: "EURe", amount: "5.00", to: "0x..." }`
-2. **Haven** validates the request against mirrored policy and on-chain allowance, then generates the transfer hash
-3. **Agent** signs the hash with its delegate private key (locally — Haven never sees the key)
-4. **Haven** relays the signed transaction via a gas-paying relayer without changing amount, token, or recipient
-5. **AllowanceModule** verifies the signature and spending limit, transfers tokens from the Safe
+2. **Haven** authenticates the API key, loads the Haven wallet and agent budget, and checks the remaining on-chain allowance
+3. **Haven** returns a payload hash to sign, or queues a pending approval when the request is outside the remaining budget
+4. **Agent/runtime** signs locally with the delegate key; the key never goes to Haven
+5. **Haven** verifies the signature and relays the transaction without changing amount, token, recipient, or authority boundary
+6. **AllowanceModule** verifies the signature and budget on-chain before tokens move from the Safe
 
 ### Payment API (3-step flow)
 
@@ -247,27 +272,31 @@ Claude receives the task, decides a payment is needed, calls the `make_payment` 
 
 All endpoints authenticate with `Authorization: Bearer sk_agent_xxx`. Authentication is not payment authority: executable transfers still require the agent-held delegate signature and on-chain Safe/module allowance.
 
+For x402 and MPP, the SDK and MCP tools use quote/pay/resume flows. Standard merchant x402 has two legs: a Haven funding leg constrained by the Haven wallet budget, then an agent merchant leg using the standard `X-PAYMENT` header. Production merchant facilitation, acquiring, fiat/card rails, settlement, swaps, yield, and advice are not current Haven production surfaces.
+
 ### Security Model
 
-Four independent layers — all must be compromised for funds to be at risk:
+Independent layers keep the API and signing boundaries separate:
 
 | Layer | What it does | Where it lives |
 |---|---|---|
 | **Safe smart account** | Multi-owner, threshold signatures, holds all funds | On-chain |
-| **AllowanceModule** | Per-token, per-delegate spending limits | On-chain |
-| **Haven policy engine** | Recipient allowlists, audit trail, approval thresholds | Off-chain |
-| **Credential scoping** | Revocable API keys, time-limited access | Haven backend |
+| **AllowanceModule** | Per-token, per-delegate budgets and reset periods | On-chain |
+| **Delegate signing key** | Signs payment payloads within the approved allowance | Agent/runtime/user environment |
+| **Haven policy mirror** | Pre-checks, approval routing, audit trail, status, and copy | Haven backend |
+| **Credential scoping** | API-key identity, prefix display, rotation, and revocation state | Haven backend |
 
-**Worst case:** If Haven is fully compromised, attackers get API keys but **not** delegate private keys, so API credentials alone cannot sign transactions. The Safe owner can revoke all delegates immediately from [Safe{Wallet}](https://app.safe.global) without needing Haven.
+If Haven is compromised, API keys alone cannot sign transactions. A Safe owner can pause or revoke an agent in Haven and can also revoke Safe permissions through Safe-compatible tooling without needing Haven.
 
 ### Key Management
 
 | Key | Who holds it | What it can do |
 |---|---|---|
-| Safe owner key | You (MetaMask) | Full Safe control — deploy, modify modules, revoke agents |
+| Safe owner key | User wallet/passkey/hardware environment | Full Safe control: deploy, modify permissions, revoke agents |
 | Delegate private key | Your agent | Sign payment intents within allowance limits only |
-| Agent API key | Your agent | Authenticate with Haven API — no signing ability |
-| Relayer key | Haven server | Pay gas only — zero fund access |
+| Agent API key | Your agent | Authenticate with Haven API; no signing ability |
+| Hosted MCP bearer token | Agent runtime config | Same API identity role as the agent API key |
+| Relayer key | Haven server | Pay gas for independently valid signed transactions; no fund access |
 
 Haven **never** holds Safe owner keys or delegate private keys.
 
@@ -276,27 +305,24 @@ For architecture constraints around custody, transfer-service risk, relaying, x4
 ## API Reference
 
 ### Authentication
-All agent endpoints use Bearer token auth:
+Agent endpoints use Bearer token auth:
 ```
 Authorization: Bearer sk_agent_xxx
 ```
 
+Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served at [`/openapi.json`](http://localhost:3001/openapi.json).
+
 ### Endpoints
 
-| Endpoint | Method | Auth | Description |
-|---|---|---|---|
-| `/auth/signup` | POST | None | Create user account |
-| `/auth/login` | POST | None | Login, returns JWT |
-| `/auth/me` | GET | JWT | Current user |
-| `/agents` | GET | JWT | List agents |
-| `/agents` | POST | JWT | Create agent |
-| `/agents/:id` | PUT | JWT | Update agent name/description |
-| `/agents/:id/revoke` | POST | JWT | Revoke agent (marks inactive) |
-| `/agents/:id/allowances` | POST | JWT | Add/update token allowance |
-| `/payments` | POST | API Key | Create payment intent |
-| `/payments/:id/sign` | POST | API Key | Submit signature, execute on-chain |
-| `/payments/:id` | GET | API Key | Get payment status |
-| `/payments` | GET | API Key | List agent's payments |
+| Surface | Auth | Examples |
+|---|---|---|
+| Dashboard auth | None/JWT | `/auth/signup`, `/auth/login`, `/auth/me` |
+| Haven wallets | JWT | `/user/safes`, `/user/safes/deploy`, balances and account views |
+| Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key`, `/agents/:id/allowances` |
+| Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
+| Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |
+| x402 / MPP demos | API key or protocol challenge | `/x402`, `/demo/x402/*`, `/demo/mpp/*` |
+| Activity | JWT | `/agent-activity/*` for payments, approvals, MCP tool calls, pending counts, and last activity |
 
 ### Payment intent request
 
@@ -308,6 +334,8 @@ POST /payments
   "to": "0xrecipient..."
 }
 ```
+
+When the request exceeds the remaining on-chain allowance, Haven returns `202` with `status: "pending_approval"` and `next_action: "wait_for_user_approval"` instead of a signable hash. The agent should tell the user it is waiting in Haven, then poll payment status or use the SDK/MCP resume helpers after approval.
 
 ### Payment intent response
 
@@ -355,7 +383,10 @@ Response on success:
 | Command | What it does |
 |---|---|
 | `npm run dev` | Start backend + frontend in dev mode |
-| `npm run build` | Build both packages |
+| `npm run build` | Build SDK, MCP packages, signer, backend, and frontend |
+| `npm run test` | Run workspace tests where configured |
+| `npm run typecheck` | Run workspace type checks |
+| `npm run quality` | Run typecheck, tests, and full build |
 | `npm run docker:up` | Start PostgreSQL container |
 | `npm run docker:down` | Stop PostgreSQL container |
 | `npm run docker:logs` | Tail PostgreSQL logs |
@@ -371,52 +402,18 @@ From `packages/backend/`:
 
 ```
 Haven-AI/
-├── .env.example               # Environment variable template
-├── docker-compose.yml         # PostgreSQL for local dev
-├── packages/
-│   ├── backend/
-│   │   ├── src/
-│   │   │   ├── index.ts           # Fastify server + route registration
-│   │   │   ├── db.ts              # PostgreSQL connection pool
-│   │   │   ├── db/migrate.ts      # Auto-migration on startup
-│   │   │   ├── middleware/
-│   │   │   │   ├── auth.ts        # JWT auth for dashboard users
-│   │   │   │   └── agentAuth.ts   # API key auth for agents
-│   │   │   ├── lib/
-│   │   │   │   ├── tokens.ts      # Supported tokens (xDAI, EURe, USDC.e)
-│   │   │   │   └── allowance-module.ts  # On-chain AllowanceModule interaction
-│   │   │   └── routes/
-│   │   │       ├── auth.ts        # Signup, login
-│   │   │       ├── agents.ts      # Agent CRUD + allowance management
-│   │   │       ├── payments.ts    # Payment intent API (create, sign, status)
-│   │   │       ├── balances.ts    # Token balance queries
-│   │   │       └── ...
-│   │   └── scripts/
-│   │       ├── test-payment-flow.ts    # Payment simulation script
-│   │       └── agent-payment-demo.ts   # Claude AI agent demo
-│   ├── sdk/
-│   │   ├── src/
-│   │   │   ├── index.ts           # Public exports
-│   │   │   ├── client.ts          # HavenClient — .pay(), .sign(), .executeTool()
-│   │   │   ├── signer.ts          # Raw ECDSA signing (AllowanceModule-compatible)
-│   │   │   ├── types.ts           # TypeScript types + error classes
-│   │   │   └── tools.ts           # Pre-built tool defs for Claude & OpenAI
-│   │   ├── package.json           # @haven_ai/sdk (publishable to npm)
-│   │   └── README.md              # SDK documentation
-│   └── frontend/
-│       └── src/
-│           ├── app/                    # Next.js pages
-│           ├── components/
-│           │   ├── AgentPanel.tsx       # Agent list + management
-│           │   ├── CreateAgentModal.tsx # Create agent with key generation
-│           │   ├── EditAgentModal.tsx   # Add/update allowances
-│           │   └── ...
-│           ├── hooks/
-│           │   ├── useAgents.ts        # Agent API hooks
-│           │   └── useOnChainAllowances.ts  # On-chain allowance sync
-│           └── lib/
-│               ├── allowance-module.ts # Frontend AllowanceModule integration
-│               └── safe-tx.ts          # Safe transaction building + signing
+|-- ABOUT_HAVEN.md             # Product and architecture mental model
+|-- docs/                      # UX, architecture, regulatory, workflow, migration docs
+|-- packages/
+|   |-- backend/               # Fastify API, database migrations, Safe/module relaying, OpenAPI
+|   |-- frontend/              # Next.js dashboard and connect-agent UX
+|   |-- sdk/                   # @haven_ai/sdk
+|   |-- mcp/                   # Local stdio MCP server; signs locally from a credential file
+|   |-- mcp-server/            # Hosted/keyless Streamable HTTP MCP server
+|   |-- signer/                # Local edge signer paired with hosted MCP
+|   `-- demo-merchant-mcp/     # Internal x402 merchant MCP demo
+|-- .env.example               # Environment variable template
+`-- docker-compose.yml         # PostgreSQL for local dev
 ```
 
 ## Supported Networks & Tokens
@@ -441,10 +438,11 @@ Haven-AI/
 - **TypeScript** throughout (backend + frontend)
 - **Fastify** — backend API
 - **Next.js 15** — frontend dashboard
-- **PostgreSQL** — agents, policies, payment intents, audit trail
+- **PostgreSQL** — agents, policies, payment intents, approvals, receipts, audit trail
 - **Safe SDK + AllowanceModule** — smart account + on-chain spending limits
 - **wagmi + viem** — wallet connection + blockchain interaction
 - **ethers v6** — backend blockchain operations
+- **Model Context Protocol** — local and hosted agent tool connections
 - **Tailwind CSS** — styling
 - **Gnosis Chain + Base** — supported EVM networks
 - **Anthropic SDK** — Claude agent demo

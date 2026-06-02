@@ -41,9 +41,11 @@ Before final review, the captain should do a risk-specific self-check based on t
 - approvals and pending actions: status transitions, migrations or constraints, post-action copy, expiry, notification counts, and single vs multi-approval behavior
 - send, receive, contacts, and other modals: primary action hierarchy, scroll, z-index, close behavior, typing behavior, duplicate handling, and network context
 - hooks, APIs, and shared utilities: required vs optional arguments, caller audits, response shape changes, fallback values, and non-happy-path tests
+- multi-entrypoint flows: shared verified state, payload shape, and tests across HTTP headers, MCP tool arguments, SDK helpers, direct APIs, and demo surfaces
+- credential and setup surfaces: one-time credential visibility, modal reset behavior, in-flight action reset, identifier entropy, and setup-copy consistency
 - generated artifacts: credential files, SDK examples, demo scripts, and skill bundles stay aligned with current Haven capabilities, env vars, product language, and regulatory guardrails
 
-After a Claude or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/ai-review-patterns.md` or the reviewer prompt. Do not add one-off preferences or obsolete implementation details.
+After a Claude or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer prompt together. Do not add one-off preferences or obsolete implementation details.
 
 Workers can implement narrow slices, but the captain owns cross-surface consistency, shared abstractions, PR shape, final review judgment, and deciding which review comments become durable workflow memory.
 
@@ -53,13 +55,18 @@ Before opening or pushing a non-trivial PR, the captain runs this preflight. Eac
 
 Run only the items that match the changed surface. Skip the rest.
 
-- **Numeric formatters.** If the diff touches `*-format.ts`, or any file using `BigInt`, `toFixed`, `formatUnits`, or `parseUnits`: confirm the file has tests for negative inputs, zero, scientific-notation strings, and both the raw-bigint and already-decimal input shapes.
-- **Counter or summary stats.** If the diff adds a counter, summary line, or breakdown (`X received · Y sent · Z failed`): confirm there is a test with at least one row that could plausibly fall into multiple buckets (failed-outbound, failed-inbound).
-- **Conditional copy strings.** If the diff adds a string like `"This will replace…"`, `"Update budget"` vs `"Add budget"`, `"Resume"` vs `"Start"`: confirm there are tests for the no-match and exact-match branches of the predicate, and confirm the predicate matches on precise identity (token address or symbol), not on a broadened layout-driven boolean.
-- **CSS animations.** If the diff adds or moves CSS animations: grep that every new keyframe rule is wrapped in `@media (prefers-reduced-motion: no-preference)`, that pre-existing animations getting a prominent placement are also gated, and that the className stack on the animated element does not toggle one animation class while another remains.
-- **Inline gate placement.** If the diff renders `OnchainActionGate` or `NetworkGate`: confirm the notice is rendered **above** the action row, not inside the `flex-1` wrapper. Use `showNotice={false}` on the gate when rendering `<OnchainActionNotice />` separately.
-- **Cross-surface value rendering.** If the diff changes a value rendered in 2+ surfaces (dashboard preview + detail card + agent page + transactions): confirm there is one shared formatter, that the input carries chain/token context, and that the API response includes the metadata each row needs.
-- **Loading-state inference.** If the diff infers onboarding or completion progress from a paginated preview list: reject and require an explicit `onboardingProgress.*` API field. Gate the dependent UI until **all** prerequisite hooks have resolved, not just the first one.
+- **Numeric Formatters.** If the diff touches `*-format.ts`, or any file using `BigInt`, `toFixed`, `formatUnits`, or `parseUnits`: confirm the file has tests for negative inputs, zero, scientific-notation strings, and both the raw-bigint and already-decimal input shapes.
+- **Counter And Summary Buckets.** If the diff adds a counter, summary line, or breakdown (`X received · Y sent · Z failed`): confirm there is a test with at least one row that could plausibly fall into multiple buckets (failed-outbound, failed-inbound).
+- **Conditional Copy Predicates.** If the diff adds a string like `"This will replace…"`, `"Update budget"` vs `"Add budget"`, `"Resume"` vs `"Start"`: confirm there are tests for the no-match and exact-match branches of the predicate, and confirm the predicate matches on precise identity (token address or symbol), not on a broadened layout-driven boolean.
+- **Animation Discipline.** If the diff adds or moves CSS animations: grep that every new keyframe rule is wrapped in `@media (prefers-reduced-motion: no-preference)`, that pre-existing animations getting a prominent placement are also gated, and that the className stack on the animated element does not toggle one animation class while another remains.
+- **Inline Gate Placement.** If the diff renders `OnchainActionGate` or `NetworkGate`: confirm the notice is rendered **above** the action row, not inside the `flex-1` wrapper. Use `showNotice={false}` on the gate when rendering `<OnchainActionNotice />` separately.
+- **Cross-Surface Display Drift.** If the diff changes a value rendered in 2+ surfaces (dashboard preview + detail card + agent page + transactions): confirm there is one shared formatter, that the input carries chain/token context, and that the API response includes the metadata each row needs.
+- **Loading-State Inference.** If the diff infers onboarding or completion progress from a paginated preview list: reject and require an explicit `onboardingProgress.*` API field. Gate the dependent UI until **all** prerequisite hooks have resolved, not just the first one.
+- **Multi-Entrypoint Parity.** If the diff changes a payment, x402/MPP, MCP, SDK, demo merchant, or hosted/local signing path: confirm every supported entrypoint uses the same validated payment state or has a parity test. Header, tool-argument, SDK helper, and direct API paths must not drift.
+- **Credential And Modal Lifecycle.** If the diff changes one-time credentials, API key rotation, setup prompts, or modal actions: confirm plaintext credential state clears on close, in-flight flags reset on reopen, stale generated snippets cannot reappear, and failed actions do not leave a stuck spinner.
+- **Identifier Entropy.** If the diff adds or changes a displayed key prefix, setup token prefix, invoice number, nonce, or visual identifier: confirm the displayed prefix has enough entropy for the population it identifies and has collision or duplicate handling where needed.
+- **Credential Setup Copy.** If the diff changes setup copy, credential handoffs, signing-key guidance, or done-step instructions: confirm the copy is consistent across surfaces, leads with the user-facing safety property, and does not imply API credentials or Haven backend custody can spend.
+- **Browser Or Headless Verification.** If browser verification is skipped for UI or routing changes: name the reason and add a headless equivalent that covers the skipped risk.
 
 Run the matching items before invoking `haven-reviewer` so the reviewer finds fewer issues. If the reviewer surfaces a new trap family, add it to `docs/ai-review-patterns.md`, this preflight, and the reviewer agent's recurring-traps list together — the three should stay in sync.
 
@@ -106,6 +113,7 @@ Use this prompt shape especially when work could sprawl, when the user asks for 
 Every non-trivial PR should end with a concise closeout:
 
 - changed files or surfaces
+- workflow used, including agents used or skipped with reason
 - checks run
 - what was intentionally left out
 - review status
@@ -221,7 +229,7 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 7. Integrate after each meaningful slice.
 8. Run relevant build or test checks.
 9. Run the **Captain Self-Check Preflight** above for the surfaces the diff touches. Pair any skipped browser verification with a headless equivalent vitest.
-10. Ask `haven-reviewer` for a final diff review when risk warrants it.
+10. Ask `haven-reviewer` for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
 11. Let the captain fix final issues, commit, push, and open the PR.
 12. Add the PR closeout contract and merge-readiness report before calling the work complete.
 13. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur. Keep `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer agent's recurring-traps list in sync.
@@ -277,7 +285,7 @@ Follow the Haven agent workflow:
 10. Ask workers to report needed shared changes instead of making them.
 11. Integrate each slice before starting broad follow-up work.
 12. Run relevant tests, type checks, builds, or browser checks when practical.
-13. Use haven-reviewer for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, or meaningful risk.
+13. Use haven-reviewer for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
 
 Gravity files the captain should usually own:
 - package files
@@ -309,12 +317,17 @@ Before implementation, briefly tell me:
 - which work stays with the captain
 - any worker file ownership boundaries
 - what checks you expect to run
+- whether browser verification, headless verification, generated artifacts, or CASP/MiCA guardrails apply
 
 Then proceed with the work unless you find a real blocker. This update is informational, not a request for permission to use the agentic workflow.
 
 Before calling the PR ready, include:
 - changed surfaces
+- workflow used, including agents used or skipped with reason
 - checks run
+- browser verification or headless equivalent
+- generated artifact and credential handoff impact
+- CASP/MiCA guardrail status when relevant
 - what was intentionally left out
 - review status
 - merge-readiness report with risk level, residual risk, and recommended merge order if multiple PRs are open

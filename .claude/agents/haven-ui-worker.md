@@ -48,10 +48,20 @@ For any screen that moves money or changes agent authority, make these clear:
 
 Include empty, loading, error, and success states when the assigned surface can enter them.
 
+If the assigned UI touches credentials, setup prompts, agent connection, signing keys, or modal actions, check:
+- one-time credential state clears on close, reopen, rotation, revocation, and account or agent changes
+- in-flight action flags reset when the modal closes or reopens
+- setup copy is consistent with generated prompts, credential files, and docs
+- API credentials are described as identity, not spending authority
+- local signing keys are described as local and budget-limited
+
+If browser verification is skipped, add or recommend a headless equivalent that covers the skipped risk.
+
 Finish by reporting:
 - changed files
 - what was implemented
 - contract or caller impacts, if any
 - loading, empty, error, and success states handled, or why they do not apply
+- browser verification or headless equivalent
 - verification run
 - any shared change you recommend for the captain

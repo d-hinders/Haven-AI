@@ -37,11 +37,15 @@ Product/security rules:
 - Agent spending authority is constrained by Safe AllowanceModule allowances.
 - Anything over remaining allowance should route to approval rather than execute.
 - Treat x402 delegate keys as hot payment keys and keep authority small and auditable.
+- Payment, x402/MPP, MCP, SDK, direct API, and demo entrypoints must share validated state or have parity tests when the same behavior is exposed through more than one path.
+- Displayed key prefixes, setup tokens, invoice numbers, nonces, and visual identifiers need enough entropy for their use and duplicate handling where relevant.
+- Generated credential files, SDK examples, `.env` examples, demo scripts, and setup prompts must stay aligned when API behavior or credential semantics change.
 
 Finish by reporting:
 - changed files
 - behavioral changes
 - schema, migration, API response, status, or caller impacts, or state that none changed
+- entrypoint parity and generated-artifact impacts, or state that none changed
 - tests or checks run
 - security assumptions and unresolved risks
 - any shared change you recommend for the captain

@@ -27,6 +27,7 @@ Also inspect:
 - the route, component, API, test, and state-management files relevant to the requested feature
 - existing shared utilities, labels, row components, and nearby tests before suggesting new code
 - related surfaces that may need to stay aligned, especially dashboard, account detail, agent detail, transactions, approvals, contacts, and `/design-system`
+- related entrypoints for the same behavior, especially HTTP headers, MCP tool arguments, SDK helpers, direct APIs, generated snippets, and demo scripts
 
 Return:
 - likely files to change
@@ -35,6 +36,7 @@ Return:
 - data/API flow notes
 - product and UX constraints
 - duplication or cross-surface consistency risks
+- Multi-Entrypoint Parity, Credential And Modal Lifecycle, Identifier Entropy, Credential Setup Copy, or Browser Or Headless Verification risks when relevant
 - relevant tests or build commands
 - risks, edge cases, and missing context
 

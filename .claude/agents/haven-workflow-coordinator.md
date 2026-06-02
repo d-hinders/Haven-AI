@@ -35,6 +35,8 @@ Recommend agents only when they materially help:
 - `haven-backend-worker` for bounded backend, SDK, API, policy, or test slices
 - `haven-reviewer` for final product, UX, security, regression, and test review
 
+Require `haven-reviewer` before closeout when the diff touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk. If reviewer coverage is skipped, the captain must give a task-based reason in the PR body.
+
 Guardrails:
 - Do not recommend parallel writes to the same file.
 - Keep gravity files with the captain unless there is a strong reason not to.
@@ -49,7 +51,12 @@ When choosing the workflow, include likely reviewer traps for the change type:
 - Approvals and pending actions: new statuses, migrations or constraints, expiry, single vs multi-approval behavior, notification counts, and post-action copy.
 - Send, receive, contacts, and modals: scroll fit, z-index, close behavior, primary CTA hierarchy, typing/autocomplete behavior, duplicate enforcement, and network context.
 - Hooks, APIs, and shared utilities: required context, caller audits, response-shape compatibility, structured errors, and regression tests for non-happy paths.
+- Multi-Entrypoint Parity: payment, x402/MPP, MCP, SDK, direct API, hosted/local signing, and demo paths share validated state or have parity tests.
+- Credential And Modal Lifecycle: one-time credential state, API key rotation, setup prompts, modal close/reopen reset, in-flight actions, and stale generated snippets.
+- Identifier Entropy: key prefixes, setup tokens, invoice numbers, nonces, and visual identifiers have enough entropy and duplicate handling for their use.
+- Credential Setup Copy: setup prompts, generated commands, credential files, SDK examples, docs, and UI agree about local signing, API identity, and agent budget limits.
 - Generated artifacts and handoffs: credential files, SDK examples, demo scripts, `.env` examples, and skill bundles must stay aligned with current SDK/API behavior, x402/MPP support, credential semantics, product language, and CASP guardrails.
+- Browser Or Headless Verification: skipped browser checks are paired with a named headless equivalent for the skipped risk.
 
 Return:
 - recommended agent plan
@@ -59,6 +66,8 @@ Return:
 - expected checks
 - likely reviewer traps
 - risks to watch
+- whether browser verification or a headless equivalent is expected
+- whether generated artifacts, examples, credential handoffs, or prompt docs need review
 - expected merge-readiness report items: CI, local checks, review status, risk level, why safe to merge, residual risk, and merge order if multiple PRs are open
 
 If asked to review progress, report whether the current work follows the planned ownership boundaries and what should be adjusted before continuing.

@@ -6,6 +6,7 @@ Use this checklist for feature branches so PRs stay mergeable, reviewable, and d
 
 - Branch from `main` unless the work truly depends on another unmerged branch.
 - Keep the branch scoped to one shippable outcome.
+- For non-trivial feature, UX feedback, or bug-fix work, use `docs/ai-agent-workflow.md` before implementation and decide the captain, explorer, worker, and reviewer shape up front.
 - If the work touches payments, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, fiat/card, swaps, merchant flows, yield, or advice, read `docs/regulatory/casp-risk-guardrails.md` first.
 - If the work spans backend, frontend, and migrations, ask whether it should be split into multiple PRs first.
 - If the change touches migrations, assume merge risk is high and keep the branch short-lived.
@@ -42,12 +43,12 @@ Good split examples:
 - Confirm the PR target is `main` if the work is meant to deploy after merge.
 - Confirm migrations are uniquely ordered and named.
 - Confirm payment-related changes preserve the CASP guardrails: no Haven-held user or agent keys, no API-key-only payment authority, no off-chain-only spend control, no mutation of signed amount/token/recipient/route, and no unreviewed swap, ramp, fiat, card, merchant settlement, yield, or advice functionality.
-- Confirm the PR description explains:
-  - what changed
-  - what was intentionally left out
-  - what reviewers should focus on
+- Complete the PR template sections for changed surfaces, workflow used, agents used or skipped, local checks, browser or headless verification, generated artifacts, CASP/MiCA guardrails, review status, and merge readiness.
 - Include a merge-readiness section using the template below for non-trivial PRs.
 - Run the **Captain Self-Check Preflight** in `docs/ai-agent-workflow.md` for the surfaces the diff touches.
+- If browser verification is skipped for UI, routing, modal, setup-flow, or animation work, add the smallest headless equivalent that covers the skipped risk and name it in the PR.
+- If SDK/API behavior, credential semantics, x402/MPP behavior, setup prompts, or product language changes, review generated credential files, `.env` examples, SDK snippets, demo scripts, and skill bundles.
+- Use `haven-reviewer` before requesting review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
 - If this PR includes a follow-up commit that fixes a bug the original commits introduced, the fix commit must include the smallest regression test (typically a vitest case) that would have caught it. If no such test is practical, document why in the commit body. Every recent "Address reviewer findings" commit that compounded into durable quality landed 2–4 targeted vitest cases alongside the fix.
 
 ## Before Merging
@@ -82,7 +83,7 @@ Use the smallest reliable set that matches the change.
 
 | Change type | Commands |
 | --- | --- |
-| Docs or prompt-only | `git diff --check` |
+| Docs, prompts, or PR template only | `git diff --check` |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
 | Backend/API | `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` |
 | Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
@@ -93,6 +94,7 @@ Use the smallest reliable set that matches the change.
 Notes:
 
 - `npm run quality` means typecheck, unit tests, and builds across workspaces.
+- Docs-only CI treats Markdown, `.claude/agents/*.md`, and `.github/pull_request_template.md` as non-code. Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend lint is not a required gate yet because `next lint` currently prompts for ESLint setup. Add lint only after a dedicated non-interactive lint migration.
 - Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.
 
@@ -114,6 +116,8 @@ Notes:
 - Which files are most likely to conflict with in-flight work?
 - What is the smallest version we can merge safely this week?
 - Does this change require generated docs, SDK examples, credential handoffs, or workflow prompts to be updated?
+- Does this expose the same behavior through multiple entrypoints, such as HTTP headers, MCP tool arguments, SDK helpers, direct APIs, or demo scripts?
+- If an agent or credential modal is involved, what clears one-time key state and in-flight action state on close, reopen, rotation, or revocation?
 
 ## Quick Copy-Paste Checklist
 

@@ -475,6 +475,18 @@ export default function CreateAgentModal({
       } else if (message.includes('Could not verify the transaction')) {
         // RPC/network error during simulation pre-flight.
         setExecError('Network error — check your connection and try again.')
+      } else if (
+        message.includes('RPC Request failed') ||
+        message.includes('fetch failed') ||
+        message.includes('Failed to fetch') ||
+        message.includes('network error') ||
+        message.includes('NetworkError')
+      ) {
+        // Raw RPC/network failure from any step (module check, nonce fetch, etc.)
+        // — surface a human-readable message instead of the viem internal.
+        setExecError(
+          'Could not reach the network. Check your connection and that your wallet is on the correct chain, then try again.',
+        )
       } else {
         setExecError(message)
       }
@@ -503,13 +515,17 @@ export default function CreateAgentModal({
     let message = 'Setup failed'
     if (err instanceof Error) {
       message = err.message
+      // Walk the cause chain — deeper errors are usually more specific.
       let cause = (err as { cause?: unknown }).cause
       while (cause instanceof Error) {
         if (cause.message) message = cause.message
         cause = (cause as { cause?: unknown }).cause
       }
+      // Prefer shortMessage only when it adds information over the raw message.
+      // Viem sets shortMessage to "RPC Request failed." for network errors which
+      // is less informative than the underlying message, so we skip it in that case.
       const short = (err as { shortMessage?: string }).shortMessage
-      if (short) message = short
+      if (short && !short.includes('RPC Request failed')) message = short
     }
     return message
   }

@@ -174,6 +174,8 @@ async function mockWalletNoise(page: Page) {
 
 export async function mockHavenApi(page: Page) {
   await mockWalletNoise(page)
+  let connectAgent2SetupCreated = false
+  let connectAgent2StatusReads = 0
 
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -208,6 +210,68 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path === '/agents') {
       await fulfillJson(route, { agents: [testAgent] })
+      return
+    }
+
+    if (method === 'POST' && path === '/agent-connection-setups') {
+      connectAgent2SetupCreated = true
+      await fulfillJson(route, {
+        setup_id: 'setup-e2e',
+        status: 'awaiting_connection',
+        setup_token: 'hv_setup_e2e123',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        connector_command: 'npx -y @haven_ai/connect --setup hv_setup_e2e123 --api https://api.haven.example --runtime claude-code',
+        setup_prompt: [
+          'Please connect this workspace to Haven.',
+          '',
+          'Run this local setup command:',
+          '',
+          'npx -y @haven_ai/connect --setup hv_setup_e2e123 --api https://api.haven.example --runtime claude-code',
+          '',
+          'The Haven connector will generate the signing key locally and send Haven only the public signing address.',
+        ].join('\n'),
+      }, 201)
+      return
+    }
+
+    if (method === 'GET' && path === '/agent-connection-setups/setup-e2e') {
+      connectAgent2StatusReads += 1
+      const connectedLocal = connectAgent2SetupCreated && connectAgent2StatusReads > 1
+      await fulfillJson(route, {
+        setup_id: 'setup-e2e',
+        agent_id: connectedLocal ? 'agent-connect2-e2e' : null,
+        status: connectedLocal ? 'connected_local' : 'awaiting_connection',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        agent: { name: 'Research Agent', description: null },
+        haven_wallet: {
+          id: testSafe.id,
+          name: testSafe.name,
+          address: testSafeAddress,
+          chain_id: 100,
+          network: 'Gnosis',
+        },
+        agent_budget: [{
+          id: 'budget-connect2-e2e',
+          token_address: '0x0000000000000000000000000000000000000000',
+          token_symbol: 'xDAI',
+          allowance_amount: '10000000000000000000',
+          reset_period_min: 1440,
+        }],
+        delegate_address: connectedLocal
+          ? '0x3333333333333333333333333333333333333333'
+          : null,
+        api_key_prefix: connectedLocal ? 'sk_agent_abc' : null,
+        runtime: 'claude-code',
+        connector: { connector_version: '0.1.0', environment_label: 'Local workspace' },
+        install_status: {
+          hosted_mcp_configured: true,
+          local_signer_configured: true,
+          credential_files_written: true,
+          restart_required: true,
+          probe_result: 'hosted_ok_local_signer_ready',
+        },
+        approval: { status: 'pending_approval', safe_tx_hash: null, tx_hash: null },
+      })
       return
     }
 

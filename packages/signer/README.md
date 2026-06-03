@@ -86,6 +86,11 @@ The delegate key is read from `HAVEN_DELEGATE_KEY` or a `--credentials` file's
 signer makes no network calls — it can't leak the key to Haven or anyone else.
 It needs no `api_key`: identity lives with the hosted connection, not here.
 
+Connect Agent 2 may create the signer credential file locally during setup. In
+that flow Haven receives the public signing address, proof, API-key hash/prefix,
+and install status only; the plaintext API key and delegate key stay in local
+protected storage/runtime config.
+
 ## Local audit
 
 Every MCP signing operation appends a JSONL row locally. File-backed runs write

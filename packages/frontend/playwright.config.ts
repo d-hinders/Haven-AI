@@ -40,6 +40,7 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: 'playwright-placeholder',
+      NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED: 'true',
       NEXT_TELEMETRY_DISABLED: '1',
       HOSTNAME: '127.0.0.1',
       PORT: String(PORT),

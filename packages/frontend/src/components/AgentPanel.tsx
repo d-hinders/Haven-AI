@@ -42,6 +42,10 @@ function budgetPeriodLabel(mins: number) {
   return `every ${label}`
 }
 
+function connectAgent2Enabled(): boolean {
+  return ['true', '1', 'on'].includes(String(process.env.NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
+}
+
 /** Resolve token address to symbol (chain-aware) */
 function tokenSymbol(addr: string, chainId: number): string {
   const lower = addr.toLowerCase()
@@ -660,6 +664,7 @@ export default function AgentPanel() {
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
   const [showRevokedAgents, setShowRevokedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const showConnectAgent2 = connectAgent2Enabled()
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
     [agents],
@@ -827,13 +832,15 @@ export default function AgentPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => setConnect2Open(true)}
-            size="sm"
-            variant="ghost"
-          >
-            Connect agent 2
-          </Button>
+          {showConnectAgent2 && (
+            <Button
+              onClick={() => setConnect2Open(true)}
+              size="sm"
+              variant="ghost"
+            >
+              Connect agent 2
+            </Button>
+          )}
           <Button
             onClick={() => setCreateOpen(true)}
             size="sm"
@@ -877,7 +884,9 @@ export default function AgentPanel() {
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
               <Button onClick={() => setCreateOpen(true)}>Connect agent</Button>
-              <Button onClick={() => setConnect2Open(true)} variant="ghost">Connect agent 2</Button>
+              {showConnectAgent2 && (
+                <Button onClick={() => setConnect2Open(true)} variant="ghost">Connect agent 2</Button>
+              )}
             </div>
           }
         />
@@ -991,13 +1000,15 @@ export default function AgentPanel() {
         }}
       />
 
-      <ConnectAgent2Modal
-        open={connect2Open}
-        onClose={() => setConnect2Open(false)}
-        safeAddress={safeAddress}
-        safeId={activeSafe?.id}
-        onSetupUpdated={refetch}
-      />
+      {showConnectAgent2 && (
+        <ConnectAgent2Modal
+          open={connect2Open}
+          onClose={() => setConnect2Open(false)}
+          safeAddress={safeAddress}
+          safeId={activeSafe?.id}
+          onSetupUpdated={refetch}
+        />
+      )}
 
       {/* Edit agent modal */}
       {editAgent && (

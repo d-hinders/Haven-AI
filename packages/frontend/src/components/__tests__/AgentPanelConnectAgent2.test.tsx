@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   SAFE,
@@ -84,7 +84,12 @@ describe('AgentPanel Connect Agent 2 entry', () => {
     mockUseActiveSigner.mockReturnValue(null)
   })
 
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('keeps old Connect agent reachable and adds the Connect agent 2 entry', () => {
+    vi.stubEnv('NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED', 'true')
     render(<AgentPanel />)
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
@@ -92,5 +97,21 @@ describe('AgentPanel Connect Agent 2 entry', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent 2' })[0])
     expect(screen.getByText('Connect Agent 2 Modal')).toBeInTheDocument()
+  })
+
+  it('keeps the old Connect agent reachable when the Connect Agent 2 rollout gate is disabled', () => {
+    vi.stubEnv('NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED', 'false')
+    render(<AgentPanel />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
+    expect(screen.getByText('Old Connect Agent Modal')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Connect agent 2' })).not.toBeInTheDocument()
+  })
+
+  it('keeps Connect Agent 2 hidden when the rollout gate is unset', () => {
+    render(<AgentPanel />)
+
+    expect(screen.getAllByRole('button', { name: 'Connect agent' })[0]).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Connect agent 2' })).not.toBeInTheDocument()
   })
 })

@@ -448,6 +448,48 @@ export const openapiSpec = {
         },
       },
     },
+    '/agent-connection-setups/{setupId}/wallet-approval': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'recordAgentConnectionWalletApproval',
+        summary: 'Record wallet approval evidence for Connect Agent 2.',
+        description:
+          'Records user wallet approval or a Safe multisig proposal for a locally connected setup. Confirmed approvals activate the pending agent only after Haven verifies the live on-chain allowance state for the exact Haven wallet, public signing address, token budgets, and reset periods. Proposed approvals remain non-active until that on-chain authority is live.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RecordAgentConnectionWalletApprovalRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Wallet approval was recorded and the setup status was returned.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentConnectionSetupStatus' },
+              },
+            },
+          },
+          '202': {
+            description: 'Confirmation evidence was recorded, but on-chain authority is not verified yet.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentConnectionSetupStatus' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '410': errorResponse,
+        },
+      },
+    },
     '/agent-connection-setups/{setupId}/cancel': {
       post: {
         tags: ['Connect Agent 2'],
@@ -1262,6 +1304,32 @@ export const openapiSpec = {
             additionalProperties: false,
           },
           failure_reason: { type: ['string', 'null'] },
+        },
+        additionalProperties: false,
+      },
+      RecordAgentConnectionWalletApprovalRequest: {
+        type: 'object',
+        required: [
+          'result',
+          'safe_tx_hash',
+          'chain_id',
+          'safe_address',
+          'allowance_module_address',
+          'delegate_address',
+        ],
+        properties: {
+          result: { type: 'string', enum: ['confirmed', 'proposed'] },
+          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          safe_tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          chain_id: { type: 'integer' },
+          safe_address: address,
+          allowance_module_address: address,
+          delegate_address: address,
+          confirmation_status: {
+            type: 'string',
+            enum: ['confirmed', 'receipt_timeout'],
+            description: 'Use receipt_timeout only when the wallet transaction was submitted but the local receipt wait timed out.',
+          },
         },
         additionalProperties: false,
       },

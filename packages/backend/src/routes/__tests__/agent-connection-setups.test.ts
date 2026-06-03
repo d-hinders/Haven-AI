@@ -10,6 +10,11 @@ const { mockQuery, mockConnect, mockClientQuery, mockClientRelease } = vi.hoiste
   mockClientRelease: vi.fn(),
 }))
 
+const { mockGetTokenAllowance, mockGetTokensForDelegate } = vi.hoisted(() => ({
+  mockGetTokenAllowance: vi.fn(),
+  mockGetTokensForDelegate: vi.fn(),
+}))
+
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),
@@ -21,6 +26,11 @@ vi.mock('../../middleware/auth.js', () => ({
   authMiddleware: async (request: { user?: { sub: string } }) => {
     request.user = { sub: 'user-1' }
   },
+}))
+
+vi.mock('../../lib/allowance-module.js', () => ({
+  getTokenAllowance: (...args: unknown[]) => mockGetTokenAllowance(...args),
+  getTokensForDelegate: (...args: unknown[]) => mockGetTokensForDelegate(...args),
 }))
 
 const SAFE = {
@@ -75,11 +85,67 @@ const ALLOWANCE = {
 
 const API_KEY_HASH = 'a'.repeat(64)
 const API_KEY_PREFIX = 'sk_agent_abc'
+const DELEGATE_ADDRESS = '0x3333333333333333333333333333333333333333'
+const TX_HASH = `0x${'a'.repeat(64)}`
+const SAFE_TX_HASH = `0x${'b'.repeat(64)}`
+const ALLOWANCE_MODULE_ADDRESS = '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134'
+
+const CONNECTED_SETUP = {
+  ...SETUP,
+  agent_id: 'agent-1',
+  status: 'connected_local',
+  setup_token_consumed_at: '2026-06-03T12:00:00.000Z',
+  delegate_address: DELEGATE_ADDRESS,
+  api_key_prefix: API_KEY_PREFIX,
+  approval_status: 'not_started',
+}
+
+type SetupFixture = Omit<
+  typeof SETUP,
+  | 'agent_id'
+  | 'status'
+  | 'setup_token_consumed_at'
+  | 'delegate_address'
+  | 'api_key_prefix'
+  | 'approval_status'
+  | 'safe_tx_hash'
+  | 'tx_hash'
+> & {
+  agent_id: string | null
+  status: string
+  setup_token_consumed_at: string | null
+  delegate_address: string | null
+  api_key_prefix: string | null
+  approval_status: string
+  safe_tx_hash: string | null
+  tx_hash: string | null
+}
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
   return app
+}
+
+function approvalPayload(result: 'confirmed' | 'proposed') {
+  return {
+    result,
+    tx_hash: result === 'confirmed' ? TX_HASH : undefined,
+    safe_tx_hash: SAFE_TX_HASH,
+    chain_id: SAFE.chain_id,
+    safe_address: SAFE.safe_address,
+    allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
+    delegate_address: DELEGATE_ADDRESS,
+  }
+}
+
+function mockWalletApprovalPersist(setup: SetupFixture = CONNECTED_SETUP) {
+  mockClientQuery.mockImplementation(async (sql: string) => {
+    if (String(sql).includes('FROM agent_connection_setups')) {
+      return { rows: [setup] }
+    }
+    return { rows: [] }
+  })
 }
 
 describe('agent connection setup routes', () => {
@@ -93,6 +159,8 @@ describe('agent connection setup routes', () => {
       query: (...args: unknown[]) => mockClientQuery(...args),
       release: mockClientRelease,
     })
+    mockGetTokenAllowance.mockReset()
+    mockGetTokensForDelegate.mockReset()
     delete process.env.HAVEN_API_URL
     delete process.env.HAVEN_HOSTED_MCP_URL
   })
@@ -319,6 +387,316 @@ describe('agent connection setup routes', () => {
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toMatch(/signing address/)
     expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK')
+
+    await app.close()
+  })
+
+  it('records confirmed wallet approval and activates only after on-chain allowance reconciliation', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
+    mockGetTokenAllowance.mockResolvedValue({
+      amount: BigInt(ALLOWANCE.allowance_amount),
+      spent: 0n,
+      resetTimeMin: ALLOWANCE.reset_period_min,
+      lastResetMin: 0,
+      nonce: 0,
+    })
+    mockWalletApprovalPersist()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      setup_id: SETUP.id,
+      status: 'active',
+      delegate_address: DELEGATE_ADDRESS,
+      approval: {
+        status: 'confirmed',
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+    })
+    expect(mockGetTokenAllowance).toHaveBeenCalledWith(
+      SAFE.chain_id,
+      SAFE.safe_address,
+      DELEGATE_ADDRESS,
+      ALLOWANCE.token_address,
+    )
+    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(setupUpdate?.[1]).toEqual([
+      SETUP.id,
+      'user-1',
+      'active',
+      'confirmed',
+      TX_HASH,
+      SAFE_TX_HASH,
+      null,
+    ])
+    const agentUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agents'),
+    )
+    expect(String(agentUpdate?.[0])).toContain("status = 'active'")
+
+    await app.close()
+  })
+
+  it('keeps multisig wallet approval proposals non-active', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([])
+    mockWalletApprovalPersist()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('proposed'),
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      setup_id: SETUP.id,
+      status: 'proposed',
+      approval: {
+        status: 'proposed',
+        tx_hash: null,
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+    })
+    const agentUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agents'),
+    )
+    expect(agentUpdate).toBeUndefined()
+
+    await app.close()
+  })
+
+  it('does not activate when the live allowance does not match the pending setup', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
+    mockGetTokenAllowance.mockResolvedValue({
+      amount: 1n,
+      spent: 0n,
+      resetTimeMin: ALLOWANCE.reset_period_min,
+      lastResetMin: 0,
+      nonce: 0,
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/budget does not match/)
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups'))).toBe(false)
+
+    await app.close()
+  })
+
+  it('records submitted confirmation evidence after a receipt timeout without activating', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([])
+    mockWalletApprovalPersist()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: {
+        ...approvalPayload('confirmed'),
+        confirmation_status: 'receipt_timeout',
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      status: 'approval_in_progress',
+      approval: {
+        status: 'submitted',
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+    })
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
+
+    await app.close()
+  })
+
+  it('does not persist wallet approval if setup was cancelled after the initial read', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
+    mockGetTokenAllowance.mockResolvedValue({
+      amount: BigInt(ALLOWANCE.allowance_amount),
+      spent: 0n,
+      resetTimeMin: ALLOWANCE.reset_period_min,
+      lastResetMin: 0,
+      nonce: 0,
+    })
+    mockWalletApprovalPersist({ ...CONNECTED_SETUP, status: 'cancelled' })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/state changed/)
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
+
+    await app.close()
+  })
+
+  it('treats repeated confirmed wallet approval evidence as idempotent', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          ...CONNECTED_SETUP,
+          status: 'active',
+          approval_status: 'confirmed',
+          tx_hash: TX_HASH,
+          safe_tx_hash: SAFE_TX_HASH,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().status).toBe('active')
+    expect(mockGetTokensForDelegate).not.toHaveBeenCalled()
+    expect(mockClientQuery).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('recovers a proposed setup to active when status read sees live on-chain authority', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          ...CONNECTED_SETUP,
+          status: 'proposed',
+          approval_status: 'proposed',
+          safe_tx_hash: SAFE_TX_HASH,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
+    mockGetTokenAllowance.mockResolvedValue({
+      amount: BigInt(ALLOWANCE.allowance_amount),
+      spent: 0n,
+      resetTimeMin: ALLOWANCE.reset_period_min,
+      lastResetMin: 0,
+      nonce: 0,
+    })
+    mockWalletApprovalPersist({
+      ...CONNECTED_SETUP,
+      status: 'proposed',
+      approval_status: 'proposed',
+      safe_tx_hash: SAFE_TX_HASH,
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      setup_id: SETUP.id,
+      status: 'active',
+      approval: {
+        status: 'confirmed',
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+    })
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("status = 'active'"))).toBe(true)
+
+    await app.close()
+  })
+
+  it('cancels a pre-approval setup under a row lock', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [CONNECTED_SETUP] }
+      }
+      if (String(sql).includes('UPDATE agent_connection_setups')) {
+        return { rows: [{ id: SETUP.id }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/cancel`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    const lockedRead = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('FROM agent_connection_setups'),
+    )
+    expect(String(lockedRead?.[0])).toContain('FOR UPDATE OF s')
+    const cancelUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(String(cancelUpdate?.[0])).toContain("status IN ('awaiting_connection', 'connected_local', 'awaiting_wallet_approval')")
+    expect(String(cancelUpdate?.[0])).toContain('safe_tx_hash IS NULL')
+
+    await app.close()
+  })
+
+  it('rejects cancellation after wallet approval is proposed or submitted', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return {
+          rows: [{
+            ...CONNECTED_SETUP,
+            status: 'proposed',
+            approval_status: 'proposed',
+            safe_tx_hash: SAFE_TX_HASH,
+          }],
+        }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/cancel`,
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/paused or revoked/)
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups'))).toBe(false)
 
     await app.close()
   })

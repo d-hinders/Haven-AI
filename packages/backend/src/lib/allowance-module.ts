@@ -19,6 +19,7 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const ALLOWANCE_MODULE_ABI = [
   'function getTokenAllowance(address safe, address delegate, address token) view returns (uint256[5])',
+  'function getTokens(address safe, address delegate) view returns (address[])',
   'function generateTransferHash(address safe, address token, address to, uint96 amount, address paymentToken, uint96 payment, uint16 nonce) view returns (bytes32)',
   'function executeAllowanceTransfer(address safe, address token, address payable to, uint96 amount, address paymentToken, uint96 payment, address delegate, bytes signature)',
 ]
@@ -98,6 +99,19 @@ export async function getTokenAllowance(
     lastResetMin: Number(result[3]),
     nonce: Number(result[4]),
   }
+}
+
+/**
+ * Read every token slot configured for a delegate on a Safe.
+ */
+export async function getTokensForDelegate(
+  chainId: number,
+  safe: string,
+  delegate: string,
+): Promise<string[]> {
+  const contract = getContract(chainId)
+  const result: string[] = await contract.getTokens(safe, delegate)
+  return result
 }
 
 /**

@@ -59,7 +59,7 @@ test.describe('Hosted MCP — in-budget path', () => {
     await expect(page.getByText(/USDC/)).toBeVisible()
 
     // Primary CTA is present — clicking it opens the CreateAgentModal
-    await expect(page.getByRole('button', { name: 'Connect agent' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Connect agent', exact: true })).toBeVisible()
 
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
@@ -72,7 +72,7 @@ test.describe('Hosted MCP — in-budget path', () => {
     await dismissMobileSidebar(page)
 
     // Open the modal
-    await page.getByRole('button', { name: 'Connect agent' }).click()
+    await page.getByRole('button', { name: 'Connect agent', exact: true }).click()
 
     // Step 1 — agent details
     const modal = page.getByRole('dialog')

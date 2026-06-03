@@ -42,8 +42,9 @@ delegate key is injected into its environment.
 
 ## Connect-Agent Flow
 
-The Haven dashboard renders runtime-specific hosted MCP snippets from
-`HOSTED_CLIENT_REGISTRY`.
+The original Connect Agent flow remains supported during the Connect Agent 2
+rollout. In that original flow, the Haven dashboard renders runtime-specific
+hosted MCP snippets from `HOSTED_CLIENT_REGISTRY`.
 
 1. User creates an agent and approves its on-chain agent budget.
 2. Haven shows the one-time credential handoff.
@@ -57,9 +58,25 @@ The Haven dashboard renders runtime-specific hosted MCP snippets from
 Deep links are allowed only for runtimes with tested install schemes. They may
 carry the hosted URL and Bearer token, but never the delegate key.
 
-Connect Agent 2 will add a staged local-key pairing setup before this hosted
-MCP runtime connection is used for payments. See
-[Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md).
+Connect Agent 2 adds a guarded staged pairing flow before hosted MCP can be
+used for payments:
+
+1. User starts in Haven with agent name, description, Haven wallet, agent
+   rules, and agent budget.
+2. Haven creates a pending setup and returns a setup token plus a copyable
+   connector prompt/command.
+3. The connector runs locally in the user's agent environment, resolves the
+   setup, generates the delegate signing key and API key locally, and stores
+   them in local protected storage or runtime config.
+4. The connector sends Haven only the public signing address, proof of
+   possession, API-key hash/prefix, and install status.
+5. User returns to Haven and signs the wallet approval. The agent cannot spend
+   until the Safe AllowanceModule approval exists on-chain.
+6. Hosted MCP uses the locally stored API key for identity, while the local
+   signer/runtime keeps using the local delegate key for authority.
+
+See [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
+and [Connect Agent 2 rollout closeout](09-connect-agent-2-rollout-closeout.md).
 
 ## Direct Payment Sequence
 
@@ -149,6 +166,9 @@ snippets, x402 signing, or relay code:
 - Hosted MCP does not import, read, log, accept, or store a delegate key.
 - Hosted snippets and deep links include the API key only, never the delegate
   key.
+- Connect Agent 2 setup/register payloads include only setup token, public
+  signing address, proof, API-key hash/prefix, and install status. They must not
+  include plaintext API keys or private keys.
 - Hosted MCP can construct and relay, but cannot sign.
 - The signer emits signatures or x402 payment headers only; it does not need an
   API key and makes no network calls.

@@ -103,22 +103,32 @@ const CONNECTED_SETUP = {
 type SetupFixture = Omit<
   typeof SETUP,
   | 'agent_id'
+  | 'description'
+  | 'runtime'
   | 'status'
   | 'setup_token_consumed_at'
   | 'delegate_address'
+  | 'proof_signature'
   | 'api_key_prefix'
+  | 'connector_version'
   | 'approval_status'
   | 'safe_tx_hash'
   | 'tx_hash'
+  | 'failure_reason'
 > & {
   agent_id: string | null
+  description: string | null
+  runtime: string | null
   status: string
   setup_token_consumed_at: string | null
   delegate_address: string | null
+  proof_signature: string | null
   api_key_prefix: string | null
+  connector_version: string | null
   approval_status: string
   safe_tx_hash: string | null
   tx_hash: string | null
+  failure_reason: string | null
 }
 
 async function buildApp(): Promise<FastifyInstance> {
@@ -163,6 +173,7 @@ describe('agent connection setup routes', () => {
     mockGetTokensForDelegate.mockReset()
     delete process.env.HAVEN_API_URL
     delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.CONNECT_AGENT_2_ENABLED = 'true'
   })
 
   it('creates a pending setup with a returned-once token stored only as a hash', async () => {
@@ -197,6 +208,267 @@ describe('agent connection setup routes', () => {
     expect(params[6]).toMatch(/^[0-9a-f]{64}$/)
     expect(params[7]).toBe(body.setup_token.slice(0, 20))
     expect(mockClientQuery).toHaveBeenCalledWith('COMMIT')
+
+    await app.close()
+  })
+
+  it('blocks new pending setup creation when the rollout gate is unset', async () => {
+    delete process.env.CONNECT_AGENT_2_ENABLED
+    const app = await buildApp()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('blocks new pending setup creation when the rollout gate is disabled', async () => {
+    process.env.CONNECT_AGENT_2_ENABLED = 'false'
+    const app = await buildApp()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('exercises the Connect Agent 2 setup spine from pending setup through active wallet approval', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const setupRows: SetupFixture[] = []
+    const allowanceRows: (typeof ALLOWANCE)[] = []
+    let agentStatus = ''
+
+    mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      const text = String(sql)
+      if (text.includes('FROM user_safes')) {
+        return { rows: [SAFE] }
+      }
+      if (text.includes('UPDATE agent_connection_setups')) {
+        const setup = setupRows.find((row) => row.id === params[0])
+        if (setup) {
+          setup.connector_version = typeof params[1] === 'string' ? params[1] : setup.connector_version
+          setup.runtime = typeof params[2] === 'string' ? params[2] : setup.runtime
+        }
+        return { rows: [] }
+      }
+      if (text.includes('FROM agent_connection_setups')) {
+        return { rows: setupRows.length ? [setupRows[0]] : [] }
+      }
+      if (text.includes('FROM agent_connection_setup_allowances')) {
+        return { rows: allowanceRows }
+      }
+      return { rows: [] }
+    })
+
+    mockClientQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      const text = String(sql)
+      if (text.includes('INSERT INTO agent_connection_setups')) {
+        setupRows[0] = {
+          ...SETUP,
+          id: String(params[0]),
+          user_id: String(params[1]),
+          safe_id: String(params[2]),
+          name: String(params[3]),
+          description: params[4] as string | null,
+          runtime: params[5] as string | null,
+          status: 'awaiting_connection',
+          setup_token_expires_at: String(params[8]),
+          challenge_id: String(params[9]),
+          challenge_message: String(params[10]),
+          challenge_expires_at: String(params[11]),
+        }
+        return { rows: [] }
+      }
+      if (text.includes('INSERT INTO agent_connection_setup_allowances')) {
+        allowanceRows.push({
+          ...ALLOWANCE,
+          token_address: String(params[1]),
+          token_symbol: String(params[2]),
+          allowance_amount: String(params[3]),
+          reset_period_min: Number(params[4]),
+        })
+        return { rows: [] }
+      }
+      if (text.includes('FROM agent_connection_setups')) {
+        return { rows: setupRows.length ? [setupRows[0]] : [] }
+      }
+      if (text.includes('SELECT id FROM agents')) {
+        return { rows: [] }
+      }
+      if (text.includes('INSERT INTO agents')) {
+        agentStatus = 'pending_approval'
+        return { rows: [{ id: 'agent-1' }] }
+      }
+      if (text.includes('INSERT INTO agent_allowances')) {
+        return { rows: [] }
+      }
+      if (text.includes('UPDATE agent_connection_setups') && text.includes('agent_id = $2')) {
+        setupRows[0] = {
+          ...setupRows[0],
+          agent_id: String(params[1]),
+          status: 'connected_local',
+          delegate_address: String(params[2]),
+          proof_signature: String(params[3]),
+          api_key_prefix: String(params[4]),
+          connector_version: params[5] as string | null,
+          runtime: params[6] as string | null,
+          connector_context: JSON.parse(String(params[7])) as Record<string, unknown>,
+          install_status: JSON.parse(String(params[8])) as Record<string, unknown>,
+          setup_token_consumed_at: '2026-06-03T12:00:00.000Z',
+        }
+        return { rows: [] }
+      }
+      if (text.includes('UPDATE agent_connection_setups') && text.includes('status = $3')) {
+        setupRows[0] = {
+          ...setupRows[0],
+          status: String(params[2]),
+          approval_status: String(params[3]),
+          tx_hash: params[4] as string | null,
+          safe_tx_hash: params[5] as string | null,
+          failure_reason: params[6] as string | null,
+        }
+        return { rows: [] }
+      }
+      if (text.includes('UPDATE agents')) {
+        agentStatus = 'active'
+        return { rows: [] }
+      }
+      return { rows: [] }
+    })
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        description: 'Pays for research APIs',
+        safe_id: SAFE.id,
+        runtime: 'claude-code',
+        allowances: [ALLOWANCE],
+      },
+    })
+    expect(createResponse.statusCode).toBe(201)
+    const created = createResponse.json()
+    expect(created.setup_token).toMatch(/^hv_setup_[0-9a-f]+$/)
+    expect(JSON.stringify(created)).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
+    const insertedSetup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setups'),
+    )
+    expect(insertedSetup?.[1]).not.toContain(created.setup_token)
+
+    const resolveResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/resolve',
+      payload: {
+        setup_token: created.setup_token,
+        connector_version: '0.1.0',
+        runtime: 'claude-code',
+      },
+    })
+    expect(resolveResponse.statusCode).toBe(200)
+    const resolved = resolveResponse.json()
+    expect(resolved.challenge.message).toBe(setupRows[0].challenge_message)
+    expect(JSON.stringify(resolved)).not.toMatch(/api_key|delegate_key|private_key|privateKey/)
+
+    const proof = await wallet.signMessage(resolved.challenge.message)
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: created.setup_token,
+        challenge_id: resolved.challenge.id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: 'sk_agent_fed',
+        runtime: 'claude-code',
+        connector_version: '0.1.0',
+        connector_context: {
+          environment_label: 'Local workspace',
+          runtime_version: 'claude-code 1.2.3',
+        },
+      },
+    })
+    expect(registerResponse.statusCode).toBe(201)
+    expect(registerResponse.json()).toMatchObject({
+      status: 'connected_local',
+      agent_status: 'pending_approval',
+      api_key_scope: 'setup_pending',
+      delegate_address: wallet.address.toLowerCase(),
+    })
+    expect(registerResponse.json()).not.toHaveProperty('api_key')
+    expect(JSON.stringify(mockClientQuery.mock.calls)).not.toContain(wallet.privateKey)
+
+    const statusResponse = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${created.setup_id}`,
+    })
+    expect(statusResponse.statusCode).toBe(200)
+    expect(statusResponse.json()).toMatchObject({
+      setup_id: created.setup_id,
+      status: 'connected_local',
+      delegate_address: wallet.address.toLowerCase(),
+      approval: { status: 'not_started' },
+    })
+
+    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
+    mockGetTokenAllowance.mockResolvedValue({
+      amount: BigInt(ALLOWANCE.allowance_amount),
+      spent: 0n,
+      resetTimeMin: ALLOWANCE.reset_period_min,
+      lastResetMin: 0,
+      nonce: 0,
+    })
+    const approvalResponse = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${created.setup_id}/wallet-approval`,
+      payload: {
+        ...approvalPayload('confirmed'),
+        delegate_address: wallet.address,
+      },
+    })
+
+    expect(approvalResponse.statusCode).toBe(200)
+    expect(approvalResponse.json()).toMatchObject({
+      setup_id: created.setup_id,
+      status: 'active',
+      delegate_address: wallet.address.toLowerCase(),
+      approval: {
+        status: 'confirmed',
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+    })
+    expect(agentStatus).toBe('active')
+    expect(mockGetTokenAllowance).toHaveBeenCalledWith(
+      SAFE.chain_id,
+      SAFE.safe_address,
+      wallet.address.toLowerCase(),
+      ALLOWANCE.token_address.toLowerCase(),
+    )
 
     await app.close()
   })

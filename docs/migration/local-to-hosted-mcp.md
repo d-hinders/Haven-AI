@@ -45,6 +45,12 @@ The split is deliberate:
 API auth is identity. Signature is authority. On-chain module state is
 enforcement.
 
+For new agents, Connect Agent 2 can create this split automatically: Haven
+creates a pending setup, the local connector generates the signing key and API
+key on the user's machine, and Haven receives only the public signing address,
+proof, API-key hash/prefix, and install status before wallet approval. This
+migration guide still applies to existing agents and manual hosted-MCP setups.
+
 ## Step-By-Step Migration
 
 ### 1. Keep Or Recreate Your Credential File
@@ -57,6 +63,11 @@ If you do not have the credential file, open Haven, select the agent, and use
 the payment-credential flow to rotate the API key. Haven cannot recover a lost
 delegate private key. If the delegate key is gone, pause or revoke the agent
 and create a new signing path.
+
+When using Connect Agent 2 for a new setup, use the Haven-generated connector
+prompt instead of manually rebuilding this file. The prompt carries only a
+setup token and public connection metadata; it does not carry the delegate key
+or plaintext API key.
 
 ### 2. Remove The Old Local MCP Server Entry
 

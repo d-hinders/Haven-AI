@@ -610,6 +610,137 @@ describe('ConnectAgent2Modal', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining(MANUAL_DELEGATE_PRIVATE_KEY))
   })
 
+  it('runs one deterministic fallback setup from registration proof to wallet approval request', async () => {
+    let connectedAfterManual = false
+    const refetch = vi.fn(async () => {
+      connectedAfterManual = true
+      return connectedSetupStatus({ delegate_address: MANUAL_DELEGATE_ADDRESS })
+    })
+    mockUseAgentConnectionSetupStatus.mockImplementation(() => ({
+      data: connectedAfterManual
+        ? connectedSetupStatus({ delegate_address: MANUAL_DELEGATE_ADDRESS })
+        : null,
+      loading: false,
+      error: null,
+      refetch,
+    }))
+    mockApiPost.mockImplementation(async (path: string) => {
+      if (path === '/agent-connection-setups') {
+        return {
+          setup_id: 'setup-1',
+          status: 'awaiting_connection',
+          setup_token: 'hv_setup_abc',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: 'npx -y @haven_ai/connect --setup hv_setup_abc --api https://api.haven.example --runtime claude-code',
+          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect --setup hv_setup_abc',
+        }
+      }
+      if (path === '/agent-connection-setups/resolve') {
+        return {
+          setup_id: 'setup-1',
+          status: 'awaiting_connection',
+          agent: { name: 'Research Agent', description: null },
+          haven_wallet: {
+            name: SAFE.name,
+            address: SAFE.safe_address,
+            chain_id: 100,
+            network: 'Gnosis',
+          },
+          agent_budget: [{
+            token_symbol: 'USDC.e',
+            allowance_amount: '10000000',
+            reset_period_min: 1440,
+          }],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: {
+            id: 'challenge-1',
+            message: 'Haven challenge',
+            expires_at: '2099-01-01T00:00:00.000Z',
+          },
+        }
+      }
+      if (path === '/agent-connection-setups/register') {
+        return {
+          setup_id: 'setup-1',
+          agent_id: 'agent-1',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: 'sk_agent_abc',
+          api_key_scope: 'setup_pending',
+          delegate_address: MANUAL_DELEGATE_ADDRESS,
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        }
+      }
+      if (path === '/agent-connection-setups/setup-1/wallet-approval') {
+        return connectedSetupStatus({
+          status: 'active',
+          delegate_address: MANUAL_DELEGATE_ADDRESS,
+          approval: { status: 'confirmed', safe_tx_hash: SAFE_TX_HASH, tx_hash: TX_HASH },
+        })
+      }
+      return {}
+    })
+    renderModal()
+
+    await fillAndCreateSetup()
+    fireEvent.click(screen.getByText('Manual credential fallback'))
+    fireEvent.click(screen.getByLabelText(/I understand this fallback shows/i))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create manual credential' }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const registerCall = mockApiPost.mock.calls.find(([path]) => path === '/agent-connection-setups/register')
+    expect(registerCall).toBeTruthy()
+    expect(registerCall?.[1]).toMatchObject({
+      setup_token: 'hv_setup_abc',
+      challenge_id: 'challenge-1',
+      delegate_address: MANUAL_DELEGATE_ADDRESS,
+      proof_signature: `0x${'9'.repeat(130)}`,
+      api_key_hash: 'cd'.repeat(32),
+      api_key_prefix: 'sk_agent_aba',
+    })
+    expect(JSON.stringify(registerCall?.[1])).not.toContain(MANUAL_DELEGATE_PRIVATE_KEY)
+    expect(JSON.stringify(registerCall?.[1])).not.toContain(MANUAL_API_KEY)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Continue to wallet approval' }))
+      await Promise.resolve()
+    })
+    expect(await screen.findByText('Local connection ready')).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve agent rules' }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(mockExecuteSafeTx).toHaveBeenCalled())
+    expect(mockBuildAgentSetupTx).toHaveBeenCalledWith(
+      SAFE.safe_address,
+      MANUAL_DELEGATE_ADDRESS,
+      [expect.objectContaining({
+        token: '0x9999999999999999999999999999999999999999',
+        amount: 10000000n,
+        resetTimeMin: 1440,
+      })],
+      true,
+      7n,
+    )
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/agent-connection-setups/setup-1/wallet-approval',
+      expect.objectContaining({
+        result: 'confirmed',
+        delegate_address: MANUAL_DELEGATE_ADDRESS,
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      }),
+    )
+  })
+
   it('shows a visible blocker when no Haven wallet is available', async () => {
     mockUseAuth.mockReturnValue({
       user: { safes: [] },

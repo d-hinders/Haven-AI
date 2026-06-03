@@ -136,6 +136,9 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     '/',
     { preHandler: authMiddleware },
     async (request, reply) => {
+      if (!connectAgent2CreationEnabled()) {
+        return reply.code(404).send({ error: 'Connect Agent 2 setup is not available' })
+      }
       if (containsForbiddenPrivateKeyField(request.body)) {
         return reply.code(400).send({ error: 'Private key fields are not accepted by Haven' })
       }
@@ -1208,4 +1211,8 @@ function networkName(chainId: number): string {
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:@-]+$/.test(value)) return value
   return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function connectAgent2CreationEnabled(): boolean {
+  return ['true', '1', 'on'].includes(String(process.env.CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
 }

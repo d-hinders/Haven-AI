@@ -1,7 +1,7 @@
 # Haven - Connect Agent 2 Local-Key Pairing
 
-Contract for the planned Connect Agent 2 flow. This is the implementation
-source of truth for issue #230 and the child work in #231 through #237.
+Contract for the Connect Agent 2 flow. This is the implementation source of
+truth for issue #230 and the child work in #231 through #237.
 
 Connect Agent 2 keeps the existing Connect Agent flow available while adding a
 new primary path where the agent spending key is generated locally by the
@@ -29,10 +29,12 @@ Connect Agent 2 uses a staged local-key pairing flow:
    and connector command.
 3. The local connector runs in the user's agent environment.
 4. The connector generates the delegate key locally and stores it locally.
-5. The connector signs a Haven challenge and sends only the public signing
-   address plus proof to Haven.
-6. Haven returns the real agent API key to the connector once, so the connector
-   can configure hosted MCP identity behind the scenes.
+5. The connector generates the agent API key locally, signs a Haven challenge,
+   and sends only the public signing address, proof, API-key hash, and API-key
+   prefix to Haven.
+6. Haven stores only the API-key hash/prefix, creates a non-active pending
+   agent, and confirms the connector can configure hosted MCP identity behind
+   the scenes.
 7. The agent remains inactive for payments until the user returns to Haven and
    approves the public signing address and agent budget in the Haven wallet.
 
@@ -63,8 +65,11 @@ Connect Agent 2 target flow:
 
 - Haven creates a pending setup before any delegate address exists.
 - The local connector generates the delegate key in the agent environment.
-- The connector registers only the public signing address plus proof.
-- Haven issues a limited pending API key to the connector for local setup.
+- The connector registers only the public signing address, proof, and locally
+  generated API-key hash/prefix.
+- Haven never receives the plaintext agent API key in Connect Agent 2.
+- The locally generated API key is limited by pending-agent status until wallet
+  approval activates the agent.
 - The user approves the public signing address and budget in the Haven wallet.
 - Browser-generated keys and signing-key prompts become fallback-only paths.
 
@@ -97,7 +102,7 @@ Haven backend
 |---|---|---|
 | Haven backend | user auth session, pending setup metadata, setup token hash, public signing address, proof signature, API key hash/prefix, allowance mirror rows, wallet approval status | agent private key, user private key, seed phrase, unencrypted setup token after creation |
 | Haven frontend | setup token while shown to the user, pending setup status, public signing address, budget/rule summary | agent private key in the Connect Agent 2 happy path |
-| Local connector | setup token during pairing, generated private signing key, public signing address, proof signature, plaintext API key returned once, runtime install metadata | user owner key, Haven server secrets |
+| Local connector | setup token during pairing, generated private signing key, public signing address, proof signature, locally generated plaintext API key, runtime install metadata | user owner key, Haven server secrets |
 | Local signer | delegate private key or protected reference, local signing audit rows | Haven API key unless a local full-MCP fallback intentionally uses it |
 | Hosted MCP | API key/Bearer token, request context, unsigned payment state, submitted signatures | delegate private key, local signer credential file |
 | Haven wallet / Safe | owner set, module state, delegate address, per-token allowances | off-chain setup tokens or API keys |
@@ -199,7 +204,7 @@ sequenceDiagram
   Connector->>Signer: Sign Haven setup challenge
   Signer-->>Connector: proof signature
   Connector->>API: Register public signing address + proof
-  API-->>Connector: agent_id, api_key, hosted_mcp_url, status connected_local
+  API-->>Connector: agent_id, api_key_scope, hosted_mcp_url, status connected_local
   Connector->>Connector: Configure hosted MCP identity and local signer
   Connector-->>User: Return to Haven to approve agent rules
   UI->>API: Poll setup status
@@ -427,6 +432,8 @@ Request:
   "challenge_id": "uuid",
   "delegate_address": "0x...",
   "proof_signature": "0x...",
+  "api_key_hash": "64 hex characters",
+  "api_key_prefix": "sk_agent_abc",
   "runtime": "claude-code",
   "connector_version": "0.1.0",
   "connector_context": {
@@ -449,7 +456,6 @@ Response:
   "agent_id": "uuid",
   "status": "connected_local",
   "agent_status": "pending_approval",
-  "api_key": "sk_agent_...",
   "api_key_prefix": "sk_agent_...",
   "api_key_scope": "setup_pending",
   "delegate_address": "0x...",
@@ -471,7 +477,7 @@ Verification:
 
 Rules:
 
-- Return plaintext `api_key` only once.
+- The connector generates the plaintext API key locally before registration.
 - Store only `api_key_hash` and `api_key_prefix`.
 - If an agent row is created here, it must be non-active for payment tools
   until wallet approval succeeds.
@@ -676,7 +682,8 @@ Connector responsibilities:
 6. Derive public signing address.
 7. Sign the Haven challenge.
 8. Register public signing address and proof.
-9. Receive API key once and configure hosted MCP identity.
+9. Keep the locally generated API key in protected local storage and configure
+   hosted MCP identity.
 10. Configure local sign-only tooling.
 11. Probe what it can probe and report install status to Haven.
 12. Print next steps without secrets.
@@ -798,12 +805,15 @@ Mitigations:
 - Agent status remains non-active until wallet approval.
 - Payment execution still requires local delegate signature and on-chain
   allowance.
+- Connect Agent 2 generates the plaintext API key locally and sends Haven only
+  its hash/prefix.
 - API key can be rotated.
 - Connector should prefer secret/env references over plaintext config where
   runtime support exists.
 
 Residual risk: leaked API key may read agent state or create pending requests
-depending on backend authorization. Scope API permissions carefully in #231.
+depending on backend authorization. Scope API permissions carefully and keep
+pending-agent auth allowlisted.
 
 ### Private Key Leakage
 
@@ -916,10 +926,10 @@ Do not remove the old Connect Agent flow in this sequence.
 
 ## Feature Gate And Rollback
 
-Connect Agent 2 should ship behind a feature gate, for example:
+Connect Agent 2 ships with rollback gates:
 
-- frontend env flag for showing the new entry point
-- backend env flag for enabling setup-token endpoints
+- frontend `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=true` shows the new entry point
+- backend `CONNECT_AGENT_2_ENABLED=true` allows new setup-token creation
 - connector package published as alpha/beta until the flow is verified
 
 Rollback plan:
@@ -941,7 +951,7 @@ Use this checklist on PRs that implement this contract:
 - Setup token is stored hashed and expires.
 - Setup token cannot authorize payment or hosted MCP calls.
 - Proof signature recovers to submitted public signing address.
-- API key returned to connector is stored as hash/prefix server-side.
+- Connector-generated API key is stored only as hash/prefix server-side.
 - Agent API key cannot move money without local delegate signature.
 - Pending/non-active statuses do not authenticate as active payment agents.
 - Hosted MCP snippets, deep links, URLs, headers, and logs never contain the

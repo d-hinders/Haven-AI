@@ -369,8 +369,21 @@ export default function CreateAgentModal({
   // ── Step: Execute ──────────────────────────────────────
 
   async function handleExecute() {
-    if (!publicClient || !signer || !safeDetails)
+    // Surface a clear error rather than silently doing nothing when a
+    // prerequisite becomes unavailable between render and click (e.g. wallet
+    // disconnected, RPC client not yet initialised for the selected chain).
+    if (!publicClient || !signer || !safeDetails) {
+      setStep('executing')
+      setExecStatus('error')
+      setExecError(
+        !signer
+          ? 'No wallet connected. Connect a wallet or passkey and try again.'
+          : !publicClient
+            ? 'No RPC client for this chain. Refresh the page and try again.'
+            : 'Account details are still loading. Wait a moment and try again.',
+      )
       return
+    }
 
     setStep('executing')
     setExecError(null)

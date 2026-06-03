@@ -2,8 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Address, parseUnits } from 'viem'
-import { RESET_PERIODS } from '@/lib/allowance-module'
-import { api } from '@/lib/api'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import { usePublicClient } from 'wagmi'
+import {
+  ALLOWANCE_MODULE_ADDRESS,
+  RESET_PERIODS,
+  buildAgentSetupTx,
+  isModuleEnabled,
+  type AllowanceSetup,
+} from '@/lib/allowance-module'
+import { api, getResolvedApiBaseUrl } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -13,11 +21,19 @@ import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
 } from '@/hooks/useAgentConnectionSetupStatus'
-import { getChainConfig } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { truncate } from '@/lib/format'
 import { validateMoneyInput } from '@/lib/money-input'
-import { getChainTokens } from '@/lib/safe-tx'
+import {
+  executeSafeTx,
+  getChainTokens,
+  getSafeNonce,
+  getSafeTxHash,
+  proposeSafeTx,
+  signSafeTx,
+} from '@/lib/safe-tx'
+import { useActiveSigner } from '@/lib/signer'
 import WalletButton from './WalletButton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -48,6 +64,51 @@ interface CreateSetupResponse {
   expires_at: string
   connector_command: string
   setup_prompt: string
+}
+
+interface ResolveSetupResponse {
+  setup_id: string
+  status: string
+  agent: {
+    name: string
+    description?: string | null
+  }
+  haven_wallet: {
+    name: string
+    address: string
+    chain_id: number
+    network: string
+  }
+  agent_budget: Array<{
+    token_symbol: string
+    allowance_amount: string
+    reset_period_min: number
+  }>
+  hosted_mcp_url: string
+  challenge: {
+    id: string
+    message: string
+    expires_at: string
+  }
+}
+
+interface RegisterSetupResponse {
+  setup_id: string
+  agent_id: string
+  status: 'connected_local'
+  agent_status: 'pending_approval'
+  api_key_prefix: string
+  api_key_scope: 'setup_pending'
+  delegate_address: string
+  hosted_mcp_url: string
+  next_action: 'return_to_haven_for_wallet_approval'
+}
+
+interface ManualCredential {
+  prompt: string
+  apiKey: string
+  delegatePrivateKey: `0x${string}`
+  delegateAddress: string
 }
 
 interface Props {
@@ -100,8 +161,15 @@ export default function ConnectAgent2Modal({
   const [setup, setSetup] = useState<CreateSetupResponse | null>(null)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [copied, setCopied] = useState<'prompt' | 'command' | null>(null)
+  const [copied, setCopied] = useState<'prompt' | 'command' | 'manual' | null>(null)
   const [cancelled, setCancelled] = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [approvalError, setApprovalError] = useState<string | null>(null)
+  const [manualFallbackConfirmed, setManualFallbackConfirmed] = useState(false)
+  const [manualCredential, setManualCredential] = useState<ManualCredential | null>(null)
+  const [manualCredentialAcknowledged, setManualCredentialAcknowledged] = useState(false)
+  const [manualCreating, setManualCreating] = useState(false)
+  const [manualError, setManualError] = useState<string | null>(null)
 
   const selectedSafe = userSafes.find((safe) => safe.id === selectedSafeId) ?? null
   const safeAddress = selectedSafe?.safe_address ?? propSafeAddress ?? ''
@@ -120,7 +188,16 @@ export default function ConnectAgent2Modal({
     enabled: open && Boolean(setup),
   })
   const setupStatus = statusQuery.data
-  const visibleStatus = cancelled ? 'cancelled' : setupStatus?.status ?? setup?.status
+  const manualCredentialNeedsSave = Boolean(manualCredential && !manualCredentialAcknowledged)
+  const rawVisibleStatus = cancelled ? 'cancelled' : setupStatus?.status ?? setup?.status
+  const visibleStatus = manualCredentialNeedsSave ? 'awaiting_connection' : rawVisibleStatus
+  const approvalSafeAddress = setupStatus?.haven_wallet.address ?? safeAddress
+  const approvalChainId = setupStatus?.haven_wallet.chain_id ?? chainId
+  const publicClient = usePublicClient({ chainId: approvalChainId })
+  const signer = useActiveSigner({
+    safeAddress: approvalSafeAddress ? (approvalSafeAddress as Address) : undefined,
+    chainId: approvalChainId,
+  })
 
   const chainTokens = useMemo(() => getChainTokens(chainId), [chainId])
   const tokenOptions = useMemo(
@@ -161,14 +238,27 @@ export default function ConnectAgent2Modal({
     setCreateError(null)
     setCopied(null)
     setCancelled(false)
+    setApproving(false)
+    setApprovalError(null)
+    setManualFallbackConfirmed(false)
+    setManualCredential(null)
+    setManualCredentialAcknowledged(false)
+    setManualCreating(false)
+    setManualError(null)
   }, [tokenOptions])
 
   const handleClose = useCallback(() => {
+    if (manualCredentialNeedsSave && typeof window !== 'undefined') {
+      const shouldClose = window.confirm(
+        'This one-time manual credential will be hidden if you close now. Continue?',
+      )
+      if (!shouldClose) return
+    }
     resetForm()
     onClose()
-  }, [onClose, resetForm])
+  }, [manualCredentialNeedsSave, onClose, resetForm])
 
-  useEscapeToClose(open, handleClose, { enabled: !creating })
+  useEscapeToClose(open, handleClose, { enabled: !creating && !approving && !manualCreating })
 
   if (!open) return null
 
@@ -253,7 +343,7 @@ export default function ConnectAgent2Modal({
     setAddToken(availableTokens.find((token) => token.symbol !== addTokenOption.symbol)?.symbol ?? '')
   }
 
-  async function copyText(kind: 'prompt' | 'command', value: string) {
+  async function copyText(kind: 'prompt' | 'command' | 'manual', value: string) {
     await navigator.clipboard?.writeText(value)
     setCopied(kind)
   }
@@ -273,9 +363,168 @@ export default function ConnectAgent2Modal({
     }
   }
 
+  async function handleApproveAgentRules() {
+    if (!setup || !setupStatus) return
+    const delegateAddress = setupStatus.delegate_address
+    const approvalWallet = setupStatus.haven_wallet.address
+    const approvalNetwork = setupStatus.haven_wallet.chain_id
+    if (!publicClient || !signer || !safeDetails || !delegateAddress) {
+      setApprovalError('Haven is still loading the wallet approval details.')
+      return
+    }
+
+    setApproving(true)
+    setApprovalError(null)
+    try {
+      const setupAllowances: AllowanceSetup[] = setupStatus.agent_budget.map((budget) => ({
+        token: budget.token_address as Address,
+        tokenSymbol: budget.token_symbol,
+        amount: BigInt(budget.allowance_amount),
+        resetTimeMin: budget.reset_period_min,
+      }))
+      const moduleEnabled = await isModuleEnabled(publicClient, approvalWallet as Address)
+      const nonce = await getSafeNonce(publicClient, approvalWallet as Address)
+      const safeTx = buildAgentSetupTx(
+        approvalWallet as Address,
+        delegateAddress as Address,
+        setupAllowances,
+        !moduleEnabled,
+        nonce,
+      )
+      const safeTxHash = getSafeTxHash(approvalWallet as Address, safeTx, approvalNetwork)
+      const signature = await signSafeTx(signer, approvalWallet as Address, safeTx, approvalNetwork)
+
+      if ((safeDetails.threshold ?? 1) <= 1) {
+        try {
+          const result = await executeSafeTx(
+            signer,
+            publicClient,
+            approvalWallet as Address,
+            safeTx,
+            signature,
+            approvalNetwork,
+          )
+          await recordWalletApproval(setup.setup_id, {
+            result: 'confirmed',
+            tx_hash: result.txHash,
+            safe_tx_hash: safeTxHash,
+            chain_id: approvalNetwork,
+            safe_address: approvalWallet,
+            allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
+            delegate_address: delegateAddress,
+            confirmation_status: 'confirmed',
+          })
+        } catch (err) {
+          const txHash = extractTxHashFromError(err)
+          if (!txHash) throw err
+          await recordWalletApproval(setup.setup_id, {
+            result: 'confirmed',
+            tx_hash: txHash,
+            safe_tx_hash: safeTxHash,
+            chain_id: approvalNetwork,
+            safe_address: approvalWallet,
+            allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
+            delegate_address: delegateAddress,
+            confirmation_status: 'receipt_timeout',
+          })
+          setApprovalError(
+            `The transaction was submitted but is still confirming. Haven will keep checking ${getExplorerUrl(approvalNetwork, 'tx', txHash)}.`,
+          )
+        }
+      } else {
+        await proposeSafeTx(
+          approvalWallet as Address,
+          safeTx,
+          safeTxHash,
+          signature,
+          signer.address,
+          approvalNetwork,
+        )
+        await recordWalletApproval(setup.setup_id, {
+          result: 'proposed',
+          safe_tx_hash: safeTxHash,
+          chain_id: approvalNetwork,
+          safe_address: approvalWallet,
+          allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
+          delegate_address: delegateAddress,
+        })
+      }
+      await statusQuery.refetch()
+      onSetupUpdated?.()
+    } catch (err) {
+      setApprovalError(approvalErrorMessage(err, signer?.type))
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  async function handleCreateManualCredential() {
+    if (!setup || !manualFallbackConfirmed) return
+    setManualCreating(true)
+    setManualError(null)
+    try {
+      const resolved = await api.post<ResolveSetupResponse>('/agent-connection-setups/resolve', {
+        setup_token: setup.setup_token,
+        connector_version: 'browser-manual-fallback',
+        runtime,
+      })
+      const delegatePrivateKey = generatePrivateKey()
+      const account = privateKeyToAccount(delegatePrivateKey)
+      const apiKey = generateBrowserAgentApiKey()
+      const proofSignature = await account.signMessage({ message: resolved.challenge.message })
+      const registration = await api.post<RegisterSetupResponse>('/agent-connection-setups/register', {
+        setup_token: setup.setup_token,
+        challenge_id: resolved.challenge.id,
+        delegate_address: account.address,
+        proof_signature: proofSignature,
+        api_key_hash: await sha256Hex(apiKey),
+        api_key_prefix: apiKey.slice(0, 12),
+        runtime,
+        connector_version: 'browser-manual-fallback',
+        connector_context: {
+          environment_label: 'Manual browser fallback',
+          config_target: 'paste-to-agent',
+        },
+        install_capabilities: {
+          can_write_runtime_config: false,
+          restart_required: true,
+        },
+      })
+
+      setManualCredential({
+        apiKey,
+        delegatePrivateKey,
+        delegateAddress: registration.delegate_address,
+        prompt: buildManualCredentialPrompt({
+          agentName: resolved.agent.name,
+          havenWallet: `${resolved.haven_wallet.name} on ${resolved.haven_wallet.network}`,
+          budgets: resolved.agent_budget.map((budget) =>
+            `${formatAllowanceForToken(budget.allowance_amount, resolved.haven_wallet.chain_id, budget.token_symbol)} ${budget.token_symbol} ${budgetPeriodLabel(budget.reset_period_min)}`,
+          ),
+          apiKey,
+          delegatePrivateKey,
+          delegateAddress: registration.delegate_address,
+          apiBaseUrl: manualApiBaseUrl(),
+          hostedMcpUrl: registration.hosted_mcp_url || resolved.hosted_mcp_url,
+        }),
+      })
+      setManualCredentialAcknowledged(false)
+      onSetupUpdated?.()
+    } catch (err) {
+      setManualError(err instanceof Error ? err.message : 'We could not create the manual credential.')
+    } finally {
+      setManualCreating(false)
+    }
+  }
+
+  async function handleContinueAfterManualCredential() {
+    setManualCredentialAcknowledged(true)
+    await statusQuery.refetch()
+  }
+
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 v2-modal-backdrop">
-      <div className="absolute inset-0" onClick={creating ? undefined : handleClose} />
+      <div className="absolute inset-0" onClick={creating || approving || manualCreating ? undefined : handleClose} />
       <div
         ref={panelRef}
         role="dialog"
@@ -296,7 +545,7 @@ export default function ConnectAgent2Modal({
           <button
             type="button"
             onClick={handleClose}
-            disabled={creating}
+            disabled={creating || approving || manualCreating}
             aria-label="Close"
             className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
@@ -556,6 +805,14 @@ export default function ConnectAgent2Modal({
                   setup={setup}
                   copied={copied}
                   onCopy={copyText}
+                  manualFallbackConfirmed={manualFallbackConfirmed}
+                  onManualFallbackConfirmedChange={setManualFallbackConfirmed}
+                  manualCredential={manualCredential}
+                  manualCredentialAcknowledged={manualCredentialAcknowledged}
+                  manualCreating={manualCreating}
+                  manualError={manualError}
+                  onCreateManualCredential={handleCreateManualCredential}
+                  onContinueAfterManualCredential={handleContinueAfterManualCredential}
                   loading={statusQuery.loading}
                   error={statusQuery.error}
                   expiresAt={setup.expires_at}
@@ -573,8 +830,12 @@ export default function ConnectAgent2Modal({
                   safeThreshold={safeDetails?.threshold ?? 1}
                   safeOwnerCount={safeDetails?.owners?.length ?? 1}
                   operationGate={operationGate}
+                  publicClientReady={Boolean(publicClient)}
+                  signerReady={Boolean(signer)}
+                  approving={approving}
+                  approvalError={approvalError}
+                  onApprove={handleApproveAgentRules}
                   onCancel={handleCancelSetup}
-                  onDone={handleClose}
                 />
               )}
 
@@ -686,14 +947,30 @@ function WaitingForConnector({
   setup,
   copied,
   onCopy,
+  manualFallbackConfirmed,
+  onManualFallbackConfirmedChange,
+  manualCredential,
+  manualCredentialAcknowledged,
+  manualCreating,
+  manualError,
+  onCreateManualCredential,
+  onContinueAfterManualCredential,
   loading,
   error,
   expiresAt,
   onCancel,
 }: {
   setup: CreateSetupResponse
-  copied: 'prompt' | 'command' | null
-  onCopy: (kind: 'prompt' | 'command', value: string) => void
+  copied: 'prompt' | 'command' | 'manual' | null
+  onCopy: (kind: 'prompt' | 'command' | 'manual', value: string) => void
+  manualFallbackConfirmed: boolean
+  onManualFallbackConfirmedChange: (confirmed: boolean) => void
+  manualCredential: ManualCredential | null
+  manualCredentialAcknowledged: boolean
+  manualCreating: boolean
+  manualError: string | null
+  onCreateManualCredential: () => void
+  onContinueAfterManualCredential: () => void
   loading: boolean
   error: string | null
   expiresAt: string
@@ -734,6 +1011,69 @@ function WaitingForConnector({
         </div>
       </details>
 
+      <details className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-xs">
+        <summary className="cursor-pointer text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+          Manual credential fallback
+        </summary>
+        <div className="mt-3 space-y-3">
+          <p className="leading-relaxed text-[var(--v2-ink-2)]">
+            Use this only if the agent cannot run the setup command or store the local connector files. Haven will still receive only the public signing address and API key hash.
+          </p>
+          <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+            <p className="font-semibold text-[var(--v2-ink)]">Before creating a manual credential</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed text-[var(--v2-ink-2)]">
+              <li>Use it only in a trusted agent workspace.</li>
+              <li>The private signing key lets the agent sign payments within the approved agent budget.</li>
+              <li>The API key identifies the agent but cannot spend alone.</li>
+              <li>If it may have leaked, pause or revoke the agent in Haven.</li>
+              <li>Do not commit it, upload it, or paste it into shared logs.</li>
+            </ul>
+          </div>
+          <label className="flex items-start gap-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-[var(--v2-ink-2)]">
+            <input
+              type="checkbox"
+              checked={manualFallbackConfirmed}
+              onChange={(event) => onManualFallbackConfirmedChange(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              I understand this fallback shows a one-time private signing key and should only be pasted into a trusted agent workspace.
+            </span>
+          </label>
+          {manualError && (
+            <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-[var(--v2-danger)]">
+              {manualError}
+            </div>
+          )}
+          {!manualCredential && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onCreateManualCredential}
+              disabled={!manualFallbackConfirmed || manualCreating}
+              className="w-full"
+            >
+              {manualCreating ? 'Creating manual credential...' : 'Create manual credential'}
+            </Button>
+          )}
+          {manualCredential && (
+            <div className="space-y-3">
+              <CopyBlock
+                label="Manual credential prompt"
+                value={manualCredential.prompt}
+                copied={copied === 'manual'}
+                onCopy={() => onCopy('manual', manualCredential.prompt)}
+              />
+              {!manualCredentialAcknowledged && (
+                <Button onClick={onContinueAfterManualCredential} className="w-full">
+                  Continue to wallet approval
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </details>
+
       <p className="text-xs text-[var(--v2-ink-3)]">
         Expires {formatAbsoluteDate(expiresAt)}. {error ? `Status check failed: ${error}` : 'Haven will update this screen when the local connection finishes.'}
       </p>
@@ -756,8 +1096,12 @@ function LocalConnectionReady({
   safeThreshold,
   safeOwnerCount,
   operationGate,
+  publicClientReady,
+  signerReady,
+  approving,
+  approvalError,
+  onApprove,
   onCancel,
-  onDone,
 }: {
   status: AgentConnectionSetupStatusResponse | null
   fallbackSetup: CreateSetupResponse
@@ -767,8 +1111,12 @@ function LocalConnectionReady({
   safeThreshold: number
   safeOwnerCount: number
   operationGate: ReturnType<typeof useSafeOperationGate>
+  publicClientReady: boolean
+  signerReady: boolean
+  approving: boolean
+  approvalError: string | null
+  onApprove: () => void
   onCancel: () => void
-  onDone: () => void
 }) {
   const install = status?.install_status
   const budgets = status?.agent_budget ?? []
@@ -778,7 +1126,13 @@ function LocalConnectionReady({
     amount: formatAllowanceForToken(budget.allowance_amount, chainId, budget.token_symbol),
     period: budgetPeriodLabel(budget.reset_period_min),
   }))
-  const approvalBlocked = approvalBlockReason(operationGate, safeDetailsLoading)
+  const approvalBlocked = approvalBlockReason(
+    operationGate,
+    safeDetailsLoading,
+    status,
+    publicClientReady,
+    signerReady,
+  )
 
   return (
     <>
@@ -845,16 +1199,26 @@ function LocalConnectionReady({
         </ApprovalRequiredBanner>
       )}
 
-      <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-        Keep using the current Connect agent flow for production agents that need active spending today.
-      </p>
+      {approvalError && (
+        <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
+          {approvalError}
+        </div>
+      )}
 
       <div className="flex gap-3">
         <Button variant="ghost" onClick={onCancel} className="flex-1">
           Cancel setup
         </Button>
-        <Button onClick={onDone} className="flex-1">
-          Done
+        <Button
+          onClick={onApprove}
+          disabled={Boolean(approvalBlocked) || approving}
+          className="flex-1"
+        >
+          {approving
+            ? 'Approving...'
+            : safeThreshold > 1
+              ? 'Submit wallet approval'
+              : 'Approve agent rules'}
         </Button>
       </div>
       <span className="sr-only">{fallbackSetup.setup_id}</span>
@@ -1005,9 +1369,136 @@ function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse['instal
 function approvalBlockReason(
   gate: ReturnType<typeof useSafeOperationGate>,
   safeDetailsLoading: boolean,
+  status: AgentConnectionSetupStatusResponse | null,
+  publicClientReady: boolean,
+  signerReady: boolean,
 ): string | null {
+  if (!status) return 'Haven is still loading local connection details.'
+  if (!status.delegate_address) return 'Haven is waiting for the public signing address from the local connection.'
   if (safeDetailsLoading) return 'Haven is still loading wallet approval details.'
+  if (!publicClientReady) return 'Haven is still connecting to the wallet network.'
   if (gate.kind === 'passkey_on_other_device') return 'Use the device with this Haven wallet passkey to approve agent rules.'
   if (gate.kind === 'no_signer') return 'Connect a wallet or use a passkey on this device to approve agent rules.'
+  if (!signerReady) return 'Connect a wallet or use a passkey on this device to approve agent rules.'
   return null
+}
+
+async function recordWalletApproval(
+  setupId: string,
+  payload: {
+    result: 'confirmed' | 'proposed'
+    tx_hash?: string
+    safe_tx_hash: string
+    chain_id: number
+    safe_address: string
+    allowance_module_address: string
+    delegate_address: string
+    confirmation_status?: 'confirmed' | 'receipt_timeout'
+  },
+): Promise<AgentConnectionSetupStatusResponse> {
+  return api.post<AgentConnectionSetupStatusResponse>(
+    `/agent-connection-setups/${encodeURIComponent(setupId)}/wallet-approval`,
+    payload,
+  )
+}
+
+function approvalErrorMessage(err: unknown, signerType?: string): string {
+  const message = errorMessage(err)
+  if (/user rejected|user denied/i.test(message)) {
+    return signerType === 'passkey'
+      ? 'Face ID or Touch ID was cancelled.'
+      : 'Wallet approval was cancelled.'
+  }
+  if (message.includes('would revert on-chain')) {
+    return 'The wallet approval transaction would fail. Check the Haven wallet network and try again.'
+  }
+  if (message.includes('Could not verify the transaction')) {
+    return 'Network error while preparing wallet approval. Check your connection and try again.'
+  }
+  return message
+}
+
+function errorMessage(err: unknown): string {
+  let message = 'Setup failed'
+  if (err instanceof Error) {
+    message = err.message
+    let cause = (err as { cause?: unknown }).cause
+    while (cause instanceof Error) {
+      if (cause.message) message = cause.message
+      cause = (cause as { cause?: unknown }).cause
+    }
+    const short = (err as { shortMessage?: string }).shortMessage
+    if (short) message = short
+  }
+  return message
+}
+
+function extractTxHashFromError(err: unknown): string | null {
+  const match = errorMessage(err).match(/0x[0-9a-fA-F]{64}/)
+  return match?.[0] ?? null
+}
+
+function generateBrowserAgentApiKey(): string {
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error('Secure browser crypto is unavailable.')
+  }
+  const bytes = new Uint8Array(24)
+  globalThis.crypto.getRandomValues(bytes)
+  return `sk_agent_${bytesToHex(bytes)}`
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('Secure browser crypto is unavailable.')
+  }
+  const data = new TextEncoder().encode(value)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', data)
+  return bytesToHex(new Uint8Array(digest))
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function manualApiBaseUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_API_URL
+  if (explicit) return explicit.replace(/\/+$/, '')
+  const resolved = getResolvedApiBaseUrl()
+  if (/^https?:\/\//.test(resolved)) return resolved.replace(/\/+$/, '')
+  if (typeof window !== 'undefined') return window.location.origin.replace(/\/+$/, '')
+  return resolved
+}
+
+function buildManualCredentialPrompt(input: {
+  agentName: string
+  havenWallet: string
+  budgets: string[]
+  apiKey: string
+  delegatePrivateKey: string
+  delegateAddress: string
+  apiBaseUrl: string
+  hostedMcpUrl: string
+}): string {
+  return [
+    `Manual Haven credential for ${input.agentName}`,
+    '',
+    `Haven wallet: ${input.havenWallet}`,
+    `Agent budget: ${input.budgets.length > 0 ? input.budgets.join(', ') : 'No budget configured'}`,
+    `Public signing address: ${input.delegateAddress}`,
+    '',
+    'Add these values only in the trusted agent workspace:',
+    `HAVEN_API_KEY=${input.apiKey}`,
+    `HAVEN_DELEGATE_KEY=${input.delegatePrivateKey}`,
+    `HAVEN_DELEGATE_ADDRESS=${input.delegateAddress}`,
+    `HAVEN_API_URL=${input.apiBaseUrl}`,
+    `HAVEN_MCP_URL=${input.hostedMcpUrl}`,
+    '',
+    'Important:',
+    '- The private signing key lets the agent sign payments within the approved agent budget.',
+    '- The API key identifies the agent but cannot spend alone.',
+    '- If this credential may have leaked, pause or revoke the agent in Haven.',
+    '- Do not commit it, upload it, paste it into shared logs, or send it to Haven.',
+    '',
+    'After adding the values, return to Haven and approve the agent rules from the Haven wallet.',
+  ].join('\n')
 }

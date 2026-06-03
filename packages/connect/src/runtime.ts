@@ -12,6 +12,11 @@ import {
   writeCredentialFiles,
   type StoredCredentialPaths,
 } from './storage.js'
+import {
+  installRuntime,
+  runtimeInstallCapabilities,
+  type RuntimeInstallResult,
+} from './runtime-install.js'
 
 export const CONNECTOR_VERSION = '0.1.0'
 
@@ -30,6 +35,7 @@ export interface ConnectDeps {
   generateApiKey?: () => string
   preflightStorage?: typeof preflightCredentialStorage
   writeCredentials?: typeof writeCredentialFiles
+  installRuntime?: typeof installRuntime
   log?: (message: string) => void
 }
 
@@ -46,8 +52,10 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   const log = secureLogger(deps.log ?? ((message) => process.stdout.write(`${message}\n`)))
   const writeCredentials = deps.writeCredentials ?? writeCredentialFiles
   const preflightStorage = deps.preflightStorage ?? preflightCredentialStorage
+  const runRuntimeInstall = deps.installRuntime ?? installRuntime
   const generateKey = deps.generateKey ?? generateDelegateKey
   const generateLocalApiKey = deps.generateApiKey ?? generateAgentApiKey
+  const installCapabilities = runtimeInstallCapabilities(options.runtime)
 
   const setup = await api.resolveSetup({
     setupToken: options.setupToken,
@@ -76,12 +84,11 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     apiKeyPrefix: agentApiKeyPrefix(localApiKey),
     connectorContext: {
       environment_label: options.environmentLabel ?? 'Local workspace',
-      config_target: 'local credential files',
+      config_target: installCapabilities.canWriteRuntimeConfig
+        ? 'agent runtime MCP config'
+        : 'local credential files',
     },
-    installCapabilities: {
-      canWriteRuntimeConfig: false,
-      restartRequired: true,
-    },
+    installCapabilities,
   })
 
   log(`Registered signing address with Haven: ${shortAddress(registration.delegate_address)}.`)
@@ -101,26 +108,38 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   log(`Stored Haven identity credential locally: ${credentialPaths.identityPath}`)
   log(`Stored local signer credential locally: ${credentialPaths.signerPath}`)
 
+  const runtimeInstall = await runRuntimeInstall({
+    runtime: options.runtime,
+    hostedMcpUrl: registration.hosted_mcp_url,
+    apiKey: localApiKey,
+    signerPath: credentialPaths.signerPath,
+    identityPath: credentialPaths.identityPath,
+    credentialDirectory: credentialPaths.directory,
+    environmentLabel: options.environmentLabel ?? 'Local workspace',
+  })
+  printRuntimeInstall(runtimeInstall, log)
+
   try {
     await api.updateInstallStatus(registration.setup_id, localApiKey, {
-      runtime: options.runtime,
+      runtime: runtimeInstall.runtime,
       connectorVersion,
-      hostedMcpConfigured: false,
-      localSignerConfigured: false,
+      hostedMcpConfigured: runtimeInstall.hostedMcpConfigured,
+      localSignerConfigured: runtimeInstall.localSignerConfigured,
       credentialFilesWritten: true,
-      probeResult: 'credential_files_written',
-      restartRequired: true,
-      nextUserAction: 'return_to_haven_for_wallet_approval_then_configure_runtime_if_needed',
+      probeResult: runtimeInstall.probeResult,
+      restartRequired: runtimeInstall.restartRequired,
+      nextUserAction: runtimeInstall.nextUserAction,
+      errorCode: runtimeInstall.errorCode,
       environmentLabel: options.environmentLabel ?? 'Local workspace',
     })
   } catch (err) {
     log(`Could not report install status to Haven: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  log('Stored hosted Haven MCP identity credential locally.')
-  log('Stored local Haven signer credential locally.')
   log('Return to Haven to approve the agent rules.')
-  log('Restart this agent session after approval if your runtime loads MCP tools at startup.')
+  if (runtimeInstall.restartRequired) {
+    log('Restart this agent session after approval if your runtime loads MCP tools at startup.')
+  }
 
   return {
     setupId: registration.setup_id,
@@ -145,4 +164,18 @@ function printSetupSummary(setup: ResolvedSetup, log: (message: string) => void)
 
 function secureLogger(log: (message: string) => void): (message: string) => void {
   return (message) => log(redactSecrets(message))
+}
+
+function printRuntimeInstall(result: RuntimeInstallResult, log: (message: string) => void): void {
+  for (const message of result.messages) log(message)
+  if (result.hostedMcpConfigured) {
+    log('Configured hosted Haven MCP identity.')
+  } else {
+    log('Hosted Haven MCP identity still needs runtime setup.')
+  }
+  if (result.localSignerConfigured) {
+    log('Configured local Haven signer.')
+  } else {
+    log('Local Haven signer still needs runtime setup.')
+  }
 }

@@ -1,0 +1,1013 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type Address, parseUnits } from 'viem'
+import { RESET_PERIODS } from '@/lib/allowance-module'
+import { api } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
+import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { useSafeDetails } from '@/hooks/useSafeDetails'
+import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
+import {
+  useAgentConnectionSetupStatus,
+  type AgentConnectionSetupStatusResponse,
+} from '@/hooks/useAgentConnectionSetupStatus'
+import { getChainConfig } from '@/lib/chains'
+import { formatAllowanceForToken } from '@/lib/allowance-format'
+import { truncate } from '@/lib/format'
+import { validateMoneyInput } from '@/lib/money-input'
+import { getChainTokens } from '@/lib/safe-tx'
+import WalletButton from './WalletButton'
+import { Button } from './ui/Button'
+import { Input } from './ui/Input'
+import { Select } from './ui/Select'
+import { StepProgress } from './ui/StepProgress'
+import { StatusBadge, type StatusTone } from './ui/StatusBadge'
+import {
+  AgentBudgetCard,
+  AgentRulesSummary,
+  ApprovalRequiredBanner,
+  WalletIdentityBlock,
+} from './haven'
+
+type SetupStep = 'details' | 'account' | 'policy' | 'review' | 'connect'
+
+interface AllowanceEntry {
+  tokenSymbol: string
+  tokenAddress: Address | null
+  decimals: number
+  amount: string
+  resetTimeMin: number
+}
+
+interface CreateSetupResponse {
+  setup_id: string
+  status: 'awaiting_connection'
+  setup_token: string
+  expires_at: string
+  connector_command: string
+  setup_prompt: string
+}
+
+interface Props {
+  open: boolean
+  onClose: () => void
+  safeAddress?: string
+  safeId?: string | null
+  onSetupUpdated?: () => void
+}
+
+const RUNTIME_OPTIONS = [
+  { id: 'claude-code', label: 'Claude Code' },
+  { id: 'codex-cli', label: 'Codex CLI' },
+  { id: 'cursor', label: 'Cursor' },
+  { id: 'vscode', label: 'VS Code' },
+  { id: 'claude-desktop', label: 'Claude Desktop' },
+  { id: 'other', label: 'Other agent' },
+]
+
+export default function ConnectAgent2Modal({
+  open,
+  onClose,
+  safeAddress: propSafeAddress,
+  safeId: propSafeId,
+  onSetupUpdated,
+}: Props) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, open)
+
+  const { user, activeSafe } = useAuth()
+  const userSafes = user?.safes ?? []
+  const initialSafeId =
+    propSafeId ??
+    userSafes.find((safe) => safe.safe_address.toLowerCase() === propSafeAddress?.toLowerCase())?.id ??
+    activeSafe?.id ??
+    userSafes.find((safe) => safe.is_default)?.id ??
+    userSafes[0]?.id ??
+    null
+
+  const [selectedSafeId, setSelectedSafeId] = useState<string | null>(initialSafeId)
+  const [step, setStep] = useState<SetupStep>('details')
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [runtime, setRuntime] = useState('claude-code')
+  const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
+  const [addToken, setAddToken] = useState('')
+  const [addAmount, setAddAmount] = useState('')
+  const [addAmountError, setAddAmountError] = useState('')
+  const [addReset, setAddReset] = useState(1440)
+  const [setup, setSetup] = useState<CreateSetupResponse | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [copied, setCopied] = useState<'prompt' | 'command' | null>(null)
+  const [cancelled, setCancelled] = useState(false)
+
+  const selectedSafe = userSafes.find((safe) => safe.id === selectedSafeId) ?? null
+  const safeAddress = selectedSafe?.safe_address ?? propSafeAddress ?? ''
+  const safeId = selectedSafe?.id ?? propSafeId ?? null
+  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? 100
+  const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
+  const walletNetworkName = getChainConfig(chainId).name
+  const walletDisplayAddress = safeAddress || selectedSafe?.safe_address
+  const { details: safeDetails, loading: safeDetailsLoading } = useSafeDetails(safeAddress || null)
+  const operationGate = useSafeOperationGate({
+    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
+    chainId,
+  })
+
+  const statusQuery = useAgentConnectionSetupStatus(setup?.setup_id ?? null, {
+    enabled: open && Boolean(setup),
+  })
+  const setupStatus = statusQuery.data
+  const visibleStatus = cancelled ? 'cancelled' : setupStatus?.status ?? setup?.status
+
+  const chainTokens = useMemo(() => getChainTokens(chainId), [chainId])
+  const tokenOptions = useMemo(
+    () =>
+      Object.entries(chainTokens).map(([symbol, cfg]) => ({
+        symbol,
+        address: cfg.address as Address | null,
+        decimals: cfg.decimals,
+      })),
+    [chainTokens],
+  )
+
+  useEffect(() => {
+    if (!open) return
+    setSelectedSafeId(initialSafeId)
+    setAddToken(tokenOptions[0]?.symbol ?? '')
+  }, [initialSafeId, open, tokenOptions])
+
+  useEffect(() => {
+    if (!open) return
+    const validSymbols = new Set(tokenOptions.map((token) => token.symbol))
+    if (!validSymbols.has(addToken)) setAddToken(tokenOptions[0]?.symbol ?? '')
+    setAllowances((prev) => prev.filter((allowance) => validSymbols.has(allowance.tokenSymbol)))
+  }, [addToken, open, tokenOptions])
+
+  const resetForm = useCallback(() => {
+    setStep('details')
+    setName('')
+    setDescription('')
+    setRuntime('claude-code')
+    setAllowances([])
+    setAddToken(tokenOptions[0]?.symbol ?? '')
+    setAddAmount('')
+    setAddAmountError('')
+    setAddReset(1440)
+    setSetup(null)
+    setCreating(false)
+    setCreateError(null)
+    setCopied(null)
+    setCancelled(false)
+  }, [tokenOptions])
+
+  const handleClose = useCallback(() => {
+    resetForm()
+    onClose()
+  }, [onClose, resetForm])
+
+  useEscapeToClose(open, handleClose, { enabled: !creating })
+
+  if (!open) return null
+
+  const hasMultipleSafes = userSafes.length > 1
+  const setupSteps: SetupStep[] = hasMultipleSafes
+    ? ['details', 'account', 'policy', 'review', 'connect']
+    : ['details', 'policy', 'review', 'connect']
+  const currentStepIndex = setupSteps.indexOf(step)
+  const detailsNextStep = hasMultipleSafes ? 'account' : 'policy'
+  const policyBackStep = hasMultipleSafes ? 'account' : 'details'
+  const budgetRows = allowances.map((allowance) => ({
+    id: allowance.tokenSymbol,
+    tokenSymbol: allowance.tokenSymbol,
+    amount: allowance.amount,
+    period: budgetPeriodLabel(allowance.resetTimeMin),
+  }))
+  const availableTokens = tokenOptions.filter(
+    (token) => !allowances.some((allowance) => allowance.tokenSymbol === token.symbol),
+  )
+  const addTokenOption = availableTokens.find((token) => token.symbol === addToken)
+  const addAmountValidation =
+    addAmount && addTokenOption
+      ? validateMoneyInput(addAmount, addTokenOption.decimals, { tokenSymbol: addTokenOption.symbol })
+      : null
+  const addAmountMessage =
+    addAmountError || (addAmountValidation && !addAmountValidation.ok ? addAmountValidation.message : '')
+  const walletUnavailable = !safeId
+
+  async function handleCreateSetup() {
+    if (!safeId) {
+      setCreateError('Choose or create a Haven wallet before creating this setup.')
+      return
+    }
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const response = await api.post<CreateSetupResponse>('/agent-connection-setups', {
+        name: name.trim(),
+        description: description.trim() || undefined,
+        safe_id: safeId,
+        runtime,
+        allowances: allowances.map((allowance) => ({
+          token_address:
+            allowance.tokenAddress ?? '0x0000000000000000000000000000000000000000',
+          token_symbol: allowance.tokenSymbol,
+          allowance_amount: parseUnits(allowance.amount, allowance.decimals).toString(),
+          reset_period_min: allowance.resetTimeMin,
+        })),
+      })
+      setSetup(response)
+      setCancelled(false)
+      setStep('connect')
+      onSetupUpdated?.()
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'We could not create the setup.')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  function handleAddAllowance() {
+    if (!addTokenOption) return
+    const parsedAmount = validateMoneyInput(addAmount, addTokenOption.decimals, {
+      tokenSymbol: addTokenOption.symbol,
+    })
+    if (!parsedAmount.ok) {
+      setAddAmountError(parsedAmount.message)
+      return
+    }
+    setAllowances((prev) => [
+      ...prev,
+      {
+        tokenSymbol: addTokenOption.symbol,
+        tokenAddress: addTokenOption.address,
+        decimals: addTokenOption.decimals,
+        amount: parsedAmount.amount,
+        resetTimeMin: addReset,
+      },
+    ])
+    setAddAmount('')
+    setAddAmountError('')
+    setAddToken(availableTokens.find((token) => token.symbol !== addTokenOption.symbol)?.symbol ?? '')
+  }
+
+  async function copyText(kind: 'prompt' | 'command', value: string) {
+    await navigator.clipboard?.writeText(value)
+    setCopied(kind)
+  }
+
+  async function handleCancelSetup() {
+    if (!setup) {
+      handleClose()
+      return
+    }
+    try {
+      await api.post(`/agent-connection-setups/${encodeURIComponent(setup.setup_id)}/cancel`, {})
+      setCancelled(true)
+      onSetupUpdated?.()
+      await statusQuery.refetch()
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'We could not cancel this setup.')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 v2-modal-backdrop">
+      <div className="absolute inset-0" onClick={creating ? undefined : handleClose} />
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Connect agent 2"
+        className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto overflow-x-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]"
+      >
+        <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Connect agent 2</h2>
+              <StatusBadge tone="brand">Preview</StatusBadge>
+            </div>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+              {headerSubtitle(step, visibleStatus)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleClose}
+            disabled={creating}
+            aria-label="Close"
+            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="border-b border-[var(--v2-border)] px-5 py-3">
+          <StepProgress totalSteps={setupSteps.length} currentStep={Math.max(currentStepIndex, 0)} />
+        </div>
+
+        <div className="p-5">
+          {step === 'details' && (
+            <div className="v2-animate-step-rise space-y-5">
+              <div>
+                <label htmlFor="connect2-name" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                  Agent name
+                </label>
+                <Input
+                  id="connect2-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="e.g. Research Agent"
+                />
+              </div>
+              <div>
+                <label htmlFor="connect2-description" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                  Description <span className="normal-case">(optional)</span>
+                </label>
+                <textarea
+                  id="connect2-description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="What does this agent do?"
+                  rows={2}
+                  className="w-full resize-none rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus:border-[var(--v2-brand)] focus:outline-none focus:ring-2 focus:ring-[var(--v2-brand)]/20"
+                />
+              </div>
+              <div>
+                <label htmlFor="connect2-runtime" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                  Agent environment
+                </label>
+                <Select
+                  id="connect2-runtime"
+                  value={runtime}
+                  onChange={(event) => setRuntime(event.target.value)}
+                >
+                  {RUNTIME_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+                <p className="mt-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                  Haven will create a local setup prompt for this environment.
+                </p>
+              </div>
+              <Button
+                onClick={() => setStep(detailsNextStep)}
+                disabled={!name.trim()}
+                className="w-full"
+              >
+                Set agent budget
+              </Button>
+            </div>
+          )}
+
+          {step === 'account' && (
+            <div className="v2-animate-step-rise space-y-4">
+              <WalletIdentityBlock name={walletName} network={walletNetworkName} address={walletDisplayAddress} />
+              <div>
+                <label htmlFor="connect2-safe" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                  Haven wallet
+                </label>
+                <Select
+                  id="connect2-safe"
+                  value={selectedSafeId ?? ''}
+                  onChange={(event) => setSelectedSafeId(event.target.value)}
+                >
+                  {userSafes.map((safe) => (
+                    <option key={safe.id} value={safe.id}>
+                      {safe.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                The agent can request payments from this Haven wallet within the budget you set next.
+              </p>
+              <div className="flex gap-3">
+                <Button variant="ghost" onClick={() => setStep('details')} className="flex-1">
+                  Back
+                </Button>
+                <Button onClick={() => setStep('policy')} disabled={!selectedSafeId} className="flex-1">
+                  Set agent budget
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 'policy' && (
+            <div className="v2-animate-step-rise space-y-4">
+              {allowances.length > 0 && (
+                <AgentBudgetCard
+                  agentName={name || 'New agent'}
+                  budgets={budgetRows}
+                  status="Budget draft"
+                  density="compact"
+                  onRemoveBudget={(row) => {
+                    setAllowances((prev) => prev.filter((allowance) => allowance.tokenSymbol !== row.tokenSymbol))
+                    setAddToken(row.tokenSymbol)
+                  }}
+                />
+              )}
+
+              {availableTokens.length > 0 ? (
+                <div className="space-y-3 rounded-[10px] border border-dashed border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">Add agent budget</p>
+                    <p className="text-xs text-[var(--v2-ink-3)]">One per token</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Select value={addToken} onChange={(event) => setAddToken(event.target.value)}>
+                      {availableTokens.map((token) => (
+                        <option key={token.symbol} value={token.symbol}>
+                          {token.symbol}
+                        </option>
+                      ))}
+                    </Select>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={addAmount}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        if (/^\d*\.?\d*$/.test(value)) {
+                          setAddAmount(value)
+                          setAddAmountError('')
+                        }
+                      }}
+                      placeholder="Amount"
+                      invalid={Boolean(addAmountMessage)}
+                      helperText={addAmountMessage || undefined}
+                      className="v2-tabular"
+                    />
+                    <Select value={addReset} onChange={(event) => setAddReset(Number(event.target.value))}>
+                      {RESET_PERIODS.map((period) => (
+                        <option key={period.value} value={period.value}>
+                          {period.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleAddAllowance}
+                    disabled={!addAmount || !addAmountValidation?.ok || !addTokenOption}
+                    className="w-full"
+                  >
+                    Add budget
+                  </Button>
+                </div>
+              ) : allowances.length > 0 ? (
+                <p className="rounded-[10px] bg-[var(--v2-surface)] px-3 py-2 text-xs text-[var(--v2-ink-2)]">
+                  All supported tokens for {walletNetworkName} already have budgets.
+                </p>
+              ) : null}
+
+              {allowances.length === 0 && (
+                <p className="py-4 text-center text-xs text-[var(--v2-ink-3)]">
+                  Add at least one agent budget to continue
+                </p>
+              )}
+
+              <div className="flex gap-3">
+                <Button variant="ghost" onClick={() => setStep(policyBackStep)} className="flex-1">
+                  Back
+                </Button>
+                <Button
+                  onClick={() => setStep('review')}
+                  disabled={allowances.length === 0}
+                  className="flex-1"
+                >
+                  Review agent rules
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 'review' && (
+            <div className="v2-animate-step-rise space-y-5">
+              <AgentRulesSummary
+                title="Review agent rules"
+                description="Haven will create a pending setup. The agent creates its key locally after you paste the setup prompt into its environment."
+                density="compact"
+                items={[
+                  { label: 'Who can spend', value: name, helper: description.trim() || undefined },
+                  { label: 'From wallet', value: `${walletName} on ${walletNetworkName}` },
+                  {
+                    label: 'Agent budget',
+                    value: (
+                      <div className="space-y-1">
+                        {allowances.map((allowance) => (
+                          <div key={allowance.tokenSymbol}>
+                            {allowance.amount} {allowance.tokenSymbol} {budgetPeriodLabel(allowance.resetTimeMin)}
+                          </div>
+                        ))}
+                      </div>
+                    ),
+                  },
+                  {
+                    label: 'Approve actions',
+                    value: 'Payments above budget',
+                    helper: 'Haven will ask you before requests above the remaining budget move money.',
+                  },
+                ]}
+              />
+
+              <ApprovalRequiredBanner title="The spending key stays local" density="compact" tone="neutral">
+                The setup prompt lets your agent create the key in its own environment. Haven receives the public signing address only.
+              </ApprovalRequiredBanner>
+
+              {createError && (
+                <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
+                  {createError}
+                </div>
+              )}
+
+              {walletUnavailable && !createError && (
+                <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+                  <p className="text-sm font-semibold text-[var(--v2-ink)]">Haven wallet unavailable</p>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                    Create or select a Haven wallet before creating the setup prompt.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <Button variant="ghost" onClick={() => setStep('policy')} className="flex-1">
+                  Back
+                </Button>
+                <Button onClick={handleCreateSetup} disabled={creating || walletUnavailable} className="flex-1">
+                  {creating ? 'Creating setup...' : 'Create setup prompt'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 'connect' && setup && (
+            <div className="v2-animate-step-rise space-y-5">
+              {visibleStatus === 'awaiting_connection' && (
+                <WaitingForConnector
+                  setup={setup}
+                  copied={copied}
+                  onCopy={copyText}
+                  loading={statusQuery.loading}
+                  error={statusQuery.error}
+                  expiresAt={setup.expires_at}
+                  onCancel={handleCancelSetup}
+                />
+              )}
+
+              {(visibleStatus === 'connected_local' || visibleStatus === 'awaiting_wallet_approval') && (
+                <LocalConnectionReady
+                  status={setupStatus}
+                  fallbackSetup={setup}
+                  walletName={walletName}
+                  chainId={chainId}
+                  safeDetailsLoading={safeDetailsLoading}
+                  safeThreshold={safeDetails?.threshold ?? 1}
+                  safeOwnerCount={safeDetails?.owners?.length ?? 1}
+                  operationGate={operationGate}
+                  onCancel={handleCancelSetup}
+                  onDone={handleClose}
+                />
+              )}
+
+              {visibleStatus === 'approval_in_progress' && (
+                <SetupStatusState
+                  title="Approval in progress"
+                  body="Haven is waiting for wallet approval. The agent cannot spend from the Haven wallet until approval is complete."
+                  tone="warning"
+                  primaryLabel="Done"
+                  onPrimary={handleClose}
+                />
+              )}
+
+              {visibleStatus === 'proposed' && (
+                <SetupStatusState
+                  title="Waiting for more approvals"
+                  body="The agent rules were proposed for wallet approval. Spending is not active until the remaining approvals are complete."
+                  tone="warning"
+                  primaryLabel="Done"
+                  onPrimary={handleClose}
+                />
+              )}
+
+              {visibleStatus === 'active' && (
+                <SetupStatusState
+                  title="Agent ready"
+                  body="The local connection and wallet approval are complete. The agent can now request payments within its agent budget."
+                  tone="success"
+                  primaryLabel="Done"
+                  onPrimary={handleClose}
+                />
+              )}
+
+              {visibleStatus === 'expired' && (
+                <TerminalSetupState
+                  title="Setup prompt expired"
+                  body="Create a new setup prompt, then paste the fresh prompt into your agent environment."
+                  tone="warning"
+                  primaryLabel="Create a new setup"
+                  onPrimary={() => {
+                    setSetup(null)
+                    setStep('review')
+                  }}
+                  secondaryLabel="Close"
+                  onSecondary={handleClose}
+                />
+              )}
+
+              {visibleStatus === 'cancelled' && (
+                <TerminalSetupState
+                  title="Setup cancelled"
+                  body="This setup can no longer connect an agent. Create a new setup prompt when you are ready."
+                  tone="neutral"
+                  primaryLabel="Create a new setup"
+                  onPrimary={() => {
+                    setSetup(null)
+                    setCancelled(false)
+                    setStep('review')
+                  }}
+                  secondaryLabel="Close"
+                  onSecondary={handleClose}
+                />
+              )}
+
+              {visibleStatus === 'failed' && (
+                <TerminalSetupState
+                  title="Setup failed"
+                  body={setupStatus?.failure_reason ?? 'Create a new setup prompt and try again.'}
+                  tone="danger"
+                  primaryLabel="Create a new setup"
+                  onPrimary={() => {
+                    setSetup(null)
+                    setStep('review')
+                  }}
+                  secondaryLabel="Close"
+                  onSecondary={handleClose}
+                />
+              )}
+
+              {visibleStatus &&
+                ![
+                  'awaiting_connection',
+                  'connected_local',
+                  'awaiting_wallet_approval',
+                  'approval_in_progress',
+                  'proposed',
+                  'active',
+                  'expired',
+                  'cancelled',
+                  'failed',
+                ].includes(visibleStatus) && (
+                  <SetupStatusState
+                    title="Setup status updated"
+                    body="Haven received a setup status this preview does not recognize yet. Refresh the page or create a new setup if this does not resolve."
+                    tone="neutral"
+                    primaryLabel="Done"
+                    onPrimary={handleClose}
+                  />
+                )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WaitingForConnector({
+  setup,
+  copied,
+  onCopy,
+  loading,
+  error,
+  expiresAt,
+  onCancel,
+}: {
+  setup: CreateSetupResponse
+  copied: 'prompt' | 'command' | null
+  onCopy: (kind: 'prompt' | 'command', value: string) => void
+  loading: boolean
+  error: string | null
+  expiresAt: string
+  onCancel: () => void
+}) {
+  return (
+    <>
+      <div className="rounded-[10px] border border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Connect your agent</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              Paste this prompt into the agent environment. It runs the local connector, creates the key there, and sends Haven only the public signing address.
+            </p>
+          </div>
+          <StatusBadge tone={loading ? 'neutral' : 'warning'}>{loading ? 'Checking' : 'Waiting'}</StatusBadge>
+        </div>
+      </div>
+
+      <CopyBlock
+        label="Setup prompt"
+        value={setup.setup_prompt}
+        copied={copied === 'prompt'}
+        onCopy={() => onCopy('prompt', setup.setup_prompt)}
+      />
+
+      <details className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-xs">
+        <summary className="cursor-pointer text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+          Command fallback
+        </summary>
+        <div className="mt-3">
+          <CopyBlock
+            label="Local command"
+            value={setup.connector_command}
+            copied={copied === 'command'}
+            onCopy={() => onCopy('command', setup.connector_command)}
+          />
+        </div>
+      </details>
+
+      <p className="text-xs text-[var(--v2-ink-3)]">
+        Expires {formatAbsoluteDate(expiresAt)}. {error ? `Status check failed: ${error}` : 'Haven will update this screen when the local connection finishes.'}
+      </p>
+
+      <div className="flex gap-3">
+        <Button variant="ghost" onClick={onCancel} className="flex-1">
+          Cancel setup
+        </Button>
+      </div>
+    </>
+  )
+}
+
+function LocalConnectionReady({
+  status,
+  fallbackSetup,
+  walletName,
+  chainId,
+  safeDetailsLoading,
+  safeThreshold,
+  safeOwnerCount,
+  operationGate,
+  onCancel,
+  onDone,
+}: {
+  status: AgentConnectionSetupStatusResponse | null
+  fallbackSetup: CreateSetupResponse
+  walletName: string
+  chainId: number
+  safeDetailsLoading: boolean
+  safeThreshold: number
+  safeOwnerCount: number
+  operationGate: ReturnType<typeof useSafeOperationGate>
+  onCancel: () => void
+  onDone: () => void
+}) {
+  const install = status?.install_status
+  const budgets = status?.agent_budget ?? []
+  const displayBudgets = budgets.map((budget) => ({
+    id: budget.id ?? budget.token_symbol,
+    tokenSymbol: budget.token_symbol,
+    amount: formatAllowanceForToken(budget.allowance_amount, chainId, budget.token_symbol),
+    period: budgetPeriodLabel(budget.reset_period_min),
+  }))
+  const approvalBlocked = approvalBlockReason(operationGate, safeDetailsLoading)
+
+  return (
+    <>
+      <div className="rounded-[10px] border border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Local connection ready</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              The agent created its key locally and registered the public signing address with Haven.
+            </p>
+          </div>
+          <StatusBadge tone="success">Connected locally</StatusBadge>
+        </div>
+      </div>
+
+      <AgentBudgetCard
+        agentName={status?.agent.name ?? 'New agent'}
+        walletName={walletName}
+        budgets={displayBudgets}
+        status="Awaiting approval"
+        statusTone="warning"
+        density="compact"
+      />
+
+      <AgentRulesSummary
+        title="Ready for Haven approval"
+        description="Wallet approval is the step that gives this public signing address authority under the agent rules."
+        density="compact"
+        items={[
+          {
+            label: 'Public address',
+            value: status?.delegate_address ? truncate(status.delegate_address) : 'Waiting for address',
+            helper: 'This is shown so you can verify the local connection before approving agent rules.',
+          },
+          {
+            label: 'Runtime setup',
+            value: runtimeStatusLabel(install),
+            helper: runtimeStatusHelper(install),
+          },
+          {
+            label: 'Approvals',
+            value: safeThreshold > 1 ? `${safeThreshold} of ${safeOwnerCount}` : 'One approval',
+            helper:
+              safeThreshold > 1
+                ? 'The wallet approval may need more people before agent spending is live.'
+                : 'One wallet approval is needed before the agent can spend.',
+          },
+        ]}
+      />
+
+      {approvalBlocked ? (
+        <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+          <p className="text-sm font-semibold text-[var(--v2-ink)]">Wallet approval unavailable</p>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">{approvalBlocked}</p>
+          {operationGate.kind === 'no_signer' && (
+            <div className="mt-3">
+              <WalletButton />
+            </div>
+          )}
+        </div>
+      ) : (
+        <ApprovalRequiredBanner title="Approve agent rules in Haven" density="compact" tone="neutral">
+          Your local connection is ready. The wallet approval step is next; until that approval is completed, this agent cannot spend from the Haven wallet.
+        </ApprovalRequiredBanner>
+      )}
+
+      <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+        Keep using the current Connect agent flow for production agents that need active spending today.
+      </p>
+
+      <div className="flex gap-3">
+        <Button variant="ghost" onClick={onCancel} className="flex-1">
+          Cancel setup
+        </Button>
+        <Button onClick={onDone} className="flex-1">
+          Done
+        </Button>
+      </div>
+      <span className="sr-only">{fallbackSetup.setup_id}</span>
+    </>
+  )
+}
+
+function CopyBlock({
+  label,
+  value,
+  copied,
+  onCopy,
+}: {
+  label: string
+  value: string
+  copied: boolean
+  onCopy: () => void
+}) {
+  return (
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-xs font-medium text-[var(--v2-ink-3)]">{label}</p>
+        <Button variant="ghost" size="sm" onClick={onCopy}>
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      <pre className="max-h-48 overflow-auto rounded-md bg-[var(--v2-surface)] p-3 text-left text-xs leading-relaxed text-[var(--v2-ink)] whitespace-pre-wrap break-words">
+        {value}
+      </pre>
+    </div>
+  )
+}
+
+function TerminalSetupState({
+  title,
+  body,
+  tone,
+  primaryLabel,
+  secondaryLabel,
+  onPrimary,
+  onSecondary,
+}: {
+  title: string
+  body: string
+  tone: StatusTone
+  primaryLabel: string
+  secondaryLabel: string
+  onPrimary: () => void
+  onSecondary: () => void
+}) {
+  return (
+    <div className="space-y-4 text-center">
+      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-surface-2)]">
+        <StatusBadge tone={tone}>{title.split(' ')[1] ?? 'Setup'}</StatusBadge>
+      </div>
+      <div>
+        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
+        <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
+      </div>
+      <div className="flex gap-3">
+        <Button variant="ghost" onClick={onSecondary} className="flex-1">
+          {secondaryLabel}
+        </Button>
+        <Button onClick={onPrimary} className="flex-1">
+          {primaryLabel}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function SetupStatusState({
+  title,
+  body,
+  tone,
+  primaryLabel,
+  onPrimary,
+}: {
+  title: string
+  body: string
+  tone: StatusTone
+  primaryLabel: string
+  onPrimary: () => void
+}) {
+  return (
+    <div className="space-y-4 text-center">
+      <div className="flex justify-center">
+        <StatusBadge tone={tone}>{title}</StatusBadge>
+      </div>
+      <p className="mx-auto max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
+      <Button onClick={onPrimary} className="w-full">
+        {primaryLabel}
+      </Button>
+    </div>
+  )
+}
+
+function headerSubtitle(step: SetupStep, status: string | undefined): string {
+  if (step === 'connect') {
+    if (status === 'connected_local') return 'Return to Haven and approve the agent rules'
+    if (status === 'expired') return 'This setup prompt expired'
+    if (status === 'cancelled') return 'This setup was cancelled'
+    return 'Paste the setup prompt into your agent environment'
+  }
+  if (step === 'details') return 'Name the agent and choose where it runs'
+  if (step === 'account') return 'Choose the Haven wallet this agent can spend from'
+  if (step === 'policy') return 'Set agent budget and approval boundaries'
+  return 'Review before creating the local setup prompt'
+}
+
+function budgetPeriodLabel(mins: number) {
+  const label = (RESET_PERIODS.find((period) => period.value === mins)?.label ?? `${mins}m`).toLowerCase()
+  if (label === 'one-time') return 'total budget'
+  if (label === 'daily') return 'per day'
+  if (label === 'weekly') return 'per week'
+  if (label === 'monthly') return 'per month'
+  return `every ${label}`
+}
+
+function formatAbsoluteDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function runtimeStatusLabel(install: AgentConnectionSetupStatusResponse['install_status']): string {
+  if (!install) return 'Checking runtime setup'
+  if (install.error_code) return 'Needs attention'
+  if (install.hosted_mcp_configured && install.local_signer_configured) return 'Configured'
+  if (install.credential_files_written) return 'Credentials stored locally'
+  return 'Manual setup needed'
+}
+
+function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse['install_status']): string {
+  if (!install) return 'Haven is waiting for the connector to report setup status.'
+  if (install.error_code) return 'The connector stored credentials, but runtime setup needs a manual finish.'
+  if (install.restart_required) return 'Restart the agent session after approval so it can load the Haven tools.'
+  if (install.hosted_mcp_configured && install.local_signer_configured) return 'The agent environment reported Haven tools and local signing are configured.'
+  if (install.credential_files_written) return 'The connector wrote local credentials. Add Haven to the runtime before using this agent.'
+  return 'Use the command fallback or runtime settings to add Haven manually.'
+}
+
+function approvalBlockReason(
+  gate: ReturnType<typeof useSafeOperationGate>,
+  safeDetailsLoading: boolean,
+): string | null {
+  if (safeDetailsLoading) return 'Haven is still loading wallet approval details.'
+  if (gate.kind === 'passkey_on_other_device') return 'Use the device with this Haven wallet passkey to approve agent rules.'
+  if (gate.kind === 'no_signer') return 'Connect a wallet or use a passkey on this device to approve agent rules.'
+  return null
+}

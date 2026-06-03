@@ -10,6 +10,16 @@ describe('runConnect', () => {
     const logs: string[] = []
     const registerInputs: RegisterSetupInput[] = []
     const installInputs: UpdateInstallStatusInput[] = []
+    const installRuntime = vi.fn(async () => ({
+      runtime: 'claude-code' as const,
+      hostedMcpConfigured: true,
+      localSignerConfigured: true,
+      probeResult: 'hosted_ok_local_signer_ready',
+      restartRequired: true,
+      nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+      configTarget: 'Claude Code MCP config',
+      messages: ['Updated Haven MCP entries with Claude Code.'],
+    }))
     const api: ConnectApiClient = {
       resolveSetup: vi.fn(async () => ({
         setup_id: 'setup-1',
@@ -73,6 +83,7 @@ describe('runConnect', () => {
           signerPath: '/tmp/haven-connect-test/agent-1/signer.json',
         }
       }),
+      installRuntime,
       log: (message) => logs.push(message),
     })
 
@@ -86,11 +97,17 @@ describe('runConnect', () => {
     expect(JSON.stringify(registerInputs[0])).not.toContain('sk_agent_supersecret')
     expect(JSON.stringify(registerInputs[0])).not.toMatch(/delegate_key|private_key|privateKey/)
     expect(installInputs[0]).toMatchObject({
-      hostedMcpConfigured: false,
-      localSignerConfigured: false,
+      hostedMcpConfigured: true,
+      localSignerConfigured: true,
       credentialFilesWritten: true,
-      nextUserAction: 'return_to_haven_for_wallet_approval_then_configure_runtime_if_needed',
+      probeResult: 'hosted_ok_local_signer_ready',
+      nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
     })
+    expect(installRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: 'sk_agent_supersecret',
+      hostedMcpUrl: 'https://mcp.haven.example/v1',
+      signerPath: '/tmp/haven-connect-test/agent-1/signer.json',
+    }))
 
     const output = logs.join('\n')
     expect(output).toContain('Fetched Haven setup for Research Agent')

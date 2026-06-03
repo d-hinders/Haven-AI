@@ -45,6 +45,10 @@ vi.mock('../CreateAgentModal', () => ({
   default: () => null,
 }))
 
+vi.mock('../ConnectAgent2Modal', () => ({
+  default: () => null,
+}))
+
 vi.mock('../EditAgentModal', () => ({
   default: () => null,
 }))

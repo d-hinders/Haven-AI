@@ -20,8 +20,9 @@ test.describe('Connect Agent 2 setup acceptance', () => {
     await page.goto('/agents')
     await dismissMobileSidebar(page)
 
+    // "Connect agent" is now the primary CTA and opens ConnectAgent2Modal directly.
     await expect(page.getByRole('button', { name: 'Connect agent', exact: true }).first()).toBeVisible()
-    await page.getByRole('button', { name: 'Connect agent 2' }).first().click()
+    await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()

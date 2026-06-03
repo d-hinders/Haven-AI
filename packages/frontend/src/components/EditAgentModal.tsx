@@ -316,7 +316,8 @@ export default function EditAgentModal({
           cause = (cause as { cause?: unknown }).cause
         }
         const short = (err as { shortMessage?: string }).shortMessage
-        if (short) message = short
+        // Skip shortMessage for generic RPC failures — the underlying message is more useful.
+        if (short && !short.includes('RPC Request failed')) message = short
       }
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
         setExecError(
@@ -324,6 +325,13 @@ export default function EditAgentModal({
             ? 'Face ID or Touch ID was cancelled'
             : 'Transaction rejected in wallet',
         )
+      } else if (
+        message.includes('RPC Request failed') ||
+        message.includes('fetch failed') ||
+        message.includes('Failed to fetch') ||
+        message.includes('NetworkError')
+      ) {
+        setExecError('Could not reach the network. Check your connection and try again.')
       } else {
         setExecError(message)
       }

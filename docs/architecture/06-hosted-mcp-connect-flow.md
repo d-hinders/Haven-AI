@@ -57,6 +57,10 @@ The Haven dashboard renders runtime-specific hosted MCP snippets from
 Deep links are allowed only for runtimes with tested install schemes. They may
 carry the hosted URL and Bearer token, but never the delegate key.
 
+Connect Agent 2 will add a staged local-key pairing setup before this hosted
+MCP runtime connection is used for payments. See
+[Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md).
+
 ## Direct Payment Sequence
 
 ```mermaid
@@ -159,6 +163,7 @@ snippets, x402 signing, or relay code:
 ## Related Docs
 
 - [Edge signer](07-edge-signer.md)
+- [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
 - [x402 payment sequence](04-x402-payment-sequence.md)
 - [Local to hosted MCP migration](../migration/local-to-hosted-mcp.md)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

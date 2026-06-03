@@ -88,30 +88,33 @@ describe('AgentPanel Connect Agent 2 entry', () => {
     vi.unstubAllEnvs()
   })
 
-  it('keeps old Connect agent reachable and adds the Connect agent 2 entry', () => {
+  it('opens ConnectAgent2Modal when NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED is true', () => {
     vi.stubEnv('NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED', 'true')
     render(<AgentPanel />)
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
-    expect(screen.getByText('Old Connect Agent Modal')).toBeInTheDocument()
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent 2' })[0])
     expect(screen.getByText('Connect Agent 2 Modal')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Manual setup' })).not.toBeInTheDocument()
   })
 
-  it('keeps the old Connect agent reachable when the Connect Agent 2 rollout gate is disabled', () => {
+  it('falls back to old modal and shows Manual setup when ConnectAgent2 is explicitly disabled', () => {
     vi.stubEnv('NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED', 'false')
     render(<AgentPanel />)
 
+    // "Connect agent" opens the legacy modal when ConnectAgent2 is off
     fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
     expect(screen.getByText('Old Connect Agent Modal')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Connect agent 2' })).not.toBeInTheDocument()
+
+    // "Manual setup" is also visible (appears in both header and empty state)
+    expect(screen.getAllByRole('button', { name: 'Manual setup' }).length).toBeGreaterThan(0)
   })
 
-  it('keeps Connect Agent 2 hidden when the rollout gate is unset', () => {
+  it('opens ConnectAgent2Modal by default when the env var is unset', () => {
+    // Unset env — ConnectAgent2 should be enabled by default (opt-out model)
     render(<AgentPanel />)
 
-    expect(screen.getAllByRole('button', { name: 'Connect agent' })[0]).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Connect agent 2' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
+    expect(screen.getByText('Connect Agent 2 Modal')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Manual setup' })).not.toBeInTheDocument()
   })
 })

@@ -43,7 +43,8 @@ function budgetPeriodLabel(mins: number) {
 }
 
 function connectAgent2Enabled(): boolean {
-  return ['true', '1', 'on'].includes(String(process.env.NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
+  // Opt-out: ConnectAgent2 is on by default unless explicitly disabled.
+  return !['false', '0', 'off'].includes(String(process.env.NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
 }
 
 /** Resolve token address to symbol (chain-aware) */
@@ -832,17 +833,18 @@ export default function AgentPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {showConnectAgent2 && (
+          {!showConnectAgent2 && (
+            // Legacy manual setup — only visible when ConnectAgent2 is disabled.
             <Button
-              onClick={() => setConnect2Open(true)}
+              onClick={() => setCreateOpen(true)}
               size="sm"
               variant="ghost"
             >
-              Connect agent 2
+              Manual setup
             </Button>
           )}
           <Button
-            onClick={() => setCreateOpen(true)}
+            onClick={() => showConnectAgent2 ? setConnect2Open(true) : setCreateOpen(true)}
             size="sm"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -883,9 +885,11 @@ export default function AgentPanel() {
           body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button onClick={() => setCreateOpen(true)}>Connect agent</Button>
-              {showConnectAgent2 && (
-                <Button onClick={() => setConnect2Open(true)} variant="ghost">Connect agent 2</Button>
+              <Button onClick={() => showConnectAgent2 ? setConnect2Open(true) : setCreateOpen(true)}>
+                Connect agent
+              </Button>
+              {!showConnectAgent2 && (
+                <Button onClick={() => setCreateOpen(true)} variant="ghost">Manual setup</Button>
               )}
             </div>
           }

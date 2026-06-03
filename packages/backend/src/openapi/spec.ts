@@ -145,6 +145,7 @@ export const openapiSpec = {
   tags: [
     { name: 'Health' },
     { name: 'Agents' },
+    { name: 'Connect Agent 2' },
     { name: 'Payments' },
     { name: 'x402' },
     { name: 'Machine payments' },
@@ -297,6 +298,177 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
+        },
+      },
+    },
+    '/agent-connection-setups': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'createAgentConnectionSetup',
+        summary: 'Create a pending Connect Agent 2 setup.',
+        description:
+          'Creates setup metadata and a short-lived setup token before any agent signing address exists. Haven stores only a setup-token hash and never receives an agent private key.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateAgentConnectionSetupRequest' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Pending setup created. The setup_token is returned once and should be passed to the local connector.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CreateAgentConnectionSetupResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+    },
+    '/agent-connection-setups/resolve': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'resolveAgentConnectionSetup',
+        summary: 'Resolve setup details for the local connector.',
+        description:
+          'Uses the setup token from the request body to return public setup context and an exact challenge message. The response contains no API key or private key material.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ResolveAgentConnectionSetupRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Public setup details and proof-of-possession challenge.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResolveAgentConnectionSetupResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': errorResponse,
+          '410': errorResponse,
+        },
+      },
+    },
+    '/agent-connection-setups/register': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'registerAgentConnectionSetup',
+        summary: 'Register a locally generated public signing address.',
+        description:
+          'The local connector signs the Haven challenge with its locally generated key and sends only the public signing address, proof, and locally generated API-key hash. Haven creates a non-active pending agent and never receives the private key or plaintext API key.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RegisterAgentConnectionSetupRequest' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Public signing address registered. Payment tools remain unavailable until wallet approval activates the agent.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/RegisterAgentConnectionSetupResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': errorResponse,
+          '410': errorResponse,
+        },
+      },
+    },
+    '/agent-connection-setups/{setupId}': {
+      get: {
+        tags: ['Connect Agent 2'],
+        operationId: 'getAgentConnectionSetup',
+        summary: 'Read pending setup status for the signed-in user.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        responses: {
+          '200': {
+            description: 'Recoverable setup status for the Haven UI.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentConnectionSetupStatus' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/agent-connection-setups/{setupId}/install-status': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'updateAgentConnectionInstallStatus',
+        summary: 'Report local connector install readiness.',
+        description:
+          'Updates best-effort local install/probe metadata only. A setup token may be used only before registration and before expiry; after registration the connector uses the pending agent API key. This endpoint cannot change signing address, wallet, allowances, approval status, or payment authority.',
+        security: [{ AgentApiKey: [] }, { SetupToken: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateConnectorInstallStatusRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Install status updated.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/UpdateConnectorInstallStatusResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/agent-connection-setups/{setupId}/cancel': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'cancelAgentConnectionSetup',
+        summary: 'Cancel a pending Connect Agent 2 setup.',
+        description:
+          'Cancels setup state and revokes the pending agent API key when no on-chain authority has been activated. Active agents must be paused or revoked through normal agent controls.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        responses: {
+          '200': {
+            description: 'Setup cancelled.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SuccessResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
         },
       },
     },
@@ -791,6 +963,12 @@ export const openapiSpec = {
         bearerFormat: 'JWT',
         description: 'Dashboard user session token. This authenticates the user for account-management endpoints; it is not agent payment authority.',
       },
+      SetupToken: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-Haven-Setup-Token',
+        description: 'Short-lived setup token used before connector registration. The same token can also be supplied as setup_token in the JSON request body. Setup tokens authenticate setup only and cannot authorize payment.',
+      },
     },
     parameters: {
       AgentId: {
@@ -801,6 +979,12 @@ export const openapiSpec = {
       },
       PaymentId: {
         name: 'id',
+        in: 'path',
+        required: true,
+        schema: uuid,
+      },
+      SetupId: {
+        name: 'setupId',
         in: 'path',
         required: true,
         schema: uuid,
@@ -847,6 +1031,267 @@ export const openapiSpec = {
         properties: { success: { type: 'boolean' } },
         additionalProperties: false,
       },
+      AgentConnectionSetupState: {
+        type: 'string',
+        enum: [
+          'awaiting_connection',
+          'connected_local',
+          'awaiting_wallet_approval',
+          'approval_in_progress',
+          'proposed',
+          'active',
+          'expired',
+          'cancelled',
+          'failed',
+        ],
+        description: 'Connect Agent 2 setup state. Pending/proposed states are not payment authority.',
+      },
+      AgentConnectionAllowanceInput: {
+        type: 'object',
+        required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
+        properties: {
+          token_address: address,
+          token_symbol: { type: 'string' },
+          allowance_amount: { type: 'string', description: 'Atomic token amount.' },
+          reset_period_min: { type: 'integer', minimum: 0 },
+        },
+        additionalProperties: false,
+      },
+      AgentConnectionAllowance: {
+        allOf: [
+          { $ref: '#/components/schemas/AgentConnectionAllowanceInput' },
+          {
+            type: 'object',
+            properties: { id: uuid },
+          },
+        ],
+      },
+      AgentConnectionWallet: {
+        type: 'object',
+        required: ['id', 'name', 'address', 'chain_id', 'network'],
+        properties: {
+          id: uuid,
+          name: { type: 'string' },
+          address,
+          chain_id: { type: 'integer' },
+          network: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+      AgentConnectionConnector: {
+        type: 'object',
+        properties: {
+          connector_version: { type: ['string', 'null'] },
+          environment_label: { type: 'string' },
+          runtime_version: { type: 'string' },
+          config_target: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+      AgentConnectionInstallStatus: {
+        type: 'object',
+        properties: {
+          runtime: { type: 'string' },
+          connector_version: { type: 'string' },
+          hosted_mcp_configured: { type: 'boolean' },
+          local_signer_configured: { type: 'boolean' },
+          credential_files_written: { type: 'boolean' },
+          probe_result: { type: 'string' },
+          restart_required: { type: 'boolean' },
+          next_user_action: { type: 'string' },
+          error_code: { type: ['string', 'null'] },
+          environment_label: { type: 'string' },
+          last_probe_at: { anyOf: [isoDateTime, { type: 'string' }] },
+        },
+        additionalProperties: false,
+      },
+      CreateAgentConnectionSetupRequest: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          description: { type: 'string' },
+          safe_id: uuid,
+          runtime: { type: 'string' },
+          allowances: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentConnectionAllowanceInput' },
+          },
+        },
+        additionalProperties: false,
+      },
+      CreateAgentConnectionSetupResponse: {
+        type: 'object',
+        required: ['setup_id', 'status', 'setup_token', 'expires_at', 'connector_command', 'setup_prompt'],
+        properties: {
+          setup_id: uuid,
+          status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
+          setup_token: { type: 'string', pattern: '^hv_setup_' },
+          expires_at: isoDateTime,
+          connector_command: { type: 'string' },
+          setup_prompt: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+      ResolveAgentConnectionSetupRequest: {
+        type: 'object',
+        required: ['setup_token'],
+        properties: {
+          setup_token: { type: 'string', pattern: '^hv_setup_' },
+          connector_version: { type: 'string' },
+          runtime: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+      ResolveAgentConnectionSetupResponse: {
+        type: 'object',
+        required: ['setup_id', 'status', 'agent', 'haven_wallet', 'agent_budget', 'hosted_mcp_url', 'challenge'],
+        properties: {
+          setup_id: uuid,
+          status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
+          agent: {
+            type: 'object',
+            required: ['name'],
+            properties: {
+              name: { type: 'string' },
+              description: { type: ['string', 'null'] },
+            },
+            additionalProperties: false,
+          },
+          haven_wallet: { $ref: '#/components/schemas/AgentConnectionWallet' },
+          agent_budget: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentConnectionAllowance' },
+          },
+          hosted_mcp_url: { type: 'string', format: 'uri' },
+          challenge: {
+            type: 'object',
+            required: ['id', 'message', 'expires_at'],
+            properties: {
+              id: uuid,
+              message: { type: 'string' },
+              expires_at: isoDateTime,
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      RegisterAgentConnectionSetupRequest: {
+        type: 'object',
+        required: [
+          'setup_token',
+          'challenge_id',
+          'delegate_address',
+          'proof_signature',
+          'api_key_hash',
+          'api_key_prefix',
+        ],
+        properties: {
+          setup_token: { type: 'string', pattern: '^hv_setup_' },
+          challenge_id: uuid,
+          delegate_address: address,
+          proof_signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' },
+          api_key_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+          api_key_prefix: { type: 'string', pattern: '^sk_agent_[0-9a-f]{3}$' },
+          runtime: { type: 'string' },
+          connector_version: { type: 'string' },
+          connector_context: { $ref: '#/components/schemas/AgentConnectionConnector' },
+          install_capabilities: {
+            type: 'object',
+            properties: {
+              can_write_runtime_config: { type: 'boolean' },
+              restart_required: { type: 'boolean' },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      RegisterAgentConnectionSetupResponse: {
+        type: 'object',
+        required: ['setup_id', 'agent_id', 'status', 'agent_status', 'api_key_prefix', 'api_key_scope', 'delegate_address', 'hosted_mcp_url', 'next_action'],
+        properties: {
+          setup_id: uuid,
+          agent_id: uuid,
+          status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
+          agent_status: { type: 'string', enum: ['pending_approval'] },
+          api_key_prefix: { type: 'string', pattern: '^sk_agent_' },
+          api_key_scope: { type: 'string', enum: ['setup_pending'] },
+          delegate_address: address,
+          hosted_mcp_url: { type: 'string', format: 'uri' },
+          next_action: { type: 'string', enum: ['return_to_haven_for_wallet_approval'] },
+        },
+        additionalProperties: false,
+      },
+      AgentConnectionSetupStatus: {
+        type: 'object',
+        required: ['setup_id', 'status', 'agent', 'haven_wallet', 'agent_budget', 'install_status', 'approval'],
+        properties: {
+          setup_id: uuid,
+          agent_id: { anyOf: [uuid, { type: 'null' }] },
+          status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
+          expires_at: isoDateTime,
+          agent: {
+            type: 'object',
+            required: ['name'],
+            properties: {
+              name: { type: 'string' },
+              description: { type: ['string', 'null'] },
+            },
+            additionalProperties: false,
+          },
+          haven_wallet: { $ref: '#/components/schemas/AgentConnectionWallet' },
+          agent_budget: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentConnectionAllowance' },
+          },
+          delegate_address: { anyOf: [address, { type: 'null' }] },
+          api_key_prefix: { type: ['string', 'null'] },
+          runtime: { type: ['string', 'null'] },
+          connector: { $ref: '#/components/schemas/AgentConnectionConnector' },
+          install_status: { $ref: '#/components/schemas/AgentConnectionInstallStatus' },
+          approval: {
+            type: 'object',
+            required: ['safe_tx_hash', 'tx_hash', 'status'],
+            properties: {
+              safe_tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
+              tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
+              status: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+          failure_reason: { type: ['string', 'null'] },
+        },
+        additionalProperties: false,
+      },
+      UpdateConnectorInstallStatusRequest: {
+        type: 'object',
+        properties: {
+          setup_token: { type: 'string', pattern: '^hv_setup_' },
+          runtime: { type: 'string' },
+          connector_version: { type: 'string' },
+          hosted_mcp_configured: { type: 'boolean' },
+          local_signer_configured: { type: 'boolean' },
+          credential_files_written: { type: 'boolean' },
+          probe_result: { type: 'string' },
+          restart_required: { type: 'boolean' },
+          next_user_action: { type: 'string' },
+          error_code: { type: ['string', 'null'] },
+          environment_label: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+      UpdateConnectorInstallStatusResponse: {
+        type: 'object',
+        required: ['setup_id', 'status', 'install_status'],
+        properties: {
+          setup_id: uuid,
+          status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
+          install_status: { $ref: '#/components/schemas/AgentConnectionInstallStatus' },
+        },
+        additionalProperties: false,
+      },
       AgentAllowance: {
         type: 'object',
         required: ['id', 'agent_id', 'token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
@@ -873,7 +1318,7 @@ export const openapiSpec = {
           safe_name: { type: ['string', 'null'] },
           safe_chain_id: { type: ['integer', 'null'] },
           api_key_prefix: { type: ['string', 'null'] },
-          status: { type: 'string', enum: ['active', 'paused', 'revoked'] },
+          status: { type: 'string', enum: ['active', 'paused', 'pending_approval', 'revoked'] },
           created_at: isoDateTime,
           allowances: { type: 'array', items: { $ref: '#/components/schemas/AgentAllowance' } },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */

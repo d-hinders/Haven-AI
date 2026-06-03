@@ -16,6 +16,7 @@ import * as machinePaymentReconciliationEvents from './013_machine_payment_recon
 import * as machinePaymentEvidence from './014_machine_payment_evidence.js'
 import * as agentToolInvocations from './015_agent_tool_invocations.js'
 import * as agentLastSeen from './016_agent_last_seen.js'
+import * as agentConnectionSetups from './017_agent_connection_setups.js'
 
 export interface Migration {
   version: string
@@ -45,4 +46,5 @@ export const migrations: Migration[] = [
   machinePaymentEvidence,
   agentToolInvocations,
   agentLastSeen,
+  agentConnectionSetups,
 ]

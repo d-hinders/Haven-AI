@@ -130,5 +130,10 @@ describe('dashboard routes', () => {
     expect(progressQuery).toContain('FROM approval_requests')
     expect(progressQuery).toContain("status = 'executed'")
     expect(progressQuery).toContain('FROM self_sign_payment_intents')
+
+    const agentQuery = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('FROM agents a'),
+    )?.[0] as string
+    expect(agentQuery).toContain("a.status IN ('active', 'paused')")
   })
 })

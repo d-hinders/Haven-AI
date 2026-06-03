@@ -114,7 +114,7 @@ export default async function dashboardRoutes(
          FROM agents a
          LEFT JOIN user_safes us ON us.id = a.safe_id
          WHERE a.user_id = $1
-           AND a.status != 'revoked'
+           AND a.status IN ('active', 'paused')
          ORDER BY
            CASE a.status
              WHEN 'active' THEN 0

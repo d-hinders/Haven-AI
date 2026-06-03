@@ -67,6 +67,7 @@ describe('agent routes', () => {
       allowances: [{ id: 'allowance-1', token_symbol: 'USDC' }],
       mcp_last_seen_at: null,
     })
+    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', 'agent-1'])
 
     await app.close()
@@ -103,6 +104,77 @@ describe('agent routes', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json().mcp_last_seen_at).toBe(lastSeenAt)
+    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
+
+    await app.close()
+  })
+
+  it('excludes pending Connect Agent 2 setups from the legacy agent list', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+
+    mockQuery.mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/agents',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ agents: [] })
+    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
+
+    await app.close()
+  })
+
+  it('blocks allowance updates while Connect Agent 2 setup is pending wallet approval', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        id: 'agent-1',
+        status: 'pending_approval',
+      }],
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agents/agent-1/allowances',
+      payload: {
+        token_address: '0x3333333333333333333333333333333333333333',
+        token_symbol: 'USDC',
+        allowance_amount: '25000000',
+        reset_period_min: 1440,
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/pending wallet approval/)
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+
+    await app.close()
+  })
+
+  it('blocks allowance deletes while Connect Agent 2 setup is pending wallet approval', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+
+    mockQuery.mockResolvedValueOnce({
+      rows: [{
+        id: 'agent-1',
+        status: 'pending_approval',
+      }],
+    })
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/agents/agent-1/allowances/0x3333333333333333333333333333333333333333',
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/pending wallet approval/)
+    expect(mockQuery).toHaveBeenCalledTimes(1)
 
     await app.close()
   })

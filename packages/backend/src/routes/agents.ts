@@ -75,6 +75,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1
+        AND a.status != 'pending_approval'
        ORDER BY a.created_at DESC`,
       [sub],
     )
@@ -119,6 +120,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1 AND a.id = $2
+        AND a.status != 'pending_approval'
        LIMIT 1`,
       [sub, id],
     )
@@ -240,6 +242,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       })
     } catch (err) {
       await client.query('ROLLBACK')
+      if (isUniqueDelegateConflict(err)) {
+        return reply
+          .code(409)
+          .send({ error: 'An active agent with this delegate address already exists' })
+      }
       throw err
     } finally {
       client.release()
@@ -434,12 +441,17 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params
     const { token_address, token_symbol, allowance_amount, reset_period_min } = request.body
 
-    const agentCheck = await pool.query(
-      'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
+    const agentCheck = await pool.query<{ id: string; status: string }>(
+      'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
       [id, sub],
     )
     if (agentCheck.rows.length === 0) {
       return reply.code(404).send({ error: 'Agent not found' })
+    }
+    if (agentCheck.rows[0].status === 'pending_approval') {
+      return reply
+        .code(409)
+        .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
     }
 
     const result = await pool.query<AllowanceRow>(
@@ -461,12 +473,17 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const { sub } = request.user as { sub: string }
       const { id, tokenAddress } = request.params
 
-      const agentCheck = await pool.query(
-        'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
+      const agentCheck = await pool.query<{ id: string; status: string }>(
+        'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
         [id, sub],
       )
       if (agentCheck.rows.length === 0) {
         return reply.code(404).send({ error: 'Agent not found' })
+      }
+      if (agentCheck.rows[0].status === 'pending_approval') {
+        return reply
+          .code(409)
+          .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
       }
 
       const result = await pool.query(
@@ -480,5 +497,16 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
       return { success: true }
     },
+  )
+}
+
+function isUniqueDelegateConflict(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      err.code === '23505' &&
+      'constraint' in err &&
+      String(err.constraint).includes('idx_agents_user_delegate_non_revoked_unique'),
   )
 }

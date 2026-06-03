@@ -420,6 +420,36 @@ describe('ConnectAgent2Modal', () => {
     expect(refetch).toHaveBeenCalled()
   })
 
+  it('disables cancel while wallet approval is in progress', async () => {
+    let resolveSignature!: (value: `0x${string}`) => void
+    mockSignSafeTx.mockReturnValueOnce(new Promise<`0x${string}`>((resolve) => {
+      resolveSignature = resolve
+    }))
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+
+    await fillAndCreateSetup()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve agent rules' }))
+      await Promise.resolve()
+    })
+
+    expect(await screen.findByRole('button', { name: 'Approving...' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel setup' })).toBeDisabled()
+
+    await act(async () => {
+      resolveSignature(`0x${'1'.repeat(130)}`)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  })
+
   it('records multisig wallet approval as proposed without executing the Safe transaction', async () => {
     mockUseSafeDetails.mockReturnValue({
       details: {
@@ -567,6 +597,7 @@ describe('ConnectAgent2Modal', () => {
     expect(dialogAfter).toContain('The private signing key lets the agent sign payments within the approved agent budget.')
     expect(dialogAfter).toContain('The API key identifies the agent but cannot spend alone.')
     expect(dialogAfter).toContain('If this credential may have leaked, pause or revoke the agent in Haven.')
+    expect(dialogAfter).toContain('HAVEN_API_URL=https://api.haven.example')
     expect(countOccurrences(dialogAfter, MANUAL_DELEGATE_PRIVATE_KEY)).toBe(1)
     expect(countOccurrences(dialogAfter, MANUAL_API_KEY)).toBe(1)
 

@@ -100,6 +100,27 @@ const CONNECTED_SETUP = {
   approval_status: 'not_started',
 }
 
+type SetupFixture = Omit<
+  typeof SETUP,
+  | 'agent_id'
+  | 'status'
+  | 'setup_token_consumed_at'
+  | 'delegate_address'
+  | 'api_key_prefix'
+  | 'approval_status'
+  | 'safe_tx_hash'
+  | 'tx_hash'
+> & {
+  agent_id: string | null
+  status: string
+  setup_token_consumed_at: string | null
+  delegate_address: string | null
+  api_key_prefix: string | null
+  approval_status: string
+  safe_tx_hash: string | null
+  tx_hash: string | null
+}
+
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
@@ -116,6 +137,15 @@ function approvalPayload(result: 'confirmed' | 'proposed') {
     allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
     delegate_address: DELEGATE_ADDRESS,
   }
+}
+
+function mockWalletApprovalPersist(setup: SetupFixture = CONNECTED_SETUP) {
+  mockClientQuery.mockImplementation(async (sql: string) => {
+    if (String(sql).includes('FROM agent_connection_setups')) {
+      return { rows: [setup] }
+    }
+    return { rows: [] }
+  })
 }
 
 describe('agent connection setup routes', () => {
@@ -374,6 +404,7 @@ describe('agent connection setup routes', () => {
       lastResetMin: 0,
       nonce: 0,
     })
+    mockWalletApprovalPersist()
 
     const response = await app.inject({
       method: 'POST',
@@ -424,6 +455,7 @@ describe('agent connection setup routes', () => {
       .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
       .mockResolvedValueOnce({ rows: [ALLOWANCE] })
     mockGetTokensForDelegate.mockResolvedValue([])
+    mockWalletApprovalPersist()
 
     const response = await app.inject({
       method: 'POST',
@@ -483,6 +515,7 @@ describe('agent connection setup routes', () => {
       .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
       .mockResolvedValueOnce({ rows: [ALLOWANCE] })
     mockGetTokensForDelegate.mockResolvedValue([])
+    mockWalletApprovalPersist()
 
     const response = await app.inject({
       method: 'POST',
@@ -502,6 +535,34 @@ describe('agent connection setup routes', () => {
         safe_tx_hash: SAFE_TX_HASH,
       },
     })
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
+
+    await app.close()
+  })
+
+  it('does not persist wallet approval if setup was cancelled after the initial read', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
+    mockGetTokenAllowance.mockResolvedValue({
+      amount: BigInt(ALLOWANCE.allowance_amount),
+      spent: 0n,
+      resetTimeMin: ALLOWANCE.reset_period_min,
+      lastResetMin: 0,
+      nonce: 0,
+    })
+    mockWalletApprovalPersist({ ...CONNECTED_SETUP, status: 'cancelled' })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/state changed/)
     expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
 
     await app.close()
@@ -555,6 +616,12 @@ describe('agent connection setup routes', () => {
       lastResetMin: 0,
       nonce: 0,
     })
+    mockWalletApprovalPersist({
+      ...CONNECTED_SETUP,
+      status: 'proposed',
+      approval_status: 'proposed',
+      safe_tx_hash: SAFE_TX_HASH,
+    })
 
     const response = await app.inject({
       method: 'GET',
@@ -571,6 +638,65 @@ describe('agent connection setup routes', () => {
       },
     })
     expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("status = 'active'"))).toBe(true)
+
+    await app.close()
+  })
+
+  it('cancels a pre-approval setup under a row lock', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [CONNECTED_SETUP] }
+      }
+      if (String(sql).includes('UPDATE agent_connection_setups')) {
+        return { rows: [{ id: SETUP.id }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/cancel`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    const lockedRead = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('FROM agent_connection_setups'),
+    )
+    expect(String(lockedRead?.[0])).toContain('FOR UPDATE OF s')
+    const cancelUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(String(cancelUpdate?.[0])).toContain("status IN ('awaiting_connection', 'connected_local', 'awaiting_wallet_approval')")
+    expect(String(cancelUpdate?.[0])).toContain('safe_tx_hash IS NULL')
+
+    await app.close()
+  })
+
+  it('rejects cancellation after wallet approval is proposed or submitted', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return {
+          rows: [{
+            ...CONNECTED_SETUP,
+            status: 'proposed',
+            approval_status: 'proposed',
+            safe_tx_hash: SAFE_TX_HASH,
+          }],
+        }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/cancel`,
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/paused or revoked/)
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups'))).toBe(false)
 
     await app.close()
   })

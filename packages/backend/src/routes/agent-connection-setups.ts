@@ -458,6 +458,9 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             failureReason: null,
             activateAgent: true,
           })
+          if (!active) {
+            return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
+          }
           return buildUserSetupStatus(active, allowances)
         }
 
@@ -469,6 +472,9 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           failureReason: null,
           activateAgent: false,
         })
+        if (!proposed) {
+          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
+        }
         return buildUserSetupStatus(proposed, allowances)
       }
 
@@ -482,6 +488,9 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           failureReason: null,
           activateAgent: true,
         })
+        if (!active) {
+          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
+        }
         return buildUserSetupStatus(active, allowances)
       }
 
@@ -494,6 +503,9 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           failureReason: verification.error,
           activateAgent: false,
         })
+        if (!inProgress) {
+          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
+        }
         return reply.code(202).send(buildUserSetupStatus(inProgress, allowances))
       }
 
@@ -546,23 +558,50 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     { preHandler: authMiddleware },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const setup = await loadSetupForUser(request.params.setupId, sub)
-      if (!setup) return reply.code(404).send({ error: 'Setup not found' })
-      if (setup.status === 'active') {
-        return reply.code(409).send({ error: 'Active agents must be revoked from the agent page' })
-      }
-
       const client = await pool.connect()
       try {
         await client.query('BEGIN')
-        await client.query(
+        const setupResult = await client.query<SetupRow>(
+          `${setupSelectSql('s.id = $1 AND s.user_id = $2')} FOR UPDATE OF s`,
+          [request.params.setupId, sub],
+        )
+        const setup = setupResult.rows[0]
+        if (!setup) {
+          await client.query('ROLLBACK')
+          return reply.code(404).send({ error: 'Setup not found' })
+        }
+        if (
+          setup.status === 'active' ||
+          setup.status === 'approval_in_progress' ||
+          setup.status === 'proposed' ||
+          setup.safe_tx_hash ||
+          setup.tx_hash
+        ) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({ error: 'Approved agents must be paused or revoked from the agent page' })
+        }
+        if (!['awaiting_connection', 'connected_local', 'awaiting_wallet_approval'].includes(setup.status)) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({ error: 'Setup cannot be cancelled' })
+        }
+
+        const cancelled = await client.query<{ id: string }>(
           `UPDATE agent_connection_setups
            SET status = 'cancelled',
                setup_token_consumed_at = COALESCE(setup_token_consumed_at, NOW()),
                updated_at = NOW()
-           WHERE id = $1 AND user_id = $2`,
+           WHERE id = $1
+             AND user_id = $2
+             AND status IN ('awaiting_connection', 'connected_local', 'awaiting_wallet_approval')
+             AND safe_tx_hash IS NULL
+             AND tx_hash IS NULL
+           RETURNING id`,
           [setup.id, sub],
         )
+        if (cancelled.rows.length === 0) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
+        }
         if (setup.agent_id) {
           await client.query(
             `UPDATE agents
@@ -767,14 +806,14 @@ async function maybeActivateFromLiveAuthority(
   }
   const verification = await tryVerifySetupAuthority(setup, allowances)
   if (!verification.ok) return setup
-  return persistWalletApprovalState(setup, {
+  return (await persistWalletApprovalState(setup, {
     status: 'active',
     approvalStatus: 'confirmed',
     txHash: setup.tx_hash,
     safeTxHash: setup.safe_tx_hash,
     failureReason: null,
     activateAgent: true,
-  })
+  })) ?? setup
 }
 
 async function tryVerifySetupAuthority(
@@ -839,18 +878,61 @@ async function persistWalletApprovalState(
     failureReason: string | null
     activateAgent: boolean
   },
-): Promise<SetupRow> {
-  const nextSetup = {
-    ...setup,
-    status: input.status,
-    approval_status: input.approvalStatus,
-    tx_hash: input.txHash ?? setup.tx_hash,
-    safe_tx_hash: input.safeTxHash ?? setup.safe_tx_hash,
-    failure_reason: input.failureReason,
-  }
+): Promise<SetupRow | null> {
+  let nextSetup: SetupRow | null = null
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    const setupResult = await client.query<SetupRow>(
+      `${setupSelectSql('s.id = $1 AND s.user_id = $2')} FOR UPDATE OF s`,
+      [setup.id, setup.user_id],
+    )
+    const locked = setupResult.rows[0]
+    if (!locked) {
+      await client.query('ROLLBACK')
+      return null
+    }
+    if (
+      locked.status === 'cancelled' ||
+      locked.status === 'expired' ||
+      locked.status === 'failed'
+    ) {
+      await client.query('ROLLBACK')
+      return null
+    }
+    if (locked.status === 'active') {
+      await client.query('COMMIT')
+      return locked
+    }
+    if (!WALLET_APPROVAL_STATES.has(locked.status)) {
+      await client.query('ROLLBACK')
+      return null
+    }
+    if (
+      locked.safe_tx_hash &&
+      input.safeTxHash &&
+      locked.safe_tx_hash.toLowerCase() !== input.safeTxHash.toLowerCase()
+    ) {
+      await client.query('ROLLBACK')
+      return null
+    }
+    if (
+      locked.tx_hash &&
+      input.txHash &&
+      locked.tx_hash.toLowerCase() !== input.txHash.toLowerCase()
+    ) {
+      await client.query('ROLLBACK')
+      return null
+    }
+
+    nextSetup = {
+      ...locked,
+      status: input.status,
+      approval_status: input.approvalStatus,
+      tx_hash: input.txHash ?? locked.tx_hash,
+      safe_tx_hash: input.safeTxHash ?? locked.safe_tx_hash,
+      failure_reason: input.failureReason,
+    }
     await client.query(
       `UPDATE agent_connection_setups
        SET status = $3,
@@ -870,13 +952,13 @@ async function persistWalletApprovalState(
         input.failureReason,
       ],
     )
-    if (input.activateAgent && setup.agent_id) {
+    if (input.activateAgent && nextSetup.agent_id) {
       await client.query(
         `UPDATE agents
          SET status = 'active',
              updated_at = NOW()
          WHERE id = $1 AND user_id = $2 AND status IN ('pending_approval', 'active')`,
-        [setup.agent_id, setup.user_id],
+        [nextSetup.agent_id, nextSetup.user_id],
       )
     }
     await client.query('COMMIT')

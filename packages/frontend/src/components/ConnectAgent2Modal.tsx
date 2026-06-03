@@ -349,6 +349,7 @@ export default function ConnectAgent2Modal({
   }
 
   async function handleCancelSetup() {
+    if (approving || manualCreating) return
     if (!setup) {
       handleClose()
       return
@@ -504,7 +505,7 @@ export default function ConnectAgent2Modal({
           apiKey,
           delegatePrivateKey,
           delegateAddress: registration.delegate_address,
-          apiBaseUrl: manualApiBaseUrl(),
+          apiBaseUrl: manualApiBaseUrl(setup.connector_command),
           hostedMcpUrl: registration.hosted_mcp_url || resolved.hosted_mcp_url,
         }),
       })
@@ -1206,7 +1207,7 @@ function LocalConnectionReady({
       )}
 
       <div className="flex gap-3">
-        <Button variant="ghost" onClick={onCancel} className="flex-1">
+        <Button variant="ghost" onClick={onCancel} disabled={approving} className="flex-1">
           Cancel setup
         </Button>
         <Button
@@ -1460,13 +1461,25 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function manualApiBaseUrl(): string {
+function manualApiBaseUrl(connectorCommand?: string): string {
+  const commandApiUrl = connectorApiBaseUrl(connectorCommand)
+  if (commandApiUrl) return commandApiUrl
   const explicit = process.env.NEXT_PUBLIC_API_URL
   if (explicit) return explicit.replace(/\/+$/, '')
   const resolved = getResolvedApiBaseUrl()
   if (/^https?:\/\//.test(resolved)) return resolved.replace(/\/+$/, '')
-  if (typeof window !== 'undefined') return window.location.origin.replace(/\/+$/, '')
+  if (typeof window !== 'undefined') {
+    const path = resolved.startsWith('/') ? resolved : `/${resolved}`
+    return `${window.location.origin.replace(/\/+$/, '')}${path}`.replace(/\/+$/, '')
+  }
   return resolved
+}
+
+function connectorApiBaseUrl(connectorCommand?: string): string | null {
+  if (!connectorCommand) return null
+  const match = connectorCommand.match(/(?:^|\s)--api(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))/)
+  const value = match?.[1] ?? match?.[2] ?? match?.[3]
+  return value ? value.replace(/\\'/g, "'").replace(/\/+$/, '') : null
 }
 
 function buildManualCredentialPrompt(input: {

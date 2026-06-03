@@ -1,0 +1,105 @@
+export type RuntimeId =
+  | 'claude-code'
+  | 'codex-cli'
+  | 'cursor'
+  | 'vscode'
+  | 'claude-desktop'
+  | 'other'
+
+export type RestartMode = 'restart-session' | 'restart-app' | 'hot-reload' | 'manual'
+
+export interface RuntimeProfile {
+  id: RuntimeId
+  label: string
+  restartMode: RestartMode
+  canWriteRuntimeConfig: boolean
+}
+
+const RUNTIME_PROFILES: Record<RuntimeId, RuntimeProfile> = {
+  'claude-code': {
+    id: 'claude-code',
+    label: 'Claude Code',
+    restartMode: 'restart-session',
+    canWriteRuntimeConfig: true,
+  },
+  'codex-cli': {
+    id: 'codex-cli',
+    label: 'Codex CLI',
+    restartMode: 'restart-session',
+    canWriteRuntimeConfig: true,
+  },
+  cursor: {
+    id: 'cursor',
+    label: 'Cursor',
+    restartMode: 'hot-reload',
+    canWriteRuntimeConfig: true,
+  },
+  vscode: {
+    id: 'vscode',
+    label: 'VS Code',
+    restartMode: 'hot-reload',
+    canWriteRuntimeConfig: true,
+  },
+  'claude-desktop': {
+    id: 'claude-desktop',
+    label: 'Claude Desktop',
+    restartMode: 'restart-app',
+    canWriteRuntimeConfig: true,
+  },
+  other: {
+    id: 'other',
+    label: 'Other agent runtime',
+    restartMode: 'manual',
+    canWriteRuntimeConfig: false,
+  },
+}
+
+const RUNTIME_ALIASES: Record<string, RuntimeId> = {
+  claude: 'claude-code',
+  'claude-code': 'claude-code',
+  claudecode: 'claude-code',
+  'claude_code': 'claude-code',
+  codex: 'codex-cli',
+  'codex-cli': 'codex-cli',
+  codexcli: 'codex-cli',
+  'codex_cli': 'codex-cli',
+  cursor: 'cursor',
+  vscode: 'vscode',
+  'vs-code': 'vscode',
+  'vs_code': 'vscode',
+  code: 'vscode',
+  'claude-desktop': 'claude-desktop',
+  'claude_desktop': 'claude-desktop',
+  claudesktop: 'claude-desktop',
+  desktop: 'claude-desktop',
+  other: 'other',
+  manual: 'other',
+}
+
+export function runtimeProfile(runtime: string | undefined, env: NodeJS.ProcessEnv = process.env): RuntimeProfile {
+  return RUNTIME_PROFILES[normalizeRuntime(runtime, env)]
+}
+
+export function normalizeRuntime(runtime: string | undefined, env: NodeJS.ProcessEnv = process.env): RuntimeId {
+  const explicit = normalizeRuntimeName(runtime)
+  if (explicit) return explicit
+  return detectRuntime(env) ?? 'other'
+}
+
+export function restartRequiredForRuntime(runtime: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  const mode = runtimeProfile(runtime, env).restartMode
+  return mode === 'restart-session' || mode === 'restart-app'
+}
+
+function normalizeRuntimeName(runtime: string | undefined): RuntimeId | null {
+  const key = runtime?.trim().toLowerCase()
+  if (!key) return null
+  return RUNTIME_ALIASES[key.replace(/\s+/g, '-')] ?? null
+}
+
+function detectRuntime(env: NodeJS.ProcessEnv): RuntimeId | null {
+  if (env.CLAUDECODE || env.CLAUDE_CODE || env.CLAUDECODE_CWD) return 'claude-code'
+  if (env.CODEX_SANDBOX || env.CODEX_HOME || env.CODEX_CWD) return 'codex-cli'
+  if (env.VSCODE_CWD || env.VSCODE_IPC_HOOK_CLI || env.TERM_PROGRAM === 'vscode') return 'vscode'
+  return null
+}

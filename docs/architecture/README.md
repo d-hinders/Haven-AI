@@ -13,6 +13,7 @@ exported PNG and SVG alongside.
 | 5 | [Agent API OpenAPI Contract](05-agent-api-openapi.md) | Public OpenAPI surface for non-TypeScript agent integrators and external reviewers. |
 | 6 | [Hosted MCP Connect Flow & Edge-Signing Contract](06-hosted-mcp-connect-flow.md) | Designing/reviewing the hosted MCP server — the wire contract, the two-credential split, and the non-custodial rule that the delegate key never reaches Haven. |
 | 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |
+| 8 | [Connect Agent 2 Local-Key Pairing](08-connect-agent-2-local-key-pairing.md) | Planning/reviewing the staged setup flow where the local connector generates the agent key, Haven receives only the public signing address, and wallet approval activates agent rules. |
 
 ## Regenerating exports
 

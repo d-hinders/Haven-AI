@@ -505,7 +505,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         return buildUserSetupStatus(active, allowances)
       }
 
-      if (request.body.confirmation_status === 'receipt_timeout') {
+      if (
+        request.body.confirmation_status === 'receipt_timeout' ||
+        isTransientSetupAuthorityVerification(verification.error)
+      ) {
         const inProgress = await persistWalletApprovalState(setup, {
           status: 'approval_in_progress',
           approvalStatus: 'submitted',
@@ -877,6 +880,13 @@ async function tryVerifySetupAuthority(
     appLogSafeError(err)
     return { ok: false, error: 'Haven could not verify the on-chain agent rules yet' }
   }
+}
+
+function isTransientSetupAuthorityVerification(error: string): boolean {
+  return (
+    error === 'On-chain agent budget is not active yet' ||
+    error === 'Haven could not verify the on-chain agent rules yet'
+  )
 }
 
 async function persistWalletApprovalState(

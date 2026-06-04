@@ -2314,11 +2314,9 @@ export class HavenClient {
   }
 
   private mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentReceipt {
-    return {
+    const receipt: HavenPaymentReceipt = {
       id: raw.id,
       paymentId: raw.payment_id,
-      paymentIntentId: raw.payment_intent_id ?? null,
-      approvalRequestId: raw.approval_request_id ?? null,
       rail: raw.rail,
       proofStatus: raw.proof_status,
       txHash: raw.tx_hash,
@@ -2343,6 +2341,15 @@ export class HavenClient {
       createdAt: raw.created_at,
       updatedAt: raw.updated_at,
     }
+
+    if ('payment_intent_id' in raw) {
+      receipt.paymentIntentId = raw.payment_intent_id ?? null
+    }
+    if ('approval_request_id' in raw) {
+      receipt.approvalRequestId = raw.approval_request_id ?? null
+    }
+
+    return receipt
   }
 }
 

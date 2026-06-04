@@ -12,6 +12,7 @@ describe('parseArgs', () => {
       'claude-code',
       '--credentials-dir',
       '/tmp/haven-creds',
+      '--ack-signer',
     ], {})
 
     expect(parsed.help).toBe(false)
@@ -20,6 +21,7 @@ describe('parseArgs', () => {
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'claude-code',
       credentialsDir: '/tmp/haven-creds',
+      ackSigner: true,
     })
   })
 

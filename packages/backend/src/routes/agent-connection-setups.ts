@@ -60,6 +60,8 @@ interface InstallStatusBody {
   hosted_mcp_configured?: boolean
   local_signer_configured?: boolean
   credential_files_written?: boolean
+  signer_acknowledged?: boolean
+  activation_command_available?: boolean
   probe_result?: string
   restart_required?: boolean
   next_user_action?: string
@@ -123,6 +125,7 @@ interface UserSafeRow {
 }
 
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
+const CONNECTOR_PACKAGE = '@haven_ai/connect@0.1.1-alpha'
 const WALLET_APPROVAL_STATES = new Set([
   'connected_local',
   'awaiting_wallet_approval',
@@ -1107,9 +1110,10 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
 
 function buildConnectorCommand(setupToken: string, request: FastifyRequest, runtime: string | null): string {
   const args = [
-    'npx -y @haven_ai/connect',
+    `npx -y ${CONNECTOR_PACKAGE}`,
     `--setup ${shellQuote(setupToken)}`,
     `--api ${shellQuote(apiBaseUrl(request))}`,
+    '--ack-signer',
   ]
   if (runtime) args.push(`--runtime ${shellQuote(runtime)}`)
   return args.join(' ')

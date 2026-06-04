@@ -54,6 +54,8 @@ describe('createConnectApiClient', () => {
       hostedMcpConfigured: false,
       localSignerConfigured: false,
       credentialFilesWritten: true,
+      signerAcknowledged: true,
+      activationCommandAvailable: true,
       probeResult: 'credential_files_written',
       restartRequired: true,
       nextUserAction: 'return_to_haven_for_wallet_approval',
@@ -63,5 +65,7 @@ describe('createConnectApiClient', () => {
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer sk_agent_secret')
     expect(String(calls[0].init.body)).not.toContain('sk_agent_secret')
     expect(String(calls[0].init.body)).toContain('credential_files_written')
+    expect(String(calls[0].init.body)).toContain('signer_acknowledged')
+    expect(String(calls[0].init.body)).toContain('activation_command_available')
   })
 })

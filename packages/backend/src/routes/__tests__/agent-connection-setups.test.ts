@@ -196,7 +196,8 @@ describe('agent connection setup routes', () => {
     const body = response.json()
     expect(body.status).toBe('awaiting_connection')
     expect(body.setup_token).toMatch(/^hv_setup_[0-9a-f]+$/)
-    expect(body.connector_command).toContain('npx -y @haven_ai/connect')
+    expect(body.connector_command).toContain('npx -y @haven_ai/connect@0.1.1-alpha')
+    expect(body.connector_command).toContain('--ack-signer')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 
     const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
@@ -1050,6 +1051,9 @@ describe('agent connection setup routes', () => {
           install_status: {
             hosted_mcp_configured: true,
             local_signer_configured: true,
+            signer_acknowledged: true,
+            activation_command_available: true,
+            error_code: null,
           },
         }],
       })
@@ -1061,13 +1065,19 @@ describe('agent connection setup routes', () => {
       payload: {
         hosted_mcp_configured: true,
         local_signer_configured: true,
+        signer_acknowledged: true,
+        activation_command_available: true,
         restart_required: true,
+        error_code: null,
         environment_label: 'Local workspace',
       },
     })
 
     expect(response.statusCode).toBe(200)
     expect(response.json().install_status.hosted_mcp_configured).toBe(true)
+    expect(response.json().install_status.signer_acknowledged).toBe(true)
+    expect(response.json().install_status.activation_command_available).toBe(true)
+    expect(response.json().install_status.error_code).toBeNull()
     expect(String(mockQuery.mock.calls[0][0])).toContain("a.status IN ($3, $4, $5)")
     expect(mockQuery.mock.calls[0][1]).toContain('pending_approval')
 

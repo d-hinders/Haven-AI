@@ -928,8 +928,11 @@ Do not remove the old Connect Agent flow in this sequence.
 
 Connect Agent 2 ships with rollback gates:
 
-- frontend `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=true` shows the new entry point
-- backend `CONNECT_AGENT_2_ENABLED=true` allows new setup-token creation
+- frontend Connect Agent 2 is enabled by default; set
+  `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` to restore the old
+  manual setup entry point
+- backend setup-token creation is enabled by default; set
+  `CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` to block new setup creation
 - connector package published as alpha/beta until the flow is verified
 
 Rollback plan:

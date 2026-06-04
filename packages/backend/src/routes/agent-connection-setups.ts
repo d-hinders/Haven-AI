@@ -1214,5 +1214,5 @@ function shellQuote(value: string): string {
 }
 
 function connectAgent2CreationEnabled(): boolean {
-  return ['true', '1', 'on'].includes(String(process.env.CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
+  return !['false', '0', 'off'].includes(String(process.env.CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
 }

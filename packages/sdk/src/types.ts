@@ -476,6 +476,8 @@ export interface HavenAllowanceSummary {
 export interface HavenPaymentReceipt {
   id: string
   paymentId: string
+  paymentIntentId?: string | null
+  approvalRequestId?: string | null
   rail: string
   proofStatus: string
   txHash: string
@@ -955,6 +957,8 @@ export interface RawHavenAllowanceSummary {
 export interface RawHavenPaymentReceipt {
   id: string
   payment_id: string
+  payment_intent_id?: string | null
+  approval_request_id?: string | null
   rail: string
   proof_status: string
   tx_hash: string

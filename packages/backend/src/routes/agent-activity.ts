@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getExplorerUrl } from '../lib/chains.js'
+import { machinePaymentLifecycle } from '../lib/machine-payment-lifecycle.js'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ interface PaymentRow {
   payment_resource_url: string | null
   merchant_address: string | null
   payment_proof_status: string | null
+  payment_reconciliation_event_type: string | null
   created_at: string
   confirmed_at: string | null
 }
@@ -41,6 +43,8 @@ interface ApprovalRow {
   payment_rail: string | null
   payment_resource_url: string | null
   merchant_address: string | null
+  payment_proof_status: string | null
+  payment_reconciliation_event_type: string | null
   status: string
   tx_hash: string | null
   created_at: string
@@ -114,11 +118,16 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.payment_resource_url,
               pi.merchant_address,
               pi.created_at,
-              pi.confirmed_at
+              pi.confirmed_at,
+              mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
        LEFT JOIN user_safes us ON us.id = a.safe_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
+       LEFT JOIN machine_payment_reconciliation_events mpre
+         ON mpre.payment_intent_id = pi.id
+        AND mpre.status = 'open'
+        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
        WHERE pi.agent_id = $1
        ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`,
@@ -127,16 +136,23 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Fetch approval requests
     const approvals = await pool.query<ApprovalRow>(
-      `SELECT id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason,
-              COALESCE(payment_rail, source, 'direct') AS source,
-              COALESCE(payment_resource_url, x402_resource_url) AS x402_resource_url,
-              payment_rail,
-              payment_resource_url,
-              merchant_address,
-              status, tx_hash, created_at
-       FROM approval_requests
-       WHERE agent_id = $1
-       ORDER BY created_at DESC
+      `SELECT ar.id, COALESCE(ar.chain_id, 100) as chain_id, ar.token_symbol, ar.amount_human, ar.to_address, ar.reason,
+              COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
+              COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS x402_resource_url,
+              ar.payment_rail,
+              ar.payment_resource_url,
+              ar.merchant_address,
+              ar.status, ar.tx_hash, ar.created_at,
+              mpe.proof_status AS payment_proof_status,
+              mpre.event_type AS payment_reconciliation_event_type
+       FROM approval_requests ar
+       LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
+       LEFT JOIN machine_payment_reconciliation_events mpre
+         ON mpre.approval_request_id = ar.id
+        AND mpre.status = 'open'
+        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+       WHERE ar.agent_id = $1
+       ORDER BY ar.created_at DESC
        LIMIT $2 OFFSET $3`,
       [id, limit, offset],
     )
@@ -154,43 +170,67 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Merge and sort by created_at desc
     const activity = [
-      ...payments.rows.map((p) => ({
-        type: 'payment' as const,
-        id: p.id,
-        token: p.token_symbol,
-        amount_raw: p.amount_raw,
-        amount: p.amount_human,
-        to: p.to_address,
-        status: p.status,
-        tx_hash: p.tx_hash,
-        payment_id: p.id,
-        payment_proof_status: p.payment_proof_status,
-        source: p.source ?? 'direct',
-        x402_resource_url: p.x402_resource_url,
-        x402_merchant_address: p.x402_merchant_address,
-        chain_id: p.chain_id,
-        token_address: p.token_address,
-        safe_id: p.safe_id,
-        safe_address: p.safe_address,
-        safe_name: p.safe_name,
-        explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
-        confirmed_at: p.confirmed_at,
-        created_at: p.created_at,
-      })),
-      ...approvals.rows.map((a) => ({
-        type: 'approval' as const,
-        id: a.id,
-        token: a.token_symbol,
-        amount: a.amount_human,
-        to: a.to_address,
-        reason: a.reason,
-        status: a.status,
-        tx_hash: a.tx_hash,
-        source: a.source ?? 'direct',
-        x402_resource_url: a.x402_resource_url,
-        explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
-        created_at: a.created_at,
-      })),
+      ...payments.rows.map((p) => {
+        const lifecycle = machinePaymentLifecycle({
+          rail: p.source,
+          paymentStatus: p.status,
+          paymentProofStatus: p.payment_proof_status,
+          reconciliationEventType: p.payment_reconciliation_event_type,
+        })
+
+        return {
+          type: 'payment' as const,
+          id: p.id,
+          token: p.token_symbol,
+          amount_raw: p.amount_raw,
+          amount: p.amount_human,
+          to: p.to_address,
+          status: p.status,
+          tx_hash: p.tx_hash,
+          payment_id: p.id,
+          payment_proof_status: p.payment_proof_status,
+          payment_flow_status: lifecycle.paymentFlowStatus,
+          payment_attention_reason: lifecycle.paymentAttentionReason,
+          source: p.source ?? 'direct',
+          x402_resource_url: p.x402_resource_url,
+          x402_merchant_address: p.x402_merchant_address,
+          chain_id: p.chain_id,
+          token_address: p.token_address,
+          safe_id: p.safe_id,
+          safe_address: p.safe_address,
+          safe_name: p.safe_name,
+          explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+          confirmed_at: p.confirmed_at,
+          created_at: p.created_at,
+        }
+      }),
+      ...approvals.rows.map((a) => {
+        const proofStatus = a.payment_proof_status ?? (a.status === 'executed' ? 'payment_confirmed' : null)
+        const lifecycle = machinePaymentLifecycle({
+          rail: a.source,
+          paymentStatus: a.status,
+          paymentProofStatus: proofStatus,
+          reconciliationEventType: a.payment_reconciliation_event_type,
+        })
+
+        return {
+          type: 'approval' as const,
+          id: a.id,
+          token: a.token_symbol,
+          amount: a.amount_human,
+          to: a.to_address,
+          reason: a.reason,
+          status: a.status,
+          tx_hash: a.tx_hash,
+          payment_proof_status: proofStatus,
+          payment_flow_status: lifecycle.paymentFlowStatus,
+          payment_attention_reason: lifecycle.paymentAttentionReason,
+          source: a.source ?? 'direct',
+          x402_resource_url: a.x402_resource_url,
+          explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
+          created_at: a.created_at,
+        }
+      }),
       ...invocations.rows.map((inv) => ({
         type: 'mcp_tool_call' as const,
         id: inv.id,
@@ -329,11 +369,16 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.payment_resource_url,
               pi.merchant_address,
               pi.created_at,
-              pi.confirmed_at
+              pi.confirmed_at,
+              mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
        LEFT JOIN user_safes us ON us.id = a.safe_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
+       LEFT JOIN machine_payment_reconciliation_events mpre
+         ON mpre.payment_intent_id = pi.id
+        AND mpre.status = 'open'
+        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
        WHERE pi.agent_id = ANY($1)
        ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`,
@@ -342,16 +387,23 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Recent approval requests
     const approvals = await pool.query<ApprovalRow & { agent_id: string }>(
-      `SELECT id, agent_id, COALESCE(chain_id, 100) as chain_id, token_symbol, amount_human, to_address, reason,
-              COALESCE(payment_rail, source, 'direct') AS source,
-              COALESCE(payment_resource_url, x402_resource_url) AS x402_resource_url,
-              payment_rail,
-              payment_resource_url,
-              merchant_address,
-              status, tx_hash, created_at
-       FROM approval_requests
-       WHERE agent_id = ANY($1)
-       ORDER BY created_at DESC
+      `SELECT ar.id, ar.agent_id, COALESCE(ar.chain_id, 100) as chain_id, ar.token_symbol, ar.amount_human, ar.to_address, ar.reason,
+              COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
+              COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS x402_resource_url,
+              ar.payment_rail,
+              ar.payment_resource_url,
+              ar.merchant_address,
+              ar.status, ar.tx_hash, ar.created_at,
+              mpe.proof_status AS payment_proof_status,
+              mpre.event_type AS payment_reconciliation_event_type
+       FROM approval_requests ar
+       LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
+       LEFT JOIN machine_payment_reconciliation_events mpre
+         ON mpre.approval_request_id = ar.id
+        AND mpre.status = 'open'
+        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+       WHERE ar.agent_id = ANY($1)
+       ORDER BY ar.created_at DESC
        LIMIT $2 OFFSET $3`,
       [agentIds, limit, offset],
     )
@@ -369,47 +421,71 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Merge and sort
     const activity = [
-      ...payments.rows.map((p) => ({
-        type: 'payment' as const,
-        id: p.id,
-        agent_id: p.agent_id,
-        agent_name: agentNames.get(p.agent_id) ?? 'Unknown',
-        token: p.token_symbol,
-        amount_raw: p.amount_raw,
-        amount: p.amount_human,
-        to: p.to_address,
-        status: p.status,
-        tx_hash: p.tx_hash,
-        payment_id: p.id,
-        payment_proof_status: p.payment_proof_status,
-        source: p.source ?? 'direct',
-        x402_resource_url: p.x402_resource_url,
-        x402_merchant_address: p.x402_merchant_address,
-        chain_id: p.chain_id,
-        token_address: p.token_address,
-        safe_id: p.safe_id,
-        safe_address: p.safe_address,
-        safe_name: p.safe_name,
-        explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
-        confirmed_at: p.confirmed_at,
-        created_at: p.created_at,
-      })),
-      ...approvals.rows.map((a) => ({
-        type: 'approval' as const,
-        id: a.id,
-        agent_id: a.agent_id,
-        agent_name: agentNames.get(a.agent_id) ?? 'Unknown',
-        token: a.token_symbol,
-        amount: a.amount_human,
-        to: a.to_address,
-        reason: a.reason,
-        status: a.status,
-        tx_hash: a.tx_hash,
-        source: a.source ?? 'direct',
-        x402_resource_url: a.x402_resource_url,
-        explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
-        created_at: a.created_at,
-      })),
+      ...payments.rows.map((p) => {
+        const lifecycle = machinePaymentLifecycle({
+          rail: p.source,
+          paymentStatus: p.status,
+          paymentProofStatus: p.payment_proof_status,
+          reconciliationEventType: p.payment_reconciliation_event_type,
+        })
+
+        return {
+          type: 'payment' as const,
+          id: p.id,
+          agent_id: p.agent_id,
+          agent_name: agentNames.get(p.agent_id) ?? 'Unknown',
+          token: p.token_symbol,
+          amount_raw: p.amount_raw,
+          amount: p.amount_human,
+          to: p.to_address,
+          status: p.status,
+          tx_hash: p.tx_hash,
+          payment_id: p.id,
+          payment_proof_status: p.payment_proof_status,
+          payment_flow_status: lifecycle.paymentFlowStatus,
+          payment_attention_reason: lifecycle.paymentAttentionReason,
+          source: p.source ?? 'direct',
+          x402_resource_url: p.x402_resource_url,
+          x402_merchant_address: p.x402_merchant_address,
+          chain_id: p.chain_id,
+          token_address: p.token_address,
+          safe_id: p.safe_id,
+          safe_address: p.safe_address,
+          safe_name: p.safe_name,
+          explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+          confirmed_at: p.confirmed_at,
+          created_at: p.created_at,
+        }
+      }),
+      ...approvals.rows.map((a) => {
+        const proofStatus = a.payment_proof_status ?? (a.status === 'executed' ? 'payment_confirmed' : null)
+        const lifecycle = machinePaymentLifecycle({
+          rail: a.source,
+          paymentStatus: a.status,
+          paymentProofStatus: proofStatus,
+          reconciliationEventType: a.payment_reconciliation_event_type,
+        })
+
+        return {
+          type: 'approval' as const,
+          id: a.id,
+          agent_id: a.agent_id,
+          agent_name: agentNames.get(a.agent_id) ?? 'Unknown',
+          token: a.token_symbol,
+          amount: a.amount_human,
+          to: a.to_address,
+          reason: a.reason,
+          status: a.status,
+          tx_hash: a.tx_hash,
+          payment_proof_status: proofStatus,
+          payment_flow_status: lifecycle.paymentFlowStatus,
+          payment_attention_reason: lifecycle.paymentAttentionReason,
+          source: a.source ?? 'direct',
+          x402_resource_url: a.x402_resource_url,
+          explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
+          created_at: a.created_at,
+        }
+      }),
       ...invocations.rows.map((inv) => ({
         type: 'mcp_tool_call' as const,
         id: inv.id,

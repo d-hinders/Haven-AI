@@ -897,7 +897,7 @@ export const openapiSpec = {
         operationId: 'attachMachinePaymentEvidence',
         summary: 'Attach merchant proof evidence for a confirmed machine payment.',
         description:
-          'Records proof-loop evidence after a confirmed x402 or MPP payment. This does not authorize or execute payment; it attaches merchant/protocol evidence to an already confirmed payment intent owned by the authenticated agent.',
+          'Records proof-loop evidence after a confirmed x402 or MPP payment. This does not authorize or execute payment; it attaches merchant/protocol evidence to an already confirmed payment or approval request owned by the authenticated agent.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
           required: true,
@@ -1853,6 +1853,8 @@ export const openapiSpec = {
         properties: {
           id: uuid,
           payment_id: uuid,
+          payment_intent_id: { anyOf: [uuid, { type: 'null' }] },
+          approval_request_id: { anyOf: [uuid, { type: 'null' }] },
           rail: { type: 'string' },
           proof_status: { type: 'string' },
           tx_hash: { type: 'string' },
@@ -1942,6 +1944,14 @@ export const openapiSpec = {
           x402MerchantAddress: { type: ['string', 'null'] },
           paymentId: { type: 'string' },
           paymentProofStatus: { type: ['string', 'null'] },
+          paymentFlowStatus: {
+            type: ['string', 'null'],
+            enum: ['paid', 'confirming_merchant', 'needs_attention', null],
+          },
+          paymentAttentionReason: {
+            type: ['string', 'null'],
+            enum: ['merchant_retry_rejected_after_payment', null],
+          },
           chainId: { type: 'integer' },
           safeId: uuid,
           safeAddress: address,

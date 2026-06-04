@@ -934,7 +934,7 @@ export class HavenClient {
       headers: retryHeaders,
     })
 
-    if (retryResponse.status === 402) {
+    if (!retryResponse.ok) {
       await this.recordMerchantRetryRejected({
         rail: 'x402',
         paymentId: receipt.paymentId,
@@ -948,8 +948,8 @@ export class HavenClient {
       })
 
       throw new HavenApiError(
-        'x402 retry was rejected after Haven funded the delegate wallet; reconciliation may be required.',
-        402,
+        'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required.',
+        retryResponse.status,
         {
           marker: 'x402_retry_rejected_after_funding',
           payment_id: receipt.paymentId,
@@ -1130,7 +1130,7 @@ export class HavenClient {
       headers: retryHeaders,
     })
 
-    if (retryResponse.status === 402) {
+    if (!retryResponse.ok) {
       await this.recordMerchantRetryRejected({
         rail: receipt.rail,
         paymentId: receipt.paymentId,
@@ -1143,8 +1143,8 @@ export class HavenClient {
       })
 
       throw new HavenApiError(
-        'Machine payment retry was rejected after Haven sent the payment.',
-        402,
+        'Machine payment retry failed after Haven sent the payment.',
+        retryResponse.status,
         {
           marker: 'machine_payment_retry_rejected_after_payment',
           payment_id: receipt.paymentId,
@@ -2317,6 +2317,8 @@ export class HavenClient {
     return {
       id: raw.id,
       paymentId: raw.payment_id,
+      paymentIntentId: raw.payment_intent_id ?? null,
+      approvalRequestId: raw.approval_request_id ?? null,
       rail: raw.rail,
       proofStatus: raw.proof_status,
       txHash: raw.tx_hash,

@@ -404,7 +404,7 @@ describe('MPP demo helpers', () => {
     })
   })
 
-  it('records a reconciliation event when an MPP retry is rejected after payment', async () => {
+  it('records a reconciliation event when an MPP retry fails after payment', async () => {
     const backendUrl = 'https://haven-api.example'
     const resourceUrl = challenge.resource
     const txHash = `0x${'ab'.repeat(32)}`
@@ -451,7 +451,7 @@ describe('MPP demo helpers', () => {
         amount: '0.01',
         to: challenge.recipient,
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Proof rejected' }), { status: 402 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Merchant unavailable' }), { status: 500 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
 
     const haven = new HavenClient({
@@ -461,7 +461,7 @@ describe('MPP demo helpers', () => {
     })
 
     await expect(haven.fetch(resourceUrl)).rejects.toMatchObject({
-      statusCode: 402,
+      statusCode: 500,
       body: expect.objectContaining({
         marker: 'machine_payment_retry_rejected_after_payment',
         payment_id: 'pay_123',
@@ -478,8 +478,8 @@ describe('MPP demo helpers', () => {
       txHash,
       details: {
         resource_url: resourceUrl,
-        retry_status: 402,
-        retry_body: JSON.stringify({ error: 'Proof rejected' }),
+        retry_status: 500,
+        retry_body: JSON.stringify({ error: 'Merchant unavailable' }),
         challenge_id: challenge.challengeId,
       },
     })

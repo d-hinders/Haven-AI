@@ -55,6 +55,9 @@ interface X402ActivityItem {
   chain_id?: number | null
   explorer_url: string | null
   confirmed_at?: string | null
+  payment_proof_status?: string | null
+  payment_flow_status?: 'paid' | 'confirming_merchant' | 'needs_attention' | null
+  payment_attention_reason?: 'merchant_retry_rejected_after_payment' | null
   created_at: string
 }
 
@@ -186,6 +189,10 @@ function buildX402ActivityTransactions(
       source: 'x402',
       x402ResourceUrl: item.x402_resource_url,
       x402MerchantAddress: item.x402_merchant_address,
+      paymentId: item.id,
+      paymentProofStatus: item.payment_proof_status ?? null,
+      paymentFlowStatus: item.payment_flow_status ?? null,
+      paymentAttentionReason: item.payment_attention_reason ?? null,
     }]
   })
 }

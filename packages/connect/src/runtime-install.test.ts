@@ -1,14 +1,13 @@
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MCP_VERSION } from '@haven_ai/mcp'
 import { describe, expect, it, vi } from 'vitest'
 import { installRuntime } from './runtime-install.js'
+import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
 const API_KEY = 'sk_agent_secret_for_runtime_test'
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
 const HOSTED_URL = 'https://mcp.haven.example/v1'
-const MCP_PACKAGE = `@haven_ai/mcp@${MCP_VERSION}`
 
 describe('installRuntime', () => {
   it('prepares Codex local MCP config and acknowledgement for normal restart', async () => {
@@ -28,6 +27,8 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+      probeLocalMcpTools: okLocalMcpProbe(),
     })
 
     const codexConfig = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
@@ -42,10 +43,12 @@ describe('installRuntime', () => {
     expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_restart_codex')
     expect(result.activationCommand).toBeUndefined()
     expect(result.errorCode).toBeUndefined()
-    expect(codexConfig).toContain(MCP_PACKAGE)
-    expect(codexConfig).toContain('--identity')
-    expect(codexConfig).toContain(identityPath)
-    expect(codexConfig).toContain('--signer')
+    expect(codexConfig).toContain(`command = "${join(credentialDirectory, 'bin', 'haven-mcp')}"`)
+    expect(codexConfig).toContain('args = []')
+    expect(codexConfig).toContain('startup_timeout_sec = 120')
+    expect(codexConfig).not.toContain('--identity')
+    expect(codexConfig).not.toContain(identityPath)
+    expect(codexConfig).not.toContain('--signer')
     expect(codexConfig).not.toContain('"--ack"')
     expect(codexConfig).not.toContain('bearer_token_env_var')
     expect(codexConfig).not.toContain('haven_signer')
@@ -54,6 +57,38 @@ describe('installRuntime', () => {
     expect(ack).toContain('"ack"')
     expect(result.messages.join('\n')).not.toContain(API_KEY)
     expect(result.messages.join('\n')).not.toContain(PRIVATE_KEY)
+  })
+
+  it('treats Codex Desktop as restart-ready with the same local MCP config', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-codex-desktop-install-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-desktop',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+      probeLocalMcpTools: okLocalMcpProbe(),
+    })
+
+    const codexConfig = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
+    expect(result.runtime).toBe('codex-desktop')
+    expect(result.runtimeMcpMode).toBe('local_stdio')
+    expect(result.localMcpConfigured).toBe(true)
+    expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_restart_codex')
+    expect(codexConfig).toContain(`command = "${join(credentialDirectory, 'bin', 'haven-mcp')}"`)
+    expect(codexConfig).not.toContain('npx')
+    expect(codexConfig).not.toContain(API_KEY)
+    expect(codexConfig).not.toContain(PRIVATE_KEY)
   })
 
   it('does not report local MCP as configured when acknowledgement is missing', async () => {
@@ -72,6 +107,8 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+      probeLocalMcpTools: okLocalMcpProbe(),
     })
 
     expect(result.hostedMcpConfigured).toBe(false)
@@ -102,6 +139,8 @@ describe('installRuntime', () => {
     }, {
       runCommand,
       fetch: okToolsFetch(),
+      prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+      probeLocalMcpTools: okLocalMcpProbe(),
     })
 
     expect(result.hostedMcpConfigured).toBe(false)
@@ -111,14 +150,124 @@ describe('installRuntime', () => {
     expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_restart_claude_code')
     expect(commands[0]).toMatchObject({
       command: 'claude',
-      args: ['mcp', 'add', 'haven', '--', 'npx', '-y', MCP_PACKAGE, '--identity', identityPath, '--signer', signerPath],
+      args: [
+        'mcp',
+        'add-json',
+        'haven',
+        JSON.stringify({
+          type: 'stdio',
+          command: join(credentialDirectory, 'bin', 'haven-mcp'),
+          args: [],
+          env: {},
+        }),
+        '--scope',
+        'user',
+      ],
     })
     expect(commands[1]).toMatchObject({
       command: 'claude',
       args: ['mcp', 'remove', 'haven-signer'],
     })
+    expect(commands[2]).toMatchObject({
+      command: 'claude',
+      args: ['mcp', 'get', 'haven'],
+    })
+    expect(result.messages.join('\n')).toContain('Verified Claude Code MCP entry.')
     expect(JSON.stringify(commands)).not.toContain('Authorization')
     expect(JSON.stringify(commands)).not.toContain(API_KEY)
+    expect(JSON.stringify(commands)).not.toContain(PRIVATE_KEY)
+  })
+
+  it('reports local MCP runtime install failures without marking restart-ready', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-runtime-install-fail-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      prepareLocalMcpRuntime: vi.fn(async () => {
+        throw new Error('npm cache could not install package')
+      }),
+      probeLocalMcpTools: okLocalMcpProbe(),
+    })
+
+    expect(result.localMcpConfigured).toBe(false)
+    expect(result.localSignerConfigured).toBe(false)
+    expect(result.errorCode).toBe('local_mcp_runtime_install_failed')
+    expect(result.probeResult).toBe('local_stdio_mcp_runtime_install_failed')
+    expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_finish_runtime_setup')
+    expect(result.messages.join('\n')).toContain('Could not prepare local Haven MCP runtime')
+    expect(result.messages.join('\n')).not.toContain(API_KEY)
+    expect(result.messages.join('\n')).not.toContain(PRIVATE_KEY)
+  })
+
+  it('reports unsupported Node versions before runtime config is written', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-node-fail-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      prepareLocalMcpRuntime: vi.fn(async () => {
+        const err = new Error('Node.js 18.19.0 is not supported. Haven local MCP requires Node.js >=20.0.0.')
+        Object.assign(err, { code: 'local_mcp_unsupported_node_version' })
+        throw err
+      }),
+      probeLocalMcpTools: okLocalMcpProbe(),
+    })
+
+    expect(result.localMcpConfigured).toBe(false)
+    expect(result.errorCode).toBe('local_mcp_unsupported_node_version')
+    expect(result.probeResult).toBe('local_stdio_mcp_unsupported_node_version')
+    expect(result.messages.join('\n')).toContain('requires Node.js >=20.0.0')
+  })
+
+  it('does not report local MCP as configured when the wrapper handshake fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-codex-probe-fail-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+      probeLocalMcpTools: vi.fn(async () => ({ status: 'missing_tools' as const, toolNames: ['haven_get_agent'] })),
+    })
+
+    expect(result.localSignerConfigured).toBe(false)
+    expect(result.localMcpConfigured).toBe(false)
+    expect(result.errorCode).toBe('local_mcp_probe_missing_tools')
+    expect(result.probeResult).toBe('local_stdio_mcp_missing_tools')
+    expect(result.messages.join('\n')).toContain('Local Haven MCP handshake failed: missing_tools.')
   })
 })
 
@@ -169,4 +318,26 @@ function okToolsFetch(): typeof fetch {
       result: { tools: [{ name: 'haven_get_agent' }] },
     }), { status: 200 }),
   ) as unknown as typeof fetch
+}
+
+function fakePrepareLocalMcpRuntime() {
+  return vi.fn(async (input: { credentialDirectory: string }) => {
+    const wrapperPath = join(input.credentialDirectory, 'bin', 'haven-mcp')
+    return {
+      command: wrapperPath,
+      args: [],
+      wrapperPath,
+      runtimeDirectory: join(input.credentialDirectory, '..', '..', 'mcp-runtime', MCP_RUNTIME_MANIFEST.mcpVersion),
+      npmCacheDirectory: join(input.credentialDirectory, '..', '..', 'npm-cache'),
+      cliPath: join(input.credentialDirectory, '..', '..', 'mcp-runtime', MCP_RUNTIME_MANIFEST.mcpVersion, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js'),
+      messages: ['Prepared stable local Haven MCP wrapper.'],
+    }
+  })
+}
+
+function okLocalMcpProbe() {
+  return vi.fn(async () => ({
+    status: 'ok' as const,
+    toolNames: [...MCP_RUNTIME_MANIFEST.requiredTools],
+  }))
 }

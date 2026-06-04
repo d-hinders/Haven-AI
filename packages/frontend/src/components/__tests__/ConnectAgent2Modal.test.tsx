@@ -325,6 +325,22 @@ describe('ConnectAgent2Modal', () => {
     expect(modalText).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
   })
 
+  it('supports Codex Desktop as a first-class runtime option', async () => {
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Agent environment'), {
+      target: { value: 'codex-desktop' },
+    })
+    await fillAndCreateSetup()
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
+      '/agent-connection-setups',
+      expect.objectContaining({
+        runtime: 'codex-desktop',
+      }),
+    ))
+  })
+
   it('renders local-ready status, runtime status, and wallet approval action', async () => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: connectedSetupStatus(),
@@ -344,6 +360,34 @@ describe('ConnectAgent2Modal', () => {
     expect(screen.getByText(/until that approval is completed, this agent cannot spend/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Approve agent rules/i })).toBeInTheDocument()
     expect(screen.queryByText(/active spending today/i)).not.toBeInTheDocument()
+  })
+
+  it('shows specific runtime setup recovery copy for local MCP failures', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({
+        install_status: {
+          runtime_mcp_mode: 'local_stdio',
+          hosted_mcp_configured: false,
+          local_signer_configured: false,
+          local_mcp_configured: false,
+          credential_files_written: true,
+          local_mcp_acknowledged: true,
+          activation_command_available: false,
+          restart_required: true,
+          probe_result: 'local_stdio_mcp_runtime_install_failed',
+          error_code: 'local_mcp_runtime_install_failed',
+        },
+      }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+
+    await fillAndCreateSetup()
+
+    expect(await screen.findByText('Needs attention')).toBeInTheDocument()
+    expect(screen.getByText(/could not install Haven tools locally/i)).toBeInTheDocument()
   })
 
   it('shows wallet approval blockers from the current device state', async () => {

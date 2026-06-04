@@ -1,8 +1,7 @@
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { MCP_VERSION } from '@haven_ai/mcp'
-import { SIGNER_VERSION } from '@haven_ai/signer'
+import { signerPackageSpec } from './runtime-manifest.js'
 import type { RuntimeId } from './runtime-registry.js'
 
 export type RuntimeMcpMode = 'local_stdio' | 'hosted_plus_signer' | 'manual'
@@ -14,6 +13,7 @@ export interface RuntimeConfigInput {
   identityPath: string
   signerPath: string
   credentialDirectory: string
+  localMcpCommand?: string
   homeDir?: string
 }
 
@@ -30,9 +30,17 @@ export interface RuntimeConfigWriteResult {
   activationCommand?: string
 }
 
+export class InvalidCodexTomlError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'InvalidCodexTomlError'
+  }
+}
+
 export async function writeRuntimeConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
   switch (input.runtime) {
     case 'codex-cli':
+    case 'codex-desktop':
       return writeCodexConfig(input)
     case 'cursor':
       return writeJsonRuntimeConfig(input, cursorConfigPath(input.homeDir), 'mcpServers')
@@ -78,10 +86,10 @@ export function buildSignerServer(signerPath: string, runtime: RuntimeId): Recor
   return server
 }
 
-export function buildLocalMcpServer(identityPath: string, signerPath: string, runtime: RuntimeId): Record<string, unknown> {
+export function buildLocalMcpServer(command: string, runtime: RuntimeId): Record<string, unknown> {
   const server = {
-    command: 'npx',
-    args: ['-y', localMcpPackageName(), '--identity', identityPath, '--signer', signerPath],
+    command,
+    args: [],
   }
   if (runtime === 'vscode') return { type: 'stdio', ...server }
   return server
@@ -106,15 +114,18 @@ export function mergeJsonMcpConfig(
   return `${JSON.stringify(config, null, 2)}\n`
 }
 
-export function mergeCodexToml(existingToml: string, identityPath: string, signerPath: string): string {
-  let next = removeTomlTable(removeTomlTable(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
+export function mergeCodexToml(existingToml: string, localMcpCommand: string): string {
+  let next = removeTomlTableTree(removeTomlTableTree(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
   next = next.trimEnd()
   const block = [
     '[mcp_servers.haven]',
-    'command = "npx"',
-    `args = ["-y", ${tomlString(localMcpPackageName())}, "--identity", ${tomlString(identityPath)}, "--signer", ${tomlString(signerPath)}]`,
+    `command = ${tomlString(localMcpCommand)}`,
+    'args = []',
+    'startup_timeout_sec = 120',
   ].join('\n')
-  return `${next ? `${next}\n\n` : ''}${block}\n`
+  validateCodexToml(block, 'Generated Codex Haven config')
+  const merged = `${next ? `${next}\n\n` : ''}${block}\n`
+  return merged
 }
 
 async function writeJsonRuntimeConfig(
@@ -160,32 +171,36 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
   const target = codexConfigPath(input.homeDir)
   try {
     const existing = await readOptional(target)
-    const merged = mergeCodexToml(existing ?? '', input.identityPath, input.signerPath)
+    if (!input.localMcpCommand) {
+      throw new Error('local MCP wrapper command is required')
+    }
+    const merged = mergeCodexToml(existing ?? '', input.localMcpCommand)
     await writeOwnerOnlyText(target, merged)
     return {
       hostedConfigured: false,
       signerConfigured: true,
       localMcpConfigured: true,
       runtimeMcpMode: 'local_stdio',
-      target: 'Codex CLI config',
+      target: configTargetLabel(input.runtime),
       changed: existing !== merged,
       restartRequired: true,
       messages: [
-        'Updated local Haven MCP entry in Codex CLI config.',
+        `Updated local Haven MCP entry in ${configTargetLabel(input.runtime)}.`,
         'After Haven approval, restart Codex normally so it can load Haven tools.',
       ],
     }
   } catch (err) {
+    const invalidToml = err instanceof InvalidCodexTomlError
     return {
       hostedConfigured: false,
       signerConfigured: false,
       localMcpConfigured: false,
       runtimeMcpMode: 'local_stdio',
-      target: 'Codex CLI config',
+      target: configTargetLabel(input.runtime),
       changed: false,
       restartRequired: true,
-      messages: [`Could not update Codex CLI config: ${err instanceof Error ? err.message : String(err)}`],
-      errorCode: 'runtime_config_write_failed',
+      messages: [`Could not update ${configTargetLabel(input.runtime)}: ${err instanceof Error ? err.message : String(err)}`],
+      errorCode: invalidToml ? 'codex_config_invalid' : 'runtime_config_write_failed',
     }
   }
 }
@@ -213,23 +228,205 @@ function parseJsonObject(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
-function removeTomlTable(toml: string, table: string): string {
+function removeTomlTableTree(toml: string, table: string): string {
   const lines = toml.split(/\r?\n/)
-  const start = `[${table}]`
   const kept: string[] = []
   let skipping = false
   for (const line of lines) {
     const trimmed = line.trim()
-    if (trimmed === start) {
-      skipping = true
-      continue
-    }
-    if (skipping && trimmed.startsWith('[') && trimmed.endsWith(']')) {
-      skipping = false
+    const tableName = tomlTableName(trimmed)
+    if (tableName) {
+      skipping = tableName === table || tableName.startsWith(`${table}.`)
+      if (skipping) continue
     }
     if (!skipping) kept.push(line)
   }
   return kept.join('\n')
+}
+
+function tomlTableName(line: string): string | null {
+  if (line.startsWith('[[') && line.endsWith(']]')) return line.slice(2, -2).trim()
+  if (line.startsWith('[') && line.endsWith(']')) return line.slice(1, -1).trim()
+  return null
+}
+
+export function validateCodexToml(toml: string, label = 'Codex config'): void {
+  const lines = toml.split(/\r?\n/)
+  let pendingValue: { value: string; line: number } | null = null
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index]
+    const line = stripTomlComment(raw).trim()
+    if (!line) continue
+
+    if (pendingValue) {
+      pendingValue.value = `${pendingValue.value}\n${line}`
+      if (hasBalancedTomlContainers(pendingValue.value)) {
+        if (!isTomlValue(pendingValue.value)) {
+          throw new InvalidCodexTomlError(`${label} has invalid TOML near line ${pendingValue.line}.`)
+        }
+        pendingValue = null
+      }
+      continue
+    }
+
+    if (isTomlTable(line)) continue
+
+    const equalsIndex = line.indexOf('=')
+    if (equalsIndex <= 0) {
+      throw new InvalidCodexTomlError(`${label} has invalid TOML near line ${index + 1}.`)
+    }
+
+    const key = line.slice(0, equalsIndex).trim()
+    const value = line.slice(equalsIndex + 1).trim()
+    if (!isTomlKey(key)) {
+      throw new InvalidCodexTomlError(`${label} has invalid TOML near line ${index + 1}.`)
+    }
+    if (startsTomlContainer(value) && !hasBalancedTomlContainers(value)) {
+      pendingValue = { value, line: index + 1 }
+      continue
+    }
+    if (!isTomlValue(value)) {
+      throw new InvalidCodexTomlError(`${label} has invalid TOML near line ${index + 1}.`)
+    }
+  }
+  if (pendingValue) {
+    throw new InvalidCodexTomlError(`${label} has invalid TOML near line ${pendingValue.line}.`)
+  }
+}
+
+function isTomlTable(line: string): boolean {
+  const table = tomlTableName(line)
+  return Boolean(table && splitTomlDottedKey(table).every(isTomlKeyPart))
+}
+
+function isTomlKey(value: string): boolean {
+  return splitTomlDottedKey(value).every(isTomlKeyPart)
+}
+
+function splitTomlDottedKey(value: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  let escaped = false
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i]
+    if (quote) {
+      current += char
+      if (quote === '"' && char === '\\' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (char === quote && !escaped) quote = null
+      escaped = false
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      current += char
+      continue
+    }
+    if (char === '.') {
+      parts.push(current.trim())
+      current = ''
+      continue
+    }
+    current += char
+  }
+  parts.push(current.trim())
+  return quote ? [] : parts
+}
+
+function isTomlKeyPart(value: string): boolean {
+  return isTomlBareKey(value) || isTomlQuotedString(value)
+}
+
+function isTomlBareKey(value: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(value)
+}
+
+function isTomlValue(value: string): boolean {
+  if (!value) return false
+  if (isTomlQuotedString(value)) return true
+  if (/^(true|false)$/i.test(value)) return true
+  if (/^[+-]?(?:inf|nan)$/i.test(value)) return true
+  if (/^[+-]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?$/.test(value)) return true
+  if (/^\d{4}-\d{2}-\d{2}(?:[Tt ][0-9:.+-Zz]+)?$/.test(value)) return true
+  if ((value.startsWith('[') && value.endsWith(']')) || (value.startsWith('{') && value.endsWith('}'))) {
+    return hasBalancedTomlContainers(value)
+  }
+  return false
+}
+
+function startsTomlContainer(value: string): boolean {
+  return value.startsWith('[') || value.startsWith('{')
+}
+
+function isTomlQuotedString(value: string): boolean {
+  if (value.startsWith('"""') || value.startsWith("'''")) {
+    const marker = value.slice(0, 3)
+    return value.length >= 6 && value.endsWith(marker)
+  }
+  if ((!value.startsWith('"') || !value.endsWith('"')) && (!value.startsWith("'") || !value.endsWith("'"))) {
+    return false
+  }
+  return hasBalancedTomlContainers(value)
+}
+
+function stripTomlComment(value: string): string {
+  let quote: '"' | "'" | null = null
+  let escaped = false
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i]
+    if (quote) {
+      if (quote === '"' && char === '\\' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (char === quote && !escaped) quote = null
+      escaped = false
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (char === '#') return value.slice(0, i)
+  }
+  return value
+}
+
+function hasBalancedTomlContainers(value: string): boolean {
+  const stack: string[] = []
+  let quote: '"' | "'" | null = null
+  let escaped = false
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i]
+    if (quote) {
+      if (quote === '"' && char === '\\' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (char === quote && !escaped) quote = null
+      escaped = false
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (char === '[' || char === '{') {
+      stack.push(char)
+      continue
+    }
+    if (char === ']') {
+      if (stack.pop() !== '[') return false
+      continue
+    }
+    if (char === '}') {
+      if (stack.pop() !== '{') return false
+    }
+  }
+  return stack.length === 0 && quote === null
 }
 
 function tomlString(value: string): string {
@@ -264,6 +461,10 @@ function claudeDesktopConfigPath(homeDir = homedir()): string {
 
 function configTargetLabel(runtime: RuntimeId): string {
   switch (runtime) {
+    case 'codex-cli':
+      return 'Codex CLI config'
+    case 'codex-desktop':
+      return 'Codex Desktop config'
     case 'cursor':
       return 'Cursor MCP config'
     case 'vscode':
@@ -276,9 +477,5 @@ function configTargetLabel(runtime: RuntimeId): string {
 }
 
 function signerPackageName(): string {
-  return `@haven_ai/signer@${SIGNER_VERSION}`
-}
-
-function localMcpPackageName(): string {
-  return `@haven_ai/mcp@${MCP_VERSION}`
+  return signerPackageSpec()
 }

@@ -18,6 +18,8 @@ import {
 
 export interface HavenMcpServerOptions {
   credentialsPath?: string
+  identityPath?: string
+  signerPath?: string
   credentials?: HavenCredentialFile
   /**
    * When true, write the consent sidecar file (`<credentials>.ack.json`)
@@ -43,7 +45,14 @@ export async function createHavenClient(options: HavenMcpServerOptions = {}): Pr
 }
 
 export async function resolveHavenClient(options: HavenMcpServerOptions = {}): Promise<ResolvedHavenClient> {
-  const credentials = options.credentials ?? await loadCredentials(options.credentialsPath)
+  const credentialSource = options.credentialsPath || options.identityPath || options.signerPath
+    ? {
+        credentialsPath: options.credentialsPath,
+        identityPath: options.identityPath,
+        signerPath: options.signerPath,
+      }
+    : undefined
+  const credentials = options.credentials ?? await loadCredentials(credentialSource)
   const client = new HavenClient({
     apiKey: credentials.apiKey,
     delegateKey: credentials.delegateKey,
@@ -67,10 +76,13 @@ export async function createHavenMcpServer(options: HavenMcpServerOptions = {}):
  * concurrently cannot leak headers into each other and the backend
  * `agent_tool_invocations` rows are always attributed to the right tool.
  */
+export const MCP_NAME = '@haven_ai/mcp'
+export const MCP_VERSION = '0.1.3-alpha'
+
 export function buildMcpServer(haven: HavenClient): McpServer {
   const server = new McpServer({
-    name: '@haven_ai/mcp',
-    version: '0.1.0-alpha',
+    name: MCP_NAME,
+    version: MCP_VERSION,
   })
 
   const handlers = createToolHandlers(haven)
@@ -124,6 +136,9 @@ export async function runConsentGate(
       apiUrl: credentials.apiUrl,
       agentId: credentials.agentId,
       safeAddress: credentials.safeAddress,
+      delegateAddress: credentials.delegateAddress,
+      chainId: credentials.chainId,
+      allowanceSummary: credentials.allowanceSummary,
     },
     toolNames,
   )
@@ -131,7 +146,7 @@ export async function runConsentGate(
   // HAVEN_CREDENTIALS as well as --credentials). If neither file path is
   // available the operator must use HAVEN_MCP_ACK; --ack has nowhere to
   // write a sidecar in that case.
-  const credentialsPath = options.credentialsPath ?? credentials.sourcePath
+  const credentialsPath = options.identityPath ?? options.credentialsPath ?? credentials.sourcePath
   return ensureConsent(input, {
     credentialsPath,
     writeAck: options.writeAck,

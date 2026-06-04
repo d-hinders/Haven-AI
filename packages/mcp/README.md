@@ -3,11 +3,10 @@
 `@haven_ai/mcp` exposes Haven payment primitives as local MCP tools. It is a
 thin wrapper around `@haven_ai/sdk`.
 
-For most user-facing setup, the current Haven app leads with hosted MCP plus a
-local edge signer. See [`@haven_ai/mcp-server`](../mcp-server/README.md) and
-[`@haven_ai/signer`](../signer/README.md). This local package remains useful
-when the MCP server itself should run beside the agent runtime and read the
-credential file locally.
+For Codex CLI and Claude Code setup, the Haven app leads with this local stdio
+server so a normal restart can load Haven tools without shell environment
+setup. Hosted MCP plus a separate local edge signer remains a fallback shape for
+other runtimes.
 
 The server is intentionally local-only:
 
@@ -32,6 +31,15 @@ Create a private JSON file from the values in the Haven agent handoff:
 ```
 
 `delegate_key` is required. Without it the MCP server cannot sign locally.
+
+The Haven connector may also write split credentials:
+
+```sh
+npx @haven_ai/mcp --identity ~/.haven/agents/<agent-id>/identity.json --signer ~/.haven/agents/<agent-id>/signer.json
+```
+
+`identity.json` holds the local API key and setup metadata. `signer.json` holds
+the delegate key. Both files stay on the user's machine.
 
 ### Credential file permissions
 
@@ -129,6 +137,7 @@ Acknowledge in one of two ways:
   This writes `haven-agent.json.ack.json` next to your credential. Future
   launches pick it up automatically. When the tool set or your on-chain
   allowance changes, the hash changes and you'll be re-prompted.
+  For split credentials, the sidecar is written next to `identity.json`.
 
 - **Environment variable.** Copy the printed hash and set
   `HAVEN_MCP_ACK=<hash>` in the MCP client's `env` block. Useful for

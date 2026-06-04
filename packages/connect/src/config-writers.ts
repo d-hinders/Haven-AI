@@ -1,13 +1,17 @@
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { MCP_VERSION } from '@haven_ai/mcp'
 import { SIGNER_VERSION } from '@haven_ai/signer'
 import type { RuntimeId } from './runtime-registry.js'
+
+export type RuntimeMcpMode = 'local_stdio' | 'hosted_plus_signer' | 'manual'
 
 export interface RuntimeConfigInput {
   runtime: RuntimeId
   hostedMcpUrl: string
   apiKey: string
+  identityPath: string
   signerPath: string
   credentialDirectory: string
   homeDir?: string
@@ -16,6 +20,8 @@ export interface RuntimeConfigInput {
 export interface RuntimeConfigWriteResult {
   hostedConfigured: boolean
   signerConfigured: boolean
+  localMcpConfigured: boolean
+  runtimeMcpMode: RuntimeMcpMode
   target: string
   changed: boolean
   restartRequired: boolean
@@ -38,6 +44,8 @@ export async function writeRuntimeConfig(input: RuntimeConfigInput): Promise<Run
       return {
         hostedConfigured: false,
         signerConfigured: false,
+        localMcpConfigured: false,
+        runtimeMcpMode: 'manual',
         target: 'manual runtime setup',
         changed: false,
         restartRequired: true,
@@ -70,6 +78,15 @@ export function buildSignerServer(signerPath: string, runtime: RuntimeId): Recor
   return server
 }
 
+export function buildLocalMcpServer(identityPath: string, signerPath: string, runtime: RuntimeId): Record<string, unknown> {
+  const server = {
+    command: 'npx',
+    args: ['-y', localMcpPackageName(), '--identity', identityPath, '--signer', signerPath],
+  }
+  if (runtime === 'vscode') return { type: 'stdio', ...server }
+  return server
+}
+
 export function mergeJsonMcpConfig(
   existingJson: string | null,
   serverRoot: 'mcpServers' | 'servers',
@@ -89,17 +106,13 @@ export function mergeJsonMcpConfig(
   return `${JSON.stringify(config, null, 2)}\n`
 }
 
-export function mergeCodexToml(existingToml: string, hostedMcpUrl: string, signerPath: string): string {
+export function mergeCodexToml(existingToml: string, identityPath: string, signerPath: string): string {
   let next = removeTomlTable(removeTomlTable(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
   next = next.trimEnd()
   const block = [
     '[mcp_servers.haven]',
-    `url = ${tomlString(hostedMcpUrl)}`,
-    'bearer_token_env_var = "HAVEN_TOKEN"',
-    '',
-    '[mcp_servers.haven_signer]',
     'command = "npx"',
-    `args = ["-y", ${tomlString(signerPackageName())}, "--credentials", ${tomlString(signerPath)}]`,
+    `args = ["-y", ${tomlString(localMcpPackageName())}, "--identity", ${tomlString(identityPath)}, "--signer", ${tomlString(signerPath)}]`,
   ].join('\n')
   return `${next ? `${next}\n\n` : ''}${block}\n`
 }
@@ -121,6 +134,8 @@ async function writeJsonRuntimeConfig(
     return {
       hostedConfigured: true,
       signerConfigured: true,
+      localMcpConfigured: false,
+      runtimeMcpMode: 'hosted_plus_signer',
       target: configTargetLabel(input.runtime),
       changed: existing !== merged,
       restartRequired: input.runtime === 'claude-desktop',
@@ -130,6 +145,8 @@ async function writeJsonRuntimeConfig(
     return {
       hostedConfigured: false,
       signerConfigured: false,
+      localMcpConfigured: false,
+      runtimeMcpMode: 'hosted_plus_signer',
       target: configTargetLabel(input.runtime),
       changed: false,
       restartRequired: true,
@@ -141,40 +158,29 @@ async function writeJsonRuntimeConfig(
 
 async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
   const target = codexConfigPath(input.homeDir)
-  const envTarget = join(input.credentialDirectory, 'identity.env')
-  const launchTarget = join(input.credentialDirectory, 'start-codex.sh')
   try {
     const existing = await readOptional(target)
-    const merged = mergeCodexToml(existing ?? '', input.hostedMcpUrl, input.signerPath)
+    const merged = mergeCodexToml(existing ?? '', input.identityPath, input.signerPath)
     await writeOwnerOnlyText(target, merged)
-    await writeOwnerOnlyText(envTarget, `export HAVEN_TOKEN=${shellToken(input.apiKey)}\n`)
-    await writeOwnerExecutableText(
-      launchTarget,
-      [
-        '#!/bin/sh',
-        'set -eu',
-        `. ${shellToken(envTarget)}`,
-        'exec codex "$@"',
-        '',
-      ].join('\n'),
-    )
     return {
-      hostedConfigured: true,
+      hostedConfigured: false,
       signerConfigured: true,
+      localMcpConfigured: true,
+      runtimeMcpMode: 'local_stdio',
       target: 'Codex CLI config',
       changed: existing !== merged,
       restartRequired: true,
-      activationCommand: shellToken(launchTarget),
       messages: [
-        'Updated Haven MCP entries in Codex CLI config.',
-        'Wrote the hosted MCP token to a private env file.',
-        `Restart Codex with: ${shellToken(launchTarget)}`,
+        'Updated local Haven MCP entry in Codex CLI config.',
+        'After Haven approval, restart Codex normally so it can load Haven tools.',
       ],
     }
   } catch (err) {
     return {
       hostedConfigured: false,
       signerConfigured: false,
+      localMcpConfigured: false,
+      runtimeMcpMode: 'local_stdio',
       target: 'Codex CLI config',
       changed: false,
       restartRequired: true,
@@ -197,12 +203,6 @@ async function writeOwnerOnlyText(path: string, value: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   await writeFile(path, value, { mode: 0o600 })
   await chmod(path, 0o600).catch(() => undefined)
-}
-
-async function writeOwnerExecutableText(path: string, value: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  await writeFile(path, value, { mode: 0o700 })
-  await chmod(path, 0o700).catch(() => undefined)
 }
 
 function parseJsonObject(value: string): Record<string, unknown> {
@@ -234,10 +234,6 @@ function removeTomlTable(toml: string, table: string): string {
 
 function tomlString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-}
-
-function shellToken(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 function cursorConfigPath(homeDir = homedir()): string {
@@ -281,4 +277,8 @@ function configTargetLabel(runtime: RuntimeId): string {
 
 function signerPackageName(): string {
   return `@haven_ai/signer@${SIGNER_VERSION}`
+}
+
+function localMcpPackageName(): string {
+  return `@haven_ai/mcp@${MCP_VERSION}`
 }

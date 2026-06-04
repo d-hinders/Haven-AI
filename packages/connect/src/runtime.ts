@@ -18,7 +18,7 @@ import {
   type RuntimeInstallResult,
 } from './runtime-install.js'
 
-export const CONNECTOR_VERSION = '0.1.1'
+export const CONNECTOR_VERSION = '0.1.2'
 
 export interface ConnectOptions {
   setupToken: string
@@ -28,6 +28,7 @@ export interface ConnectOptions {
   environmentLabel?: string
   connectorVersion?: string
   ackSigner?: boolean
+  ackLocalTools?: boolean
 }
 
 export interface ConnectDeps {
@@ -99,9 +100,15 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     agentId: registration.agent_id,
     apiKey: localApiKey,
     delegateKey: localKey.privateKey,
+    delegateAddress: localKey.address,
     safeAddress: setup.haven_wallet.address,
     chainId: setup.haven_wallet.chain_id,
     network: setup.haven_wallet.network,
+    agentBudget: setup.agent_budget.map((budget) => ({
+      token_symbol: budget.token_symbol,
+      allowance_amount: budget.allowance_amount,
+      reset_period_min: budget.reset_period_min,
+    })),
     apiUrl: options.apiBaseUrl,
     hostedMcpUrl: registration.hosted_mcp_url,
     warn: log,
@@ -118,6 +125,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     credentialDirectory: credentialPaths.directory,
     environmentLabel: options.environmentLabel ?? 'Local workspace',
     ackSigner: options.ackSigner,
+    ackLocalTools: options.ackLocalTools,
   })
   printRuntimeInstall(runtimeInstall, log)
 
@@ -125,10 +133,13 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     await api.updateInstallStatus(registration.setup_id, localApiKey, {
       runtime: runtimeInstall.runtime,
       connectorVersion,
+      runtimeMcpMode: runtimeInstall.runtimeMcpMode,
       hostedMcpConfigured: runtimeInstall.hostedMcpConfigured,
       localSignerConfigured: runtimeInstall.localSignerConfigured,
+      localMcpConfigured: runtimeInstall.localMcpConfigured,
       credentialFilesWritten: true,
       signerAcknowledged: runtimeInstall.signerAcknowledged,
+      localMcpAcknowledged: runtimeInstall.localMcpAcknowledged,
       activationCommandAvailable: Boolean(runtimeInstall.activationCommand),
       probeResult: runtimeInstall.probeResult,
       restartRequired: runtimeInstall.restartRequired,
@@ -142,7 +153,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
 
   log('Return to Haven to approve the agent rules.')
   if (runtimeInstall.restartRequired) {
-    log('Restart this agent session after approval if your runtime loads MCP tools at startup.')
+    log('After approval, restart this agent normally so it can load Haven tools.')
   }
 
   return {
@@ -172,10 +183,12 @@ function secureLogger(log: (message: string) => void): (message: string) => void
 
 function printRuntimeInstall(result: RuntimeInstallResult, log: (message: string) => void): void {
   for (const message of result.messages) log(message)
-  if (result.hostedMcpConfigured) {
+  if (result.localMcpConfigured) {
+    log('Configured local Haven MCP tools.')
+  } else if (result.hostedMcpConfigured) {
     log('Configured hosted Haven MCP identity.')
   } else {
-    log('Hosted Haven MCP identity still needs runtime setup.')
+    log('Haven MCP tools still need runtime setup.')
   }
   if (result.localSignerConfigured) {
     log('Configured local Haven signer.')

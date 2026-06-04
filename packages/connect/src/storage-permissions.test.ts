@@ -30,6 +30,7 @@ describe('writeCredentialFiles permission warnings', () => {
       agentId: 'agent-1',
       apiKey: 'sk_agent_secret',
       delegateKey: `0x${'11'.repeat(32)}`,
+      delegateAddress: '0x1111111111111111111111111111111111111111',
       apiUrl: 'https://api.haven.example',
       hostedMcpUrl: 'https://mcp.haven.example/v1',
       warn: (message) => warnings.push(message),
@@ -56,6 +57,7 @@ describe('writeCredentialFiles permission warnings', () => {
       agentId: 'agent-1',
       apiKey: 'sk_agent_secret',
       delegateKey: `0x${'11'.repeat(32)}`,
+      delegateAddress: '0x1111111111111111111111111111111111111111',
       apiUrl: 'https://api.haven.example',
       hostedMcpUrl: 'https://mcp.haven.example/v1',
     })).rejects.toThrow('identity write failed')

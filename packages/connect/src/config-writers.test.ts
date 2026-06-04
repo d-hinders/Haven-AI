@@ -1,6 +1,7 @@
-import { mkdtemp, readFile, stat } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { MCP_VERSION } from '@haven_ai/mcp'
 import { SIGNER_VERSION } from '@haven_ai/signer'
 import { describe, expect, it } from 'vitest'
 import {
@@ -12,7 +13,9 @@ import {
 const API_KEY = 'sk_agent_secret_for_config_test'
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
 const HOSTED_URL = 'https://mcp.haven.example/v1'
+const IDENTITY_PATH = '/Users/example/.haven/agents/agent-1/identity.json'
 const SIGNER_PATH = '/Users/example/.haven/agents/agent-1/signer.json'
+const MCP_PACKAGE = `@haven_ai/mcp@${MCP_VERSION}`
 const SIGNER_PACKAGE = `@haven_ai/signer@${SIGNER_VERSION}`
 
 describe('runtime config writers', () => {
@@ -58,25 +61,27 @@ describe('runtime config writers', () => {
         '[mcp_servers.haven_signer]',
         'command = "old"',
       ].join('\n'),
-      HOSTED_URL,
+      IDENTITY_PATH,
       SIGNER_PATH,
     )
 
     expect(merged).toContain('model = "gpt-5"')
     expect(merged).toContain('[mcp_servers.other]')
     expect(merged).toContain('[mcp_servers.haven]')
-    expect(merged).toContain(`url = "${HOSTED_URL}"`)
-    expect(merged).toContain('bearer_token_env_var = "HAVEN_TOKEN"')
-    expect(merged).toContain('[mcp_servers.haven_signer]')
-    expect(merged).toContain(SIGNER_PACKAGE)
+    expect(merged).toContain('command = "npx"')
+    expect(merged).toContain(MCP_PACKAGE)
+    expect(merged).toContain(`"${IDENTITY_PATH}"`)
     expect(merged).not.toContain('"--ack"')
     expect(merged).toContain(`"${SIGNER_PATH}"`)
+    expect(merged).not.toContain('[mcp_servers.haven_signer]')
+    expect(merged).not.toContain('bearer_token_env_var')
     expect(merged).not.toContain('https://old.example')
+    expect(merged).not.toContain(HOSTED_URL)
     expect(merged).not.toContain(API_KEY)
     expect(merged).not.toContain(PRIVATE_KEY)
   })
 
-  it('writes Codex config and stores the bearer in a private env file, not TOML', async () => {
+  it('writes Codex config with local stdio MCP and no env launcher', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-config-'))
     const credentialsDir = join(dir, 'agent-1')
 
@@ -84,31 +89,27 @@ describe('runtime config writers', () => {
       runtime: 'codex-cli',
       hostedMcpUrl: HOSTED_URL,
       apiKey: API_KEY,
+      identityPath: join(credentialsDir, 'identity.json'),
       signerPath: SIGNER_PATH,
       credentialDirectory: credentialsDir,
       homeDir: dir,
     })
 
     const toml = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
-    const env = await readFile(join(credentialsDir, 'identity.env'), 'utf8')
-    const launchPath = join(credentialsDir, 'start-codex.sh')
-    const launcher = await readFile(launchPath, 'utf8')
-    expect(result.hostedConfigured).toBe(true)
+    expect(result.hostedConfigured).toBe(false)
     expect(result.signerConfigured).toBe(true)
+    expect(result.localMcpConfigured).toBe(true)
+    expect(result.runtimeMcpMode).toBe('local_stdio')
     expect(result.errorCode).toBeUndefined()
-    expect(result.activationCommand).toContain('start-codex.sh')
-    expect(toml).toContain('bearer_token_env_var = "HAVEN_TOKEN"')
-    expect(toml).toContain(SIGNER_PACKAGE)
+    expect(result.activationCommand).toBeUndefined()
+    expect(toml).toContain(MCP_PACKAGE)
+    expect(toml).toContain('--identity')
+    expect(toml).toContain(join(credentialsDir, 'identity.json'))
+    expect(toml).toContain('--signer')
     expect(toml).not.toContain('"--ack"')
     expect(toml).not.toContain(API_KEY)
-    expect(env).toContain(`export HAVEN_TOKEN='${API_KEY}'`)
-    expect(env).not.toContain(PRIVATE_KEY)
-    expect(launcher).toContain('identity.env')
-    expect(launcher).toContain('exec codex "$@"')
-    expect(launcher).not.toContain(API_KEY)
-    expect(launcher).not.toContain(PRIVATE_KEY)
-    if (process.platform !== 'win32') {
-      expect((await stat(launchPath)).mode & 0o777).toBe(0o700)
-    }
+    expect(toml).not.toContain(PRIVATE_KEY)
+    expect(toml).not.toContain('bearer_token_env_var')
+    expect(toml).not.toContain('haven_signer')
   })
 })

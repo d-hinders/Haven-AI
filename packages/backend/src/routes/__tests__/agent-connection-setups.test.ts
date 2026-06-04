@@ -173,7 +173,7 @@ describe('agent connection setup routes', () => {
     mockGetTokensForDelegate.mockReset()
     delete process.env.HAVEN_API_URL
     delete process.env.HAVEN_HOSTED_MCP_URL
-    process.env.CONNECT_AGENT_2_ENABLED = 'true'
+    delete process.env.CONNECT_AGENT_2_ENABLED
   })
 
   it('creates a pending setup with a returned-once token stored only as a hash', async () => {
@@ -212,9 +212,10 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  it('blocks new pending setup creation when the rollout gate is unset', async () => {
-    delete process.env.CONNECT_AGENT_2_ENABLED
+  it('creates a pending setup when the rollout gate is explicitly enabled', async () => {
+    process.env.CONNECT_AGENT_2_ENABLED = 'true'
     const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
 
     const response = await app.inject({
       method: 'POST',
@@ -226,15 +227,14 @@ describe('agent connection setup routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(404)
-    expect(mockQuery).not.toHaveBeenCalled()
-    expect(mockConnect).not.toHaveBeenCalled()
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({ status: 'awaiting_connection' })
 
     await app.close()
   })
 
-  it('blocks new pending setup creation when the rollout gate is disabled', async () => {
-    process.env.CONNECT_AGENT_2_ENABLED = 'false'
+  it.each(['false', '0', 'off'])('blocks new pending setup creation when the rollout gate is %s', async (gateValue) => {
+    process.env.CONNECT_AGENT_2_ENABLED = gateValue
     const app = await buildApp()
 
     const response = await app.inject({

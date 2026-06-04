@@ -24,6 +24,7 @@ import {
   proposeSafeTx,
   getSafeTxHash,
   getChainTokens,
+  SafeTxReceiptTimeoutError,
 } from '@/lib/safe-tx'
 import { truncate } from '@/lib/format'
 import { buildHandoff, type HandoffInput } from '@/lib/agent-handoff'
@@ -468,6 +469,17 @@ export default function CreateAgentModal({
       setAuthorityResult(completedAuthority)
       await saveAgentToHaven(completedAuthority)
     } catch (err: unknown) {
+      // Receipt timeout: the on-chain tx was broadcast and may still land.
+      // Record it as established authority and route the retry to a backend
+      // save-only — re-running handleExecute would rebuild the whole batch with
+      // a fresh nonce and double-apply (or collide) once the original confirms.
+      if (err instanceof SafeTxReceiptTimeoutError) {
+        setTxHash(err.txHash)
+        setAuthorityResult({ status: 'confirmed', txHash: err.txHash })
+        setExecError(err.message)
+        setExecStatus('error')
+        return
+      }
       const message = errorMessage(err)
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
         setExecError(
@@ -475,10 +487,6 @@ export default function CreateAgentModal({
             ? 'Face ID or Touch ID was cancelled'
             : 'Transaction rejected in wallet',
         )
-      } else if (message.includes('not yet confirmed after 2 minutes')) {
-        // Transaction submitted but receipt timed out — surface the tx hash so
-        // the user can track it on the block explorer and retry saving later.
-        setExecError(message)
       } else if (message.includes('would revert on-chain')) {
         // Simulation pre-flight detected a revert — avoid showing the raw
         // technical message; give the user a clear actionable hint instead.
@@ -1133,7 +1141,10 @@ export default function CreateAgentModal({
                     )}
                   </div>
                   <div className="flex gap-3 pt-2">
-                    {backendSaveFailed ? (
+                    {backendSaveFailed || authorityResult ? (
+                      // On-chain authority already exists (save failed, or the
+                      // tx was submitted but its receipt timed out). Retry must
+                      // only re-save to Haven — never re-run the on-chain batch.
                       <>
                         <Button variant="ghost" onClick={handleClose} className="flex-1">
                           Close

@@ -17,6 +17,25 @@ import type { HavenUserSigner } from './signer'
 // ── Constants ────────────────────────────────────────────────────────
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address
 
+/**
+ * Thrown when a submitted Safe tx does not produce a receipt within the timeout.
+ * The tx may still confirm later, so `txHash` is carried for the UI to surface a
+ * block-explorer link and to retry the *backend* save without re-running the
+ * on-chain batch. `instanceof Error` and the message stay intact for callers
+ * that still match on text.
+ */
+export class SafeTxReceiptTimeoutError extends Error {
+  readonly txHash: Hash
+  constructor(txHash: Hash) {
+    super(
+      `Transaction submitted but not yet confirmed after 2 minutes. ` +
+        `It may still land — check the block explorer for ${txHash}`,
+    )
+    this.name = 'SafeTxReceiptTimeoutError'
+    this.txHash = txHash
+  }
+}
+
 // ERC-20 transfer ABI
 const ERC20_TRANSFER_ABI = [
   {
@@ -353,10 +372,10 @@ export async function executeSafeTx(
       await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 })
     } catch (err) {
       if (err instanceof WaitForTransactionReceiptTimeoutError) {
-        throw new Error(
-          `Transaction submitted but not yet confirmed after 2 minutes. ` +
-            `It may still land — check the block explorer for ${txHash}`,
-        )
+        // The tx was broadcast and may still land. Throw a typed error carrying
+        // the hash so callers can route to "finish saving" instead of re-running
+        // the on-chain batch (which would double-apply or collide on the nonce).
+        throw new SafeTxReceiptTimeoutError(txHash)
       }
       throw err
     }
@@ -409,7 +428,10 @@ export async function proposeSafeTx(
       gasPrice: tx.gasPrice.toString(),
       gasToken: tx.gasToken,
       refundReceiver: tx.refundReceiver,
-      nonce: Number(tx.nonce),
+      // Send as a string: the Safe Tx Service hashes the exact uint256 nonce
+      // into contractTransactionHash, so Number() truncation on a high-nonce
+      // Safe (> 2^53) would post a nonce that disagrees with the hash → 422.
+      nonce: tx.nonce.toString(),
       contractTransactionHash: safeTxHash,
       sender,
       signature: adjustedSig,

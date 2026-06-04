@@ -32,6 +32,7 @@ import {
   getSafeTxHash,
   proposeSafeTx,
   signSafeTx,
+  SafeTxReceiptTimeoutError,
 } from '@/lib/safe-tx'
 import { useActiveSigner } from '@/lib/signer'
 import WalletButton from './WalletButton'
@@ -160,6 +161,7 @@ export default function ConnectAgent2Modal({
   const [addReset, setAddReset] = useState(1440)
   const [setup, setSetup] = useState<CreateSetupResponse | null>(null)
   const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [copied, setCopied] = useState<'prompt' | 'command' | 'manual' | null>(null)
   const [cancelled, setCancelled] = useState(false)
@@ -292,6 +294,11 @@ export default function ConnectAgent2Modal({
       setCreateError('Choose or create a Haven wallet before creating this setup.')
       return
     }
+    // Synchronous re-entry guard: `creating` only disables the button on the
+    // next render, so a fast double-click would POST twice and orphan the first
+    // pending setup. The ref flips immediately, before React commits.
+    if (creatingRef.current) return
+    creatingRef.current = true
     setCreating(true)
     setCreateError(null)
     try {
@@ -315,6 +322,7 @@ export default function ConnectAgent2Modal({
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'We could not create the setup.')
     } finally {
+      creatingRef.current = false
       setCreating(false)
     }
   }
@@ -661,6 +669,9 @@ export default function ConnectAgent2Modal({
                   onRemoveBudget={(row) => {
                     setAllowances((prev) => prev.filter((allowance) => allowance.tokenSymbol !== row.tokenSymbol))
                     setAddToken(row.tokenSymbol)
+                    // Clear any stale validation error from the previously
+                    // selected token so it doesn't block the re-selected one.
+                    setAddAmountError('')
                   }}
                 />
               )}
@@ -672,7 +683,7 @@ export default function ConnectAgent2Modal({
                     <p className="text-xs text-[var(--v2-ink-3)]">One per token</p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
-                    <Select value={addToken} onChange={(event) => setAddToken(event.target.value)}>
+                    <Select value={addToken} onChange={(event) => { setAddToken(event.target.value); setAddAmountError('') }}>
                       {availableTokens.map((token) => (
                         <option key={token.symbol} value={token.symbol}>
                           {token.symbol}
@@ -1435,6 +1446,8 @@ function errorMessage(err: unknown): string {
 }
 
 function extractTxHashFromError(err: unknown): string | null {
+  // Prefer the typed field — the regex fallback is for older/plain errors.
+  if (err instanceof SafeTxReceiptTimeoutError) return err.txHash
   const match = errorMessage(err).match(/0x[0-9a-fA-F]{64}/)
   return match?.[0] ?? null
 }

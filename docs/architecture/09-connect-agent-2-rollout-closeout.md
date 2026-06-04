@@ -207,11 +207,14 @@ Do not remove or demote the original Connect Agent flow until:
   backend requests, or generated artifacts.
 - A separate removal issue and PR are opened.
 
-## Current Merge Readiness
+## Historical #237 Merge Readiness
+
+This section records the #237 closeout that merged via PR #243. Current
+default-on rollback gate behavior is described in [Rollout Gates](#rollout-gates).
 
 CI status:
 
-- Pending until the #237 PR is opened. Green PR CI is required before merge.
+- PR #243 passed CI before merge.
 
 Local checks run on this branch:
 
@@ -268,13 +271,12 @@ Why it is safe to merge behind the gates:
 
 Residual risk and follow-up:
 
-- PR CI must still pass.
 - Browser coverage uses mocked Haven API responses and no real funds.
 - Runtime install behavior remains beta until verified across target agent
   environments.
 - Old flow removal needs a separate issue, rollout decision, and PR.
 
-Recommended merge order:
+Historical merge order:
 
 - #230, #231/#232, #233/#234, #235/#236, then #237. The earlier issues are
-  already merged; #237 should merge last after CI.
+  already merged.

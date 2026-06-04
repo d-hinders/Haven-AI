@@ -18,6 +18,7 @@ import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
@@ -601,29 +602,32 @@ function TransactionsSection({
         </div>
       ) : (
         <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-          {transactions.slice(0, 5).map((tx) => (
-            <Link
-              key={`${tx.hash}-${tx.type}-${tx.safeId}`}
-              href="/transactions"
-              className="block"
-            >
-              <TransactionActivityRow
-                title={transactionTitle(tx)}
-                description={transactionMovement(tx, resolveAddress)}
-                amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
-                amountTone={
-                  tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
-                }
-                status={tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent'}
-                statusTone={
-                  tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
-                }
-                timestamp={timeAgo(tx.timestamp * 1000)}
-                direction={tx.direction}
-                density="compact"
-              />
-            </Link>
-          ))}
+          {transactions.slice(0, 5).map((tx) => {
+            const lifecycle = machinePaymentLifecyclePresentation(tx)
+            return (
+              <Link
+                key={`${tx.hash}-${tx.type}-${tx.safeId}`}
+                href="/transactions"
+                className="block"
+              >
+                <TransactionActivityRow
+                  title={transactionTitle(tx)}
+                  description={transactionMovement(tx, resolveAddress)}
+                  amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
+                  amountTone={
+                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
+                  }
+                  status={lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
+                  statusTone={lifecycle?.tone ?? (
+                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
+                  )}
+                  timestamp={timeAgo(tx.timestamp * 1000)}
+                  direction={tx.direction}
+                  density="compact"
+                />
+              </Link>
+            )
+          })}
         </div>
       )}
     </div>

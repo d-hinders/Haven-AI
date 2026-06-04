@@ -28,6 +28,7 @@
   "scripts": {
     "build": "npm --prefix ../mcp run build && npm --prefix ../signer run build && tsup",
     "test": "npm --prefix ../mcp run build && npm --prefix ../signer run build && vitest run",
+    "smoke:pack": "npm --prefix ../sdk run build && npm --prefix ../mcp run build && HAVEN_CONNECT_PACKAGE_SMOKE=1 vitest run src/package-smoke.test.ts",
     "typecheck": "npm --prefix ../mcp run build && npm --prefix ../signer run build && tsc --noEmit"
   },
   "keywords": [
@@ -40,8 +41,8 @@
   "license": "MIT",
   "dependencies": {
     "@haven_ai/mcp": "0.1.3-alpha",
-    "@haven_ai/sdk": "*",
-    "@haven_ai/signer": "*",
+    "@haven_ai/sdk": "0.1.6",
+    "@haven_ai/signer": "0.1.0-alpha",
     "ethers": "^6.13.0"
   },
   "devDependencies": {

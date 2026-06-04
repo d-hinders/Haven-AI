@@ -213,6 +213,30 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
+  it('includes Codex Desktop runtime in the generated setup command', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'codex-desktop',
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    const body = response.json()
+    expect(body.connector_command).toContain('--ack-local-tools')
+    expect(body.connector_command).toContain('--runtime codex-desktop')
+    expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
+
+    await app.close()
+  })
+
   it('creates a pending setup when the rollout gate is explicitly enabled', async () => {
     process.env.CONNECT_AGENT_2_ENABLED = 'true'
     const app = await buildApp()

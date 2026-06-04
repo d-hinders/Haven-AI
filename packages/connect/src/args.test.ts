@@ -43,6 +43,7 @@ describe('parseArgs', () => {
   it('requires a setup token unless help is requested', () => {
     expect(() => parseArgs([], {})).toThrow('--setup')
     expect(parseArgs(['--help'], {}).help).toBe(true)
+    expect(helpText()).toContain('codex-desktop')
     expect(helpText()).toMatch(/never sends it to Haven/)
   })
 })

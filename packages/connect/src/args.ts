@@ -67,7 +67,7 @@ export function helpText(): string {
     'Options:',
     '  --setup <token>            Short-lived setup token from Haven.',
     '  --api <url>                Haven backend API URL. Defaults to HAVEN_API_URL or http://localhost:3001.',
-    '  --runtime <name>           Agent runtime hint, such as claude-code, codex-cli, cursor, vscode, or claude-desktop.',
+    '  --runtime <name>           Agent runtime hint, such as claude-code, codex-cli, codex-desktop, cursor, vscode, or claude-desktop.',
     '  --credentials-dir <path>   Credential directory fallback. Defaults to ~/.haven/agents.',
     '  --environment-label <text> Non-sensitive label shown in Haven setup review.',
     '  --ack-local-tools          Write the one-time local Haven tools acknowledgement during setup.',

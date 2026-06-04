@@ -30,10 +30,13 @@ export interface RegisterSetupInput extends ResolveSetupInput {
 export interface UpdateInstallStatusInput {
   runtime?: string
   connectorVersion: string
+  runtimeMcpMode?: string
   hostedMcpConfigured: boolean
   localSignerConfigured: boolean
+  localMcpConfigured?: boolean
   credentialFilesWritten?: boolean
   signerAcknowledged?: boolean
+  localMcpAcknowledged?: boolean
   activationCommandAvailable?: boolean
   probeResult: string
   restartRequired: boolean
@@ -128,10 +131,13 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
         body: JSON.stringify({
           runtime: input.runtime,
           connector_version: input.connectorVersion,
+          runtime_mcp_mode: input.runtimeMcpMode,
           hosted_mcp_configured: input.hostedMcpConfigured,
           local_signer_configured: input.localSignerConfigured,
+          local_mcp_configured: input.localMcpConfigured,
           credential_files_written: input.credentialFilesWritten,
           signer_acknowledged: input.signerAcknowledged,
+          local_mcp_acknowledged: input.localMcpAcknowledged,
           activation_command_available: input.activationCommandAvailable,
           probe_result: input.probeResult,
           restart_required: input.restartRequired,

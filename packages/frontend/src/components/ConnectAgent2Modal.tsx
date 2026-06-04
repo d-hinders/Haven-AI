@@ -1124,8 +1124,7 @@ function LocalConnectionReady({
     install &&
       !install.error_code &&
       install.restart_required &&
-      install.hosted_mcp_configured &&
-      install.local_signer_configured,
+      runtimeIsConfigured(install),
   )
   const budgets = status?.agent_budget ?? []
   const displayBudgets = budgets.map((budget) => ({
@@ -1195,8 +1194,8 @@ function LocalConnectionReady({
         <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
           <p className="text-sm font-semibold text-[var(--v2-ink)]">Agent restart prepared</p>
           <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-            The connector prepared Haven tools and local signing. After approval, restart the agent
-            with the connector's restart instruction so it can load them.
+            The connector prepared Haven tools for this agent. After approval, restart the agent
+            normally so it can load them.
           </p>
         </div>
       )}
@@ -1370,21 +1369,29 @@ function formatAbsoluteDate(value: string): string {
 function runtimeStatusLabel(install: AgentConnectionSetupStatusResponse['install_status']): string {
   if (!install) return 'Checking runtime setup'
   if (install.error_code) return 'Needs attention'
-  if (install.restart_required && install.hosted_mcp_configured && install.local_signer_configured) return 'Restart ready'
-  if (install.hosted_mcp_configured && install.local_signer_configured) return 'Configured'
+  if (install.restart_required && runtimeIsConfigured(install)) return 'Restart ready'
+  if (runtimeIsConfigured(install)) return 'Configured'
   if (install.credential_files_written) return 'Credentials stored locally'
   return 'Manual setup needed'
 }
 
 function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse['install_status']): string {
   if (!install) return 'Haven is waiting for the connector to report setup status.'
+  if (install.error_code === 'local_mcp_ack_required') return 'Haven tools need one-time acknowledgement before this agent can load them.'
   if (install.error_code === 'local_signer_ack_required') return 'Local signing needs one-time acknowledgement before this agent can load Haven tools.'
   if (install.error_code) return 'The connector stored credentials, but runtime setup needs a manual finish.'
+  if (install.restart_required && install.local_mcp_configured && runtimeIsConfigured(install)) return 'After approval, restart the agent normally so it can load Haven tools.'
   if (install.restart_required && install.activation_command_available) return 'The connector prepared a restart command. Use it after approval so this agent can load Haven tools.'
   if (install.restart_required) return 'Restart the agent session after approval so it can load Haven tools.'
-  if (install.hosted_mcp_configured && install.local_signer_configured) return 'The agent environment reported Haven tools and local signing are configured.'
+  if (runtimeIsConfigured(install)) return 'The agent environment reported Haven tools are configured.'
   if (install.credential_files_written) return 'The connector wrote local credentials. Add Haven to the runtime before using this agent.'
   return 'Use the command fallback or runtime settings to add Haven manually.'
+}
+
+function runtimeIsConfigured(install: AgentConnectionSetupStatusResponse['install_status']): boolean {
+  if (!install) return false
+  if (install.local_mcp_configured && install.local_mcp_acknowledged) return true
+  return Boolean(install.hosted_mcp_configured && install.local_signer_configured)
 }
 
 function approvalBlockReason(

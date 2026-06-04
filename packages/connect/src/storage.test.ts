@@ -12,9 +12,11 @@ describe('writeCredentialFiles', () => {
       agentId: 'agent-1',
       apiKey: 'sk_agent_testsecret',
       delegateKey: `0x${'11'.repeat(32)}`,
+      delegateAddress: '0x1111111111111111111111111111111111111111',
       safeAddress: '0x2222222222222222222222222222222222222222',
       chainId: 100,
       network: 'Gnosis',
+      agentBudget: [{ token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440 }],
       apiUrl: 'https://api.haven.example',
       hostedMcpUrl: 'https://mcp.haven.example/v1',
     })
@@ -27,8 +29,10 @@ describe('writeCredentialFiles', () => {
     expect(identity).not.toContain('1111111111111111111111111111111111111111111111111111111111111111')
 
     expect(signer).toContain('delegate_key')
+    expect(signer).toContain('delegate_address')
     expect(signer).toContain('1111111111111111111111111111111111111111111111111111111111111111')
     expect(signer).not.toContain('sk_agent_testsecret')
+    expect(identity).toContain('agent_budget')
 
     if (process.platform !== 'win32') {
       expect((await stat(paths.identityPath)).mode & 0o777).toBe(0o600)
@@ -43,6 +47,7 @@ describe('writeCredentialFiles', () => {
       agentId: 'agent-1',
       apiKey: 'sk_agent_testsecret',
       delegateKey: `0x${'11'.repeat(32)}`,
+      delegateAddress: '0x1111111111111111111111111111111111111111',
       apiUrl: 'https://api.haven.example',
       hostedMcpUrl: 'https://mcp.haven.example/v1',
     }

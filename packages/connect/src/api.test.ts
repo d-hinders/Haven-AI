@@ -51,12 +51,14 @@ describe('createConnectApiClient', () => {
     const api = createConnectApiClient('https://api.haven.example/', fetchImpl)
     await api.updateInstallStatus('setup-1', 'sk_agent_secret', {
       connectorVersion: '0.1.0',
+      runtimeMcpMode: 'local_stdio',
       hostedMcpConfigured: false,
-      localSignerConfigured: false,
+      localSignerConfigured: true,
+      localMcpConfigured: true,
       credentialFilesWritten: true,
-      signerAcknowledged: true,
+      localMcpAcknowledged: true,
       activationCommandAvailable: true,
-      probeResult: 'credential_files_written',
+      probeResult: 'local_stdio_mcp_ready',
       restartRequired: true,
       nextUserAction: 'return_to_haven_for_wallet_approval',
     })
@@ -65,7 +67,9 @@ describe('createConnectApiClient', () => {
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer sk_agent_secret')
     expect(String(calls[0].init.body)).not.toContain('sk_agent_secret')
     expect(String(calls[0].init.body)).toContain('credential_files_written')
-    expect(String(calls[0].init.body)).toContain('signer_acknowledged')
+    expect(String(calls[0].init.body)).toContain('runtime_mcp_mode')
+    expect(String(calls[0].init.body)).toContain('local_mcp_configured')
+    expect(String(calls[0].init.body)).toContain('local_mcp_acknowledged')
     expect(String(calls[0].init.body)).toContain('activation_command_available')
   })
 })

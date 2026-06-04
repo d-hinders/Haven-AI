@@ -12,13 +12,16 @@ describe('runConnect', () => {
     const installInputs: UpdateInstallStatusInput[] = []
     const installRuntime = vi.fn(async () => ({
       runtime: 'claude-code' as const,
-      hostedMcpConfigured: true,
+      runtimeMcpMode: 'local_stdio' as const,
+      hostedMcpConfigured: false,
       localSignerConfigured: true,
-      probeResult: 'hosted_ok_local_signer_ready',
+      localMcpConfigured: true,
+      localMcpAcknowledged: true,
+      probeResult: 'local_stdio_mcp_ready',
       restartRequired: true,
       nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
       configTarget: 'Claude Code MCP config',
-      messages: ['Updated Haven MCP entries with Claude Code.'],
+      messages: ['Updated local Haven MCP entry with Claude Code.'],
     }))
     const api: ConnectApiClient = {
       resolveSetup: vi.fn(async () => ({
@@ -77,6 +80,12 @@ describe('runConnect', () => {
       writeCredentials: vi.fn(async (input) => {
         expect(input.apiKey).toBe('sk_agent_supersecret')
         expect(input.delegateKey).toBe(PRIVATE_KEY)
+        expect(input.delegateAddress).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(input.agentBudget).toEqual([{
+          token_symbol: 'USDC.e',
+          allowance_amount: '25000000',
+          reset_period_min: 1440,
+        }])
         return {
           directory: '/tmp/haven-connect-test/agent-1',
           identityPath: '/tmp/haven-connect-test/agent-1/identity.json',
@@ -97,15 +106,19 @@ describe('runConnect', () => {
     expect(JSON.stringify(registerInputs[0])).not.toContain('sk_agent_supersecret')
     expect(JSON.stringify(registerInputs[0])).not.toMatch(/delegate_key|private_key|privateKey/)
     expect(installInputs[0]).toMatchObject({
-      hostedMcpConfigured: true,
+      runtimeMcpMode: 'local_stdio',
+      hostedMcpConfigured: false,
       localSignerConfigured: true,
+      localMcpConfigured: true,
+      localMcpAcknowledged: true,
       credentialFilesWritten: true,
-      probeResult: 'hosted_ok_local_signer_ready',
+      probeResult: 'local_stdio_mcp_ready',
       nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
     })
     expect(installRuntime).toHaveBeenCalledWith(expect.objectContaining({
       apiKey: 'sk_agent_supersecret',
       hostedMcpUrl: 'https://mcp.haven.example/v1',
+      identityPath: '/tmp/haven-connect-test/agent-1/identity.json',
       signerPath: '/tmp/haven-connect-test/agent-1/signer.json',
     }))
 

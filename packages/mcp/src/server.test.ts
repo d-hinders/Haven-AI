@@ -1,6 +1,9 @@
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from '@haven_ai/sdk'
-import { buildMcpServer } from './server.js'
+import { buildMcpServer, createHavenMcpServer } from './server.js'
 
 const baseUrl = 'https://haven.example'
 
@@ -82,6 +85,54 @@ describe('Haven MCP server dispatch', () => {
     const havenCall = captured.find((c) => c.url.startsWith(baseUrl))
     expect(havenCall).toBeDefined()
     expect(havenCall?.headers['x-haven-mcp-tool']).toBe('haven_get_agent')
+  })
+
+  it('builds from split identity and signer credentials without env vars', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-split-server-'))
+    const identityPath = join(dir, 'identity.json')
+    const signerPath = join(dir, 'signer.json')
+    await writeFile(identityPath, JSON.stringify({
+      api_key: 'sk_agent_split',
+      api_url: baseUrl,
+      agent_id: 'agent-1',
+      safe_address: '0xSafe',
+      chain_id: 100,
+    }))
+    await writeFile(signerPath, JSON.stringify({
+      delegate_key: `0x${'11'.repeat(32)}`,
+      delegate_address: '0x1111111111111111111111111111111111111111',
+    }))
+    await chmod(identityPath, 0o600)
+    await chmod(signerPath, 0o600)
+
+    const server = await createHavenMcpServer({ identityPath, signerPath, skipConsent: true })
+
+    expect(readToolByName(server as any, 'haven_get_agent')).toBeDefined()
+  })
+
+  it('keeps HAVEN_CREDENTIALS support through the server entrypoint', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-env-server-'))
+    const credentialsPath = join(dir, 'agent.json')
+    const originalCredentials = process.env.HAVEN_CREDENTIALS
+    await writeFile(credentialsPath, JSON.stringify({
+      api_key: 'sk_agent_env',
+      api_url: baseUrl,
+      delegate_key: `0x${'22'.repeat(32)}`,
+    }))
+    await chmod(credentialsPath, 0o600)
+
+    try {
+      process.env.HAVEN_CREDENTIALS = credentialsPath
+      const server = await createHavenMcpServer({ skipConsent: true })
+
+      expect(readToolByName(server as any, 'haven_get_agent')).toBeDefined()
+    } finally {
+      if (originalCredentials === undefined) {
+        delete process.env.HAVEN_CREDENTIALS
+      } else {
+        process.env.HAVEN_CREDENTIALS = originalCredentials
+      }
+    }
   })
 
   it('clears the X-Haven-MCP-Tool header after dispatch so later calls are not mis-attributed', async () => {

@@ -10,6 +10,8 @@ const ENV_KEYS = [
   'HAVEN_DELEGATE_KEY',
   'HAVEN_AGENT_ID',
   'HAVEN_SAFE_ADDRESS',
+  'HAVEN_CHAIN_ID',
+  'HAVEN_NETWORK',
   'HAVEN_API_URL',
 ] as const
 
@@ -43,7 +45,10 @@ describe('loadCredentials', () => {
       delegate_key: '0xdelegate',
       agent_id: 'agent-1',
       safe_address: '0xSafe',
+      chain_id: 100,
+      network: 'Gnosis',
       api_url: 'https://haven.example',
+      allowance_summary: [{ token: 'USDC', amount: '25000000', resetMinutes: 1440 }],
     }))
     await chmod(file, 0o600)
 
@@ -52,8 +57,48 @@ describe('loadCredentials', () => {
       delegateKey: '0xdelegate',
       agentId: 'agent-1',
       safeAddress: '0xSafe',
+      chainId: 100,
+      network: 'Gnosis',
       apiUrl: 'https://haven.example',
+      allowanceSummary: [{ token: 'USDC', amount: '25000000', resetMinutes: 1440 }],
       sourcePath: file,
+    })
+  })
+
+  it('loads split identity and signer credential files', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-split-'))
+    const identityPath = join(dir, 'identity.json')
+    const signerPath = join(dir, 'signer.json')
+    await writeFile(identityPath, JSON.stringify({
+      api_key: 'sk_agent_split',
+      agent_id: 'agent-1',
+      safe_address: '0xSafe',
+      chain_id: 100,
+      network: 'Gnosis',
+      api_url: 'https://haven.example',
+      agent_budget: [{ token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440 }],
+    }))
+    await writeFile(signerPath, JSON.stringify({
+      delegate_key: '0xdelegate',
+      delegate_address: '0xDelegate',
+      safe_address: '0xSafeSigner',
+    }))
+    await chmod(identityPath, 0o600)
+    await chmod(signerPath, 0o600)
+
+    await expect(loadCredentials({ identityPath, signerPath })).resolves.toEqual({
+      apiKey: 'sk_agent_split',
+      delegateKey: '0xdelegate',
+      agentId: 'agent-1',
+      safeAddress: '0xSafe',
+      delegateAddress: '0xDelegate',
+      chainId: 100,
+      network: 'Gnosis',
+      apiUrl: 'https://haven.example',
+      allowanceSummary: [{ token: 'USDC', amount: '25000000', resetMinutes: 1440 }],
+      sourcePath: identityPath,
+      identityPath,
+      signerPath,
     })
   })
 

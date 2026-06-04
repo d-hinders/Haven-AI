@@ -14,9 +14,15 @@ export interface WriteCredentialInput {
   agentId: string
   apiKey: string
   delegateKey: string
+  delegateAddress: string
   safeAddress?: string
   chainId?: number
   network?: string
+  agentBudget?: Array<{
+    token_symbol: string
+    allowance_amount: string
+    reset_period_min: number
+  }>
   apiUrl: string
   hostedMcpUrl: string
   warn?: (message: string) => void
@@ -57,11 +63,12 @@ export async function writeCredentialFiles(input: WriteCredentialInput): Promise
 
   await writeOwnerOnlyJson(
     signerPath,
-    {
-      delegate_key: input.delegateKey,
-      agent_id: input.agentId,
-      safe_address: input.safeAddress,
-      chain_id: input.chainId,
+      {
+        delegate_key: input.delegateKey,
+        delegate_address: input.delegateAddress,
+        agent_id: input.agentId,
+        safe_address: input.safeAddress,
+        chain_id: input.chainId,
       network: input.network,
       note: 'Local signer credential. Haven backend never receives this private key.',
     },
@@ -79,6 +86,7 @@ export async function writeCredentialFiles(input: WriteCredentialInput): Promise
         network: input.network,
         api_url: input.apiUrl,
         hosted_mcp_url: input.hostedMcpUrl,
+        agent_budget: input.agentBudget,
         note: 'Haven API key identifies the agent only. It cannot spend without the local signer key and on-chain Haven wallet rules.',
       },
       input.warn,

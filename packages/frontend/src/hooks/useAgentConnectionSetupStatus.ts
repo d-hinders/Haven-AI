@@ -47,10 +47,13 @@ export interface AgentConnectionSetupStatusResponse {
     config_target?: string
   }
   install_status?: {
+    runtime_mcp_mode?: string
     hosted_mcp_configured?: boolean
     local_signer_configured?: boolean
+    local_mcp_configured?: boolean
     credential_files_written?: boolean
     signer_acknowledged?: boolean
+    local_mcp_acknowledged?: boolean
     activation_command_available?: boolean
     probe_result?: string
     restart_required?: boolean

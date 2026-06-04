@@ -813,6 +813,76 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
+  it('keeps confirmed wallet approval in progress when on-chain budget is not visible yet', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([])
+    mockWalletApprovalPersist()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      status: 'approval_in_progress',
+      approval: {
+        status: 'submitted',
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+      failure_reason: 'On-chain agent budget is not active yet',
+    })
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
+    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(setupUpdate?.[1]).toEqual([
+      SETUP.id,
+      'user-1',
+      'approval_in_progress',
+      'submitted',
+      TX_HASH,
+      SAFE_TX_HASH,
+      'On-chain agent budget is not active yet',
+    ])
+
+    await app.close()
+  })
+
+  it('keeps confirmed wallet approval in progress when on-chain verification is temporarily unavailable', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockRejectedValue(new Error('rpc unavailable'))
+    mockWalletApprovalPersist()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      status: 'approval_in_progress',
+      approval: {
+        status: 'submitted',
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+      failure_reason: 'Haven could not verify the on-chain agent rules yet',
+    })
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
+
+    await app.close()
+  })
+
   it('does not persist wallet approval if setup was cancelled after the initial read', async () => {
     const app = await buildApp()
     mockQuery

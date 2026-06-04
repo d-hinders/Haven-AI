@@ -76,6 +76,7 @@ interface AgentAllowanceRow {
 
 interface ReconciliationPaymentRow {
   id: string
+  kind: 'payment_intent' | 'approval_request'
   user_id: string
   tx_hash: string | null
   status: string
@@ -101,7 +102,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function mapEvidence(row: MachinePaymentEvidenceRow) {
   return {
     id: row.id,
-    payment_id: row.payment_intent_id,
+    payment_id: row.payment_intent_id ?? row.approval_request_id,
+    payment_intent_id: row.payment_intent_id,
+    approval_request_id: row.approval_request_id,
     rail: row.rail,
     proof_status: row.proof_status,
     tx_hash: row.tx_hash,
@@ -375,14 +378,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       })
 
       if (!evidence) {
-        return reply.code(404).send({ error: 'Payment intent not found' })
+        return reply.code(404).send({ error: 'Payment not found' })
       }
 
       return reply.code(202).send({ evidence: mapEvidence(evidence) })
     } catch (err) {
       const marker = err instanceof Error ? err.message : String(err)
       if (marker === 'payment_not_confirmed') {
-        return reply.code(409).send({ error: 'Evidence requires a confirmed payment intent' })
+        return reply.code(409).send({ error: 'Evidence requires a confirmed payment' })
       }
       if (marker === 'tx_hash_mismatch') {
         return reply.code(409).send({ error: 'txHash does not match payment intent' })
@@ -445,7 +448,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
 
     const paymentResult = await pool.query<ReconciliationPaymentRow>(
-      `SELECT id, user_id, tx_hash, status, payment_rail, source,
+      `SELECT 'payment_intent'::TEXT AS kind,
+              id, user_id, tx_hash, status, payment_rail, source,
               payment_resource_url, x402_resource_url,
               merchant_address, x402_merchant_address,
               machine_challenge_id, machine_idempotency_key, x402_idempotency_key
@@ -454,14 +458,29 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
        LIMIT 1`,
       [paymentId, agent.id],
     )
-    const payment = paymentResult.rows[0]
+    let payment = paymentResult.rows[0]
     if (!payment) {
-      return reply.code(404).send({ error: 'Payment intent not found' })
+      const approvalResult = await pool.query<ReconciliationPaymentRow>(
+        `SELECT 'approval_request'::TEXT AS kind,
+                id, user_id, tx_hash, status, payment_rail, source,
+                payment_resource_url, x402_resource_url,
+                merchant_address, NULL::TEXT AS x402_merchant_address,
+                machine_challenge_id, machine_idempotency_key, NULL::TEXT AS x402_idempotency_key
+         FROM approval_requests
+         WHERE id = $1 AND agent_id = $2
+         LIMIT 1`,
+        [paymentId, agent.id],
+      )
+      payment = approvalResult.rows[0]
+    }
+    if (!payment) {
+      return reply.code(404).send({ error: 'Payment not found' })
     }
 
-    if (payment.status !== 'confirmed' || !payment.tx_hash) {
+    const expectedStatus = payment.kind === 'approval_request' ? 'executed' : 'confirmed'
+    if (payment.status !== expectedStatus || !payment.tx_hash) {
       return reply.code(409).send({
-        error: 'Reconciliation events require a confirmed payment intent',
+        error: 'Reconciliation events require a confirmed payment',
         status: payment.status,
       })
     }
@@ -475,14 +494,18 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(409).send({ error: 'rail does not match payment intent' })
     }
 
+    const paymentIntentId = payment.kind === 'payment_intent' ? payment.id : null
+    const approvalRequestId = payment.kind === 'approval_request' ? payment.id : null
+    const conflictColumn = payment.kind === 'approval_request' ? 'approval_request_id' : 'payment_intent_id'
+
     const result = await pool.query<{ id: string; status: string; created_at: string }>(
       `INSERT INTO machine_payment_reconciliation_events (
-        agent_id, user_id, payment_intent_id, rail, event_type, tx_hash,
+        agent_id, user_id, payment_intent_id, approval_request_id, rail, event_type, tx_hash,
         resource_url, merchant_address, machine_challenge_id, machine_idempotency_key,
         reason, details
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      ON CONFLICT (payment_intent_id, event_type)
-        WHERE payment_intent_id IS NOT NULL
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      ON CONFLICT (${conflictColumn}, event_type)
+        WHERE ${conflictColumn} IS NOT NULL
       DO UPDATE SET
         tx_hash = EXCLUDED.tx_hash,
         resource_url = EXCLUDED.resource_url,
@@ -497,7 +520,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       [
         agent.id,
         payment.user_id,
-        payment.id,
+        paymentIntentId,
+        approvalRequestId,
         rail,
         eventType,
         payment.tx_hash.toLowerCase(),

@@ -184,6 +184,8 @@ describe('mergeX402Transactions', () => {
       agentName: 'Research assistant',
       paymentId: 'payment-id',
       paymentProofStatus: 'protocol_receipt_attached',
+      paymentFlowStatus: 'paid',
+      paymentAttentionReason: null,
     })
   })
 
@@ -208,6 +210,8 @@ describe('mergeX402Transactions', () => {
             amount_human: '0.01',
             merchant_address: '0x2222222222222222222222222222222222222222',
             payment_resource_url: 'https://mcp.soundside.ai/mcp',
+            payment_proof_status: 'protocol_receipt_attached',
+            payment_reconciliation_event_type: null,
             executed_at: '2026-05-22T07:50:10Z',
             created_at: '2026-05-22T07:49:55Z',
           },
@@ -261,7 +265,57 @@ describe('mergeX402Transactions', () => {
       agentId: 'agent-id',
       agentName: 'Research assistant',
       paymentId: 'approval-id',
+      paymentProofStatus: 'protocol_receipt_attached',
+      paymentFlowStatus: 'paid',
+      paymentAttentionReason: null,
+    })
+  })
+
+  it('marks x402 transactions with open merchant reconciliation as needing attention', async () => {
+    vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'payment-id',
+            tx_hash: TX_HASH,
+            agent_id: 'agent-id',
+            agent_name: 'Research assistant',
+            safe_id: 'safe-id',
+            safe_address: SAFE_ADDRESS,
+            safe_name: 'Main wallet',
+            chain_id: 8453,
+            token_symbol: 'USDC',
+            token_address: USDC_ADDRESS,
+            to_address: '0x1111111111111111111111111111111111111111',
+            amount_raw: '20000',
+            amount_human: '0.02',
+            x402_merchant_address: '0x2222222222222222222222222222222222222222',
+            x402_resource_url: 'https://api.example.com/data',
+            payment_proof_status: 'payment_confirmed',
+            payment_reconciliation_event_type: 'merchant_retry_rejected_after_payment',
+            confirmed_at: '2026-05-08T11:50:10Z',
+            created_at: '2026-05-08T11:49:55Z',
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{
+        id: 'safe-id',
+        safe_address: SAFE_ADDRESS,
+        chain_id: 8453,
+        name: 'Main wallet',
+      }],
+      [],
+    )
+
+    expect(result[0]).toMatchObject({
+      source: 'x402',
       paymentProofStatus: 'payment_confirmed',
+      paymentFlowStatus: 'needs_attention',
+      paymentAttentionReason: 'merchant_retry_rejected_after_payment',
     })
   })
 })

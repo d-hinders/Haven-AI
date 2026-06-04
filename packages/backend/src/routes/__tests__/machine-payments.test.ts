@@ -103,6 +103,7 @@ describe('machine payment routes', () => {
   function confirmedPayment(overrides: Record<string, unknown> = {}) {
     return {
       id: PAYMENT_ID,
+      kind: 'payment_intent',
       agent_id: AGENT.id,
       user_id: AGENT.user_id,
       safe_address: AGENT.safe_address,
@@ -129,6 +130,38 @@ describe('machine payment routes', () => {
       }),
       x402_idempotency_key: null,
       confirmed_at: '2026-05-15T12:00:00.000Z',
+      ...overrides,
+    }
+  }
+
+  function executedApproval(overrides: Record<string, unknown> = {}) {
+    return {
+      id: PAYMENT_ID,
+      kind: 'approval_request',
+      agent_id: AGENT.id,
+      user_id: AGENT.user_id,
+      safe_address: AGENT.safe_address,
+      chain_id: 8453,
+      token_symbol: 'USDC',
+      token_address: USDC,
+      to_address: RECIPIENT.toLowerCase(),
+      amount_raw: '10000',
+      amount_human: '0.01',
+      tx_hash: TX_HASH,
+      status: 'executed',
+      payment_rail: 'mpp_demo',
+      source: 'mpp_demo',
+      payment_resource_url: challenge.resource,
+      x402_resource_url: null,
+      merchant_address: RECIPIENT.toLowerCase(),
+      machine_challenge_id: challenge.challengeId,
+      machine_idempotency_key: 'mpp_demo:test',
+      machine_metadata: JSON.stringify({
+        protocol: 'mpp',
+        network: challenge.network.name,
+        description: challenge.description,
+      }),
+      executed_at: '2026-05-15T12:00:00.000Z',
       ...overrides,
     }
   }
@@ -224,6 +257,7 @@ describe('machine payment routes', () => {
         rows: [{
           id: 'evidence-1',
           payment_intent_id: PAYMENT_ID,
+          approval_request_id: null,
           agent_id: AGENT.id,
           user_id: AGENT.user_id,
           rail: 'mpp_demo',
@@ -265,6 +299,8 @@ describe('machine payment routes', () => {
       receipts: [{
         id: 'evidence-1',
         payment_id: PAYMENT_ID,
+        payment_intent_id: PAYMENT_ID,
+        approval_request_id: null,
         rail: 'mpp_demo',
         proof_status: 'payment_confirmed',
         tx_hash: TX_HASH,
@@ -720,6 +756,47 @@ describe('machine payment routes', () => {
     expect(insertCall[1]).toContain('mpp_demo:test')
   })
 
+  it('records a reconciliation event for executed approval requests rejected by the merchant retry', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [executedApproval()] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'event-approval',
+          status: 'open',
+          created_at: '2026-05-15T12:00:00.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: TX_HASH,
+        reason: 'Merchant returned HTTP 402 after approval-funded payment',
+        details: { retryStatus: 402, resourceUrl: challenge.resource },
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      event_id: 'event-approval',
+      payment_id: PAYMENT_ID,
+      event_type: 'merchant_retry_rejected_after_payment',
+    })
+
+    const insertCall = mockQuery.mock.calls[3]
+    expect(insertCall[0]).toContain('approval_request_id')
+    expect(insertCall[0]).toContain('ON CONFLICT (approval_request_id, event_type)')
+    expect(insertCall[1]).toContain(PAYMENT_ID)
+    expect(insertCall[1]).toContain('merchant_retry_rejected_after_payment')
+  })
+
   it('attaches SDK-reported merchant evidence for confirmed machine payments', async () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
@@ -793,6 +870,84 @@ describe('machine payment routes', () => {
 
     expect(mockQuery.mock.calls[2][0]).toContain('machine_payment_evidence')
     expect(mockQuery.mock.calls[3][0]).toContain('UPDATE machine_payment_evidence')
+    expect(mockQuery.mock.calls[4][0]).toContain('machine_payment_reconciliation_events')
+    expect(mockQuery.mock.calls[4][0]).toContain("status = 'resolved'")
+    expect(mockQuery.mock.calls[4][0]).toContain('WHERE payment_intent_id = $1')
+  })
+
+  it('attaches SDK-reported merchant evidence for executed approval requests', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [executedApproval()] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'evidence-approval',
+          payment_intent_id: null,
+          approval_request_id: PAYMENT_ID,
+          agent_id: AGENT.id,
+          user_id: AGENT.user_id,
+          rail: 'mpp_demo',
+          proof_status: 'protocol_receipt_attached',
+          tx_hash: TX_HASH,
+          chain_id: 8453,
+          resource_url: challenge.resource,
+          merchant_address: RECIPIENT.toLowerCase(),
+          payer_address: AGENT.safe_address.toLowerCase(),
+          settlement_address: RECIPIENT.toLowerCase(),
+          token_symbol: 'USDC',
+          token_address: USDC.toLowerCase(),
+          amount_raw: '10000',
+          amount_human: '0.01',
+          challenge_id: challenge.challengeId,
+          idempotency_key: 'mpp_demo:test',
+          challenge_payload: challenge,
+          selected_payment: null,
+          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+          payment_proof_header: 'proof-header',
+          protocol_receipt_header_name: 'Payment-Receipt',
+          protocol_receipt_header: 'receipt-header',
+          protocol_receipt_payload: { status: 'settled' },
+          merchant_status: 200,
+          confirmed_at: '2026-05-15T12:00:00.000Z',
+          created_at: '2026-05-15T12:00:00.000Z',
+          updated_at: '2026-05-15T12:00:01.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: TX_HASH,
+        resourceUrl: challenge.resource,
+        merchantStatus: 200,
+        paymentProofHeaderName: 'MACHINE-PAYMENT-PROOF',
+        paymentProofHeader: 'proof-header',
+        protocolReceiptHeaderName: 'Payment-Receipt',
+        protocolReceiptHeader: 'receipt-header',
+        protocolReceiptPayload: { status: 'settled' },
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      evidence: {
+        payment_id: PAYMENT_ID,
+        payment_intent_id: null,
+        approval_request_id: PAYMENT_ID,
+        proof_status: 'protocol_receipt_attached',
+      },
+    })
+    expect(mockQuery.mock.calls[3][0]).toContain('approval_request_id')
+    expect(mockQuery.mock.calls[4][0]).toContain('WHERE approval_request_id = $1')
+    expect(mockQuery.mock.calls[5][0]).toContain('machine_payment_reconciliation_events')
+    expect(mockQuery.mock.calls[5][0]).toContain("status = 'resolved'")
+    expect(mockQuery.mock.calls[5][0]).toContain('WHERE approval_request_id = $1')
   })
 
   it('rejects evidence reports whose tx hash does not match the payment', async () => {
@@ -835,13 +990,14 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(409)
-    expect(response.json().error).toBe('Evidence requires a confirmed payment intent')
+    expect(response.json().error).toBe('Evidence requires a confirmed payment')
     expect(mockQuery).toHaveBeenCalledTimes(2)
   })
 
   it('does not attach evidence to another agent payment', async () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
 
     const response = await app.inject({
@@ -856,8 +1012,8 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(404)
-    expect(response.json().error).toBe('Payment intent not found')
-    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(response.json().error).toBe('Payment not found')
+    expect(mockQuery).toHaveBeenCalledTimes(3)
   })
 
   it('does not record reconciliation events for unconfirmed payments', async () => {
@@ -880,7 +1036,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(409)
     expect(response.json()).toMatchObject({
-      error: 'Reconciliation events require a confirmed payment intent',
+      error: 'Reconciliation events require a confirmed payment',
       status: 'pending_signature',
     })
     expect(mockQuery).toHaveBeenCalledTimes(2)

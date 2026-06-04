@@ -9,6 +9,12 @@ function parseArgs(argv: string[]): HavenMcpServerOptions {
     if (arg === '--credentials' || arg === '--credentials-path') {
       options.credentialsPath = argv[i + 1]
       i += 1
+    } else if (arg === '--identity') {
+      options.identityPath = argv[i + 1]
+      i += 1
+    } else if (arg === '--signer') {
+      options.signerPath = argv[i + 1]
+      i += 1
     } else if (arg === '--transport') {
       const transport = argv[i + 1]
       i += 1
@@ -25,9 +31,12 @@ function parseArgs(argv: string[]): HavenMcpServerOptions {
         '',
         'Usage:',
         '  npx @haven_ai/mcp --credentials /path/to/agent.json',
+        '  npx @haven_ai/mcp --identity /path/to/identity.json --signer /path/to/signer.json',
         '',
         'Options:',
         '  --credentials <path>       Haven credential JSON file. Also supported: HAVEN_CREDENTIALS.',
+        '  --identity <path>          Haven identity JSON file written by @haven_ai/connect.',
+        '  --signer <path>            Haven signer JSON file written by @haven_ai/connect.',
         '  --transport stdio          Local stdio transport. This is the only supported mode.',
         '  --ack                      Acknowledge the first-launch consent block and write',
         '                             a sidecar acknowledgement file next to the credential.',

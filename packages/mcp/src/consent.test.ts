@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   computeConsentHash,
+  consentInputFromClient,
   ensureConsent,
   renderConsentBlock,
   type ConsentInput,
@@ -196,6 +197,97 @@ describe('consent gate', () => {
     expect(block).toContain(`Consent hash: ${hash}`)
     expect(block).toContain('haven_pay_x402_quote')
     expect(block).toContain('Safe AllowanceModule')
+  })
+
+  it('uses credential allowance snapshot when live allowances are not available yet', async () => {
+    const seedAllowance = [{ token: 'USDC', amount: '25000000', resetMinutes: 1440 }]
+    const haven = {
+      getAllowances: async () => {
+        throw new Error('not active yet')
+      },
+    }
+
+    const built = await consentInputFromClient(
+      haven as never,
+      {
+        apiKey: 'sk_agent_abcdef',
+        agentId: 'agent-1',
+        safeAddress: '0xSafe',
+        delegateAddress: '0xDelegate',
+        chainId: 100,
+        allowanceSummary: seedAllowance,
+      },
+      ['haven_get_agent'],
+    )
+
+    expect(built.allowanceSummary).toEqual(seedAllowance)
+    expect(built.delegateAddress).toBe('0xDelegate')
+    expect(built.chainId).toBe(100)
+  })
+
+  it('uses a successful empty live allowance list instead of the setup snapshot', async () => {
+    const seedAllowance = [{ token: 'USDC', amount: '25000000', resetMinutes: 1440 }]
+    const haven = {
+      getAllowances: async () => ({
+        safeAddress: '0xSafeLive',
+        delegateAddress: '0xDelegateLive',
+        chainId: 100,
+        allowances: [],
+      }),
+    }
+
+    const built = await consentInputFromClient(
+      haven as never,
+      {
+        apiKey: 'sk_agent_abcdef',
+        safeAddress: '0xSafe',
+        delegateAddress: '0xDelegate',
+        chainId: 100,
+        allowanceSummary: seedAllowance,
+      },
+      ['haven_get_agent'],
+    )
+
+    expect(built.allowanceSummary).toEqual([])
+    expect(built.safeAddress).toBe('0xSafeLive')
+    expect(built.delegateAddress).toBe('0xDelegateLive')
+  })
+
+  it('binds consent to live on-chain allowance instead of configured metadata', async () => {
+    const haven = {
+      getAllowances: async () => ({
+        safeAddress: '0xSafe',
+        delegateAddress: '0xDelegate',
+        chainId: 100,
+        allowances: [
+          {
+            tokenSymbol: 'USDC',
+            configuredAmount: '25000000',
+            resetPeriodMin: 1440,
+            onchain: {
+              amount: '5000000',
+              resetTimeMin: 60,
+            },
+          },
+        ],
+      }),
+    }
+
+    const built = await consentInputFromClient(
+      haven as never,
+      {
+        apiKey: 'sk_agent_abcdef',
+        safeAddress: '0xSafe',
+        delegateAddress: '0xDelegate',
+        chainId: 100,
+        allowanceSummary: [{ token: 'USDC', amount: '25000000', resetMinutes: 1440 }],
+      },
+      ['haven_get_agent'],
+    )
+
+    expect(built.allowanceSummary).toEqual([
+      { token: 'USDC', amount: '5000000', resetMinutes: 60 },
+    ])
   })
 })
 

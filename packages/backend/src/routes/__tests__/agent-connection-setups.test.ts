@@ -173,7 +173,7 @@ describe('agent connection setup routes', () => {
     mockGetTokensForDelegate.mockReset()
     delete process.env.HAVEN_API_URL
     delete process.env.HAVEN_HOSTED_MCP_URL
-    process.env.CONNECT_AGENT_2_ENABLED = 'true'
+    delete process.env.CONNECT_AGENT_2_ENABLED
   })
 
   it('creates a pending setup with a returned-once token stored only as a hash', async () => {
@@ -196,7 +196,8 @@ describe('agent connection setup routes', () => {
     const body = response.json()
     expect(body.status).toBe('awaiting_connection')
     expect(body.setup_token).toMatch(/^hv_setup_[0-9a-f]+$/)
-    expect(body.connector_command).toContain('npx -y @haven_ai/connect')
+    expect(body.connector_command).toContain('npx -y @haven_ai/connect@0.1.2-alpha')
+    expect(body.connector_command).toContain('--ack-local-tools')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 
     const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
@@ -212,9 +213,34 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  it('blocks new pending setup creation when the rollout gate is unset', async () => {
-    delete process.env.CONNECT_AGENT_2_ENABLED
+  it('includes Codex Desktop runtime in the generated setup command', async () => {
     const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'codex-desktop',
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    const body = response.json()
+    expect(body.connector_command).toContain('--ack-local-tools')
+    expect(body.connector_command).toContain('--runtime codex-desktop')
+    expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
+
+    await app.close()
+  })
+
+  it('creates a pending setup when the rollout gate is explicitly enabled', async () => {
+    process.env.CONNECT_AGENT_2_ENABLED = 'true'
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
 
     const response = await app.inject({
       method: 'POST',
@@ -226,15 +252,14 @@ describe('agent connection setup routes', () => {
       },
     })
 
-    expect(response.statusCode).toBe(404)
-    expect(mockQuery).not.toHaveBeenCalled()
-    expect(mockConnect).not.toHaveBeenCalled()
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({ status: 'awaiting_connection' })
 
     await app.close()
   })
 
-  it('blocks new pending setup creation when the rollout gate is disabled', async () => {
-    process.env.CONNECT_AGENT_2_ENABLED = 'false'
+  it.each(['false', '0', 'off'])('blocks new pending setup creation when the rollout gate is %s', async (gateValue) => {
+    process.env.CONNECT_AGENT_2_ENABLED = gateValue
     const app = await buildApp()
 
     const response = await app.inject({
@@ -812,6 +837,76 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
+  it('keeps confirmed wallet approval in progress when on-chain budget is not visible yet', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockResolvedValue([])
+    mockWalletApprovalPersist()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      status: 'approval_in_progress',
+      approval: {
+        status: 'submitted',
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+      failure_reason: 'On-chain agent budget is not active yet',
+    })
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
+    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(setupUpdate?.[1]).toEqual([
+      SETUP.id,
+      'user-1',
+      'approval_in_progress',
+      'submitted',
+      TX_HASH,
+      SAFE_TX_HASH,
+      'On-chain agent budget is not active yet',
+    ])
+
+    await app.close()
+  })
+
+  it('keeps confirmed wallet approval in progress when on-chain verification is temporarily unavailable', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    mockGetTokensForDelegate.mockRejectedValue(new Error('rpc unavailable'))
+    mockWalletApprovalPersist()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
+      payload: approvalPayload('confirmed'),
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      status: 'approval_in_progress',
+      approval: {
+        status: 'submitted',
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      },
+      failure_reason: 'Haven could not verify the on-chain agent rules yet',
+    })
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
+
+    await app.close()
+  })
+
   it('does not persist wallet approval if setup was cancelled after the initial read', async () => {
     const app = await buildApp()
     mockQuery
@@ -1048,8 +1143,13 @@ describe('agent connection setup routes', () => {
       .mockResolvedValueOnce({
         rows: [{
           install_status: {
-            hosted_mcp_configured: true,
+            runtime_mcp_mode: 'local_stdio',
+            hosted_mcp_configured: false,
             local_signer_configured: true,
+            local_mcp_configured: true,
+            local_mcp_acknowledged: true,
+            activation_command_available: true,
+            error_code: null,
           },
         }],
       })
@@ -1059,15 +1159,25 @@ describe('agent connection setup routes', () => {
       url: `/agent-connection-setups/${SETUP.id}/install-status`,
       headers: { authorization: 'Bearer sk_agent_pending' },
       payload: {
-        hosted_mcp_configured: true,
+        runtime_mcp_mode: 'local_stdio',
+        hosted_mcp_configured: false,
         local_signer_configured: true,
+        local_mcp_configured: true,
+        local_mcp_acknowledged: true,
+        activation_command_available: true,
         restart_required: true,
+        error_code: null,
         environment_label: 'Local workspace',
       },
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json().install_status.hosted_mcp_configured).toBe(true)
+    expect(response.json().install_status.runtime_mcp_mode).toBe('local_stdio')
+    expect(response.json().install_status.hosted_mcp_configured).toBe(false)
+    expect(response.json().install_status.local_mcp_configured).toBe(true)
+    expect(response.json().install_status.local_mcp_acknowledged).toBe(true)
+    expect(response.json().install_status.activation_command_available).toBe(true)
+    expect(response.json().install_status.error_code).toBeNull()
     expect(String(mockQuery.mock.calls[0][0])).toContain("a.status IN ($3, $4, $5)")
     expect(mockQuery.mock.calls[0][1]).toContain('pending_approval')
 

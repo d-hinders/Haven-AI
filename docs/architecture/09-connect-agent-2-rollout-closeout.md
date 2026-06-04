@@ -8,7 +8,8 @@ to a guarded rollout path. It does not remove the original Connect Agent flow.
 
 ## Ship Decision
 
-Connect Agent 2 can be merged behind opt-in rollout gates after PR CI passes.
+Connect Agent 2 can be merged as the default Connect Agent path with explicit
+rollback gates after PR CI passes.
 The final reviewer pass for this branch completed with no blocking findings.
 
 The safety property is unchanged:
@@ -27,14 +28,17 @@ Haven only public or hashed material.
 
 Frontend:
 
-- `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=true` shows the Connect Agent 2 entry
-  point. Unset, `false`, `0`, and `off` keep it hidden.
+- Connect Agent 2 is the default Connect Agent flow. Unset or truthy
+  `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED` keeps it enabled.
+- `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` restores the old
+  manual setup entry point.
 - The original Connect Agent button remains reachable.
 
 Backend:
 
-- `CONNECT_AGENT_2_ENABLED=true` allows creation of new pending setups. Unset,
-  `false`, `0`, and `off` block new setup creation.
+- New pending setup creation is enabled by default. Unset or truthy
+  `CONNECT_AGENT_2_ENABLED` allows setup creation.
+- `CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` blocks new setup creation.
 - Existing read, install-status, wallet-approval, and cancel endpoints remain
   available so in-progress setups can recover, expire, or be cancelled.
 
@@ -45,8 +49,8 @@ Connector:
 
 Rollback:
 
-1. Unset `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED`, or set it to `false`.
-2. Unset `CONNECT_AGENT_2_ENABLED`, or set it to `false`.
+1. Set `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=false`.
+2. Set `CONNECT_AGENT_2_ENABLED=false`.
 3. Leave old Connect Agent available.
 4. Keep status/cancel recovery endpoints live until pending setups expire or are
    resolved.
@@ -203,11 +207,14 @@ Do not remove or demote the original Connect Agent flow until:
   backend requests, or generated artifacts.
 - A separate removal issue and PR are opened.
 
-## Current Merge Readiness
+## Historical #237 Merge Readiness
+
+This section records the #237 closeout that merged via PR #243. Current
+default-on rollback gate behavior is described in [Rollout Gates](#rollout-gates).
 
 CI status:
 
-- Pending until the #237 PR is opened. Green PR CI is required before merge.
+- PR #243 passed CI before merge.
 
 Local checks run on this branch:
 
@@ -235,22 +242,23 @@ Review status:
 - Initial `haven-reviewer` pass found blocking issues around rollout gates,
   concrete closeout reporting, deterministic end-to-end coverage, and stale
   architecture docs.
-- This branch now makes Connect Agent 2 explicitly opt-in on both frontend and
-  backend, adds deterministic backend/frontend/browser coverage, replaces the
-  closeout template with this concrete readiness report, and updates the stale
-  architecture/migration/signer docs.
+- This branch now keeps Connect Agent 2 default-on with explicit frontend and
+  backend rollback gates, adds deterministic backend/frontend/browser coverage,
+  replaces the closeout template with this concrete readiness report, and
+  updates the stale architecture/migration/signer docs.
 - Final reviewer pass completed with no blocking findings.
 
 Risk level:
 
-- Medium behind opt-in gates. Risk becomes high if the gates are enabled broadly
-  before beta runtime behavior and support recovery paths are proven.
+- Medium with explicit rollback gates. Risk becomes high if runtime behavior is
+  expanded broadly before beta install behavior and support recovery paths are
+  proven.
 
 Why it is safe to merge behind the gates:
 
 - The original Connect Agent flow remains available.
-- Unset rollout env hides the Connect Agent 2 entry point and blocks creation of
-  new pending setups.
+- Explicit `false`, `0`, or `off` rollout env can restore the old manual setup
+  entry point and block new pending setup creation.
 - Haven never receives the delegate private key or plaintext Connect Agent 2
   API key.
 - Pending setup, API identity, and hosted MCP access are not spend authority.
@@ -263,13 +271,12 @@ Why it is safe to merge behind the gates:
 
 Residual risk and follow-up:
 
-- PR CI must still pass.
 - Browser coverage uses mocked Haven API responses and no real funds.
 - Runtime install behavior remains beta until verified across target agent
   environments.
 - Old flow removal needs a separate issue, rollout decision, and PR.
 
-Recommended merge order:
+Historical merge order:
 
 - #230, #231/#232, #233/#234, #235/#236, then #237. The earlier issues are
-  already merged; #237 should merge last after CI.
+  already merged.

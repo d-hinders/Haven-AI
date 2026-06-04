@@ -1,5 +1,6 @@
 export type RuntimeId =
   | 'claude-code'
+  | 'codex-desktop'
   | 'codex-cli'
   | 'cursor'
   | 'vscode'
@@ -25,6 +26,12 @@ const RUNTIME_PROFILES: Record<RuntimeId, RuntimeProfile> = {
   'codex-cli': {
     id: 'codex-cli',
     label: 'Codex CLI',
+    restartMode: 'restart-session',
+    canWriteRuntimeConfig: true,
+  },
+  'codex-desktop': {
+    id: 'codex-desktop',
+    label: 'Codex Desktop',
     restartMode: 'restart-session',
     canWriteRuntimeConfig: true,
   },
@@ -63,6 +70,12 @@ const RUNTIME_ALIASES: Record<string, RuntimeId> = {
   'codex-cli': 'codex-cli',
   codexcli: 'codex-cli',
   'codex_cli': 'codex-cli',
+  'codex-desktop': 'codex-desktop',
+  'codex_desktop': 'codex-desktop',
+  codexdesktop: 'codex-desktop',
+  'codex-app': 'codex-desktop',
+  'codex_app': 'codex-desktop',
+  codexapp: 'codex-desktop',
   cursor: 'cursor',
   vscode: 'vscode',
   'vs-code': 'vscode',

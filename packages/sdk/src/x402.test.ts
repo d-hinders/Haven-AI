@@ -413,7 +413,7 @@ describe('x402 helpers', () => {
     })
   })
 
-  it('records a reconciliation event when an x402 retry is rejected after funding', async () => {
+  it('records a reconciliation event when an x402 retry fails after funding', async () => {
     const backendUrl = 'https://haven.example'
     const resourceUrl = paymentRequired.resource.url
     const txHash = `0x${'ab'.repeat(32)}`
@@ -455,7 +455,7 @@ describe('x402 helpers', () => {
         amount: '0.02',
         to: delegateAddress,
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Payment rejected' }), { status: 402 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Missing session ID' }), { status: 400 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
 
     const haven = new HavenClient({
@@ -465,7 +465,7 @@ describe('x402 helpers', () => {
     })
 
     await expect(haven.fetch(resourceUrl)).rejects.toMatchObject({
-      statusCode: 402,
+      statusCode: 400,
       body: expect.objectContaining({
         marker: 'x402_retry_rejected_after_funding',
         payment_id: 'pay_123',
@@ -482,8 +482,8 @@ describe('x402 helpers', () => {
       txHash,
       details: {
         resource_url: resourceUrl,
-        retry_status: 402,
-        retry_body: JSON.stringify({ error: 'Payment rejected' }),
+        retry_status: 400,
+        retry_body: JSON.stringify({ error: 'Missing session ID' }),
         merchant_to: accepted.payTo,
         delegate_to: delegateAddress,
       },

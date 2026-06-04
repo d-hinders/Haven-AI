@@ -8,7 +8,7 @@ public signing address, proof signature, and API-key hash. Haven never receives
 the private key or plaintext API key.
 
 ```sh
-npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --runtime claude-code
+npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
 
 The connector writes owner-only credential files outside the project by default:
@@ -21,3 +21,7 @@ the locally held signer key and the user-approved on-chain Haven wallet rules.
 
 Use `--credentials-dir <path>` to choose a different local credential directory.
 Do not point it at a project repository, shared folder, or cloud-synced folder.
+
+Use `--ack-local-tools` with Haven-generated setup prompts. It prepares the
+local Haven tools acknowledgement during setup so Codex and Claude Code can load
+Haven after a normal restart.

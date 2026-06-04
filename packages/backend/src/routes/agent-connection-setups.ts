@@ -56,10 +56,15 @@ interface RegisterSetupBody extends ResolveSetupBody {
 interface InstallStatusBody {
   setup_token?: string
   runtime?: string
+  runtime_mcp_mode?: string
   connector_version?: string
   hosted_mcp_configured?: boolean
   local_signer_configured?: boolean
+  local_mcp_configured?: boolean
   credential_files_written?: boolean
+  signer_acknowledged?: boolean
+  local_mcp_acknowledged?: boolean
+  activation_command_available?: boolean
   probe_result?: string
   restart_required?: boolean
   next_user_action?: string
@@ -123,6 +128,7 @@ interface UserSafeRow {
 }
 
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
+const CONNECTOR_PACKAGE = '@haven_ai/connect@0.1.2-alpha'
 const WALLET_APPROVAL_STATES = new Set([
   'connected_local',
   'awaiting_wallet_approval',
@@ -328,6 +334,8 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       const initialInstallStatus = {
         hosted_mcp_configured: false,
         local_signer_configured: false,
+        local_mcp_configured: false,
+        local_mcp_acknowledged: false,
         restart_required: Boolean(request.body.install_capabilities?.restart_required),
       }
       setupId = setup.id
@@ -497,7 +505,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         return buildUserSetupStatus(active, allowances)
       }
 
-      if (request.body.confirmation_status === 'receipt_timeout') {
+      if (
+        request.body.confirmation_status === 'receipt_timeout' ||
+        isTransientSetupAuthorityVerification(verification.error)
+      ) {
         const inProgress = await persistWalletApprovalState(setup, {
           status: 'approval_in_progress',
           approvalStatus: 'submitted',
@@ -871,6 +882,13 @@ async function tryVerifySetupAuthority(
   }
 }
 
+function isTransientSetupAuthorityVerification(error: string): boolean {
+  return (
+    error === 'On-chain agent budget is not active yet' ||
+    error === 'Haven could not verify the on-chain agent rules yet'
+  )
+}
+
 async function persistWalletApprovalState(
   setup: SetupRow,
   input: {
@@ -1107,9 +1125,10 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
 
 function buildConnectorCommand(setupToken: string, request: FastifyRequest, runtime: string | null): string {
   const args = [
-    'npx -y @haven_ai/connect',
+    `npx -y ${CONNECTOR_PACKAGE}`,
     `--setup ${shellQuote(setupToken)}`,
     `--api ${shellQuote(apiBaseUrl(request))}`,
+    '--ack-local-tools',
   ]
   if (runtime) args.push(`--runtime ${shellQuote(runtime)}`)
   return args.join(' ')
@@ -1214,5 +1233,5 @@ function shellQuote(value: string): string {
 }
 
 function connectAgent2CreationEnabled(): boolean {
-  return ['true', '1', 'on'].includes(String(process.env.CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
+  return !['false', '0', 'off'].includes(String(process.env.CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
 }

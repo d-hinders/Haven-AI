@@ -4,6 +4,7 @@ import { useState, useMemo, type ReactNode } from 'react'
 import { getExplorerUrl } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { timeAgo, truncate } from '@/lib/format'
+import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import type { AggregatedTransaction } from '@/types/transactions'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
@@ -404,6 +405,8 @@ export default function TransactionsTable({
             // Incoming transactions: leave initiator blank (no meaningful "who" — the originator is the sending wallet).
             // Outgoing without an agent: surface as "You".
             const initiator = tx.agentName ?? (tx.direction === 'in' ? '' : 'You')
+            const lifecycleBadge = machinePaymentLifecyclePresentation(tx)
+            const statusBadge = lifecycleBadge ?? tx.statusBadge
 
             return (
               <tr
@@ -422,8 +425,8 @@ export default function TransactionsTable({
                       <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
                         {transactionTitle(tx)}
                       </p>
-                      {tx.statusBadge ? (
-                        <StatusBadge tone={tx.statusBadge.tone}>{tx.statusBadge.label}</StatusBadge>
+                      {statusBadge ? (
+                        <StatusBadge tone={statusBadge.tone}>{statusBadge.label}</StatusBadge>
                       ) : tx.isError ? (
                         <StatusBadge tone="danger">Failed</StatusBadge>
                       ) : null}

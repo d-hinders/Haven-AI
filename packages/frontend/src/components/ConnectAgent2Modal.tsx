@@ -123,6 +123,7 @@ interface Props {
 const RUNTIME_OPTIONS = [
   { id: 'claude-code', label: 'Claude Code' },
   { id: 'codex-cli', label: 'Codex CLI' },
+  { id: 'codex-desktop', label: 'Codex Desktop' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'vscode', label: 'VS Code' },
   { id: 'claude-desktop', label: 'Claude Desktop' },
@@ -1131,6 +1132,12 @@ function LocalConnectionReady({
   onCancel: () => void
 }) {
   const install = status?.install_status
+  const runtimeReadyAfterRestart = Boolean(
+    install &&
+      !install.error_code &&
+      install.restart_required &&
+      runtimeIsConfigured(install),
+  )
   const budgets = status?.agent_budget ?? []
   const displayBudgets = budgets.map((budget) => ({
     id: budget.id ?? budget.token_symbol,
@@ -1194,6 +1201,16 @@ function LocalConnectionReady({
           },
         ]}
       />
+
+      {runtimeReadyAfterRestart && (
+        <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+          <p className="text-sm font-semibold text-[var(--v2-ink)]">Agent restart prepared</p>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            The connector prepared Haven tools for this agent. After approval, restart the agent
+            normally so it can load them.
+          </p>
+        </div>
+      )}
 
       {approvalBlocked ? (
         <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
@@ -1364,18 +1381,34 @@ function formatAbsoluteDate(value: string): string {
 function runtimeStatusLabel(install: AgentConnectionSetupStatusResponse['install_status']): string {
   if (!install) return 'Checking runtime setup'
   if (install.error_code) return 'Needs attention'
-  if (install.hosted_mcp_configured && install.local_signer_configured) return 'Configured'
+  if (install.restart_required && runtimeIsConfigured(install)) return 'Restart ready'
+  if (runtimeIsConfigured(install)) return 'Configured'
   if (install.credential_files_written) return 'Credentials stored locally'
   return 'Manual setup needed'
 }
 
 function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse['install_status']): string {
   if (!install) return 'Haven is waiting for the connector to report setup status.'
+  if (install.error_code === 'local_mcp_ack_required') return 'Haven tools need one-time acknowledgement before this agent can load them.'
+  if (install.error_code === 'local_signer_ack_required') return 'Local signing needs one-time acknowledgement before this agent can load Haven tools.'
+  if (install.error_code === 'local_mcp_unsupported_node_version') return 'Update Node.js to version 20 or newer, then run the setup command again.'
+  if (install.error_code === 'local_mcp_runtime_install_failed') return 'The connector could not install Haven tools locally. Run the setup command again; it uses Haven-owned local storage.'
+  if (install.error_code === 'codex_config_invalid') return 'Codex config needs a manual fix before Haven tools can be added.'
+  if (install.error_code === 'claude_code_config_failed') return 'Claude Code did not accept the Haven tools entry. Run the setup command inside Claude Code again.'
+  if (install.error_code?.startsWith('local_mcp_probe_')) return 'The connector installed Haven tools, but the local check could not load them yet. Run the setup command again.'
   if (install.error_code) return 'The connector stored credentials, but runtime setup needs a manual finish.'
-  if (install.restart_required) return 'Restart the agent session after approval so it can load the Haven tools.'
-  if (install.hosted_mcp_configured && install.local_signer_configured) return 'The agent environment reported Haven tools and local signing are configured.'
+  if (install.restart_required && install.local_mcp_configured && runtimeIsConfigured(install)) return 'After approval, restart the agent normally so it can load Haven tools.'
+  if (install.restart_required && install.activation_command_available) return 'The connector prepared a restart command. Use it after approval so this agent can load Haven tools.'
+  if (install.restart_required) return 'Restart the agent session after approval so it can load Haven tools.'
+  if (runtimeIsConfigured(install)) return 'The agent environment reported Haven tools are configured.'
   if (install.credential_files_written) return 'The connector wrote local credentials. Add Haven to the runtime before using this agent.'
   return 'Use the command fallback or runtime settings to add Haven manually.'
+}
+
+function runtimeIsConfigured(install: AgentConnectionSetupStatusResponse['install_status']): boolean {
+  if (!install) return false
+  if (install.local_mcp_configured && install.local_mcp_acknowledged) return true
+  return Boolean(install.hosted_mcp_configured && install.local_signer_configured)
 }
 
 function approvalBlockReason(

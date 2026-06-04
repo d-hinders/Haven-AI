@@ -206,11 +206,15 @@ function connectedSetupStatus(overrides: Record<string, unknown> = {}) {
     }],
     delegate_address: '0x3333333333333333333333333333333333333333',
     install_status: {
-      hosted_mcp_configured: true,
+      runtime_mcp_mode: 'local_stdio',
+      hosted_mcp_configured: false,
       local_signer_configured: true,
+      local_mcp_configured: true,
       credential_files_written: true,
+      local_mcp_acknowledged: true,
+      activation_command_available: false,
       restart_required: true,
-      probe_result: 'hosted_ok_local_signer_ready',
+      probe_result: 'local_stdio_mcp_ready',
     },
     approval: { status: 'pending_approval', safe_tx_hash: null, tx_hash: null },
     ...overrides,
@@ -286,8 +290,8 @@ describe('ConnectAgent2Modal', () => {
       status: 'awaiting_connection',
       setup_token: 'hv_setup_abc',
       expires_at: '2099-01-01T00:00:00.000Z',
-      connector_command: 'npx -y @haven_ai/connect --setup hv_setup_abc --api https://api.haven.example --runtime claude-code',
-      setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect --setup hv_setup_abc',
+      connector_command: 'npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+      setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --ack-local-tools',
     })
   })
 
@@ -321,6 +325,22 @@ describe('ConnectAgent2Modal', () => {
     expect(modalText).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
   })
 
+  it('supports Codex Desktop as a first-class runtime option', async () => {
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Agent environment'), {
+      target: { value: 'codex-desktop' },
+    })
+    await fillAndCreateSetup()
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
+      '/agent-connection-setups',
+      expect.objectContaining({
+        runtime: 'codex-desktop',
+      }),
+    ))
+  })
+
   it('renders local-ready status, runtime status, and wallet approval action', async () => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: connectedSetupStatus(),
@@ -335,9 +355,39 @@ describe('ConnectAgent2Modal', () => {
     expect(await screen.findByText('Local connection ready')).toBeInTheDocument()
     expect(screen.getByText('Connected locally')).toBeInTheDocument()
     expect(screen.getByText('Ready for Haven approval')).toBeInTheDocument()
+    expect(screen.getByText('Restart ready')).toBeInTheDocument()
+    expect(screen.getByText('Agent restart prepared')).toBeInTheDocument()
     expect(screen.getByText(/until that approval is completed, this agent cannot spend/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Approve agent rules/i })).toBeInTheDocument()
     expect(screen.queryByText(/active spending today/i)).not.toBeInTheDocument()
+  })
+
+  it('shows specific runtime setup recovery copy for local MCP failures', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({
+        install_status: {
+          runtime_mcp_mode: 'local_stdio',
+          hosted_mcp_configured: false,
+          local_signer_configured: false,
+          local_mcp_configured: false,
+          credential_files_written: true,
+          local_mcp_acknowledged: true,
+          activation_command_available: false,
+          restart_required: true,
+          probe_result: 'local_stdio_mcp_runtime_install_failed',
+          error_code: 'local_mcp_runtime_install_failed',
+        },
+      }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+
+    await fillAndCreateSetup()
+
+    expect(await screen.findByText('Needs attention')).toBeInTheDocument()
+    expect(screen.getByText(/could not install Haven tools locally/i)).toBeInTheDocument()
   })
 
   it('shows wallet approval blockers from the current device state', async () => {
@@ -516,8 +566,8 @@ describe('ConnectAgent2Modal', () => {
           status: 'awaiting_connection',
           setup_token: 'hv_setup_abc',
           expires_at: '2099-01-01T00:00:00.000Z',
-          connector_command: 'npx -y @haven_ai/connect --setup hv_setup_abc --api https://api.haven.example --runtime claude-code',
-          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect --setup hv_setup_abc',
+          connector_command: 'npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --ack-local-tools',
         }
       }
       if (path === '/agent-connection-setups/resolve') {
@@ -631,8 +681,8 @@ describe('ConnectAgent2Modal', () => {
           status: 'awaiting_connection',
           setup_token: 'hv_setup_abc',
           expires_at: '2099-01-01T00:00:00.000Z',
-          connector_command: 'npx -y @haven_ai/connect --setup hv_setup_abc --api https://api.haven.example --runtime claude-code',
-          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect --setup hv_setup_abc',
+          connector_command: 'npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --ack-local-tools',
         }
       }
       if (path === '/agent-connection-setups/resolve') {

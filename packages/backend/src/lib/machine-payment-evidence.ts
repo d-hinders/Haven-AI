@@ -8,8 +8,11 @@ export type PaymentProofStatus =
   | 'merchant_response_observed'
   | 'protocol_receipt_attached'
 
+type MachinePaymentReferenceKind = 'payment_intent' | 'approval_request'
+
 export interface MachinePaymentEvidenceSource {
   id: string
+  kind?: MachinePaymentReferenceKind
   agent_id: string
   user_id: string
   safe_address: string
@@ -52,7 +55,8 @@ export interface AttachMachinePaymentEvidenceInput {
 
 export interface MachinePaymentEvidenceRow {
   id: string
-  payment_intent_id: string
+  payment_intent_id: string | null
+  approval_request_id: string | null
   agent_id: string
   user_id: string
   rail: string
@@ -83,8 +87,16 @@ export interface MachinePaymentEvidenceRow {
 }
 
 interface PaymentIntentEvidenceRow extends MachinePaymentEvidenceSource {
+  kind: 'payment_intent'
   tx_hash: string
 }
+
+interface ApprovalRequestEvidenceRow extends MachinePaymentEvidenceSource {
+  kind: 'approval_request'
+  tx_hash: string
+}
+
+type ProtocolPaymentEvidenceRow = PaymentIntentEvidenceRow | ApprovalRequestEvidenceRow
 
 interface EvidenceLogger {
   warn: (payload: Record<string, unknown>, message: string) => void
@@ -108,6 +120,20 @@ function merchantAddressForPayment(intent: MachinePaymentEvidenceSource): string
 
 function idempotencyKeyForPayment(intent: MachinePaymentEvidenceSource): string | null {
   return intent.machine_idempotency_key ?? intent.x402_idempotency_key ?? null
+}
+
+function referenceKindForPayment(intent: MachinePaymentEvidenceSource): MachinePaymentReferenceKind {
+  return intent.kind ?? 'payment_intent'
+}
+
+function referenceColumnForPayment(intent: MachinePaymentEvidenceSource): 'payment_intent_id' | 'approval_request_id' {
+  return referenceKindForPayment(intent) === 'approval_request'
+    ? 'approval_request_id'
+    : 'payment_intent_id'
+}
+
+function expectedStatusForPayment(intent: MachinePaymentEvidenceSource): string {
+  return referenceKindForPayment(intent) === 'approval_request' ? 'executed' : 'confirmed'
 }
 
 function normalizeJson(value: Record<string, unknown> | string | null | undefined): string | null {
@@ -140,24 +166,30 @@ export async function recordMachinePaymentEvidenceBase(
 ): Promise<void> {
   const rail = railForPayment(intent)
   if (!isProtocolPaymentRail(rail)) return
-  if (intent.status !== 'confirmed' || !intent.tx_hash) return
+  if (intent.status !== expectedStatusForPayment(intent) || !intent.tx_hash) return
 
   const resourceUrl = resourceUrlForPayment(intent)
   if (!resourceUrl) return
+  const referenceColumn = referenceColumnForPayment(intent)
+  const conflictClause = referenceColumn === 'payment_intent_id'
+    ? 'ON CONFLICT (payment_intent_id)'
+    : 'ON CONFLICT (approval_request_id) WHERE approval_request_id IS NOT NULL'
+  const paymentIntentId = referenceColumn === 'payment_intent_id' ? intent.id : null
+  const approvalRequestId = referenceColumn === 'approval_request_id' ? intent.id : null
 
   await pool.query(
     `INSERT INTO machine_payment_evidence (
-      payment_intent_id, agent_id, user_id, rail, proof_status, tx_hash,
+      payment_intent_id, approval_request_id, agent_id, user_id, rail, proof_status, tx_hash,
       chain_id, resource_url, merchant_address, payer_address, settlement_address,
       token_symbol, token_address, amount_raw, amount_human, challenge_id,
       idempotency_key, challenge_payload, confirmed_at
     ) VALUES (
-      $1, $2, $3, $4, 'payment_confirmed', LOWER($5::TEXT),
-      $6, $7, LOWER($8::TEXT), LOWER($9::TEXT), LOWER($10::TEXT),
-      $11, LOWER($12::TEXT), $13, $14, $15,
-      $16, $17, $18
+      $1, $2, $3, $4, $5, 'payment_confirmed', LOWER($6::TEXT),
+      $7, $8, LOWER($9::TEXT), LOWER($10::TEXT), LOWER($11::TEXT),
+      $12, LOWER($13::TEXT), $14, $15, $16,
+      $17, $18, $19
     )
-    ON CONFLICT (payment_intent_id)
+    ${conflictClause}
     DO UPDATE SET
       rail = EXCLUDED.rail,
       tx_hash = EXCLUDED.tx_hash,
@@ -176,7 +208,8 @@ export async function recordMachinePaymentEvidenceBase(
       confirmed_at = EXCLUDED.confirmed_at,
       updated_at = NOW()`,
     [
-      intent.id,
+      paymentIntentId,
+      approvalRequestId,
       intent.agent_id,
       intent.user_id,
       rail,
@@ -203,7 +236,8 @@ export async function recordMachinePaymentEvidenceBaseById(
   agentId?: string,
 ): Promise<void> {
   const result = await pool.query<MachinePaymentEvidenceSource>(
-    `SELECT id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+    `SELECT 'payment_intent'::TEXT AS kind,
+            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
             to_address, amount_raw, amount_human, tx_hash, status, source,
             x402_resource_url, x402_merchant_address, x402_idempotency_key,
             payment_rail, payment_resource_url, merchant_address,
@@ -243,6 +277,44 @@ export async function tryRecordMachinePaymentEvidenceBaseById(
   }
 }
 
+async function findProtocolPaymentForEvidence(
+  agentId: string,
+  paymentId: string,
+): Promise<ProtocolPaymentEvidenceRow | null> {
+  const paymentResult = await pool.query<PaymentIntentEvidenceRow>(
+    `SELECT 'payment_intent'::TEXT AS kind,
+            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+            to_address, amount_raw, amount_human, tx_hash, status, source,
+            x402_resource_url, x402_merchant_address, x402_idempotency_key,
+            payment_rail, payment_resource_url, merchant_address,
+            machine_challenge_id, machine_idempotency_key, machine_metadata,
+            confirmed_at
+     FROM payment_intents
+     WHERE id = $1 AND agent_id = $2
+     LIMIT 1`,
+    [paymentId, agentId],
+  )
+
+  const payment = paymentResult.rows[0]
+  if (payment) return payment
+
+  const approvalResult = await pool.query<ApprovalRequestEvidenceRow>(
+    `SELECT 'approval_request'::TEXT AS kind,
+            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+            to_address, amount_raw, amount_human, tx_hash, status, source,
+            x402_resource_url, NULL::TEXT AS x402_merchant_address, NULL::TEXT AS x402_idempotency_key,
+            payment_rail, payment_resource_url, merchant_address,
+            machine_challenge_id, machine_idempotency_key, machine_metadata,
+            executed_at AS confirmed_at
+     FROM approval_requests
+     WHERE id = $1 AND agent_id = $2
+     LIMIT 1`,
+    [paymentId, agentId],
+  )
+
+  return approvalResult.rows[0] ?? null
+}
+
 export async function attachMachinePaymentEvidence(
   input: AttachMachinePaymentEvidenceInput,
 ): Promise<MachinePaymentEvidenceRow | null> {
@@ -259,22 +331,9 @@ export async function attachMachinePaymentEvidence(
     throw new Error('merchant_status_invalid')
   }
 
-  const paymentResult = await pool.query<PaymentIntentEvidenceRow>(
-    `SELECT id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, tx_hash, status, source,
-            x402_resource_url, x402_merchant_address, x402_idempotency_key,
-            payment_rail, payment_resource_url, merchant_address,
-            machine_challenge_id, machine_idempotency_key, machine_metadata,
-            confirmed_at
-     FROM payment_intents
-     WHERE id = $1 AND agent_id = $2
-     LIMIT 1`,
-    [input.paymentId, input.agentId],
-  )
-
-  const payment = paymentResult.rows[0]
+  const payment = await findProtocolPaymentForEvidence(input.agentId, input.paymentId)
   if (!payment) return null
-  if (payment.status !== 'confirmed' || !payment.tx_hash) {
+  if (payment.status !== expectedStatusForPayment(payment) || !payment.tx_hash) {
     throw new Error('payment_not_confirmed')
   }
   if (payment.tx_hash.toLowerCase() !== input.txHash.toLowerCase()) {
@@ -297,6 +356,7 @@ export async function attachMachinePaymentEvidence(
   await recordMachinePaymentEvidenceBase(payment)
 
   const proofStatus = proofStatusForAttach(input)
+  const referenceColumn = referenceColumnForPayment(payment)
   const result = await pool.query<MachinePaymentEvidenceRow>(
     `UPDATE machine_payment_evidence
      SET proof_status = CASE
@@ -313,7 +373,7 @@ export async function attachMachinePaymentEvidence(
          protocol_receipt_payload = COALESCE($10::JSONB, protocol_receipt_payload),
          merchant_status = COALESCE($11, merchant_status),
          updated_at = NOW()
-     WHERE payment_intent_id = $1
+     WHERE ${referenceColumn} = $1
        AND agent_id = $2
      RETURNING *`,
     [
@@ -331,5 +391,19 @@ export async function attachMachinePaymentEvidence(
     ],
   )
 
-  return result.rows[0] ?? null
+  const evidence = result.rows[0] ?? null
+  if (evidence) {
+    await pool.query(
+      `UPDATE machine_payment_reconciliation_events
+       SET status = 'resolved',
+           updated_at = NOW()
+       WHERE ${referenceColumn} = $1
+         AND agent_id = $2
+         AND status = 'open'
+         AND event_type = 'merchant_retry_rejected_after_payment'`,
+      [payment.id, input.agentId],
+    )
+  }
+
+  return evidence
 }

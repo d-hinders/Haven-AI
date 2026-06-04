@@ -33,8 +33,8 @@ Connect Agent 2 uses a staged local-key pairing flow:
    and sends only the public signing address, proof, API-key hash, and API-key
    prefix to Haven.
 6. Haven stores only the API-key hash/prefix, creates a non-active pending
-   agent, and confirms the connector can configure hosted MCP identity behind
-   the scenes.
+   agent, and confirms the connector can configure local MCP behind the
+   scenes.
 7. The agent remains inactive for payments until the user returns to Haven and
    approves the public signing address and agent budget in the Haven wallet.
 
@@ -58,8 +58,9 @@ Current flow:
   can create `active` agents unless implementation explicitly overrides status,
   and current agent auth primarily expects `active` or `paused` agents.
 - `HostedConnectCard` and `hosted-connect.ts` produce hosted MCP setup snippets
-  and optional setup prompts. Hosted snippets do not include the delegate key,
-  but some current fallback prompt material can include it.
+  and optional setup prompts for the older/fallback flow. Hosted snippets do not
+  include the delegate key, but some current fallback prompt material can
+  include it.
 
 Connect Agent 2 target flow:
 
@@ -103,8 +104,8 @@ Haven backend
 | Haven backend | user auth session, pending setup metadata, setup token hash, public signing address, proof signature, API key hash/prefix, allowance mirror rows, wallet approval status | agent private key, user private key, seed phrase, unencrypted setup token after creation |
 | Haven frontend | setup token while shown to the user, pending setup status, public signing address, budget/rule summary | agent private key in the Connect Agent 2 happy path |
 | Local connector | setup token during pairing, generated private signing key, public signing address, proof signature, locally generated plaintext API key, runtime install metadata | user owner key, Haven server secrets |
-| Local signer | delegate private key or protected reference, local signing audit rows | Haven API key unless a local full-MCP fallback intentionally uses it |
-| Hosted MCP | API key/Bearer token, request context, unsigned payment state, submitted signatures | delegate private key, local signer credential file |
+| Local MCP | locally generated API key, delegate private key or protected reference, local signing audit rows | user owner key, Haven server secrets |
+| Hosted MCP fallback | API key/Bearer token, request context, unsigned payment state, submitted signatures | delegate private key, local signer credential file |
 | Haven wallet / Safe | owner set, module state, delegate address, per-token allowances | off-chain setup tokens or API keys |
 
 ## State Model
@@ -118,11 +119,11 @@ Recommended storage shape:
   target, setup status, and recovery metadata.
 - Recommended default: `agents` is created at local registration time with a new
   non-active status such as `pending_approval`, and the connector receives the
-  API key once so it can configure hosted MCP behind the scenes.
+  API key once so it can configure local MCP behind the scenes.
 - A pre-approval API key may authenticate only allowlisted setup/readiness calls,
-  such as setup status, connector install status, hosted MCP handshake, and tool
-  discovery. It must not create payment intents, resume approvals, sign, submit,
-  or otherwise spend.
+  such as setup status, connector install status, MCP readiness checks, and
+  tool discovery. It must not create payment intents, resume approvals, sign,
+  submit, or otherwise spend.
 - If implementation does not add that explicit allowlist, delay API-key issuance
   until `active` and require the connector to support a post-approval repair or
   install step. The UX-preferred path is the limited pending API key.
@@ -205,7 +206,7 @@ sequenceDiagram
   Signer-->>Connector: proof signature
   Connector->>API: Register public signing address + proof
   API-->>Connector: agent_id, api_key_scope, hosted_mcp_url, status connected_local
-  Connector->>Connector: Configure hosted MCP identity and local signer
+  Connector->>Connector: Configure local MCP tools
   Connector-->>User: Return to Haven to approve agent rules
   UI->>API: Poll setup status
   API-->>UI: connected_local + public signing address
@@ -235,7 +236,7 @@ sequenceDiagram
   API-->>UI: setup token + command
   UI-->>User: Show command and manual instructions
   User->>Shell: Run connector command manually
-  Shell->>Connector: npx -y @haven_ai/connect --setup hv_setup_...
+  Shell->>Connector: npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_...
   Connector->>API: Resolve setup, register public signing address, receive API key
   Connector-->>Shell: Setup saved locally; return to Haven
   Shell-->>User: No private key printed
@@ -258,8 +259,8 @@ sequenceDiagram
 
   User->>Agent: Paste setup prompt
   Agent->>Connector: Run connector command
-  Connector->>Runtime: Write hosted MCP + local signer config
-  Connector-->>Agent: Setup saved; restart this session once
+  Connector->>Runtime: Write local MCP config
+  Connector-->>Agent: Setup saved; restart normally after approval
   Connector-->>UI: Report connected_local if status reporting is available
   User->>UI: Approve agent rules
   UI-->>User: Agent rules approved
@@ -348,7 +349,7 @@ Response:
   "status": "awaiting_connection",
   "setup_token": "hv_setup_...",
   "expires_at": "2026-06-03T12:00:00.000Z",
-  "connector_command": "npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example",
+  "connector_command": "npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools",
   "setup_prompt": "Copy-ready prompt text"
 }
 ```
@@ -373,7 +374,7 @@ Request:
 ```json
 {
   "setup_token": "hv_setup_...",
-  "connector_version": "0.1.0",
+  "connector_version": "0.1.2",
   "runtime": "claude-code"
 }
 ```
@@ -435,7 +436,7 @@ Request:
   "api_key_hash": "64 hex characters",
   "api_key_prefix": "sk_agent_abc",
   "runtime": "claude-code",
-  "connector_version": "0.1.0",
+  "connector_version": "0.1.2",
   "connector_context": {
     "environment_label": "Local workspace",
     "runtime_version": "claude-code 1.2.3",
@@ -526,14 +527,17 @@ Response:
   "api_key_prefix": "sk_agent_...",
   "runtime": "claude-code",
   "connector": {
-    "connector_version": "0.1.0",
+    "connector_version": "0.1.2",
     "environment_label": "Local workspace",
     "runtime_version": "claude-code 1.2.3",
     "last_connected_at": "2026-06-03T11:44:00.000Z"
   },
   "install_status": {
-    "hosted_mcp_configured": true,
+    "runtime_mcp_mode": "local_stdio",
+    "hosted_mcp_configured": false,
     "local_signer_configured": true,
+    "local_mcp_configured": true,
+    "local_mcp_acknowledged": true,
     "restart_required": true,
     "last_probe_at": "2026-06-03T11:45:00.000Z"
   },
@@ -566,10 +570,14 @@ Request:
 ```json
 {
   "runtime": "claude-code",
-  "connector_version": "0.1.0",
-  "hosted_mcp_configured": true,
+  "connector_version": "0.1.2",
+  "runtime_mcp_mode": "local_stdio",
+  "hosted_mcp_configured": false,
   "local_signer_configured": true,
-  "probe_result": "restart_required",
+  "local_mcp_configured": true,
+  "local_mcp_acknowledged": true,
+  "activation_command_available": false,
+  "probe_result": "local_stdio_mcp_ready",
   "restart_required": true,
   "next_user_action": "restart_agent_session",
   "error_code": null,
@@ -584,8 +592,9 @@ Rules:
   approval status, or agent status.
 - The endpoint must reject private key material, API keys, raw paths, usernames,
   hostnames, and chat transcripts.
-- UI can use this status to explain whether the connector installed hosted MCP,
-  configured local signing, needs a restart, or needs manual repair.
+- UI can use this status to explain whether the connector installed local MCP
+  tools, needs a normal restart, or needs manual repair. Hosted MCP plus local
+  signer metadata remains a fallback shape for runtimes that still use it.
 
 ### Record Wallet Approval
 
@@ -661,7 +670,7 @@ Rules:
 Preferred command shape:
 
 ```sh
-npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --runtime claude-code
+npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
 
 The setup prompt may ask the agent to run that command, but the command is the
@@ -683,8 +692,9 @@ Connector responsibilities:
 7. Sign the Haven challenge.
 8. Register public signing address and proof.
 9. Keep the locally generated API key in protected local storage and configure
-   hosted MCP identity.
-10. Configure local sign-only tooling.
+   local MCP with split identity and signer credentials.
+10. Configure fallback local sign-only tooling where the selected runtime still
+    uses hosted MCP plus local signer.
 11. Probe what it can probe and report install status to Haven.
 12. Print next steps without secrets.
 
@@ -717,7 +727,7 @@ may include:
 - setup command
 - setup token
 - Haven API URL
-- hosted MCP URL
+- Haven API URL
 - selected runtime
 - agent name and budget summary
 - instructions not to print or paste private keys
@@ -736,7 +746,7 @@ Please connect this workspace to Haven.
 
 Run this local setup command:
 
-npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --runtime claude-code
+npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 
 The Haven connector will generate the signing key locally and send Haven only
 the public signing address. Do not print private keys in chat or logs.
@@ -856,8 +866,8 @@ Initial runtime classes:
 
 | Runtime | Install target | Restart guidance |
 |---|---|---|
-| Claude Code | `claude mcp add` or project config | likely restart current session |
-| Codex CLI | `.codex/config.toml` plus env/secret reference | restart current session |
+| Claude Code | local stdio `@haven_ai/mcp` entry | normal Claude Code restart |
+| Codex CLI | `.codex/config.toml` local stdio `@haven_ai/mcp` entry | normal `codex` restart |
 | Cursor | MCP config or deep link | reload or runtime-specific refresh |
 | VS Code | MCP config/deep link | hot reload may work; verify per version |
 | Claude Desktop | desktop config | full app restart |
@@ -865,11 +875,23 @@ Initial runtime classes:
 
 The connector should report:
 
-- hosted MCP configured
+- runtime MCP mode
+- local MCP configured
+- local MCP acknowledgement prepared
 - local signer configured
 - probe result if available
 - restart required or not known
 - next user action
+
+For Codex and Claude Code, the connector writes a single local stdio
+`@haven_ai/mcp` entry that points at owner-only `identity.json` and
+`signer.json` files. The API key and delegate key stay in those local files;
+Codex no longer needs `HAVEN_TOKEN`, `identity.env`, or a generated launcher.
+
+For Codex and Claude Code, the Haven-generated connector command includes
+`--ack-local-tools`. This writes the local MCP consent sidecar during setup so
+a normal restart can load Haven tools after wallet approval. The delegate
+private key remains only in the local signer credential file.
 
 This should use the install-status endpoint above when network access works. If
 the runtime cannot report status automatically, the UI should show the last known
@@ -928,8 +950,11 @@ Do not remove the old Connect Agent flow in this sequence.
 
 Connect Agent 2 ships with rollback gates:
 
-- frontend `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=true` shows the new entry point
-- backend `CONNECT_AGENT_2_ENABLED=true` allows new setup-token creation
+- frontend Connect Agent 2 is enabled by default; set
+  `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` to restore the old
+  manual setup entry point
+- backend setup-token creation is enabled by default; set
+  `CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` to block new setup creation
 - connector package published as alpha/beta until the flow is verified
 
 Rollback plan:

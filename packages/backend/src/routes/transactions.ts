@@ -10,6 +10,7 @@ import {
 import { getChain } from '../lib/chains.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import { createCache } from '../lib/cache.js'
+import { machinePaymentLifecycle } from '../lib/machine-payment-lifecycle.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const UUID_RE =
@@ -35,6 +36,8 @@ export interface Transaction {
   x402MerchantAddress?: string | null
   paymentId?: string
   paymentProofStatus?: string | null
+  paymentFlowStatus?: string | null
+  paymentAttentionReason?: string | null
 }
 
 interface UserSafeRow {
@@ -62,6 +65,7 @@ interface PaymentIntentAgentRow {
   payment_resource_url: string | null
   merchant_address: string | null
   payment_proof_status: string | null
+  payment_reconciliation_event_type: string | null
 }
 
 interface ApprovalRequestAgentRow {
@@ -72,6 +76,8 @@ interface ApprovalRequestAgentRow {
   source: string | null
   payment_resource_url: string | null
   merchant_address: string | null
+  payment_proof_status: string | null
+  payment_reconciliation_event_type: string | null
 }
 
 interface X402PaymentIntentRow {
@@ -91,6 +97,7 @@ interface X402PaymentIntentRow {
   x402_merchant_address: string | null
   x402_resource_url: string | null
   payment_proof_status: string | null
+  payment_reconciliation_event_type: string | null
   confirmed_at: string | null
   created_at: string
 }
@@ -111,13 +118,16 @@ interface X402ApprovalRequestRow {
   amount_human: string
   merchant_address: string | null
   payment_resource_url: string | null
+  payment_proof_status: string | null
+  payment_reconciliation_event_type: string | null
   executed_at: string | null
   created_at: string
 }
 
 interface MachinePaymentEvidenceDetailRow {
   id: string
-  payment_intent_id: string
+  payment_intent_id: string | null
+  approval_request_id: string | null
   rail: string
   proof_status: string
   tx_hash: string
@@ -443,10 +453,15 @@ export async function enrichTransactionsWithAgents(
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS payment_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS merchant_address,
-              mpe.proof_status AS payment_proof_status
+              mpe.proof_status AS payment_proof_status,
+              mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
+       LEFT JOIN machine_payment_reconciliation_events mpre
+         ON mpre.payment_intent_id = pi.id
+        AND mpre.status = 'open'
+        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
        WHERE LOWER(pi.tx_hash) = ANY($1)
          AND pi.user_id = $2
          AND pi.status = 'confirmed'`,
@@ -463,9 +478,16 @@ export async function enrichTransactionsWithAgents(
         merchantAddress: string | null
         paymentId: string
         paymentProofStatus: string | null
+        paymentFlowStatus: string | null
+        paymentAttentionReason: string | null
       }
     >()
     for (const row of piResult.rows) {
+      const lifecycle = machinePaymentLifecycle({
+        rail: row.source,
+        paymentProofStatus: row.payment_proof_status,
+        reconciliationEventType: row.payment_reconciliation_event_type,
+      })
       agentByTxHash.set(row.tx_hash, {
         id: row.agent_id,
         name: row.agent_name,
@@ -474,6 +496,8 @@ export async function enrichTransactionsWithAgents(
         merchantAddress: row.merchant_address,
         paymentId: row.id,
         paymentProofStatus: row.payment_proof_status,
+        paymentFlowStatus: lifecycle.paymentFlowStatus,
+        paymentAttentionReason: lifecycle.paymentAttentionReason,
       })
     }
 
@@ -484,9 +508,16 @@ export async function enrichTransactionsWithAgents(
               a.name AS agent_name,
               COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
               COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS payment_resource_url,
-              ar.merchant_address
+              ar.merchant_address,
+              mpe.proof_status AS payment_proof_status,
+              mpre.event_type AS payment_reconciliation_event_type
        FROM approval_requests ar
        JOIN agents a ON a.id = ar.agent_id
+       LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
+       LEFT JOIN machine_payment_reconciliation_events mpre
+         ON mpre.approval_request_id = ar.id
+        AND mpre.status = 'open'
+        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
        WHERE LOWER(ar.tx_hash) = ANY($1)
          AND ar.user_id = $2
          AND COALESCE(ar.payment_rail, ar.source) = 'x402'
@@ -496,6 +527,12 @@ export async function enrichTransactionsWithAgents(
 
     for (const row of approvalResult.rows) {
       if (agentByTxHash.has(row.tx_hash)) continue
+      const proofStatus = row.payment_proof_status ?? 'payment_confirmed'
+      const lifecycle = machinePaymentLifecycle({
+        rail: row.source,
+        paymentProofStatus: proofStatus,
+        reconciliationEventType: row.payment_reconciliation_event_type,
+      })
       agentByTxHash.set(row.tx_hash, {
         id: row.agent_id,
         name: row.agent_name,
@@ -503,7 +540,9 @@ export async function enrichTransactionsWithAgents(
         resourceUrl: row.payment_resource_url,
         merchantAddress: row.merchant_address,
         paymentId: row.id,
-        paymentProofStatus: 'payment_confirmed',
+        paymentProofStatus: proofStatus,
+        paymentFlowStatus: lifecycle.paymentFlowStatus,
+        paymentAttentionReason: lifecycle.paymentAttentionReason,
       })
     }
 
@@ -518,6 +557,8 @@ export async function enrichTransactionsWithAgents(
         x402MerchantAddress: agent?.merchantAddress ?? tx.x402MerchantAddress,
         paymentId: agent?.paymentId ?? tx.paymentId,
         paymentProofStatus: agent?.paymentProofStatus ?? tx.paymentProofStatus,
+        paymentFlowStatus: agent?.paymentFlowStatus ?? tx.paymentFlowStatus,
+        paymentAttentionReason: agent?.paymentAttentionReason ?? tx.paymentAttentionReason,
       }
     })
   } catch {
@@ -549,11 +590,16 @@ export async function fetchConfirmedX402Transactions(
             pi.x402_merchant_address,
             pi.x402_resource_url,
             mpe.proof_status AS payment_proof_status,
+            mpre.event_type AS payment_reconciliation_event_type,
             pi.confirmed_at,
             pi.created_at
      FROM payment_intents pi
      JOIN agents a ON a.id = pi.agent_id
      LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
+     LEFT JOIN machine_payment_reconciliation_events mpre
+       ON mpre.payment_intent_id = pi.id
+      AND mpre.status = 'open'
+      AND mpre.event_type = 'merchant_retry_rejected_after_payment'
      JOIN user_safes us
        ON us.user_id = pi.user_id
       AND us.id = ANY($2)
@@ -588,10 +634,17 @@ export async function fetchConfirmedX402Transactions(
             ar.amount_human,
             ar.merchant_address,
             COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS payment_resource_url,
+            mpe.proof_status AS payment_proof_status,
+            mpre.event_type AS payment_reconciliation_event_type,
             ar.executed_at,
             ar.created_at
      FROM approval_requests ar
      JOIN agents a ON a.id = ar.agent_id
+     LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
+     LEFT JOIN machine_payment_reconciliation_events mpre
+       ON mpre.approval_request_id = ar.id
+      AND mpre.status = 'open'
+      AND mpre.event_type = 'merchant_retry_rejected_after_payment'
      JOIN user_safes us
        ON us.user_id = ar.user_id
       AND us.id = ANY($2)
@@ -617,6 +670,12 @@ export async function fetchConfirmedX402Transactions(
       chain.tokenByAddress[tokenAddress] ??
       Object.values(chain.tokens).find((token) => token.symbol === row.token_symbol)
     const merchantAddress = row.x402_merchant_address ?? row.to_address
+    const proofStatus = row.payment_proof_status ?? 'payment_confirmed'
+    const lifecycle = machinePaymentLifecycle({
+      rail: 'x402',
+      paymentProofStatus: proofStatus,
+      reconciliationEventType: row.payment_reconciliation_event_type,
+    })
 
     return {
       hash: row.tx_hash,
@@ -643,7 +702,9 @@ export async function fetchConfirmedX402Transactions(
       agentId: row.agent_id,
       agentName: row.agent_name,
       paymentId: row.id,
-      paymentProofStatus: row.payment_proof_status ?? 'payment_confirmed',
+      paymentProofStatus: proofStatus,
+      paymentFlowStatus: lifecycle.paymentFlowStatus,
+      paymentAttentionReason: lifecycle.paymentAttentionReason,
     }
   })
 
@@ -654,6 +715,12 @@ export async function fetchConfirmedX402Transactions(
       chain.tokenByAddress[tokenAddress] ??
       Object.values(chain.tokens).find((token) => token.symbol === row.token_symbol)
     const merchantAddress = row.merchant_address ?? row.to_address
+    const proofStatus = row.payment_proof_status ?? 'payment_confirmed'
+    const lifecycle = machinePaymentLifecycle({
+      rail: 'x402',
+      paymentProofStatus: proofStatus,
+      reconciliationEventType: row.payment_reconciliation_event_type,
+    })
 
     return {
       hash: row.tx_hash,
@@ -680,7 +747,9 @@ export async function fetchConfirmedX402Transactions(
       agentId: row.agent_id,
       agentName: row.agent_name,
       paymentId: row.id,
-      paymentProofStatus: 'payment_confirmed',
+      paymentProofStatus: proofStatus,
+      paymentFlowStatus: lifecycle.paymentFlowStatus,
+      paymentAttentionReason: lifecycle.paymentAttentionReason,
     }
   })
 
@@ -883,6 +952,7 @@ export default async function transactionRoutes(
       const result = await pool.query<MachinePaymentEvidenceDetailRow>(
         `SELECT mpe.id,
                 mpe.payment_intent_id,
+                mpe.approval_request_id,
                 mpe.rail,
                 mpe.proof_status,
                 mpe.tx_hash,
@@ -909,9 +979,10 @@ export default async function transactionRoutes(
                 mpe.created_at,
                 mpe.updated_at
          FROM machine_payment_evidence mpe
-         JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
-         WHERE mpe.payment_intent_id = $1
-           AND pi.user_id = $2
+         LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
+         LEFT JOIN approval_requests ar ON ar.id = mpe.approval_request_id
+         WHERE (mpe.payment_intent_id = $1 OR mpe.approval_request_id = $1)
+           AND COALESCE(pi.user_id, ar.user_id) = $2
          LIMIT 1`,
         [paymentId, sub],
       )
@@ -924,7 +995,9 @@ export default async function transactionRoutes(
       return {
         evidence: {
           id: evidence.id,
-          payment_id: evidence.payment_intent_id,
+          payment_id: evidence.payment_intent_id ?? evidence.approval_request_id,
+          payment_intent_id: evidence.payment_intent_id,
+          approval_request_id: evidence.approval_request_id,
           rail: evidence.rail,
           proof_status: evidence.proof_status,
           tx_hash: evidence.tx_hash,

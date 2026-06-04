@@ -12,6 +12,7 @@ describe('parseArgs', () => {
       'claude-code',
       '--credentials-dir',
       '/tmp/haven-creds',
+      '--ack-local-tools',
     ], {})
 
     expect(parsed.help).toBe(false)
@@ -20,7 +21,15 @@ describe('parseArgs', () => {
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'claude-code',
       credentialsDir: '/tmp/haven-creds',
+      ackLocalTools: true,
     })
+  })
+
+  it('keeps --ack-signer as an alias for local tools acknowledgement', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--ack-signer'], {})
+
+    expect(parsed.options.ackSigner).toBe(true)
+    expect(parsed.options.ackLocalTools).toBe(true)
   })
 
   it('uses HAVEN_API_URL when --api is omitted', () => {
@@ -34,6 +43,7 @@ describe('parseArgs', () => {
   it('requires a setup token unless help is requested', () => {
     expect(() => parseArgs([], {})).toThrow('--setup')
     expect(parseArgs(['--help'], {}).help).toBe(true)
+    expect(helpText()).toContain('codex-desktop')
     expect(helpText()).toMatch(/never sends it to Haven/)
   })
 })

@@ -934,7 +934,7 @@ export class HavenClient {
       headers: retryHeaders,
     })
 
-    if (retryResponse.status === 402) {
+    if (!retryResponse.ok) {
       await this.recordMerchantRetryRejected({
         rail: 'x402',
         paymentId: receipt.paymentId,
@@ -948,8 +948,8 @@ export class HavenClient {
       })
 
       throw new HavenApiError(
-        'x402 retry was rejected after Haven funded the delegate wallet; reconciliation may be required.',
-        402,
+        'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required.',
+        retryResponse.status,
         {
           marker: 'x402_retry_rejected_after_funding',
           payment_id: receipt.paymentId,
@@ -1130,7 +1130,7 @@ export class HavenClient {
       headers: retryHeaders,
     })
 
-    if (retryResponse.status === 402) {
+    if (!retryResponse.ok) {
       await this.recordMerchantRetryRejected({
         rail: receipt.rail,
         paymentId: receipt.paymentId,
@@ -1143,8 +1143,8 @@ export class HavenClient {
       })
 
       throw new HavenApiError(
-        'Machine payment retry was rejected after Haven sent the payment.',
-        402,
+        'Machine payment retry failed after Haven sent the payment.',
+        retryResponse.status,
         {
           marker: 'machine_payment_retry_rejected_after_payment',
           payment_id: receipt.paymentId,
@@ -2314,7 +2314,7 @@ export class HavenClient {
   }
 
   private mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentReceipt {
-    return {
+    const receipt: HavenPaymentReceipt = {
       id: raw.id,
       paymentId: raw.payment_id,
       rail: raw.rail,
@@ -2341,6 +2341,15 @@ export class HavenClient {
       createdAt: raw.created_at,
       updatedAt: raw.updated_at,
     }
+
+    if ('payment_intent_id' in raw) {
+      receipt.paymentIntentId = raw.payment_intent_id ?? null
+    }
+    if ('approval_request_id' in raw) {
+      receipt.approvalRequestId = raw.approval_request_id ?? null
+    }
+
+    return receipt
   }
 }
 

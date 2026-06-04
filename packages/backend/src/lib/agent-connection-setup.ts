@@ -116,8 +116,12 @@ export function sanitizeInstallStatus(value: unknown): Record<string, unknown> {
     ? value as Record<string, unknown>
     : {}
   const status: Record<string, unknown> = {}
+  if ('error_code' in raw && raw.error_code === null) {
+    status.error_code = null
+  }
   for (const key of [
     'runtime',
+    'runtime_mcp_mode',
     'connector_version',
     'probe_result',
     'next_user_action',
@@ -134,7 +138,11 @@ export function sanitizeInstallStatus(value: unknown): Record<string, unknown> {
   for (const key of [
     'hosted_mcp_configured',
     'local_signer_configured',
+    'local_mcp_configured',
     'credential_files_written',
+    'signer_acknowledged',
+    'local_mcp_acknowledged',
+    'activation_command_available',
     'restart_required',
   ]) {
     if (typeof raw[key] === 'boolean') status[key] = raw[key]

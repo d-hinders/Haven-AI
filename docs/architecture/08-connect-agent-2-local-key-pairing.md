@@ -235,7 +235,7 @@ sequenceDiagram
   API-->>UI: setup token + command
   UI-->>User: Show command and manual instructions
   User->>Shell: Run connector command manually
-  Shell->>Connector: npx -y @haven_ai/connect --setup hv_setup_...
+  Shell->>Connector: npx -y @haven_ai/connect@0.1.1-alpha --setup hv_setup_...
   Connector->>API: Resolve setup, register public signing address, receive API key
   Connector-->>Shell: Setup saved locally; return to Haven
   Shell-->>User: No private key printed
@@ -348,7 +348,7 @@ Response:
   "status": "awaiting_connection",
   "setup_token": "hv_setup_...",
   "expires_at": "2026-06-03T12:00:00.000Z",
-  "connector_command": "npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example",
+  "connector_command": "npx -y @haven_ai/connect@0.1.1-alpha --setup hv_setup_... --api https://api.haven.example --ack-signer",
   "setup_prompt": "Copy-ready prompt text"
 }
 ```
@@ -373,7 +373,7 @@ Request:
 ```json
 {
   "setup_token": "hv_setup_...",
-  "connector_version": "0.1.0",
+  "connector_version": "0.1.1",
   "runtime": "claude-code"
 }
 ```
@@ -435,7 +435,7 @@ Request:
   "api_key_hash": "64 hex characters",
   "api_key_prefix": "sk_agent_abc",
   "runtime": "claude-code",
-  "connector_version": "0.1.0",
+  "connector_version": "0.1.1",
   "connector_context": {
     "environment_label": "Local workspace",
     "runtime_version": "claude-code 1.2.3",
@@ -526,7 +526,7 @@ Response:
   "api_key_prefix": "sk_agent_...",
   "runtime": "claude-code",
   "connector": {
-    "connector_version": "0.1.0",
+    "connector_version": "0.1.1",
     "environment_label": "Local workspace",
     "runtime_version": "claude-code 1.2.3",
     "last_connected_at": "2026-06-03T11:44:00.000Z"
@@ -566,9 +566,11 @@ Request:
 ```json
 {
   "runtime": "claude-code",
-  "connector_version": "0.1.0",
+  "connector_version": "0.1.1",
   "hosted_mcp_configured": true,
   "local_signer_configured": true,
+  "signer_acknowledged": true,
+  "activation_command_available": true,
   "probe_result": "restart_required",
   "restart_required": true,
   "next_user_action": "restart_agent_session",
@@ -661,7 +663,7 @@ Rules:
 Preferred command shape:
 
 ```sh
-npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --runtime claude-code
+npx -y @haven_ai/connect@0.1.1-alpha --setup hv_setup_... --api https://api.haven.example --ack-signer --runtime claude-code
 ```
 
 The setup prompt may ask the agent to run that command, but the command is the
@@ -736,7 +738,7 @@ Please connect this workspace to Haven.
 
 Run this local setup command:
 
-npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --runtime claude-code
+npx -y @haven_ai/connect@0.1.1-alpha --setup hv_setup_... --api https://api.haven.example --ack-signer --runtime claude-code
 
 The Haven connector will generate the signing key locally and send Haven only
 the public signing address. Do not print private keys in chat or logs.
@@ -857,7 +859,7 @@ Initial runtime classes:
 | Runtime | Install target | Restart guidance |
 |---|---|---|
 | Claude Code | `claude mcp add` or project config | likely restart current session |
-| Codex CLI | `.codex/config.toml` plus env/secret reference | restart current session |
+| Codex CLI | `.codex/config.toml`, private `identity.env`, and a private launcher script | restart current session with the generated launcher |
 | Cursor | MCP config or deep link | reload or runtime-specific refresh |
 | VS Code | MCP config/deep link | hot reload may work; verify per version |
 | Claude Desktop | desktop config | full app restart |
@@ -867,9 +869,22 @@ The connector should report:
 
 - hosted MCP configured
 - local signer configured
+- local signer acknowledgement prepared
+- restart command prepared when the runtime needs exported environment
 - probe result if available
 - restart required or not known
 - next user action
+
+For Codex, the connector keeps the API key out of `.codex/config.toml`. It
+writes a private `identity.env` with an exported `HAVEN_TOKEN` and a private
+`start-codex.sh` launcher so the next Codex session inherits the token required
+by `bearer_token_env_var`.
+
+For Codex and Claude Code, the Haven-generated connector command includes
+`--ack-signer`. This writes the local signer consent sidecar during setup. The
+runtime MCP command relies on that sidecar rather than carrying a long-lived
+auto-ack flag. The delegate private key remains only in the local signer
+credential file.
 
 This should use the install-status endpoint above when network access works. If
 the runtime cannot report status automatically, the UI should show the last known

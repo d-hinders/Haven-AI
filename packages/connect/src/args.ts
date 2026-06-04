@@ -26,6 +26,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       options.credentialsDir = requireValue(argv, ++i, arg)
     } else if (arg === '--environment-label') {
       options.environmentLabel = requireValue(argv, ++i, arg)
+    } else if (arg === '--ack-signer') {
+      options.ackSigner = true
     } else if (arg === '--version') {
       process.stdout.write(`${CONNECTOR_VERSION}\n`)
       process.exit(0)
@@ -57,7 +59,7 @@ export function helpText(): string {
     'sends Haven only the public signing address plus a proof signature.',
     '',
     'Usage:',
-    '  npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --runtime claude-code',
+    '  npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-signer --runtime claude-code',
     '',
     'Options:',
     '  --setup <token>            Short-lived setup token from Haven.',
@@ -65,6 +67,7 @@ export function helpText(): string {
     '  --runtime <name>           Agent runtime hint, such as claude-code, codex-cli, cursor, vscode, or claude-desktop.',
     '  --credentials-dir <path>   Credential directory fallback. Defaults to ~/.haven/agents.',
     '  --environment-label <text> Non-sensitive label shown in Haven setup review.',
+    '  --ack-signer               Write the one-time local signer acknowledgement during setup.',
     '  --help                     Show this help.',
     '',
     'The connector never prints the private key and never sends it to Haven.',

@@ -1,8 +1,14 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { SIGNER_VERSION } from '@haven_ai/signer'
 import { writeRuntimeConfig } from './config-writers.js'
 import { probeHostedMcpTools, probeLocalSignerCredential } from './probes.js'
 import { normalizeRuntime, restartRequiredForRuntime, runtimeProfile, type RuntimeId } from './runtime-registry.js'
+import {
+  acknowledgeLocalSignerConsent,
+  getLocalSignerConsentStatus,
+  type LocalSignerConsentStatus,
+} from './signer-consent.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -14,6 +20,7 @@ export interface RuntimeInstallInput {
   identityPath: string
   credentialDirectory: string
   environmentLabel?: string
+  ackSigner?: boolean
 }
 
 export interface RuntimeInstallResult {
@@ -26,6 +33,8 @@ export interface RuntimeInstallResult {
   errorCode?: string
   configTarget?: string
   runtimeVersion?: string
+  signerAcknowledged?: boolean
+  activationCommand?: string
   messages: string[]
 }
 
@@ -42,9 +51,12 @@ export async function installRuntime(
 ): Promise<RuntimeInstallResult> {
   const runtime = normalizeRuntime(input.runtime, deps.env)
   const profile = runtimeProfile(runtime, deps.env)
+  const signerConsentMessages: string[] = []
+  const signerConsent = await resolveSignerConsent(input, signerConsentMessages)
 
   if (runtime === 'other') {
-    const signerReady = await probeLocalSignerCredential(input.signerPath)
+    const signerCredentialReady = await probeLocalSignerCredential(input.signerPath)
+    const signerReady = signerCredentialReady && signerConsent.acknowledged
     return {
       runtime,
       hostedMcpConfigured: false,
@@ -56,7 +68,11 @@ export async function installRuntime(
       nextUserAction: 'return_to_haven_for_wallet_approval_then_configure_runtime',
       errorCode: 'manual_runtime_setup_required',
       configTarget: 'manual runtime setup',
-      messages: ['Runtime was not recognized. Keep the local credentials and add Haven MCP entries manually after wallet approval.'],
+      signerAcknowledged: signerConsent.acknowledged,
+      messages: [
+        ...signerConsentMessages,
+        'Runtime was not recognized. Keep the local credentials and add Haven MCP entries manually after wallet approval.',
+      ],
     }
   }
 
@@ -71,7 +87,7 @@ export async function installRuntime(
         homeDir: deps.homeDir,
       })
 
-  const [hostedProbe, signerReady] = await Promise.all([
+  const [hostedProbe, signerCredentialReady] = await Promise.all([
     configResult.hostedConfigured
       ? probeHostedMcpTools(input.apiKey, input.hostedMcpUrl, deps.fetch)
       : Promise.resolve({ status: 'bad_response' as const }),
@@ -79,8 +95,9 @@ export async function installRuntime(
   ])
 
   const hostedOk = configResult.hostedConfigured && hostedProbe.status !== 'unauthorized'
-  const signerOk = configResult.signerConfigured && signerReady
+  const signerOk = configResult.signerConfigured && signerCredentialReady && signerConsent.acknowledged
   const restartRequired = configResult.restartRequired || restartRequiredForRuntime(runtime, deps.env)
+  const errorCode = configResult.errorCode ?? signerConsentErrorCode(signerCredentialReady, signerConsent)
 
   return {
     runtime,
@@ -88,10 +105,12 @@ export async function installRuntime(
     localSignerConfigured: signerOk,
     probeResult: buildProbeResult(configResult.hostedConfigured, hostedProbe.status, signerOk),
     restartRequired,
-    nextUserAction: nextAction(profile.restartMode, configResult.errorCode),
-    errorCode: configResult.errorCode,
+    nextUserAction: nextAction(runtime, profile.restartMode, errorCode),
+    errorCode,
     configTarget: configResult.target,
-    messages: configResult.messages,
+    signerAcknowledged: signerConsent.acknowledged,
+    activationCommand: configResult.activationCommand,
+    messages: [...signerConsentMessages, ...configResult.messages],
   }
 }
 
@@ -117,6 +136,7 @@ async function configureClaudeCode(
   restartRequired: boolean
   messages: string[]
   errorCode?: string
+  activationCommand?: string
 }> {
   const runCommand = deps.runCommand ?? defaultRunCommand
   try {
@@ -134,9 +154,10 @@ async function configureClaudeCode(
       'mcp',
       'add',
       'haven-signer',
+      '--',
       'npx',
       '-y',
-      '@haven_ai/signer',
+      signerPackageName(),
       '--credentials',
       input.signerPath,
     ])
@@ -146,7 +167,10 @@ async function configureClaudeCode(
       target: 'Claude Code MCP config',
       changed: true,
       restartRequired: true,
-      messages: ['Updated Haven MCP entries with Claude Code.'],
+      messages: [
+        'Updated Haven MCP entries with Claude Code.',
+        'Restart Claude Code after Haven approval so it can load the Haven tools.',
+      ],
     }
   } catch (err) {
     return {
@@ -155,7 +179,10 @@ async function configureClaudeCode(
       target: 'Claude Code MCP config',
       changed: false,
       restartRequired: true,
-      messages: [`Could not update Claude Code MCP config: ${err instanceof Error ? err.message : String(err)}`],
+      messages: [
+        `Could not update Claude Code MCP config: ${err instanceof Error ? err.message : String(err)}`,
+        'Install Claude Code or rerun the Haven setup command inside a Claude Code terminal.',
+      ],
       errorCode: 'claude_code_config_failed',
     }
   }
@@ -171,13 +198,45 @@ function buildProbeResult(hostedConfigured: boolean, hostedStatus: string, signe
   return `${hostedPart}_${signerPart}`.slice(0, 120)
 }
 
+async function resolveSignerConsent(
+  input: RuntimeInstallInput,
+  messages: string[],
+): Promise<LocalSignerConsentStatus> {
+  if (input.ackSigner) {
+    const status = await acknowledgeLocalSignerConsent(input.signerPath, (message) => messages.push(message))
+    if (status.acknowledged) {
+      messages.push('Prepared the local Haven signer acknowledgement.')
+    } else {
+      messages.push('Local Haven signer acknowledgement still needs attention.')
+    }
+    return status
+  }
+  return getLocalSignerConsentStatus(input.signerPath)
+}
+
+function signerConsentErrorCode(
+  signerCredentialReady: boolean,
+  signerConsent: LocalSignerConsentStatus,
+): string | undefined {
+  if (!signerCredentialReady) return 'local_signer_credential_unavailable'
+  if (!signerConsent.acknowledged) return 'local_signer_ack_required'
+  return undefined
+}
+
 function nextAction(
+  runtime: RuntimeId,
   restartMode: 'restart-session' | 'restart-app' | 'hot-reload' | 'manual',
   errorCode?: string,
 ): string {
   if (errorCode) return 'return_to_haven_for_wallet_approval_then_finish_runtime_setup'
   if (restartMode === 'hot-reload') return 'return_to_haven_for_wallet_approval'
+  if (runtime === 'codex-cli') return 'return_to_haven_for_wallet_approval_then_restart_codex_with_haven_env'
+  if (runtime === 'claude-code') return 'return_to_haven_for_wallet_approval_then_restart_claude_code'
   if (restartMode === 'restart-app') return 'return_to_haven_for_wallet_approval_then_restart_app'
   if (restartMode === 'restart-session') return 'return_to_haven_for_wallet_approval_then_restart_agent_session'
   return 'return_to_haven_for_wallet_approval_then_configure_runtime'
+}
+
+function signerPackageName(): string {
+  return `@haven_ai/signer@${SIGNER_VERSION}`
 }

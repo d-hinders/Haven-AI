@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { SIGNER_VERSION } from '@haven_ai/signer'
 import type { RuntimeId } from './runtime-registry.js'
 
 export interface RuntimeConfigInput {
@@ -20,6 +21,7 @@ export interface RuntimeConfigWriteResult {
   restartRequired: boolean
   messages: string[]
   errorCode?: string
+  activationCommand?: string
 }
 
 export async function writeRuntimeConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
@@ -62,7 +64,7 @@ export function buildHostedServer(hostedMcpUrl: string, apiKey: string, runtime:
 export function buildSignerServer(signerPath: string, runtime: RuntimeId): Record<string, unknown> {
   const server = {
     command: 'npx',
-    args: ['-y', '@haven_ai/signer', '--credentials', signerPath],
+    args: ['-y', signerPackageName(), '--credentials', signerPath],
   }
   if (runtime === 'vscode') return { type: 'stdio', ...server }
   return server
@@ -97,7 +99,7 @@ export function mergeCodexToml(existingToml: string, hostedMcpUrl: string, signe
     '',
     '[mcp_servers.haven_signer]',
     'command = "npx"',
-    `args = ["-y", "@haven_ai/signer", "--credentials", ${tomlString(signerPath)}]`,
+    `args = ["-y", ${tomlString(signerPackageName())}, "--credentials", ${tomlString(signerPath)}]`,
   ].join('\n')
   return `${next ? `${next}\n\n` : ''}${block}\n`
 }
@@ -140,22 +142,34 @@ async function writeJsonRuntimeConfig(
 async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
   const target = codexConfigPath(input.homeDir)
   const envTarget = join(input.credentialDirectory, 'identity.env')
+  const launchTarget = join(input.credentialDirectory, 'start-codex.sh')
   try {
     const existing = await readOptional(target)
     const merged = mergeCodexToml(existing ?? '', input.hostedMcpUrl, input.signerPath)
     await writeOwnerOnlyText(target, merged)
-    await writeOwnerOnlyText(envTarget, `HAVEN_TOKEN=${shellToken(input.apiKey)}\n`)
+    await writeOwnerOnlyText(envTarget, `export HAVEN_TOKEN=${shellToken(input.apiKey)}\n`)
+    await writeOwnerExecutableText(
+      launchTarget,
+      [
+        '#!/bin/sh',
+        'set -eu',
+        `. ${shellToken(envTarget)}`,
+        'exec codex "$@"',
+        '',
+      ].join('\n'),
+    )
     return {
-      hostedConfigured: false,
+      hostedConfigured: true,
       signerConfigured: true,
       target: 'Codex CLI config',
       changed: existing !== merged,
       restartRequired: true,
+      activationCommand: shellToken(launchTarget),
       messages: [
         'Updated Haven MCP entries in Codex CLI config.',
-        'Wrote the hosted MCP token to a private env file. Launch Codex with that env file before using Haven tools.',
+        'Wrote the hosted MCP token to a private env file.',
+        `Restart Codex with: ${shellToken(launchTarget)}`,
       ],
-      errorCode: 'codex_env_activation_required',
     }
   } catch (err) {
     return {
@@ -183,6 +197,12 @@ async function writeOwnerOnlyText(path: string, value: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   await writeFile(path, value, { mode: 0o600 })
   await chmod(path, 0o600).catch(() => undefined)
+}
+
+async function writeOwnerExecutableText(path: string, value: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  await writeFile(path, value, { mode: 0o700 })
+  await chmod(path, 0o700).catch(() => undefined)
 }
 
 function parseJsonObject(value: string): Record<string, unknown> {
@@ -257,4 +277,8 @@ function configTargetLabel(runtime: RuntimeId): string {
     default:
       return 'runtime MCP config'
   }
+}
+
+function signerPackageName(): string {
+  return `@haven_ai/signer@${SIGNER_VERSION}`
 }

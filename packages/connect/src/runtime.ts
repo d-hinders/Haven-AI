@@ -18,7 +18,7 @@ import {
   type RuntimeInstallResult,
 } from './runtime-install.js'
 
-export const CONNECTOR_VERSION = '0.1.0'
+export const CONNECTOR_VERSION = '0.1.1'
 
 export interface ConnectOptions {
   setupToken: string
@@ -27,6 +27,7 @@ export interface ConnectOptions {
   credentialsDir?: string
   environmentLabel?: string
   connectorVersion?: string
+  ackSigner?: boolean
 }
 
 export interface ConnectDeps {
@@ -116,6 +117,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     identityPath: credentialPaths.identityPath,
     credentialDirectory: credentialPaths.directory,
     environmentLabel: options.environmentLabel ?? 'Local workspace',
+    ackSigner: options.ackSigner,
   })
   printRuntimeInstall(runtimeInstall, log)
 
@@ -126,6 +128,8 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
       hostedMcpConfigured: runtimeInstall.hostedMcpConfigured,
       localSignerConfigured: runtimeInstall.localSignerConfigured,
       credentialFilesWritten: true,
+      signerAcknowledged: runtimeInstall.signerAcknowledged,
+      activationCommandAvailable: Boolean(runtimeInstall.activationCommand),
       probeResult: runtimeInstall.probeResult,
       restartRequired: runtimeInstall.restartRequired,
       nextUserAction: runtimeInstall.nextUserAction,

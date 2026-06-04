@@ -50,6 +50,8 @@ export interface AgentConnectionSetupStatusResponse {
     hosted_mcp_configured?: boolean
     local_signer_configured?: boolean
     credential_files_written?: boolean
+    signer_acknowledged?: boolean
+    activation_command_available?: boolean
     probe_result?: string
     restart_required?: boolean
     next_user_action?: string

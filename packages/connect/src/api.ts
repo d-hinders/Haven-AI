@@ -33,6 +33,8 @@ export interface UpdateInstallStatusInput {
   hostedMcpConfigured: boolean
   localSignerConfigured: boolean
   credentialFilesWritten?: boolean
+  signerAcknowledged?: boolean
+  activationCommandAvailable?: boolean
   probeResult: string
   restartRequired: boolean
   nextUserAction: string
@@ -129,6 +131,8 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
           hosted_mcp_configured: input.hostedMcpConfigured,
           local_signer_configured: input.localSignerConfigured,
           credential_files_written: input.credentialFilesWritten,
+          signer_acknowledged: input.signerAcknowledged,
+          activation_command_available: input.activationCommandAvailable,
           probe_result: input.probeResult,
           restart_required: input.restartRequired,
           next_user_action: input.nextUserAction,

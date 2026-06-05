@@ -4,10 +4,10 @@ Last updated: 2026-06-05
 
 ## Current Run
 
-- Branch: `codex/quality-signer-readiness-review-pattern`
-- PR target: capture the reusable review lesson from Antonio's PR #273: wallet address or `isConnected` state is not signer readiness when the action path requires a `walletClient`.
-- Why this target: PR #273 fixed a real Connect Agent 2 dead-end where the UI could report wallet approval as unavailable without showing the recovery action. A follow-up scan found no live duplicate after `useSafeOperationGate` was fixed centrally, but the trap was missing from `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the Haven reviewer prompt. This PR updates that durable review memory so future wallet/passkey approval changes test the intermediate address-present / walletClient-missing state.
-- Files touched: `docs/ai-review-patterns.md`, `docs/ai-agent-workflow.md`, `.claude/agents/haven-reviewer.md`, and this loop file.
+- Branch: `codex/quality-self-sign-allowance-validation`
+- PR target: apply shared owner-side allowance validation and revoked-agent mutation guards to older `/self-sign-agents` allowance create/update/delete paths.
+- Why this target: `/agents` and Connect Agent 2 setup now reject malformed token addresses, token symbols, atomic amounts, reset periods, duplicate tokens, and revoked-agent allowance mutations before writing mirror rows. The legacy self-sign route still accepted raw allowance payloads. This PR keeps the change validation-only while closing the parity gap around agent authority metadata.
+- Files touched: `packages/backend/src/routes/self-sign-agents.ts`, `packages/backend/src/routes/__tests__/self-sign-agents.test.ts`, and this loop file.
 
 ## Priority Backlog
 
@@ -36,7 +36,8 @@ Last updated: 2026-06-05
 - PR #271: owner-side agent allowance mirror writes reject invalid token, amount, reset-period, duplicate-token, and revoked-agent mutation states before storing rows.
 - PR #272: one-shot x402 and MPP/generic machine-payment writes are terminal-state guarded for signature recording, stale sign-data refresh, confirmed transition, failed transition, and rail-scoped idempotency replay.
 - Antonio PR #273: `useSafeOperationGate` now requires both wallet `address` and `walletClient` before treating EOA signing as ready, keeping wallet recovery visible when the client is not ready.
-- Planned current PR: durable review memory now captures the signer-readiness gate trap from PR #273.
+- PR #274: durable review memory now captures the signer-readiness gate trap from PR #273 in `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the Haven reviewer prompt.
+- Planned current PR: older `/self-sign-agents` allowance writes use the shared owner-side allowance normalizer and block revoked-agent allowance mutations.
 - Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
@@ -44,21 +45,26 @@ Last updated: 2026-06-05
 - x402/generic machine-payment consolidation: defer because it crosses idempotency, approval-state, expected-context binding, and multi-entrypoint behavior.
 - Broader payment state rewrite, DB migrations, custody/signing semantics, Safe ownership assumptions, production chain/token config, and protocol compatibility changes need separate review.
 - Broader x402/payment-history consolidation remains deferred.
-- Older `/self-sign-agents` allowance parity remains deferred because the current PR is scoped to payment-intent state guards.
-- Reconciliation-event immutability is deferred: `machine_payment_reconciliation_events` can reopen a resolved event on conflict today, but this PR stays scoped to payment-intent state and signable metadata rows.
+- Broader self-sign onboarding, budget UI, and allowance-state rewrites remain deferred.
+- Reconciliation-event immutability is deferred: `machine_payment_reconciliation_events` can reopen a resolved event on conflict today, but this PR stays scoped to allowance validation parity.
+- Whole-agent `/self-sign-agents/:id` delete lifecycle parity remains deferred to a separate PR; reviewer noted it can delete non-revoked self-sign agents, unlike `/agents`.
 
 ## Known Baseline Notes
 
 - Focused check after implementation:
-  - `git diff --check` passed for the docs-only review-pattern update.
-  - `npm run test -w packages/frontend -- useSafeOperationGate.test.ts` passed.
-- Recent PR scan:
-  - Inspected Antonio PR #273 (`fix(frontend): require walletClient in useSafeOperationGate EOA check`).
-  - Searched frontend wallet/signing gates for duplicate `address`/`isConnected` readiness bugs; all direct signing surfaces now route through `useSafeOperationGate` / `OnchainActionGate`, and `NetworkGate` is not used standalone.
-- Captain self-check covered UI review docs, signer-readiness gates, inline gate/recovery-action placement, and documentation-list sync across `docs/ai-review-patterns.md`, `docs/ai-agent-workflow.md`, and `.claude/agents/haven-reviewer.md`.
+  - `npm run test -w packages/backend -- self-sign-agents.test.ts agents.test.ts` passed.
+  - `npm run test -w packages/backend` passed.
+  - `npm run typecheck -w packages/backend` passed.
+  - `npm run build -w packages/backend` passed.
+  - `git diff --check` passed.
+- Current target scan:
+  - Confirmed `/agents` already uses `normalizeAgentAllowances`, `normalizeAgentAllowance`, and `normalizeAgentAllowanceTokenAddress`.
+  - Confirmed `/self-sign-agents` previously lowercased token addresses but did not validate token shape, token symbol, atomic amount, reset period, duplicate create payloads, or revoked-agent allowance mutations.
+- Captain self-check covered CASP guardrails, payment authority boundaries, shared allowance normalizer reuse, revoked-state mutation guards, and focused route regression coverage.
+- Reviewer agent found no route/docs code findings and no new secret leakage or CASP concerns. Residual gap: coverage is mocked route-unit coverage, not real Postgres or end-to-end self-sign payment coverage.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
 - Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 
 ## Recommended Next Target
 
-After this PR merges, choose a narrow backend allowance-parity target: audit older `/self-sign-agents` allowance create/update/delete paths against the shared owner-side allowance validation now used by `/agents` and Connect Agent 2 setup. Keep it validation-only and defer broader onboarding, budget UI, or allowance-state rewrites.
+After this PR merges, choose a narrow same-surface lifecycle target: align whole-agent `/self-sign-agents/:id` delete behavior with `/agents` by requiring revocation before deletion, with focused tests that active self-sign agents cannot be deleted while revoked ones still can. Keep it lifecycle-only and defer broader self-sign onboarding or allowance-state rewrites.

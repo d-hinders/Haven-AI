@@ -7,8 +7,6 @@ import { usePublicClient } from 'wagmi'
 import {
   ALLOWANCE_MODULE_ADDRESS,
   RESET_PERIODS,
-  buildAgentSetupTx,
-  isModuleEnabled,
   type AllowanceSetup,
 } from '@/lib/allowance-module'
 import { api, getResolvedApiBaseUrl } from '@/lib/api'
@@ -25,15 +23,8 @@ import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { truncate } from '@/lib/format'
 import { validateMoneyInput } from '@/lib/money-input'
-import {
-  executeSafeTx,
-  getChainTokens,
-  getSafeNonce,
-  getSafeTxHash,
-  proposeSafeTx,
-  signSafeTx,
-  SafeTxReceiptTimeoutError,
-} from '@/lib/safe-tx'
+import { getChainTokens } from '@/lib/safe-tx'
+import { executeAgentSetup } from '@/lib/agent-setup'
 import { useActiveSigner } from '@/lib/signer'
 import WalletButton from './WalletButton'
 import { Button } from './ui/Button'
@@ -392,72 +383,41 @@ export default function ConnectAgent2Modal({
         amount: BigInt(budget.allowance_amount),
         resetTimeMin: budget.reset_period_min,
       }))
-      const moduleEnabled = await isModuleEnabled(publicClient, approvalWallet as Address)
-      const nonce = await getSafeNonce(publicClient, approvalWallet as Address)
-      const safeTx = buildAgentSetupTx(
-        approvalWallet as Address,
-        delegateAddress as Address,
-        setupAllowances,
-        !moduleEnabled,
-        nonce,
-      )
-      const safeTxHash = getSafeTxHash(approvalWallet as Address, safeTx, approvalNetwork)
-      const signature = await signSafeTx(signer, approvalWallet as Address, safeTx, approvalNetwork)
 
-      if ((safeDetails.threshold ?? 1) <= 1) {
-        try {
-          const result = await executeSafeTx(
-            signer,
-            publicClient,
-            approvalWallet as Address,
-            safeTx,
-            signature,
-            approvalNetwork,
-          )
-          await recordWalletApproval(setup.setup_id, {
-            result: 'confirmed',
-            tx_hash: result.txHash,
-            safe_tx_hash: safeTxHash,
-            chain_id: approvalNetwork,
-            safe_address: approvalWallet,
-            allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
-            delegate_address: delegateAddress,
-            confirmation_status: 'confirmed',
-          })
-        } catch (err) {
-          const txHash = extractTxHashFromError(err)
-          if (!txHash) throw err
-          await recordWalletApproval(setup.setup_id, {
-            result: 'confirmed',
-            tx_hash: txHash,
-            safe_tx_hash: safeTxHash,
-            chain_id: approvalNetwork,
-            safe_address: approvalWallet,
-            allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
-            delegate_address: delegateAddress,
-            confirmation_status: 'receipt_timeout',
-          })
+      const result = await executeAgentSetup({
+        signer,
+        publicClient,
+        safeAddress: approvalWallet as Address,
+        delegateAddress: delegateAddress as Address,
+        allowances: setupAllowances,
+        chainId: approvalNetwork,
+        threshold: safeDetails.threshold ?? 1,
+      })
+
+      const baseApproval = {
+        safe_tx_hash: result.safeTxHash,
+        chain_id: approvalNetwork,
+        safe_address: approvalWallet,
+        allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
+        delegate_address: delegateAddress,
+      }
+
+      if (result.status === 'proposed') {
+        await recordWalletApproval(setup.setup_id, { result: 'proposed', ...baseApproval })
+      } else {
+        // confirmed or receipt_timeout — both submitted the tx; record the
+        // confirmation state so Haven keeps checking on a timeout.
+        await recordWalletApproval(setup.setup_id, {
+          result: 'confirmed',
+          tx_hash: result.txHash,
+          confirmation_status: result.status === 'receipt_timeout' ? 'receipt_timeout' : 'confirmed',
+          ...baseApproval,
+        })
+        if (result.status === 'receipt_timeout') {
           setApprovalError(
-            `The transaction was submitted but is still confirming. Haven will keep checking ${getExplorerUrl(approvalNetwork, 'tx', txHash)}.`,
+            `The transaction was submitted but is still confirming. Haven will keep checking ${getExplorerUrl(approvalNetwork, 'tx', result.txHash)}.`,
           )
         }
-      } else {
-        await proposeSafeTx(
-          approvalWallet as Address,
-          safeTx,
-          safeTxHash,
-          signature,
-          signer.address,
-          approvalNetwork,
-        )
-        await recordWalletApproval(setup.setup_id, {
-          result: 'proposed',
-          safe_tx_hash: safeTxHash,
-          chain_id: approvalNetwork,
-          safe_address: approvalWallet,
-          allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
-          delegate_address: delegateAddress,
-        })
       }
       await statusQuery.refetch()
       onSetupUpdated?.()
@@ -1476,13 +1436,6 @@ function errorMessage(err: unknown): string {
     if (short) message = short
   }
   return message
-}
-
-function extractTxHashFromError(err: unknown): string | null {
-  // Prefer the typed field — the regex fallback is for older/plain errors.
-  if (err instanceof SafeTxReceiptTimeoutError) return err.txHash
-  const match = errorMessage(err).match(/0x[0-9a-fA-F]{64}/)
-  return match?.[0] ?? null
 }
 
 function generateBrowserAgentApiKey(): string {

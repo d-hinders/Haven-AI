@@ -662,6 +662,7 @@ export default function DashboardClient() {
   const {
     balances,
     loading: balancesLoading,
+    error: balancesError,
     refetch: refetchAggregatedBalances,
   } = useAggregatedBalances()
   const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } = useDashboardOverview()
@@ -678,8 +679,9 @@ export default function DashboardClient() {
   // user can complete them in any order. The guide always renders the
   // canonical Fund → Agent → First payment ordering but a step completed
   // out of order shows as done regardless.
-  const dataReady = safes.length > 0 && !balancesLoading && !agentsLoading
-  const hasFunds = dataReady && hasAnyBalance
+  const fundingStateKnown = safes.length > 0 && !balancesLoading && !balancesError
+  const dataReady = fundingStateKnown && !agentsLoading
+  const hasFunds = fundingStateKnown && hasAnyBalance
   const hasAgents = dataReady && agents.length > 0
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
@@ -804,7 +806,7 @@ export default function DashboardClient() {
     refetch: refetchSelectedBalances,
   } = useBalances(
     selectedActionSafe?.safe_address ?? null,
-    { enabled: sendModalDataEnabled },
+    { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
   )
   const {
     details: selectedSafeDetails,
@@ -902,8 +904,8 @@ export default function DashboardClient() {
       changePercent={changePercent}
       hasAccounts={safes.length > 0}
       hasFunds={hasFunds}
-      fundingStateKnown={dataReady}
-      watchingForDeposit={dataReady && !hasFunds && hasOpenedReceive}
+      fundingStateKnown={fundingStateKnown}
+      watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       onSend={() => openHeroAction('send')}
       onReceive={() => openHeroAction('receive')}

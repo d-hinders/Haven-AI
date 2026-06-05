@@ -122,6 +122,7 @@ export interface BalanceItem {
   balance: string
   formatted: string
   decimals: number
+  chainId?: number
 }
 
 export interface BalancesResponse {

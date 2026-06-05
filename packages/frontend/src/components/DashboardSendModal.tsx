@@ -47,7 +47,7 @@ export default function DashboardSendModal({
     balances,
     loading: balancesLoading,
     error: balancesError,
-  } = useBalances(safeAddress)
+  } = useBalances(safeAddress, { chainId: selectedSafe?.chain_id })
   const {
     details: safeDetails,
     loading: safeDetailsLoading,

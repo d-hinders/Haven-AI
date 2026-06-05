@@ -167,13 +167,13 @@ export default function AccountDetailClient() {
     loading: portfolioLoading,
     error: portfolioError,
     refetch: refetchPortfolio,
-  } = usePortfolio(safeAddress)
+  } = usePortfolio(safeAddress, { chainId })
 
   const {
     balances,
     error: balancesError,
     refetch: refetchBalances,
-  } = useBalances(safeAddress)
+  } = useBalances(safeAddress, { chainId })
 
   const {
     transactions,

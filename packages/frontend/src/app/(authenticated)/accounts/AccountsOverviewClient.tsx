@@ -451,7 +451,7 @@ function SafeCard({
     totalEur,
     breakdown,
     loading: portfolioLoading,
-  } = usePortfolio(safe.safe_address)
+  } = usePortfolio(safe.safe_address, { chainId: safe.chain_id })
   const fiatTotal = currency === 'USD' ? totalUsd : totalEur
 
   // The breakdown comes back sorted by value, but make it explicit so we never

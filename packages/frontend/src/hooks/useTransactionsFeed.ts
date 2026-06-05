@@ -65,6 +65,7 @@ export function useTransactionsFeed(
   const fetchPage = useCallback(
     async (offset: number, append: boolean, fresh: boolean) => {
       const requestId = ++requestIdRef.current
+      const filtersForRequest = filtersRef.current
 
       setError(null)
       if (append) {
@@ -77,10 +78,12 @@ export function useTransactionsFeed(
 
       try {
         const data = await api.get<TransactionsFeedResponse>(
-          `/transactions?${toQueryString(filtersRef.current, offset, limit, fresh)}`,
+          `/transactions?${toQueryString(filtersForRequest, offset, limit, fresh)}`,
         )
+        if (requestId !== requestIdRef.current) return
+
         const x402Transactions = offset === 0
-          ? await fetchX402ActivityTransactions(filtersRef.current)
+          ? await fetchX402ActivityTransactions(filtersForRequest)
           : []
 
         if (requestId !== requestIdRef.current) return

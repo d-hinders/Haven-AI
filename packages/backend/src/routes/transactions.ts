@@ -7,7 +7,7 @@ import {
   fetchERC20Transfers,
   fetchSafeServiceTransfers,
 } from '../lib/explorer-api.js'
-import { getChain } from '../lib/chains.js'
+import { getChain, isSupportedChain } from '../lib/chains.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import { createCache } from '../lib/cache.js'
 import { machinePaymentLifecycle } from '../lib/machine-payment-lifecycle.js'
@@ -188,6 +188,17 @@ function parsePositiveInt(
     return null
   }
   return parsed
+}
+
+function parseChainId(value: unknown): number | null {
+  if (value === undefined) return null
+  if (Array.isArray(value)) return Number.NaN
+
+  const raw = String(value).trim()
+  if (!/^[1-9]\d*$/.test(raw)) return Number.NaN
+
+  const chainId = Number(raw)
+  return Number.isSafeInteger(chainId) ? chainId : Number.NaN
 }
 
 function parseFreshFlag(value: string | undefined): boolean {
@@ -435,6 +446,14 @@ function compareEnrichedTransactions(
   return compareTransactions(a, b) || a.safeAddress.localeCompare(b.safeAddress)
 }
 
+export function enrichedTransactionIdentityKey(tx: EnrichedTransaction): string {
+  return [
+    tx.chainId,
+    tx.safeId,
+    transactionDedupKey(tx),
+  ].join(':')
+}
+
 export async function enrichTransactionsWithAgents(
   userId: string,
   transactions: EnrichedTransaction[],
@@ -607,7 +626,8 @@ export async function fetchConfirmedX402Transactions(
         us.id = a.safe_id
         OR (
           LOWER(us.safe_address) = LOWER(pi.safe_address)
-          AND us.chain_id = COALESCE(pi.chain_id, us.chain_id)
+          AND pi.chain_id IS NOT NULL
+          AND us.chain_id = pi.chain_id
         )
       )
      WHERE pi.user_id = $1
@@ -652,7 +672,8 @@ export async function fetchConfirmedX402Transactions(
         us.id = a.safe_id
         OR (
           LOWER(us.safe_address) = LOWER(ar.safe_address)
-          AND us.chain_id = COALESCE(ar.chain_id, us.chain_id)
+          AND ar.chain_id IS NOT NULL
+          AND us.chain_id = ar.chain_id
         )
       )
      WHERE ar.user_id = $1
@@ -897,7 +918,7 @@ export default async function transactionRoutes(
 
     const seen = new Set<string>()
     const deduped = mergedWithX402.filter((tx) => {
-      const key = `${transactionDedupKey(tx)}:${tx.safeAddress.toLowerCase()}`
+      const key = enrichedTransactionIdentityKey(tx)
       if (seen.has(key)) return false
       seen.add(key)
       return true
@@ -1153,13 +1174,14 @@ export default async function transactionRoutes(
 
   app.get<{
     Params: { safeAddress: string }
-    Querystring: { page?: string; limit?: string; fresh?: string }
+    Querystring: { page?: string; limit?: string; fresh?: string; chain_id?: string }
   }>('/:safeAddress', async (request, reply) => {
     const { safeAddress } = request.params
     const { sub } = request.user as { sub: string }
     const page = parsePositiveInt(request.query.page, 1, 1, Number.MAX_SAFE_INTEGER)
     const limit = parsePositiveInt(request.query.limit, 25, 1, 100)
     const fresh = parseFreshFlag(request.query.fresh)
+    const requestedChainId = parseChainId(request.query.chain_id)
 
     if (page === null || limit === null) {
       return reply.code(400).send({ error: 'Invalid pagination params' })
@@ -1169,16 +1191,33 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid address' })
     }
 
+    if (Number.isNaN(requestedChainId)) {
+      return reply.code(400).send({ error: 'Invalid chain_id' })
+    }
+
+    if (requestedChainId !== null && !isSupportedChain(requestedChainId)) {
+      return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })
+    }
+
+    const ownershipSql = requestedChainId === null
+      ? 'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)'
+      : 'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3'
+    const ownershipParams = requestedChainId === null
+      ? [sub, safeAddress]
+      : [sub, safeAddress, requestedChainId]
     const userResult = await pool.query<{ id: string; chain_id: number }>(
-      'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
-      [sub, safeAddress],
+      ownershipSql,
+      ownershipParams,
     )
     if (userResult.rows.length === 0) {
       return reply.code(403).send({ error: 'Not your Safe' })
     }
+    if (requestedChainId === null && userResult.rows.length > 1) {
+      return reply.code(400).send({ error: 'chain_id required' })
+    }
 
     const safeId = userResult.rows[0].id
-    const chainId = userResult.rows[0].chain_id
+    const chainId = requestedChainId ?? userResult.rows[0].chain_id
     const { transactions: allTransactions } = await fetchSafeTransactions({
       safeId,
       safeAddress,

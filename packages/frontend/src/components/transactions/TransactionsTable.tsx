@@ -525,7 +525,10 @@ function counterpartyLabel(
   }
 
   const address = tx.direction === 'in' ? tx.from : tx.to
-  const safeName = safeNamesByAddress?.get(address.toLowerCase())
+  const addressKey = address.toLowerCase()
+  const safeName =
+    safeNamesByAddress?.get(`${addressKey}:${tx.chainId}`) ??
+    safeNamesByAddress?.get(addressKey)
   const contactName = resolveAddress?.(address)
 
   return safeName ?? contactName ?? truncate(address)

@@ -6,6 +6,7 @@ import { fetchPortfolioForSafe } from '../lib/portfolio.js'
 import {
   compareTransactions,
   type EnrichedTransaction,
+  enrichedTransactionIdentityKey,
   enrichTransactionsWithAgents,
   fetchSafeTransactions,
   mergeX402Transactions,
@@ -323,7 +324,7 @@ export default async function dashboardRoutes(
 
     const seen = new Set<string>()
     const dedupedTransactions = visibleTransactions.filter((tx) => {
-      const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}:${tx.safeAddress.toLowerCase()}`
+      const key = enrichedTransactionIdentityKey(tx)
       if (seen.has(key)) return false
       seen.add(key)
       return true

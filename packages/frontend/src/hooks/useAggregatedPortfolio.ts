@@ -246,41 +246,63 @@ interface AggregatedTransactionsReturn {
 }
 
 export function useAggregatedTransactions(limit = 10): AggregatedTransactionsReturn {
-  const { addresses, key } = useSafeAddressKey()
+  const { balanceRefs, key } = useSafeAddressKey()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [total, setTotal] = useState(0)
+  const generationRef = useRef(0)
 
-  const addressesRef = useRef(addresses)
-  addressesRef.current = addresses
+  const balanceRefsRef = useRef(balanceRefs)
+  balanceRefsRef.current = balanceRefs
 
   const fetchAll = useCallback(async () => {
-    const addrs = addressesRef.current
-    if (addrs.length === 0) return
+    const generation = ++generationRef.current
+    const safes = balanceRefsRef.current
+    if (safes.length === 0) {
+      setTransactions([])
+      setTotal(0)
+      setError(null)
+      setLoading(false)
+      return
+    }
 
     try {
+      setLoading(true)
       setError(null)
 
       const results = await Promise.all(
-        addrs.map((addr) =>
-          api
-            .get<TransactionsResponse>(
-              `/transactions/${addr}?page=1&limit=${limit}`,
+        safes.map(async (safe) => {
+          try {
+            const data = await api.get<TransactionsResponse>(
+              `/transactions/${safe.address}?page=1&limit=${limit}&chain_id=${encodeURIComponent(String(safe.chainId))}`,
             )
-            .catch(() => ({ transactions: [], total: 0, page: 1, limit, pages: 0 })),
-        ),
+            return { safe, data, error: null }
+          } catch (err) {
+            return { safe, data: null, error: err }
+          }
+        }),
       )
+
+      if (generationRef.current !== generation) return
+
+      if (results.some((result) => result.error !== null)) {
+        setTransactions([])
+        setTotal(0)
+        setError('Failed to load transactions')
+        return
+      }
 
       // Merge, deduplicate, sort by timestamp desc
       const all: Transaction[] = []
       let totalCount = 0
       const seen = new Set<string>()
 
-      for (const r of results) {
-        totalCount += r.total
-        for (const tx of r.transactions) {
-          const txKey = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}`
+      for (const { safe, data } of results) {
+        if (!data) continue
+        totalCount += data.total
+        for (const tx of data.transactions) {
+          const txKey = transactionIdentityKey(tx, safe.chainId)
           if (!seen.has(txKey)) {
             seen.add(txKey)
             all.push(tx)
@@ -293,14 +315,22 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
       setTransactions(all.slice(0, limit))
       setTotal(totalCount)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load transactions')
+      if (generationRef.current === generation) {
+        setError(err instanceof Error ? err.message : 'Failed to load transactions')
+      }
     } finally {
-      setLoading(false)
+      if (generationRef.current === generation) {
+        setLoading(false)
+      }
     }
   }, [limit])
 
   useEffect(() => {
-    if (!key) {
+    if (balanceRefs.length === 0) {
+      generationRef.current += 1
+      setTransactions([])
+      setTotal(0)
+      setError(null)
       setLoading(false)
       return
     }
@@ -309,8 +339,23 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
     fetchAll()
     // Poll every 60s like the other aggregated hooks
     const interval = setInterval(fetchAll, 60_000)
-    return () => clearInterval(interval)
+    return () => {
+      generationRef.current += 1
+      clearInterval(interval)
+    }
   }, [key, fetchAll])
 
   return { transactions, loading, error, total, refetch: fetchAll }
+}
+
+function transactionIdentityKey(tx: Transaction, chainId: number): string {
+  return [
+    chainId,
+    tx.hash.toLowerCase(),
+    tx.type,
+    tx.from.toLowerCase(),
+    tx.to.toLowerCase(),
+    tx.value,
+    tx.tokenAddress?.toLowerCase() ?? 'native',
+  ].join(':')
 }

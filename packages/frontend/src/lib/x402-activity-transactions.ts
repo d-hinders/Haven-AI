@@ -126,9 +126,13 @@ function buildX402ActivityTransactions(
 ): AggregatedTransaction[] {
   const agentsById = new Map(agents.map((agent) => [agent.id, agent]))
   const safesById = new Map(safes.map((safe) => [safe.id, safe]))
-  const safesByAddress = new Map(
-    safes.map((safe) => [safe.safe_address.toLowerCase(), safe]),
+  const safesByAddressAndChain = new Map(
+    safes.map((safe) => [
+      safeIdentityKey(safe.safe_address, safe.chain_id),
+      safe,
+    ]),
   )
+  const uniqueSafesByAddress = uniqueSafeAddressMap(safes)
   const tokenFilter = parseTokenKey(filters.tokenKey)
 
   return activity.flatMap((item) => {
@@ -147,12 +151,19 @@ function buildX402ActivityTransactions(
       return []
     }
 
-    const safe = resolveSafe(item, agent, safesById, safesByAddress)
-    const safeId = item.safe_id ?? agent?.safe_id ?? safe?.id
-    if (!safeId) return []
+    const safe = resolveSafe(
+      item,
+      agent,
+      safesById,
+      safesByAddressAndChain,
+      uniqueSafesByAddress,
+    )
+    if (!safe) return []
+
+    const safeId = safe.id
     if (filters.safeId && safeId !== filters.safeId) return []
 
-    const chainId = item.chain_id ?? safe?.chain_id ?? 100
+    const chainId = safe.chain_id
     const tokenAddress = resolveTokenAddress(item, agent, chainId)
     if (tokenFilter) {
       if (chainId !== tokenFilter.chainId) return []
@@ -162,8 +173,7 @@ function buildX402ActivityTransactions(
     }
 
     const timestamp = parseActivityTimestamp(item.confirmed_at ?? item.created_at)
-    const safeAddress = item.safe_address ?? agent?.safe_address ?? safe?.safe_address
-    if (!safeAddress) return []
+    const safeAddress = item.safe_address ?? safe.safe_address
 
     return [{
       hash: item.tx_hash,
@@ -185,7 +195,7 @@ function buildX402ActivityTransactions(
       chainId,
       safeId,
       safeAddress,
-      safeName: item.safe_name ?? agent?.safe_name ?? safe?.name ?? 'Haven wallet',
+      safeName: item.safe_name ?? safe.name ?? agent?.safe_name ?? 'Haven wallet',
       source: 'x402',
       x402ResourceUrl: item.x402_resource_url,
       x402MerchantAddress: item.x402_merchant_address,
@@ -201,13 +211,78 @@ function resolveSafe(
   item: X402ActivityItem,
   agent: AgentResponse | undefined,
   safesById: Map<string, UserSafeResponse>,
-  safesByAddress: Map<string, UserSafeResponse>,
+  safesByAddressAndChain: Map<string, UserSafeResponse>,
+  uniqueSafesByAddress: Map<string, UserSafeResponse | null>,
 ): UserSafeResponse | undefined {
-  if (item.safe_id) return safesById.get(item.safe_id)
-  if (agent?.safe_id) return safesById.get(agent.safe_id)
-  if (item.safe_address) return safesByAddress.get(item.safe_address.toLowerCase())
-  if (agent?.safe_address) return safesByAddress.get(agent.safe_address.toLowerCase())
+  if (item.safe_id) {
+    return matchingSafe(safesById.get(item.safe_id), item)
+  }
+  if (agent?.safe_id) {
+    return matchingSafe(safesById.get(agent.safe_id), item, agent)
+  }
+  if (item.safe_address && item.chain_id) {
+    return matchingSafe(
+      safesByAddressAndChain.get(safeIdentityKey(item.safe_address, item.chain_id)),
+      item,
+    )
+  }
+  if (item.safe_address) {
+    return matchingSafe(
+      uniqueSafesByAddress.get(item.safe_address.toLowerCase()) ?? undefined,
+      item,
+    )
+  }
+  if (agent?.safe_address && item.chain_id) {
+    return matchingSafe(
+      safesByAddressAndChain.get(safeIdentityKey(agent.safe_address, item.chain_id)),
+      item,
+      agent,
+    )
+  }
+  if (agent?.safe_address) {
+    return matchingSafe(
+      uniqueSafesByAddress.get(agent.safe_address.toLowerCase()) ?? undefined,
+      item,
+      agent,
+    )
+  }
   return undefined
+}
+
+function matchingSafe(
+  safe: UserSafeResponse | null | undefined,
+  item: X402ActivityItem,
+  agent?: AgentResponse,
+): UserSafeResponse | undefined {
+  if (!safe) return undefined
+  if (item.safe_id && item.safe_id !== safe.id) return undefined
+  if (agent?.safe_id && agent.safe_id !== safe.id) return undefined
+  if (item.chain_id && item.chain_id !== safe.chain_id) return undefined
+
+  const safeAddress = safe.safe_address.toLowerCase()
+  if (item.safe_address && item.safe_address.toLowerCase() !== safeAddress) return undefined
+  if (agent?.safe_address && agent.safe_address.toLowerCase() !== safeAddress) return undefined
+
+  return safe
+}
+
+function safeIdentityKey(address: string, chainId: number): string {
+  return `${address.toLowerCase()}:${chainId}`
+}
+
+function uniqueSafeAddressMap(
+  safes: UserSafeResponse[],
+): Map<string, UserSafeResponse | null> {
+  const uniqueSafes = new Map<string, UserSafeResponse | null>()
+  for (const safe of safes) {
+    const key = safe.safe_address.toLowerCase()
+    if (uniqueSafes.has(key)) {
+      uniqueSafes.set(key, null)
+      continue
+    }
+    uniqueSafes.set(key, safe)
+  }
+  return uniqueSafes
 }
 
 function resolveTokenAddress(

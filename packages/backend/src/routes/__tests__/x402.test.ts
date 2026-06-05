@@ -170,6 +170,60 @@ describe('x402 routes', () => {
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
   })
 
+  it('rejects malformed decimal atomic amounts before allowance checks', async () => {
+    const malformedAmounts = [
+      '0x4e20',
+      '1e6',
+      '+20000',
+      '-1',
+      ' 20000',
+      '20000 ',
+      '0',
+    ]
+
+    for (const amount of malformedAmounts) {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/x402',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {
+          url: 'https://mcp.soundside.ai/mcp',
+          payTo: AGENT.delegate_address,
+          amount,
+          asset: USDC,
+          network: 'base',
+        },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe(
+        'Invalid amount — must be a positive decimal integer in atomic units',
+      )
+    }
+
+    mockQuery.mockResolvedValueOnce(authRow())
+    const blankResponse = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        amount: '',
+        asset: USDC,
+        network: 'base',
+      },
+    })
+
+    expect(blankResponse.statusCode).toBe(400)
+    expect(blankResponse.json().error).toBe('Amount (atomic units) is required')
+    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    expect(mockQuery).toHaveBeenCalledTimes(malformedAmounts.length + 1)
+  })
+
   it('returns an existing pending signature intent for duplicate idempotency keys', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
 

@@ -16,6 +16,7 @@ import type { PaymentRequirements } from 'x402/types'
 
 const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 const X402_IDEMPOTENCY_BUCKET_MS = 300_000
+const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
 
 function decodeBase64Json<T>(value: string, label: string): T {
   try {
@@ -23,6 +24,14 @@ function decodeBase64Json<T>(value: string, label: string): T {
   } catch {
     throw new Error(`Failed to decode ${label}`)
   }
+}
+
+function isPositiveDecimalAtomicAmount(value: string): boolean {
+  return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n
+}
+
+function optionAuthorizationAmount(option: X402PaymentOption): string {
+  return option.maxAmountRequired ?? option.amount
 }
 
 function normalizePaymentOption(value: unknown): X402PaymentOption | null {
@@ -46,6 +55,16 @@ function normalizePaymentOption(value: unknown): X402PaymentOption | null {
         : null
 
   if (!amount) return null
+  if (!isPositiveDecimalAtomicAmount(amount)) return null
+  if (
+    candidate.maxAmountRequired !== undefined &&
+    (
+      typeof candidate.maxAmountRequired !== 'string' ||
+      !isPositiveDecimalAtomicAmount(candidate.maxAmountRequired)
+    )
+  ) {
+    return null
+  }
 
   return {
     scheme: candidate.scheme,
@@ -217,13 +236,21 @@ export function selectPaymentOption(
   for (const opt of accepts) {
     if (opt.network in SUPPORTED_X402_NETWORKS) {
       const networkTokens = NETWORK_TOKENS[opt.network]
-      if (networkTokens?.[opt.asset.toLowerCase()]) return opt
+      if (
+        networkTokens?.[opt.asset.toLowerCase()] &&
+        isPositiveDecimalAtomicAmount(optionAuthorizationAmount(opt))
+      ) {
+        return opt
+      }
     }
   }
 
   // Second pass: any supported network
   for (const opt of accepts) {
-    if (opt.network in SUPPORTED_X402_NETWORKS) {
+    if (
+      opt.network in SUPPORTED_X402_NETWORKS &&
+      isPositiveDecimalAtomicAmount(optionAuthorizationAmount(opt))
+    ) {
       return opt
     }
   }
@@ -246,7 +273,8 @@ export function selectStandardPaymentOption(
     if (
       opt.scheme === 'exact' &&
       opt.network in STANDARD_X402_NETWORKS &&
-      opt.asset.toLowerCase() === BASE_USDC_ADDRESS
+      opt.asset.toLowerCase() === BASE_USDC_ADDRESS &&
+      isPositiveDecimalAtomicAmount(optionAuthorizationAmount(opt))
     ) {
       return opt
     }
@@ -256,7 +284,11 @@ export function selectStandardPaymentOption(
 }
 
 export function x402AuthorizationAmount(option: X402PaymentOption): string {
-  return option.maxAmountRequired ?? option.amount
+  const amount = optionAuthorizationAmount(option)
+  if (!isPositiveDecimalAtomicAmount(amount)) {
+    throw new Error('Invalid x402 amount: must be a positive decimal atomic amount')
+  }
+  return amount
 }
 
 export function buildX402ExpectedMessage(context: X402ExpectedContext): string {

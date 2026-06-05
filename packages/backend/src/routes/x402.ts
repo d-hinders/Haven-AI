@@ -23,6 +23,7 @@ import {
 // ── Constants ─────────────────────────────────────────────────────
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -63,6 +64,10 @@ interface X402ExpectedContext {
 
 function isValidAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
+}
+
+function isPositiveDecimalAtomicAmount(value: string): boolean {
+  return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n
 }
 
 /**
@@ -210,6 +215,11 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     if (!amount || typeof amount !== 'string') {
       return reply.code(400).send({ error: 'Amount (atomic units) is required' })
     }
+    if (!isPositiveDecimalAtomicAmount(amount)) {
+      return reply.code(400).send({
+        error: 'Invalid amount — must be a positive decimal integer in atomic units',
+      })
+    }
     if (!asset || typeof asset !== 'string') {
       return reply.code(400).send({ error: 'Asset (token address) is required' })
     }
@@ -256,15 +266,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
 
     // 3. Parse amount (already in atomic units from x402)
-    let amountRaw: bigint
-    try {
-      amountRaw = BigInt(amount)
-    } catch {
-      return reply.code(400).send({ error: 'Invalid amount — must be integer atomic units' })
-    }
-    if (amountRaw <= 0n) {
-      return reply.code(400).send({ error: 'Amount must be greater than zero' })
-    }
+    const amountRaw = BigInt(amount)
 
     // Human-readable amount for storage
     const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)

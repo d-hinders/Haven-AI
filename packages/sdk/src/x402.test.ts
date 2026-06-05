@@ -6,6 +6,8 @@ import {
   encodePaymentProof,
   parsePaymentRequired,
   parsePaymentRequiredResponse,
+  selectPaymentOption,
+  selectStandardPaymentOption,
   x402AuthorizationAmount,
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
@@ -1102,5 +1104,35 @@ describe('x402 helpers', () => {
     expect(buildX402IdempotencyKey(paymentRequired, option, 1778440000000)).not.toBe(
       buildX402IdempotencyKey(paymentRequired, { ...option, maxAmountRequired: '30000' }, 1778440000000),
     )
+  })
+
+  it('rejects malformed x402 atomic authorization amounts before selection', () => {
+    const malformedAmounts = [
+      '0x4e20',
+      '1e6',
+      '+20000',
+      '-1',
+      ' 20000',
+      '20000 ',
+      '',
+      '0',
+    ]
+
+    for (const amount of malformedAmounts) {
+      const option = { ...accepted, amount }
+
+      expect(selectPaymentOption([option])).toBeNull()
+      expect(selectStandardPaymentOption([option])).toBeNull()
+      expect(() => x402AuthorizationAmount(option)).toThrow(
+        'Invalid x402 amount: must be a positive decimal atomic amount',
+      )
+    }
+
+    expect(selectPaymentOption([
+      { ...accepted, amount: '10000', maxAmountRequired: '0x4e20' },
+    ])).toBeNull()
+    expect(selectStandardPaymentOption([
+      { ...accepted, amount: '10000', maxAmountRequired: '0x4e20' },
+    ])).toBeNull()
   })
 })

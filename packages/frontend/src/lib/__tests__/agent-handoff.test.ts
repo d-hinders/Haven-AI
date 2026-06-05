@@ -43,6 +43,19 @@ function withInput(overrides: Partial<HandoffInput>): HandoffInput {
   }
 }
 
+function sectionStartingWith(markdown: string, heading: string): string {
+  const section = markdown.split(/\n(?=## )/).find((candidate) =>
+    candidate.startsWith(`## ${heading}`),
+  )
+  expect(section, `missing markdown section: ${heading}`).toBeTruthy()
+  return section!
+}
+
+function expectNoRawSecrets(value: string) {
+  expect(value).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+  expect(value).not.toContain('0xPRIVATEKEY_NEVERREAL')
+}
+
 describe('buildDotenv', () => {
   it('emits API key, agent identity, wallet address, and chain id', () => {
     const env = buildDotenv(BASE_INPUT)
@@ -127,6 +140,8 @@ describe('buildHandoff — credentials', () => {
   it('embeds the delegate private key when Haven generated it', () => {
     const { markdown } = buildHandoff(BASE_INPUT)
     expect(markdown).toContain('0xPRIVATEKEY_NEVERREAL')
+    expect(markdown).toContain('signs each payment locally before Haven relays it within on-chain rules')
+    expect(markdown).not.toContain('before Haven executes it')
   })
 
   it('omits the private key when the user brought their own', () => {
@@ -223,9 +238,11 @@ describe('buildHandoff — SDK example', () => {
     const byo = buildHandoff(
       withInput({ credentials: { ...BASE_INPUT.credentials, delegatePrivateKey: null } }),
     ).markdown
+    expect(generated).toContain('signs with delegate key, relays, waits')
     for (const md of [generated, byo]) {
       expect(md).toContain('haven.pay({')
       expect(md).toContain('@haven_ai/sdk')
+      expect(md).not.toContain('signs with delegate key, executes')
     }
   })
 
@@ -235,5 +252,23 @@ describe('buildHandoff — SDK example', () => {
     )
     expect(markdown).toContain('Set HAVEN_DELEGATE_KEY before making payments')
     expect(markdown).toContain('HAVEN_DELEGATE_ADDRESS=')
+  })
+
+  it('keeps reusable examples free of raw credential values', () => {
+    const { markdown } = buildHandoff(BASE_INPUT)
+
+    // Secrets are intentionally present in the credentials and dotenv
+    // sections, but reusable code blocks should only read env vars.
+    expect(markdown).toContain('sk_agent_TESTKEY_NEVERREAL')
+    expect(markdown).toContain('0xPRIVATEKEY_NEVERREAL')
+
+    for (const heading of [
+      'Quickstart (Node.js)',
+      'Paid APIs and machine-payment requests',
+      'When a payment needs approval',
+      'First payment',
+    ]) {
+      expectNoRawSecrets(sectionStartingWith(markdown, heading))
+    }
   })
 })

@@ -39,7 +39,7 @@ function buildSkillMd(input: HandoffInput): string {
 
   return `---
 name: haven-pay
-description: Make stablecoin payments via Haven on behalf of the user. Use when the user asks to send, pay, tip, or transfer crypto — or when the agent hits an HTTP 402 response from a paid API.
+description: Sign Haven payment requests locally and submit payments within the user's agent rules. Use when the user asks to send, pay, tip, or transfer crypto — or when the agent hits an HTTP 402 response from a paid API.
 ---
 
 # Haven: pay from a Haven wallet

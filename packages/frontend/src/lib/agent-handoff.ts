@@ -149,7 +149,7 @@ function buildSdkExample(hasDelegateKey: boolean): string {
     `  baseUrl: process.env.HAVEN_API_URL,`,
     `})`,
     ``,
-    `// Single call: creates intent, signs with delegate key, executes, waits.`,
+    `// Single call: creates intent, signs with delegate key, relays, waits.`,
     `const result = await haven.pay({`,
     `  to: '0xRecipientAddress',`,
     `  amount: '1',      // human-readable, e.g. "1" for 1 USDC`,
@@ -217,7 +217,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
   if (hasDelegateKey) {
     credentialLines.push(
       ``,
-      `**Delegate private key** — signs each payment locally before Haven executes it:`,
+      `**Delegate private key** — signs each payment locally before Haven relays it within on-chain rules:`,
       ``,
       '```',
       credentials.delegatePrivateKey!,

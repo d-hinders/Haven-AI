@@ -44,6 +44,11 @@ async function readBundle(input: HandoffInput) {
   return { filename, folderName: folderName!, read, zip }
 }
 
+function expectNoRawSecrets(value: string) {
+  expect(value).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+  expect(value).not.toContain('0xPRIVATEKEY_NEVERREAL')
+}
+
 describe('buildSkillBundle — structure', () => {
   it('produces a slug-named zip with no secrets in the filename', async () => {
     const { filename } = await readBundle(BASE_INPUT)
@@ -96,6 +101,29 @@ describe('buildSkillBundle — credential plumbing', () => {
     expect(payTs).not.toContain('0xPRIVATEKEY_NEVERREAL')
   })
 
+  it('keeps raw credentials confined to the intentionally secret-bearing files', async () => {
+    const { filename, folderName, read, zip } = await readBundle(BASE_INPUT)
+
+    expectNoRawSecrets(filename)
+    expectNoRawSecrets(folderName)
+
+    const secretBearingFiles = new Set(['README.md', '.env.example'])
+    for (const [path, entry] of Object.entries(zip.files)) {
+      expectNoRawSecrets(path)
+      if (entry.dir) continue
+
+      expect(path.startsWith(folderName)).toBe(true)
+      const relativePath = path.slice(folderName.length)
+      const contents = await entry.async('string')
+      if (secretBearingFiles.has(relativePath)) {
+        expect(contents).toContain('sk_agent_TESTKEY_NEVERREAL')
+        expect(contents).toContain('0xPRIVATEKEY_NEVERREAL')
+      } else {
+        expectNoRawSecrets(contents)
+      }
+    }
+  })
+
   it('pay.ts loads credentials from process.env and throws if missing', async () => {
     const { read } = await readBundle(BASE_INPUT)
     const payTs = await read('pay.ts')
@@ -111,9 +139,12 @@ describe('buildSkillBundle — credential plumbing', () => {
 
     expect(skillMd).toContain('Haven wallet')
     expect(skillMd).toContain('Credential address')
+    expect(skillMd).toContain('Sign Haven payment requests locally')
+    expect(skillMd).toContain('within the user\'s agent rules')
     expect(skillMd).toContain('haven.fetch()')
     expect(skillMd).toContain('get_payment_status')
     expect(skillMd).toContain('retry_original_x402_request')
+    expect(skillMd).not.toContain('on behalf of the user')
     expect(skillMd).not.toContain('server-side policy')
     expect(skillMd).not.toContain('AllowanceModule')
   })

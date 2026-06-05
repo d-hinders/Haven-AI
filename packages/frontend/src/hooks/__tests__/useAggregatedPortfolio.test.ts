@@ -17,8 +17,9 @@ vi.mock('@/context/AuthContext', () => ({
 import {
   useAggregatedBalances,
   useAggregatedPortfolio,
+  useAggregatedTransactions,
 } from '@/hooks/useAggregatedPortfolio'
-import type { BalanceItem } from '@/types/transactions'
+import type { BalanceItem, Transaction } from '@/types/transactions'
 
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
 const SECOND_SAFE_ADDRESS = '0x2222222222222222222222222222222222222222'
@@ -46,6 +47,25 @@ function usdc(balance: string): BalanceItem {
     balance,
     formatted: balance,
     decimals: 6,
+  }
+}
+
+function transaction(hash: string): Transaction {
+  return {
+    hash,
+    type: 'erc20',
+    from: SAFE_ADDRESS,
+    to: '0x3333333333333333333333333333333333333333',
+    value: '1000000',
+    valueFormatted: '1',
+    asset: 'USDC',
+    decimals: 6,
+    direction: 'out',
+    timestamp: 1778240999,
+    blockNumber: 45725826,
+    isError: false,
+    tokenAddress: TOKEN_ADDRESS,
+    tokenSymbol: 'USDC',
   }
 }
 
@@ -148,5 +168,50 @@ describe('aggregated portfolio hooks', () => {
 
     expect(result.current.balances).toEqual([])
     expect(result.current.error).toBe('Failed to load balances')
+  })
+
+  it('requests aggregate transactions for each Safe chain', async () => {
+    mockSafes([
+      { id: 'gnosis', safe_address: SAFE_ADDRESS, chain_id: 100 },
+      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+    ])
+    const sharedTransaction = transaction('0xshared')
+    mockApiGet.mockImplementation(async (path: string) => {
+      if (path === `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=100`) {
+        return { transactions: [sharedTransaction], total: 1, page: 1, limit: 10, pages: 1 }
+      }
+      if (path === `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=8453`) {
+        return { transactions: [sharedTransaction], total: 1, page: 1, limit: 10, pages: 1 }
+      }
+      return { transactions: [], total: 0, page: 1, limit: 10, pages: 0 }
+    })
+
+    const { result } = renderHook(() => useAggregatedTransactions())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(mockApiGet).toHaveBeenCalledWith(
+      `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=100`,
+    )
+    expect(mockApiGet).toHaveBeenCalledWith(
+      `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=8453`,
+    )
+    expect(result.current.transactions).toHaveLength(2)
+    expect(result.current.total).toBe(2)
+  })
+
+  it('surfaces aggregate transaction errors instead of treating failures as empty history', async () => {
+    mockSafes([
+      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+    ])
+    mockApiGet.mockRejectedValue(new Error('temporarily unavailable'))
+
+    const { result } = renderHook(() => useAggregatedTransactions())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.transactions).toEqual([])
+    expect(result.current.total).toBe(0)
+    expect(result.current.error).toBe('Failed to load transactions')
   })
 })

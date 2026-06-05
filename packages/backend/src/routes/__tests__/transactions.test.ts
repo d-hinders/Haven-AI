@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
+import fastifyJwt from '@fastify/jwt'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import transactionRoutes, {
   enrichTransactionsWithAgents,
   fetchSafeTransactions,
   mergeX402Transactions,
 } from '../transactions.js'
-import type { FastifyBaseLogger } from 'fastify'
 import pool from '../../db.js'
 
 const SAFE_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'
@@ -18,6 +19,97 @@ function jsonResponse(body: unknown): Response {
     status: 200,
     headers: { 'content-type': 'application/json' },
   })
+}
+
+function stubEmptyTransactionFetch(): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const url = input.toString()
+
+    if (url.includes('/api/v1/safes/') && url.includes('/transfers/')) {
+      return jsonResponse({ count: 0, next: null, previous: null, results: [] })
+    }
+
+    if (url.includes('/addresses/') && url.includes('/transactions')) {
+      return jsonResponse({ items: [], next_page_params: null })
+    }
+
+    if (url.includes('/addresses/') && url.includes('/token-transfers')) {
+      return jsonResponse({ items: [], next_page_params: null })
+    }
+
+    if (url.includes('module=account')) {
+      return jsonResponse({ status: '1', message: 'OK', result: [] })
+    }
+
+    throw new Error(`Unexpected fetch URL: ${url}`)
+  })
+
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+function stubOneNativeTransactionFetch(): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const url = input.toString()
+
+    if (url.includes('/api/v1/safes/') && url.includes('/transfers/')) {
+      return jsonResponse({ count: 0, next: null, previous: null, results: [] })
+    }
+
+    if (url.includes('/addresses/') && url.includes('/token-transfers')) {
+      return jsonResponse({ items: [], next_page_params: null })
+    }
+
+    if (url.includes('/addresses/') && url.includes('/transactions')) {
+      return jsonResponse({
+        items: [{
+          hash: TX_HASH,
+          block_number: 45725826,
+          timestamp: '2026-05-08T11:49:59Z',
+          from: { hash: SENDER },
+          to: { hash: SAFE_ADDRESS },
+          value: '1000000000000000000',
+          gas_limit: '21000',
+          gas_used: '21000',
+          status: 'ok',
+          method: null,
+        }],
+        next_page_params: null,
+      })
+    }
+
+    if (url.includes('module=account') && url.includes('action=txlistinternal')) {
+      return jsonResponse({ status: '1', message: 'OK', result: [] })
+    }
+
+    if (url.includes('module=account') && url.includes('action=tokentx')) {
+      return jsonResponse({ status: '1', message: 'OK', result: [] })
+    }
+
+    if (url.includes('module=account') && url.includes('action=txlist')) {
+      return jsonResponse({
+        status: '1',
+        message: 'OK',
+        result: [{
+          blockNumber: '45725826',
+          timeStamp: '1778240999',
+          hash: TX_HASH,
+          from: SENDER,
+          to: SAFE_ADDRESS,
+          value: '1000000000000000000',
+          gas: '21000',
+          gasUsed: '21000',
+          isError: '0',
+          functionName: '',
+        }],
+      })
+    }
+
+    throw new Error(`Unexpected fetch URL: ${url}`)
+  })
+
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 afterEach(() => {
@@ -107,7 +199,228 @@ describe('fetchSafeTransactions', () => {
   })
 })
 
+describe('transaction routes', () => {
+  let app: FastifyInstance
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(transactionRoutes, { prefix: '/transactions' })
+  })
+
+  afterAll(async () => {
+    await app.close()
+  })
+
+  function signToken(payload: { sub: string; email: string }): string {
+    return app.jwt.sign(payload, { expiresIn: '1h' })
+  }
+
+  function mockSafeRows(rows: Array<{ id: string; chain_id: number }>) {
+    return vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
+      if (String(sql).includes('FROM user_safes')) {
+        return { rows } as never
+      }
+      return { rows: [] } as never
+    })
+  }
+
+  it('uses the requested owned chain when fetching legacy Safe transactions', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    const fetchMock = stubEmptyTransactionFetch()
+    const queryMock = mockSafeRows([{ id: 'safe-base', chain_id: 8453 }])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=8453&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.stringContaining('AND chain_id = $3'),
+      ['user-1', SAFE_ADDRESS, 8453],
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('https://base.blockscout.com/api/v2/addresses/'),
+    )
+    expect(response.json()).toMatchObject({
+      transactions: [],
+      total: 0,
+      page: 1,
+      limit: 10,
+      pages: 0,
+    })
+  })
+
+  it('keeps legacy address-only transaction reads when one chain owns the address', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    const fetchMock = stubEmptyTransactionFetch()
+    const queryMock = mockSafeRows([{ id: 'safe-gnosis', chain_id: 100 }])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.not.stringContaining('AND chain_id = $3'),
+      ['user-1', SAFE_ADDRESS],
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('https://api.etherscan.io/v2/api'),
+    )
+  })
+
+  it('requires chain_id for legacy transaction reads matching multiple owned chains', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    const fetchMock = stubEmptyTransactionFetch()
+    mockSafeRows([
+      { id: 'safe-gnosis', chain_id: 100 },
+      { id: 'safe-base', chain_id: 8453 },
+    ])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('chain_id required')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed chain_id values before transaction ownership lookup', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    const fetchMock = stubEmptyTransactionFetch()
+    const queryMock = vi.spyOn(pool, 'query')
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${SAFE_ADDRESS}?chain_id=8453.5`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('Invalid chain_id')
+    expect(queryMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects unsupported transaction chains before ownership lookup', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    const fetchMock = stubEmptyTransactionFetch()
+    const queryMock = vi.spyOn(pool, 'query')
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${SAFE_ADDRESS}?chain_id=999999`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('Unsupported chain: 999999')
+    expect(queryMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not fall back to another chain when requested transaction chain is not owned', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    const fetchMock = stubEmptyTransactionFetch()
+    const queryMock = mockSafeRows([])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${SAFE_ADDRESS}?chain_id=8453`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json().error).toBe('Not your Safe')
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.stringContaining('AND chain_id = $3'),
+      ['user-1', SAFE_ADDRESS, 8453],
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps aggregate transactions separate for the same Safe address on different chains', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubOneNativeTransactionFetch()
+    vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      if (text.includes('FROM user_safes') && text.includes('ORDER BY created_at ASC')) {
+        return {
+          rows: [
+            {
+              id: 'safe-gnosis',
+              safe_address: SAFE_ADDRESS,
+              chain_id: 100,
+              name: 'Gnosis wallet',
+            },
+            {
+              id: 'safe-base',
+              safe_address: SAFE_ADDRESS,
+              chain_id: 8453,
+              name: 'Base wallet',
+            },
+          ],
+        } as never
+      }
+      return { rows: [] } as never
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/transactions?limit=10&fresh=1',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.transactions).toHaveLength(2)
+    expect(body.transactions.map((tx: { chainId: number }) => tx.chainId).sort()).toEqual([
+      100,
+      8453,
+    ])
+  })
+})
+
 describe('mergeX402Transactions', () => {
+  it('requires chain context for x402 address fallback joins', async () => {
+    const queryMock = vi.spyOn(pool, 'query').mockResolvedValue({ rows: [] } as never)
+
+    await mergeX402Transactions(
+      'user-id',
+      [
+        {
+          id: 'safe-gnosis',
+          safe_address: SAFE_ADDRESS,
+          chain_id: 100,
+          name: 'Gnosis wallet',
+        },
+        {
+          id: 'safe-base',
+          safe_address: SAFE_ADDRESS,
+          chain_id: 8453,
+          name: 'Base wallet',
+        },
+      ],
+      [],
+    )
+
+    const paymentIntentSql = String(queryMock.mock.calls[0][0])
+    const approvalRequestSql = String(queryMock.mock.calls[1][0])
+
+    expect(paymentIntentSql).toContain('pi.chain_id IS NOT NULL')
+    expect(paymentIntentSql).toContain('us.chain_id = pi.chain_id')
+    expect(approvalRequestSql).toContain('ar.chain_id IS NOT NULL')
+    expect(approvalRequestSql).toContain('us.chain_id = ar.chain_id')
+  })
+
   it('normalizes x402 funding intents into merchant-facing transactions', async () => {
     vi.spyOn(pool, 'query')
       .mockResolvedValueOnce({

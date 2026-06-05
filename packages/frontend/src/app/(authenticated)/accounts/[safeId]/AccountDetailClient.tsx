@@ -138,7 +138,10 @@ export default function AccountDetailClient() {
 
   const safeNamesByAddress = new Map<string, string>()
   for (const account of user?.safes ?? []) {
-    safeNamesByAddress.set(account.safe_address.toLowerCase(), account.name)
+    safeNamesByAddress.set(
+      `${account.safe_address.toLowerCase()}:${account.chain_id}`,
+      account.name,
+    )
   }
   const passkeyAddresses = new Set(
     passkeys

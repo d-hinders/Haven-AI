@@ -52,7 +52,7 @@ export async function loadSignerCredentials(
       delegateKey: envKey,
       agentId: stringField(process.env.HAVEN_AGENT_ID),
       safeAddress: stringField(process.env.HAVEN_SAFE_ADDRESS),
-      chainId: numberField(process.env.HAVEN_CHAIN_ID),
+      chainId: chainIdField(process.env.HAVEN_CHAIN_ID, 'HAVEN_CHAIN_ID'),
       network: stringField(process.env.HAVEN_NETWORK),
       x402BindingSigner: stringField(process.env.HAVEN_X402_BINDING_SIGNER),
     }
@@ -88,12 +88,11 @@ async function loadFromFile(path: string): Promise<SignerCredentials> {
     throw new Error('Haven credentials are missing delegate_key — the edge signer needs it to sign.')
   }
 
-  const chainId = numberField(raw.chain_id ?? raw.chainId)
   return {
     delegateKey,
     agentId: stringField(raw.agent_id ?? raw.agentId),
     safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
-    chainId,
+    chainId: chainIdField(raw.chain_id ?? raw.chainId, 'chain_id'),
     network: stringField(raw.network),
     x402BindingSigner: stringField(
       raw.x402_binding_signer ??
@@ -108,13 +107,28 @@ function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function numberField(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) return parsed
+function chainIdField(value: unknown, label: string): number | undefined {
+  if (value === undefined || value === null) return undefined
+
+  if (typeof value === 'number') {
+    if (Number.isSafeInteger(value) && value > 0) return value
+    throw invalidChainIdError(label)
   }
-  return undefined
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (/^[1-9]\d*$/.test(trimmed)) {
+      const parsed = Number(trimmed)
+      if (Number.isSafeInteger(parsed)) return parsed
+    }
+    throw invalidChainIdError(label)
+  }
+
+  throw invalidChainIdError(label)
+}
+
+function invalidChainIdError(label: string): Error {
+  return new Error(`Haven signer credentials ${label} must be a positive integer.`)
 }
 
 /**

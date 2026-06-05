@@ -4,10 +4,10 @@ Last updated: 2026-06-05
 
 ## Current Run
 
-- Branch: `codex/quality-agent-allowance-validation`
-- PR target: harden owner-side agent allowance mirror writes so impossible Safe AllowanceModule values are rejected before they are stored.
-- Why this target: it is the narrow backend validation follow-up from the agent budget/policy audit. Legacy `/agents` allowance create/update/delete and Connect Agent 2 setup creation now share input normalization for token address, token symbol, atomic allowance amount, and reset period. Revoked agents can no longer mutate mirrored budget rows. This keeps the database mirror aligned with on-chain-compatible values without changing custody, Safe ownership, signer authority, payment execution, database schema, production chain/token config, protocol behavior, SDK shape, or API authority.
-- Files touched: `packages/backend/src/lib/agent-allowance-validation.ts`, `packages/backend/src/routes/agents.ts`, `packages/backend/src/routes/agent-connection-setups.ts`, related backend route tests, `packages/backend/src/openapi/spec.ts`, `packages/backend/src/openapi/spec.test.ts`, and this loop file.
+- Branch: `codex/quality-payment-terminal-state-guards`
+- PR target: guard one-shot machine-payment and x402 payment-intent mutations so retry, signature, confirmation, failure, and stale sign-data refresh writes only apply while the row is still the expected pending payment row.
+- Why this target: it is the next narrow payment-state hardening after the pre-RPC `submitted` fix. The shared MPP/generic helper and legacy x402 route now use compare-and-set style predicates for signature recording, terminal success/failure writes, and stale nonce/hash refreshes. This protects confirmed/failed terminal rows from later retry or failure-path overwrites without changing custody, Safe ownership, signer authority, payment execution, database schema, protocol behavior, SDK shape, or product UX.
+- Files touched: `packages/backend/src/lib/machine-payments.ts`, `packages/backend/src/routes/x402.ts`, related backend route tests, and this loop file.
 
 ## Priority Backlog
 
@@ -33,7 +33,8 @@ Last updated: 2026-06-05
 - PR #268: x402/payment-history enrichment resolves and applies agent/payment labels by Safe and chain identity instead of transaction hash alone.
 - PR #269: temporary frontend x402 bridge was retired, and agent activity feeds publish stored payment/approval Safe identity instead of an agent's current Safe.
 - PR #270: list-level agent budget edit/revoke actions are active-wallet scoped, and agent detail uses stored wallet chain identity when auth state is missing that wallet.
-- Planned current PR: owner-side agent allowance mirror writes reject invalid token, amount, reset-period, and revoked-agent mutation states before storing rows.
+- PR #271: owner-side agent allowance mirror writes reject invalid token, amount, reset-period, duplicate-token, and revoked-agent mutation states before storing rows.
+- Planned current PR: one-shot x402 and MPP/generic machine-payment writes are terminal-state guarded for signature recording, stale sign-data refresh, confirmed transition, and failed transition.
 - Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
@@ -41,24 +42,25 @@ Last updated: 2026-06-05
 - x402/generic machine-payment consolidation: defer because it crosses idempotency, approval-state, expected-context binding, and multi-entrypoint behavior.
 - Broader payment state rewrite, DB migrations, custody/signing semantics, Safe ownership assumptions, production chain/token config, and protocol compatibility changes need separate review.
 - Broader x402/payment-history consolidation remains deferred.
-- Older `/self-sign-agents` allowance parity remains deferred because the current PR is focused on the active owner dashboard and Connect Agent 2 setup surfaces.
-- Backend payment terminal-state mutation guards remain a good follow-up, but this PR stays validation-only for allowance mirror writes.
+- Older `/self-sign-agents` allowance parity remains deferred because the current PR is scoped to payment-intent state guards.
+- Reconciliation-event immutability is deferred: `machine_payment_reconciliation_events` can reopen a resolved event on conflict today, but this PR stays scoped to payment-intent state and signable metadata rows.
 
 ## Known Baseline Notes
 
 - Focused checks after implementation:
-  - `npm run test -w packages/backend -- agents.test.ts agent-connection-setups.test.ts openapi/spec.test.ts` passed.
+  - `npm run test -w packages/backend -- machine-payments.test.ts x402.test.ts` passed.
 - Full local gates after implementation:
   - `npm run test -w packages/backend` passed.
   - `npm run typecheck -w packages/backend` passed.
   - `npm run build -w packages/backend` passed.
   - `git diff --check` passed.
-- Explorer agent pass recommended the current smallest PR: validate `/agents` allowance create/update/delete inputs, normalize canonical DB values, and block revoked-agent mirror mutations.
-- Captain self-check covered CASP guardrails, numeric formatter/BigInt input traps, multi-entrypoint parity for owner-created agent rules, public OpenAPI documentation drift, secret leakage, and test sufficiency.
-- Reviewer agent flagged duplicate-token allowance arrays and an OpenAPI leading-zero mismatch; both were fixed with regression coverage.
+- Explorer agent pass recommended this smallest PR: guard x402 and generic one-shot payment-intent signature, terminal, and retry-refresh writes with `agent_id`, rail, expected `pending_signature` status, and empty `tx_hash`.
+- Reviewer agent flagged cross-rail idempotency lookups and a missing x402 confirmation-race regression; both were fixed with rail-scoped selectors and x402 parity coverage.
+- Residual follow-up: failed-execution paths now avoid overwriting terminal rows but still return `status: failed` when the guarded failed update loses a race, matching the existing `/payments/:id/sign` behavior.
+- Captain self-check covered CASP guardrails, payment-authority boundaries, multi-entrypoint x402/MPP parity, terminal-state overwrite risk, secret leakage, and test sufficiency.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
 - Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 
 ## Recommended Next Target
 
-After this PR merges, choose a narrow backend payment lifecycle target: audit terminal-state mutation paths for x402/MPP/generic machine payments and add validation-only guards where a confirmed/failed/refunded terminal row could be overwritten by retry, evidence, or reconciliation work. Keep it state-guard focused and defer broader payment-state rewrites.
+After this PR merges, choose a narrow backend allowance-parity target: audit older `/self-sign-agents` allowance create/update/delete paths against the shared owner-side allowance validation now used by `/agents` and Connect Agent 2 setup. Keep it validation-only and defer broader onboarding, budget UI, or allowance-state rewrites.

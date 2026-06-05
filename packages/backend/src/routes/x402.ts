@@ -113,6 +113,14 @@ async function signX402ExpectedContext(context: X402ExpectedContext) {
   }
 }
 
+async function currentPaymentIntentStatus(id: string, agent: AgentContext): Promise<string> {
+  const current = await pool.query<{ status: string }>(
+    `SELECT status FROM payment_intents WHERE id = $1 AND agent_id = $2`,
+    [id, agent.id],
+  )
+  return current.rows[0]?.status ?? 'unknown'
+}
+
 /** Resolve a token from its contract address for a specific chain. */
 function resolveTokenByAddress(chainId: number, address: string) {
   const lower = address.toLowerCase()
@@ -277,6 +285,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
          FROM payment_intents
          WHERE agent_id = $1
            AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
+           AND COALESCE(payment_rail, source) = 'x402'
            AND status NOT IN ('failed', 'expired')
          ORDER BY created_at DESC
          LIMIT 1`,
@@ -323,14 +332,27 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
             refreshedAllowance.nonce,
           )
 
-          await pool.query(
+          const refreshedResult = await pool.query<{ id: string }>(
             `UPDATE payment_intents
              SET allowance_nonce = $1,
                  sign_hash = $2,
                  expires_at = NOW() + interval '10 minutes'
-             WHERE id = $3`,
-            [existingNonce, existingHash, existing.id],
+             WHERE id = $3
+               AND agent_id = $4
+               AND COALESCE(payment_rail, source) = 'x402'
+               AND status = 'pending_signature'
+               AND tx_hash IS NULL
+             RETURNING id`,
+            [existingNonce, existingHash, existing.id, agent.id],
           )
+          if (refreshedResult.rows.length === 0) {
+            const status = await currentPaymentIntentStatus(existing.id, agent)
+            return reply.code(409).send({
+              payment_id: existing.id,
+              status,
+              error: `x402 payment is ${status}, expected pending_signature`,
+            })
+          }
         }
 
         const x402ExpectedAuth = await signX402ExpectedContext({
@@ -587,6 +609,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
          FROM payment_intents
          WHERE agent_id = $1
            AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
+           AND COALESCE(payment_rail, source) = 'x402'
            AND status NOT IN ('failed', 'expired')
          ORDER BY created_at DESC
          LIMIT 1`,
@@ -625,10 +648,25 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       // permanently stuck (idempotency check blocks retry on any status not in
       // ('failed','expired')). Instead we keep the record in 'pending_signature' until
       // execution succeeds, then flip it to 'confirmed' in one atomic write.
-      await pool.query(
-        `UPDATE payment_intents SET signature = $1, signed_at = NOW() WHERE id = $2`,
-        [signature, intent.id],
+      const signatureResult = await pool.query<{ id: string }>(
+        `UPDATE payment_intents
+         SET signature = $1, signed_at = NOW()
+         WHERE id = $2
+           AND agent_id = $3
+           AND COALESCE(payment_rail, source) = 'x402'
+           AND status = 'pending_signature'
+           AND tx_hash IS NULL
+         RETURNING id`,
+        [signature, intent.id, agent.id],
       )
+      if (signatureResult.rows.length === 0) {
+        const status = await currentPaymentIntentStatus(intent.id, agent)
+        return reply.code(409).send({
+          payment_id: intent.id,
+          status,
+          error: 'Payment intent changed before execution',
+        })
+      }
 
       // Execute on-chain
       try {
@@ -649,7 +687,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           amountHuman,
         )
 
-        await pool.query(
+        const confirmedResult = await pool.query<{ id: string }>(
           `UPDATE payment_intents
            SET status = 'confirmed',
                tx_hash = $1,
@@ -657,9 +695,23 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
                confirmed_at = NOW(),
                usd_value = $3,
                eur_value = $4
-           WHERE id = $2`,
-          [txHash, intent.id, fiatValues.usd, fiatValues.eur],
+           WHERE id = $2
+             AND agent_id = $5
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND status = 'pending_signature'
+             AND tx_hash IS NULL
+           RETURNING id`,
+          [txHash, intent.id, fiatValues.usd, fiatValues.eur, agent.id],
         )
+
+        if (confirmedResult.rows.length === 0) {
+          const status = await currentPaymentIntentStatus(intent.id, agent)
+          return reply.code(409).send({
+            payment_id: intent.id,
+            status,
+            error: 'Payment intent changed after on-chain execution',
+          })
+        }
 
         await tryRecordMachinePaymentEvidenceBaseById(intent.id, agent.id, request.log)
 
@@ -681,8 +733,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err)
         await pool.query(
-          `UPDATE payment_intents SET status = 'failed', error_message = $1 WHERE id = $2`,
-          [errorMsg, intent.id],
+          `UPDATE payment_intents
+           SET status = 'failed', error_message = $1
+           WHERE id = $2
+             AND agent_id = $3
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND status = 'pending_signature'
+             AND tx_hash IS NULL`,
+          [errorMsg, intent.id, agent.id],
         )
         return reply.code(502).send({
           success: false,

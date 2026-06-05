@@ -172,12 +172,6 @@ export default function ConnectAgent2Modal({
   const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
   const walletNetworkName = getChainConfig(chainId).name
   const walletDisplayAddress = safeAddress || selectedSafe?.safe_address
-  const { details: safeDetails, loading: safeDetailsLoading } = useSafeDetails(safeAddress || null)
-  const operationGate = useSafeOperationGate({
-    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
-    chainId,
-  })
-
   const statusQuery = useAgentConnectionSetupStatus(setup?.setup_id ?? null, {
     enabled: open && Boolean(setup),
   })
@@ -187,6 +181,16 @@ export default function ConnectAgent2Modal({
   const visibleStatus = manualCredentialNeedsSave ? 'awaiting_connection' : rawVisibleStatus
   const approvalSafeAddress = setupStatus?.haven_wallet.address ?? safeAddress
   const approvalChainId = setupStatus?.haven_wallet.chain_id ?? chainId
+  const approvalWalletLabel = setupStatus?.haven_wallet
+    ? `${setupStatus.haven_wallet.name} on ${setupStatus.haven_wallet.network}`
+    : walletName
+  const { details: safeDetails, loading: safeDetailsLoading } = useSafeDetails(approvalSafeAddress || null, {
+    chainId: approvalChainId,
+  })
+  const operationGate = useSafeOperationGate({
+    safeAddress: approvalSafeAddress ? (approvalSafeAddress as Address) : undefined,
+    chainId: approvalChainId,
+  })
   const publicClient = usePublicClient({ chainId: approvalChainId })
   const signer = useActiveSigner({
     safeAddress: approvalSafeAddress ? (approvalSafeAddress as Address) : undefined,
@@ -798,8 +802,8 @@ export default function ConnectAgent2Modal({
                 <LocalConnectionReady
                   status={setupStatus}
                   fallbackSetup={setup}
-                  walletName={walletName}
-                  chainId={chainId}
+                  walletName={approvalWalletLabel}
+                  chainId={approvalChainId}
                   safeDetailsLoading={safeDetailsLoading}
                   safeThreshold={safeDetails?.threshold ?? 1}
                   safeOwnerCount={safeDetails?.owners?.length ?? 1}

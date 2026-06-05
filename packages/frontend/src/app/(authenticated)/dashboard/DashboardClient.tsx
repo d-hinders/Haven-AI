@@ -812,7 +812,7 @@ export default function DashboardClient() {
     error: selectedSafeDetailsError,
   } = useSafeDetails(
     selectedActionSafe?.safe_address ?? null,
-    { enabled: sendModalDataEnabled },
+    { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
   )
 
   const totalFiat = currency === 'EUR' ? (overview?.totals.eur ?? 0) : (overview?.totals.usd ?? 0)

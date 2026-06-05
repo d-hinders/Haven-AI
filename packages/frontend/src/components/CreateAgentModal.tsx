@@ -130,7 +130,7 @@ export default function CreateAgentModal({
   // Self-fetch Safe details from the selected Safe so the modal owns its
   // execution context — caller doesn't need to refetch when the user picks a
   // different Safe.
-  const { details: safeDetails } = useSafeDetails(safeAddress || null)
+  const { details: safeDetails } = useSafeDetails(safeAddress || null, { chainId })
 
   const chainTokens = getChainTokens(chainId)
   const tokenOptions = Object.entries(chainTokens).map(([symbol, cfg]) => ({

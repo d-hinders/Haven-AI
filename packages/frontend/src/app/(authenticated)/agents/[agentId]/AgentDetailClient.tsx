@@ -243,7 +243,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   const safeAddress = safe?.safe_address ?? agent?.safe_address ?? null
   const chainId = safe?.chain_id ?? 100
   const chainConfig = safe ? getChainConfig(safe.chain_id) : null
-  const { details: safeDetails } = useSafeDetails(safeAddress)
+  const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const { activity, stats, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
   const managedDelegates = useMemo(
     () => (agent?.delegate_address && agent.status !== 'revoked' ? [agent.delegate_address] : []),

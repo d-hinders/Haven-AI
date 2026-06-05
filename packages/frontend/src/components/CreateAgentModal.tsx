@@ -5,8 +5,6 @@ import { usePublicClient } from 'wagmi'
 import { type Address, parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAddress } from 'viem/accounts'
 import {
-  buildAgentSetupTx,
-  isModuleEnabled,
   RESET_PERIODS,
   type AllowanceSetup,
 } from '@/lib/allowance-module'
@@ -17,15 +15,8 @@ import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { validateMoneyInput } from '@/lib/money-input'
 import OnchainActionGate from './OnchainActionGate'
-import {
-  getSafeNonce,
-  signSafeTx,
-  executeSafeTx,
-  proposeSafeTx,
-  getSafeTxHash,
-  getChainTokens,
-  SafeTxReceiptTimeoutError,
-} from '@/lib/safe-tx'
+import { getChainTokens } from '@/lib/safe-tx'
+import { executeAgentSetup } from '@/lib/agent-setup'
 import { truncate } from '@/lib/format'
 import { buildHandoff, type HandoffInput } from '@/lib/agent-handoff'
 import { buildAgentCredential, type AgentCredentialJson } from '@/lib/agent-credential'
@@ -392,14 +383,6 @@ export default function CreateAgentModal({
     setAuthorityResult(null)
 
     try {
-      // 1. Check if module is enabled
-      setExecStatus('checking')
-      const moduleEnabled = await isModuleEnabled(
-        publicClient,
-        safeAddress as Address,
-      )
-
-      // 2. Build the setup allowances
       const setupAllowances: AllowanceSetup[] = allowances.map((a) => ({
         token: (a.tokenAddress ?? '0x0000000000000000000000000000000000000000') as Address,
         tokenSymbol: a.tokenSymbol,
@@ -407,79 +390,43 @@ export default function CreateAgentModal({
         resetTimeMin: a.resetTimeMin,
       }))
 
-      // 3. Get nonce and build batched tx
-      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
-      const safeTx = buildAgentSetupTx(
-        safeAddress as Address,
-        delegateAddress as Address,
-        setupAllowances,
-        !moduleEnabled,
-        nonce,
-      )
-
-      // 4. Sign
-      setExecStatus('signing')
-      const signature = await signSafeTx(
+      const result = await executeAgentSetup({
         signer,
-        safeAddress as Address,
-        safeTx,
+        publicClient,
+        safeAddress: safeAddress as Address,
+        delegateAddress: delegateAddress as Address,
+        allowances: setupAllowances,
         chainId,
-      )
+        threshold: safeDetails.threshold ?? 1,
+        onStatus: setExecStatus,
+      })
 
-      const threshold = safeDetails.threshold ?? 1
-
-      let completedAuthority: AuthorityResult
-      if (threshold <= 1) {
-        // Single-owner: execute directly
-        setExecStatus('executing')
-        const result = await executeSafeTx(
-          signer,
-          publicClient,
-          safeAddress as Address,
-          safeTx,
-          signature,
-          chainId,
-        )
+      // Receipt timeout: the on-chain tx was broadcast and may still land.
+      // Record it as established authority and route the retry to a backend
+      // save-only — re-running would rebuild the whole batch with a fresh nonce
+      // and double-apply (or collide) once the original confirms.
+      if (result.status === 'receipt_timeout') {
         setTxHash(result.txHash)
-        completedAuthority = {
-          status: 'confirmed',
-          txHash: result.txHash,
-        }
-      } else {
-        // Multi-sig: propose
-        setExecStatus('executing')
-        const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
-        await proposeSafeTx(
-          safeAddress as Address,
-          safeTx,
-          safeTxHash,
-          signature,
-          signer.address,
-          chainId,
+        setAuthorityResult({ status: 'confirmed', txHash: result.txHash })
+        setExecError(
+          `Transaction submitted but not yet confirmed after 2 minutes. ` +
+            `It may still land — check the block explorer for ${result.txHash}`,
         )
-        setTxHash(safeTxHash)
-        completedAuthority = {
-          status: 'proposed',
-          txHash: safeTxHash,
-        }
+        setExecStatus('error')
+        return
       }
 
-      // 5. Save agent to Haven backend
+      setTxHash(result.txHash)
+      const completedAuthority: AuthorityResult = {
+        status: result.status,
+        txHash: result.txHash,
+      }
+
+      // Save agent to Haven backend
       setExecStatus('saving')
       setAuthorityResult(completedAuthority)
       await saveAgentToHaven(completedAuthority)
     } catch (err: unknown) {
-      // Receipt timeout: the on-chain tx was broadcast and may still land.
-      // Record it as established authority and route the retry to a backend
-      // save-only — re-running handleExecute would rebuild the whole batch with
-      // a fresh nonce and double-apply (or collide) once the original confirms.
-      if (err instanceof SafeTxReceiptTimeoutError) {
-        setTxHash(err.txHash)
-        setAuthorityResult({ status: 'confirmed', txHash: err.txHash })
-        setExecError(err.message)
-        setExecStatus('error')
-        return
-      }
       const message = errorMessage(err)
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
         setExecError(

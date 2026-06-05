@@ -450,6 +450,99 @@ describe('machine payment routes', () => {
       },
     })
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+
+    expect(mockQuery.mock.calls[1][0]).toContain('COALESCE(payment_rail, source) = $4')
+    expect(mockQuery.mock.calls[1][1]).toEqual([
+      AGENT.id,
+      'mpp_demo:test',
+      challenge.challengeId,
+      'mpp_demo',
+    ])
+  })
+
+  it('guards stale sign data refreshes for duplicate pending intents', async () => {
+    const refreshedHash = `0x${'22'.repeat(32)}`
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 4 })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(refreshedHash)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [pendingIntent({
+          allowance_nonce: 3,
+          sign_hash: SIGN_HASH,
+        })],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().sign_data).toMatchObject({
+      hash: refreshedHash,
+      components: { nonce: 4 },
+    })
+
+    expect(mockQuery.mock.calls[1][0]).toContain('COALESCE(payment_rail, source) = $4')
+
+    const refreshCall = mockQuery.mock.calls[2]
+    expect(refreshCall[0]).toContain('UPDATE payment_intents')
+    expect(refreshCall[0]).toContain('agent_id = $4')
+    expect(refreshCall[0]).toContain('COALESCE(payment_rail, source) = $5')
+    expect(refreshCall[0]).toContain("status = 'pending_signature'")
+    expect(refreshCall[0]).toContain('tx_hash IS NULL')
+    expect(refreshCall[1]).toEqual([
+      4,
+      refreshedHash,
+      PAYMENT_ID,
+      AGENT.id,
+      'mpp_demo',
+    ])
+  })
+
+  it('reloads rail-scoped existing intents after insert idempotency conflicts', async () => {
+    allowanceMocks.getTokenAllowance
+      .mockResolvedValueOnce({ nonce: 3 })
+      .mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'pending_signature',
+      rail: 'mpp_demo',
+      sign_data: { hash: SIGN_HASH },
+    })
+
+    const fallbackLookup = mockQuery.mock.calls[5]
+    expect(fallbackLookup[0]).toContain('COALESCE(payment_rail, source) = $4')
+    expect(fallbackLookup[1]).toEqual([
+      AGENT.id,
+      'mpp_demo:test',
+      challenge.challengeId,
+      'mpp_demo',
+    ])
   })
 
   it('returns unified status for confirmed payment intents', async () => {
@@ -758,8 +851,8 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
       .mockResolvedValueOnce({ rows: [] })
 
     const response = await app.inject({
@@ -783,9 +876,13 @@ describe('machine payment routes', () => {
     expect(signatureUpdateIndex).toBeGreaterThanOrEqual(0)
     const signatureUpdateCall = mockQuery.mock.calls[signatureUpdateIndex]
     expect(signatureUpdateCall[0]).toContain('SET signature = $1, signed_at = NOW()')
+    expect(signatureUpdateCall[0]).toContain("status = 'pending_signature'")
+    expect(signatureUpdateCall[0]).toContain('agent_id = $3')
+    expect(signatureUpdateCall[0]).toContain('payment_rail = $4')
+    expect(signatureUpdateCall[0]).toContain('tx_hash IS NULL')
     expect(signatureUpdateCall[0]).not.toContain("status = 'submitted'")
     expect(signatureUpdateCall[0]).not.toContain('submitted_at')
-    expect(signatureUpdateCall[1]).toEqual(['0xsig', PAYMENT_ID])
+    expect(signatureUpdateCall[1]).toEqual(['0xsig', PAYMENT_ID, AGENT.id, 'mpp_demo'])
 
     const executionOrder = allowanceMocks.executeAllowanceTransfer.mock.invocationCallOrder[0]
     expect(mockQuery.mock.invocationCallOrder[signatureUpdateIndex]).toBeLessThan(executionOrder)
@@ -798,7 +895,90 @@ describe('machine payment routes', () => {
     expect(confirmedUpdateCall[0]).toContain("SET status = 'confirmed'")
     expect(confirmedUpdateCall[0]).toContain('tx_hash = $1')
     expect(confirmedUpdateCall[0]).toContain('submitted_at = NOW()')
-    expect(confirmedUpdateCall[1]).toEqual([TX_HASH, PAYMENT_ID, 0.01, 0.01])
+    expect(confirmedUpdateCall[0]).toContain("status = 'pending_signature'")
+    expect(confirmedUpdateCall[0]).toContain('agent_id = $5')
+    expect(confirmedUpdateCall[0]).toContain('payment_rail = $6')
+    expect(confirmedUpdateCall[0]).toContain('tx_hash IS NULL')
+    expect(confirmedUpdateCall[1]).toEqual([TX_HASH, PAYMENT_ID, 0.01, 0.01, AGENT.id, 'mpp_demo'])
+  })
+
+  it('does not overwrite one-shot terminal state after execution failures', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'failed',
+      error: 'On-chain execution failed',
+    })
+
+    const failedUpdateCall = mockQuery.mock.calls.find(([sql]) =>
+      typeof sql === 'string' && sql.includes("SET status = 'failed'")
+    )
+    expect(failedUpdateCall?.[0]).toContain("status = 'pending_signature'")
+    expect(failedUpdateCall?.[0]).toContain('agent_id = $3')
+    expect(failedUpdateCall?.[0]).toContain('payment_rail = $4')
+    expect(failedUpdateCall?.[0]).toContain('tx_hash IS NULL')
+    expect(failedUpdateCall?.[1]).toEqual(['relayer unavailable', PAYMENT_ID, AGENT.id, 'mpp_demo'])
+  })
+
+  it('does not record evidence when a one-shot confirmation loses a terminal-state race', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.01, eur: 0.01 })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ status: 'confirmed' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'confirmed',
+      error: 'Payment intent changed after on-chain execution',
+    })
+    expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
+    expect(
+      mockQuery.mock.calls.some(([sql]) =>
+        typeof sql === 'string' && sql.includes('machine_payment_evidence')
+      ),
+    ).toBe(false)
   })
 
   it('records a reconciliation event for confirmed payments rejected by the merchant retry', async () => {

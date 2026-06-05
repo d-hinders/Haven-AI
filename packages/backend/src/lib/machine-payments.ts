@@ -224,6 +224,14 @@ function machinePaymentResponse(
   }
 }
 
+async function currentPaymentIntentStatus(id: string, agent: AgentContext): Promise<string> {
+  const current = await pool.query<{ status: string }>(
+    `SELECT status FROM payment_intents WHERE id = $1 AND agent_id = $2`,
+    [id, agent.id],
+  )
+  return current.rows[0]?.status ?? 'unknown'
+}
+
 function signData(intent: PaymentIntentRow, hash = intent.sign_hash, nonce = intent.allowance_nonce) {
   return {
     hash,
@@ -297,6 +305,7 @@ async function findExistingIntent(
      FROM payment_intents
      WHERE agent_id = $1
        AND status NOT IN ('failed', 'expired')
+       AND COALESCE(payment_rail, source) = $4
        AND (
          ($2::TEXT IS NOT NULL AND (
            machine_idempotency_key = $2
@@ -351,6 +360,7 @@ async function findExistingApproval(
 async function returnExistingIntent(
   existing: PaymentIntentRow,
   agent: AgentContext,
+  rail: MachinePaymentRail,
 ) {
   if (existing.status === 'confirmed' && existing.tx_hash) {
     return { statusCode: 200, body: machinePaymentResponse(existing, agent) }
@@ -379,14 +389,30 @@ async function returnExistingIntent(
         refreshedAllowance.nonce,
       )
 
-      await pool.query(
+      const refreshedResult = await pool.query<{ id: string }>(
         `UPDATE payment_intents
          SET allowance_nonce = $1,
              sign_hash = $2,
              expires_at = NOW() + interval '10 minutes'
-         WHERE id = $3`,
-        [existingNonce, existingHash, existing.id],
+         WHERE id = $3
+           AND agent_id = $4
+           AND COALESCE(payment_rail, source) = $5
+           AND status = 'pending_signature'
+           AND tx_hash IS NULL
+         RETURNING id`,
+        [existingNonce, existingHash, existing.id, agent.id, rail],
       )
+      if (refreshedResult.rows.length === 0) {
+        const status = await currentPaymentIntentStatus(existing.id, agent)
+        return {
+          statusCode: 409,
+          body: {
+            payment_id: existing.id,
+            status,
+            error: `Machine payment is ${status}, expected pending_signature`,
+          },
+        }
+      }
     }
 
     return {
@@ -480,7 +506,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
 
   const existingIntent = await findExistingIntent(agent, rail, idempotencyKey, challengeId)
-  if (existingIntent) return returnExistingIntent(existingIntent, agent)
+  if (existingIntent) return returnExistingIntent(existingIntent, agent, rail)
 
   const existingApproval = await findExistingApproval(agent, rail, idempotencyKey, challengeId)
   if (existingApproval) {
@@ -691,7 +717,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   let intent = intentResult.rows[0]
   if (!intent) {
     const existing = await findExistingIntent(agent, rail, idempotencyKey, challengeId)
-    if (existing) return returnExistingIntent(existing, agent)
+    if (existing) return returnExistingIntent(existing, agent, rail)
     return {
       statusCode: 409,
       body: { error: 'Machine payment already exists but could not be loaded' },
@@ -734,10 +760,28 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  await pool.query(
-    `UPDATE payment_intents SET signature = $1, signed_at = NOW() WHERE id = $2`,
-    [signature, intent.id],
+  const signatureResult = await pool.query<{ id: string }>(
+    `UPDATE payment_intents
+     SET signature = $1, signed_at = NOW()
+     WHERE id = $2
+       AND agent_id = $3
+       AND payment_rail = $4
+       AND status = 'pending_signature'
+       AND tx_hash IS NULL
+     RETURNING id`,
+    [signature, intent.id, agent.id, rail],
   )
+  if (signatureResult.rows.length === 0) {
+    const status = await currentPaymentIntentStatus(intent.id, agent)
+    return {
+      statusCode: 409,
+      body: {
+        payment_id: intent.id,
+        status,
+        error: 'Payment intent changed before execution',
+      },
+    }
+  }
 
   try {
     const { txHash } = await executeAllowanceTransfer(
@@ -757,7 +801,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       amountHuman,
     )
 
-    await pool.query(
+    const confirmedResult = await pool.query<{ id: string }>(
       `UPDATE payment_intents
        SET status = 'confirmed',
            tx_hash = $1,
@@ -765,9 +809,26 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
            confirmed_at = NOW(),
            usd_value = $3,
            eur_value = $4
-       WHERE id = $2`,
-      [txHash, intent.id, fiatValues.usd, fiatValues.eur],
+       WHERE id = $2
+         AND agent_id = $5
+         AND payment_rail = $6
+         AND status = 'pending_signature'
+         AND tx_hash IS NULL
+       RETURNING id`,
+      [txHash, intent.id, fiatValues.usd, fiatValues.eur, agent.id, rail],
     )
+
+    if (confirmedResult.rows.length === 0) {
+      const status = await currentPaymentIntentStatus(intent.id, agent)
+      return {
+        statusCode: 409,
+        body: {
+          payment_id: intent.id,
+          status,
+          error: 'Payment intent changed after on-chain execution',
+        },
+      }
+    }
 
     await tryRecordMachinePaymentEvidenceBaseById(intent.id, agent.id)
 
@@ -781,8 +842,14 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
     await pool.query(
-      `UPDATE payment_intents SET status = 'failed', error_message = $1 WHERE id = $2`,
-      [errorMsg, intent.id],
+      `UPDATE payment_intents
+       SET status = 'failed', error_message = $1
+       WHERE id = $2
+         AND agent_id = $3
+         AND payment_rail = $4
+         AND status = 'pending_signature'
+         AND tx_hash IS NULL`,
+      [errorMsg, intent.id, agent.id, rail],
     )
     return {
       statusCode: 502,

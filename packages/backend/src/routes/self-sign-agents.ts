@@ -1,6 +1,11 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import {
+  normalizeAgentAllowance,
+  normalizeAgentAllowances,
+  normalizeAgentAllowanceTokenAddress,
+} from '../lib/agent-allowance-validation.js'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -9,12 +14,7 @@ interface CreateSelfSignAgentBody {
   description?: string
   delegate_address: string
   safe_id?: string
-  allowances?: {
-    token_address: string
-    token_symbol: string
-    allowance_amount: string
-    reset_period_min: number
-  }[]
+  allowances?: unknown
 }
 
 interface UpdateSelfSignAgentBody {
@@ -102,12 +102,16 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
       description,
       delegate_address,
       safe_id,
-      allowances = [],
+      allowances,
     } = request.body
 
     if (!name?.trim()) return reply.code(400).send({ error: 'name is required' })
     if (!delegate_address || !isValidAddress(delegate_address)) {
       return reply.code(400).send({ error: 'Valid delegate_address is required' })
+    }
+    const normalizedAllowances = normalizeAgentAllowances(allowances)
+    if (!normalizedAllowances.ok) {
+      return reply.code(400).send({ error: normalizedAllowances.error })
     }
 
     if (safe_id) {
@@ -132,7 +136,7 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
       )
       const agentId = agentResult.rows[0].id
 
-      for (const allowance of allowances) {
+      for (const allowance of normalizedAllowances.value) {
         await client.query(
           `INSERT INTO self_sign_agent_allowances
              (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
@@ -142,7 +146,7 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
                  updated_at = NOW()`,
           [
             agentId,
-            allowance.token_address.toLowerCase(),
+            allowance.token_address,
             allowance.token_symbol,
             allowance.allowance_amount,
             allowance.reset_period_min,
@@ -161,7 +165,7 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
         [agentId],
       )
 
-      return { ...agent.rows[0], allowances, auth_type: 'self_sign' }
+      return { ...agent.rows[0], allowances: normalizedAllowances.value, auth_type: 'self_sign' }
     } catch (err: unknown) {
       await client.query('ROLLBACK')
       if ((err as { code?: string }).code === '23505') {
@@ -247,14 +251,21 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
   }>('/:id/allowances', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
-    const { token_address, token_symbol, allowance_amount, reset_period_min } = request.body
+    const normalizedAllowance = normalizeAgentAllowance(request.body)
+    if (!normalizedAllowance.ok) {
+      return reply.code(400).send({ error: normalizedAllowance.error })
+    }
 
-    const agentCheck = await pool.query(
-      'SELECT id FROM self_sign_agents WHERE id = $1 AND user_id = $2',
+    const agentCheck = await pool.query<{ id: string; status: string }>(
+      'SELECT id, status FROM self_sign_agents WHERE id = $1 AND user_id = $2',
       [id, sub],
     )
     if (agentCheck.rows.length === 0) return reply.code(404).send({ error: 'Agent not found' })
+    if (agentCheck.rows[0].status === 'revoked') {
+      return reply.code(409).send({ error: 'Revoked agent rules cannot be changed' })
+    }
 
+    const { token_address, token_symbol, allowance_amount, reset_period_min } = normalizedAllowance.value
     const result = await pool.query<AllowanceRow>(
       `INSERT INTO self_sign_agent_allowances
          (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
@@ -263,7 +274,7 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
          SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3,
              updated_at = NOW()
        RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
-      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min],
+      [id, token_address, token_symbol, allowance_amount, reset_period_min],
     )
     return result.rows[0]
   })
@@ -274,16 +285,23 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id, tokenAddress } = request.params
+      const normalizedTokenAddress = normalizeAgentAllowanceTokenAddress(tokenAddress)
+      if (!normalizedTokenAddress.ok) {
+        return reply.code(400).send({ error: normalizedTokenAddress.error })
+      }
 
-      const agentCheck = await pool.query(
-        'SELECT id FROM self_sign_agents WHERE id = $1 AND user_id = $2',
+      const agentCheck = await pool.query<{ id: string; status: string }>(
+        'SELECT id, status FROM self_sign_agents WHERE id = $1 AND user_id = $2',
         [id, sub],
       )
       if (agentCheck.rows.length === 0) return reply.code(404).send({ error: 'Agent not found' })
+      if (agentCheck.rows[0].status === 'revoked') {
+        return reply.code(409).send({ error: 'Revoked agent rules cannot be changed' })
+      }
 
       const result = await pool.query(
         'DELETE FROM self_sign_agent_allowances WHERE agent_id = $1 AND token_address = $2 RETURNING id',
-        [id, tokenAddress.toLowerCase()],
+        [id, normalizedTokenAddress.value],
       )
       if (result.rows.length === 0) return reply.code(404).send({ error: 'Allowance not found' })
       return { success: true }

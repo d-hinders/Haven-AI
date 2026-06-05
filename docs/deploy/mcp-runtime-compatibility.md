@@ -16,7 +16,7 @@ The source of truth is `packages/connect/src/runtime-manifest.ts`.
 | --- | --- |
 | Node.js | >= 20.0.0 |
 | `@haven_ai/connect` | current package version |
-| `@haven_ai/mcp` | `0.1.3-alpha` |
+| `@haven_ai/mcp` | `0.1.4-alpha` |
 | `@haven_ai/sdk` | `0.1.6` |
 | `@haven_ai/signer` | `0.1.0-alpha` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |

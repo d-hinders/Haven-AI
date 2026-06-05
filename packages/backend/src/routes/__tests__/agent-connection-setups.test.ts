@@ -196,7 +196,7 @@ describe('agent connection setup routes', () => {
     const body = response.json()
     expect(body.status).toBe('awaiting_connection')
     expect(body.setup_token).toMatch(/^hv_setup_[0-9a-f]+$/)
-    expect(body.connector_command).toContain('npx -y @haven_ai/connect@0.1.2-alpha')
+    expect(body.connector_command).toContain('npx -y @haven_ai/connect@0.1.3-alpha')
     expect(body.connector_command).toContain('--ack-local-tools')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 

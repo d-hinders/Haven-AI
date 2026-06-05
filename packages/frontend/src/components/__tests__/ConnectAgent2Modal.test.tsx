@@ -290,8 +290,8 @@ describe('ConnectAgent2Modal', () => {
       status: 'awaiting_connection',
       setup_token: 'hv_setup_abc',
       expires_at: '2099-01-01T00:00:00.000Z',
-      connector_command: 'npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
-      setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --ack-local-tools',
+      connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+      setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --ack-local-tools',
     })
   })
 
@@ -566,8 +566,8 @@ describe('ConnectAgent2Modal', () => {
           status: 'awaiting_connection',
           setup_token: 'hv_setup_abc',
           expires_at: '2099-01-01T00:00:00.000Z',
-          connector_command: 'npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
-          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --ack-local-tools',
+          connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --ack-local-tools',
         }
       }
       if (path === '/agent-connection-setups/resolve') {
@@ -681,8 +681,8 @@ describe('ConnectAgent2Modal', () => {
           status: 'awaiting_connection',
           setup_token: 'hv_setup_abc',
           expires_at: '2099-01-01T00:00:00.000Z',
-          connector_command: 'npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
-          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_abc --ack-local-tools',
+          connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --ack-local-tools',
         }
       }
       if (path === '/agent-connection-setups/resolve') {

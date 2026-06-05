@@ -735,7 +735,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   }
 
   await pool.query(
-    `UPDATE payment_intents SET signature = $1, signed_at = NOW(), status = 'submitted', submitted_at = NOW() WHERE id = $2`,
+    `UPDATE payment_intents SET signature = $1, signed_at = NOW() WHERE id = $2`,
     [signature, intent.id],
   )
 
@@ -761,6 +761,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       `UPDATE payment_intents
        SET status = 'confirmed',
            tx_hash = $1,
+           submitted_at = NOW(),
            confirmed_at = NOW(),
            usd_value = $3,
            eur_value = $4

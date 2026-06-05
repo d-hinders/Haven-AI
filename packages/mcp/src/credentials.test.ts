@@ -81,7 +81,10 @@ describe('loadCredentials', () => {
     await writeFile(signerPath, JSON.stringify({
       delegate_key: '0xdelegate',
       delegate_address: '0xDelegate',
-      safe_address: '0xSafeSigner',
+      agent_id: 'agent-1',
+      safe_address: '0xsafe',
+      chain_id: '100',
+      network: 'gnosis',
     }))
     await chmod(identityPath, 0o600)
     await chmod(signerPath, 0o600)
@@ -100,6 +103,80 @@ describe('loadCredentials', () => {
       identityPath,
       signerPath,
     })
+  })
+
+  it('rejects split credential metadata mismatches without leaking raw values', async () => {
+    const cases = [
+      {
+        label: 'agent_id',
+        identity: { agent_id: 'agent-1' },
+        signer: { agent_id: 'agent-2' },
+        rawValues: ['agent-1', 'agent-2'],
+      },
+      {
+        label: 'safe_address',
+        identity: { safe_address: '0xSafeA' },
+        signer: { safe_address: '0xSafeB' },
+        rawValues: ['0xSafeA', '0xSafeB'],
+      },
+      {
+        label: 'delegate_address',
+        identity: { delegate_address: '0xDelegateA' },
+        signer: { delegate_address: '0xDelegateB' },
+        rawValues: ['0xDelegateA', '0xDelegateB'],
+      },
+      {
+        label: 'chain_id',
+        identity: { chain_id: 100 },
+        signer: { chain_id: '8453' },
+        rawValues: ['100', '8453'],
+      },
+      {
+        label: 'network',
+        identity: { network: 'Gnosis' },
+        signer: { network: 'Base' },
+        rawValues: ['Gnosis', 'Base'],
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      const dir = await mkdtemp(join(tmpdir(), `haven-mcp-split-${testCase.label}-`))
+      const identityPath = join(dir, 'identity.json')
+      const signerPath = join(dir, 'signer.json')
+      await writeFile(identityPath, JSON.stringify({
+        api_key: 'sk_agent_split',
+        agent_id: 'agent-1',
+        safe_address: '0xSafe',
+        chain_id: 100,
+        network: 'Gnosis',
+        ...testCase.identity,
+      }))
+      await writeFile(signerPath, JSON.stringify({
+        delegate_key: '0xdelegate',
+        delegate_address: '0xDelegate',
+        agent_id: 'agent-1',
+        safe_address: '0xsafe',
+        chain_id: '100',
+        network: 'gnosis',
+        ...testCase.signer,
+      }))
+      await chmod(identityPath, 0o600)
+      await chmod(signerPath, 0o600)
+
+      let error: unknown
+      try {
+        await loadCredentials({ identityPath, signerPath })
+      } catch (err) {
+        error = err
+      }
+
+      expect(error).toBeInstanceOf(Error)
+      const message = error instanceof Error ? error.message : String(error)
+      expect(message).toContain(`mismatched ${testCase.label} values`)
+      for (const value of ['sk_agent_split', '0xdelegate', ...testCase.rawValues]) {
+        expect(message).not.toContain(value)
+      }
+    }
   })
 
   it('returns sourcePath when the file path comes from HAVEN_CREDENTIALS', async () => {

@@ -727,10 +727,10 @@ may include:
 - setup command
 - setup token
 - Haven API URL
-- Haven API URL
 - selected runtime
 - agent name and budget summary
-- instructions not to print or paste private keys
+- explicit approval for the exact local setup actions
+- instructions not to print or paste private keys, API keys, credential files, or config secrets
 
 It must not include:
 
@@ -744,12 +744,17 @@ Example:
 ```text
 Please connect this workspace to Haven.
 
-Run this local setup command:
+I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@0.1.3-alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update Codex MCP config under ~/.codex/config.toml.
 
-npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
+Run this exact command:
 
-The Haven connector will generate the signing key locally and send Haven only
-the public signing address. Do not print private keys in chat or logs.
+npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime codex-desktop
+
+Do not print private keys, API keys, credential file contents, or config secrets
+in chat or logs.
+
+The Haven connector generates the signing key locally and sends Haven only the
+public signing address plus proof.
 
 When the connector finishes, tell me to return to Haven to approve the agent
 rules.

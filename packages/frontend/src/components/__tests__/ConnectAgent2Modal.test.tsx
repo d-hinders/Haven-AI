@@ -225,6 +225,22 @@ function countOccurrences(value: string, needle: string): number {
   return value.split(needle).length - 1
 }
 
+const SETUP_PROMPT = [
+  'Please connect this workspace to Haven.',
+  '',
+  'I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@0.1.3-alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
+  '',
+  'Run this exact command:',
+  '',
+  'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+  '',
+  'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
+  '',
+  'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
+  '',
+  'When the connector finishes, tell me to return to Haven to approve the agent rules.',
+].join('\n')
+
 describe('ConnectAgent2Modal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -291,7 +307,7 @@ describe('ConnectAgent2Modal', () => {
       setup_token: 'hv_setup_abc',
       expires_at: '2099-01-01T00:00:00.000Z',
       connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
-      setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --ack-local-tools',
+      setup_prompt: SETUP_PROMPT,
     })
   })
 
@@ -339,6 +355,8 @@ describe('ConnectAgent2Modal', () => {
         runtime: 'codex-desktop',
       }),
     ))
+    expect(await screen.findByText(/Codex Desktop may ask you to approve running the setup command/i)).toBeInTheDocument()
+    expect(screen.getByText(/It includes your approval for the exact local setup actions/i)).toBeInTheDocument()
   })
 
   it('renders local-ready status, runtime status, and wallet approval action', async () => {
@@ -567,7 +585,7 @@ describe('ConnectAgent2Modal', () => {
           setup_token: 'hv_setup_abc',
           expires_at: '2099-01-01T00:00:00.000Z',
           connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
-          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --ack-local-tools',
+          setup_prompt: SETUP_PROMPT,
         }
       }
       if (path === '/agent-connection-setups/resolve') {
@@ -682,7 +700,7 @@ describe('ConnectAgent2Modal', () => {
           setup_token: 'hv_setup_abc',
           expires_at: '2099-01-01T00:00:00.000Z',
           connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
-          setup_prompt: 'Please connect this workspace to Haven.\n\nnpx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --ack-local-tools',
+          setup_prompt: SETUP_PROMPT,
         }
       }
       if (path === '/agent-connection-setups/resolve') {

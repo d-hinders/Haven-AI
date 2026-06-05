@@ -198,6 +198,12 @@ describe('agent connection setup routes', () => {
     expect(body.setup_token).toMatch(/^hv_setup_[0-9a-f]+$/)
     expect(body.connector_command).toContain('npx -y @haven_ai/connect@0.1.3-alpha')
     expect(body.connector_command).toContain('--ack-local-tools')
+    expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
+    expect(body.setup_prompt).toContain('download and execute the published npm package @haven_ai/connect@0.1.3-alpha')
+    expect(body.setup_prompt).toContain('connect to Haven at http://localhost:80')
+    expect(body.setup_prompt).toContain('write local Haven credential files under ~/.haven')
+    expect(body.setup_prompt).toContain('update the local agent MCP config when supported')
+    expect(body.setup_prompt).toContain('Run this exact command:')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 
     const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
@@ -232,6 +238,9 @@ describe('agent connection setup routes', () => {
     const body = response.json()
     expect(body.connector_command).toContain('--ack-local-tools')
     expect(body.connector_command).toContain('--runtime codex-desktop')
+    expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
+    expect(body.setup_prompt).toContain('update Codex MCP config under ~/.codex/config.toml')
+    expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 
     await app.close()

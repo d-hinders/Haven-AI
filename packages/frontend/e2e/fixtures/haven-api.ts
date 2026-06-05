@@ -224,11 +224,17 @@ export async function mockHavenApi(page: Page) {
         setup_prompt: [
           'Please connect this workspace to Haven.',
           '',
-          'Run this local setup command:',
+          'I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@0.1.3-alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
+          '',
+          'Run this exact command:',
           '',
           'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_e2e123 --api https://api.haven.example --ack-local-tools --runtime claude-code',
           '',
-          'The Haven connector will generate the signing key locally and send Haven only the public signing address.',
+          'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
+          '',
+          'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
+          '',
+          'When the connector finishes, tell me to return to Haven to approve the agent rules.',
         ].join('\n'),
       }, 201)
       return

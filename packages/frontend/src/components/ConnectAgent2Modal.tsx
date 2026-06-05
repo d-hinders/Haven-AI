@@ -776,6 +776,7 @@ export default function ConnectAgent2Modal({
               {visibleStatus === 'awaiting_connection' && (
                 <WaitingForConnector
                   setup={setup}
+                  runtime={runtime}
                   copied={copied}
                   onCopy={copyText}
                   manualFallbackConfirmed={manualFallbackConfirmed}
@@ -918,6 +919,7 @@ export default function ConnectAgent2Modal({
 
 function WaitingForConnector({
   setup,
+  runtime,
   copied,
   onCopy,
   manualFallbackConfirmed,
@@ -934,6 +936,7 @@ function WaitingForConnector({
   onCancel,
 }: {
   setup: CreateSetupResponse
+  runtime: string
   copied: 'prompt' | 'command' | 'manual' | null
   onCopy: (kind: 'prompt' | 'command' | 'manual', value: string) => void
   manualFallbackConfirmed: boolean
@@ -956,8 +959,13 @@ function WaitingForConnector({
           <div>
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Connect your agent</h3>
             <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Paste this prompt into the agent environment. It runs the local connector, creates the key there, and sends Haven only the public signing address.
+              Paste this prompt into the agent environment. It includes your approval for the exact local setup actions, creates the key there, and sends Haven only the public signing address.
             </p>
+            {runtime === 'codex-desktop' && (
+              <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Codex Desktop may ask you to approve running the setup command. That is expected.
+              </p>
+            )}
           </div>
           <StatusBadge tone={loading ? 'neutral' : 'warning'}>{loading ? 'Checking' : 'Waiting'}</StatusBadge>
         </div>

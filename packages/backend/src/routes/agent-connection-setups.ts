@@ -219,14 +219,15 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         client.release()
       }
 
-      const command = buildConnectorCommand(setupToken, request, parsed.runtime)
+      const apiUrl = apiBaseUrl(request)
+      const command = buildConnectorCommand(setupToken, apiUrl, parsed.runtime)
       return reply.code(201).send({
         setup_id: setupId,
         status: 'awaiting_connection',
         setup_token: setupToken,
         expires_at: expiresAt,
         connector_command: command,
-        setup_prompt: buildSetupPrompt(command),
+        setup_prompt: buildSetupPrompt(command, parsed.runtime, apiUrl),
       })
     },
   )
@@ -1123,29 +1124,47 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
   }
 }
 
-function buildConnectorCommand(setupToken: string, request: FastifyRequest, runtime: string | null): string {
+function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: string | null): string {
   const args = [
     `npx -y ${CONNECTOR_PACKAGE}`,
     `--setup ${shellQuote(setupToken)}`,
-    `--api ${shellQuote(apiBaseUrl(request))}`,
+    `--api ${shellQuote(apiUrl)}`,
     '--ack-local-tools',
   ]
   if (runtime) args.push(`--runtime ${shellQuote(runtime)}`)
   return args.join(' ')
 }
 
-function buildSetupPrompt(command: string): string {
+function buildSetupPrompt(command: string, runtime: string | null, apiUrl: string): string {
+  const approvedActions = [
+    `download and execute the published npm package ${CONNECTOR_PACKAGE}`,
+    `connect to Haven at ${apiUrl}`,
+    'write local Haven credential files under ~/.haven',
+    runtime === 'codex-cli' || runtime === 'codex-desktop'
+      ? 'update Codex MCP config under ~/.codex/config.toml'
+      : 'update the local agent MCP config when supported',
+  ]
+
   return [
     'Please connect this workspace to Haven.',
     '',
-    'Run this local setup command:',
+    `I approve running this exact Haven setup command. It may ${joinApprovedActions(approvedActions)}.`,
+    '',
+    'Run this exact command:',
     '',
     command,
     '',
-    'The Haven connector will generate the signing key locally and send Haven only the public signing address. Do not print private keys in chat or logs.',
+    'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
+    '',
+    'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
     '',
     'When the connector finishes, tell me to return to Haven to approve the agent rules.',
   ].join('\n')
+}
+
+function joinApprovedActions(actions: string[]): string {
+  if (actions.length <= 1) return actions[0] ?? ''
+  return `${actions.slice(0, -1).join(', ')}, and ${actions[actions.length - 1]}`
 }
 
 function apiBaseUrl(request: FastifyRequest): string {

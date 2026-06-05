@@ -82,6 +82,7 @@ const ALLOWANCE = {
   allowance_amount: '25000000',
   reset_period_min: 1440,
 }
+const UINT96_OVERFLOW = (1n << 96n).toString()
 
 const API_KEY_HASH = 'a'.repeat(64)
 const API_KEY_PREFIX = 'sk_agent_abc'
@@ -215,6 +216,106 @@ describe('agent connection setup routes', () => {
     expect(params[6]).toMatch(/^[0-9a-f]{64}$/)
     expect(params[7]).toBe(body.setup_token.slice(0, 20))
     expect(mockClientQuery).toHaveBeenCalledWith('COMMIT')
+    const insertAllowance = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setup_allowances'),
+    )
+    expect(insertAllowance?.[1]).toEqual([
+      expect.any(String),
+      ALLOWANCE.token_address.toLowerCase(),
+      ALLOWANCE.token_symbol,
+      ALLOWANCE.allowance_amount,
+      ALLOWANCE.reset_period_min,
+    ])
+
+    await app.close()
+  })
+
+  it('normalizes setup allowances before storing pending wallet approval state', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [{
+          ...ALLOWANCE,
+          token_symbol: '  USDC.e  ',
+          allowance_amount: '00025000000',
+        }],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    const insertAllowance = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setup_allowances'),
+    )
+    expect(insertAllowance?.[1]).toEqual([
+      expect.any(String),
+      ALLOWANCE.token_address.toLowerCase(),
+      'USDC.e',
+      '25000000',
+      ALLOWANCE.reset_period_min,
+    ])
+
+    await app.close()
+  })
+
+  it.each([
+    ['bad token address', { ...ALLOWANCE, token_address: 'not-an-address' }, /Valid token address/],
+    ['blank token symbol', { ...ALLOWANCE, token_symbol: '   ' }, /Token symbol is required/],
+    ['zero allowance amount', { ...ALLOWANCE, allowance_amount: '0' }, /positive decimal atomic amount/],
+    ['scientific allowance amount', { ...ALLOWANCE, allowance_amount: '1e6' }, /positive decimal atomic amount/],
+    ['uint96 overflow allowance amount', { ...ALLOWANCE, allowance_amount: UINT96_OVERFLOW }, /uint96/],
+    ['negative reset period', { ...ALLOWANCE, reset_period_min: -1 }, /0 to 65535/],
+    ['uint16 overflow reset period', { ...ALLOWANCE, reset_period_min: 65536 }, /0 to 65535/],
+  ])('rejects invalid setup allowance input before wallet lookup: %s', async (_label, allowance, errorPattern) => {
+    const app = await buildApp()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [allowance],
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatch(errorPattern)
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('rejects duplicate setup allowances after token address normalization', async () => {
+    const app = await buildApp()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [
+          ALLOWANCE,
+          {
+            ...ALLOWANCE,
+            token_address: ALLOWANCE.token_address.toUpperCase().replace('X', 'x'),
+            allowance_amount: '50000000',
+          },
+        ],
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatch(/Duplicate token/)
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockConnect).not.toHaveBeenCalled()
 
     await app.close()
   })

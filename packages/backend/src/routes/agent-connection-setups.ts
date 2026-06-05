@@ -16,6 +16,7 @@ import {
   sanitizeInstallStatus,
   verifySetupProof,
 } from '../lib/agent-connection-setup.js'
+import { normalizeAgentAllowances } from '../lib/agent-allowance-validation.js'
 import { getTokenAllowance, getTokensForDelegate } from '../lib/allowance-module.js'
 import { getChain } from '../lib/chains.js'
 
@@ -204,7 +205,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
              VALUES ($1, $2, $3, $4, $5)`,
             [
               setupId,
-              allowance.token_address.toLowerCase(),
+              allowance.token_address,
               allowance.token_symbol,
               allowance.allowance_amount,
               allowance.reset_period_min,
@@ -652,24 +653,10 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     reply.code(400).send({ error: 'Name is required' })
     return null
   }
-  const allowances = Array.isArray(body.allowances) ? body.allowances : []
-  for (const allowance of allowances) {
-    if (!isValidAddress(allowance.token_address)) {
-      reply.code(400).send({ error: 'Valid token address is required' })
-      return null
-    }
-    if (!allowance.token_symbol || typeof allowance.token_symbol !== 'string') {
-      reply.code(400).send({ error: 'Token symbol is required' })
-      return null
-    }
-    if (!/^\d+$/.test(String(allowance.allowance_amount))) {
-      reply.code(400).send({ error: 'Allowance amount must be an atomic integer string' })
-      return null
-    }
-    if (!Number.isInteger(allowance.reset_period_min) || allowance.reset_period_min < 0) {
-      reply.code(400).send({ error: 'Reset period must be a non-negative integer' })
-      return null
-    }
+  const allowances = normalizeAgentAllowances(body.allowances)
+  if (!allowances.ok) {
+    reply.code(400).send({ error: allowances.error })
+    return null
   }
   return {
     name,
@@ -679,7 +666,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     runtime: typeof body.runtime === 'string' && body.runtime.trim()
       ? body.runtime.trim().slice(0, 80)
       : null,
-    allowances,
+    allowances: allowances.value,
   }
 }
 

@@ -225,6 +225,28 @@ describe('openapiSpec', () => {
     )
   })
 
+  it('documents allowance input constraints for owner-created agent rules', () => {
+    const createAgentAllowance =
+      openapiSpec.components.schemas.CreateAgentRequest.properties.allowances.items
+    const setupAllowance =
+      openapiSpec.components.schemas.AgentConnectionAllowanceInput
+
+    for (const schema of [createAgentAllowance, setupAllowance]) {
+      expect(schema.properties.token_symbol).toMatchObject({
+        minLength: 1,
+        maxLength: 20,
+      })
+      expect(schema.properties.allowance_amount).toMatchObject({
+        type: 'string',
+        pattern: '^[0-9]+$',
+      })
+      expect(schema.properties.reset_period_min).toMatchObject({
+        minimum: 0,
+        maximum: 65535,
+      })
+    }
+  })
+
   it('documents the non-custodial authority boundary in security schemes and resume state', () => {
     const agentScheme = openapiSpec.components.securitySchemes.AgentApiKey
     expect(agentScheme.description).toMatch(/identity/i)

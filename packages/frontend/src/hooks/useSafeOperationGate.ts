@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useSyncExternalStore } from 'react'
-import { useAccount } from 'wagmi'
+import { useAccount, useWalletClient } from 'wagmi'
 import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import {
@@ -40,6 +40,7 @@ export function useSafeOperationGate(args: {
 }): SafeOperationGate {
   const { passkeys } = useAuth()
   const { address } = useAccount()
+  const { data: walletClient } = useWalletClient({ chainId: args.chainId })
 
   const storedPasskeyValue = useSyncExternalStore(
     subscribe,
@@ -75,7 +76,7 @@ export function useSafeOperationGate(args: {
     return { kind: 'ready' }
   }
 
-  if (address) {
+  if (address && walletClient) {
     return { kind: 'ready' }
   }
 

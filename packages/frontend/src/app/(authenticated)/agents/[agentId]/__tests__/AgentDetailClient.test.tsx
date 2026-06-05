@@ -23,7 +23,7 @@ const {
 }))
 
 vi.mock('wagmi', () => ({
-  usePublicClient: () => mockUsePublicClient(),
+  usePublicClient: (...args: unknown[]) => mockUsePublicClient(...args),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -43,19 +43,19 @@ vi.mock('@/hooks/useAgentActivity', async () => {
 })
 
 vi.mock('@/hooks/useOnChainAllowances', () => ({
-  useOnChainAllowances: () => mockUseOnChainAllowances(),
+  useOnChainAllowances: (...args: unknown[]) => mockUseOnChainAllowances(...args),
 }))
 
 vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: () => mockUseSafeDetails(),
+  useSafeDetails: (...args: unknown[]) => mockUseSafeDetails(...args),
 }))
 
 vi.mock('@/hooks/useSafeOperationGate', () => ({
-  useSafeOperationGate: () => mockUseSafeOperationGate(),
+  useSafeOperationGate: (...args: unknown[]) => mockUseSafeOperationGate(...args),
 }))
 
 vi.mock('@/lib/signer', () => ({
-  useActiveSigner: () => mockUseActiveSigner(),
+  useActiveSigner: (...args: unknown[]) => mockUseActiveSigner(...args),
 }))
 
 vi.mock('@/components/OnchainActionGate', () => ({
@@ -248,5 +248,61 @@ describe('AgentDetailClient last-activity metadata', () => {
     render(<AgentDetailClient agentId="agent-1" />)
 
     expect(screen.getAllByText('Haven wallet 0x4444...4444').length).toBeGreaterThan(0)
+  })
+
+  it('uses stored agent wallet chain when the wallet is missing from auth state', () => {
+    const baseSafeAddress = '0x3333333333333333333333333333333333333333'
+    const delegateAddress = '0x4444444444444444444444444444444444444444'
+    mockUseAuth.mockReturnValue({
+      user: {
+        safes: [],
+      },
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Base agent',
+          description: null,
+          delegate_address: delegateAddress,
+          safe_id: 'safe-base',
+          safe_address: baseSafeAddress,
+          safe_name: 'Base account',
+          safe_chain_id: 8453,
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [{
+            id: 'allowance-base-usdc',
+            agent_id: 'agent-1',
+            token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            token_symbol: 'USDC',
+            allowance_amount: '1000000',
+            reset_period_min: 1440,
+          }],
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(mockUseSafeDetails).toHaveBeenCalledWith(baseSafeAddress, { chainId: 8453 })
+    expect(mockUseOnChainAllowances).toHaveBeenCalledWith(baseSafeAddress, [delegateAddress], 8453)
+    expect(mockUsePublicClient).toHaveBeenCalledWith({ chainId: 8453 })
+    expect(mockUseActiveSigner).toHaveBeenCalledWith({
+      safeAddress: baseSafeAddress,
+      chainId: 8453,
+    })
+    expect(mockUseSafeOperationGate).toHaveBeenCalledWith({
+      safeAddress: baseSafeAddress,
+      chainId: 8453,
+    })
+    expect(screen.getByText('Base')).toBeInTheDocument()
+    expect(screen.getByText('1.00 USDC per day')).toBeInTheDocument()
   })
 })

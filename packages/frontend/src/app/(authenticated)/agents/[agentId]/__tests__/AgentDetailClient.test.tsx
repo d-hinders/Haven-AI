@@ -83,7 +83,25 @@ vi.mock('@/components/ConfirmDialog', () => ({
 }))
 
 vi.mock('@/components/transactions/TransactionsTable', () => ({
-  default: () => <div>Transactions table</div>,
+  default: ({
+    transactions = [],
+  }: {
+    transactions?: Array<{
+      hash: string
+      safeName?: string
+      movementOverride?: ReactNode
+    }>
+  }) => (
+    <div>
+      <div>Transactions table</div>
+      {transactions.map((tx) => (
+        <div key={tx.hash}>
+          <span>{tx.safeName}</span>
+          {tx.movementOverride}
+        </div>
+      ))}
+    </div>
+  ),
 }))
 
 import AgentDetailClient from '../AgentDetailClient'
@@ -159,5 +177,76 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByText('Last activity')).toBeInTheDocument()
     expect(screen.getByText('2h ago')).toBeInTheDocument()
     expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+  })
+
+  it('uses the activity row wallet name for historical payment movement', () => {
+    mockUseAgentActivity.mockReturnValue({
+      activity: [
+        {
+          type: 'payment',
+          id: 'payment-1',
+          agent_id: 'agent-1',
+          token: 'USDC',
+          token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          amount_raw: '10000',
+          amount: '0.01',
+          to: '0x2222222222222222222222222222222222222222',
+          status: 'confirmed',
+          tx_hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
+          source: 'x402',
+          x402_resource_url: 'https://api.example.com/data',
+          x402_merchant_address: '0x2222222222222222222222222222222222222222',
+          chain_id: 8453,
+          safe_id: 'safe-old',
+          safe_address: '0x4444444444444444444444444444444444444444',
+          safe_name: 'Previous wallet',
+          explorer_url: null,
+          confirmed_at: '2026-05-08T11:49:59Z',
+          created_at: '2026-05-08T11:49:00Z',
+        },
+      ],
+      stats: null,
+      loading: false,
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getAllByText('Previous wallet').length).toBeGreaterThan(0)
+    expect(screen.getByText('api.example.com')).toBeInTheDocument()
+  })
+
+  it('does not fall back to the current wallet name when historical activity has only an address', () => {
+    mockUseAgentActivity.mockReturnValue({
+      activity: [
+        {
+          type: 'payment',
+          id: 'payment-1',
+          agent_id: 'agent-1',
+          token: 'USDC',
+          token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          amount_raw: '10000',
+          amount: '0.01',
+          to: '0x2222222222222222222222222222222222222222',
+          status: 'confirmed',
+          tx_hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
+          source: 'x402',
+          x402_resource_url: 'https://api.example.com/data',
+          x402_merchant_address: '0x2222222222222222222222222222222222222222',
+          chain_id: 8453,
+          safe_id: null,
+          safe_address: '0x4444444444444444444444444444444444444444',
+          safe_name: null,
+          explorer_url: null,
+          confirmed_at: '2026-05-08T11:49:59Z',
+          created_at: '2026-05-08T11:49:00Z',
+        },
+      ],
+      stats: null,
+      loading: false,
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getAllByText('Haven wallet 0x4444...4444').length).toBeGreaterThan(0)
   })
 })

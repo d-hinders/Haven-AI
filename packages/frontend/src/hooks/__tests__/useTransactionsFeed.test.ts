@@ -2,24 +2,11 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockApiGet = vi.fn()
-const mockFetchX402ActivityTransactions = vi.fn()
-const mockMergeTransactionsWithX402Activity = vi.fn(
-  (transactions: unknown[], _x402Transactions: unknown[]) => transactions,
-)
 
 vi.mock('@/lib/api', () => ({
   api: {
     get: (...args: unknown[]) => mockApiGet(...args),
   },
-}))
-
-vi.mock('@/lib/x402-activity-transactions', () => ({
-  fetchX402ActivityTransactions: (...args: unknown[]) =>
-    mockFetchX402ActivityTransactions(...args),
-  mergeTransactionsWithX402Activity: (
-    transactions: unknown[],
-    x402Transactions: unknown[],
-  ) => mockMergeTransactionsWithX402Activity(transactions, x402Transactions),
 }))
 
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
@@ -61,12 +48,9 @@ function response(transactions: AggregatedTransaction[]): TransactionsFeedRespon
 describe('useTransactionsFeed', () => {
   beforeEach(() => {
     mockApiGet.mockReset()
-    mockFetchX402ActivityTransactions.mockReset()
-    mockMergeTransactionsWithX402Activity.mockClear()
-    mockFetchX402ActivityTransactions.mockResolvedValue([])
   })
 
-  it('does not run the x402 bridge for stale transaction feed requests', async () => {
+  it('does not run extra x402 bridge requests for transaction feed data', async () => {
     let resolveFirst!: (value: TransactionsFeedResponse) => void
     let resolveSecond!: (value: TransactionsFeedResponse) => void
 
@@ -85,7 +69,6 @@ describe('useTransactionsFeed', () => {
       resolveFirst(response([tx('0xold', 'safe-old')]))
       await Promise.resolve()
     })
-    expect(mockFetchX402ActivityTransactions).not.toHaveBeenCalled()
 
     await act(async () => {
       resolveSecond(response([tx('0xnew', 'safe-new')]))
@@ -93,10 +76,45 @@ describe('useTransactionsFeed', () => {
     })
 
     await waitFor(() => expect(result.current.loadingInitial).toBe(false))
-    expect(mockFetchX402ActivityTransactions).toHaveBeenCalledTimes(1)
-    expect(mockFetchX402ActivityTransactions).toHaveBeenCalledWith({
-      safeId: 'safe-new',
-    })
+    expect(mockApiGet).toHaveBeenCalledTimes(2)
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/transactions?safeId=safe-old&offset=0&limit=25',
+    )
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/transactions?safeId=safe-new&offset=0&limit=25',
+    )
     expect(result.current.transactions[0]?.hash).toBe('0xnew')
+  })
+
+  it('dedupes overlapping paginated rows without the x402 bridge', async () => {
+    mockApiGet
+      .mockResolvedValueOnce({
+        ...response([tx('0xfirst', 'safe-1')]),
+        total: 2,
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        ...response([
+          tx('0xfirst', 'safe-1'),
+          tx('0xsecond', 'safe-1'),
+        ]),
+        offset: 1,
+        total: 2,
+      })
+
+    const { result } = renderHook(() => useTransactionsFeed({}))
+
+    await waitFor(() => expect(result.current.loadingInitial).toBe(false))
+
+    await act(async () => {
+      await result.current.loadMore()
+    })
+
+    expect(result.current.transactions.map((item) => item.hash)).toEqual([
+      '0xfirst',
+      '0xsecond',
+    ])
+    expect(mockApiGet).toHaveBeenCalledTimes(2)
+    expect(mockApiGet).toHaveBeenLastCalledWith('/transactions?offset=1&limit=25')
   })
 })

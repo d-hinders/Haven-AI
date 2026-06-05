@@ -2,24 +2,11 @@ import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockApiGet = vi.fn()
-const mockFetchX402ActivityTransactions = vi.fn()
-const mockMergeTransactionsWithX402Activity = vi.fn(
-  (transactions: unknown[], _x402Transactions: unknown[]) => transactions,
-)
 
 vi.mock('@/lib/api', () => ({
   api: {
     get: (...args: unknown[]) => mockApiGet(...args),
   },
-}))
-
-vi.mock('@/lib/x402-activity-transactions', () => ({
-  fetchX402ActivityTransactions: (...args: unknown[]) =>
-    mockFetchX402ActivityTransactions(...args),
-  mergeTransactionsWithX402Activity: (
-    transactions: unknown[],
-    x402Transactions: unknown[],
-  ) => mockMergeTransactionsWithX402Activity(transactions, x402Transactions),
 }))
 
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
@@ -68,12 +55,9 @@ function overview(id: string): DashboardOverviewResponse {
 describe('useDashboardOverview', () => {
   beforeEach(() => {
     mockApiGet.mockReset()
-    mockFetchX402ActivityTransactions.mockReset()
-    mockMergeTransactionsWithX402Activity.mockClear()
-    mockFetchX402ActivityTransactions.mockResolvedValue([])
   })
 
-  it('ignores stale overview data when an older request resolves late', async () => {
+  it('uses canonical overview transactions and ignores stale overview data', async () => {
     let resolveFirst!: (value: DashboardOverviewResponse) => void
     let resolveSecond!: (value: DashboardOverviewResponse) => void
     const firstOverview = overview('0xold')
@@ -100,5 +84,7 @@ describe('useDashboardOverview', () => {
       await Promise.resolve()
     })
     expect(result.current.data?.transactions[0]?.hash).toBe('0xnew')
+    expect(mockApiGet).toHaveBeenCalledTimes(2)
+    expect(mockApiGet).toHaveBeenCalledWith('/dashboard/overview')
   })
 })

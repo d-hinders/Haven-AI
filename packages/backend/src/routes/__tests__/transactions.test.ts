@@ -2,6 +2,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import transactionRoutes, {
+  type EnrichedTransaction,
   enrichTransactionsWithAgents,
   fetchSafeTransactions,
   mergeX402Transactions,
@@ -415,10 +416,14 @@ describe('mergeX402Transactions', () => {
     const paymentIntentSql = String(queryMock.mock.calls[0][0])
     const approvalRequestSql = String(queryMock.mock.calls[1][0])
 
+    expect(paymentIntentSql).toContain('LOWER(us.safe_address) = LOWER(pi.safe_address)')
     expect(paymentIntentSql).toContain('pi.chain_id IS NOT NULL')
     expect(paymentIntentSql).toContain('us.chain_id = pi.chain_id')
+    expect(paymentIntentSql).not.toContain('us.id = a.safe_id')
+    expect(approvalRequestSql).toContain('LOWER(us.safe_address) = LOWER(ar.safe_address)')
     expect(approvalRequestSql).toContain('ar.chain_id IS NOT NULL')
     expect(approvalRequestSql).toContain('us.chain_id = ar.chain_id')
+    expect(approvalRequestSql).not.toContain('us.id = a.safe_id')
   })
 
   it('normalizes x402 funding intents into merchant-facing transactions', async () => {
@@ -499,6 +504,80 @@ describe('mergeX402Transactions', () => {
       paymentProofStatus: 'protocol_receipt_attached',
       paymentFlowStatus: 'paid',
       paymentAttentionReason: null,
+    })
+  })
+
+  it('keeps same-hash raw transactions on a different chain when merging x402 rows', async () => {
+    vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'payment-id',
+            tx_hash: TX_HASH,
+            agent_id: 'agent-id',
+            agent_name: 'Research assistant',
+            safe_id: 'safe-id',
+            safe_address: SAFE_ADDRESS,
+            safe_name: 'Base wallet',
+            chain_id: 8453,
+            token_symbol: 'USDC',
+            token_address: USDC_ADDRESS,
+            to_address: '0x1111111111111111111111111111111111111111',
+            amount_raw: '20000',
+            amount_human: '0.02',
+            x402_merchant_address: '0x2222222222222222222222222222222222222222',
+            x402_resource_url: 'https://api.example.com/data',
+            payment_proof_status: 'payment_confirmed',
+            payment_reconciliation_event_type: null,
+            confirmed_at: '2026-05-08T11:50:10Z',
+            created_at: '2026-05-08T11:49:55Z',
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{
+        id: 'safe-id',
+        safe_address: SAFE_ADDRESS,
+        chain_id: 8453,
+        name: 'Base wallet',
+      }],
+      [{
+        hash: TX_HASH,
+        type: 'erc20',
+        from: SAFE_ADDRESS,
+        to: '0x1111111111111111111111111111111111111111',
+        value: '20000',
+        valueFormatted: '0.02',
+        asset: 'USDC',
+        decimals: 6,
+        direction: 'out',
+        timestamp: 1778240999,
+        blockNumber: 45725826,
+        isError: false,
+        tokenAddress: USDC_ADDRESS,
+        tokenSymbol: 'USDC',
+        chainId: 100,
+        safeId: 'safe-id',
+        safeAddress: SAFE_ADDRESS,
+        safeName: 'Gnosis wallet',
+      }],
+    )
+
+    expect(result).toHaveLength(2)
+    expect(result.map((tx) => tx.chainId).sort()).toEqual([100, 8453])
+    const rawGnosisTransaction = result.find((tx) => tx.chainId === 100)
+    expect(rawGnosisTransaction).toMatchObject({
+      hash: TX_HASH,
+    })
+    expect(rawGnosisTransaction?.source).toBeUndefined()
+    expect(rawGnosisTransaction?.paymentId).toBeUndefined()
+    expect(result.find((tx) => tx.chainId === 8453)).toMatchObject({
+      hash: TX_HASH,
+      source: 'x402',
+      paymentId: 'payment-id',
     })
   })
 
@@ -634,24 +713,10 @@ describe('mergeX402Transactions', () => {
 })
 
 describe('enrichTransactionsWithAgents', () => {
-  it('enriches raw explorer transfers from executed x402 approvals', async () => {
-    vi.spyOn(pool, 'query')
-      .mockResolvedValueOnce({ rows: [] } as never)
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: 'approval-id',
-            tx_hash: TX_HASH.toLowerCase(),
-            agent_id: 'agent-id',
-            agent_name: 'Soundside agent',
-            source: 'x402',
-            payment_resource_url: 'https://mcp.soundside.ai/mcp',
-            merchant_address: '0x2222222222222222222222222222222222222222',
-          },
-        ],
-      } as never)
-
-    const result = await enrichTransactionsWithAgents('user-id', [{
+  function explorerTransfer(
+    overrides: Partial<EnrichedTransaction> = {},
+  ): EnrichedTransaction {
+    return {
       hash: TX_HASH,
       type: 'erc20',
       from: SAFE_ADDRESS,
@@ -667,10 +732,103 @@ describe('enrichTransactionsWithAgents', () => {
       tokenAddress: USDC_ADDRESS,
       tokenSymbol: 'USDC',
       chainId: 8453,
-      safeId: 'safe-id',
+      safeId: 'safe-base',
       safeAddress: SAFE_ADDRESS,
       safeName: 'Based',
-    }])
+      ...overrides,
+    }
+  }
+
+  it('scopes payment intent enrichment to the matching Safe and chain', async () => {
+    const queryMock = vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'payment-id',
+            tx_hash: TX_HASH.toLowerCase(),
+            safe_id: 'safe-base',
+            chain_id: 8453,
+            agent_id: 'agent-id',
+            agent_name: 'Soundside agent',
+            source: 'x402',
+            payment_resource_url: 'https://mcp.soundside.ai/mcp',
+            merchant_address: '0x2222222222222222222222222222222222222222',
+            payment_proof_status: 'protocol_receipt_attached',
+            payment_reconciliation_event_type: null,
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const result = await enrichTransactionsWithAgents('user-id', [
+      explorerTransfer(),
+      explorerTransfer({
+        safeId: 'safe-gnosis',
+        chainId: 100,
+        safeName: 'Gnosis',
+      }),
+    ])
+
+    expect(result[0]).toMatchObject({
+      hash: TX_HASH,
+      source: 'x402',
+      x402ResourceUrl: 'https://mcp.soundside.ai/mcp',
+      x402MerchantAddress: '0x2222222222222222222222222222222222222222',
+      agentId: 'agent-id',
+      agentName: 'Soundside agent',
+      paymentId: 'payment-id',
+      paymentProofStatus: 'protocol_receipt_attached',
+    })
+    expect(result[1]).toMatchObject({
+      hash: TX_HASH,
+      safeId: 'safe-gnosis',
+      chainId: 100,
+    })
+    expect(result[1].agentId).toBeUndefined()
+    expect(result[1].paymentId).toBeUndefined()
+
+    const paymentIntentSql = String(queryMock.mock.calls[0][0])
+    expect(paymentIntentSql).toContain('JOIN user_safes us')
+    expect(paymentIntentSql).toContain('LOWER(us.safe_address) = LOWER(pi.safe_address)')
+    expect(paymentIntentSql).toContain('us.id = ANY($3)')
+    expect(paymentIntentSql).toContain('us.chain_id = pi.chain_id')
+    expect(paymentIntentSql).not.toContain('us.id = a.safe_id')
+    expect(queryMock.mock.calls[0][1]).toEqual([
+      [TX_HASH.toLowerCase()],
+      'user-id',
+      ['safe-base', 'safe-gnosis'],
+    ])
+  })
+
+  it('enriches raw explorer transfers from executed x402 approvals by Safe and chain', async () => {
+    const queryMock = vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'approval-id',
+            tx_hash: TX_HASH.toLowerCase(),
+            safe_id: 'safe-base',
+            chain_id: 8453,
+            agent_id: 'agent-id',
+            agent_name: 'Soundside agent',
+            source: 'x402',
+            payment_resource_url: 'https://mcp.soundside.ai/mcp',
+            merchant_address: '0x2222222222222222222222222222222222222222',
+            payment_proof_status: null,
+            payment_reconciliation_event_type: null,
+          },
+        ],
+      } as never)
+
+    const result = await enrichTransactionsWithAgents('user-id', [
+      explorerTransfer(),
+      explorerTransfer({
+        safeId: 'safe-gnosis',
+        chainId: 100,
+        safeName: 'Gnosis',
+      }),
+    ])
 
     expect(result[0]).toMatchObject({
       hash: TX_HASH,
@@ -682,5 +840,24 @@ describe('enrichTransactionsWithAgents', () => {
       paymentId: 'approval-id',
       paymentProofStatus: 'payment_confirmed',
     })
+    expect(result[1]).toMatchObject({
+      hash: TX_HASH,
+      safeId: 'safe-gnosis',
+      chainId: 100,
+    })
+    expect(result[1].agentId).toBeUndefined()
+    expect(result[1].paymentId).toBeUndefined()
+
+    const approvalRequestSql = String(queryMock.mock.calls[1][0])
+    expect(approvalRequestSql).toContain('JOIN user_safes us')
+    expect(approvalRequestSql).toContain('LOWER(us.safe_address) = LOWER(ar.safe_address)')
+    expect(approvalRequestSql).toContain('us.id = ANY($3)')
+    expect(approvalRequestSql).toContain('us.chain_id = ar.chain_id')
+    expect(approvalRequestSql).not.toContain('us.id = a.safe_id')
+    expect(queryMock.mock.calls[1][1]).toEqual([
+      [TX_HASH.toLowerCase()],
+      'user-id',
+      ['safe-base', 'safe-gnosis'],
+    ])
   })
 })

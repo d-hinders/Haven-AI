@@ -59,6 +59,8 @@ export interface EnrichedTransaction extends Transaction {
 interface PaymentIntentAgentRow {
   id: string
   tx_hash: string
+  safe_id: string
+  chain_id: number
   agent_id: string
   agent_name: string
   source: string | null
@@ -71,6 +73,8 @@ interface PaymentIntentAgentRow {
 interface ApprovalRequestAgentRow {
   id: string
   tx_hash: string
+  safe_id: string
+  chain_id: number
   agent_id: string
   agent_name: string
   source: string | null
@@ -454,6 +458,18 @@ export function enrichedTransactionIdentityKey(tx: EnrichedTransaction): string 
   ].join(':')
 }
 
+function paymentAgentIdentityKey(
+  txHash: string,
+  safeId: string,
+  chainId: number,
+): string {
+  return `${txHash.toLowerCase()}:${safeId}:${chainId}`
+}
+
+function x402FundingIdentityKey(tx: EnrichedTransaction): string {
+  return paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId)
+}
+
 export async function enrichTransactionsWithAgents(
   userId: string,
   transactions: EnrichedTransaction[],
@@ -461,12 +477,17 @@ export async function enrichTransactionsWithAgents(
   const txHashes = Array.from(
     new Set(transactions.map((tx) => tx.hash.toLowerCase())),
   )
-  if (txHashes.length === 0) return transactions
+  const safeIds = Array.from(
+    new Set(transactions.map((tx) => tx.safeId).filter(Boolean)),
+  )
+  if (txHashes.length === 0 || safeIds.length === 0) return transactions
 
   try {
     const piResult = await pool.query<PaymentIntentAgentRow>(
       `SELECT pi.id,
               LOWER(pi.tx_hash) AS tx_hash,
+              us.id AS safe_id,
+              us.chain_id AS chain_id,
               pi.agent_id,
               a.name AS agent_name,
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
@@ -481,13 +502,19 @@ export async function enrichTransactionsWithAgents(
          ON mpre.payment_intent_id = pi.id
         AND mpre.status = 'open'
         AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+       JOIN user_safes us
+         ON us.user_id = pi.user_id
+        AND us.id = ANY($3)
+        AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+        AND pi.chain_id IS NOT NULL
+        AND us.chain_id = pi.chain_id
        WHERE LOWER(pi.tx_hash) = ANY($1)
          AND pi.user_id = $2
          AND pi.status = 'confirmed'`,
-      [txHashes, userId],
+      [txHashes, userId, safeIds],
     )
 
-    const agentByTxHash = new Map<
+    const agentByTransactionIdentity = new Map<
       string,
       {
         id: string
@@ -507,22 +534,27 @@ export async function enrichTransactionsWithAgents(
         paymentProofStatus: row.payment_proof_status,
         reconciliationEventType: row.payment_reconciliation_event_type,
       })
-      agentByTxHash.set(row.tx_hash, {
-        id: row.agent_id,
-        name: row.agent_name,
-        source: row.source,
-        resourceUrl: row.payment_resource_url,
-        merchantAddress: row.merchant_address,
-        paymentId: row.id,
-        paymentProofStatus: row.payment_proof_status,
-        paymentFlowStatus: lifecycle.paymentFlowStatus,
-        paymentAttentionReason: lifecycle.paymentAttentionReason,
-      })
+      agentByTransactionIdentity.set(
+        paymentAgentIdentityKey(row.tx_hash, row.safe_id, row.chain_id),
+        {
+          id: row.agent_id,
+          name: row.agent_name,
+          source: row.source,
+          resourceUrl: row.payment_resource_url,
+          merchantAddress: row.merchant_address,
+          paymentId: row.id,
+          paymentProofStatus: row.payment_proof_status,
+          paymentFlowStatus: lifecycle.paymentFlowStatus,
+          paymentAttentionReason: lifecycle.paymentAttentionReason,
+        },
+      )
     }
 
     const approvalResult = await pool.query<ApprovalRequestAgentRow>(
       `SELECT ar.id,
               LOWER(ar.tx_hash) AS tx_hash,
+              us.id AS safe_id,
+              us.chain_id AS chain_id,
               ar.agent_id,
               a.name AS agent_name,
               COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
@@ -537,22 +569,33 @@ export async function enrichTransactionsWithAgents(
          ON mpre.approval_request_id = ar.id
         AND mpre.status = 'open'
         AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+       JOIN user_safes us
+         ON us.user_id = ar.user_id
+        AND us.id = ANY($3)
+        AND LOWER(us.safe_address) = LOWER(ar.safe_address)
+        AND ar.chain_id IS NOT NULL
+        AND us.chain_id = ar.chain_id
        WHERE LOWER(ar.tx_hash) = ANY($1)
          AND ar.user_id = $2
          AND COALESCE(ar.payment_rail, ar.source) = 'x402'
          AND ar.status = 'executed'`,
-      [txHashes, userId],
+      [txHashes, userId, safeIds],
     )
 
     for (const row of approvalResult.rows) {
-      if (agentByTxHash.has(row.tx_hash)) continue
+      const identityKey = paymentAgentIdentityKey(
+        row.tx_hash,
+        row.safe_id,
+        row.chain_id,
+      )
+      if (agentByTransactionIdentity.has(identityKey)) continue
       const proofStatus = row.payment_proof_status ?? 'payment_confirmed'
       const lifecycle = machinePaymentLifecycle({
         rail: row.source,
         paymentProofStatus: proofStatus,
         reconciliationEventType: row.payment_reconciliation_event_type,
       })
-      agentByTxHash.set(row.tx_hash, {
+      agentByTransactionIdentity.set(identityKey, {
         id: row.agent_id,
         name: row.agent_name,
         source: row.source,
@@ -566,7 +609,9 @@ export async function enrichTransactionsWithAgents(
     }
 
     return transactions.map((tx) => {
-      const agent = agentByTxHash.get(tx.hash.toLowerCase())
+      const agent = agentByTransactionIdentity.get(
+        paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId),
+      )
       return {
         ...tx,
         agentId: agent?.id ?? tx.agentId,
@@ -622,14 +667,9 @@ export async function fetchConfirmedX402Transactions(
      JOIN user_safes us
        ON us.user_id = pi.user_id
       AND us.id = ANY($2)
-      AND (
-        us.id = a.safe_id
-        OR (
-          LOWER(us.safe_address) = LOWER(pi.safe_address)
-          AND pi.chain_id IS NOT NULL
-          AND us.chain_id = pi.chain_id
-        )
-      )
+      AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+      AND pi.chain_id IS NOT NULL
+      AND us.chain_id = pi.chain_id
      WHERE pi.user_id = $1
        AND pi.source = 'x402'
        AND pi.status = 'confirmed'
@@ -668,14 +708,9 @@ export async function fetchConfirmedX402Transactions(
      JOIN user_safes us
        ON us.user_id = ar.user_id
       AND us.id = ANY($2)
-      AND (
-        us.id = a.safe_id
-        OR (
-          LOWER(us.safe_address) = LOWER(ar.safe_address)
-          AND ar.chain_id IS NOT NULL
-          AND us.chain_id = ar.chain_id
-        )
-      )
+      AND LOWER(us.safe_address) = LOWER(ar.safe_address)
+      AND ar.chain_id IS NOT NULL
+      AND us.chain_id = ar.chain_id
      WHERE ar.user_id = $1
        AND COALESCE(ar.payment_rail, ar.source) = 'x402'
        AND ar.status = 'executed'
@@ -786,12 +821,12 @@ export async function mergeX402Transactions(
   if (x402Transactions.length === 0) return transactions
 
   const x402FundingKeys = new Set(
-    x402Transactions.map((tx) => `${tx.hash.toLowerCase()}:${tx.safeId}`),
+    x402Transactions.map(x402FundingIdentityKey),
   )
 
   return [
     ...transactions.filter(
-      (tx) => !x402FundingKeys.has(`${tx.hash.toLowerCase()}:${tx.safeId}`),
+      (tx) => !x402FundingKeys.has(x402FundingIdentityKey(tx)),
     ),
     ...x402Transactions,
   ]

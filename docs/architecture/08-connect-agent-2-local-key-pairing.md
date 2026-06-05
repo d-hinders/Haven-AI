@@ -236,7 +236,7 @@ sequenceDiagram
   API-->>UI: setup token + command
   UI-->>User: Show command and manual instructions
   User->>Shell: Run connector command manually
-  Shell->>Connector: npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_...
+  Shell->>Connector: npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_...
   Connector->>API: Resolve setup, register public signing address, receive API key
   Connector-->>Shell: Setup saved locally; return to Haven
   Shell-->>User: No private key printed
@@ -349,7 +349,7 @@ Response:
   "status": "awaiting_connection",
   "setup_token": "hv_setup_...",
   "expires_at": "2026-06-03T12:00:00.000Z",
-  "connector_command": "npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools",
+  "connector_command": "npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools",
   "setup_prompt": "Copy-ready prompt text"
 }
 ```
@@ -670,7 +670,7 @@ Rules:
 Preferred command shape:
 
 ```sh
-npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
+npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
 
 The setup prompt may ask the agent to run that command, but the command is the
@@ -746,7 +746,7 @@ Please connect this workspace to Haven.
 
 Run this local setup command:
 
-npx -y @haven_ai/connect@0.1.2-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
+npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 
 The Haven connector will generate the signing key locally and send Haven only
 the public signing address. Do not print private keys in chat or logs.

@@ -20,11 +20,11 @@ describe('prepareLocalMcpRuntime', () => {
     const identityPath = join(credentialDirectory, 'identity.json')
     const signerPath = join(credentialDirectory, 'signer.json')
     const runCommand = vi.fn(async () => {
-      const cliPath = join(homeDir, '.haven', 'mcp-runtime', '0.1.3-alpha', 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
+      const cliPath = join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
       await mkdir(join(cliPath, '..'), { recursive: true })
       await writeFile(cliPath, 'console.log("mcp")\n', 'utf8')
-      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.3-alpha', 'node_modules', '@haven_ai', 'mcp', 'package.json'), '0.1.3-alpha')
-      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.3-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.1.6')
+      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'mcp', 'package.json'), '0.1.4-alpha')
+      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.1.6')
     })
 
     await mkdir(credentialDirectory, { recursive: true })
@@ -66,17 +66,17 @@ describe('prepareLocalMcpRuntime', () => {
     const credentialDirectory = join(homeDir, '.haven', 'agents', 'agent-1')
     const identityPath = join(credentialDirectory, 'identity.json')
     const signerPath = join(credentialDirectory, 'signer.json')
-    const staleCliPath = join(homeDir, '.haven', 'mcp-runtime', '0.1.3-alpha', 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
+    const staleCliPath = join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
     await mkdir(join(staleCliPath, '..'), { recursive: true })
     await writeFile(staleCliPath, 'console.log("stale")\n', 'utf8')
-    await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.3-alpha', 'node_modules', '@haven_ai', 'mcp', 'package.json'), '0.1.3-alpha')
-    await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.3-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.0.0')
+    await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'mcp', 'package.json'), '0.1.4-alpha')
+    await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.0.0')
     await mkdir(credentialDirectory, { recursive: true })
     await writeFile(identityPath, JSON.stringify({ api_key: API_KEY }), 'utf8')
     await writeFile(signerPath, JSON.stringify({ delegate_key: PRIVATE_KEY }), 'utf8')
 
     const runCommand = vi.fn(async () => {
-      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.3-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.1.6')
+      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.1.6')
     })
 
     const result = await prepareLocalMcpRuntime({

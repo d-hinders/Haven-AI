@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/mcp",
-  "version": "0.1.3-alpha",
+  "version": "0.1.4-alpha",
   "description": "Haven MCP server for local, non-custodial agent payments",
   "type": "module",
   "bin": {

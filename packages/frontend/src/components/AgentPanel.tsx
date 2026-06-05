@@ -642,7 +642,7 @@ export default function AgentPanel() {
   const { activeSafe } = useAuth()
   const safeAddress = activeSafe?.safe_address ?? null
   const chainId = activeSafe?.chain_id ?? 100
-  const { details: safeDetails } = useSafeDetails(safeAddress)
+  const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const {
     agents,
     loading,

@@ -52,7 +52,7 @@ export default function DashboardSendModal({
     details: safeDetails,
     loading: safeDetailsLoading,
     error: safeDetailsError,
-  } = useSafeDetails(safeAddress)
+  } = useSafeDetails(safeAddress, { chainId: selectedSafe?.chain_id })
 
   const safeOptions = useMemo(
     () =>

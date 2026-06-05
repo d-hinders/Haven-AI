@@ -408,7 +408,7 @@ function ApprovalCardWithContext({
   } catch {
     // Keep the approval actionable even if a new chain label has not landed yet.
   }
-  const { details: safeDetails } = useSafeDetails(safeAddress)
+  const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const publicClient = usePublicClient({ chainId })
   const signer = useActiveSigner({
     safeAddress,

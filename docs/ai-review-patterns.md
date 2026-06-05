@@ -20,6 +20,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 
 - Avoid optional hook or function arguments when missing values make the old call compile but fail at runtime. Make required context required in TypeScript.
 - Audit all callers after changing hook signatures, response fields, status values, or API payloads.
+- Async hooks that fetch keyed data must ignore late responses from older keys. Use a generation guard or abort signal when address, chain, agent id, filters, or enabled state can change while a request is in flight.
 - Prefer explicit response fields over matching on free-text reason strings. If a free-text fallback is necessary, document it as temporary.
 - When SDK or API behavior changes, review generated examples, credential handoff files, demo scripts, and skill bundles for stale instructions.
 - When renaming technical fields to product-facing names, keep compatibility aliases when external users or generated artifacts may already depend on the old env var or field.

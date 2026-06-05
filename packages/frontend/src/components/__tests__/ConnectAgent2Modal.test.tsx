@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   SAFE,
+  BASE_SAFE,
   SIGNER_ADDRESS,
   SAFE_TX_HASH,
   TX_HASH,
@@ -32,6 +33,14 @@ const {
     chain_id: 100,
     is_default: true,
     created_at: '2026-01-01T00:00:00.000Z',
+  },
+  BASE_SAFE: {
+    id: 'safe-2',
+    name: 'Base wallet',
+    safe_address: '0x4444444444444444444444444444444444444444',
+    chain_id: 8453,
+    is_default: false,
+    created_at: '2026-01-02T00:00:00.000Z',
   },
   SIGNER_ADDRESS: '0x2222222222222222222222222222222222222222',
   SAFE_TX_HASH: `0x${'b'.repeat(64)}`,
@@ -65,7 +74,7 @@ vi.mock('@/context/AuthContext', () => ({
 }))
 
 vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: (safeAddress: string | null) => mockUseSafeDetails(safeAddress),
+  useSafeDetails: (safeAddress: string | null, options: unknown) => mockUseSafeDetails(safeAddress, options),
 }))
 
 vi.mock('@/hooks/useSafeOperationGate', () => ({
@@ -100,10 +109,16 @@ vi.mock('@/lib/allowance-module', () => ({
 }))
 
 vi.mock('@/lib/safe-tx', () => ({
-  getChainTokens: () => ({
-    xDAI: { address: null, decimals: 18 },
-    'USDC.e': { address: '0x9999999999999999999999999999999999999999', decimals: 6 },
-  }),
+  getChainTokens: (chainId: number) =>
+    chainId === 8453
+      ? {
+          ETH: { address: null, decimals: 18 },
+          USDC: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
+        }
+      : {
+          xDAI: { address: null, decimals: 18 },
+          'USDC.e': { address: '0x9999999999999999999999999999999999999999', decimals: 6 },
+        },
   getSafeNonce: (...args: unknown[]) => mockGetSafeNonce(...args),
   signSafeTx: (...args: unknown[]) => mockSignSafeTx(...args),
   executeSafeTx: (...args: unknown[]) => mockExecuteSafeTx(...args),
@@ -172,6 +187,9 @@ async function fillAndCreateSetup() {
     target: { value: 'Research Agent' },
   })
   fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+  if (!screen.queryByPlaceholderText('Amount')) {
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+  }
   fireEvent.change(screen.getByPlaceholderText('Amount'), {
     target: { value: '10' },
   })
@@ -486,6 +504,101 @@ describe('ConnectAgent2Modal', () => {
       }),
     )
     expect(refetch).toHaveBeenCalled()
+  })
+
+  it('uses the setup wallet for approval readiness when the selected wallet is stale', async () => {
+    const refetch = vi.fn()
+    const setupWalletStatus = connectedSetupStatus({
+      haven_wallet: {
+        id: BASE_SAFE.id,
+        name: BASE_SAFE.name,
+        address: BASE_SAFE.safe_address,
+        chain_id: 8453,
+        network: 'Base',
+      },
+      agent_budget: [{
+        id: 'budget-base-usdc',
+        token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        token_symbol: 'USDC',
+        allowance_amount: '10000000',
+        reset_period_min: 1440,
+      }],
+    })
+
+    mockUseAuth.mockReturnValue({
+      user: { safes: [SAFE, BASE_SAFE] },
+      activeSafe: SAFE,
+    })
+    mockUseAgentConnectionSetupStatus.mockImplementation((setupId: string | null) => ({
+      data: setupId ? setupWalletStatus : null,
+      loading: false,
+      error: null,
+      refetch,
+    }))
+    mockUseSafeDetails.mockImplementation((safeAddress: string | null) =>
+      safeAddress?.toLowerCase() === BASE_SAFE.safe_address.toLowerCase()
+        ? {
+            details: {
+              address: BASE_SAFE.safe_address,
+              threshold: 2,
+              owners: [SIGNER_ADDRESS, '0x5555555555555555555555555555555555555555'],
+            },
+            loading: false,
+            error: null,
+          }
+        : {
+            details: { address: SAFE.safe_address, threshold: 1, owners: [SIGNER_ADDRESS] },
+            loading: false,
+            error: null,
+          },
+    )
+
+    renderModal({ safeAddress: SAFE.safe_address, safeId: SAFE.id })
+    await fillAndCreateSetup()
+
+    expect(await screen.findByText('Local connection ready')).toBeInTheDocument()
+    expect(screen.getByText('Base wallet on Base')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Submit wallet approval' })).toBeInTheDocument()
+    expect(mockUseSafeDetails).toHaveBeenLastCalledWith(BASE_SAFE.safe_address, { chainId: 8453 })
+    expect(mockUseSafeOperationGate).toHaveBeenLastCalledWith({
+      safeAddress: BASE_SAFE.safe_address,
+      chainId: 8453,
+    })
+    expect(mockUsePublicClient).toHaveBeenLastCalledWith({ chainId: 8453 })
+    expect(mockUseActiveSigner).toHaveBeenLastCalledWith({
+      safeAddress: BASE_SAFE.safe_address,
+      chainId: 8453,
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Submit wallet approval' }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(mockProposeSafeTx).toHaveBeenCalled())
+    expect(mockExecuteSafeTx).not.toHaveBeenCalled()
+    expect(mockBuildAgentSetupTx).toHaveBeenCalledWith(
+      BASE_SAFE.safe_address,
+      '0x3333333333333333333333333333333333333333',
+      [expect.objectContaining({
+        token: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        amount: 10000000n,
+        resetTimeMin: 1440,
+      })],
+      true,
+      7n,
+    )
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/agent-connection-setups/setup-1/wallet-approval',
+      expect.objectContaining({
+        result: 'proposed',
+        safe_tx_hash: SAFE_TX_HASH,
+        chain_id: 8453,
+        safe_address: BASE_SAFE.safe_address,
+        delegate_address: '0x3333333333333333333333333333333333333333',
+      }),
+    )
   })
 
   it('disables cancel while wallet approval is in progress', async () => {

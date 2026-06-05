@@ -158,7 +158,7 @@ export default function AccountDetailClient() {
     loading: detailsLoading,
     error: detailsError,
     refetch: refetchDetails,
-  } = useSafeDetails(safeAddress)
+  } = useSafeDetails(safeAddress, { chainId })
 
   const {
     totalUsd,

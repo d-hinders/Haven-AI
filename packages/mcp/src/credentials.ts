@@ -161,11 +161,34 @@ async function loadCredentialsFromSplitFiles(identityPath: string, signerPath: s
   return {
     apiKey,
     delegateKey,
-    agentId: stringField(identity.agent_id ?? identity.agentId ?? signer.agent_id ?? signer.agentId),
-    safeAddress: stringField(identity.safe_address ?? identity.safeAddress ?? signer.safe_address ?? signer.safeAddress),
-    delegateAddress: stringField(signer.delegate_address ?? signer.delegateAddress ?? identity.delegate_address ?? identity.delegateAddress),
-    chainId: numberField(identity.chain_id ?? identity.chainId ?? signer.chain_id ?? signer.chainId),
-    network: stringField(identity.network ?? signer.network),
+    agentId: matchingStringField(
+      'agent_id',
+      identity.agent_id ?? identity.agentId,
+      signer.agent_id ?? signer.agentId,
+    ),
+    safeAddress: matchingStringField(
+      'safe_address',
+      identity.safe_address ?? identity.safeAddress,
+      signer.safe_address ?? signer.safeAddress,
+      { caseInsensitive: true },
+    ),
+    delegateAddress: matchingStringField(
+      'delegate_address',
+      signer.delegate_address ?? signer.delegateAddress,
+      identity.delegate_address ?? identity.delegateAddress,
+      { caseInsensitive: true },
+    ),
+    chainId: matchingNumberField(
+      'chain_id',
+      identity.chain_id ?? identity.chainId,
+      signer.chain_id ?? signer.chainId,
+    ),
+    network: matchingStringField(
+      'network',
+      identity.network,
+      signer.network,
+      { caseInsensitive: true },
+    ),
     apiUrl: stringField(identity.api_url ?? identity.apiUrl),
     allowanceSummary: allowanceSummaryField(
       identity.allowance_summary ??
@@ -226,6 +249,44 @@ function numberField(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string' && value.trim() && /^\d+$/.test(value.trim())) return Number(value.trim())
   return undefined
+}
+
+function matchingStringField(
+  label: string,
+  preferred: unknown,
+  fallback: unknown,
+  options: { caseInsensitive?: boolean } = {},
+): string | undefined {
+  const preferredValue = stringField(preferred)
+  const fallbackValue = stringField(fallback)
+  if (
+    preferredValue &&
+    fallbackValue &&
+    !sameCredentialValue(preferredValue, fallbackValue, options.caseInsensitive)
+  ) {
+    throw mismatchedSplitCredentialError(label)
+  }
+  return preferredValue ?? fallbackValue
+}
+
+function matchingNumberField(label: string, preferred: unknown, fallback: unknown): number | undefined {
+  const preferredValue = numberField(preferred)
+  const fallbackValue = numberField(fallback)
+  if (preferredValue !== undefined && fallbackValue !== undefined && preferredValue !== fallbackValue) {
+    throw mismatchedSplitCredentialError(label)
+  }
+  return preferredValue ?? fallbackValue
+}
+
+function sameCredentialValue(first: string, second: string, caseInsensitive = false): boolean {
+  return caseInsensitive ? first.toLowerCase() === second.toLowerCase() : first === second
+}
+
+function mismatchedSplitCredentialError(label: string): Error {
+  return new Error(
+    `Haven split credentials have mismatched ${label} values. ` +
+      'Recreate the identity and signer credential files from the same Haven agent.',
+  )
 }
 
 function allowanceSummaryField(value: unknown): HavenCredentialAllowance[] | undefined {

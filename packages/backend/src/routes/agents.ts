@@ -2,6 +2,11 @@ import { FastifyInstance } from 'fastify'
 import crypto from 'crypto'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import {
+  normalizeAgentAllowance,
+  normalizeAgentAllowances,
+  normalizeAgentAllowanceTokenAddress,
+} from '../lib/agent-allowance-validation.js'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -153,6 +158,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (!delegate_address || !isValidAddress(delegate_address)) {
       return reply.code(400).send({ error: 'Valid delegate address is required' })
     }
+    const normalizedAllowances = normalizeAgentAllowances(allowances)
+    if (!normalizedAllowances.ok) {
+      return reply.code(400).send({ error: normalizedAllowances.error })
+    }
 
     // Validate safe_id belongs to the user (if provided)
     let resolvedSafeId: string | null = null
@@ -215,15 +224,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const savedAllowances: AllowanceRow[] = []
-      if (allowances && allowances.length > 0) {
-        for (const a of allowances) {
+      if (normalizedAllowances.value.length > 0) {
+        for (const a of normalizedAllowances.value) {
           const res = await client.query<AllowanceRow>(
             `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
              VALUES ($1, $2, $3, $4, $5)
              RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
             [
               agent.id,
-              a.token_address.toLowerCase(),
+              a.token_address,
               a.token_symbol,
               a.allowance_amount,
               a.reset_period_min,
@@ -439,7 +448,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   }>('/:id/allowances', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
-    const { token_address, token_symbol, allowance_amount, reset_period_min } = request.body
+    const normalizedAllowance = normalizeAgentAllowance(request.body)
+    if (!normalizedAllowance.ok) {
+      return reply.code(400).send({ error: normalizedAllowance.error })
+    }
 
     const agentCheck = await pool.query<{ id: string; status: string }>(
       'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
@@ -453,14 +465,20 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         .code(409)
         .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
     }
+    if (agentCheck.rows[0].status === 'revoked') {
+      return reply
+        .code(409)
+        .send({ error: 'Revoked agent rules cannot be changed' })
+    }
 
+    const { token_address, token_symbol, allowance_amount, reset_period_min } = normalizedAllowance.value
     const result = await pool.query<AllowanceRow>(
       `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (agent_id, token_address)
        DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, updated_at = NOW()
        RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
-      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min],
+      [id, token_address, token_symbol, allowance_amount, reset_period_min],
     )
 
     return result.rows[0]
@@ -472,6 +490,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id, tokenAddress } = request.params
+      const normalizedTokenAddress = normalizeAgentAllowanceTokenAddress(tokenAddress)
+      if (!normalizedTokenAddress.ok) {
+        return reply.code(400).send({ error: normalizedTokenAddress.error })
+      }
 
       const agentCheck = await pool.query<{ id: string; status: string }>(
         'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
@@ -485,10 +507,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
           .code(409)
           .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
       }
+      if (agentCheck.rows[0].status === 'revoked') {
+        return reply
+          .code(409)
+          .send({ error: 'Revoked agent rules cannot be changed' })
+      }
 
       const result = await pool.query(
         'DELETE FROM agent_allowances WHERE agent_id = $1 AND token_address = $2 RETURNING id',
-        [id, tokenAddress.toLowerCase()],
+        [id, normalizedTokenAddress.value],
       )
 
       if (result.rows.length === 0) {

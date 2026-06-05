@@ -15,6 +15,24 @@ const uuid = {
   format: 'uuid',
 } as const
 
+const tokenSymbol = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 20,
+} as const
+
+const allowanceAtomicAmount = {
+  type: 'string',
+  pattern: '^[0-9]+$',
+  description: 'Decimal atomic token amount. Leading zeroes are accepted and canonicalized; effective amount must be positive and capped at uint96 for Safe AllowanceModule compatibility.',
+} as const
+
+const allowanceResetPeriodMin = {
+  type: 'integer',
+  minimum: 0,
+  maximum: 65535,
+} as const
+
 const isoDateTime = {
   type: 'string',
   format: 'date-time',
@@ -1093,9 +1111,9 @@ export const openapiSpec = {
         required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
         properties: {
           token_address: address,
-          token_symbol: { type: 'string' },
-          allowance_amount: { type: 'string', description: 'Atomic token amount.' },
-          reset_period_min: { type: 'integer', minimum: 0 },
+          token_symbol: tokenSymbol,
+          allowance_amount: allowanceAtomicAmount,
+          reset_period_min: allowanceResetPeriodMin,
         },
         additionalProperties: false,
       },
@@ -1419,9 +1437,9 @@ export const openapiSpec = {
               required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
               properties: {
                 token_address: address,
-                token_symbol: { type: 'string' },
-                allowance_amount: { type: 'string' },
-                reset_period_min: { type: 'integer' },
+                token_symbol: tokenSymbol,
+                allowance_amount: allowanceAtomicAmount,
+                reset_period_min: allowanceResetPeriodMin,
               },
               additionalProperties: false,
             },

@@ -686,6 +686,36 @@ describe('machine payment routes', () => {
     expect(response.json().error).toBe('MPP demo challenge has expired')
   })
 
+  it('rejects invalid challenge expiry timestamps before authorization work', async () => {
+    const invalidExpiresAtValues = [
+      'not-a-date',
+      '',
+      null,
+    ]
+
+    for (const expiresAt of invalidExpiresAtValues) {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {
+          challenge: { ...challenge, expiresAt },
+          idempotencyKey: 'mpp_demo:test',
+        },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe('expiresAt must be a valid ISO timestamp')
+    }
+
+    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+    expect(mockQuery).toHaveBeenCalledTimes(invalidExpiresAtValues.length)
+  })
+
   it('rejects signatures from the wrong delegate', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })

@@ -149,7 +149,14 @@ function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): strin
   if (challenge.amount?.atomic !== '10000' || challenge.amount?.display !== '0.01') {
     return 'MPP demo payments are fixed at 0.01 USDC'
   }
-  if (new Date(challenge.expiresAt).getTime() <= Date.now()) {
+  if (!challenge.expiresAt || typeof challenge.expiresAt !== 'string') {
+    return 'expiresAt must be a valid ISO timestamp'
+  }
+  const expiresAtMs = new Date(challenge.expiresAt).getTime()
+  if (!Number.isFinite(expiresAtMs)) {
+    return 'expiresAt must be a valid ISO timestamp'
+  }
+  if (expiresAtMs <= Date.now()) {
     return 'MPP demo challenge has expired'
   }
   return null

@@ -344,7 +344,7 @@ function pythonInline(cred: AgentCredentialJson): RuntimeSnippet {
     `from haven import HavenClient`,
     ``,
     `client = HavenClient(`,
-    `    api_key=os.environ["HAVEN_API_KEY"],    # ${cred.api_key}`,
+    `    api_key=os.environ["HAVEN_API_KEY"],`,
     `    delegate_key=os.environ["HAVEN_DELEGATE_KEY"],  # signs locally`,
     cred.api_url
       ? `    base_url="${cred.api_url}",`
@@ -398,7 +398,7 @@ function sdkInline(cred: AgentCredentialJson): RuntimeSnippet {
     `import { HavenClient } from '@haven_ai/sdk'`,
     ``,
     `const haven = new HavenClient({`,
-    `  apiKey: process.env.HAVEN_API_KEY!,    // ${cred.api_key}`,
+    `  apiKey: process.env.HAVEN_API_KEY!,`,
     `  delegateKey: process.env.HAVEN_DELEGATE_KEY!,  // signs locally`,
     cred.api_url ? `  baseUrl: '${cred.api_url}',` : `  // baseUrl: process.env.HAVEN_API_URL,`,
     `})`,

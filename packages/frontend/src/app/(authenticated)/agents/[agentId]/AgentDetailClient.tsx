@@ -248,8 +248,14 @@ export default function AgentDetailClient({ agentId }: Props) {
     [agent?.safe_id, user?.safes],
   )
   const safeAddress = safe?.safe_address ?? agent?.safe_address ?? null
-  const chainId = safe?.chain_id ?? 100
-  const chainConfig = safe ? getChainConfig(safe.chain_id) : null
+  const chainId = safe?.chain_id ?? agent?.safe_chain_id ?? 100
+  const chainConfig = useMemo(() => {
+    try {
+      return getChainConfig(chainId)
+    } catch {
+      return null
+    }
+  }, [chainId])
   const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const { activity, stats, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
   const managedDelegates = useMemo(

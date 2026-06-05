@@ -4,10 +4,10 @@ Last updated: 2026-06-05
 
 ## Current Run
 
-- Branch: `codex/quality-x402-activity-bridge-identity`
-- PR target: retire the temporary frontend x402 activity bridge and harden `/agent-activity` Safe/chain identity.
-- Why this target: it completes the read/display identity cleanup deferred from PR #268. The transactions feed and dashboard overview now trust the canonical backend x402 rows instead of faning out to `/agent-activity/feed`, `/agents`, and `/auth/me` to synthesize duplicate rows. Remaining agent activity endpoints resolve payment and approval rows through the payment record's stored `safe_address + chain_id`, and agent detail rows use the row's wallet name when rendering historical movement. It does not change custody, Safe ownership, signer authority, payment execution, production chain/token config, payment protocol behavior, SDK shape, or payment API authority.
-- Files touched: `packages/backend/src/routes/agent-activity.ts`, `packages/backend/src/routes/__tests__/agent-activity.test.ts`, `packages/frontend/src/hooks/useTransactionsFeed.ts`, `packages/frontend/src/hooks/useDashboardOverview.ts`, related hook tests, agent detail activity mapping/tests, retired x402 bridge files, and this loop file.
+- Branch: `codex/quality-agent-budget-policy-consistency`
+- PR target: prevent list-level agent budget edit/revoke actions from using the currently selected Haven wallet for agents that belong to a different wallet, and make agent detail use stored wallet chain identity when auth state is missing that wallet.
+- Why this target: it is the narrowest high-value P0 found in the agent budget/policy audit. `AgentPanel` renders agents across wallets while reading Safe details, signer state, and on-chain allowances from the active wallet. Without a guard, inline edit/revoke controls could prepare an agent budget update or revoke against the wrong Safe/chain. This PR keeps pause/resume available, moves off-wallet budget/revoke management to the agent detail page, and makes the detail page fall back to the agent row's stored `safe_address + safe_chain_id`. It does not change custody, Safe ownership, signer authority, payment execution, backend payment policy, database schema, production chain/token config, protocol behavior, SDK shape, or API authority.
+- Files touched: `packages/frontend/src/components/AgentPanel.tsx`, `packages/frontend/src/components/__tests__/AgentPanel.test.tsx`, `packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx`, `packages/frontend/src/app/(authenticated)/agents/[agentId]/__tests__/AgentDetailClient.test.tsx`, and this loop file.
 
 ## Priority Backlog
 
@@ -31,36 +31,33 @@ Last updated: 2026-06-05
 - PR #266: chain-scoped balance and portfolio reads prevent duplicate-address Safes and overlapping token symbols from driving wrong funding readiness or account totals.
 - PR #267: chain-scoped transaction/activity reads prevent duplicate-address Safes from fetching, deduping, previewing, or labeling activity against the wrong chain.
 - PR #268: x402/payment-history enrichment resolves and applies agent/payment labels by Safe and chain identity instead of transaction hash alone.
-- Planned current PR: temporary frontend x402 bridge is retired, and agent activity feeds publish stored payment/approval Safe identity instead of an agent's current Safe.
+- PR #269: temporary frontend x402 bridge was retired, and agent activity feeds publish stored payment/approval Safe identity instead of an agent's current Safe.
+- Planned current PR: list-level agent budget edit/revoke actions are active-wallet scoped, and agent detail uses stored wallet chain identity when auth state is missing that wallet.
 - Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
 
 - x402/generic machine-payment consolidation: defer because it crosses idempotency, approval-state, expected-context binding, and multi-entrypoint behavior.
 - Broader payment state rewrite, DB migrations, custody/signing semantics, Safe ownership assumptions, production chain/token config, and protocol compatibility changes need separate review.
-- Broader x402/payment-history consolidation remains deferred; this PR only removes the temporary bridge and tightens remaining agent activity read identity.
+- Broader x402/payment-history consolidation remains deferred.
+- Backend allowance input normalization and terminal-state mutation guards remain a good follow-up, but this PR stays focused on frontend wallet-context authority actions.
 
 ## Known Baseline Notes
 
-- Baseline checks from this run before implementation:
-  - `npm run test -w packages/backend -- transactions.test.ts dashboard.test.ts` passed.
-  - `npm run test -w packages/frontend -- useTransactionsFeed.test.ts useDashboardOverview.test.ts x402-activity-transactions.test.ts` passed.
 - Focused checks after implementation:
-  - `npm run test -w packages/backend -- agent-activity.test.ts` passed.
-  - `npm run test -w packages/frontend -- useTransactionsFeed.test.ts useDashboardOverview.test.ts AgentDetailClient.test.tsx` passed.
+  - `npm run test -w packages/frontend -- AgentPanel.test.tsx AgentDetailClient.test.tsx EditAgentModal.test.tsx` passed.
 - Full local gates after implementation:
-  - `npm run test -w packages/backend` passed.
   - `npm run test -w packages/frontend` passed with the known `useAgentLastSeen.test.ts` React `act(...)` warning.
-  - `npm run typecheck -w packages/backend` passed.
   - `npm run typecheck -w packages/frontend` passed.
-  - `npm run build -w packages/backend` passed.
   - `npm run build -w packages/frontend` passed with existing optional wallet dependency warnings from MetaMask/WalletConnect packages.
-- Explorer agent pass recommended the same smallest PR: retire the frontend bridge, resolve `/agent-activity` through stored Safe address and chain, and cover the endpoint/hooks.
-- Captain self-review covered payment state identity, CASP guardrails, frontend/backend parity, secret leakage, UI data mapping, and test sufficiency; no additional code issues found so far.
-- Reviewer agent found one historical activity wallet-label fallback that could still use the current agent wallet when `safe_name` was missing; it was fixed with a row-address fallback and regression coverage.
+  - `npm run test -w packages/backend -- agents.test.ts machine-payments.test.ts x402.test.ts` passed.
+  - `git diff --check` passed.
+- Explorer agent pass recommended the current smallest PR: block inline budget edit/revoke for off-active-wallet agents in `AgentPanel`, and make agent detail use stored `safe_chain_id` when `user.safes` is missing the wallet.
+- Captain self-check covered CASP guardrails, active-wallet action gating, async hook keying, cross-surface budget display drift, UI copy, secret leakage, and test sufficiency; browser verification is covered by focused headless vitest regressions for the changed action and chain-fallback states.
+- Reviewer agent found no blocking issue and flagged one `safe_id: null` future-shape edge case; the active-wallet predicate now falls back to stored Safe address plus chain before allowing inline budget/revoke actions.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
 - Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 
 ## Recommended Next Target
 
-After this PR merges, choose a narrow P0 agent budget and policy consistency target: audit allowance creation, remaining budget display, pause/revoke state, and on-chain/account state for stale Safe or chain assumptions. Keep the first PR read/display or validation-only where possible, and defer broader payment-state rewrites.
+After this PR merges, choose a narrow backend validation target for owner-side agent allowance mirror writes: normalize `token_address`, `token_symbol`, `allowance_amount`, and `reset_period_min`; reject impossible AllowanceModule values such as zero, scientific/hex/signed amounts, uint96 overflow, and uint16 reset overflow; and block budget mirror mutations for revoked/pending agents. Keep it validation-only and defer broader payment-state rewrites.

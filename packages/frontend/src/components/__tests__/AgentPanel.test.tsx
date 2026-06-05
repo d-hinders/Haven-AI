@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -30,11 +30,11 @@ vi.mock('@/hooks/useAgents', () => ({
 }))
 
 vi.mock('@/hooks/useOnChainAllowances', () => ({
-  useOnChainAllowances: () => mockUseOnChainAllowances(),
+  useOnChainAllowances: (...args: unknown[]) => mockUseOnChainAllowances(...args),
 }))
 
 vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: () => mockUseSafeDetails(),
+  useSafeDetails: (...args: unknown[]) => mockUseSafeDetails(...args),
 }))
 
 vi.mock('@/lib/signer', () => ({
@@ -50,7 +50,19 @@ vi.mock('../ConnectAgent2Modal', () => ({
 }))
 
 vi.mock('../EditAgentModal', () => ({
-  default: () => null,
+  default: ({
+    agent,
+    safeAddress,
+    chainId,
+  }: {
+    agent: { name: string }
+    safeAddress: string
+    chainId: number
+  }) => (
+    <div data-testid="edit-agent-modal">
+      {agent.name}|{safeAddress}|{chainId}
+    </div>
+  ),
 }))
 
 vi.mock('../ConfirmDialog', () => ({
@@ -132,5 +144,95 @@ describe('AgentPanel last-activity metadata', () => {
     expect(screen.getByText('Last activity 2h ago')).toBeInTheDocument()
     expect(screen.getByText('No activity yet')).toBeInTheDocument()
     expect(screen.queryByText('active')).not.toBeInTheDocument()
+  })
+
+  it('only exposes inline budget edit and revoke for agents on the active Haven wallet', () => {
+    const activeDelegate = '0x2222222222222222222222222222222222222222'
+    const baseDelegate = '0x4444444444444444444444444444444444444444'
+    const addressOnlyDelegate = '0x5555555555555555555555555555555555555555'
+    mockUseAgents.mockReturnValue({
+      agents: [
+        baseAgent({
+          id: 'agent-active',
+          name: 'Gnosis agent',
+          delegate_address: activeDelegate,
+          safe_id: 'safe-1',
+          safe_name: 'Main account',
+          safe_chain_id: 100,
+        }),
+        baseAgent({
+          id: 'agent-base',
+          name: 'Base agent',
+          delegate_address: baseDelegate,
+          safe_id: 'safe-base',
+          safe_address: '0x3333333333333333333333333333333333333333',
+          safe_name: 'Base account',
+          safe_chain_id: 8453,
+          allowances: [{
+            id: 'allowance-base-usdc',
+            agent_id: 'agent-base',
+            token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            token_symbol: 'USDC',
+            allowance_amount: '1000000',
+            reset_period_min: 1440,
+          }],
+        }),
+        baseAgent({
+          id: 'agent-address-only',
+          name: 'Address-only Base agent',
+          delegate_address: addressOnlyDelegate,
+          safe_id: null,
+          safe_address: '0x3333333333333333333333333333333333333333',
+          safe_name: 'Base account',
+          safe_chain_id: 8453,
+        }),
+      ],
+      loading: false,
+      revokeAgent: vi.fn(),
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    mockUseOnChainAllowances.mockReturnValue({
+      data: new Map(),
+      loading: true,
+      onChainDelegates: [],
+      refetch: vi.fn(),
+    })
+
+    const { rerender } = render(<AgentPanel />)
+
+    expect(mockUseOnChainAllowances).toHaveBeenCalledWith(
+      SAFE.safe_address,
+      [activeDelegate],
+      SAFE.chain_id,
+    )
+    expect(screen.getByRole('button', { name: 'Edit Gnosis agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Revoke Gnosis agent' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit Base agent' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Revoke Base agent' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open details for Base agent' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit Address-only Base agent' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Revoke Address-only Base agent' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open details for Address-only Base agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Pause Base agent' })).toBeInTheDocument()
+    expect(
+      screen.getAllByText((_, node) => node?.textContent === '1.00 USDC per day').length,
+    ).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Gnosis agent' }))
+    expect(screen.getByTestId('edit-agent-modal')).toHaveTextContent(
+      `Gnosis agent|${SAFE.safe_address}|${SAFE.chain_id}`,
+    )
+
+    mockUseAuth.mockReturnValue({
+      activeSafe: {
+        ...SAFE,
+        id: 'safe-other',
+      },
+    })
+    rerender(<AgentPanel />)
+    expect(screen.queryByTestId('edit-agent-modal')).not.toBeInTheDocument()
   })
 })

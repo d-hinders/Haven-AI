@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
 
-const { mockQuery, allowanceMocks } = vi.hoisted(() => ({
+const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
@@ -10,6 +10,9 @@ const { mockQuery, allowanceMocks } = vi.hoisted(() => ({
     generateTransferHash: vi.fn(),
     recoverSigner: vi.fn(),
     executeAllowanceTransfer: vi.fn(),
+  },
+  fiatMocks: {
+    getFiatValuesForTokenAmount: vi.fn(),
   },
 }))
 
@@ -20,6 +23,8 @@ vi.mock('../../db.js', () => ({
 }))
 
 vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
+
+vi.mock('../../lib/fiat-values.js', () => fiatMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -70,6 +75,7 @@ describe('machine payment routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
+    for (const mock of Object.values(fiatMocks)) mock.mockReset()
   })
 
   function pendingIntent(overrides: Record<string, unknown> = {}) {
@@ -706,6 +712,63 @@ describe('machine payment routes', () => {
       recovered: '0x0000000000000000000000000000000000000001',
     })
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+  })
+
+  it('records one-shot signatures without marking the payment submitted before execution', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.01, eur: 0.01 })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({
+      success: true,
+      payment_id: PAYMENT_ID,
+      status: 'confirmed',
+      tx_hash: TX_HASH,
+    })
+
+    const signatureUpdateIndex = mockQuery.mock.calls.findIndex(([sql]) =>
+      typeof sql === 'string' && sql.includes('SET signature = $1, signed_at = NOW()')
+    )
+    expect(signatureUpdateIndex).toBeGreaterThanOrEqual(0)
+    const signatureUpdateCall = mockQuery.mock.calls[signatureUpdateIndex]
+    expect(signatureUpdateCall[0]).toContain('SET signature = $1, signed_at = NOW()')
+    expect(signatureUpdateCall[0]).not.toContain("status = 'submitted'")
+    expect(signatureUpdateCall[0]).not.toContain('submitted_at')
+    expect(signatureUpdateCall[1]).toEqual(['0xsig', PAYMENT_ID])
+
+    const executionOrder = allowanceMocks.executeAllowanceTransfer.mock.invocationCallOrder[0]
+    expect(mockQuery.mock.invocationCallOrder[signatureUpdateIndex]).toBeLessThan(executionOrder)
+
+    const confirmedUpdateIndex = mockQuery.mock.calls.findIndex(([sql]) =>
+      typeof sql === 'string' && sql.includes("SET status = 'confirmed'")
+    )
+    expect(confirmedUpdateIndex).toBeGreaterThanOrEqual(0)
+    const confirmedUpdateCall = mockQuery.mock.calls[confirmedUpdateIndex]
+    expect(confirmedUpdateCall[0]).toContain("SET status = 'confirmed'")
+    expect(confirmedUpdateCall[0]).toContain('tx_hash = $1')
+    expect(confirmedUpdateCall[0]).toContain('submitted_at = NOW()')
+    expect(confirmedUpdateCall[1]).toEqual([TX_HASH, PAYMENT_ID, 0.01, 0.01])
   })
 
   it('records a reconciliation event for confirmed payments rejected by the merchant retry', async () => {

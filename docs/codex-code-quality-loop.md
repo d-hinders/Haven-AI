@@ -4,10 +4,10 @@ Last updated: 2026-06-05
 
 ## Current Run
 
-- Branch: `codex/quality-signer-credential-validation`
-- PR target: reject malformed signer `chain_id` metadata before it can weaken consent or audit context.
-- Why this target: it is a narrow credential-handoff safety item that keeps local signer configuration fail-fast when chain metadata is present but invalid, without changing key custody, key generation, signer authority, payment APIs, credential export/import, or product UX.
-- Files touched: `packages/signer/src/credentials.ts`, `packages/signer/src/credentials.test.ts`, and this loop file.
+- Branch: `codex/quality-generated-credential-redaction`
+- PR target: remove raw API-key echoes from env-based SDK/Python runtime examples and lock the redaction with tests.
+- Why this target: it is a narrow generated-credential safety item that reduces accidental credential spread in copy-paste developer examples without changing key custody, key generation, credential export/import, signer authority, payment APIs, or the user-facing credential flow.
+- Files touched: `packages/frontend/src/lib/agent-runtime-snippets.ts`, `packages/frontend/src/lib/__tests__/agent-runtime-snippets.test.ts`, and this loop file.
 
 ## Priority Backlog
 
@@ -24,7 +24,8 @@ Last updated: 2026-06-05
 - PR #259: x402 amount validation rejects hex, scientific notation, signed, negative, zero, blank, and whitespace-wrapped atomic values before payment work begins.
 - PR #260: MPP demo challenge validation rejects invalid `expiresAt` timestamps before authorization, allowance, hash, or execution helpers run.
 - PR #261: MCP split credential loading rejects mismatched `agent_id`, `safe_address`, `delegate_address`, `chain_id`, and `network` metadata before returning a merged credential.
-- Planned current PR: signer credential loading accepts only positive integer `chain_id` / `HAVEN_CHAIN_ID` values and rejects malformed present values without leaking delegate key material.
+- PR #262: signer credential loading accepts only positive integer `chain_id` / `HAVEN_CHAIN_ID` values and rejects malformed present values without leaking delegate key material.
+- Planned current PR: env-based SDK/Python runtime examples reference `HAVEN_API_KEY` / `HAVEN_DELEGATE_KEY` but no longer echo raw credential values in comments.
 - Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
@@ -35,10 +36,10 @@ Last updated: 2026-06-05
 ## Known Baseline Notes
 
 - Baseline checks from this run before implementation:
-  - `npm run test -w packages/signer` passed.
+  - `npm run test -w packages/frontend -- agent-runtime-snippets.test.ts agent-credential.test.ts` passed.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
 - Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 
 ## Recommended Next Target
 
-After this PR merges, choose a narrow P0 generated-credential safety target: inspect `packages/frontend/src/lib/agent-runtime-snippets.ts`, `packages/frontend/src/lib/agent-credential.ts`, and related tests for secret-redaction gaps in generated snippets and examples. Keep it test-focused and do not change key custody, generation, export/import, signer semantics, or the user-facing credential flow.
+After this PR merges, choose a narrow P0 generated-artifact safety target: inspect `packages/frontend/src/lib/agent-skill-bundle.ts`, `packages/frontend/src/lib/agent-handoff.ts`, and related tests for secret placement boundaries between intentionally secret-bearing artifacts and reusable code/docs. Keep it test-focused and do not change key custody, generation, export/import, signer semantics, or the user-facing credential flow.

@@ -103,6 +103,16 @@ describe('buildRuntimeSnippets — inline mode', () => {
     expect(snippet.code).toContain('HAVEN_API_KEY')
   })
 
+  it('env-based SDK examples do not echo raw credential values in comments', () => {
+    for (const id of ['sdk-cli', 'python'] as const) {
+      const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
+      expect(snippet.code).toContain('HAVEN_API_KEY')
+      expect(snippet.code).toContain('HAVEN_DELEGATE_KEY')
+      expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+      expect(snippet.code).not.toContain('0xPRIVATEKEY_NEVERREAL')
+    }
+  })
+
   it('MCP-based snippets include a consentNote; non-MCP do not', () => {
     const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
     for (const id of mcpIds) {
@@ -183,5 +193,19 @@ describe('buildRuntimeSnippets — file mode', () => {
     expect(snippet.code).toContain(PATH)
     expect(snippet.code).toContain('json.load')
     expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+  })
+
+  it('SDK/CLI file-mode snippet reads the credential file without raw secrets', () => {
+    const snippet = buildRuntimeSnippet(
+      { credential: credential(), credentialFilePath: PATH },
+      'sdk-cli',
+      'file',
+    )
+    expect(snippet.code).toContain(PATH)
+    expect(snippet.code).toContain('readFile')
+    expect(snippet.code).toContain('cred.api_key')
+    expect(snippet.code).toContain('cred.delegate_key')
+    expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+    expect(snippet.code).not.toContain('0xPRIVATEKEY_NEVERREAL')
   })
 })

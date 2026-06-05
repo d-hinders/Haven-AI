@@ -33,8 +33,12 @@ interface PaymentRow {
 
 interface ApprovalRow {
   id: string
+  safe_id: string | null
+  safe_address: string | null
+  safe_name: string | null
   chain_id: number
   token_symbol: string
+  token_address: string
   amount_human: string
   to_address: string
   reason: string | null
@@ -99,10 +103,10 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     // Fetch payments
     const payments = await pool.query<PaymentRow>(
       `SELECT pi.id,
-              a.safe_id,
+              us.id AS safe_id,
               COALESCE(us.safe_address, pi.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(us.chain_id, pi.chain_id, 100) AS chain_id,
+              COALESCE(pi.chain_id, us.chain_id, 100) AS chain_id,
               pi.token_symbol,
               pi.token_address,
               pi.amount_raw,
@@ -121,8 +125,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
-       JOIN agents a ON a.id = pi.agent_id
-       LEFT JOIN user_safes us ON us.id = a.safe_id
+       LEFT JOIN user_safes us
+         ON us.user_id = pi.user_id
+        AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+        AND pi.chain_id IS NOT NULL
+        AND us.chain_id = pi.chain_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
        LEFT JOIN machine_payment_reconciliation_events mpre
          ON mpre.payment_intent_id = pi.id
@@ -136,7 +143,16 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Fetch approval requests
     const approvals = await pool.query<ApprovalRow>(
-      `SELECT ar.id, COALESCE(ar.chain_id, 100) as chain_id, ar.token_symbol, ar.amount_human, ar.to_address, ar.reason,
+      `SELECT ar.id,
+              us.id AS safe_id,
+              COALESCE(us.safe_address, ar.safe_address) AS safe_address,
+              us.name AS safe_name,
+              COALESCE(ar.chain_id, us.chain_id, 100) as chain_id,
+              ar.token_symbol,
+              ar.token_address,
+              ar.amount_human,
+              ar.to_address,
+              ar.reason,
               COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
               COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS x402_resource_url,
               ar.payment_rail,
@@ -146,6 +162,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               mpe.proof_status AS payment_proof_status,
               mpre.event_type AS payment_reconciliation_event_type
        FROM approval_requests ar
+       LEFT JOIN user_safes us
+         ON us.user_id = ar.user_id
+        AND LOWER(us.safe_address) = LOWER(ar.safe_address)
+        AND ar.chain_id IS NOT NULL
+        AND us.chain_id = ar.chain_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
        LEFT JOIN machine_payment_reconciliation_events mpre
          ON mpre.approval_request_id = ar.id
@@ -227,6 +248,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           payment_attention_reason: lifecycle.paymentAttentionReason,
           source: a.source ?? 'direct',
           x402_resource_url: a.x402_resource_url,
+          chain_id: a.chain_id,
+          token_address: a.token_address,
+          safe_id: a.safe_id,
+          safe_address: a.safe_address,
+          safe_name: a.safe_name,
           explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
           created_at: a.created_at,
         }
@@ -350,10 +376,10 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     const payments = await pool.query<PaymentRow & { agent_id: string }>(
       `SELECT pi.id,
               pi.agent_id,
-              a.safe_id,
+              us.id AS safe_id,
               COALESCE(us.safe_address, pi.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(us.chain_id, pi.chain_id, 100) AS chain_id,
+              COALESCE(pi.chain_id, us.chain_id, 100) AS chain_id,
               pi.token_symbol,
               pi.token_address,
               pi.amount_raw,
@@ -372,8 +398,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
-       JOIN agents a ON a.id = pi.agent_id
-       LEFT JOIN user_safes us ON us.id = a.safe_id
+       LEFT JOIN user_safes us
+         ON us.user_id = pi.user_id
+        AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+        AND pi.chain_id IS NOT NULL
+        AND us.chain_id = pi.chain_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
        LEFT JOIN machine_payment_reconciliation_events mpre
          ON mpre.payment_intent_id = pi.id
@@ -387,7 +416,17 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
 
     // Recent approval requests
     const approvals = await pool.query<ApprovalRow & { agent_id: string }>(
-      `SELECT ar.id, ar.agent_id, COALESCE(ar.chain_id, 100) as chain_id, ar.token_symbol, ar.amount_human, ar.to_address, ar.reason,
+      `SELECT ar.id,
+              ar.agent_id,
+              us.id AS safe_id,
+              COALESCE(us.safe_address, ar.safe_address) AS safe_address,
+              us.name AS safe_name,
+              COALESCE(ar.chain_id, us.chain_id, 100) as chain_id,
+              ar.token_symbol,
+              ar.token_address,
+              ar.amount_human,
+              ar.to_address,
+              ar.reason,
               COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
               COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS x402_resource_url,
               ar.payment_rail,
@@ -397,6 +436,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               mpe.proof_status AS payment_proof_status,
               mpre.event_type AS payment_reconciliation_event_type
        FROM approval_requests ar
+       LEFT JOIN user_safes us
+         ON us.user_id = ar.user_id
+        AND LOWER(us.safe_address) = LOWER(ar.safe_address)
+        AND ar.chain_id IS NOT NULL
+        AND us.chain_id = ar.chain_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
        LEFT JOIN machine_payment_reconciliation_events mpre
          ON mpre.approval_request_id = ar.id
@@ -482,6 +526,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           payment_attention_reason: lifecycle.paymentAttentionReason,
           source: a.source ?? 'direct',
           x402_resource_url: a.x402_resource_url,
+          chain_id: a.chain_id,
+          token_address: a.token_address,
+          safe_id: a.safe_id,
+          safe_address: a.safe_address,
+          safe_name: a.safe_name,
           explorer_url: a.tx_hash ? getExplorerUrl(a.chain_id, 'tx', a.tx_hash) : null,
           created_at: a.created_at,
         }

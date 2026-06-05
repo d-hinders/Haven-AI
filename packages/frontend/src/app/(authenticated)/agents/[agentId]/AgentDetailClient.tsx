@@ -81,6 +81,12 @@ function activityMovement(item: PaymentActivityItem, walletName: string) {
   return <TransactionMovement from={walletName} to={recipient} />
 }
 
+function activityWalletName(item: PaymentActivityItem, fallbackName: string): string {
+  if (item.safe_name) return item.safe_name
+  if (item.safe_address) return `Haven wallet ${truncate(item.safe_address)}`
+  return fallbackName
+}
+
 // Adapts the agent activity feed (payments + approvals) into the shape the
 // shared TransactionsTable expects, so the agent detail screen reuses the
 // same primitive — and the same tinted header band — as the other
@@ -94,6 +100,7 @@ function activityToTransaction(
   const status = activityStatusPresentation(item.status)
   const isError = failedOrRejectedStatus(item.status)
   const createdMs = new Date(item.created_at).getTime()
+  const rowWalletName = activityWalletName(item, walletName)
   return {
     hash: item.tx_hash ?? `activity-${item.type}-${item.id}`,
     type: 'erc20',
@@ -115,7 +122,7 @@ function activityToTransaction(
     chainId: item.chain_id ?? 0,
     safeId: item.safe_id ?? '',
     safeAddress: item.safe_address ?? '',
-    safeName: item.safe_name ?? walletName,
+    safeName: rowWalletName,
     agentId: item.agent_id,
     paymentId: item.id,
     paymentProofStatus: item.payment_proof_status ?? null,
@@ -123,7 +130,7 @@ function activityToTransaction(
     paymentAttentionReason: item.payment_attention_reason ?? null,
     statusBadge: { label: status.label, tone: status.tone },
     titleOverride: activityTitle(item, agentName),
-    movementOverride: activityMovement(item, walletName),
+    movementOverride: activityMovement(item, rowWalletName),
     explorerUrl: item.explorer_url,
   }
 }

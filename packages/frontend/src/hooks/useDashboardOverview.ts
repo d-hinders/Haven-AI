@@ -2,10 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import {
-  fetchX402ActivityTransactions,
-  mergeTransactionsWithX402Activity,
-} from '@/lib/x402-activity-transactions'
 import type { DashboardOverviewResponse } from '@/types/dashboard'
 
 export function useDashboardOverview() {
@@ -22,18 +18,7 @@ export function useDashboardOverview() {
       const response = await api.get<DashboardOverviewResponse>('/dashboard/overview')
       if (requestIdRef.current !== requestId) return
 
-      const x402Transactions = await fetchX402ActivityTransactions()
-      if (requestIdRef.current !== requestId) return
-
-      const transactions = mergeTransactionsWithX402Activity(
-        response.transactions,
-        x402Transactions,
-      )
-
-      setData({
-        ...response,
-        transactions,
-      })
+      setData(response)
     } catch (err) {
       if (requestIdRef.current === requestId) {
         setError(err instanceof Error ? err.message : 'Failed to load dashboard overview')

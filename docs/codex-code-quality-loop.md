@@ -4,10 +4,10 @@ Last updated: 2026-06-05
 
 ## Current Run
 
-- Branch: `codex/quality-payment-terminal-state-guards`
-- PR target: guard one-shot machine-payment and x402 payment-intent mutations so retry, signature, confirmation, failure, and stale sign-data refresh writes only apply while the row is still the expected pending payment row.
-- Why this target: it is the next narrow payment-state hardening after the pre-RPC `submitted` fix. The shared MPP/generic helper and legacy x402 route now use compare-and-set style predicates for signature recording, terminal success/failure writes, and stale nonce/hash refreshes. This protects confirmed/failed terminal rows from later retry or failure-path overwrites without changing custody, Safe ownership, signer authority, payment execution, database schema, protocol behavior, SDK shape, or product UX.
-- Files touched: `packages/backend/src/lib/machine-payments.ts`, `packages/backend/src/routes/x402.ts`, related backend route tests, and this loop file.
+- Branch: `codex/quality-signer-readiness-review-pattern`
+- PR target: capture the reusable review lesson from Antonio's PR #273: wallet address or `isConnected` state is not signer readiness when the action path requires a `walletClient`.
+- Why this target: PR #273 fixed a real Connect Agent 2 dead-end where the UI could report wallet approval as unavailable without showing the recovery action. A follow-up scan found no live duplicate after `useSafeOperationGate` was fixed centrally, but the trap was missing from `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the Haven reviewer prompt. This PR updates that durable review memory so future wallet/passkey approval changes test the intermediate address-present / walletClient-missing state.
+- Files touched: `docs/ai-review-patterns.md`, `docs/ai-agent-workflow.md`, `.claude/agents/haven-reviewer.md`, and this loop file.
 
 ## Priority Backlog
 
@@ -34,7 +34,9 @@ Last updated: 2026-06-05
 - PR #269: temporary frontend x402 bridge was retired, and agent activity feeds publish stored payment/approval Safe identity instead of an agent's current Safe.
 - PR #270: list-level agent budget edit/revoke actions are active-wallet scoped, and agent detail uses stored wallet chain identity when auth state is missing that wallet.
 - PR #271: owner-side agent allowance mirror writes reject invalid token, amount, reset-period, duplicate-token, and revoked-agent mutation states before storing rows.
-- Planned current PR: one-shot x402 and MPP/generic machine-payment writes are terminal-state guarded for signature recording, stale sign-data refresh, confirmed transition, and failed transition.
+- PR #272: one-shot x402 and MPP/generic machine-payment writes are terminal-state guarded for signature recording, stale sign-data refresh, confirmed transition, failed transition, and rail-scoped idempotency replay.
+- Antonio PR #273: `useSafeOperationGate` now requires both wallet `address` and `walletClient` before treating EOA signing as ready, keeping wallet recovery visible when the client is not ready.
+- Planned current PR: durable review memory now captures the signer-readiness gate trap from PR #273.
 - Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
@@ -47,17 +49,13 @@ Last updated: 2026-06-05
 
 ## Known Baseline Notes
 
-- Focused checks after implementation:
-  - `npm run test -w packages/backend -- machine-payments.test.ts x402.test.ts` passed.
-- Full local gates after implementation:
-  - `npm run test -w packages/backend` passed.
-  - `npm run typecheck -w packages/backend` passed.
-  - `npm run build -w packages/backend` passed.
-  - `git diff --check` passed.
-- Explorer agent pass recommended this smallest PR: guard x402 and generic one-shot payment-intent signature, terminal, and retry-refresh writes with `agent_id`, rail, expected `pending_signature` status, and empty `tx_hash`.
-- Reviewer agent flagged cross-rail idempotency lookups and a missing x402 confirmation-race regression; both were fixed with rail-scoped selectors and x402 parity coverage.
-- Residual follow-up: failed-execution paths now avoid overwriting terminal rows but still return `status: failed` when the guarded failed update loses a race, matching the existing `/payments/:id/sign` behavior.
-- Captain self-check covered CASP guardrails, payment-authority boundaries, multi-entrypoint x402/MPP parity, terminal-state overwrite risk, secret leakage, and test sufficiency.
+- Focused check after implementation:
+  - `git diff --check` passed for the docs-only review-pattern update.
+  - `npm run test -w packages/frontend -- useSafeOperationGate.test.ts` passed.
+- Recent PR scan:
+  - Inspected Antonio PR #273 (`fix(frontend): require walletClient in useSafeOperationGate EOA check`).
+  - Searched frontend wallet/signing gates for duplicate `address`/`isConnected` readiness bugs; all direct signing surfaces now route through `useSafeOperationGate` / `OnchainActionGate`, and `NetworkGate` is not used standalone.
+- Captain self-check covered UI review docs, signer-readiness gates, inline gate/recovery-action placement, and documentation-list sync across `docs/ai-review-patterns.md`, `docs/ai-agent-workflow.md`, and `.claude/agents/haven-reviewer.md`.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
 - Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 

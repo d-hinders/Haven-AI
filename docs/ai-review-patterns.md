@@ -32,6 +32,12 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - Modal content should fit normal laptop screens when practical. If more information is needed, prefer a step, disclosure, or detail surface over forcing scroll.
 - Check z-index, backdrop, close, Escape, and unsaved-work behavior for modals that contain required actions or wallet/signing controls.
 
+## Signer Readiness Gates
+
+- A connected wallet address is not the same as a ready signer. EOA signing paths that use `useActiveSigner` require both `address` and `walletClient`; gates must stay aligned with the signer hook instead of checking `address` or `isConnected` alone.
+- If wallet or passkey readiness is incomplete, the UI must keep the recovery action visible. A warning such as "Wallet approval unavailable" must be paired with `WalletButton`, passkey guidance, or an equivalent next action.
+- Tests for wallet-gated money or authority actions should cover the intermediate state where a wallet address is present but `walletClient` is not ready. That state should remain blocked and recoverable, not visually ready or silently disabled.
+
 ## Recipient And Form Behavior
 
 - Do not hijack typing with eager exact-name matching or autocomplete side effects. Suggestions should be committed by an explicit user action or a clearly bounded blur behavior.

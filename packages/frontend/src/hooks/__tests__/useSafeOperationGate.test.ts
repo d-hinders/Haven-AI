@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Address } from 'viem'
 
 const mockUseAccount = vi.fn()
+const mockUseWalletClient = vi.fn()
 const mockUseAuth = vi.fn()
 
 vi.mock('wagmi', () => ({
   useAccount: () => mockUseAccount(),
+  useWalletClient: () => mockUseWalletClient(),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -33,9 +35,11 @@ describe('useSafeOperationGate', () => {
   beforeEach(() => {
     localStorage.clear()
     mockUseAccount.mockReset()
+    mockUseWalletClient.mockReset()
     mockUseAuth.mockReset()
 
     mockUseAccount.mockReturnValue({ address: undefined })
+    mockUseWalletClient.mockReturnValue({ data: undefined })
     mockUseAuth.mockReturnValue({ passkeys: [] })
   })
 
@@ -64,8 +68,9 @@ describe('useSafeOperationGate', () => {
     expect(result.current).toEqual({ kind: 'ready' })
   })
 
-  it('returns ready for an EOA safe when a wallet is connected', () => {
+  it('returns ready for an EOA safe when a wallet is connected and walletClient is ready', () => {
     mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
 
     const { result } = renderHook(() =>
       useSafeOperationGate({
@@ -75,6 +80,20 @@ describe('useSafeOperationGate', () => {
     )
 
     expect(result.current).toEqual({ kind: 'ready' })
+  })
+
+  it('returns no_signer when a wallet address is connected but walletClient is not yet ready', () => {
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: undefined })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({
+        safeAddress: SAFE_ADDRESS,
+        chainId: 100,
+      }),
+    )
+
+    expect(result.current).toEqual({ kind: 'no_signer' })
   })
 
   it('returns no_signer when there is neither a stored passkey nor a connected wallet', () => {

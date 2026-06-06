@@ -4,10 +4,10 @@ Last updated: 2026-06-06
 
 ## Current Run
 
-- Branch: `codex/quality-self-sign-delete-lifecycle`
-- PR target: align whole-agent `/self-sign-agents/:id` delete behavior with `/agents` by requiring revocation before deletion.
-- Why this target: frontend copy and active `/agents` already treat deletion as a cleanup step after network authority has been revoked. The legacy self-sign route still allowed deleting active rows, which could remove Haven's local record before the revocation lifecycle was complete. This PR keeps the change lifecycle-only and does not alter signing, custody, Safe permissions, allowance validation, or UI.
-- Files touched: `packages/backend/src/routes/self-sign-agents.ts`, `packages/backend/src/routes/__tests__/self-sign-agents.test.ts`, and this loop file.
+- Branch: `codex/quality-reconciliation-event-immutability`
+- PR target: harden `machine_payment_reconciliation_events` conflict handling so resolved merchant-retry events cannot be reopened by later retry/upsert calls.
+- Why this target: evidence attachment already resolves open merchant retry reconciliation events, and transaction/activity reads only surface open events as needing attention. The reconciliation-event route still set `status = 'open'` on every conflict update, so a later SDK retry could reopen a resolved event. This PR keeps the change event-state-only and does not alter payment execution, custody, signing, Safe permissions, SDK API shape, or product UX.
+- Files touched: `packages/backend/src/routes/machine-payments.ts`, `packages/backend/src/routes/__tests__/machine-payments.test.ts`, and this loop file.
 
 ## Priority Backlog
 
@@ -38,7 +38,8 @@ Last updated: 2026-06-06
 - Antonio PR #273: `useSafeOperationGate` now requires both wallet `address` and `walletClient` before treating EOA signing as ready, keeping wallet recovery visible when the client is not ready.
 - PR #274: durable review memory now captures the signer-readiness gate trap from PR #273 in `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the Haven reviewer prompt.
 - PR #275: older `/self-sign-agents` allowance writes use the shared owner-side allowance normalizer and block revoked-agent allowance mutations.
-- Planned current PR: whole-agent `/self-sign-agents/:id` delete now requires `status = 'revoked'`, matching `/agents`.
+- PR #276: whole-agent `/self-sign-agents/:id` delete now requires `status = 'revoked'`, matching `/agents`.
+- Planned current PR: resolved `machine_payment_reconciliation_events` stay resolved on later merchant-retry upserts.
 - Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
@@ -47,24 +48,24 @@ Last updated: 2026-06-06
 - Broader payment state rewrite, DB migrations, custody/signing semantics, Safe ownership assumptions, production chain/token config, and protocol compatibility changes need separate review.
 - Broader x402/payment-history consolidation remains deferred.
 - Broader self-sign onboarding, budget UI, and allowance-state rewrites remain deferred.
-- Reconciliation-event immutability is deferred: `machine_payment_reconciliation_events` can reopen a resolved event on conflict today, but this PR stays scoped to self-sign delete lifecycle parity.
+- Automated merchant retry, sweep, and operational reconciliation jobs remain deferred.
 
 ## Known Baseline Notes
 
 - Focused check after implementation:
-  - `npm run test -w packages/backend -- self-sign-agents.test.ts agents.test.ts` passed.
+  - `npm run test -w packages/backend -- machine-payments.test.ts` passed.
   - `npm run test -w packages/backend` passed.
   - `npm run typecheck -w packages/backend` passed.
   - `npm run build -w packages/backend` passed.
   - `git diff --check` passed.
 - Current target scan:
-  - Confirmed `/agents` deletes only `status = 'revoked'` rows, returns 404 for missing rows, and returns 409 for existing non-revoked rows.
-  - Confirmed `/self-sign-agents` previously deleted by id/user only.
-  - Confirmed frontend delete copy already says deletion is only available after revocation, so no product copy change is needed.
-- Captain self-check covered CASP guardrails, payment authority boundaries, delete/revoke lifecycle ordering, and focused route regression coverage.
+  - Confirmed evidence attachment resolves only open `merchant_retry_rejected_after_payment` reconciliation events.
+  - Confirmed transaction and agent-activity reads only join open reconciliation events for `needs_attention`.
+  - Confirmed the reconciliation-event upsert previously set `status = 'open'` on every conflict update.
+- Captain self-check covered CASP guardrails, payment authority boundaries, multi-entrypoint retry behavior, event-state transitions, and focused route regression coverage.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
 - Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 
 ## Recommended Next Target
 
-After this PR merges, choose a narrow backend payment-state target: harden `machine_payment_reconciliation_events` conflict handling so an already resolved event cannot be reopened by a later retry/upsert. Keep it event-state-only and defer broader payment reconciliation or terminal-state rewrites.
+After this PR merges, choose a narrow backend API-contract target: make machine-payment reconciliation response status values explicit in OpenAPI/tests (`open` and `resolved`) without changing runtime behavior. Defer broader reconciliation automation, payment-state rewrites, and x402/generic consolidation.

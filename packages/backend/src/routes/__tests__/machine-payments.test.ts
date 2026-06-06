@@ -1019,6 +1019,7 @@ describe('machine payment routes', () => {
     const insertCall = mockQuery.mock.calls[2]
     expect(insertCall[0]).toContain('machine_payment_reconciliation_events')
     expect(insertCall[0]).toContain('ON CONFLICT (payment_intent_id, event_type)')
+    expect(insertCall[0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
     expect(insertCall[1]).toContain(PAYMENT_ID)
     expect(insertCall[1]).toContain('mpp_demo')
     expect(insertCall[1]).toContain('merchant_retry_rejected_after_payment')
@@ -1066,8 +1067,95 @@ describe('machine payment routes', () => {
     const insertCall = mockQuery.mock.calls[3]
     expect(insertCall[0]).toContain('approval_request_id')
     expect(insertCall[0]).toContain('ON CONFLICT (approval_request_id, event_type)')
+    expect(insertCall[0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
     expect(insertCall[1]).toContain(PAYMENT_ID)
     expect(insertCall[1]).toContain('merchant_retry_rejected_after_payment')
+  })
+
+  it('does not reopen resolved reconciliation events for confirmed payments', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'event-resolved',
+          status: 'resolved',
+          created_at: '2026-05-15T12:00:00.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: TX_HASH,
+        reason: 'Merchant returned HTTP 402 after a resolved event',
+        details: { retryStatus: 402, retryAttempt: 2 },
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      event_id: 'event-resolved',
+      status: 'resolved',
+      payment_id: PAYMENT_ID,
+    })
+    expect(mockQuery.mock.calls[2][0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    expect(mockQuery.mock.calls[3][0]).toContain('FROM machine_payment_reconciliation_events')
+    expect(mockQuery.mock.calls[3][0]).toContain('WHERE payment_intent_id = $1')
+    expect(mockQuery.mock.calls[3][1]).toEqual([
+      PAYMENT_ID,
+      AGENT.id,
+      'merchant_retry_rejected_after_payment',
+    ])
+  })
+
+  it('does not reopen resolved reconciliation events for executed approval requests', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [executedApproval()] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'event-approval-resolved',
+          status: 'resolved',
+          created_at: '2026-05-15T12:00:00.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: TX_HASH,
+        reason: 'Merchant returned HTTP 402 after a resolved approval event',
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      event_id: 'event-approval-resolved',
+      status: 'resolved',
+      payment_id: PAYMENT_ID,
+    })
+    expect(mockQuery.mock.calls[3][0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    expect(mockQuery.mock.calls[4][0]).toContain('FROM machine_payment_reconciliation_events')
+    expect(mockQuery.mock.calls[4][0]).toContain('WHERE approval_request_id = $1')
+    expect(mockQuery.mock.calls[4][1]).toEqual([
+      PAYMENT_ID,
+      AGENT.id,
+      'merchant_retry_rejected_after_payment',
+    ])
   })
 
   it('attaches SDK-reported merchant evidence for confirmed machine payments', async () => {

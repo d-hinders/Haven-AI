@@ -91,6 +91,12 @@ interface ReconciliationPaymentRow {
   x402_idempotency_key: string | null
 }
 
+interface ReconciliationEventRow {
+  id: string
+  status: string
+  created_at: string
+}
+
 const RECONCILIATION_EVENT_TYPES = new Set([
   'merchant_retry_rejected_after_payment',
 ])
@@ -505,7 +511,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const approvalRequestId = payment.kind === 'approval_request' ? payment.id : null
     const conflictColumn = payment.kind === 'approval_request' ? 'approval_request_id' : 'payment_intent_id'
 
-    const result = await pool.query<{ id: string; status: string; created_at: string }>(
+    const result = await pool.query<ReconciliationEventRow>(
       `INSERT INTO machine_payment_reconciliation_events (
         agent_id, user_id, payment_intent_id, approval_request_id, rail, event_type, tx_hash,
         resource_url, merchant_address, machine_challenge_id, machine_idempotency_key,
@@ -523,6 +529,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         details = EXCLUDED.details,
         status = 'open',
         updated_at = NOW()
+      WHERE machine_payment_reconciliation_events.status <> 'resolved'
       RETURNING id, status, created_at`,
       [
         agent.id,
@@ -541,7 +548,21 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       ],
     )
 
-    const event = result.rows[0]
+    let event = result.rows[0]
+    if (!event) {
+      const existingResult = await pool.query<ReconciliationEventRow>(
+        `SELECT id, status, created_at
+         FROM machine_payment_reconciliation_events
+         WHERE ${conflictColumn} = $1
+           AND agent_id = $2
+           AND event_type = $3
+         LIMIT 1`,
+        [payment.id, agent.id, eventType],
+      )
+      event = existingResult.rows[0]
+    }
+    if (!event) throw new Error('reconciliation_event_conflict_not_found')
+
     return reply.code(202).send({
       event_id: event.id,
       status: event.status,

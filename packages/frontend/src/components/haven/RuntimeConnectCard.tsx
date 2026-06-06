@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -76,6 +76,14 @@ export function RuntimeConnectCard({
   const [activeId, setActiveId] = useState<RuntimeSnippetId | null>(null)
   const [mode, setMode] = useState<RuntimeSnippetMode>('inline')
   const [copyError, setCopyError] = useState<RuntimeSnippetId | null>(null)
+  const copyErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Clear the auto-dismiss timer on unmount so it never fires into a dead component.
+  useEffect(() => {
+    return () => {
+      if (copyErrorTimerRef.current !== null) clearTimeout(copyErrorTimerRef.current)
+    }
+  }, [])
 
   const snippets = useMemo(
     () => buildRuntimeSnippets({ credential, credentialFilePath }, mode),
@@ -94,11 +102,16 @@ export function RuntimeConnectCard({
 
   const handleCopyFailed = useCallback(
     (snippet: RuntimeSnippet) => {
+      // Clear any previous auto-dismiss timer before arming a new one.
+      if (copyErrorTimerRef.current !== null) clearTimeout(copyErrorTimerRef.current)
       setCopyError(snippet.id)
       // Auto-clear after a few seconds so the inline error doesn't linger
       // forever if the user navigates away and back.
-      setTimeout(
-        () => setCopyError((id) => (id === snippet.id ? null : id)),
+      copyErrorTimerRef.current = setTimeout(
+        () => {
+          setCopyError((id) => (id === snippet.id ? null : id))
+          copyErrorTimerRef.current = null
+        },
         4000,
       )
     },

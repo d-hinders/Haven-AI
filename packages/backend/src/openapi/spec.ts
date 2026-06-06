@@ -1937,7 +1937,7 @@ export const openapiSpec = {
         required: ['event_id', 'status', 'payment_id', 'rail', 'event_type', 'created_at'],
         properties: {
           event_id: uuid,
-          status: { type: 'string' },
+          status: { type: 'string', enum: ['open', 'resolved'] },
           payment_id: uuid,
           rail: { type: 'string' },
           event_type: { type: 'string' },

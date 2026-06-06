@@ -4,10 +4,10 @@ Last updated: 2026-06-06
 
 ## Current Run
 
-- Branch: `codex/quality-reconciliation-event-immutability`
-- PR target: harden `machine_payment_reconciliation_events` conflict handling so resolved merchant-retry events cannot be reopened by later retry/upsert calls.
-- Why this target: evidence attachment already resolves open merchant retry reconciliation events, and transaction/activity reads only surface open events as needing attention. The reconciliation-event route still set `status = 'open'` on every conflict update, so a later SDK retry could reopen a resolved event. This PR keeps the change event-state-only and does not alter payment execution, custody, signing, Safe permissions, SDK API shape, or product UX.
-- Files touched: `packages/backend/src/routes/machine-payments.ts`, `packages/backend/src/routes/__tests__/machine-payments.test.ts`, and this loop file.
+- Branch: `codex/quality-reconciliation-status-contract`
+- PR target: make `MachinePaymentReconciliationEventResponse.status` explicit in OpenAPI/tests as `open | resolved`.
+- Why this target: PR #277 made resolved reconciliation events durable in runtime behavior. The published OpenAPI response still described reconciliation event `status` as an unconstrained string, which leaves SDK/tool consumers without the contract needed to handle already-resolved retries deterministically. This PR keeps the change schema/test-only and does not alter payment execution, custody, signing, Safe permissions, SDK runtime behavior, or product UX.
+- Files touched: `packages/backend/src/openapi/spec.ts`, `packages/backend/src/openapi/spec.test.ts`, and this loop file.
 
 ## Priority Backlog
 
@@ -39,7 +39,8 @@ Last updated: 2026-06-06
 - PR #274: durable review memory now captures the signer-readiness gate trap from PR #273 in `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the Haven reviewer prompt.
 - PR #275: older `/self-sign-agents` allowance writes use the shared owner-side allowance normalizer and block revoked-agent allowance mutations.
 - PR #276: whole-agent `/self-sign-agents/:id` delete now requires `status = 'revoked'`, matching `/agents`.
-- Planned current PR: resolved `machine_payment_reconciliation_events` stay resolved on later merchant-retry upserts.
+- PR #277: resolved `machine_payment_reconciliation_events` stay resolved on later merchant-retry upserts.
+- Planned current PR: reconciliation event response status values are explicit in OpenAPI/tests.
 - Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
@@ -53,19 +54,19 @@ Last updated: 2026-06-06
 ## Known Baseline Notes
 
 - Focused check after implementation:
-  - `npm run test -w packages/backend -- machine-payments.test.ts` passed.
+  - `npm run test -w packages/backend -- spec.test.ts` passed.
   - `npm run test -w packages/backend` passed.
   - `npm run typecheck -w packages/backend` passed.
   - `npm run build -w packages/backend` passed.
   - `git diff --check` passed.
 - Current target scan:
-  - Confirmed evidence attachment resolves only open `merchant_retry_rejected_after_payment` reconciliation events.
-  - Confirmed transaction and agent-activity reads only join open reconciliation events for `needs_attention`.
-  - Confirmed the reconciliation-event upsert previously set `status = 'open'` on every conflict update.
-- Captain self-check covered CASP guardrails, payment authority boundaries, multi-entrypoint retry behavior, event-state transitions, and focused route regression coverage.
+  - Confirmed runtime reconciliation response status comes from `machine_payment_reconciliation_events.status`.
+  - Confirmed the only current status values are `open` from insert/update and `resolved` from evidence attachment.
+  - Confirmed OpenAPI previously described the response status as a generic string.
+- Captain self-check covered CASP guardrails, payment authority boundaries, API schema drift, multi-entrypoint retry consumers, and OpenAPI regression coverage.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
 - Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 
 ## Recommended Next Target
 
-After this PR merges, choose a narrow backend API-contract target: make machine-payment reconciliation response status values explicit in OpenAPI/tests (`open` and `resolved`) without changing runtime behavior. Defer broader reconciliation automation, payment-state rewrites, and x402/generic consolidation.
+After this PR merges, choose another narrow backend API-contract target: make machine-payment evidence `proof_status` values explicit in OpenAPI/tests (`payment_confirmed`, `merchant_response_observed`, `protocol_receipt_attached`) without changing runtime behavior. Defer broader evidence/reconciliation automation, payment-state rewrites, and x402/generic consolidation.

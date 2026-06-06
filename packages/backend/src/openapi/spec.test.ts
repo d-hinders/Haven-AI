@@ -247,6 +247,17 @@ describe('openapiSpec', () => {
     }
   })
 
+  it('documents reconciliation event response statuses', () => {
+    const responseSchema =
+      openapiSpec.components.schemas.MachinePaymentReconciliationEventResponse
+
+    expect(responseSchema.required).toContain('status')
+    expect(responseSchema.properties.status).toMatchObject({
+      type: 'string',
+      enum: ['open', 'resolved'],
+    })
+  })
+
   it('documents the non-custodial authority boundary in security schemes and resume state', () => {
     const agentScheme = openapiSpec.components.securitySchemes.AgentApiKey
     expect(agentScheme.description).toMatch(/identity/i)

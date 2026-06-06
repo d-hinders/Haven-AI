@@ -104,7 +104,7 @@ function WalletPopover({
   const popoverRef = useRef<HTMLDivElement>(null)
   const { disconnectAsync } = useDisconnect()
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const copyTimerRef = useRef<number | null>(null)
 
   // Cancel the copy-reset timer on unmount so it never fires into a dead component.
   useEffect(() => {

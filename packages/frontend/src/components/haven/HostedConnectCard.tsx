@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCopyTimeout } from '@/hooks/useCopyTimeout'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
@@ -106,9 +107,9 @@ export function HostedConnectCard({
   const isConnected = Boolean(lastSeenAt)
 
   const [activeId, setActiveId] = useState<HostedClientId | null>(null)
-  const [copiedConnect, setCopiedConnect] = useState(false)
-  const [copiedKey, setCopiedKey] = useState(false)
-  const [copiedSetupPrompt, setCopiedSetupPrompt] = useState(false)
+  const { copied: copiedConnect, markCopied: markCopiedConnect } = useCopyTimeout(2000)
+  const { copied: copiedKey, markCopied: markCopiedKey } = useCopyTimeout(2000)
+  const { copied: copiedSetupPrompt, markCopied: markCopiedSetupPrompt } = useCopyTimeout(2000)
   const [copyError, setCopyError] = useState<string | null>(null)
   // The manual setup disclosure uses React state so secret-bearing content is
   // genuinely absent from the DOM until the user asks for it.
@@ -168,9 +169,8 @@ export function HostedConnectCard({
       return
     }
     setCopyError(null)
-    setCopiedConnect(true)
-    setTimeout(() => setCopiedConnect(false), 2000)
-  }, [snippet])
+    markCopiedConnect()
+  }, [snippet, markCopiedConnect])
 
   const handleCopyKey = useCallback(async () => {
     try {
@@ -180,11 +180,10 @@ export function HostedConnectCard({
       return
     }
     setCopyError(null)
-    setCopiedKey(true)
-    setTimeout(() => setCopiedKey(false), 2000)
+    markCopiedKey()
     onCopySigningKey?.()
     onCredentialSaved?.()
-  }, [credential.delegate_key, onCopySigningKey, onCredentialSaved])
+  }, [credential.delegate_key, markCopiedKey, onCopySigningKey, onCredentialSaved])
 
   const handleCopySetupPrompt = useCallback(async () => {
     if (!setupPrompt) return
@@ -195,13 +194,12 @@ export function HostedConnectCard({
       return
     }
     setCopyError(null)
-    setCopiedSetupPrompt(true)
-    setTimeout(() => setCopiedSetupPrompt(false), 2000)
+    markCopiedSetupPrompt()
     // The setup prompt embeds both connection identity and the signing key,
     // so copying it counts as having the Haven credential in hand.
     onCopySigningKey?.()
     onCredentialSaved?.()
-  }, [setupPrompt, onCopySigningKey, onCredentialSaved])
+  }, [setupPrompt, markCopiedSetupPrompt, onCopySigningKey, onCredentialSaved])
 
   const handleOpenDeepLink = useCallback(() => {
     if (!activeId || !hasDeepLink(activeId)) return
@@ -698,16 +696,16 @@ function DestinationPathRow({
   path: { label: string; path: string }
   showLabel: boolean
 }) {
-  const [copied, setCopied] = useState(false)
+  const { copied, markCopied } = useCopyTimeout(2000)
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(path.path)
     } catch {
       /* clipboard can fail in restricted contexts */
+      return
     }
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }, [path.path])
+    markCopied()
+  }, [path.path, markCopied])
 
   return (
     <li className="flex items-center gap-3 px-3 py-2">

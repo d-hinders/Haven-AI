@@ -64,13 +64,19 @@ export function usePortfolio(
   }, [chainId, safeAddress])
 
   useEffect(() => {
+    if (!safeAddress) {
+      generationRef.current += 1
+      setLoading(false)
+      return
+    }
+
     fetchPortfolio()
     const interval = setInterval(fetchPortfolio, 60_000)
     return () => {
       generationRef.current += 1
       clearInterval(interval)
     }
-  }, [fetchPortfolio])
+  }, [fetchPortfolio, safeAddress])
 
   return { totalUsd, totalEur, breakdown, loading, error, refetch: fetchPortfolio }
 }

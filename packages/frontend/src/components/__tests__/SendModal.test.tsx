@@ -46,12 +46,12 @@ const defaultProps = {
   },
   balances: [
     {
-      symbol: 'ETH',
-      name: 'ETH',
-      address: null,
-      balance: '5000000000000000000',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      balance: '5000000',
       formatted: '5',
-      decimals: 18,
+      decimals: 6,
       usdValue: 0,
       eurValue: 0,
     },
@@ -88,7 +88,7 @@ describe('SendModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     expect(screen.getByRole('heading', { name: 'Review payment' })).toBeInTheDocument()
-    expect(screen.getByText('2 ETH')).toBeInTheDocument()
+    expect(screen.getByText('2 USDC')).toBeInTheDocument()
     expect(screen.getByText('From')).toBeInTheDocument()
     expect(screen.getAllByText('Operating wallet').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Alice').length).toBeGreaterThan(0)
@@ -128,7 +128,7 @@ describe('SendModal', () => {
     await waitFor(() => {
       expect(send).toHaveBeenCalledWith(
         expect.objectContaining({
-          token: 'ETH',
+          token: 'USDC',
           amount: '1.5',
           recipient: RECIPIENT,
         }),
@@ -147,7 +147,7 @@ describe('SendModal', () => {
         balances={[
           {
             ...defaultProps.balances[0],
-            balance: '100000000000000000',
+            balance: '100000', // 0.1 USDC (6 decimals)
             formatted: '0.1',
           },
         ]}
@@ -155,12 +155,12 @@ describe('SendModal', () => {
     )
 
     fireEvent.change(screen.getByPlaceholderText('0.00'), {
-      target: { value: '0.100000000000000001' },
+      target: { value: '0.100001' },
     })
     fireEvent.change(screen.getByPlaceholderText(RECIPIENT_INPUT), { target: { value: RECIPIENT } })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
-    expect(screen.getByText('Insufficient balance. You have 0.1 ETH')).toBeInTheDocument()
+    expect(screen.getByText('Insufficient balance. You have 0.1 USDC')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Review payment' })).not.toBeInTheDocument()
   })
 
@@ -180,7 +180,7 @@ describe('SendModal', () => {
     fireEvent.change(screen.getByPlaceholderText(RECIPIENT_INPUT), { target: { value: RECIPIENT } })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
-    expect(screen.getByText('0.5 ETH')).toBeInTheDocument()
+    expect(screen.getByText('0.5 USDC')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve and send' }))
 

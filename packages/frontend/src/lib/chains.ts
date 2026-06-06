@@ -88,8 +88,8 @@ const BASE_CONFIG: FrontendChainConfig = {
     verifier: '0x0000000000000000000000000000000000000100',
   },
   tokens: {
-    'ETH': { symbol: 'ETH', decimals: 18, address: null },
     'USDC': { symbol: 'USDC', decimals: 6, address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+    'ETH': { symbol: 'ETH', decimals: 18, address: null },
   },
 }
 

@@ -136,8 +136,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [hydratePasskeys, syncActiveSafe])
 
-  // On mount, check for existing token
+  // On mount, check for existing token.
+  // A cancelled ref guards against the effect re-running (e.g. in Strict Mode)
+  // while an in-flight request is still pending — without it two overlapping
+  // /auth/me calls could both call setUser/syncActiveSafe in an undefined order.
   useEffect(() => {
+    let cancelled = false
+
     const stored = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
     if (!stored) {
       setLoading(false)
@@ -149,17 +154,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api
       .get<User>('/auth/me')
       .then(async (u) => {
+        if (cancelled) return
         setUser(u)
         syncActiveSafe(u)
         await hydratePasskeys()
       })
       .catch(() => {
+        if (cancelled) return
         // Token invalid or expired
         localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
         setToken(null)
         setPasskeys([])
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => { cancelled = true }
   }, [hydratePasskeys, syncActiveSafe])
 
   const signup = useCallback(

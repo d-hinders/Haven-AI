@@ -9,7 +9,20 @@ import { config } from '@/lib/wagmi'
 
 import '@rainbow-me/rainbowkit/styles.css'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Keep data fresh for 10 s before treating it as stale. wagmi fires many
+      // queries (account, block, wallet client) on MetaMask connect — without
+      // a staleTime they all refetch immediately on every component mount,
+      // causing a burst of RPC calls that makes the UI feel sluggish.
+      staleTime: 10_000,
+      // One retry is enough for transient RPC hiccups; three (the default)
+      // adds unnecessary delay before the error state is shown.
+      retry: 1,
+    },
+  },
+})
 
 export default function Providers({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false)

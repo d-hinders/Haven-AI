@@ -71,9 +71,16 @@ export function OwnerDirectoryProvider({ children }: { children: ReactNode }) {
     }
   }, [user])
 
+  // Use a stable string key derived from safe IDs rather than the `safes`
+  // array reference itself. `setUser(newUserObj)` always creates a new array
+  // reference even when the safes are unchanged, which would trigger an extra
+  // `refreshOwners` call on every `refreshUser` invocation.
+  const safeKey = user?.safes?.map((s) => s.id).join(',') ?? ''
+
   useEffect(() => {
     void refreshOwners()
-  }, [refreshOwners, user?.safes])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshOwners, safeKey])
 
   const ownerByAddress = useMemo(() => {
     const map = new Map<string, OwnerAlias>()

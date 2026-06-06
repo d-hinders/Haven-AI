@@ -218,10 +218,19 @@ export default async function selfSignAgentRoutes(app: FastifyInstance): Promise
     const { id } = request.params
 
     const result = await pool.query(
-      'DELETE FROM self_sign_agents WHERE id = $1 AND user_id = $2 RETURNING id',
+      `DELETE FROM self_sign_agents
+       WHERE id = $1 AND user_id = $2 AND status = 'revoked'
+       RETURNING id`,
       [id, sub],
     )
-    if (result.rows.length === 0) return reply.code(404).send({ error: 'Agent not found' })
+    if (result.rows.length === 0) {
+      const existing = await pool.query(
+        'SELECT id FROM self_sign_agents WHERE id = $1 AND user_id = $2',
+        [id, sub],
+      )
+      if (existing.rows.length === 0) return reply.code(404).send({ error: 'Agent not found' })
+      return reply.code(409).send({ error: 'Only revoked agents can be deleted' })
+    }
     return { success: true }
   })
 

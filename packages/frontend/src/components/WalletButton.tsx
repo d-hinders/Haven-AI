@@ -104,6 +104,14 @@ function WalletPopover({
   const popoverRef = useRef<HTMLDivElement>(null)
   const { disconnectAsync } = useDisconnect()
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Cancel the copy-reset timer on unmount so it never fires into a dead component.
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
+    }
+  }, [])
 
   useEscapeToClose(open, onClose)
 
@@ -131,8 +139,12 @@ function WalletPopover({
   const handleCopy = async (address: string) => {
     try {
       await navigator.clipboard.writeText(address)
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
       setCopiedAddress(address)
-      window.setTimeout(() => setCopiedAddress(null), 1500)
+      copyTimerRef.current = window.setTimeout(() => {
+        setCopiedAddress(null)
+        copyTimerRef.current = null
+      }, 1500)
     } catch {
       /* ignore */
     }
@@ -279,10 +291,19 @@ export default function WalletButton() {
   const [pendingSwitch, setPendingSwitch] = useState(false)
 
   useEffect(() => {
-    if (pendingSwitch && !isConnected && openConnectModalHook) {
+    if (!pendingSwitch) return
+
+    if (!isConnected && openConnectModalHook) {
       setPendingSwitch(false)
       openConnectModalHook()
+      return
     }
+
+    // Safety valve: if we have been in pending state for >3 s but the connect
+    // modal is still not available (e.g. RainbowKit not ready), give up so the
+    // UI doesn't stay stuck on "Disconnecting…" indefinitely.
+    const id = window.setTimeout(() => setPendingSwitch(false), 3000)
+    return () => window.clearTimeout(id)
   }, [pendingSwitch, isConnected, openConnectModalHook])
 
   const handleSwitchWallet = async () => {

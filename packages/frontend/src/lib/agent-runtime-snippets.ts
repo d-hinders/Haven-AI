@@ -306,7 +306,7 @@ function vsCodeInline(cred: AgentCredentialJson): RuntimeSnippet {
     language: 'json',
     guidance:
       'Add this to your VS Code MCP settings and reload the window. ' +
-      '(Open the Command Palette → "MCP: Open User Settings" or edit .vscode/mcp.json in your workspace.)',
+      '(Open the Command Palette → "MCP: Open User Configuration" or edit .vscode/mcp.json in your workspace.)',
     destination: '.vscode/mcp.json',
     code: jsonBlock(config),
     mode: 'inline',

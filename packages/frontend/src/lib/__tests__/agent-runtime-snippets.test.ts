@@ -95,6 +95,12 @@ describe('buildRuntimeSnippets — inline mode', () => {
     expect(config.servers.haven.env.HAVEN_API_KEY).toBe('sk_agent_TESTKEY_NEVERREAL')
   })
 
+  it('VS Code inline snippet guidance references the correct Command Palette label', () => {
+    const snippet = buildRuntimeSnippet({ credential: credential() }, 'vscode', 'inline')
+    expect(snippet.guidance).toContain('MCP: Open User Configuration')
+    expect(snippet.guidance).not.toContain('MCP: Open User Settings')
+  })
+
   it('Python snippet has python language and pip install comment', () => {
     const snippet = buildRuntimeSnippet({ credential: credential() }, 'python', 'inline')
     expect(snippet.language).toBe('python')

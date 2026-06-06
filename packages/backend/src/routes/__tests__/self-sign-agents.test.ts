@@ -158,6 +158,68 @@ describe('self-sign agent routes', () => {
     await app.close()
   })
 
+  it('blocks deleting active self-sign agents before revocation', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
+
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 'agent-1' }] })
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/self-sign-agents/agent-1',
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toBe('Only revoked agents can be deleted')
+    expect(String(mockQuery.mock.calls[0][0])).toContain("status = 'revoked'")
+    expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1'])
+    expect(mockQuery.mock.calls[1][1]).toEqual(['agent-1', 'user-1'])
+
+    await app.close()
+  })
+
+  it('returns not found when deleting an unknown self-sign agent', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
+
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/self-sign-agents/missing-agent',
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json().error).toBe('Agent not found')
+    expect(mockQuery).toHaveBeenCalledTimes(2)
+
+    await app.close()
+  })
+
+  it('deletes revoked self-sign agents', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
+
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'agent-1' }] })
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/self-sign-agents/agent-1',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ success: true })
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+    expect(String(mockQuery.mock.calls[0][0])).toContain("status = 'revoked'")
+    expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1'])
+
+    await app.close()
+  })
+
   it.each([
     ['bad token address', { ...VALID_ALLOWANCE, token_address: 'not-an-address' }, /Valid token address/],
     ['zero allowance amount', { ...VALID_ALLOWANCE, allowance_amount: '0' }, /positive decimal atomic amount/],

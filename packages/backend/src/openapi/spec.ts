@@ -1880,7 +1880,10 @@ export const openapiSpec = {
           payment_intent_id: { anyOf: [uuid, { type: 'null' }] },
           approval_request_id: { anyOf: [uuid, { type: 'null' }] },
           rail: { type: 'string' },
-          proof_status: { type: 'string' },
+          proof_status: {
+            type: 'string',
+            enum: ['payment_confirmed', 'merchant_response_observed', 'protocol_receipt_attached'],
+          },
           tx_hash: { type: 'string' },
           chain_id: { type: 'integer' },
           resource_url: { type: 'string', format: 'uri' },

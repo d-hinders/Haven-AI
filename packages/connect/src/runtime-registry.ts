@@ -4,6 +4,7 @@ export type RuntimeId =
   | 'codex-cli'
   | 'cursor'
   | 'vscode'
+  | 'vscode-insiders'
   | 'claude-desktop'
   | 'other'
 
@@ -47,6 +48,12 @@ const RUNTIME_PROFILES: Record<RuntimeId, RuntimeProfile> = {
     restartMode: 'hot-reload',
     canWriteRuntimeConfig: true,
   },
+  'vscode-insiders': {
+    id: 'vscode-insiders',
+    label: 'VS Code Insiders',
+    restartMode: 'hot-reload',
+    canWriteRuntimeConfig: true,
+  },
   'claude-desktop': {
     id: 'claude-desktop',
     label: 'Claude Desktop',
@@ -81,6 +88,12 @@ const RUNTIME_ALIASES: Record<string, RuntimeId> = {
   'vs-code': 'vscode',
   'vs_code': 'vscode',
   code: 'vscode',
+  'vscode-insiders': 'vscode-insiders',
+  'vscode_insiders': 'vscode-insiders',
+  vscodeinsiders: 'vscode-insiders',
+  'vs-code-insiders': 'vscode-insiders',
+  'code-insiders': 'vscode-insiders',
+  insiders: 'vscode-insiders',
   'claude-desktop': 'claude-desktop',
   'claude_desktop': 'claude-desktop',
   claudesktop: 'claude-desktop',

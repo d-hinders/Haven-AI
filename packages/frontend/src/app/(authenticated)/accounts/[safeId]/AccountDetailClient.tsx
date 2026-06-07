@@ -624,21 +624,29 @@ export default function AccountDetailClient() {
         ) : null}
       </div>
 
-      <SendModal
-        open={sendOpen && Boolean(safeAddress)}
-        onClose={() => setSendOpen(false)}
-        safeAddress={safeAddress ?? ''}
-        safeName={safe.name}
-        safeDetails={details}
-        balances={balances}
-        onSuccess={handleSendSuccess}
-        contacts={contacts}
-        contactsError={contactsError}
-        resolveAddress={resolveAddress}
-        chainId={chainId}
-        contextLoading={detailsLoading}
-        contextError={detailsError}
-      />
+      {/*
+        Mount the modal only while open so its wallet hooks
+        (useSendTransaction / useActiveSigner / useSafeOperationGate, each
+        backing a wagmi wallet-client subscription) don't run in the
+        background on every account page view.
+      */}
+      {sendOpen && safeAddress && (
+        <SendModal
+          open
+          onClose={() => setSendOpen(false)}
+          safeAddress={safeAddress}
+          safeName={safe.name}
+          safeDetails={details}
+          balances={balances}
+          onSuccess={handleSendSuccess}
+          contacts={contacts}
+          contactsError={contactsError}
+          resolveAddress={resolveAddress}
+          chainId={chainId}
+          contextLoading={detailsLoading}
+          contextError={detailsError}
+        />
+      )}
       <ReceiveFundsModal
         open={receiveOpen}
         safe={safe}

@@ -1058,24 +1058,26 @@ export default function DashboardClient() {
         onSelect={handleActionSafeSelected}
       />
 
-      <SendModal
-        open={sendOpen && Boolean(selectedActionSafe)}
-        onClose={() => setSendOpen(false)}
-        safeAddress={selectedActionSafe?.safe_address ?? ''}
-        safeName={selectedActionSafe?.name}
-        safeDetails={selectedSafeDetails}
-        balances={selectedSafeBalances}
-        onSuccess={() => {
-          refreshDashboardData()
-          setSendOpen(false)
-        }}
-        contacts={contacts}
-        contactsError={contactsError}
-        resolveAddress={resolveAddress}
-        chainId={selectedActionSafe?.chain_id ?? 100}
-        contextLoading={selectedSafeBalancesLoading || selectedSafeDetailsLoading}
-        contextError={selectedSafeBalancesError ?? selectedSafeDetailsError}
-      />
+      {sendOpen && selectedActionSafe && (
+        <SendModal
+          open
+          onClose={() => setSendOpen(false)}
+          safeAddress={selectedActionSafe.safe_address}
+          safeName={selectedActionSafe.name}
+          safeDetails={selectedSafeDetails}
+          balances={selectedSafeBalances}
+          onSuccess={() => {
+            refreshDashboardData()
+            setSendOpen(false)
+          }}
+          contacts={contacts}
+          contactsError={contactsError}
+          resolveAddress={resolveAddress}
+          chainId={selectedActionSafe.chain_id ?? 100}
+          contextLoading={selectedSafeBalancesLoading || selectedSafeDetailsLoading}
+          contextError={selectedSafeBalancesError ?? selectedSafeDetailsError}
+        />
+      )}
 
       <ReceiveFundsModal
         open={receiveOpen}

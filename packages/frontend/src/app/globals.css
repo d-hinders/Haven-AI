@@ -147,9 +147,16 @@
 }
 
 .v2-modal-backdrop {
+  /*
+   * Solid dark overlay only — no backdrop-filter. A full-viewport
+   * `backdrop-filter: blur()` forces the compositor to keep a GPU-backed
+   * snapshot of the entire page behind the modal and re-blur it on every
+   * paint (background polling, spinners, etc.). On tall pages like the
+   * account detail view (balance card + agent list + full transactions
+   * table) that ballooned VRAM and made the modal feel sluggish. The dark
+   * overlay alone gives the same focus effect at a fraction of the cost.
+   */
   background: var(--v2-modal-backdrop);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
 }
 
 @keyframes v2FlowForward {

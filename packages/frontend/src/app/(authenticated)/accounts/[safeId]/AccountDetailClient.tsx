@@ -33,7 +33,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
-import { getExplorerUrl, getChainConfig } from '@/lib/chains'
+import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
@@ -126,7 +126,7 @@ export default function AccountDetailClient() {
   // Find this Safe from user's list
   const safe = user?.safes?.find((s) => s.id === safeId)
   const safeAddress = safe?.safe_address ?? null
-  const chainId = safe?.chain_id ?? 100
+  const chainId = safe?.chain_id ?? DEFAULT_CHAIN_ID
 
   // Keep the active Safe in sync with the route. Runs as an effect so we
   // never call setState during render.

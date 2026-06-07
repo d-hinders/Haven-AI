@@ -19,7 +19,7 @@ import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
 } from '@/hooks/useAgentConnectionSetupStatus'
-import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { truncate } from '@/lib/format'
 import { validateMoneyInput } from '@/lib/money-input'
@@ -177,7 +177,7 @@ export default function ConnectAgent2Modal({
   const selectedSafe = userSafes.find((safe) => safe.id === selectedSafeId) ?? null
   const safeAddress = selectedSafe?.safe_address ?? propSafeAddress ?? ''
   const safeId = selectedSafe?.id ?? propSafeId ?? null
-  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? 100
+  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
   const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
   const walletNetworkName = getChainConfig(chainId).name
   const walletDisplayAddress = safeAddress || selectedSafe?.safe_address

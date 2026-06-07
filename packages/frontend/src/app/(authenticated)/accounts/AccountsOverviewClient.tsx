@@ -175,7 +175,7 @@ function AddSafeModal({
                 </div>
                 <div className="flex-1 min-w-0">
                   <span className="block text-sm font-medium text-[var(--v2-ink)] transition-colors">Create Haven account</span>
-                  <span className="block text-xs text-[var(--v2-ink-3)] mt-0.5">Create a new account on Gnosis Chain or Base</span>
+                  <span className="block text-xs text-[var(--v2-ink-3)] mt-0.5">Create a new account on Base</span>
                 </div>
                 <svg className="w-4 h-4 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -503,7 +503,7 @@ function SafeCard({
       {/* Caption — network + age. Replaces the raw 0x address that was too
           technical for an at-a-glance overview. */}
       <div className="mb-5 flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
-        <NetworkPill chainId={safe.chain_id ?? 100} />
+        <NetworkPill chainId={safe.chain_id ?? DEFAULT_CHAIN_ID} />
         <span aria-hidden="true">{'·'}</span>
         <span>Added {timeAgo(safe.created_at)}</span>
       </div>

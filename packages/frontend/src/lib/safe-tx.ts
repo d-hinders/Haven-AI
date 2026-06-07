@@ -9,7 +9,7 @@ import {
   type Hash,
   type PublicClient,
 } from 'viem'
-import { getChainConfig } from './chains'
+import { getChainConfig, DEFAULT_CHAIN_ID } from './chains'
 import { api } from './api'
 import { signSafeHashWithPasskey } from './passkey-sign'
 import type { HavenUserSigner } from './signer'
@@ -199,7 +199,7 @@ export function buildSafeTx(
 export function getSafeTxHash(
   safeAddress: Address,
   tx: SafeTxParams,
-  chainId: number = 100,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): `0x${string}` {
   return hashTypedData({
     domain: {
@@ -228,7 +228,7 @@ export async function signSafeTx(
   signer: HavenUserSigner,
   safeAddress: Address,
   tx: SafeTxParams,
-  chainId: number = 100,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<`0x${string}`> {
   if (signer.type === 'eoa') {
     return signer.walletClient.signTypedData({
@@ -296,7 +296,7 @@ export async function executeSafeTx(
   safeAddress: Address,
   tx: SafeTxParams,
   signature: `0x${string}`,
-  chainId: number = 100,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<{ txHash: Hash }> {
   if (signer.type === 'eoa') {
     const adjustedSig = normaliseSignatureV(signature)
@@ -409,7 +409,7 @@ export async function proposeSafeTx(
   safeTxHash: string,
   signature: `0x${string}`,
   sender: Address,
-  chainId: number = 100,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<void> {
   const adjustedSig = normaliseSignatureV(signature)
   const { safeTxServiceUrl } = getChainConfig(chainId)

@@ -12,7 +12,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { validateMoneyInput } from '@/lib/money-input'
 import OnchainActionGate from './OnchainActionGate'
 import { getChainTokens } from '@/lib/safe-tx'
@@ -125,7 +125,7 @@ export default function CreateAgentModal({
     userSafes.find((s) => s.id === selectedSafeId) ?? null
   const safeAddress = selectedSafe?.safe_address ?? propSafeAddress ?? ''
   const safeId = selectedSafe?.id ?? propSafeId ?? null
-  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? 100
+  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
 
   // Self-fetch Safe details from the selected Safe so the modal owns its
   // execution context — caller doesn't need to refetch when the user picks a
@@ -1059,7 +1059,7 @@ export default function CreateAgentModal({
                     </p>
                     {!backendSaveFailed && execError?.includes('not yet confirmed after 2 minutes') && txHash && (
                       <a
-                        href={`${getChainConfig(chainId ?? 100).explorerUrl}/tx/${txHash}`}
+                        href={`${getChainConfig(chainId ?? DEFAULT_CHAIN_ID).explorerUrl}/tx/${txHash}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-2 inline-block text-xs text-[var(--v2-brand)] underline underline-offset-2"

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Address, parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { usePublicClient } from 'wagmi'
+import { useAccount, usePublicClient, useSwitchChain } from 'wagmi'
 import {
   ALLOWANCE_MODULE_ADDRESS,
   RESET_PERIODS,
@@ -196,6 +196,18 @@ export default function ConnectAgent2Modal({
     safeAddress: approvalSafeAddress ? (approvalSafeAddress as Address) : undefined,
     chainId: approvalChainId,
   })
+
+  // Detect when a wallet IS connected but to the wrong chain for this approval.
+  // In that case `useWalletClient({ chainId: approvalChainId })` returns null, so
+  // useSafeOperationGate falls through to `no_signer` — but the real problem is
+  // just a network mismatch, not an absent wallet.
+  const { address: walletAddress, chain: walletChain } = useAccount()
+  const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
+  const isWrongChain = Boolean(
+    walletAddress && walletChain && walletChain.id !== approvalChainId && !signer,
+  )
+  let approvalChainName = 'the required network'
+  try { approvalChainName = getChainConfig(approvalChainId).name } catch { /* keep default */ }
 
   const chainTokens = useMemo(() => getChainTokens(chainId), [chainId])
   const tokenOptions = useMemo(
@@ -814,6 +826,10 @@ export default function ConnectAgent2Modal({
                   approvalError={approvalError}
                   onApprove={handleApproveAgentRules}
                   onCancel={handleCancelSetup}
+                  isWrongChain={isWrongChain}
+                  approvalChainName={approvalChainName}
+                  onSwitchChain={() => switchChain({ chainId: approvalChainId })}
+                  isSwitchingChain={isSwitchingChain}
                 />
               )}
 
@@ -1087,6 +1103,10 @@ function LocalConnectionReady({
   approvalError,
   onApprove,
   onCancel,
+  isWrongChain,
+  approvalChainName,
+  onSwitchChain,
+  isSwitchingChain,
 }: {
   status: AgentConnectionSetupStatusResponse | null
   fallbackSetup: CreateSetupResponse
@@ -1102,6 +1122,14 @@ function LocalConnectionReady({
   approvalError: string | null
   onApprove: () => void
   onCancel: () => void
+  /** True when a wallet is connected but to the wrong chain for this approval */
+  isWrongChain: boolean
+  /** Human-readable name of the chain the approval requires */
+  approvalChainName: string
+  /** Switch the connected wallet to the approval chain */
+  onSwitchChain: () => void
+  /** True while a chain-switch is in flight */
+  isSwitchingChain: boolean
 }) {
   const install = status?.install_status
   const runtimeReadyAfterRestart = Boolean(
@@ -1123,6 +1151,8 @@ function LocalConnectionReady({
     status,
     publicClientReady,
     signerReady,
+    isWrongChain,
+    approvalChainName,
   )
 
   return (
@@ -1188,7 +1218,20 @@ function LocalConnectionReady({
         <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
           <p className="text-sm font-semibold text-[var(--v2-ink)]">Wallet approval unavailable</p>
           <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">{approvalBlocked}</p>
-          {operationGate.kind === 'no_signer' && (
+          {operationGate.kind === 'no_signer' && isWrongChain && (
+            // Wallet is connected but on the wrong chain — offer a one-click switch.
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onSwitchChain}
+              disabled={isSwitchingChain}
+              className="mt-3 w-full"
+            >
+              {isSwitchingChain ? 'Switching network…' : `Switch to ${approvalChainName}`}
+            </Button>
+          )}
+          {operationGate.kind === 'no_signer' && !isWrongChain && (
+            // No wallet at all — show the connect button.
             <div className="mt-3">
               <WalletButton />
             </div>
@@ -1389,12 +1432,18 @@ function approvalBlockReason(
   status: AgentConnectionSetupStatusResponse | null,
   publicClientReady: boolean,
   signerReady: boolean,
+  wrongChain = false,
+  approvalChainName = 'the required network',
 ): string | null {
   if (!status) return 'Haven is still loading local connection details.'
   if (!status.delegate_address) return 'Haven is waiting for the public signing address from the local connection.'
   if (safeDetailsLoading) return 'Haven is still loading wallet approval details.'
   if (!publicClientReady) return 'Haven is still connecting to the wallet network.'
   if (gate.kind === 'passkey_on_other_device') return 'Use the device with this Haven wallet passkey to approve agent rules.'
+  // Wallet is connected but to the wrong chain — network mismatch, not a missing wallet.
+  if (gate.kind === 'no_signer' && wrongChain) {
+    return `Your wallet is connected to the wrong network. Switch to ${approvalChainName} to approve agent rules.`
+  }
   if (gate.kind === 'no_signer') return 'Connect a wallet or use a passkey on this device to approve agent rules.'
   if (!signerReady) return 'Connect a wallet or use a passkey on this device to approve agent rules.'
   return null

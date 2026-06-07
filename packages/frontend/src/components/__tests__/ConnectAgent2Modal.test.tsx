@@ -67,6 +67,10 @@ const {
 
 vi.mock('wagmi', () => ({
   usePublicClient: (args: unknown) => mockUsePublicClient(args),
+  // Not connected by default — avoids wrong-chain detection in tests that
+  // don't explicitly set up a wallet connection.
+  useAccount: () => ({ address: undefined, chain: undefined }),
+  useSwitchChain: () => ({ switchChain: vi.fn(), isPending: false }),
 }))
 
 vi.mock('@/context/AuthContext', () => ({

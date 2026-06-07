@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -45,8 +46,18 @@ export function OwnerDirectoryProvider({ children }: { children: ReactNode }) {
   const [partialFailure, setPartialFailure] = useState(false)
   const [failedSafeIds, setFailedSafeIds] = useState<string[]>([])
 
+  // Ref keeps refreshOwners stable across user-object reference changes.
+  // Without this, any refreshUser() call (even when safe IDs are unchanged)
+  // would recreate refreshOwners and trigger an extra /user/owners API call.
+  const userRef = useRef(user)
+  userRef.current = user
+
+  // Generation counter prevents a slow response from an earlier call from
+  // overwriting state written by a more-recent call.
+  const genRef = useRef(0)
+
   const refreshOwners = useCallback(async () => {
-    if (!user) {
+    if (!userRef.current) {
       setOwners([])
       setError(null)
       setPartialFailure(false)
@@ -54,33 +65,35 @@ export function OwnerDirectoryProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    const gen = ++genRef.current
+
     try {
       setLoading(true)
       setError(null)
       const response = await api.get<OwnersResponse>('/user/owners')
+      if (genRef.current !== gen) return
       setOwners(response.owners)
       setPartialFailure(response.partialFailure)
       setFailedSafeIds(response.failedSafeIds)
     } catch (err) {
+      if (genRef.current !== gen) return
       setError(err instanceof Error ? err.message : 'Could not load account owners')
       setOwners([])
       setPartialFailure(false)
       setFailedSafeIds([])
     } finally {
-      setLoading(false)
+      if (genRef.current === gen) setLoading(false)
     }
-  }, [user])
+  }, []) // stable — reads user via ref, not as a closure dep
 
-  // Use a stable string key derived from safe IDs rather than the `safes`
-  // array reference itself. `setUser(newUserObj)` always creates a new array
-  // reference even when the safes are unchanged, which would trigger an extra
-  // `refreshOwners` call on every `refreshUser` invocation.
+  // Refresh only when the set of safe IDs actually changes. refreshOwners is
+  // stable (empty dep array), so this effect only re-fires on safeKey changes
+  // and on mount — not on every refreshUser() call that creates a new user object.
   const safeKey = user?.safes?.map((s) => s.id).join(',') ?? ''
 
   useEffect(() => {
     void refreshOwners()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshOwners, safeKey])
+  }, [safeKey, refreshOwners])
 
   const ownerByAddress = useMemo(() => {
     const map = new Map<string, OwnerAlias>()

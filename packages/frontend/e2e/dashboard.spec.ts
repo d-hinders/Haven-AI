@@ -32,7 +32,7 @@ test.describe('dashboard browser UX', () => {
     const modal = page.getByRole('dialog', { name: 'Receive funds' })
     await expect(modal).toBeVisible()
     await expect(modal.getByText('Operations')).toBeVisible()
-    await expect(modal.getByText('Gnosis Chain', { exact: true })).toBeVisible()
+    await expect(modal.getByText('Base', { exact: true })).toBeVisible()
     await expect(modal.getByText(testSafeAddress)).toBeVisible()
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])

@@ -55,8 +55,10 @@ test.describe('Hosted MCP — in-budget path', () => {
     // At least one agent is shown (the mocked "Research agent")
     await expect(page.getByText('Research agent')).toBeVisible()
 
-    // The agent's allowance is shown
-    await expect(page.getByText(/USDC/)).toBeVisible()
+    // The agent's allowance is shown. The allowance row renders the symbol
+    // twice (token chip + formatted amount), so pin to the first match —
+    // same pattern as the connected-state test below.
+    await expect(page.getByText(/USDC/).first()).toBeVisible()
 
     // Primary CTA is present — clicking it opens the CreateAgentModal
     await expect(page.getByRole('button', { name: 'Connect agent', exact: true })).toBeVisible()

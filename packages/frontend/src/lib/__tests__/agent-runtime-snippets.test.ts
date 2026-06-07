@@ -39,6 +39,7 @@ describe('buildRuntimeSnippets — inline mode', () => {
       'python',
       'sdk-cli',
       'vscode',
+      'vscode-insiders',
       'windsurf',
     ])
   })

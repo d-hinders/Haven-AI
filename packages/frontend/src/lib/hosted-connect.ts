@@ -27,6 +27,7 @@ export type HostedClientId =
   | 'claude-desktop'
   | 'cursor'
   | 'vscode'
+  | 'vscode-insiders'
   | 'windsurf'
   | 'continue'
   | 'cline'
@@ -76,6 +77,7 @@ export const HOSTED_CLIENT_REGISTRY: HostedClientOption[] = [
   // ── Editors ─────────────────────────────────────────────────────────────
   { id: 'cursor', label: 'Cursor', tagline: 'MCP settings', group: 'editor', oneClick: true },
   { id: 'vscode', label: 'VS Code', tagline: 'Copilot · MCP', group: 'editor', oneClick: true },
+  { id: 'vscode-insiders', label: 'VS Code Insiders', tagline: 'Copilot · MCP', group: 'editor', oneClick: true },
   { id: 'windsurf', label: 'Windsurf', tagline: 'Cascade · MCP', group: 'editor' },
   { id: 'continue', label: 'Continue.dev', tagline: 'config.yaml', group: 'editor' },
   { id: 'cline', label: 'Cline', tagline: 'VS Code extension', group: 'editor' },
@@ -214,6 +216,32 @@ export function buildHostedConnectSnippet(
         ],
         postNote:
           'VS Code restarts the MCP server on config save — no window reload needed.',
+      }
+
+    // ── VS Code Insiders (same JSON format, Insiders-specific paths) ───────
+    case 'vscode-insiders':
+      return {
+        client,
+        language: 'json',
+        guidance:
+          'Save this where VS Code Insiders reads MCP servers. Workspace is recommended; user-scope is in the Command Palette → "MCP: Open User Configuration".',
+        code: JSON.stringify(
+          {
+            servers: {
+              haven: { type: 'http', url: hostedUrl, headers: authHeader },
+            },
+          },
+          null,
+          2,
+        ),
+        destinationPaths: [
+          { label: 'Workspace', path: '.vscode/mcp.json' },
+          { label: 'User · macOS', path: '~/Library/Application Support/Code - Insiders/User/mcp.json' },
+          { label: 'User · Windows', path: '%APPDATA%\\Code - Insiders\\User\\mcp.json' },
+          { label: 'User · Linux', path: '~/.config/Code - Insiders/User/mcp.json' },
+        ],
+        postNote:
+          'VS Code Insiders restarts the MCP server on config save — no window reload needed.',
       }
 
     // ── Windsurf ──────────────────────────────────────────────────────────
@@ -423,7 +451,7 @@ export function buildHostedConnectSnippet(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Runtimes that have a verified, working deep-link install scheme. */
-type DeepLinkClient = 'cursor' | 'vscode'
+type DeepLinkClient = 'cursor' | 'vscode' | 'vscode-insiders'
 
 /**
  * Build a one-click install deep link.
@@ -447,15 +475,17 @@ export function buildDeepLink(
 ): string {
   const token = credential.api_key
 
-  if (client === 'vscode') {
-    // VS Code expects a URL-encoded JSON object describing the server.
+  if (client === 'vscode' || client === 'vscode-insiders') {
+    // VS Code and VS Code Insiders expect a URL-encoded JSON object.
+    // The scheme differs: `vscode:` vs `vscode-insiders:`.
     const payload = JSON.stringify({
       name: 'haven',
       type: 'http',
       url: hostedUrl,
       headers: { Authorization: `Bearer ${token}` },
     })
-    return `vscode:mcp/install?${encodeURIComponent(payload)}`
+    const scheme = client === 'vscode-insiders' ? 'vscode-insiders' : 'vscode'
+    return `${scheme}:mcp/install?${encodeURIComponent(payload)}`
   }
 
   // Cursor — base64-encoded headers blob.
@@ -479,6 +509,7 @@ export function buildDeepLink(
 export const DEEP_LINK_LABEL: Record<DeepLinkClient, string> = {
   cursor: 'Add to Cursor',
   vscode: 'Add to VS Code',
+  'vscode-insiders': 'Add to VS Code Insiders',
 }
 
 /**
@@ -486,7 +517,7 @@ export const DEEP_LINK_LABEL: Record<DeepLinkClient, string> = {
  * registry's `oneClick` flag so it stays in sync with the tile chip.
  */
 export function hasDeepLink(client: HostedClientId): client is DeepLinkClient {
-  return client === 'cursor' || client === 'vscode'
+  return client === 'cursor' || client === 'vscode' || client === 'vscode-insiders'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -117,6 +117,7 @@ const RUNTIME_OPTIONS = [
   { id: 'codex-desktop', label: 'Codex Desktop' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'vscode', label: 'VS Code' },
+  { id: 'vscode-insiders', label: 'VS Code Insiders' },
   { id: 'claude-desktop', label: 'Claude Desktop' },
   { id: 'other', label: 'Other agent' },
 ]

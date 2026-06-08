@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/signer",
-  "version": "0.1.2-alpha",
+  "version": "0.1.3-alpha",
   "description": "Haven edge signer — holds the delegate key locally and signs payment hashes + x402 headers. Pairs with the hosted, keyless @haven_ai/mcp-server.",
   "type": "module",
   "bin": {

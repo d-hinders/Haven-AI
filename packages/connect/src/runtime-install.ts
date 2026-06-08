@@ -262,7 +262,7 @@ async function configureClaudeCode(
       messages: [
         'Updated local Haven MCP entry with Claude Code.',
         ...(verified ? ['Verified Claude Code MCP entry.'] : []),
-        'After Haven approval, restart Claude Code normally so it can load Haven tools.',
+        'After Haven approval, Haven tools should appear in your next Claude Code message. If they don\'t, restart the session to load them.',
       ],
     }
   } catch (err) {

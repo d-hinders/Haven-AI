@@ -30,7 +30,7 @@ A reviewer can:
 - **New file:** `packages/backend/src/lib/passkey-signer.ts` — backend port of the frontend's CREATE2 prediction, plus the v0.2.1 proxy creation code constant.
 - **New file:** `packages/backend/src/routes/passkeys.ts` — `POST /passkeys`, `GET /passkeys`.
 - **New file:** `packages/backend/src/routes/safe-deploy.ts` — `POST /safe/deploy` (relayer-submitted Safe deployment for passkey users).
-- **New file:** `packages/backend/src/lib/relayer.ts` — minimal per-chain relayer wrapper around the existing `RELAYER_PRIVATE_KEY` (factor any inline relayer code that already exists in `routes/payments.ts` or `routes/self-sign-payments.ts` only if it's a clean cut — otherwise just write a fresh wrapper).
+- **New file:** `packages/backend/src/lib/relayer.ts` — minimal per-chain relayer wrapper around the existing `RELAYER_PRIVATE_KEY` (factor any inline relayer code that already exists in `routes/payments.ts` only if it's a clean cut — otherwise just write a fresh wrapper).
 - **Modify:** `packages/backend/src/lib/chains.ts` — add a `passkey: { verifier: string }` block to each `ChainConfig`, mirroring what was done in the frontend.
 - **Modify:** `packages/backend/src/db/migrations/index.ts` — register the new migration.
 - **Modify:** `packages/backend/src/index.ts` — register the two new route modules with prefixes `/passkeys` and `/safe`.
@@ -166,7 +166,7 @@ Implementation notes:
   ```
   that logs a warning via `app.log.warn(...)` (or `console.warn` if you don't want to thread the Fastify logger). Don't throw — low balance is operational, not a request-level error. Default `minBalanceWei` to `parseEther('0.01')` for now.
 
-If `routes/payments.ts` or `routes/self-sign-payments.ts` already constructs a relayer wallet inline, **leave them alone**. Refactoring shared relayer infrastructure into one module is out of scope for this PR; the duplication can be cleaned up later in a dedicated chore.
+If `routes/payments.ts` already constructs a relayer wallet inline, **leave it alone**. Refactoring shared relayer infrastructure into one module is out of scope for this PR; the duplication can be cleaned up later in a dedicated chore.
 
 ## Routes — `packages/backend/src/routes/passkeys.ts`
 
@@ -345,7 +345,7 @@ You don't need to spin up a real chain for these — mocking `ethers.Contract` c
 If during implementation you find yourself wanting to:
 
 - Verify the WebAuthn attestation cryptographically — **don't, for this PR.** Document the trust model in a code comment and move on.
-- Refactor the existing relayer code in `routes/payments.ts` / `routes/self-sign-payments.ts` — **don't.** Copy what you need into `lib/relayer.ts`; cleanup later.
+- Refactor the existing relayer code in `routes/payments.ts` — **don't.** Copy what you need into `lib/relayer.ts`; cleanup later.
 - Add the deployed Safe to `user_safes` automatically — **don't.** The frontend will call `POST /user/safes` separately.
 - Support multiple passkeys per user per chain (device list) — **don't.** Post-MVP, would require schema changes.
 - Add 4337 / UserOp deployment as an alternative — **don't.** The parent plan explicitly chose Option A (relayer); revisiting that is a separate design discussion.

@@ -49,7 +49,7 @@ Last updated: 2026-06-06
 - x402/generic machine-payment consolidation: defer because it crosses idempotency, approval-state, expected-context binding, and multi-entrypoint behavior.
 - Broader payment state rewrite, DB migrations, custody/signing semantics, Safe ownership assumptions, production chain/token config, and protocol compatibility changes need separate review.
 - Broader x402/payment-history consolidation remains deferred.
-- Broader self-sign onboarding, budget UI, and allowance-state rewrites remain deferred.
+- The self-sign agent track was removed (routes, middleware, and the unused frontend hook); the historical `001_self_sign_agents` / `002_self_sign_payment_intents` migrations are kept so the migration chain stays intact, but the tables are now unused.
 - Automated merchant retry, sweep, and operational reconciliation jobs remain deferred.
 
 ## Known Baseline Notes

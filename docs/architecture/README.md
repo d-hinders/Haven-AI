@@ -36,8 +36,8 @@ done
 - Current code supports **Gnosis Chain (id 100)** and **Base (id 8453)** for
   Haven wallet/Safe flows where configured. Standard merchant x402 demos focus
   on Base USDC.
-- **API-key agents only.** A self-sign (EIP-191) agent path also exists in
-  the code but is intentionally excluded from these diagrams.
+- **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
+  removed — it is no longer part of the codebase.)
 - Diagrams reflect what the code does, not the aspirational model in
   [CLAUDE.md](../../CLAUDE.md). Where they diverge (e.g. Safe ownership is not
   on-chain-verified at import; the delegate EOA is user-supplied, not

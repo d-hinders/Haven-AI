@@ -7,7 +7,7 @@ import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
 import { useActiveSigner } from '@/lib/signer'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainTokens, type SendParams } from '@/lib/safe-tx'
-import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { truncate, isValidAddress } from '@/lib/format'
 import { exceedsRawBalance, validateMoneyInput } from '@/lib/money-input'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
@@ -144,7 +144,7 @@ export default function SendModal({
   contacts = [],
   contactsError = null,
   resolveAddress,
-  chainId = 100,
+  chainId = DEFAULT_CHAIN_ID,
   safeOptions = [],
   selectedSafeOptionId,
   onSelectSafeOption,

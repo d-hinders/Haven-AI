@@ -13,6 +13,7 @@ import {
   type AllowanceInfo,
 } from '@/lib/allowance-module'
 import { getChainTokens } from '@/lib/safe-tx'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import CreateAgentModal from './CreateAgentModal'
 import ConnectAgent2Modal from './ConnectAgent2Modal'
 import EditAgentModal from './EditAgentModal'
@@ -115,7 +116,7 @@ function BotIcon({ size = 15 }: { size?: number }) {
 function AllowanceBar({
   info,
   loading,
-  chainId = 100,
+  chainId = DEFAULT_CHAIN_ID,
 }: {
   info: AllowanceInfo
   loading?: boolean
@@ -257,7 +258,7 @@ function AgentCard({
   onDelete,
   busyAction,
   canUseWalletActions,
-  chainId = 100,
+  chainId = DEFAULT_CHAIN_ID,
 }: {
   agent: Agent
   onChainAllowances: AllowanceInfo[] | null
@@ -593,7 +594,7 @@ function AgentCard({
 function UnmanagedDelegateCard({
   delegate,
   allowances,
-  chainId = 100,
+  chainId = DEFAULT_CHAIN_ID,
 }: {
   delegate: string
   allowances: AllowanceInfo[]
@@ -663,7 +664,7 @@ function UnmanagedDelegateCard({
 export default function AgentPanel() {
   const { activeSafe } = useAuth()
   const safeAddress = activeSafe?.safe_address ?? null
-  const chainId = activeSafe?.chain_id ?? 100
+  const chainId = activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
   const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const {
     agents,
@@ -759,7 +760,7 @@ export default function AgentPanel() {
     }
 
     if (agent.safe_address) {
-      const agentChainId = agent.safe_chain_id ?? 100
+      const agentChainId = agent.safe_chain_id ?? DEFAULT_CHAIN_ID
       return Boolean(
         safeAddress &&
           agent.safe_address.toLowerCase() === safeAddress.toLowerCase() &&

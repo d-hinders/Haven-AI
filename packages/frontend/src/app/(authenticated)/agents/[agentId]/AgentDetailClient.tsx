@@ -17,7 +17,7 @@ import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { formatAllowanceAmount } from '@/lib/allowance-format'
-import { getChainConfig } from '@/lib/chains'
+import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
 import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
@@ -248,7 +248,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     [agent?.safe_id, user?.safes],
   )
   const safeAddress = safe?.safe_address ?? agent?.safe_address ?? null
-  const chainId = safe?.chain_id ?? agent?.safe_chain_id ?? 100
+  const chainId = safe?.chain_id ?? agent?.safe_chain_id ?? DEFAULT_CHAIN_ID
   const chainConfig = useMemo(() => {
     try {
       return getChainConfig(chainId)

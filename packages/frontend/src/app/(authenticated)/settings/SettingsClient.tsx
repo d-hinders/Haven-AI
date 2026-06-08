@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { type OwnerAlias } from '@/lib/api'
-import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -192,7 +192,7 @@ function OwnerRow({
             )}
             <StatusPill tone={type === 'Wallet' ? 'neutral' : 'brand'}>{type}</StatusPill>
             {!editing && owner.accounts.map((account) => {
-              const chain = getChainConfig(account.chain_id ?? 100)
+              const chain = getChainConfig(account.chain_id ?? DEFAULT_CHAIN_ID)
               return (
                 <span
                   key={`${account.id}-${owner.owner_address}`}
@@ -211,7 +211,7 @@ function OwnerRow({
             ) : null}
             <CopyAddressButton address={owner.owner_address} />
             <a
-              href={getExplorerUrl(owner.accounts[0]?.chain_id ?? 100, 'address', owner.owner_address)}
+              href={getExplorerUrl(owner.accounts[0]?.chain_id ?? DEFAULT_CHAIN_ID, 'address', owner.owner_address)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"

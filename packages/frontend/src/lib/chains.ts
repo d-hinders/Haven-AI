@@ -95,13 +95,30 @@ const BASE_CONFIG: FrontendChainConfig = {
 
 // ── Registry ──────────────────────────────────────────────────────
 
+/**
+ * Full registry of every chain Haven *knows about*. `getChainConfig` reads
+ * from here, so data created on any of these chains (e.g. a Safe a user
+ * imported on Gnosis before we went Base-only) still renders without
+ * crashing.
+ */
 const CHAINS: Record<number, FrontendChainConfig> = {
   100: GNOSIS_CONFIG,
   8453: BASE_CONFIG,
 }
 
-export const SUPPORTED_CHAINS = Object.values(CHAINS)
-export const SUPPORTED_CHAIN_IDS = Object.keys(CHAINS).map(Number)
+/**
+ * Chains currently *offered to users* — network pickers, wallet
+ * network-validation, and the wagmi connector list all derive from this.
+ *
+ * TEMPORARY: Base-only. Multichain is the long-term goal, but offering
+ * multiple chains today confuses the single-account-flow UX. To re-enable
+ * Gnosis (or add another chain) put its ID back in this list — the per-chain
+ * config above is already in place, so that's the only change needed here.
+ */
+const ENABLED_CHAIN_IDS: number[] = [BASE_CONFIG.chainId]
+
+export const SUPPORTED_CHAINS = ENABLED_CHAIN_IDS.map((id) => CHAINS[id])
+export const SUPPORTED_CHAIN_IDS = ENABLED_CHAIN_IDS
 export const DEFAULT_CHAIN_ID = BASE_CONFIG.chainId
 
 export function getChainConfig(chainId: number): FrontendChainConfig {

@@ -17,6 +17,7 @@ import { RESET_PERIODS } from '@/lib/allowance-module'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { displayName } from '@/lib/user'
@@ -1073,7 +1074,7 @@ export default function DashboardClient() {
           contacts={contacts}
           contactsError={contactsError}
           resolveAddress={resolveAddress}
-          chainId={selectedActionSafe.chain_id ?? 100}
+          chainId={selectedActionSafe.chain_id ?? DEFAULT_CHAIN_ID}
           contextLoading={selectedSafeBalancesLoading || selectedSafeDetailsLoading}
           contextError={selectedSafeBalancesError ?? selectedSafeDetailsError}
         />

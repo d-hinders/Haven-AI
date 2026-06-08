@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import {
   getDelegates,
   getAllAllowances,
@@ -42,7 +43,7 @@ interface UseOnChainAllowancesResult {
 export function useOnChainAllowances(
   safeAddress: string | null,
   managedDelegates: string[],
-  chainId: number = 100,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): UseOnChainAllowancesResult {
   const publicClient = usePublicClient({ chainId })
 

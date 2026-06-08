@@ -697,6 +697,46 @@ export default function AgentPanel() {
       if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
     }
   }, [])
+
+  // Delegates the user just approved in-modal. The on-chain allowance lands a
+  // moment before the backend status flips `pending_approval` → `active` and
+  // the `/agents` GET filter starts returning the agent. During that window
+  // the agent's delegate is on-chain but absent from `agents`, so the
+  // unmanagedDelegates classifier would tag it as "Unmanaged Delegate /
+  // network only" until the next refresh. We suppress the classification
+  // for up to 30s (or until `agents` catches up).
+  const [recentDelegates, setRecentDelegates] = useState<Set<string>>(new Set())
+  const recentDelegateTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  useEffect(() => {
+    const timers = recentDelegateTimersRef.current
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer))
+      timers.clear()
+    }
+  }, [])
+  const markDelegateRecent = useCallback((address: string | null | undefined) => {
+    if (!address) return
+    const key = address.toLowerCase()
+    setRecentDelegates((prev) => {
+      if (prev.has(key)) return prev
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
+    const timers = recentDelegateTimersRef.current
+    const existing = timers.get(key)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      timers.delete(key)
+      setRecentDelegates((prev) => {
+        if (!prev.has(key)) return prev
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    }, 30_000)
+    timers.set(key, timer)
+  }, [])
   const showConnectAgent2 = connectAgent2Enabled()
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
@@ -747,17 +787,47 @@ export default function AgentPanel() {
     refetch: refetchOnChain,
   } = useOnChainAllowances(safeAddress, managedDelegates, chainId)
 
-  // Find delegates that exist on-chain but not in Haven DB
+  // Find delegates that exist on-chain but not in Haven DB. `recentDelegates`
+  // suppresses the brief flicker right after a Connect-agent approval lands
+  // on-chain: the delegate is visible on-chain ~immediately, but the
+  // `/agents` GET still filters out `pending_approval` agents until the
+  // backend records the wallet approval. Without suppression, the new agent
+  // shows up as "Unmanaged Delegate / network only" until the next refresh.
   const unmanagedDelegates = useMemo(() => {
     const managedSet = new Set(managedDelegates.map((a) => a.toLowerCase()))
     return onChainDelegates
       .filter((d) => !managedSet.has(d.toLowerCase()))
+      .filter((d) => !recentDelegates.has(d.toLowerCase()))
       .map((d) => ({
         address: d,
         allowances: onChainData.get(d.toLowerCase())?.allowances ?? [],
       }))
       .filter((d) => d.allowances.length > 0) // only show if they have allowances
-  }, [onChainDelegates, managedDelegates, onChainData])
+  }, [onChainDelegates, managedDelegates, onChainData, recentDelegates])
+
+  // Drop the suppression early once the agents list catches up — keeps the
+  // 30s timer as a fallback for slow backends but cleans up immediately
+  // when the agent flips to `active` and reappears in `/agents`.
+  useEffect(() => {
+    if (recentDelegates.size === 0) return
+    const managed = new Set(managedDelegates.map((a) => a.toLowerCase()))
+    const matched: string[] = []
+    recentDelegates.forEach((addr) => {
+      if (managed.has(addr)) matched.push(addr)
+    })
+    if (matched.length === 0) return
+    const timers = recentDelegateTimersRef.current
+    matched.forEach((addr) => {
+      const timer = timers.get(addr)
+      if (timer) clearTimeout(timer)
+      timers.delete(addr)
+    })
+    setRecentDelegates((prev) => {
+      const next = new Set(prev)
+      matched.forEach((addr) => next.delete(addr))
+      return next
+    })
+  }, [managedDelegates, recentDelegates])
 
   function handleEdit(agent: Agent) {
     if (!agentUsesActiveSafe(agent)) {
@@ -1081,7 +1151,12 @@ export default function AgentPanel() {
           onClose={() => setConnect2Open(false)}
           safeAddress={safeAddress}
           safeId={activeSafe?.id}
-          onSetupUpdated={refetch}
+          onSetupUpdated={(info) => {
+            // Suppress the brief "Unmanaged Delegate" race window before
+            // refreshing — see comment on `unmanagedDelegates`.
+            markDelegateRecent(info?.delegateAddress)
+            refetch()
+          }}
         />
       )}
 

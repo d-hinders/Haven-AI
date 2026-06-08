@@ -236,3 +236,91 @@ describe('AgentPanel last-activity metadata', () => {
     expect(screen.queryByTestId('edit-agent-modal')).not.toBeInTheDocument()
   })
 })
+
+describe('AgentPanel unmanaged-delegate suppression', () => {
+  const NEW_DELEGATE = '0x9999999999999999999999999999999999999999'
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
+    vi.resetModules()
+    mockUseAuth.mockReturnValue({ activeSafe: SAFE })
+    // No DB agents yet — mirrors the race window after wallet approval has
+    // landed on-chain but before the backend flips the agent from
+    // `pending_approval` → `active`.
+    mockUseAgents.mockReturnValue({
+      agents: [],
+      loading: false,
+      revokeAgent: vi.fn(),
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    mockUseSafeDetails.mockReturnValue({ details: null })
+    mockUsePublicClient.mockReturnValue({})
+    mockUseActiveSigner.mockReturnValue(null)
+    // The delegate IS on-chain (its allowance just landed). Without the
+    // suppression, AgentPanel would tag it as "Unmanaged Delegate / network
+    // only" because it's not in `managedDelegates`.
+    mockUseOnChainAllowances.mockReturnValue({
+      data: new Map([
+        [NEW_DELEGATE.toLowerCase(), {
+          // Shape matches AllowanceInfo in lib/allowance-module.ts so the
+          // UnmanagedDelegateCard's <AllowanceBar> renders without crashing
+          // — `token` is the address, `amount` and `spent` are bigints.
+          allowances: [{
+            token: '0xddAfbb505ad214D7b80b1f830fcCc89B60fb7A83', // Gnosis USDC.e
+            amount: 1_000_000n,
+            spent: 0n,
+            resetTimeMin: 1440,
+            lastResetMin: 0,
+            nonce: 0,
+          }],
+        }],
+      ]),
+      loading: false,
+      onChainDelegates: [NEW_DELEGATE],
+      refetch: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('does not classify a freshly-approved delegate as Unmanaged Delegate', async () => {
+    // Re-mock ConnectAgent2Modal to give the test a trigger for the
+    // onSetupUpdated callback — the real modal fires this after wallet
+    // approval lands on-chain.
+    vi.doMock('../ConnectAgent2Modal', () => ({
+      default: (props: { onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void }) => (
+        <button
+          type="button"
+          data-testid="fake-setup-updated"
+          onClick={() => props.onSetupUpdated?.({ delegateAddress: NEW_DELEGATE })}
+        >
+          fire onSetupUpdated
+        </button>
+      ),
+    }))
+    const { default: AgentPanelFresh } = await import('../AgentPanel')
+    render(<AgentPanelFresh />)
+
+    // Sanity: with no suppression and no managed agent, the delegate would
+    // render as Unmanaged before the click. After firing onSetupUpdated with
+    // the matching delegate, the Unmanaged card must disappear.
+    expect(screen.getByText('Unmanaged Delegate')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('fake-setup-updated'))
+    expect(screen.queryByText('Unmanaged Delegate')).not.toBeInTheDocument()
+  })
+
+  it('still classifies genuinely external delegates as Unmanaged', async () => {
+    // No onSetupUpdated fires — this is a delegate someone set up outside
+    // Haven, not a freshly-approved one. The yellow card SHOULD render.
+    vi.doMock('../ConnectAgent2Modal', () => ({ default: () => null }))
+    const { default: AgentPanelFresh } = await import('../AgentPanel')
+    render(<AgentPanelFresh />)
+    expect(screen.getByText('Unmanaged Delegate')).toBeInTheDocument()
+  })
+})

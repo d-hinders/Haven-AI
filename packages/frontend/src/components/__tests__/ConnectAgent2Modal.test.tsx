@@ -392,14 +392,82 @@ describe('ConnectAgent2Modal', () => {
 
     await fillAndCreateSetup()
 
-    expect(await screen.findByText('Local connection ready')).toBeInTheDocument()
-    expect(screen.getByText('Connected locally')).toBeInTheDocument()
-    expect(screen.getByText('Ready for Haven approval')).toBeInTheDocument()
-    expect(screen.getByText('Restart ready')).toBeInTheDocument()
-    expect(screen.getByText('Agent restart prepared')).toBeInTheDocument()
-    expect(screen.getByText(/until that approval is completed, this agent cannot spend/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Approve agent rules/i })).toBeInTheDocument()
+    // The single anchor summary headline replaces the old stack of green
+    // success / awaiting-approval / "Ready for Haven approval" / yellow
+    // restart callouts. Restart guidance moves to the post-approval state.
+    expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
+    expect(screen.getByText(/Local connection verified/i)).toBeInTheDocument()
+    expect(screen.getByText(/You sign to give Research Agent authority to spend/i)).toBeInTheDocument()
+    expect(screen.queryByText('Connected locally')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ready for Haven approval')).not.toBeInTheDocument()
+    expect(screen.queryByText('Agent restart prepared')).not.toBeInTheDocument()
+    expect(screen.queryByText(/until that approval is completed/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve rules' })).toBeInTheDocument()
     expect(screen.queryByText(/active spending today/i)).not.toBeInTheDocument()
+  })
+
+  it('uses non-wallet copy on the approval screen', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+    await fillAndCreateSetup()
+
+    // Regression: "wallet" language was ambiguous (Safe vs. signing EOA vs.
+    // passkey). Step copy should be direct and not reference wallet on the
+    // approval screen.
+    expect(await screen.findByText('Approve the agent rules')).toBeInTheDocument() // header subtitle
+    expect(
+      screen.getByText(/^You sign to give Research Agent authority to spend/),
+    ).toBeInTheDocument()
+    const screenText = document.body.textContent ?? ''
+    expect(screenText).not.toContain('Approve the agent rules in your wallet')
+    expect(screenText).not.toContain('Your wallet signs')
+    expect(screenText).not.toContain('Return to Haven and approve')
+  })
+
+  it('shows post-approval restart hint and "Agent rules approved" headline on success', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({ status: 'active' }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+    await fillAndCreateSetup()
+
+    // The restart guidance moved from the pre-approval screen to here — it's
+    // only actionable now that approval has landed. "Agent rules approved"
+    // appears in both the StatusBadge title and the header subtitle.
+    const approvedMatches = await screen.findAllByText('Agent rules approved')
+    expect(approvedMatches.length).toBeGreaterThan(0)
+    expect(screen.getByText(/restart the agent/i)).toBeInTheDocument()
+    expect(screen.queryByText('Agent restart prepared')).not.toBeInTheDocument()
+  })
+
+  it('hides verification details behind a disclosure on the approval screen', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+    await fillAndCreateSetup()
+
+    // The truncated form sits inline as a verification check; the disclosure
+    // exists so the full address + runtime status are one click away.
+    // (We don't assert the full address is removed when collapsed — `<details>`
+    // hides via CSS in browsers but still mounts the children in JSDOM.)
+    expect(await screen.findByText(/Local connection verified/i)).toBeInTheDocument()
+    expect(screen.getByText('Verification details')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Verification details'))
+    expect(
+      screen.getByText('0x3333333333333333333333333333333333333333'),
+    ).toBeInTheDocument()
   })
 
   it('shows specific runtime setup recovery copy for local MCP failures', async () => {
@@ -426,6 +494,10 @@ describe('ConnectAgent2Modal', () => {
 
     await fillAndCreateSetup()
 
+    // Runtime status detail lives behind the "Verification details" disclosure
+    // — the pre-approval screen is calm by default; install diagnostics are a
+    // click away when needed.
+    fireEvent.click(await screen.findByText('Verification details'))
     expect(await screen.findByText('Needs attention')).toBeInTheDocument()
     expect(screen.getByText(/could not install Haven tools locally/i)).toBeInTheDocument()
   })
@@ -459,7 +531,7 @@ describe('ConnectAgent2Modal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    expect(await screen.findByText('Wallet approval unavailable')).toBeInTheDocument()
+    expect(await screen.findByText('Approval unavailable')).toBeInTheDocument()
     expect(screen.getByText(/Connect a wallet or use a passkey/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
   })
@@ -477,7 +549,7 @@ describe('ConnectAgent2Modal', () => {
     await fillAndCreateSetup()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve agent rules' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Approve rules' }))
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -560,9 +632,9 @@ describe('ConnectAgent2Modal', () => {
     renderModal({ safeAddress: SAFE.safe_address, safeId: SAFE.id })
     await fillAndCreateSetup()
 
-    expect(await screen.findByText('Local connection ready')).toBeInTheDocument()
+    expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
     expect(screen.getByText('Base wallet on Base')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Submit wallet approval' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Submit approval' })).toBeInTheDocument()
     expect(mockUseSafeDetails).toHaveBeenLastCalledWith(BASE_SAFE.safe_address, { chainId: 8453 })
     expect(mockUseSafeOperationGate).toHaveBeenLastCalledWith({
       safeAddress: BASE_SAFE.safe_address,
@@ -575,7 +647,7 @@ describe('ConnectAgent2Modal', () => {
     })
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Submit wallet approval' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Submit approval' }))
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -621,7 +693,7 @@ describe('ConnectAgent2Modal', () => {
     await fillAndCreateSetup()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve agent rules' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Approve rules' }))
       await Promise.resolve()
     })
 
@@ -656,7 +728,7 @@ describe('ConnectAgent2Modal', () => {
     await fillAndCreateSetup()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Submit wallet approval' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Submit approval' }))
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -686,7 +758,7 @@ describe('ConnectAgent2Modal', () => {
     await fillAndCreateSetup()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve agent rules' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Approve rules' }))
       await Promise.resolve()
     })
 
@@ -895,10 +967,10 @@ describe('ConnectAgent2Modal', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Continue to wallet approval' }))
       await Promise.resolve()
     })
-    expect(await screen.findByText('Local connection ready')).toBeInTheDocument()
+    expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve agent rules' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Approve rules' }))
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -950,7 +1022,7 @@ describe('ConnectAgent2Modal', () => {
   it.each([
     ['approval_in_progress', 'Approval in progress'],
     ['proposed', 'Waiting for more approvals'],
-    ['active', 'Agent ready'],
+    ['active', 'Agent rules approved'],
   ])('renders %s setup status without a blank connect step', async (status, title) => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: {
@@ -979,6 +1051,10 @@ describe('ConnectAgent2Modal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    expect(await screen.findByText(title)).toBeInTheDocument()
+    // "Agent rules approved" also appears in the header subtitle for the
+    // `active` state, so multiple matches are valid — we just need at
+    // least one (the StatusBadge title).
+    const matches = await screen.findAllByText(title)
+    expect(matches.length).toBeGreaterThan(0)
   })
 })

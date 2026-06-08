@@ -4,9 +4,9 @@ Last updated: 2026-06-06
 
 ## Current Run
 
-- Branch: `codex/quality-reconciliation-status-contract`
-- PR target: make `MachinePaymentReconciliationEventResponse.status` explicit in OpenAPI/tests as `open | resolved`.
-- Why this target: PR #277 made resolved reconciliation events durable in runtime behavior. The published OpenAPI response still described reconciliation event `status` as an unconstrained string, which leaves SDK/tool consumers without the contract needed to handle already-resolved retries deterministically. This PR keeps the change schema/test-only and does not alter payment execution, custody, signing, Safe permissions, SDK runtime behavior, or product UX.
+- Branch: `codex/quality-evidence-proof-status-contract`
+- PR target: make `MachinePaymentReceipt.proof_status` explicit in OpenAPI/tests as `payment_confirmed | merchant_response_observed | protocol_receipt_attached`.
+- Why this target: machine-payment evidence already emits a narrow proof-status domain, but the published receipt schema described it as an unconstrained string. This PR keeps the change schema/test-only and does not alter payment execution, custody, signing, Safe permissions, SDK runtime behavior, or product UX.
 - Files touched: `packages/backend/src/openapi/spec.ts`, `packages/backend/src/openapi/spec.test.ts`, and this loop file.
 
 ## Priority Backlog
@@ -40,7 +40,8 @@ Last updated: 2026-06-06
 - PR #275: older `/self-sign-agents` allowance writes use the shared owner-side allowance normalizer and block revoked-agent allowance mutations.
 - PR #276: whole-agent `/self-sign-agents/:id` delete now requires `status = 'revoked'`, matching `/agents`.
 - PR #277: resolved `machine_payment_reconciliation_events` stay resolved on later merchant-retry upserts.
-- Planned current PR: reconciliation event response status values are explicit in OpenAPI/tests.
+- PR #278: reconciliation event response status values are explicit in OpenAPI/tests.
+- Planned current PR: machine-payment evidence proof-status values are explicit in OpenAPI/tests.
 - Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
@@ -60,13 +61,13 @@ Last updated: 2026-06-06
   - `npm run build -w packages/backend` passed.
   - `git diff --check` passed.
 - Current target scan:
-  - Confirmed runtime reconciliation response status comes from `machine_payment_reconciliation_events.status`.
-  - Confirmed the only current status values are `open` from insert/update and `resolved` from evidence attachment.
-  - Confirmed OpenAPI previously described the response status as a generic string.
+  - Confirmed runtime evidence proof status comes from `PaymentProofStatus`.
+  - Confirmed the only current proof-status values are `payment_confirmed`, `merchant_response_observed`, and `protocol_receipt_attached`.
+  - Confirmed OpenAPI previously described `MachinePaymentReceipt.proof_status` as a generic string.
 - Captain self-check covered CASP guardrails, payment authority boundaries, API schema drift, multi-entrypoint retry consumers, and OpenAPI regression coverage.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
 - Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 
 ## Recommended Next Target
 
-After this PR merges, choose another narrow backend API-contract target: make machine-payment evidence `proof_status` values explicit in OpenAPI/tests (`payment_confirmed`, `merchant_response_observed`, `protocol_receipt_attached`) without changing runtime behavior. Defer broader evidence/reconciliation automation, payment-state rewrites, and x402/generic consolidation.
+After this PR merges, choose another narrow backend API-contract target: make `MachinePaymentReceipt.rail` explicit in OpenAPI/tests for the machine-payment receipt rails that evidence can publish. Defer broader evidence/reconciliation automation, payment-state rewrites, and x402/generic consolidation.

@@ -258,6 +258,16 @@ describe('openapiSpec', () => {
     })
   })
 
+  it('documents machine payment evidence proof statuses', () => {
+    const receiptSchema = openapiSpec.components.schemas.MachinePaymentReceipt
+
+    expect(receiptSchema.required).toContain('proof_status')
+    expect(receiptSchema.properties.proof_status).toMatchObject({
+      type: 'string',
+      enum: ['payment_confirmed', 'merchant_response_observed', 'protocol_receipt_attached'],
+    })
+  })
+
   it('documents the non-custodial authority boundary in security schemes and resume state', () => {
     const agentScheme = openapiSpec.components.securitySchemes.AgentApiKey
     expect(agentScheme.description).toMatch(/identity/i)

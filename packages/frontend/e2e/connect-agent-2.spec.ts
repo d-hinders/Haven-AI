@@ -37,9 +37,12 @@ test.describe('Connect Agent 2 setup acceptance', () => {
     await expect(dialog.getByText(/hv_setup_e2e123/).first()).toBeVisible()
     await expect(dialog).not.toContainText(/delegate_key|private_key|privateKey|HAVEN_DELEGATE_KEY/)
 
-    await expect(dialog.getByText('Local connection ready')).toBeVisible()
-    await expect(dialog.getByText('Connected locally')).toBeVisible()
-    await expect(dialog.getByText('Wallet approval unavailable')).toBeVisible()
+    // Pre-approval screen collapses to a single anchor Card: heading +
+    // verification check inline, no separate green callout / awaiting-approval
+    // budget card / "Ready for Haven approval" table / restart banner.
+    await expect(dialog.getByRole('heading', { name: 'Approve agent rules' })).toBeVisible()
+    await expect(dialog.getByText(/Local connection verified/i)).toBeVisible()
+    await expect(dialog.getByText('Approval unavailable')).toBeVisible()
     await expect(dialog.getByText(/Connect a wallet or use a passkey/i)).toBeVisible()
     await expect(dialog).not.toContainText(/delegate_key|private_key|privateKey|HAVEN_DELEGATE_KEY/)
 

@@ -108,7 +108,15 @@ interface Props {
   onClose: () => void
   safeAddress?: string
   safeId?: string | null
-  onSetupUpdated?: () => void
+  /**
+   * Fires after any setup-state change the parent should react to (typically:
+   * refresh the agents list). When the on-chain approval has just been
+   * recorded, `delegateAddress` is passed so the parent can optimistically
+   * suppress the "Unmanaged Delegate" classification — the agent appears
+   * on-chain a moment before the `/agents` list flips it from
+   * `pending_approval` to `active`.
+   */
+  onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
 }
 
 const RUNTIME_OPTIONS = [
@@ -437,7 +445,10 @@ export default function ConnectAgent2Modal({
         }
       }
       await statusQuery.refetch()
-      onSetupUpdated?.()
+      // Pass the delegate so the agents page can suppress the brief
+      // "Unmanaged Delegate" window between on-chain landing and the
+      // backend status flipping from `pending_approval` → `active`.
+      onSetupUpdated?.({ delegateAddress: setupStatus.delegate_address ?? null })
     } catch (err) {
       setApprovalError(approvalErrorMessage(err, signer?.type))
     } finally {
@@ -856,8 +867,12 @@ export default function ConnectAgent2Modal({
 
               {visibleStatus === 'active' && (
                 <SetupStatusState
-                  title="Agent ready"
-                  body="The local connection and wallet approval are complete. The agent can now request payments within its agent budget."
+                  title="Agent rules approved"
+                  body={
+                    setupStatus?.install_status?.restart_required
+                      ? 'Your agent can now spend within budget. Restart the agent so it can load Haven tools.'
+                      : "Your agent can now spend within budget. If you haven't already, restart the agent so it loads Haven tools."
+                  }
                   tone="success"
                   primaryLabel="Done"
                   onPrimary={handleClose}
@@ -1132,13 +1147,13 @@ function LocalConnectionReady({
   /** True while a chain-switch is in flight */
   isSwitchingChain: boolean
 }) {
+  // The pre-approval screen is intentionally calm — single anchor surface, one
+  // primary action. The runtime-restart hint used to live here as a separate
+  // yellow callout; it now moves to the post-approval `active` SetupStatusState
+  // where it's actually actionable. The duplicate "Local connection ready"
+  // green callout collapses into a single inline check row inside the summary
+  // footer below.
   const install = status?.install_status
-  const runtimeReadyAfterRestart = Boolean(
-    install &&
-      !install.error_code &&
-      install.restart_required &&
-      runtimeIsConfigured(install),
-  )
   const budgets = status?.agent_budget ?? []
   const displayBudgets = budgets.map((budget) => ({
     id: budget.id ?? budget.token_symbol,
@@ -1146,6 +1161,8 @@ function LocalConnectionReady({
     amount: formatAllowanceForToken(budget.allowance_amount, chainId, budget.token_symbol),
     period: budgetPeriodLabel(budget.reset_period_min),
   }))
+  const agentName = status?.agent.name ?? 'this agent'
+  const verifiedAddressShort = status?.delegate_address ? truncate(status.delegate_address) : null
   const approvalBlocked = approvalBlockReason(
     operationGate,
     safeDetailsLoading,
@@ -1158,66 +1175,109 @@ function LocalConnectionReady({
 
   return (
     <>
-      <div className="rounded-[10px] border border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Local connection ready</h3>
-            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              The agent created its key locally and registered the public signing address with Haven.
-            </p>
-          </div>
-          <StatusBadge tone="success">Connected locally</StatusBadge>
-        </div>
-      </div>
-
-      <AgentBudgetCard
-        agentName={status?.agent.name ?? 'New agent'}
-        walletName={walletName}
-        budgets={displayBudgets}
-        status="Awaiting approval"
-        statusTone="warning"
-        density="compact"
-      />
-
       <AgentRulesSummary
-        title="Ready for Haven approval"
-        description="Wallet approval is the step that gives this public signing address authority under the agent rules."
+        title="Approve agent rules"
+        description={`You sign to give ${agentName} authority to spend within this budget. Nothing executes outside what you approve here.`}
         density="compact"
         items={[
           {
-            label: 'Public address',
-            value: status?.delegate_address ? truncate(status.delegate_address) : 'Waiting for address',
-            helper: 'This is shown so you can verify the local connection before approving agent rules.',
+            label: 'Agent',
+            value: status?.agent.name ?? 'New agent',
+            helper: status?.agent.description?.trim() || undefined,
           },
+          { label: 'From', value: walletName },
           {
-            label: 'Runtime setup',
-            value: runtimeStatusLabel(install),
-            helper: runtimeStatusHelper(install),
-          },
-          {
-            label: 'Approvals',
-            value: safeThreshold > 1 ? `${safeThreshold} of ${safeOwnerCount}` : 'One approval',
-            helper:
-              safeThreshold > 1
-                ? 'The wallet approval may need more people before agent spending is live.'
-                : 'One wallet approval is needed before the agent can spend.',
+            label: 'Budget',
+            value: (
+              <div className="space-y-1">
+                {displayBudgets.length === 0 ? (
+                  <span className="text-[var(--v2-ink-3)]">Waiting for budget</span>
+                ) : (
+                  displayBudgets.map((budget) => (
+                    <div key={budget.id}>
+                      {budget.amount} {budget.tokenSymbol} {budget.period}
+                    </div>
+                  ))
+                )}
+              </div>
+            ),
           },
         ]}
+        footer={
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-[12px] text-[var(--v2-ink-2)]">
+              <svg
+                aria-hidden="true"
+                className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+              >
+                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>
+                Local connection verified
+                {verifiedAddressShort ? ` · ${verifiedAddressShort}` : ''}
+              </span>
+            </div>
+            {(status?.delegate_address || install || safeThreshold > 1) && (
+              <details className="group text-[12px]">
+                <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]">
+                  <svg
+                    aria-hidden="true"
+                    className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                  >
+                    <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Verification details
+                </summary>
+                <dl className="mt-2 space-y-2 border-l border-[var(--v2-border)] pl-3">
+                  {status?.delegate_address && (
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+                        Public address
+                      </dt>
+                      <dd className="mt-0.5 break-all font-mono text-[11px] text-[var(--v2-ink)]">
+                        {status.delegate_address}
+                      </dd>
+                    </div>
+                  )}
+                  {install && (
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+                        Runtime setup
+                      </dt>
+                      <dd className="mt-0.5 text-[12px] text-[var(--v2-ink-2)]">
+                        <span className="text-[var(--v2-ink)]">{runtimeStatusLabel(install)}</span>
+                        {runtimeStatusHelper(install) ? ` — ${runtimeStatusHelper(install)}` : ''}
+                      </dd>
+                    </div>
+                  )}
+                  {safeThreshold > 1 && (
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+                        Approvals required
+                      </dt>
+                      <dd className="mt-0.5 text-[12px] text-[var(--v2-ink-2)]">
+                        {safeThreshold} of {safeOwnerCount}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </details>
+            )}
+          </div>
+        }
       />
 
-      {runtimeReadyAfterRestart && (
+      {approvalBlocked && (
         <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
-          <p className="text-sm font-semibold text-[var(--v2-ink)]">Agent restart prepared</p>
-          <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-            The connector prepared Haven tools for this agent. After approval, restart the agent
-            normally so it can load them.
-          </p>
-        </div>
-      )}
-
-      {approvalBlocked ? (
-        <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
-          <p className="text-sm font-semibold text-[var(--v2-ink)]">Wallet approval unavailable</p>
+          <p className="text-sm font-semibold text-[var(--v2-ink)]">Approval unavailable</p>
           <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">{approvalBlocked}</p>
           {operationGate.kind === 'no_signer' && isWrongChain && (
             // Wallet is connected but on the wrong chain — offer a one-click switch.
@@ -1238,10 +1298,6 @@ function LocalConnectionReady({
             </div>
           )}
         </div>
-      ) : (
-        <ApprovalRequiredBanner title="Approve agent rules in Haven" density="compact" tone="neutral">
-          Your local connection is ready. The wallet approval step is next; until that approval is completed, this agent cannot spend from the Haven wallet.
-        </ApprovalRequiredBanner>
       )}
 
       {approvalError && (
@@ -1262,8 +1318,8 @@ function LocalConnectionReady({
           {approving
             ? 'Approving...'
             : safeThreshold > 1
-              ? 'Submit wallet approval'
-              : 'Approve agent rules'}
+              ? 'Submit approval'
+              : 'Approve rules'}
         </Button>
       </div>
       <span className="sr-only">{fallbackSetup.setup_id}</span>
@@ -1363,7 +1419,9 @@ function SetupStatusState({
 
 function headerSubtitle(step: SetupStep, status: string | undefined): string {
   if (step === 'connect') {
-    if (status === 'connected_local') return 'Return to Haven and approve the agent rules'
+    if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent rules'
+    if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
+    if (status === 'active') return 'Agent rules approved'
     if (status === 'expired') return 'This setup prompt expired'
     if (status === 'cancelled') return 'This setup was cancelled'
     return 'Paste the setup prompt into your agent environment'

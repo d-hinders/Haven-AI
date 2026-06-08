@@ -798,6 +798,89 @@ describe('Haven MCP tool handlers', () => {
     }
   })
 
+  it('insufficient delegate balance + allowance: pre-flight surfaces structured failure', async () => {
+    // Slice B regression: when the delegate's on-chain balance plus the
+    // remaining Safe AllowanceModule allowance cannot cover the requested
+    // amount, the Haven backend returns 422 with a structured shape and the
+    // MCP tool MUST surface phase + nextAction so the agent can tell the
+    // user "fund the Safe or raise the allowance" rather than silently
+    // burning a sign step that would revert on-chain.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, _init) => {
+      const u = String(url)
+      if (u === resourceUrl) {
+        return new Response(JSON.stringify(x402PaymentRequired), {
+          status: 402,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (u.endsWith('/x402')) {
+        return new Response(JSON.stringify({
+          error:
+            'Insufficient funds to pay 0.02 USDC: delegate balance 0.0 + remaining allowance 0.005 ' +
+            '= 0.005 USDC, short by 0.015. Fund the Safe or raise the agent allowance and retry.',
+          error_code: 'insufficient_funds',
+          phase: 'insufficient_funds',
+          next_action: 'fund_safe_or_raise_allowance',
+          rail: 'x402',
+          chain_id: 8453,
+          token: 'USDC',
+          asset: x402PaymentRequired.accepts[0].asset,
+          network: x402PaymentRequired.accepts[0].network,
+          amount: '0.02',
+          amount_atomic: '20000',
+          delegate_balance: '0.0',
+          delegate_balance_atomic: '0',
+          remaining_allowance: '0.005',
+          remaining_allowance_atomic: '5000',
+          shortfall: '0.015',
+          shortfall_atomic: '15000',
+          resource_url: resourceUrl,
+          merchant_address: x402PaymentRequired.accepts[0].payTo,
+        }), { status: 422, headers: { 'Content-Type': 'application/json' } })
+      }
+      return jsonResponse({})
+    })
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl,
+      x402Wallet: safeAddress,
+    })
+    const handlers = createToolHandlers(haven)
+
+    const result = await handlers.haven_pay_x402({ url: resourceUrl })
+
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      // The two machine-readable fields the agent should branch on.
+      expect(result.nextAction).toBe('fund_safe_or_raise_allowance')
+      expect(result.phase).toBe('insufficient_funds')
+      expect(result.statusCode).toBe(422)
+      // No payment_id because no intent was created — the pre-flight check
+      // short-circuits before any state-creating write. This is the field
+      // an agent uses to decide "is there something to resume?" — there is
+      // not, so it should remain undefined.
+      expect(result.paymentId).toBeUndefined()
+      // The structured body must carry the actionable shortfall details so
+      // the agent can surface them to the user verbatim.
+      const body = result.body as Record<string, unknown>
+      expect(body.error_code).toBe('insufficient_funds')
+      expect(body.shortfall_atomic).toBe('15000')
+      expect(body.delegate_balance_atomic).toBe('0')
+      expect(body.remaining_allowance_atomic).toBe('5000')
+      // Non-custody surveillance guard: the structured failure must NOT
+      // echo the delegate or Safe address back to the agent runtime. The
+      // agent already holds both via its credential; surfacing them here
+      // widens the hot-wallet delegate's monitoring surface for no benefit.
+      expect(body).not.toHaveProperty('delegate_address')
+      expect(body).not.toHaveProperty('safe_address')
+      // Message must be human-readable and reference the actual token + amount.
+      expect(result.message).toMatch(/Insufficient funds/i)
+      expect(result.message).toContain('USDC')
+    }
+  })
+
   it('[#190] over-budget MPP payment queues for user approval (regression — unchanged)', async () => {
     // Mirror of the x402 regression but for the MPP rail.
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({

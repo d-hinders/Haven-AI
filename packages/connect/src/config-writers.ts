@@ -188,7 +188,7 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
       restartRequired: true,
       messages: [
         `Updated local Haven MCP entry in ${configTargetLabel(input.runtime)}.`,
-        'After Haven approval, restart Codex normally so it can load Haven tools.',
+        'After Haven approval, Haven tools should appear in your next Codex message. If they don\'t, restart Codex to load them.',
       ],
     }
   } catch (err) {

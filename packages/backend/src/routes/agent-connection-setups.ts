@@ -129,7 +129,7 @@ interface UserSafeRow {
 }
 
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
-const CONNECTOR_PACKAGE = '@haven_ai/connect@0.1.3-alpha'
+const CONNECTOR_PACKAGE = '@haven_ai/connect@0.1.6-alpha'
 const WALLET_APPROVAL_STATES = new Set([
   'connected_local',
   'awaiting_wallet_approval',

@@ -59,6 +59,16 @@ export const toolDescriptions = {
     nextActionGuidance:
       'If approval is needed, preserve the returned resume_state and wait for nextAction=retry_original_x402_request before resuming.',
   },
+  payX402OneShot: {
+    summary:
+      'Fetch an x402 paid HTTP resource in a single call. Handles the full probe -> pay -> retry round trip and returns the merchant response.',
+    selectionGuidance:
+      'Prefer this over the quote+pay split when the agent just wants the paid resource and does not need to inspect the price first. If you already have a quote from haven_quote_x402, use haven_pay_x402_quote instead. Do not use for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
+    behavior:
+      'Calls the URL, parses any HTTP 402 x402 challenge, signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, then retries the original request with the X-PAYMENT header and returns the merchant response. If the resource returns an MPP machine-payment challenge instead of standard x402, the MPP payment path is used automatically. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
+    nextActionGuidance:
+      'If approval is needed, preserve the returned resume_state or paymentId and call the resume tool once nextAction=retry_original_x402_request.',
+  },
   resumeX402: {
     summary:
       'Resume an x402 payment after the Haven wallet owner approved the funding step.',

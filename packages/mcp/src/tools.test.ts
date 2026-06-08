@@ -165,6 +165,7 @@ describe('Haven MCP tool descriptions', () => {
   const cases: Array<{ tool: keyof typeof toolDescriptions; key: keyof typeof sharedDescriptions }> = [
     { tool: 'haven_quote_x402', key: 'quoteX402' },
     { tool: 'haven_pay_x402_quote', key: 'payX402' },
+    { tool: 'haven_pay_x402', key: 'payX402OneShot' },
     { tool: 'haven_resume_x402_payment', key: 'resumeX402' },
     { tool: 'haven_quote_mpp', key: 'quoteMpp' },
     { tool: 'haven_pay_mpp_challenge', key: 'payMpp' },
@@ -382,6 +383,154 @@ describe('Haven MCP tool handlers', () => {
     expect(requests.some((r) => r.url.endsWith('/x402'))).toBe(true)
     expect(requests.some((r) => r.url.endsWith('/payments/x402-pay-1/sign'))).toBe(true)
     assertNoDelegateKeyLeak(requests, delegateKey)
+  })
+
+  it('haven_pay_x402 one-shot: probes 402, pays, retries, returns merchant body', async () => {
+    // Regression for the agent-feedback fix that added haven_pay_x402: the
+    // single-call form must internally do quoteX402 -> payX402Quote -> retry
+    // without the agent orchestrating intermediate tools. We assert the merchant
+    // sees X-PAYMENT on exactly one retry and the response body reaches the agent.
+    const requests: CapturedRequest[] = []
+    let merchantRetries = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      requests.push({ url: String(url), init })
+      const u = String(url)
+
+      if (u === x402PaymentRequired.resource.url) {
+        const headers = init?.headers ? new Headers(init.headers) : new Headers()
+        if (headers.has('X-PAYMENT')) {
+          merchantRetries += 1
+          return new Response(JSON.stringify({ ok: true, data: 'one-shot-paid' }), {
+            status: 200,
+            headers: {
+              'PAYMENT-RESPONSE': btoa(JSON.stringify({
+                success: true,
+                transaction: txHash,
+                network: x402PaymentRequired.accepts[0].network,
+              })),
+            },
+          })
+        }
+        return new Response(JSON.stringify(x402PaymentRequired), {
+          status: 402,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      if (u.endsWith('/x402')) {
+        return jsonResponse({
+          payment_id: 'x402-one-shot-1',
+          status: 'pending_signature',
+          chain_id: 8453,
+          safe_address: safeAddress,
+          token: 'USDC',
+          amount: '0.01',
+          to: delegateAddress,
+          resource_url: x402PaymentRequired.resource.url,
+          sign_data: {
+            hash: `0x${'33'.repeat(32)}`,
+            components: {
+              safe: safeAddress,
+              token: x402PaymentRequired.accepts[0].asset,
+              to: delegateAddress,
+              amount: x402PaymentRequired.accepts[0].amount,
+              payment_token: '0x0000000000000000000000000000000000000000',
+              payment: '0',
+              nonce: 1,
+            },
+            instructions: 'Sign with delegate key',
+          },
+        }, 201)
+      }
+
+      if (u.endsWith('/payments/x402-one-shot-1/sign')) {
+        return jsonResponse({
+          payment_id: 'x402-one-shot-1',
+          status: 'confirmed',
+          tx_hash: txHash,
+          token: 'USDC',
+          amount: '0.01',
+          to: delegateAddress,
+          explorer_url: `https://basescan.org/tx/${txHash}`,
+        })
+      }
+
+      if (u.endsWith('/machine-payments/evidence')) {
+        return jsonResponse({ evidence: { id: 'evidence-1' } }, 202)
+      }
+
+      return jsonResponse({})
+    })
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl,
+      x402Wallet: safeAddress,
+    })
+    const handlers = createToolHandlers(haven)
+
+    const result = await handlers.haven_pay_x402({ url: x402PaymentRequired.resource.url })
+
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('one-shot pay failed')
+    expect(JSON.stringify(result.data)).toContain('one-shot-paid')
+    expect((result.data as { status: number }).status).toBe(200)
+
+    expect(merchantRetries).toBe(1)
+    expect(requests.some((r) => r.url.endsWith('/x402'))).toBe(true)
+    expect(requests.some((r) => r.url.endsWith('/payments/x402-one-shot-1/sign'))).toBe(true)
+    assertNoDelegateKeyLeak(requests, delegateKey)
+  })
+
+  it('haven_pay_x402 one-shot: surfaces pending-approval state with resume context', async () => {
+    // When the agent has insufficient on-chain allowance headroom, the one-shot
+    // tool must surface the same approval-required failure shape as the split
+    // tools — the agent should never silently succeed or fail.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, _init) => {
+      const u = String(url)
+      if (u === x402PaymentRequired.resource.url) {
+        return new Response(JSON.stringify(x402PaymentRequired), {
+          status: 402,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (u.endsWith('/x402')) {
+        return new Response(JSON.stringify({
+          payment_id: 'pay-one-shot-overbudget-1',
+          kind: 'approval_request',
+          status: 'pending_approval',
+          phase: 'user_approval_required',
+          next_action: 'wait_for_user_approval',
+          amount: '0.01',
+          token: 'USDC',
+          resource_url: x402PaymentRequired.resource.url,
+          merchant_address: x402PaymentRequired.accepts[0].payTo,
+          tx_hash: null,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          chain_id: 8453,
+          message: 'Allowance exhausted — awaiting user approval',
+        }), { status: 202, headers: { 'Content-Type': 'application/json' } })
+      }
+      return jsonResponse({})
+    })
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl,
+      x402Wallet: safeAddress,
+    })
+    const handlers = createToolHandlers(haven)
+
+    const result = await handlers.haven_pay_x402({ url: x402PaymentRequired.resource.url })
+
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.nextAction).toBe('wait_for_user_approval')
+      expect(result.status).toBe('pending_approval')
+      expect(result.paymentId).toBe('pay-one-shot-overbudget-1')
+    }
   })
 
   it('resumes x402 payments by payment_id without leaking the delegate key', async () => {

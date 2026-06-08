@@ -20,6 +20,7 @@ const headersSchema = z.record(z.string(), z.string()).optional()
 export type HavenMcpToolName =
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
+  | 'haven_pay_x402'
   | 'haven_resume_x402_payment'
   | 'haven_quote_mpp'
   | 'haven_pay_mpp_challenge'
@@ -40,6 +41,13 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   },
   haven_pay_x402_quote: {
     quote: z.unknown(),
+    idempotencyKey: z.string().optional(),
+  },
+  haven_pay_x402: {
+    url: z.string().url(),
+    method: z.string().optional(),
+    headers: headersSchema,
+    body: z.string().optional(),
     idempotencyKey: z.string().optional(),
   },
   haven_resume_x402_payment: {
@@ -84,6 +92,7 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
   haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
+  haven_pay_x402: composeDescription(sharedDescriptions.payX402OneShot),
   haven_resume_x402_payment: composeDescription(sharedDescriptions.resumeX402),
   haven_quote_mpp: composeDescription(sharedDescriptions.quoteMpp),
   haven_pay_mpp_challenge: composeDescription(sharedDescriptions.payMpp),
@@ -126,6 +135,14 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       const args = objectInput('haven_pay_x402_quote', input)
       return runTool(async () => {
         const response = await haven.payX402Quote(args.quote as X402Quote, { idempotencyKey: args.idempotencyKey })
+        return responsePayload(response)
+      })
+    },
+
+    haven_pay_x402: async (input) => {
+      const args = objectInput('haven_pay_x402', input)
+      return runTool(async () => {
+        const response = await haven.fetch(args.url, requestInit(args), { idempotencyKey: args.idempotencyKey })
         return responsePayload(response)
       })
     },

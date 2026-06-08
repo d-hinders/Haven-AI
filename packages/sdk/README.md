@@ -32,9 +32,10 @@ console.log(result.txHash)      // 0x...
 console.log(result.explorerUrl) // https://gnosisscan.io/tx/0x... (or basescan.org for Base)
 ```
 
-## Try it live — zero setup
+## Pay for an x402 resource
 
-Haven hosts a demo endpoint you can hit immediately after creating an agent:
+Point `haven.fetch` at any HTTP resource gated behind `402 Payment Required` —
+the SDK detects the 402, pays through Haven, and retries automatically:
 
 ```typescript
 import { HavenClient } from '@haven_ai/sdk'
@@ -46,20 +47,12 @@ const haven = new HavenClient({
 })
 
 // haven.fetch handles 402 → pay → retry automatically
-const response = await haven.fetch(
-  'https://havenbackend-production-8a00.up.railway.app/demo/x402/data',
-)
+const response = await haven.fetch('https://your-x402-endpoint.example/resource')
 const data = await response.json()
-
-console.log(data.message)     // "You paid! Here's your demo data."
-console.log(data.fact)        // a fun fact about the agent economy
-console.log(data.explorerUrl) // link to the on-chain payment tx
 ```
 
-Tell your agent:
-> "Use Haven to fetch `https://havenbackend-production-8a00.up.railway.app/demo/x402/data` and show me what came back."
-
-The agent will pay a tiny amount (~0.01 EURe on Gnosis Chain), receive the demo payload, and you'll see the payment in your Haven dashboard activity feed — no local server or extra config required.
+The payment fits within the agent's on-chain allowance (or is queued for your
+approval if it exceeds it), and shows up in your Haven dashboard activity feed.
 
 ## Supported Networks & Tokens
 

@@ -11,8 +11,7 @@
     "test": "npm --prefix ../sdk run build && vitest run",
     "test:watch": "npm --prefix ../sdk run build && vitest",
     "test:payment": "tsx scripts/test-payment-flow.ts",
-    "agent:demo": "tsx scripts/agent-payment-demo.ts",
-    "demo:x402": "tsx scripts/x402-live-demo.ts"
+    "agent:demo": "tsx scripts/agent-payment-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

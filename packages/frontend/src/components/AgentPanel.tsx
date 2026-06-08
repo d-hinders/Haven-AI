@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback, type KeyboardEvent, type MouseEvent } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef, type KeyboardEvent, type MouseEvent } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -687,6 +687,16 @@ export default function AgentPanel() {
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
   const [showRevokedAgents, setShowRevokedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  // Timers for deferred on-chain refetch after agent create/edit. Tracked in a
+  // ref so they can be cancelled on unmount, preventing spurious API calls and
+  // setState on an unmounted component when the user navigates away within 2s.
+  const onChainRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
+    }
+  }, [])
   const showConnectAgent2 = connectAgent2Enabled()
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
@@ -1058,8 +1068,10 @@ export default function AgentPanel() {
           // setup file / skill bundle / raw credentials. User dismisses via
           // the Done button, which fires onClose.
           refetch()
-          // Refresh network data after a short delay for tx confirmation
-          setTimeout(refetchOnChain, 2000)
+          // Refresh network data after a short delay for tx confirmation.
+          // Tracked so the timer can be cancelled if the component unmounts first.
+          if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
+          onChainRefetchTimerRef.current = setTimeout(refetchOnChain, 2000)
         }}
       />
 
@@ -1088,7 +1100,8 @@ export default function AgentPanel() {
           onUpdated={() => {
             refetch()
             setEditAgent(null)
-            setTimeout(refetchOnChain, 2000)
+            if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
+            onChainRefetchTimerRef.current = setTimeout(refetchOnChain, 2000)
           }}
         />
       )}

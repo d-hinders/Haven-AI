@@ -46,6 +46,8 @@ export async function writeRuntimeConfig(input: RuntimeConfigInput): Promise<Run
       return writeJsonRuntimeConfig(input, cursorConfigPath(input.homeDir), 'mcpServers')
     case 'vscode':
       return writeJsonRuntimeConfig(input, vscodeConfigPath(input.homeDir), 'servers')
+    case 'vscode-insiders':
+      return writeJsonRuntimeConfig(input, vscodeInsidersConfigPath(input.homeDir), 'servers')
     case 'claude-desktop':
       return writeJsonRuntimeConfig(input, claudeDesktopConfigPath(input.homeDir), 'mcpServers')
     default:
@@ -64,7 +66,7 @@ export async function writeRuntimeConfig(input: RuntimeConfigInput): Promise<Run
 }
 
 export function buildHostedServer(hostedMcpUrl: string, apiKey: string, runtime: RuntimeId): Record<string, unknown> {
-  if (runtime === 'vscode') {
+  if (runtime === 'vscode' || runtime === 'vscode-insiders') {
     return {
       type: 'http',
       url: hostedMcpUrl,
@@ -82,7 +84,7 @@ export function buildSignerServer(signerPath: string, runtime: RuntimeId): Recor
     command: 'npx',
     args: ['-y', signerPackageName(), '--credentials', signerPath],
   }
-  if (runtime === 'vscode') return { type: 'stdio', ...server }
+  if (runtime === 'vscode' || runtime === 'vscode-insiders') return { type: 'stdio', ...server }
   return server
 }
 
@@ -91,7 +93,7 @@ export function buildLocalMcpServer(command: string, runtime: RuntimeId): Record
     command,
     args: [],
   }
-  if (runtime === 'vscode') return { type: 'stdio', ...server }
+  if (runtime === 'vscode' || runtime === 'vscode-insiders') return { type: 'stdio', ...server }
   return server
 }
 
@@ -449,6 +451,14 @@ function vscodeConfigPath(homeDir = homedir()): string {
   return resolve(homeDir, '.config', 'Code', 'User', 'mcp.json')
 }
 
+function vscodeInsidersConfigPath(homeDir = homedir()): string {
+  if (platform() === 'darwin') return resolve(homeDir, 'Library', 'Application Support', 'Code - Insiders', 'User', 'mcp.json')
+  if (platform() === 'win32') {
+    return resolve(process.env.APPDATA ?? join(homeDir, 'AppData', 'Roaming'), 'Code - Insiders', 'User', 'mcp.json')
+  }
+  return resolve(homeDir, '.config', 'Code - Insiders', 'User', 'mcp.json')
+}
+
 function claudeDesktopConfigPath(homeDir = homedir()): string {
   if (platform() === 'darwin') {
     return resolve(homeDir, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
@@ -469,6 +479,8 @@ function configTargetLabel(runtime: RuntimeId): string {
       return 'Cursor MCP config'
     case 'vscode':
       return 'VS Code MCP config'
+    case 'vscode-insiders':
+      return 'VS Code Insiders MCP config'
     case 'claude-desktop':
       return 'Claude Desktop config'
     default:

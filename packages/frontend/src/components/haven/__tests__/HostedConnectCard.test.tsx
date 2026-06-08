@@ -35,10 +35,24 @@ function credential() {
  * The tile's accessible name is the concatenation of the label, the chip
  * aria-label, and the tagline span — span boundaries don't introduce
  * spaces, so we anchor on the start of the string rather than on word
- * boundaries. Safe because no registry label is a prefix of another.
+ * boundaries.
+ *
+ * When multiple tabs share a label prefix (e.g. 'VS Code' is a prefix of
+ * 'VS Code Insiders'), we disambiguate via raw textContent: after slicing
+ * off the expected label, the remainder for the *exact* tile starts with a
+ * non-letter (e.g. the ⚡ chip emoji), while the longer label's remainder
+ * starts with whitespace then another letter ('_Insiders…').
  */
 function tabByLabel(label: string) {
-  return screen.getByRole('tab', { name: new RegExp(`^${escapeRegExp(label)}`, 'i') })
+  const all = screen.getAllByRole('tab', { name: new RegExp(`^${escapeRegExp(label)}`, 'i') })
+  if (all.length === 1) return all[0]
+  // Disambiguate: find the tab whose textContent doesn't continue the label
+  // with more alphabetic characters (possibly after leading whitespace).
+  const exact = all.find((tab) => {
+    const after = (tab.textContent ?? '').slice(label.length)
+    return after.length === 0 || !/^[\s]*[A-Za-z]/.test(after)
+  })
+  return exact ?? all[0]
 }
 
 function escapeRegExp(s: string): string {
@@ -193,17 +207,19 @@ describe('HostedConnectCard', () => {
     }
   })
 
-  it('shows a "1-click" badge on Cursor and VS Code tiles and not on the others', () => {
+  it('shows a "1-click" badge on Cursor, VS Code, and VS Code Insiders tiles and not on the others', () => {
     render(<HostedConnectCard credential={credential()} />)
 
     const cursorTile = tabByLabel('Cursor')
     const vscodeTile = tabByLabel('VS Code')
+    const vscodeInsidersTile = tabByLabel('VS Code Insiders')
     const claudeCodeTile = tabByLabel('Claude Code')
 
     // The chip is rendered with aria-label="one-click install" so screen
     // readers announce it; assert against that, not text content.
     expect(cursorTile.querySelector('[aria-label="one-click install"]')).not.toBeNull()
     expect(vscodeTile.querySelector('[aria-label="one-click install"]')).not.toBeNull()
+    expect(vscodeInsidersTile.querySelector('[aria-label="one-click install"]')).not.toBeNull()
     expect(claudeCodeTile.querySelector('[aria-label="one-click install"]')).toBeNull()
   })
 
@@ -285,6 +301,31 @@ describe('HostedConnectCard', () => {
     expect(url).not.toContain(DELEGATE_KEY)
     // VS Code uses URL-encoded JSON (not base64) — decode and check the key.
     const queryMatch = url.match(/^vscode:mcp\/install\?(.+)$/)
+    expect(queryMatch).not.toBeNull()
+    const decoded = decodeURIComponent(queryMatch![1])
+    expect(decoded).toContain(API_KEY)
+  })
+
+  it('VS Code Insiders shows "Add to VS Code Insiders" deep-link button', () => {
+    render(<HostedConnectCard credential={credential()} />)
+    fireEvent.click(tabByLabel('VS Code Insiders'))
+    openManualSetup()
+
+    expect(screen.getByRole('button', { name: 'Add to VS Code Insiders' })).toBeInTheDocument()
+    expect(screen.queryByText('json')).not.toBeInTheDocument()
+  })
+
+  it('"Add to VS Code Insiders" opens a vscode-insiders:mcp/install deep link carrying the bearer', () => {
+    render(<HostedConnectCard credential={credential()} />)
+    fireEvent.click(tabByLabel('VS Code Insiders'))
+    openManualSetup()
+    fireEvent.click(screen.getByRole('button', { name: 'Add to VS Code Insiders' }))
+
+    expect(windowOpen).toHaveBeenCalledTimes(1)
+    const [url] = windowOpen.mock.calls[0] as [string, string]
+    expect(url).toMatch(/^vscode-insiders:mcp\/install\?/)
+    expect(url).not.toContain(DELEGATE_KEY)
+    const queryMatch = url.match(/^vscode-insiders:mcp\/install\?(.+)$/)
     expect(queryMatch).not.toBeNull()
     const decoded = decodeURIComponent(queryMatch![1])
     expect(decoded).toContain(API_KEY)

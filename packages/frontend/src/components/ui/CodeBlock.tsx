@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCopyTimeout } from '@/hooks/useCopyTimeout'
 
 export function CodeBlock({
   language = 'bash',
@@ -22,7 +22,7 @@ export function CodeBlock({
    */
   onCopyFailed?: () => void
 }) {
-  const [copied, setCopied] = useState(false)
+  const { copied, markCopied } = useCopyTimeout(2000)
 
   const handleCopy = async () => {
     try {
@@ -34,8 +34,7 @@ export function CodeBlock({
       onCopyFailed?.()
       return
     }
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    markCopied()
     onCopy?.()
   }
 

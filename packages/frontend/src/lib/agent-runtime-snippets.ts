@@ -29,6 +29,7 @@ export type RuntimeSnippetId =
   | 'cursor'
   | 'windsurf'
   | 'vscode'
+  | 'vscode-insiders'
   | 'generic-mcp'
   | 'sdk-cli'
   | 'python'
@@ -306,7 +307,7 @@ function vsCodeInline(cred: AgentCredentialJson): RuntimeSnippet {
     language: 'json',
     guidance:
       'Add this to your VS Code MCP settings and reload the window. ' +
-      '(Open the Command Palette → "MCP: Open User Settings" or edit .vscode/mcp.json in your workspace.)',
+      '(Open the Command Palette → "MCP: Open User Configuration" or edit .vscode/mcp.json in your workspace.)',
     destination: '.vscode/mcp.json',
     code: jsonBlock(config),
     mode: 'inline',
@@ -329,6 +330,60 @@ function vsCodeFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
     guidance:
       'First download the credentials below and save them somewhere private. Then add this to ' +
       'your VS Code MCP settings and reload the window.',
+    code: jsonBlock(config),
+    mode: 'file',
+    consentNote: CONSENT_NOTE,
+  }
+}
+
+// ── VS Code Insiders ─────────────────────────────────────────────
+
+function vsCodeInsidersInline(cred: AgentCredentialJson): RuntimeSnippet {
+  const config = {
+    servers: {
+      haven: {
+        type: 'stdio',
+        command: 'npx',
+        args: ['-y', MCP_PACKAGE],
+        env: stripUndefined({
+          HAVEN_API_KEY: cred.api_key,
+          HAVEN_DELEGATE_KEY: cred.delegate_key,
+          HAVEN_AGENT_ID: cred.agent_id,
+          HAVEN_SAFE_ADDRESS: cred.safe_address,
+          HAVEN_API_URL: cred.api_url ?? undefined,
+        }),
+      },
+    },
+  }
+  return {
+    id: 'vscode-insiders',
+    label: 'VS Code Insiders',
+    language: 'json',
+    guidance:
+      'Add this to your VS Code Insiders MCP settings and reload the window. ' +
+      '(Open the Command Palette → "MCP: Open User Configuration" or edit .vscode/mcp.json in your workspace.)',
+    destination: '.vscode/mcp.json',
+    code: jsonBlock(config),
+    mode: 'inline',
+    consentNote: CONSENT_NOTE,
+  }
+}
+
+function vsCodeInsidersFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
+  const config = {
+    servers: {
+      haven: {
+        type: 'stdio',
+        command: 'npx',
+        args: ['-y', MCP_PACKAGE, '--credentials', path],
+      },
+    },
+  }
+  return {
+    ...vsCodeInsidersInline(cred),
+    guidance:
+      'First download the credentials below and save them somewhere private. Then add this to ' +
+      'your VS Code Insiders MCP settings and reload the window.',
     code: jsonBlock(config),
     mode: 'file',
     consentNote: CONSENT_NOTE,
@@ -453,6 +508,7 @@ export function buildRuntimeSnippets(input: RuntimeSnippetInput, mode: RuntimeSn
       cursorFile(input.credential, path),
       windsurfFile(input.credential, path),
       vsCodeFile(input.credential, path),
+      vsCodeInsidersFile(input.credential, path),
       genericFile(input.credential, path),
       sdkFile(input.credential, path),
       pythonFile(input.credential, path),
@@ -463,6 +519,7 @@ export function buildRuntimeSnippets(input: RuntimeSnippetInput, mode: RuntimeSn
     cursorInline(input.credential),
     windsurfInline(input.credential),
     vsCodeInline(input.credential),
+    vsCodeInsidersInline(input.credential),
     genericInline(input.credential),
     sdkInline(input.credential),
     pythonInline(input.credential),

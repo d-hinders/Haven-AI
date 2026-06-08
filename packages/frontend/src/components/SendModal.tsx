@@ -24,6 +24,7 @@ import {
 } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 interface SendSafeOption {
   id: string
@@ -153,6 +154,9 @@ export default function SendModal({
   const { toast } = useToast()
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
+  // Freeze the page behind the modal so the (often large) account page
+  // isn't continuously laid out and composited while the modal is open.
+  useBodyScrollLock(open)
   const safeAddressForHooks = safeAddress as Address
   const { status, txHash, error, send, reset } = useSendTransaction({
     safeAddress: safeAddressForHooks,

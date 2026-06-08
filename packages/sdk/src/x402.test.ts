@@ -348,7 +348,8 @@ describe('x402 helpers', () => {
     expect(retryHeaders.has('PAYMENT-SIGNATURE')).toBe(false)
     expect(payment).toMatchObject({
       x402Version: 2,
-      accepted,
+      scheme: 'exact',
+      network: 'base',
       payload: {
         authorization: {
           from: delegateAddress,
@@ -662,7 +663,8 @@ describe('x402 helpers', () => {
     const payment = decodeHeader(receipt.paymentHeader ?? '')
     expect(payment).toMatchObject({
       x402Version: 2,
-      accepted,
+      scheme: 'exact',
+      network: 'base',
       payload: {
         authorization: {
           from: delegateAddress,

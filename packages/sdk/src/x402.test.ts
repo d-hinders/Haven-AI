@@ -348,8 +348,7 @@ describe('x402 helpers', () => {
     expect(retryHeaders.has('PAYMENT-SIGNATURE')).toBe(false)
     expect(payment).toMatchObject({
       x402Version: 2,
-      scheme: 'exact',
-      network: 'base',
+      accepted,
       payload: {
         authorization: {
           from: delegateAddress,
@@ -358,6 +357,33 @@ describe('x402 helpers', () => {
         },
       },
     })
+
+    // ── PR #300 regression guard ──────────────────────────────────────
+    //
+    // The x402 v2 spec (and Soundside's facilitator) require the payment
+    // payload to carry `accepted` as a top-level field that is an exact
+    // copy of the chosen `accepts[i]` from the 402 response. See
+    // Soundside Protocol Details item 5:
+    //   https://github.com/soundside-design/soundside-docs/blob/main/guides/x402.md
+    //
+    // PR #300 (cc54083) dropped the `accepted` wrap on the assumption
+    // that the spec required top-level `scheme`/`network` string fields
+    // instead. That broke every compliant v2 facilitator including
+    // Soundside, which rejected the header with `Field required: accepted`
+    // and stranded the agent's USDC on the delegate EOA.
+    //
+    // These assertions are stricter than the `toMatchObject` above on
+    // purpose: `toMatchObject` only checks that the listed keys are
+    // present and match, so it cannot catch a regression where stray
+    // top-level `scheme`/`network` keys leak in alongside `accepted`.
+    // The strict key-set + exact-equality checks here would have failed
+    // on PR #300's payload shape.
+    expect((payment as { accepted: unknown }).accepted).toEqual(accepted)
+    expect(Object.keys(payment as object).sort()).toEqual(
+      ['accepted', 'payload', 'x402Version'].sort(),
+    )
+    expect(payment).not.toHaveProperty('scheme')
+    expect(payment).not.toHaveProperty('network')
 
     expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/evidence`)
     const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
@@ -663,8 +689,7 @@ describe('x402 helpers', () => {
     const payment = decodeHeader(receipt.paymentHeader ?? '')
     expect(payment).toMatchObject({
       x402Version: 2,
-      scheme: 'exact',
-      network: 'base',
+      accepted,
       payload: {
         authorization: {
           from: delegateAddress,
@@ -673,6 +698,15 @@ describe('x402 helpers', () => {
         },
       },
     })
+
+    // PR #300 regression guard — see the longer note on the earlier
+    // payX402Quote test for the spec reference (Soundside docs item 5).
+    expect((payment as { accepted: unknown }).accepted).toEqual(accepted)
+    expect(Object.keys(payment as object).sort()).toEqual(
+      ['accepted', 'payload', 'x402Version'].sort(),
+    )
+    expect(payment).not.toHaveProperty('scheme')
+    expect(payment).not.toHaveProperty('network')
   })
 
   it('retries the original x402 request from an approved payment id', async () => {

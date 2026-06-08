@@ -1454,7 +1454,14 @@ export class HavenClient {
       paymentRequired.x402Version,
       requirements,
     )
-    return header
+    if (paymentRequired.x402Version < 2) return header
+
+    const payment = decodeBase64Json<{ payload: unknown }>(header)
+    return btoa(JSON.stringify({
+      x402Version: paymentRequired.x402Version,
+      accepted: option,
+      payload: payment.payload,
+    }))
   }
 
   private cacheX402Receipt(

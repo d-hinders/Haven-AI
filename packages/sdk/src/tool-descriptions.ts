@@ -47,7 +47,8 @@ export const toolDescriptions = {
       'Inspect an HTTP 402 x402 paid resource without creating a Haven payment, signature, approval, or on-chain transaction.',
     behavior:
       'Probes the merchant directly and parses the 402 response. Pure read-only client behavior — Haven is not contacted.',
-    nextActionGuidance: '',
+    nextActionGuidance:
+      'On success the returned quote is the input to haven_pay_x402_quote. Do not call the merchant again — Haven re-uses the captured request when paying.',
   },
   payX402: {
     summary:
@@ -57,7 +58,8 @@ export const toolDescriptions = {
     behavior:
       'Signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, and returns the merchant response or a pending-approval state.',
     nextActionGuidance:
-      'If approval is needed, preserve the returned resume_state and wait for nextAction=retry_original_x402_request before resuming.',
+      'If approval is needed, preserve the returned resume_state and wait for nextAction=retry_original_x402_request before resuming. ' +
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
   },
   payX402OneShot: {
     summary:
@@ -67,7 +69,8 @@ export const toolDescriptions = {
     behavior:
       'Calls the URL, parses any HTTP 402 x402 challenge, signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, then retries the original request with the X-PAYMENT header and returns the merchant response. If the resource returns an MPP machine-payment challenge instead of standard x402, the MPP payment path is used automatically. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
     nextActionGuidance:
-      'If approval is needed, preserve the returned resume_state or paymentId and call the resume tool once nextAction=retry_original_x402_request.',
+      'If approval is needed, preserve the returned resume_state or paymentId and call the resume tool once nextAction=retry_original_x402_request. ' +
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
   },
   resumeX402: {
     summary:
@@ -82,7 +85,8 @@ export const toolDescriptions = {
       'Inspect a Haven MPP challenge or paid MPP URL without creating a Haven payment, signature, approval, or on-chain transaction.',
     behavior:
       'Parses an MPP challenge envelope and returns a typed quote with rail tag, amount, asset, and merchant context. Pure read-only — Haven is not contacted.',
-    nextActionGuidance: '',
+    nextActionGuidance:
+      'On success the returned quote is the input to haven_pay_mpp_challenge. Do not call the merchant again — Haven re-uses the captured request when paying.',
   },
   payMpp: {
     summary:

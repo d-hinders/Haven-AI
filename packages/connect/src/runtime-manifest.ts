@@ -12,7 +12,7 @@ export const MCP_RUNTIME_MANIFEST = {
   sdkPackage: '@haven_ai/sdk',
   sdkVersion: '0.1.8',
   signerPackage: '@haven_ai/signer',
-  signerVersion: '0.1.1-alpha',
+  signerVersion: '0.1.2-alpha',
   minimumNodeVersion: '20.0.0',
   supportedClients: ['codex-cli', 'codex-desktop', 'claude-code'] as const,
   requiredTools: registeredToolNames() as readonly string[],

@@ -128,7 +128,9 @@ export function useAgentConnectionSetupStatus(
         status === 'approval_in_progress' ||
         status === 'proposed'
       if (shouldPoll) {
-        timeout = window.setTimeout(tick, status === 'awaiting_connection' ? 3000 : 10000)
+        const localMcpConfigured = next?.install_status?.local_mcp_configured
+        const fastPoll = status === 'awaiting_connection' || (status === 'connected_local' && !localMcpConfigured)
+        timeout = window.setTimeout(tick, fastPoll ? 3000 : 10000)
       }
     }
 

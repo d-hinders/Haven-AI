@@ -520,7 +520,7 @@ describe('ConnectAgent2Modal', () => {
         },
         agent_budget: [],
         delegate_address: '0x3333333333333333333333333333333333333333',
-        install_status: { credential_files_written: true },
+        install_status: { credential_files_written: true, local_mcp_configured: true },
         approval: { status: 'pending_approval' },
       },
       loading: false,

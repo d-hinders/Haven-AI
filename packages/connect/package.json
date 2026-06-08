@@ -42,7 +42,7 @@
   "dependencies": {
     "@haven_ai/mcp": "0.1.6-alpha",
     "@haven_ai/sdk": "0.1.8",
-    "@haven_ai/signer": "0.1.1-alpha",
+    "@haven_ai/signer": "0.1.2-alpha",
     "ethers": "^6.13.0"
   },
   "devDependencies": {

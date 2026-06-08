@@ -3,7 +3,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { assertSupportedNodeVersion, prepareLocalMcpRuntime } from './local-mcp-runtime.js'
-import { mcpPackageSpec, sdkPackageSpec } from './runtime-manifest.js'
+import { MCP_RUNTIME_MANIFEST, mcpPackageSpec, sdkPackageSpec } from './runtime-manifest.js'
+
+// Use the manifest's pinned MCP version everywhere we mock the install layout,
+// so a version bump in runtime-manifest.ts (or in @haven_ai/mcp's MCP_VERSION
+// constant that it imports) does NOT silently break this test. Hardcoding the
+// literal here previously meant the test passed against a stale version on
+// disk and only broke at publish time on the next bump — exactly the failure
+// mode that surfaced when bumping for the agent-feedback slice release.
+const PINNED_MCP_VERSION = MCP_RUNTIME_MANIFEST.mcpVersion
+const PINNED_SDK_VERSION = MCP_RUNTIME_MANIFEST.sdkVersion
 
 const API_KEY = 'sk_agent_secret_for_local_runtime_test'
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
@@ -20,11 +29,11 @@ describe('prepareLocalMcpRuntime', () => {
     const identityPath = join(credentialDirectory, 'identity.json')
     const signerPath = join(credentialDirectory, 'signer.json')
     const runCommand = vi.fn(async () => {
-      const cliPath = join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
+      const cliPath = join(homeDir, '.haven', 'mcp-runtime', PINNED_MCP_VERSION, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
       await mkdir(join(cliPath, '..'), { recursive: true })
       await writeFile(cliPath, 'console.log("mcp")\n', 'utf8')
-      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'mcp', 'package.json'), '0.1.4-alpha')
-      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.1.6')
+      await writePackage(join(homeDir, '.haven', 'mcp-runtime', PINNED_MCP_VERSION, 'node_modules', '@haven_ai', 'mcp', 'package.json'), PINNED_MCP_VERSION)
+      await writePackage(join(homeDir, '.haven', 'mcp-runtime', PINNED_MCP_VERSION, 'node_modules', '@haven_ai', 'sdk', 'package.json'), PINNED_SDK_VERSION)
     })
 
     await mkdir(credentialDirectory, { recursive: true })
@@ -66,17 +75,17 @@ describe('prepareLocalMcpRuntime', () => {
     const credentialDirectory = join(homeDir, '.haven', 'agents', 'agent-1')
     const identityPath = join(credentialDirectory, 'identity.json')
     const signerPath = join(credentialDirectory, 'signer.json')
-    const staleCliPath = join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
+    const staleCliPath = join(homeDir, '.haven', 'mcp-runtime', PINNED_MCP_VERSION, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js')
     await mkdir(join(staleCliPath, '..'), { recursive: true })
     await writeFile(staleCliPath, 'console.log("stale")\n', 'utf8')
-    await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'mcp', 'package.json'), '0.1.4-alpha')
-    await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.0.0')
+    await writePackage(join(homeDir, '.haven', 'mcp-runtime', PINNED_MCP_VERSION, 'node_modules', '@haven_ai', 'mcp', 'package.json'), PINNED_MCP_VERSION)
+    await writePackage(join(homeDir, '.haven', 'mcp-runtime', PINNED_MCP_VERSION, 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.0.0')
     await mkdir(credentialDirectory, { recursive: true })
     await writeFile(identityPath, JSON.stringify({ api_key: API_KEY }), 'utf8')
     await writeFile(signerPath, JSON.stringify({ delegate_key: PRIVATE_KEY }), 'utf8')
 
     const runCommand = vi.fn(async () => {
-      await writePackage(join(homeDir, '.haven', 'mcp-runtime', '0.1.4-alpha', 'node_modules', '@haven_ai', 'sdk', 'package.json'), '0.1.6')
+      await writePackage(join(homeDir, '.haven', 'mcp-runtime', PINNED_MCP_VERSION, 'node_modules', '@haven_ai', 'sdk', 'package.json'), PINNED_SDK_VERSION)
     })
 
     const result = await prepareLocalMcpRuntime({

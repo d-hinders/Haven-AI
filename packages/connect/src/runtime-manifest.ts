@@ -10,7 +10,7 @@ export const MCP_RUNTIME_MANIFEST = {
   mcpPackage: '@haven_ai/mcp',
   mcpVersion: MCP_VERSION,
   sdkPackage: '@haven_ai/sdk',
-  sdkVersion: '0.1.6',
+  sdkVersion: '0.1.7',
   signerPackage: '@haven_ai/signer',
   signerVersion: '0.1.0-alpha',
   minimumNodeVersion: '20.0.0',

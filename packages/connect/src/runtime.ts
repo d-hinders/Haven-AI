@@ -17,6 +17,7 @@ import {
   runtimeInstallCapabilities,
   type RuntimeInstallResult,
 } from './runtime-install.js'
+import { runtimeRequiresHardRestart } from './runtime-registry.js'
 
 export const CONNECTOR_VERSION = '0.1.2'
 
@@ -153,12 +154,16 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
 
   log('Return to Haven to approve the agent rules.')
   if (runtimeInstall.restartRequired) {
-    // Soften the "must restart" claim: some clients (and some Claude Code
-    // session versions) pick up newly-registered MCP servers in-session via
-    // the deferred-tool mechanism, so the restart is a fallback, not a
-    // precondition. Agents that follow an unconditional instruction here
-    // were restarting unnecessarily.
-    log('After approval, Haven tools should appear in your next message. If they don\'t, restart this agent to load them.')
+    // Desktop GUI runtimes really do need a restart — the MCP server only
+    // loads at app launch. For CLI / session runtimes (Claude Code, Codex
+    // CLI) the new MCP often appears in-session via the deferred-tool
+    // mechanism, so soften the instruction there to avoid training users to
+    // restart unnecessarily.
+    if (runtimeRequiresHardRestart(runtimeInstall.runtime)) {
+      log('After approval, restart this agent so it can load Haven tools.')
+    } else {
+      log('After approval, Haven tools should appear in your next message. If they don\'t, restart this agent to load them.')
+    }
   }
 
   return {

@@ -117,6 +117,19 @@ export function restartRequiredForRuntime(runtime: string | undefined, env: Node
   return mode === 'restart-session' || mode === 'restart-app'
 }
 
+/**
+ * Desktop GUI runtimes really do require a restart for the user to see the new
+ * MCP server — the MCP server lifecycle is tied to app launch, not to the
+ * current conversation. The agent who reported the "restart not needed"
+ * surprise was using Claude Code (a CLI session that picks up new MCP servers
+ * in-session via the deferred-tool mechanism). Don't softpedal the restart
+ * instruction on Claude Desktop / Codex Desktop just because Claude Code is
+ * looser about it.
+ */
+export function runtimeRequiresHardRestart(runtime: RuntimeId): boolean {
+  return runtime === 'claude-desktop' || runtime === 'codex-desktop'
+}
+
 function normalizeRuntimeName(runtime: string | undefined): RuntimeId | null {
   const key = runtime?.trim().toLowerCase()
   if (!key) return null

@@ -9,6 +9,7 @@ import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import {
   getTokenAllowance,
+  getTokenBalance,
   computeEffectiveAllowance,
   generateTransferHash,
   recoverSigner,
@@ -473,6 +474,75 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     }
 
     const effective = computeEffectiveAllowance(onChainAllowance)
+
+    // Pre-flight: read the delegate's on-chain balance for this token before
+    // doing anything that creates state. Even with a full Safe AllowanceModule
+    // top-up the merchant payment cannot settle unless the delegate ends up
+    // holding the amount, so the real coverage is
+    // `delegateBalance + remainingAllowance`. If that's short, return a
+    // structured `insufficient_funds` failure with no payment intent or
+    // approval row — there is no approval the wallet owner could grant that
+    // would make this payment succeed; the originating Safe needs more funds
+    // or the agent's per-token allowance needs to be raised.
+    //
+    // Note: the existing over-budget branch below treats `amount > remaining`
+    // as approval-required. That assumes the delegate's existing balance is
+    // zero. The pre-flight short-circuits the unrecoverable case but does
+    // not change the approval-required path — small overages still queue.
+    let delegateBalance: bigint
+    try {
+      delegateBalance = await getTokenBalance(
+        agent.chain_id,
+        agent.delegate_address,
+        tokenAddress,
+      )
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to read delegate token balance',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    const totalCoverage = delegateBalance + effective.remaining
+    if (amountRaw > totalCoverage) {
+      const shortfallRaw = amountRaw - totalCoverage
+      const balanceHuman = ethers.formatUnits(delegateBalance, tokenConfig.decimals)
+      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const coverageHuman = ethers.formatUnits(totalCoverage, tokenConfig.decimals)
+      const shortfallHuman = ethers.formatUnits(shortfallRaw, tokenConfig.decimals)
+      return reply.code(422).send({
+        error:
+          `Insufficient funds to pay ${amountHuman} ${tokenConfig.symbol}: ` +
+          `delegate balance ${balanceHuman} + remaining allowance ${remainingHuman} ` +
+          `= ${coverageHuman} ${tokenConfig.symbol}, short by ${shortfallHuman}. ` +
+          'Fund the Safe or raise the agent allowance and retry.',
+        error_code: 'insufficient_funds',
+        phase: AgentPaymentPhase.InsufficientFunds,
+        next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+        rail: AgentPaymentRail.X402,
+        chain_id: agent.chain_id,
+        token: tokenConfig.symbol,
+        asset: tokenAddress,
+        network,
+        amount: amountHuman,
+        amount_atomic: amountRaw.toString(),
+        delegate_balance: balanceHuman,
+        delegate_balance_atomic: delegateBalance.toString(),
+        remaining_allowance: remainingHuman,
+        remaining_allowance_atomic: effective.remaining.toString(),
+        shortfall: shortfallHuman,
+        shortfall_atomic: shortfallRaw.toString(),
+        resource_url: url,
+        merchant_address: merchantPayTo?.toLowerCase() ?? null,
+        // Intentionally not echoing the agent's delegate or safe address here.
+        // The agent holds both via its credential, and the delegate EOA is
+        // the only entity that briefly holds liquid funds during the x402
+        // hot-wallet leg — leaking it through a structured pre-flight error
+        // (which agent runtimes may log, persist, or relay) is unnecessary
+        // surveillance surface for no agent benefit.
+      })
+    }
+
     if (amountRaw > effective.remaining) {
       const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
       const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''

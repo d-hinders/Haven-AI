@@ -19,6 +19,7 @@ export const AgentPaymentPhase = {
   Rejected: 'rejected',
   Expired: 'expired',
   Failed: 'failed',
+  InsufficientFunds: 'insufficient_funds',
 } as const
 
 export type AgentPaymentPhase = (typeof AgentPaymentPhase)[keyof typeof AgentPaymentPhase]
@@ -32,6 +33,7 @@ export const AgentPaymentNextAction = {
   RetryOriginalX402Request: 'retry_original_x402_request',
   StopAndTellUser: 'stop_and_tell_user',
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
+  FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]

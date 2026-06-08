@@ -6,6 +6,7 @@ const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() =>
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
+    getTokenBalance: vi.fn(),
     computeEffectiveAllowance: vi.fn(),
     generateTransferHash: vi.fn(),
     recoverSigner: vi.fn(),
@@ -95,6 +96,12 @@ describe('x402 routes', () => {
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
     for (const mock of Object.values(evidenceMocks)) mock.mockReset()
+    // Default to zero delegate balance for tests that don't care about it.
+    // The pre-flight check (delegateBalance + remainingAllowance >= amount)
+    // still passes because existing tests set `remaining` high enough to
+    // cover the requested amount on its own. Tests that want to exercise
+    // the insufficient-funds branch override this with .mockResolvedValueOnce.
+    allowanceMocks.getTokenBalance.mockResolvedValue(0n)
   })
 
   it('registers /x402/authorize as the explicit authorize endpoint', async () => {
@@ -618,6 +625,10 @@ describe('x402 routes', () => {
   it('queues over-allowance x402 payments once with rail metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
+    // Delegate already holds enough to satisfy the shortfall after the
+    // top-up, so the pre-flight insufficient-funds check passes and we
+    // fall through into the existing over-budget approval-queue path.
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(20_000n)
 
     mockQuery
       .mockResolvedValueOnce(authRow())
@@ -696,6 +707,213 @@ describe('x402 routes', () => {
       category: 'data',
       description: null,
     }))
+  })
+
+  it('returns 422 insufficient_funds when delegate balance + remaining allowance cannot cover the amount', async () => {
+    // Regression test for the agent-feedback-driven pre-flight check. Before
+    // the check existed, this case would proceed all the way to sign_data
+    // generation and then fail on-chain at executeAllowanceTransfer, leaving
+    // the agent in a dead-end "signed but won't settle" state. The new
+    // pre-flight fails fast with a structured error the agent can act on
+    // (next_action=fund_safe_or_raise_allowance).
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 5_000n })
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:insufficient',
+      },
+    })
+
+    expect(response.statusCode).toBe(422)
+    const body = response.json()
+    expect(body).toMatchObject({
+      error_code: 'insufficient_funds',
+      phase: 'insufficient_funds',
+      next_action: 'fund_safe_or_raise_allowance',
+      rail: 'x402',
+      chain_id: 8453,
+      token: 'USDC',
+      asset: USDC,
+      network: 'base',
+      amount: '0.02',
+      amount_atomic: '20000',
+      delegate_balance: '0.0',
+      delegate_balance_atomic: '0',
+      remaining_allowance: '0.005',
+      remaining_allowance_atomic: '5000',
+      shortfall: '0.015',
+      shortfall_atomic: '15000',
+      resource_url: 'https://mcp.soundside.ai/mcp',
+      merchant_address: MERCHANT.toLowerCase(),
+    })
+    // Delegate / Safe addresses must NOT be echoed back. Agents already know
+    // both from the credential they hold; surfacing them in a structured
+    // pre-flight error widens the surveillance surface for the hot-wallet
+    // delegate EOA for no agent-side benefit.
+    expect(body).not.toHaveProperty('delegate_address')
+    expect(body).not.toHaveProperty('safe_address')
+    expect(body.error).toMatch(/Insufficient funds/i)
+    expect(body.error).toContain('USDC')
+
+    // Critical: no payment intent or approval row was written. The pre-flight
+    // must short-circuit BEFORE any state-creating DB write — the user can
+    // retry after funding without an idempotency conflict.
+    const inserts = mockQuery.mock.calls.filter((call) =>
+      typeof call[0] === 'string' && /INSERT INTO (payment_intents|approval_requests)/.test(call[0] as string),
+    )
+    expect(inserts).toEqual([])
+
+    // The pre-flight read happened on the (chain, delegate, token) tuple
+    // before the over-budget approval-queue path would have run.
+    expect(allowanceMocks.getTokenBalance).toHaveBeenCalledWith(
+      AGENT.chain_id,
+      AGENT.delegate_address,
+      USDC,
+    )
+  })
+
+  it('returns 422 insufficient_funds when delegate balance + remaining is just short of the amount', async () => {
+    // Boundary case: cover = amount - 1. The check must reject (strict >),
+    // not silently round to "close enough", or merchant settlement would
+    // revert downstream.
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(9_999n)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:boundary',
+      },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.json()).toMatchObject({
+      error_code: 'insufficient_funds',
+      shortfall_atomic: '1',
+    })
+  })
+
+  it('falls through pre-flight when delegate balance covers the allowance gap', async () => {
+    // Regression guard: if the delegate already holds enough of the token to
+    // settle the merchant payment, even a zero remaining allowance must NOT
+    // fire the insufficient-funds short-circuit on its own. The over-budget
+    // approval-queue path (or the happy-path sign step) is what should run.
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 0n })
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(50_000n)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-balance-only',
+          status: 'pending',
+          token_symbol: 'USDC',
+          amount_human: '0.02',
+          expires_at: '2026-05-10T20:00:00.000Z',
+          machine_challenge_id: null,
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:balance-only',
+      },
+    })
+
+    // The existing over-budget logic still treats remaining<amount as
+    // approval-required (queues for user approval). The pre-flight check is
+    // narrower than that: it only short-circuits the unrecoverable case.
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-balance-only',
+      status: 'pending_approval',
+    })
+  })
+
+  it('returns 502 when the delegate balance read itself fails (RPC outage)', async () => {
+    // Make sure a transient RPC failure on the balance read surfaces as a
+    // distinct 502 from the allowance-read failure — agents and dashboards
+    // distinguishing the two read paths can pick the right retry strategy.
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.getTokenBalance.mockRejectedValueOnce(new Error('rpc timeout'))
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:rpc-outage',
+      },
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json().error).toBe('Failed to read delegate token balance')
   })
 
   it('returns an existing pending approval for duplicate over-allowance idempotency keys', async () => {
@@ -863,6 +1081,9 @@ describe('x402 routes', () => {
   it('returns the existing approval when an over-allowance insert hits an idempotency conflict', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
+    // Delegate balance covers the shortfall so the pre-flight check passes
+    // and we exercise the over-budget idempotency-conflict path.
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(20_000n)
 
     mockQuery
       .mockResolvedValueOnce(authRow())

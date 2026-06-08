@@ -535,6 +535,14 @@ export const AgentPaymentPhase = {
   Expired: 'expired',
   /** Haven could not complete the payment; the agent should stop and surface the failure. */
   Failed: 'failed',
+  /**
+   * Pre-flight check determined the delegate's existing balance plus the
+   * remaining on-chain allowance cannot cover the requested amount, so no
+   * payment intent was created. Distinct from `UserApprovalRequired`: there
+   * is no approval that would fix this — the originating Safe needs more
+   * funds or the agent's per-token allowance needs to be raised first.
+   */
+  InsufficientFunds: 'insufficient_funds',
 } as const
 
 export type AgentPaymentPhase = (typeof AgentPaymentPhase)[keyof typeof AgentPaymentPhase]
@@ -556,6 +564,12 @@ export const AgentPaymentNextAction = {
   StopAndTellUser: 'stop_and_tell_user',
   /** Ask again only if the user still wants the payment after expiry. */
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
+  /**
+   * Stop and tell the user that the originating Safe needs to be funded or
+   * the agent's per-token allowance needs to be raised before the payment
+   * can succeed. A user approval will not fix this state on its own.
+   */
+  FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
@@ -618,6 +632,8 @@ export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = 
   [AgentPaymentPhase.Rejected]: 'The wallet owner rejected the request; the agent should stop and tell the user.',
   [AgentPaymentPhase.Expired]: 'The payment or approval request expired before completion.',
   [AgentPaymentPhase.Failed]: 'Haven could not complete the payment; the agent should stop and surface the failure.',
+  [AgentPaymentPhase.InsufficientFunds]:
+    'Pre-flight check determined the delegate balance plus the remaining on-chain allowance cannot cover the requested amount, so no payment was created. The originating Safe must be funded or the agent allowance raised before retrying.',
 }
 
 export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, string> = {
@@ -629,6 +645,8 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
   [AgentPaymentNextAction.RetryOriginalX402Request]: 'Resume this payment id and retry the original x402 request with the merchant payment header.',
   [AgentPaymentNextAction.StopAndTellUser]: 'Stop retrying this payment and tell the user what happened.',
   [AgentPaymentNextAction.RequestAgainIfUserStillWantsIt]: 'Ask again only if the user still wants the payment after expiry.',
+  [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
+    'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {

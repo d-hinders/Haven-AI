@@ -537,7 +537,7 @@ export default function ConnectAgent2Modal({
               <StatusBadge tone="brand">Preview</StatusBadge>
             </div>
             <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-              {headerSubtitle(step, visibleStatus)}
+              {headerSubtitle(step, visibleStatus, setupStatus?.install_status?.local_mcp_configured)}
             </p>
           </div>
           <button
@@ -822,7 +822,16 @@ export default function ConnectAgent2Modal({
                 />
               )}
 
-              {(visibleStatus === 'connected_local' || visibleStatus === 'awaiting_wallet_approval') && (
+              {visibleStatus === 'connected_local' &&
+                !setupStatus?.install_status?.local_mcp_configured &&
+                !setupStatus?.install_status?.error_code && (
+                <FinalizingLocalSetup loading={statusQuery.loading} />
+              )}
+
+              {((visibleStatus === 'connected_local' &&
+                (setupStatus?.install_status?.local_mcp_configured ||
+                  setupStatus?.install_status?.error_code)) ||
+                visibleStatus === 'awaiting_wallet_approval') && (
                 <LocalConnectionReady
                   status={setupStatus}
                   fallbackSetup={setup}
@@ -1101,6 +1110,19 @@ function WaitingForConnector({
         </Button>
       </div>
     </>
+  )
+}
+
+function FinalizingLocalSetup({ loading }: { loading: boolean }) {
+  return (
+    <div className="space-y-4 text-center">
+      <div className="flex justify-center">
+        <StatusBadge tone="neutral">{loading ? 'Checking' : 'Finishing setup'}</StatusBadge>
+      </div>
+      <p className="mx-auto max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
+        The connector is finishing local setup. This usually takes a few seconds.
+      </p>
+    </div>
   )
 }
 
@@ -1417,8 +1439,9 @@ function SetupStatusState({
   )
 }
 
-function headerSubtitle(step: SetupStep, status: string | undefined): string {
+function headerSubtitle(step: SetupStep, status: string | undefined, localMcpConfigured?: boolean): string {
   if (step === 'connect') {
+    if (status === 'connected_local' && !localMcpConfigured) return 'Finishing local setup'
     if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent rules'
     if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
     if (status === 'active') return 'Agent rules approved'

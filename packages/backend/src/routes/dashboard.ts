@@ -147,13 +147,6 @@ export default async function dashboardRoutes(
                AND status = 'executed'
                AND tx_hash IS NOT NULL
            )
-           OR EXISTS (
-             SELECT 1
-             FROM self_sign_payment_intents
-             WHERE user_id = $1
-               AND status = 'confirmed'
-               AND tx_hash IS NOT NULL
-           )
          ) AS has_first_agent_payment`,
         [sub],
       ),

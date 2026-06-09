@@ -20,9 +20,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { HavenClient, buildX402ExpectedMessage } from '@haven_ai/sdk'
 import { privateKeyToAccount } from 'viem/accounts'
-import { createEdgeSigner } from '../../signer/src/core.js'
-import { createToolHandlers as createHostedHandlers } from './tools.js'
-import { createToolHandlers as createSignerHandlers } from '../../signer/src/tools.js'
+import { createEdgeSigner, createToolHandlers as createSignerHandlers } from '@haven_ai/signer'
+import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
 import { createHostedHavenClient } from './server.js'
 
 // ── Test keys (well-known Hardhat accounts, never used for real funds) ────────
@@ -181,11 +180,11 @@ function jsonResponse(status: number, body: unknown) {
   }
 }
 
-function ok<T = unknown>(result: { success: boolean; data?: T; message?: string; code?: string }): T {
+function ok<T = unknown>(result: ToolPayload): T {
   if (!result.success) {
     throw new Error(`Expected success, got failure: [${result.code}] ${result.message}`)
   }
-  return result.data as T
+  return (result as { success: true; data: T }).data
 }
 
 // ── Test suite ─────────────────────────────────────────────────────────────────

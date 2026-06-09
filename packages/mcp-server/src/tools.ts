@@ -355,10 +355,15 @@ export function createToolHandlers(
           // Call the internal MPP authorization endpoint directly via the
           // keyless path: POST /machine-payments/authorize returns a payload_hash
           // for the agent to sign, or an already-confirmed tx if auto-executed.
-          const raw = await (haven as any)._post<any>('/machine-payments/authorize', {
-            challenge: quote.challenge,
-            idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
-          }).catch(() => null)
+          type PostFn = (path: string, body: Record<string, unknown>) => Promise<unknown>
+          const postFn = (haven as unknown as { post?: PostFn }).post
+          const raw = await (postFn
+            ? postFn.call(haven, '/machine-payments/authorize', {
+                challenge: quote.challenge,
+                idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
+              })
+            : null
+          ) as Record<string, unknown> | null
 
           // Fallback if internal method not available: use createIntent equiv.
           if (raw === null) {
@@ -368,27 +373,37 @@ export function createToolHandlers(
             )
           }
 
-          if (raw.success && raw.tx_hash) {
-            return { payment_id: raw.payment_id, status: 'confirmed', tx_hash: raw.tx_hash, payload_hash: null }
+          // Type-narrow the raw response fields.
+          const rawTyped = raw as {
+            success?: boolean
+            tx_hash?: string
+            payment_id?: string
+            status?: string
+            expires_at?: string
+            sign_data?: { hash?: string }
           }
 
-          if (raw.payment_id && raw.sign_data?.hash) {
+          if (rawTyped.success && rawTyped.tx_hash) {
+            return { payment_id: rawTyped.payment_id, status: 'confirmed', tx_hash: rawTyped.tx_hash, payload_hash: null }
+          }
+
+          if (rawTyped.payment_id && rawTyped.sign_data?.hash) {
             return {
-              payment_id: raw.payment_id,
-              status: raw.status ?? 'pending_signature',
-              payload_hash: raw.sign_data.hash,
-              expires_at: raw.expires_at ?? null,
+              payment_id: rawTyped.payment_id,
+              status: rawTyped.status ?? 'pending_signature',
+              payload_hash: rawTyped.sign_data.hash,
+              expires_at: rawTyped.expires_at ?? null,
               meta: { challenge: quote.challenge },
             }
           }
 
           // Over-budget → pending_approval
-          if (isPendingApproval(raw.status)) {
-            return { payment_id: raw.payment_id, status: 'pending_approval', payload_hash: null }
+          if (isPendingApproval(rawTyped.status)) {
+            return { payment_id: rawTyped.payment_id, status: 'pending_approval', payload_hash: null }
           }
 
           throw new HavenApiError(
-            `Unexpected machine-payment authorize response: ${JSON.stringify(raw)}`,
+            `Unexpected machine-payment authorize response: ${JSON.stringify(rawTyped)}`,
             500,
           )
         } catch (err) {

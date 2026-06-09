@@ -488,7 +488,10 @@ describe('x402 helpers', () => {
         amount: '0.02',
         to: delegateAddress,
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Missing session ID' }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Missing session ID' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', 'X-Soundside-Trace': 'trace-789' },
+      }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
 
     const haven = new HavenClient({
@@ -502,6 +505,9 @@ describe('x402 helpers', () => {
       body: expect.objectContaining({
         marker: 'x402_retry_rejected_after_funding',
         payment_id: 'pay_123',
+        merchant_status: 400,
+        merchant_body: JSON.stringify({ error: 'Missing session ID' }),
+        merchant_headers: expect.objectContaining({ 'x-soundside-trace': 'trace-789' }),
       }),
     })
 
@@ -521,6 +527,129 @@ describe('x402 helpers', () => {
         delegate_to: delegateAddress,
       },
     })
+  })
+
+  const x402PreRetryResponses = (resourceUrl: string, txHash: string): Response[] => [
+    new Response(JSON.stringify(paymentRequired), {
+      status: 402,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    new Response(JSON.stringify({
+      payment_id: 'pay_123',
+      status: 'pending_signature',
+      chain_id: 8453,
+      safe_address: safeAddress,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+      resource_url: resourceUrl,
+      sign_data: {
+        hash: `0x${'11'.repeat(32)}`,
+        components: {
+          safe: safeAddress,
+          token: accepted.asset,
+          to: delegateAddress,
+          amount: accepted.amount,
+          payment_token: '0x0000000000000000000000000000000000000000',
+          payment: '0',
+          nonce: 1,
+        },
+        instructions: 'Sign with delegate key',
+      },
+    }), { status: 201 }),
+    new Response(JSON.stringify({
+      payment_id: 'pay_123',
+      status: 'confirmed',
+      tx_hash: txHash,
+      chain_id: 8453,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+    }), { status: 200 }),
+  ]
+
+  it.each([
+    {
+      label: '400 schema-style rejection',
+      status: 400,
+      statusText: 'Bad Request',
+      body: JSON.stringify({ error: 'Field required: accepted' }),
+    },
+    {
+      label: '402 signature/balance rejection',
+      status: 402,
+      statusText: 'Payment Required',
+      body: JSON.stringify({ error: 'invalid_exact_evm_payload_authorization_valueInsufficient' }),
+    },
+    {
+      label: '5xx server error',
+      status: 503,
+      statusText: 'Service Unavailable',
+      body: 'upstream temporarily unavailable',
+    },
+  ])('captures the merchant response body for a $label retry failure', async ({ status, statusText, body }) => {
+    const backendUrl = 'https://haven.example'
+    const resourceUrl = paymentRequired.resource.url
+    const txHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    for (const response of x402PreRetryResponses(resourceUrl, txHash)) {
+      fetchMock.mockResolvedValueOnce(response)
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(body, {
+        status,
+        statusText,
+        headers: { 'Content-Type': 'application/json', 'X-Merchant-Trace': 'trace-abc' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: backendUrl,
+    })
+
+    await expect(haven.fetch(resourceUrl)).rejects.toMatchObject({
+      statusCode: status,
+      body: expect.objectContaining({
+        marker: 'x402_retry_rejected_after_funding',
+        payment_id: 'pay_123',
+        merchant_status: status,
+        merchant_status_text: statusText,
+        merchant_body: body,
+        merchant_headers: expect.objectContaining({ 'x-merchant-trace': 'trace-abc' }),
+      }),
+    })
+  })
+
+  it('does not leak the delegate key or agent API key into the captured merchant response', async () => {
+    const backendUrl = 'https://haven.example'
+    const resourceUrl = paymentRequired.resource.url
+    const txHash = `0x${'ab'.repeat(32)}`
+    const delegateKey = `0x${'01'.repeat(32)}`
+    const apiKey = 'sk_agent_secret_value'
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    for (const response of x402PreRetryResponses(resourceUrl, txHash)) {
+      fetchMock.mockResolvedValueOnce(response)
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Missing session ID' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
+
+    const haven = new HavenClient({ apiKey, delegateKey, baseUrl: backendUrl })
+
+    const error = await haven.fetch(resourceUrl).then(
+      () => { throw new Error('expected merchant retry to reject') },
+      (err: unknown) => err as { body: Record<string, unknown> },
+    )
+
+    const serialized = JSON.stringify(error.body)
+    expect(serialized).not.toContain(apiKey)
+    expect(serialized).not.toContain(delegateKey)
+    expect(error.body.merchant_body).toBe(JSON.stringify({ error: 'Missing session ID' }))
   })
 
   it('does not fund the delegate wallet for unsupported Base assets', async () => {

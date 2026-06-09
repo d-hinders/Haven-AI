@@ -94,6 +94,17 @@ const MCP_PROTOCOL_VERSION = '2025-06-18'
 const MCP_ACCEPT = 'application/json, text/event-stream'
 const MCP_CLIENT_INFO = { name: 'haven-sdk', version: '1' }
 
+/** Cap the merchant body persisted to the reconciliation event (the full body is kept on the thrown error). */
+const MERCHANT_BODY_SNIPPET_LIMIT = 1000
+
+/** A failed merchant retry response, captured verbatim for debugging and surfaced on the structured error. */
+interface CapturedMerchantResponse {
+  merchant_status: number
+  merchant_status_text: string
+  merchant_headers: Record<string, string>
+  merchant_body: string
+}
+
 const PAYMENT_STATE_STATUS_CODES: Record<string, number> = {
   pending: 202,
   pending_approval: 202,
@@ -1190,12 +1201,13 @@ export class HavenClient {
     })
 
     if (!retryResponse.ok) {
+      const merchant = await captureMerchantResponse(retryResponse)
       await this.recordMerchantRetryRejected({
         rail: 'x402',
         paymentId: receipt.paymentId,
         txHash: receipt.txHash,
         resourceUrl: receipt.resourceUrl,
-        retryResponse,
+        merchant,
         details: {
           merchant_to: receipt.merchantTo,
           delegate_to: receipt.to,
@@ -1204,7 +1216,7 @@ export class HavenClient {
 
       throw new HavenApiError(
         'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required.',
-        retryResponse.status,
+        merchant.merchant_status,
         {
           marker: 'x402_retry_rejected_after_funding',
           payment_id: receipt.paymentId,
@@ -1212,6 +1224,7 @@ export class HavenClient {
           resource_url: receipt.resourceUrl,
           merchant_to: receipt.merchantTo,
           delegate_to: receipt.to,
+          ...merchant,
         },
       )
     }
@@ -1386,12 +1399,13 @@ export class HavenClient {
     })
 
     if (!retryResponse.ok) {
+      const merchant = await captureMerchantResponse(retryResponse)
       await this.recordMerchantRetryRejected({
         rail: receipt.rail,
         paymentId: receipt.paymentId,
         txHash: receipt.txHash,
         resourceUrl: receipt.resourceUrl,
-        retryResponse,
+        merchant,
         details: {
           challenge_id: receipt.challengeId,
         },
@@ -1399,13 +1413,14 @@ export class HavenClient {
 
       throw new HavenApiError(
         'Machine payment retry failed after Haven sent the payment.',
-        retryResponse.status,
+        merchant.merchant_status,
         {
           marker: 'machine_payment_retry_rejected_after_payment',
           payment_id: receipt.paymentId,
           tx_hash: receipt.txHash,
           resource_url: receipt.resourceUrl,
           rail: receipt.rail,
+          ...merchant,
         },
       )
     }
@@ -1798,7 +1813,7 @@ export class HavenClient {
     paymentId: string
     txHash: string
     resourceUrl: string
-    retryResponse: Response
+    merchant: CapturedMerchantResponse
     details?: Record<string, unknown>
   }): Promise<void> {
     try {
@@ -1807,11 +1822,11 @@ export class HavenClient {
         rail: input.rail,
         eventType: 'merchant_retry_rejected_after_payment',
         txHash: input.txHash,
-        reason: `Merchant returned HTTP ${input.retryResponse.status} after Haven payment confirmation`,
+        reason: `Merchant returned HTTP ${input.merchant.merchant_status} after Haven payment confirmation`,
         details: {
           resource_url: input.resourceUrl,
-          retry_status: input.retryResponse.status,
-          retry_body: await responseSnippet(input.retryResponse),
+          retry_status: input.merchant.merchant_status,
+          retry_body: input.merchant.merchant_body.slice(0, MERCHANT_BODY_SNIPPET_LIMIT) || null,
           ...input.details,
         },
       })
@@ -2643,11 +2658,19 @@ function parseProtocolReceiptHeader(value: string): Record<string, unknown> | un
   }
 }
 
-async function responseSnippet(response: Response): Promise<string | null> {
-  try {
-    const text = await response.clone().text()
-    return text.slice(0, 1000) || null
-  } catch {
-    return null
+/**
+ * Captures a failed merchant retry response so callers can debug exactly why the
+ * merchant rejected a payment Haven already funded. We preserve the status code,
+ * statusText, headers, and full body text verbatim — this is the merchant's
+ * response, so it never contains Haven-side secrets (delegate key, agent API key),
+ * which only ever live in the outbound request.
+ */
+async function captureMerchantResponse(response: Response): Promise<CapturedMerchantResponse> {
+  const merchant_body = await response.text().catch(() => '')
+  return {
+    merchant_status: response.status,
+    merchant_status_text: response.statusText,
+    merchant_headers: Object.fromEntries(response.headers.entries()),
+    merchant_body,
   }
 }

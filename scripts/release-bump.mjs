@@ -313,6 +313,15 @@ async function main() {
   header('Verifying connect bundle')
   await verifyConnectBundle(newVersion)
 
+  // Strong build-order check: the dedicated verifier require()s the built
+  // bundle and compares its runtime-resolved mcpVersion against the
+  // MCP_VERSION literal in packages/mcp/src/server.ts. We build connect via
+  // tsup directly above (step 8), which bypasses connect's own `build` script
+  // that normally runs this verifier — so run it explicitly here. Without this,
+  // verifyConnectBundle alone only checks the inlined sdk/signer version string
+  // and cannot catch a stale mcpVersion (it is resolved at runtime, not inlined).
+  await run('node', [join(ROOT, 'scripts', 'verify-connect-bundle.mjs')])
+
   // ── Done ──────────────────────────────────────────────────────────────────
   header('Done')
   log(`\n  Released: ${newVersion}`)

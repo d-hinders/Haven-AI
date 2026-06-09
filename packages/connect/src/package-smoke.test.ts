@@ -61,8 +61,8 @@ describe('MCP_VERSION constant parity', () => {
   })
 
   // This test skips when dist/ hasn't been built yet (fresh checkout, CI before
-  // the build step). The primary enforcement is the postbuild hook in
-  // packages/connect/package.json and the install-smoke CI job. When this test
+  // the build step). The primary enforcement is the build-step verifier wired
+  // into packages/connect/package.json and the install-smoke CI job. When this test
   // does run (after a local build or in smoke:pack), it catches the build-order
   // bug: if packages/mcp/dist/ was stale when connect's tsup ran, the bundle
   // require()s the old mcp dist and resolves the wrong mcpVersion at runtime.

@@ -19,7 +19,7 @@ import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
 } from '@/hooks/useAgentConnectionSetupStatus'
-import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { truncate } from '@/lib/format'
 import { validateMoneyInput } from '@/lib/money-input'
@@ -142,12 +142,22 @@ export default function ConnectAgent2Modal({
 
   const { user, activeSafe } = useAuth()
   const userSafes = user?.safes ?? []
+
+  // Only wallets on a currently-supported chain can actually run a new agent
+  // (the wallet/approval flow is scoped to enabled chains). Offer those in the
+  // picker; fall back to all wallets only if the user has none on a supported
+  // chain, so the picker is never empty.
+  const isSupportedChain = (chainId?: number) =>
+    chainId !== undefined && SUPPORTED_CHAIN_IDS.includes(chainId)
+  const supportedSafes = userSafes.filter((safe) => isSupportedChain(safe.chain_id))
+  const selectableSafes = supportedSafes.length > 0 ? supportedSafes : userSafes
+
   const initialSafeId =
     propSafeId ??
     userSafes.find((safe) => safe.safe_address.toLowerCase() === propSafeAddress?.toLowerCase())?.id ??
-    activeSafe?.id ??
-    userSafes.find((safe) => safe.is_default)?.id ??
-    userSafes[0]?.id ??
+    (isSupportedChain(activeSafe?.chain_id) ? activeSafe?.id : undefined) ??
+    selectableSafes.find((safe) => safe.is_default)?.id ??
+    selectableSafes[0]?.id ??
     null
 
   const [selectedSafeId, setSelectedSafeId] = useState<string | null>(initialSafeId)
@@ -229,11 +239,24 @@ export default function ConnectAgent2Modal({
     [chainTokens],
   )
 
+  // Initialise the wallet + token selection once, when the modal opens.
+  // Reading the latest values via refs (instead of listing them as effect
+  // deps) is deliberate: `tokenOptions` changes identity whenever the chosen
+  // wallet's chain changes, so depending on it here would re-run this effect
+  // and snap the user's wallet choice back to the default mid-selection.
+  const initialSafeIdRef = useRef(initialSafeId)
+  initialSafeIdRef.current = initialSafeId
+  const firstTokenRef = useRef<string>(tokenOptions[0]?.symbol ?? '')
+  firstTokenRef.current = tokenOptions[0]?.symbol ?? ''
+  const prevOpenRef = useRef(false)
+
   useEffect(() => {
-    if (!open) return
-    setSelectedSafeId(initialSafeId)
-    setAddToken(tokenOptions[0]?.symbol ?? '')
-  }, [initialSafeId, open, tokenOptions])
+    if (open && !prevOpenRef.current) {
+      setSelectedSafeId(initialSafeIdRef.current)
+      setAddToken(firstTokenRef.current)
+    }
+    prevOpenRef.current = open
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -626,7 +649,7 @@ export default function ConnectAgent2Modal({
                   value={selectedSafeId ?? ''}
                   onChange={(event) => setSelectedSafeId(event.target.value)}
                 >
-                  {userSafes.map((safe) => (
+                  {selectableSafes.map((safe) => (
                     <option key={safe.id} value={safe.id}>
                       {safe.name}
                     </option>

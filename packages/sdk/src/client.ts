@@ -65,6 +65,7 @@ import {
   encodeMachinePaymentProof,
   parseMachinePaymentChallengeResponse,
 } from './mpp.js'
+import { createJsonRpcProvider } from './provider.js'
 
 const DEFAULT_BASE_URL = 'http://localhost:3001'
 
@@ -72,6 +73,7 @@ const CHAIN_EXPLORER_TX: Record<number, string> = {
   100:  'https://gnosisscan.io/tx',
   8453: 'https://basescan.org/tx',
 }
+
 
 function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
   const base = CHAIN_EXPLORER_TX[chainId ?? 8453] ?? CHAIN_EXPLORER_TX[8453]
@@ -294,6 +296,7 @@ export class HavenClient {
   private readonly requestTimeout: number
   private readonly confirmationTimeout: number
   private readonly pollingInterval: number
+  private readonly chainRpcs: Record<number, string>
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
   private readonly x402ReceiptCache = new Map<string, { expiresAt: number; receipt: X402Receipt }>()
   private readonly inFlightMachinePayments = new Map<string, Promise<MachinePaymentReceipt>>()
@@ -325,6 +328,7 @@ export class HavenClient {
     this.requestTimeout = config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
     this.pollingInterval = config.pollingInterval ?? DEFAULT_POLLING_INTERVAL
+    this.chainRpcs = config.chainRpcs ?? {}
     this.defaultHeaders = { ...(config.defaultHeaders ?? {}) }
 
     if (this.delegateKey) {
@@ -811,6 +815,13 @@ export class HavenClient {
     if (execResult.status !== 'confirmed') {
       this.throwPaymentStateError('x402 payment', execResult)
     }
+
+    // Wait for ≥1 on-chain confirmation before retrying the merchant so the
+    // merchant's balanceOf(delegate) check sees the funded balance.
+    await this.waitForFundingTx(
+      execResult.tx_hash,
+      execResult.chain_id ?? chainIdFromNetwork(option.network),
+    )
 
     const receipt = this.mapX402ReceiptFromAuthorization(paymentRequired, option, paymentHeader, raw, execResult)
     this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
@@ -1868,6 +1879,34 @@ export class HavenClient {
     } catch {
       // Evidence reporting is best-effort. The paid resource response remains
       // the caller-visible result when merchant retry succeeded.
+    }
+  }
+
+  /**
+   * Wait for a funding tx to be mined with ≥1 confirmation before the
+   * merchant retry, eliminating the race where the merchant's
+   * `balanceOf(delegate)` runs before the funding block propagates.
+   *
+   * Skipped when `chainRpcs` does not include the chain; in that case Haven's
+   * backend has already confirmed on-chain submission and callers accept the
+   * small propagation window as a trade-off for not configuring an RPC URL.
+   */
+  private async waitForFundingTx(
+    txHash: string | undefined,
+    chainId: number | undefined,
+    timeoutMs = 30_000,
+  ): Promise<void> {
+    if (!txHash || !chainId) return
+    const rpcUrl = this.chainRpcs[chainId]
+    if (!rpcUrl) return
+    const provider = createJsonRpcProvider(rpcUrl)
+    const onChainReceipt = await provider.waitForTransaction(txHash, 1, timeoutMs)
+    if (!onChainReceipt || onChainReceipt.status !== 1) {
+      throw new HavenApiError(
+        'Funding tx did not confirm on-chain within the timeout window.',
+        500,
+        { txHash, chainId },
+      )
     }
   }
 

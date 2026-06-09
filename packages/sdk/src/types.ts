@@ -31,6 +31,22 @@ export interface HavenClientConfig {
    * standard HTTP and never carry Haven-internal headers.
    */
   defaultHeaders?: Record<string, string>
+
+  /**
+   * JSON-RPC RPC URLs keyed by EIP-155 chain ID.
+   *
+   * When provided for a chain, the SDK waits for ≥1 on-chain confirmation of
+   * the AllowanceModule funding tx before retrying the merchant. This prevents
+   * the race where the merchant's `balanceOf(delegate)` call runs before the
+   * funding block has propagated to the merchant's RPC node.
+   *
+   * Without this option the SDK proceeds as soon as Haven's backend confirms
+   * submission (backward-compatible default). Set it to a reliable RPC
+   * endpoint (e.g. Alchemy / Infura) for production usage.
+   *
+   * @example { 8453: 'https://mainnet.base.org' }
+   */
+  chainRpcs?: Record<number, string>
 }
 
 // ── Payment Types ────────────────────────────────────────────────

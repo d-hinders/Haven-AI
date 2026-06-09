@@ -1424,4 +1424,161 @@ describe('machine payment routes', () => {
     expect(response.json().error).toBe('txHash does not match payment intent')
     expect(mockQuery).toHaveBeenCalledTimes(2)
   })
+
+  // ── POST /send ─────────────────────────────────────────────────────────────
+
+  describe('POST /machine-payments/send', () => {
+    const SEND_PAYMENT_ID = '44444444-4444-4444-4444-444444444444'
+    const SEND_HASH = `0x${'22'.repeat(32)}`
+    const SEND_RECIPIENT = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'
+
+    function sendIntentRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: SEND_PAYMENT_ID,
+        status: 'pending_signature',
+        expires_at: '2099-01-01T00:10:00.000Z',
+        ...overrides,
+      }
+    }
+
+    function allowanceWithRemaining(remaining: bigint) {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+        amount: 1_000_000n,
+        spent: 0n,
+        resetTimeMin: 1440,
+        lastResetMin: 0,
+        nonce: 5,
+      })
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
+        remaining,
+        effectiveSpent: 0n,
+        isResetPending: false,
+      })
+    }
+
+    it('creates a USDC payment intent within allowance and returns sign_data', async () => {
+      allowanceWithRemaining(1_000_000_000n)
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SEND_HASH)
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        // agent_allowances check
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '100' }] })
+        // INSERT payment_intent
+        .mockResolvedValueOnce({ rows: [sendIntentRow()] })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1.50' },
+      })
+
+      expect(response.statusCode).toBe(201)
+      const body = response.json()
+      expect(body.payment_id).toBe(SEND_PAYMENT_ID)
+      expect(body.status).toBe('pending_signature')
+      expect(body.asset).toBe('USDC')
+      expect(body.amount).toBe('1.50')
+      expect(body.recipient).toBe(SEND_RECIPIENT.toLowerCase())
+      expect(body.sign_data.hash).toBe(SEND_HASH)
+      expect(body.sign_data.instructions).toContain('delegate private key')
+      expect(allowanceMocks.generateTransferHash).toHaveBeenCalledTimes(1)
+    })
+
+    it('queues over-allowance transfer as pending_approval (202)', async () => {
+      allowanceWithRemaining(0n)
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '0' }] })
+        .mockResolvedValueOnce({
+          rows: [{
+            id: SEND_PAYMENT_ID,
+            status: 'pending',
+            expires_at: '2099-01-02T00:00:00.000Z',
+          }],
+        })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '999' },
+      })
+
+      expect(response.statusCode).toBe(202)
+      const body = response.json()
+      expect(body.status).toBe('pending_approval')
+      expect(body.payment_id).toBe(SEND_PAYMENT_ID)
+      expect(body.asset).toBe('USDC')
+      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    })
+
+    it('rejects unknown asset with 400', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'DOGE', recipient: SEND_RECIPIENT, amount: '1' },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toContain('ETH, USDC')
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    })
+
+    it('rejects invalid recipient address with 400', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: 'not-an-address', amount: '1' },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toContain('recipient')
+    })
+
+    it('rejects missing amount with 400', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toContain('amount')
+    })
+
+    it('rejects when agent has no allowance configured for the token', async () => {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+        amount: 0n, spent: 0n, resetTimeMin: 0, lastResetMin: 0, nonce: 0,
+      })
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
+        remaining: 0n, effectiveSpent: 0n, isResetPending: false,
+      })
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [] }) // no allowance configured
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1' },
+      })
+
+      expect(response.statusCode).toBe(403)
+      expect(response.json().error).toContain('not configured')
+    })
+  })
 })

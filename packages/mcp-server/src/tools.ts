@@ -33,8 +33,10 @@ import { z } from 'zod/v3'
 export type HostedToolName =
   | 'haven_get_agent'
   | 'haven_get_allowances'
+  | 'haven_send'
   | 'haven_pay'
   | 'haven_submit'
+  | 'haven_pay_mcp_tool'
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
@@ -51,6 +53,12 @@ export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transact
 export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_get_agent: {},
   haven_get_allowances: {},
+  haven_send: {
+    asset: z.enum(['ETH', 'USDC']),
+    recipient: z.string().min(1),
+    amount: z.string().min(1),
+    idempotency_key: z.string().optional(),
+  },
   haven_pay: {
     token: z.string().min(1),
     amount: z.string().min(1),
@@ -61,6 +69,12 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     signature: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
+  },
+  haven_pay_mcp_tool: {
+    merchant_url: z.string().url(),
+    tool_name: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()).optional(),
+    idempotency_key: z.string().optional(),
   },
   haven_quote_x402: {
     url: z.string().url(),
@@ -127,6 +141,17 @@ const SUBMIT_DESCRIPTION = [
   'sent to Haven — never the signing key. Returns { status, tx_hash }.',
 ].join(' ')
 
+const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
+  ...sharedDescriptions.payMcpTool,
+  behavior:
+    'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. ' +
+    'Creates a funding intent and returns the unsigned payload_hash for the local edge signer. ' +
+    'Sign via haven_sign, relay via haven_submit, use haven_x402_sign_header on the local signer ' +
+    'to build the X-PAYMENT header, and retry the merchant with the original JSON-RPC envelope ' +
+    'plus the X-PAYMENT header to get the tool result. ' +
+    'Haven never receives the signing key.',
+})
+
 const QUOTE_X402_DESCRIPTION = composeDescription({
   ...sharedDescriptions.quoteX402,
   behavior:
@@ -186,8 +211,10 @@ const RESUME_MPP_DESCRIPTION = [
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
+  haven_send: composeDescription(sharedDescriptions.send),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
+  haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
@@ -223,6 +250,39 @@ export function createToolHandlers(
 
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
 
+    haven_send: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_send', input)
+        try {
+          const intent = await haven.createIntent({
+            token: args.asset,
+            amount: args.amount,
+            to: args.recipient,
+          })
+          return {
+            payment_id: intent.paymentId,
+            status: intent.status,
+            payload_hash: intent.signData.hash,
+            expires_at: intent.expiresAt,
+            asset: args.asset,
+            amount: args.amount,
+            recipient: args.recipient,
+          }
+        } catch (err) {
+          if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
+            return {
+              payment_id: err.paymentId,
+              status: 'pending_approval',
+              payload_hash: null,
+              asset: args.asset,
+              amount: args.amount,
+              recipient: args.recipient,
+            }
+          }
+          throw err
+        }
+      }),
+
     haven_pay: async (input) =>
       runTool(async () => {
         const args = parse('haven_pay', input)
@@ -252,6 +312,45 @@ export function createToolHandlers(
         const args = parse('haven_submit', input)
         const result = await haven.submitSignature(args.payment_id, args.signature)
         return { status: result.status, tx_hash: result.txHash ?? null }
+      }),
+
+    haven_pay_mcp_tool: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_pay_mcp_tool', input)
+        const envelope = {
+          jsonrpc: '2.0',
+          id: `haven-mcp-${Date.now()}`,
+          method: 'tools/call',
+          params: {
+            name: args.tool_name,
+            arguments: args.arguments ?? {},
+          },
+        }
+        const init: RequestInit = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(envelope),
+        }
+        try {
+          const quote = await haven.quoteX402(args.merchant_url as string, init, {
+            idempotencyKey: args.idempotency_key,
+          })
+          const intent = await haven.createX402Intent(
+            quote.paymentRequired as X402PaymentRequired,
+            { idempotencyKey: args.idempotency_key ?? quote.idempotencyKey },
+          )
+          return {
+            ...buildX402SigningContext(intent),
+            // Give the agent the request details it needs to retry after signing.
+            merchant_url: args.merchant_url,
+            tool_name: args.tool_name,
+          }
+        } catch (err) {
+          if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
+            return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }
+          }
+          throw err
+        }
       }),
 
     haven_quote_x402: async (input) =>

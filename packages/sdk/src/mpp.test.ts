@@ -451,7 +451,11 @@ describe('MPP demo helpers', () => {
         amount: '0.01',
         to: challenge.recipient,
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Merchant unavailable' }), { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Merchant unavailable' }), {
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { 'Content-Type': 'application/json', 'X-Merchant-Trace': 'mpp-trace-1' },
+      }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
 
     const haven = new HavenClient({
@@ -465,6 +469,10 @@ describe('MPP demo helpers', () => {
       body: expect.objectContaining({
         marker: 'machine_payment_retry_rejected_after_payment',
         payment_id: 'pay_123',
+        merchant_status: 500,
+        merchant_status_text: 'Internal Server Error',
+        merchant_body: JSON.stringify({ error: 'Merchant unavailable' }),
+        merchant_headers: expect.objectContaining({ 'x-merchant-trace': 'mpp-trace-1' }),
       }),
     })
 

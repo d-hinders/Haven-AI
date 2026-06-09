@@ -15,7 +15,8 @@
     "test:unit": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "quality": "npm run typecheck && npm run test:unit && npm run build",
-    "test:e2e": "npm run test:e2e -w packages/frontend"
+    "test:e2e": "npm run test:e2e -w packages/frontend",
+    "release:bump": "node scripts/release-bump.mjs"
   },
   "overrides": {
     "axios": "^1.16.1",

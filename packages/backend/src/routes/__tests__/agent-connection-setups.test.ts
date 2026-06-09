@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet } from 'ethers'
-import agentConnectionSetupRoutes from '../agent-connection-setups.js'
+import agentConnectionSetupRoutes, { CONNECTOR_PACKAGE } from '../agent-connection-setups.js'
 
 const { mockQuery, mockConnect, mockClientQuery, mockClientRelease } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -197,10 +197,10 @@ describe('agent connection setup routes', () => {
     const body = response.json()
     expect(body.status).toBe('awaiting_connection')
     expect(body.setup_token).toMatch(/^hv_setup_[0-9a-f]+$/)
-    expect(body.connector_command).toContain('npx -y @haven_ai/connect@0.1.6-alpha')
+    expect(body.connector_command).toContain(`npx -y ${CONNECTOR_PACKAGE}`)
     expect(body.connector_command).toContain('--ack-local-tools')
     expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
-    expect(body.setup_prompt).toContain('download and execute the published npm package @haven_ai/connect@0.1.6-alpha')
+    expect(body.setup_prompt).toContain(`download and execute the published npm package ${CONNECTOR_PACKAGE}`)
     expect(body.setup_prompt).toContain('connect to Haven at http://localhost:80')
     expect(body.setup_prompt).toContain('write local Haven credential files under ~/.haven')
     expect(body.setup_prompt).toContain('update the local agent MCP config when supported')
@@ -337,9 +337,11 @@ describe('agent connection setup routes', () => {
 
     expect(response.statusCode).toBe(201)
     const body = response.json()
+    expect(body.connector_command).toContain(`npx -y ${CONNECTOR_PACKAGE}`)
     expect(body.connector_command).toContain('--ack-local-tools')
     expect(body.connector_command).toContain('--runtime codex-desktop')
     expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
+    expect(body.setup_prompt).toContain(`download and execute the published npm package ${CONNECTOR_PACKAGE}`)
     expect(body.setup_prompt).toContain('update Codex MCP config under ~/.codex/config.toml')
     expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)

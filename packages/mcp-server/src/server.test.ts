@@ -36,10 +36,16 @@ describe('buildHostedMcpServer', () => {
         'haven_get_agent',
         'haven_get_allowances',
         'haven_get_payment_status',
-        'haven_list_transactions',
+        'haven_get_resume_state',
+        'haven_list_receipts',
         'haven_pay',
+        'haven_pay_mpp_challenge',
+        'haven_pay_x402_quote',
+        'haven_quote_mpp',
+        'haven_quote_x402',
+        'haven_resume_mpp_payment',
+        'haven_resume_x402_payment',
         'haven_submit',
-        'haven_x402_authorize',
       ].sort(),
     )
 
@@ -59,14 +65,14 @@ describe('buildHostedMcpServer', () => {
     const { tools } = await client.listTools()
     const allowances = tools.find((tool) => tool.name === 'haven_get_allowances')
     const pay = tools.find((tool) => tool.name === 'haven_pay')
-    const x402Authorize = tools.find((tool) => tool.name === 'haven_x402_authorize')
-    const transactions = tools.find((tool) => tool.name === 'haven_list_transactions')
+    const payX402Quote = tools.find((tool) => tool.name === 'haven_pay_x402_quote')
+    const receipts = tools.find((tool) => tool.name === 'haven_list_receipts')
 
     expect(allowances?.description?.toLowerCase()).toContain('what can i spend')
     expect(allowances?.description?.toLowerCase()).toContain('remaining budget')
     expect(pay?.description?.toLowerCase()).toContain('call haven_get_allowances instead')
-    expect(x402Authorize?.description?.toLowerCase()).toContain('call haven_get_allowances instead')
-    expect(transactions?.description?.toLowerCase()).toContain('use the allowance tool instead')
+    expect(payX402Quote?.description?.toLowerCase()).toContain('call haven_get_allowances')
+    expect(receipts?.description?.toLowerCase()).toContain('use the allowance tool instead')
 
     await client.close()
     await server.close()

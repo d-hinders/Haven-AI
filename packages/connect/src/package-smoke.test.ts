@@ -25,6 +25,7 @@
 
 import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -57,6 +58,51 @@ describe('MCP_VERSION constant parity', () => {
         'Keep them in sync: bump both together when releasing a new MCP version.',
       ].join(' '),
     ).toBe(mcpPackageJson.version)
+  })
+
+  // This test skips when dist/ hasn't been built yet (fresh checkout, CI before
+  // the build step). The primary enforcement is the postbuild hook in
+  // packages/connect/package.json and the install-smoke CI job. When this test
+  // does run (after a local build or in smoke:pack), it catches the build-order
+  // bug: if packages/mcp/dist/ was stale when connect's tsup ran, the bundle
+  // require()s the old mcp dist and resolves the wrong mcpVersion at runtime.
+  it('connect dist/index.cjs resolves the correct mcpVersion at runtime (skips when dist absent)', async () => {
+    const bundlePath = fileURLToPath(new URL('../dist/index.cjs', import.meta.url))
+
+    // Skip gracefully if not yet built.
+    try {
+      await access(bundlePath)
+    } catch {
+      return // not built yet — postbuild hook + CI enforce this after each build
+    }
+
+    // Source-of-truth: the MCP_VERSION literal in server.ts.
+    const serverTsPath = fileURLToPath(new URL('../../mcp/src/server.ts', import.meta.url))
+    const serverTs = await readFile(serverTsPath, 'utf8')
+    const sourceMatch = serverTs.match(/export const MCP_VERSION\s*=\s*(['"])(.+?)\1/)
+    expect(
+      sourceMatch,
+      'Could not find MCP_VERSION constant in packages/mcp/src/server.ts',
+    ).not.toBeNull()
+    const sourceVersion = sourceMatch![2]
+
+    // Require the built bundle and check what mcpVersion it resolves to at runtime.
+    // The bundle does: var mcp = require('@haven_ai/mcp'); mcpVersion: mcp.MCP_VERSION
+    // If mcp/dist/ was stale when connect built, bundleVersion !== sourceVersion.
+    const req = createRequire(import.meta.url)
+    const connectDist = req(bundlePath) as { MCP_RUNTIME_MANIFEST: { mcpVersion: string } }
+    const bundleVersion = connectDist.MCP_RUNTIME_MANIFEST?.mcpVersion
+
+    expect(
+      bundleVersion,
+      [
+        `Build-order mismatch: connect's bundle resolves mcpVersion "${bundleVersion}"`,
+        `but packages/mcp/src/server.ts declares "${sourceVersion}".`,
+        `packages/mcp/dist/ was stale when connect was built.`,
+        `Fix: npm run release:bump -- prerelease (see scripts/README.md)`,
+        `or: rm -rf packages/{sdk,mcp,connect}/dist && rebuild in order.`,
+      ].join(' '),
+    ).toBe(sourceVersion)
   })
 })
 

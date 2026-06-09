@@ -519,6 +519,34 @@ export interface HavenPaymentReceipt {
   updatedAt: string
 }
 
+// ── Delegate Sweep Types ─────────────────────────────────────────
+
+/** One transferred asset in a delegate sweep. */
+export interface SweepEntry {
+  /** 'USDC' or 'ETH' */
+  asset: string
+  /** Human-readable amount swept (e.g. "0.12") */
+  amount: string
+  /** Atomic amount swept */
+  amountAtomic: string
+  /** Transaction hash of the sweep transfer */
+  txHash: string
+  /** Block explorer URL for the tx */
+  explorerUrl: string
+}
+
+/** Result of a `sweepDelegate()` call. */
+export interface SweepResult {
+  /** Address funds were swept FROM */
+  fromAddress: string
+  /** Address funds were swept TO (always the originating Safe) */
+  toAddress: string
+  /** Chain the sweep occurred on */
+  chainId: number
+  /** One entry per transferred asset. Empty when nothing was stranded. */
+  transfers: SweepEntry[]
+}
+
 // ── Agent Payment State Types ────────────────────────────────────
 
 export type PaymentStateKind = 'payment_intent' | 'approval_request'

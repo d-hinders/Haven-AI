@@ -48,6 +48,7 @@ describe('buildHostedMcpServer', () => {
         'haven_resume_x402_payment',
         'haven_send',
         'haven_submit',
+        'haven_sweep_delegate',
       ].sort(),
     )
 

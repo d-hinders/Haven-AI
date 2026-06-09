@@ -363,6 +363,30 @@ describe('ConnectAgent2Modal', () => {
     expect(modalText).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
   })
 
+  it('defaults the wallet picker to a supported-chain wallet and does not offer the legacy Gnosis one', () => {
+    // Regression: with a leftover Gnosis (unsupported) wallet as the default,
+    // the picker used to default to it and snap back to it when the user tried
+    // to switch to a Base wallet (the chain change re-ran the init effect).
+    mockUseAuth.mockReturnValue({
+      user: { safes: [SAFE, BASE_SAFE] }, // SAFE = Gnosis (default, unsupported), BASE_SAFE = Base
+      activeSafe: SAFE,
+    })
+
+    renderModal({ safeAddress: '', safeId: null })
+
+    fireEvent.change(screen.getByLabelText('Agent name'), {
+      target: { value: 'Research Agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+
+    const select = screen.getByLabelText('Haven wallet') as HTMLSelectElement
+    // Defaults to the supported Base wallet, not the Gnosis default.
+    expect(select.value).toBe(BASE_SAFE.id)
+    // The unsupported Gnosis wallet is not offered for a new agent.
+    expect(within(select).getByRole('option', { name: 'Base wallet' })).toBeInTheDocument()
+    expect(within(select).queryByRole('option', { name: 'Operating wallet' })).not.toBeInTheDocument()
+  })
+
   it('supports Codex Desktop as a first-class runtime option', async () => {
     renderModal()
 

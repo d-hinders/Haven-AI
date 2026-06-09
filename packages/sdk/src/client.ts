@@ -86,6 +86,14 @@ const DEFAULT_REQUEST_TIMEOUT = 30_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
+// ── MCP-over-x402 transport (issue #315) ──────────────────────────
+// MCP merchants (Soundside, the Coinbase reference) speak the Streamable
+// HTTP transport: an `initialize` handshake hands back an `mcp-session-id`
+// that must ride on every subsequent request, and responses arrive as SSE.
+const MCP_PROTOCOL_VERSION = '2025-06-18'
+const MCP_ACCEPT = 'application/json, text/event-stream'
+const MCP_CLIENT_INFO = { name: 'haven-sdk', version: '1' }
+
 const PAYMENT_STATE_STATUS_CODES: Record<string, number> = {
   pending: 202,
   pending_approval: 202,
@@ -198,6 +206,75 @@ function parseMerchantSettlement(header: string | null): {
   return { settlementTxHash: tx }
 }
 
+/**
+ * MCP-over-HTTP merchants expose their endpoint at a path ending in `/mcp`
+ * (Soundside, the Coinbase reference — the convention). That path is the
+ * primary auto-handshake signal. Trailing slashes and query/hash suffixes
+ * are tolerated so `/mcp/`, `/mcp?x=1`, and `/foo/mcp` all match.
+ */
+function isMcpUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, '').endsWith('/mcp')
+  } catch {
+    return /\/mcp(?:[/?#]|$)/.test(url)
+  }
+}
+
+/**
+ * Coinbase Bazaar's published-discovery extension. Its presence in a 402 body
+ * marks an MCP-discoverable resource even when the URL doesn't end in `/mcp`,
+ * so it is the second auto-handshake signal.
+ */
+async function responseHasBazaarExtension(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.clone().json()) as { extensions?: { bazaar?: unknown } } | null
+    return body?.extensions?.bazaar != null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Parse the `data:` frames of an MCP Streamable-HTTP SSE stream into the
+ * JSON-RPC messages they carry. Multiple `data:` lines before a blank line are
+ * concatenated into one payload per the SSE spec; non-JSON frames (keep-alives)
+ * are skipped.
+ */
+function parseSseJsonRpcMessages(text: string): Array<Record<string, unknown>> {
+  const messages: Array<Record<string, unknown>> = []
+  let dataLines: string[] = []
+
+  const flush = (): void => {
+    if (dataLines.length === 0) return
+    try {
+      messages.push(JSON.parse(dataLines.join('\n')) as Record<string, unknown>)
+    } catch {
+      // Ignore keep-alives and non-JSON data frames.
+    }
+    dataLines = []
+  }
+
+  for (const line of text.split(/\r?\n/)) {
+    if (line === '') {
+      flush()
+      continue
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).replace(/^ /, ''))
+    }
+  }
+  flush()
+
+  return messages
+}
+
+/** Pick the JSON-RPC response (result/error) from a set of SSE messages. */
+function selectJsonRpcResult(
+  messages: Array<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  return messages.find((m) => 'result' in m || 'error' in m) ?? messages[messages.length - 1]
+}
+
 export class HavenClient {
   private readonly apiKey: string
   private readonly delegateKey: string | undefined
@@ -222,6 +299,9 @@ export class HavenClient {
    * the same time — see their own headers without stepping on each other.
    */
   private readonly requestContext = new AsyncLocalStorage<{ headers: Record<string, string> }>()
+
+  /** Monotonic JSON-RPC id source for the MCP `initialize` handshake. */
+  private mcpRequestId = 0
 
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
@@ -798,6 +878,16 @@ export class HavenClient {
    * const data = await response.json()
    * ```
    *
+   * **MCP-over-x402 auto-handshake (issue #315):** when the endpoint is
+   * MCP-shaped — the URL path ends in `/mcp`, or the 402 body carries a
+   * Coinbase Bazaar `extensions.bazaar` block — the SDK runs the MCP
+   * `initialize` handshake, threads the resulting `mcp-session-id`,
+   * `Accept: application/json, text/event-stream`, and `x402-wallet` headers
+   * through every request, and collapses SSE responses to the JSON-RPC
+   * `result`. The caller just passes `(url, { body })` and never sees the
+   * protocol plumbing. A non-MCP server (handshake error / no session id)
+   * falls back to standard x402 behaviour.
+   *
    * Requires `delegateKey` to be set in the client config.
    */
   async fetch(
@@ -805,18 +895,29 @@ export class HavenClient {
     init?: RequestInit,
     options: X402AuthorizationOptions = {},
   ): Promise<Response> {
-    const initialInit = this.withX402Wallet(init, this.x402PayerAddress())
+    // Signal A: a `/mcp` path is the MCP-over-HTTP convention, so handshake
+    // up front — before the probe — so the session id rides on the probe and
+    // the retry alike. A non-MCP server yields `undefined` and we fall back.
+    let mcpSessionId: string | undefined
+    if (isMcpUrl(url)) {
+      mcpSessionId = await this.mcpInitialize(url, init)
+    }
+
+    let requestInit = this.withX402Wallet(init, this.x402PayerAddress())
+    if (mcpSessionId) requestInit = this.withMcpHeaders(requestInit, mcpSessionId)
 
     // 1. Make the original request
-    const response = await globalThis.fetch(url, initialInit)
+    const response = await globalThis.fetch(url, requestInit)
 
-    // 2. Not a 402 — return as-is
-    if (response.status !== 402) return response
+    // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions)
+    if (response.status !== 402) {
+      return mcpSessionId ? this.surfaceMcpResult(response) : response
+    }
 
     const machineChallengeHeader = response.headers.get('MACHINE-PAYMENT-CHALLENGE')
     if (machineChallengeHeader) {
       const challenge = await parseMachinePaymentChallengeResponse(response)
-      return this.fetchWithMachinePayment(url, initialInit, challenge)
+      return this.fetchWithMachinePayment(url, requestInit, challenge)
     }
 
     // 3. Parse x402 payment requirements
@@ -831,11 +932,19 @@ export class HavenClient {
         // Not a Haven machine-payment 402 — return original response
         return response
       }
-      return this.fetchWithMachinePayment(url, initialInit, challenge)
+      return this.fetchWithMachinePayment(url, requestInit, challenge)
+    }
+
+    // Signal B: a Bazaar `extensions.bazaar` block marks an MCP-discoverable
+    // resource even without the `/mcp` convention. Handshake now (if we
+    // haven't already) so the paid retry carries the session id.
+    if (!mcpSessionId && (await responseHasBazaarExtension(response))) {
+      mcpSessionId = await this.mcpInitialize(url, init)
+      if (mcpSessionId) requestInit = this.withMcpHeaders(requestInit, mcpSessionId)
     }
 
     // 4. Pay through Haven
-    const request = this.snapshotX402Request(url, initialInit)
+    const request = this.snapshotX402Request(url, requestInit)
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     const idempotencyKey = options.idempotencyKey ?? (option ? buildX402IdempotencyKey(paymentRequired, option) : undefined)
     let receipt: X402Receipt
@@ -853,7 +962,117 @@ export class HavenClient {
       }
       throw err
     }
-    return this.retryX402Request(url, initialInit, paymentRequired, receipt)
+    const retryResponse = await this.retryX402Request(url, requestInit, paymentRequired, receipt)
+    return mcpSessionId ? this.surfaceMcpResult(retryResponse) : retryResponse
+  }
+
+  // ── MCP-over-x402 transport helpers (issue #315) ─────────────────
+
+  /**
+   * Run the MCP `initialize` handshake against a Streamable-HTTP endpoint and
+   * return the `mcp-session-id` the server assigns.
+   *
+   * Returns `undefined` whenever the endpoint is not actually an MCP server —
+   * a transport/HTTP error, a missing session id, or a JSON-RPC error in the
+   * handshake response — so the caller can fall back to plain x402.
+   */
+  private async mcpInitialize(url: string, init?: RequestInit): Promise<string | undefined> {
+    try {
+      const headers = new Headers(init?.headers)
+      headers.set('Content-Type', 'application/json')
+      headers.set('Accept', MCP_ACCEPT)
+      const wallet = this.x402PayerAddress()
+      if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
+
+      const response = await globalThis.fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: ++this.mcpRequestId,
+          method: 'initialize',
+          params: {
+            protocolVersion: MCP_PROTOCOL_VERSION,
+            capabilities: {},
+            clientInfo: MCP_CLIENT_INFO,
+          },
+        }),
+      })
+
+      if (!response.ok) return undefined
+
+      const sessionId = response.headers.get('mcp-session-id')
+      if (!sessionId) return undefined
+
+      // A JSON-RPC error means the server spoke MCP but rejected the
+      // handshake — treat it as non-MCP and fall back to standard x402.
+      const message = await this.readMcpMessage(response)
+      if (message && 'error' in message) return undefined
+
+      return sessionId
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Read a single JSON-RPC message from an MCP response (JSON or SSE body). */
+  private async readMcpMessage(response: Response): Promise<Record<string, unknown> | undefined> {
+    let text: string
+    try {
+      text = await response.clone().text()
+    } catch {
+      return undefined
+    }
+
+    if ((response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      return selectJsonRpcResult(parseSseJsonRpcMessages(text))
+    }
+
+    try {
+      return JSON.parse(text) as Record<string, unknown>
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Add the MCP transport headers (session id + SSE Accept) to a request. */
+  private withMcpHeaders(init: RequestInit | undefined, sessionId: string): RequestInit {
+    const headers = new Headers(init?.headers)
+    headers.set('mcp-session-id', sessionId)
+    headers.set('Accept', MCP_ACCEPT)
+    return { ...init, headers }
+  }
+
+  /**
+   * Collapse an MCP SSE response into a plain JSON response carrying the
+   * JSON-RPC `result`, so callers of `fetch()` never see raw SSE framing.
+   * Non-SSE responses pass through untouched.
+   */
+  private async surfaceMcpResult(response: Response): Promise<Response> {
+    if (!(response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      return response
+    }
+
+    let text: string
+    try {
+      text = await response.clone().text()
+    } catch {
+      return response
+    }
+
+    const message = selectJsonRpcResult(parseSseJsonRpcMessages(text))
+    if (!message) return response
+
+    const body = 'result' in message ? message.result : message
+    const headers = new Headers(response.headers)
+    headers.set('content-type', 'application/json')
+    headers.delete('content-length')
+
+    return new Response(JSON.stringify(body), {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    })
   }
 
   /**

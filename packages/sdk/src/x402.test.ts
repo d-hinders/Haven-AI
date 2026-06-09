@@ -22,11 +22,15 @@ const accepted: X402PaymentOption = {
   extra: { name: 'USD Coin', version: '2' },
 }
 
+// Standard-x402 fixture. Its URL is intentionally NOT `/mcp`: these tests
+// exercise the plain x402 path and must not trip the MCP auto-handshake
+// (issue #315). MCP-shaped endpoints are covered in their own describe block
+// below with a `https://mcp.soundside.ai/mcp` fixture.
 const paymentRequired: X402PaymentRequired = {
   x402Version: 2,
   error: 'Payment required',
   resource: {
-    url: 'https://mcp.soundside.ai/mcp',
+    url: 'https://api.merchant.example/paid',
     description: 'create_image via luma - $0.02 USDC',
     mimeType: 'application/json',
   },

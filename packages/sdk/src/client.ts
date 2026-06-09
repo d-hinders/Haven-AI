@@ -1009,9 +1009,42 @@ export class HavenClient {
       const message = await this.readMcpMessage(response)
       if (message && 'error' in message) return undefined
 
+      // Per the MCP lifecycle, the client confirms initialization with a
+      // `notifications/initialized` notification. Servers that gate tool
+      // calls on it would otherwise reject every subsequent request.
+      await this.mcpNotifyInitialized(url, init, sessionId)
+
       return sessionId
     } catch {
       return undefined
+    }
+  }
+
+  /**
+   * Send the MCP `notifications/initialized` notification that completes the
+   * lifecycle handshake. Best-effort: the session is already established, so a
+   * failed notification must not abort the payment.
+   */
+  private async mcpNotifyInitialized(
+    url: string,
+    init: RequestInit | undefined,
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      const headers = new Headers(init?.headers)
+      headers.set('Content-Type', 'application/json')
+      headers.set('Accept', MCP_ACCEPT)
+      headers.set('mcp-session-id', sessionId)
+      const wallet = this.x402PayerAddress()
+      if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
+
+      await globalThis.fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+      })
+    } catch {
+      // Best-effort — see doc comment.
     }
   }
 
@@ -1067,6 +1100,9 @@ export class HavenClient {
     const headers = new Headers(response.headers)
     headers.set('content-type', 'application/json')
     headers.delete('content-length')
+    // Don't leak the transport session id back to the caller — the whole
+    // point of the auto-handshake is that the agent never sees MCP plumbing.
+    headers.delete('mcp-session-id')
 
     return new Response(JSON.stringify(body), {
       status: response.status,

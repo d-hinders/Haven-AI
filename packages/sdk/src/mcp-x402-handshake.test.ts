@@ -50,7 +50,12 @@ function initializeOk(sessionId: string): Response {
   )
 }
 
-function fundingPendingSignature(): Response {
+/** The 202 a server returns for the `notifications/initialized` notification. */
+function notificationAccepted(): Response {
+  return new Response(null, { status: 202 })
+}
+
+function fundingPendingSignature(resourceUrl: string = mcpUrl): Response {
   return new Response(JSON.stringify({
     payment_id: 'pay_123',
     status: 'pending_signature',
@@ -59,7 +64,7 @@ function fundingPendingSignature(): Response {
     token: 'USDC',
     amount: '0.02',
     to: delegateAddress,
-    resource_url: mcpUrl,
+    resource_url: resourceUrl,
     sign_data: {
       hash: `0x${'11'.repeat(32)}`,
       components: {
@@ -117,6 +122,14 @@ function isInitializeCall(call: unknown[]): boolean {
   }
 }
 
+function isInitializedNotificationCall(call: unknown[]): boolean {
+  try {
+    return bodyOf(call).method === 'notifications/initialized'
+  } catch {
+    return false
+  }
+}
+
 describe('MCP-over-x402 auto-handshake (issue #315)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -127,21 +140,23 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       .spyOn(globalThis, 'fetch')
       // 0: MCP initialize handshake
       .mockResolvedValueOnce(initializeOk('sess-abc'))
-      // 1: probe → 402 with x402 requirements in the JSON body
+      // 1: notifications/initialized completes the lifecycle handshake
+      .mockResolvedValueOnce(notificationAccepted())
+      // 2: probe → 402 with x402 requirements in the JSON body
       .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequiredFor(mcpUrl)), {
         status: 402,
         headers: { 'Content-Type': 'application/json' },
       }))
-      // 2: Haven funding authorize
+      // 3: Haven funding authorize
       .mockResolvedValueOnce(fundingPendingSignature())
-      // 3: Haven sign → confirmed
+      // 4: Haven sign → confirmed
       .mockResolvedValueOnce(fundingConfirmed())
-      // 4: paid retry → SSE JSON-RPC result
+      // 5: paid retry → SSE JSON-RPC result
       .mockResolvedValueOnce(sseResponse(
         sse({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'an image' }] } }),
         { headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ success: true, transaction: '0xabc', network: accepted.network })) } },
       ))
-      // 5: Haven evidence (best-effort)
+      // 6: Haven evidence (best-effort)
       .mockResolvedValueOnce(evidenceAccepted())
 
     const haven = newClient()
@@ -153,7 +168,7 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       body: toolCall,
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock).toHaveBeenCalledTimes(7)
 
     // Initialize ran first, against the merchant, with a real handshake body.
     expect(String(fetchMock.mock.calls[0][0])).toBe(mcpUrl)
@@ -163,13 +178,17 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       params: { protocolVersion: '2025-06-18' },
     })
 
+    // ...followed by the initialized notification carrying the session id.
+    expect(isInitializedNotificationCall(fetchMock.mock.calls[1])).toBe(true)
+    expect(headersOf(fetchMock.mock.calls[1]).get('mcp-session-id')).toBe('sess-abc')
+
     // The probe carried the caller's tool-call body untouched.
-    expect(String(fetchMock.mock.calls[1][0])).toBe(mcpUrl)
-    expect((fetchMock.mock.calls[1][1] as RequestInit).body).toBe(toolCall)
+    expect(String(fetchMock.mock.calls[2][0])).toBe(mcpUrl)
+    expect((fetchMock.mock.calls[2][1] as RequestInit).body).toBe(toolCall)
 
     // Session id + SSE Accept threaded onto both the probe and the retry.
-    const probeHeaders = headersOf(fetchMock.mock.calls[1])
-    const retryHeaders = headersOf(fetchMock.mock.calls[4])
+    const probeHeaders = headersOf(fetchMock.mock.calls[2])
+    const retryHeaders = headersOf(fetchMock.mock.calls[5])
     expect(probeHeaders.get('mcp-session-id')).toBe('sess-abc')
     expect(retryHeaders.get('mcp-session-id')).toBe('sess-abc')
     expect(probeHeaders.get('mcp-session-id')).toBe(retryHeaders.get('mcp-session-id'))
@@ -181,9 +200,11 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     // The retry still carries the merchant-verifiable x402 header.
     expect(retryHeaders.has('X-PAYMENT')).toBe(true)
 
-    // SSE was collapsed to the JSON-RPC result — the caller never sees raw SSE.
+    // SSE was collapsed to the JSON-RPC result — the caller never sees raw SSE,
+    // and the transport session id is not leaked back to the caller.
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('application/json')
+    expect(response.headers.has('mcp-session-id')).toBe(false)
     await expect(response.json()).resolves.toEqual({ content: [{ type: 'text', text: 'an image' }] })
   })
 
@@ -260,27 +281,30 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
       })), { status: 402, headers: { 'Content-Type': 'application/json' } }))
       // 1: initialize triggered by the bazaar signal
       .mockResolvedValueOnce(initializeOk('sess-bazaar'))
-      // 2-3: Haven authorize + sign
-      .mockResolvedValueOnce(fundingPendingSignature())
+      // 2: notifications/initialized
+      .mockResolvedValueOnce(notificationAccepted())
+      // 3-4: Haven authorize + sign
+      .mockResolvedValueOnce(fundingPendingSignature(genericUrl))
       .mockResolvedValueOnce(fundingConfirmed())
-      // 4: SSE retry
+      // 5: SSE retry
       .mockResolvedValueOnce(sseResponse(
         sse({ jsonrpc: '2.0', id: 2, result: { ok: true } }),
       ))
-      // 5: evidence
+      // 6: evidence
       .mockResolvedValueOnce(evidenceAccepted())
 
     const haven = newClient()
     const response = await haven.fetch(genericUrl, { method: 'POST', body: JSON.stringify({}) })
 
-    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock).toHaveBeenCalledTimes(7)
     // The probe came first and could not have carried a session id...
     expect(String(fetchMock.mock.calls[0][0])).toBe(genericUrl)
     expect(headersOf(fetchMock.mock.calls[0]).has('mcp-session-id')).toBe(false)
     // ...then the bazaar signal triggered the handshake...
     expect(isInitializeCall(fetchMock.mock.calls[1])).toBe(true)
+    expect(isInitializedNotificationCall(fetchMock.mock.calls[2])).toBe(true)
     // ...so the paid retry is authorized with the freshly issued session id.
-    expect(headersOf(fetchMock.mock.calls[4]).get('mcp-session-id')).toBe('sess-bazaar')
+    expect(headersOf(fetchMock.mock.calls[5]).get('mcp-session-id')).toBe('sess-bazaar')
     await expect(response.json()).resolves.toEqual({ ok: true })
   })
 

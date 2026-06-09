@@ -543,6 +543,13 @@ export const AgentPaymentPhase = {
    * funds or the agent's per-token allowance needs to be raised first.
    */
   InsufficientFunds: 'insufficient_funds',
+  /**
+   * Haven's funding leg (Safe → delegate) confirmed on-chain, but the
+   * merchant rejected the x402 retry. The delegate wallet may hold stranded
+   * USDC that was never settled to the merchant. The agent should stop, tell
+   * the user, and wait for the sweep flow to reclaim the funds.
+   */
+  FundedButUnsettled: 'funded_but_unsettled',
 } as const
 
 export type AgentPaymentPhase = (typeof AgentPaymentPhase)[keyof typeof AgentPaymentPhase]
@@ -570,6 +577,12 @@ export const AgentPaymentNextAction = {
    * can succeed. A user approval will not fix this state on its own.
    */
   FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
+  /**
+   * The delegate wallet may hold funds that were sent from the Safe but never
+   * settled to the merchant. The wallet owner should initiate a sweep to
+   * return those funds to the originating Safe.
+   */
+  SweepStrandedFunds: 'sweep_stranded_funds',
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
@@ -634,6 +647,8 @@ export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = 
   [AgentPaymentPhase.Failed]: 'Haven could not complete the payment; the agent should stop and surface the failure.',
   [AgentPaymentPhase.InsufficientFunds]:
     'Pre-flight check determined the delegate balance plus the remaining on-chain allowance cannot cover the requested amount, so no payment was created. The originating Safe must be funded or the agent allowance raised before retrying.',
+  [AgentPaymentPhase.FundedButUnsettled]:
+    "Haven's funding leg confirmed on-chain but the merchant rejected the x402 retry. The delegate wallet may hold stranded funds. The agent should stop and wait for the wallet owner to sweep the stranded funds back to the Safe.",
 }
 
 export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, string> = {
@@ -647,6 +662,8 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
   [AgentPaymentNextAction.RequestAgainIfUserStillWantsIt]: 'Ask again only if the user still wants the payment after expiry.',
   [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
     'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
+  [AgentPaymentNextAction.SweepStrandedFunds]:
+    'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating Safe.',
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {

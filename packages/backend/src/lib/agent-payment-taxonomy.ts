@@ -20,6 +20,7 @@ export const AgentPaymentPhase = {
   Expired: 'expired',
   Failed: 'failed',
   InsufficientFunds: 'insufficient_funds',
+  FundedButUnsettled: 'funded_but_unsettled',
 } as const
 
 export type AgentPaymentPhase = (typeof AgentPaymentPhase)[keyof typeof AgentPaymentPhase]
@@ -34,6 +35,7 @@ export const AgentPaymentNextAction = {
   StopAndTellUser: 'stop_and_tell_user',
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
   FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
+  SweepStrandedFunds: 'sweep_stranded_funds',
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]

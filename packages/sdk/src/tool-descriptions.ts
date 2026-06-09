@@ -158,8 +158,8 @@ export const toolDescriptions = {
       'Returns the JSON-RPC result (the actual merchant output) on success. ' +
       'Amounts within the on-chain allowance execute automatically; over-allowance transfers are queued as pending_approval.',
     nextActionGuidance:
-      'If pending_approval is returned, preserve payment_id and resume_state. ' +
-      'Wait for the wallet owner to approve in Haven, then call haven_resume_x402_payment to retry the merchant request.',
+      'If pending_approval is returned, preserve payment_id and resume_state and wait for the wallet owner to approve in Haven. ' +
+      'Use haven_resume_x402_payment once nextAction=retry_original_x402_request.',
   },
   send: {
     summary:

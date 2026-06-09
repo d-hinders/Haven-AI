@@ -146,9 +146,9 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
   behavior:
     'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. ' +
     'Creates a funding intent and returns the unsigned payload_hash for the local edge signer. ' +
-    'After signing via haven_sign and relaying via haven_submit, call haven_x402_sign_header ' +
-    'on the local signer to build the X-PAYMENT header, then retry the merchant with the ' +
-    'original JSON-RPC envelope plus the X-PAYMENT header to get the tool result. ' +
+    'Sign via haven_sign, relay via haven_submit, use haven_x402_sign_header on the local signer ' +
+    'to build the X-PAYMENT header, and retry the merchant with the original JSON-RPC envelope ' +
+    'plus the X-PAYMENT header to get the tool result. ' +
     'Haven never receives the signing key.',
 })
 

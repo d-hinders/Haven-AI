@@ -540,12 +540,12 @@ describe('custody invariant', () => {
         status: 201,
         body: X402_INTENT_RESPONSE,
       },
-      // haven_pay_mcp_tool: merchant probe + agent fetch + intent creation
+      // haven_pay_mcp_tool: merchant probe + intent creation
+      // (agent fetch reuses GET /machine-payments/agent already stubbed above)
       'POST /mcp': {
         status: 402,
         responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
       },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
     })
 
     const h = handlers()

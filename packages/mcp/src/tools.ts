@@ -18,6 +18,7 @@ import { z } from 'zod/v3'
 const headersSchema = z.record(z.string(), z.string()).optional()
 
 export type HavenMcpToolName =
+  | 'haven_send'
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_pay_x402'
@@ -32,6 +33,12 @@ export type HavenMcpToolName =
   | 'haven_list_receipts'
 
 export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
+  haven_send: {
+    asset: z.enum(['ETH', 'USDC']),
+    recipient: z.string().min(1),
+    amount: z.string().min(1),
+    idempotencyKey: z.string().optional(),
+  },
   haven_quote_x402: {
     url: z.string().url(),
     method: z.string().optional(),
@@ -90,6 +97,7 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
  * guidance lands in both places at once and a parity test can catch drift.
  */
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
+  haven_send: composeDescription(sharedDescriptions.send),
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
   haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
   haven_pay_x402: composeDescription(sharedDescriptions.payX402OneShot),
@@ -126,6 +134,38 @@ export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
 
 export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName, (input: unknown) => Promise<ToolPayload>> {
   return {
+    haven_send: async (input) => {
+      return runTool(async () => {
+        const args = objectInput('haven_send', input)
+        try {
+          const result = await haven.pay({
+            token: args.asset,
+            amount: args.amount,
+            to: args.recipient,
+          })
+          return {
+            payment_id: result.paymentId,
+            status: result.status,
+            tx_hash: result.txHash ?? null,
+            asset: args.asset,
+            amount: args.amount,
+            recipient: args.recipient,
+          }
+        } catch (err) {
+          if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
+            return {
+              payment_id: err.paymentId,
+              status: 'pending_approval',
+              asset: args.asset,
+              amount: args.amount,
+              recipient: args.recipient,
+            }
+          }
+          throw err
+        }
+      })
+    },
+
     haven_quote_x402: async (input) => {
       const args = objectInput('haven_quote_x402', input)
       return runTool(async () => haven.quoteX402(args.url, requestInit(args), { idempotencyKey: args.idempotencyKey }))
@@ -224,6 +264,10 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
     return state as X402ResumeState | MppResumeState
   }
+}
+
+function isPendingApproval(status: string | undefined): boolean {
+  return status === 'pending' || status === 'pending_approval'
 }
 
 function objectInput<TName extends HavenMcpToolName>(

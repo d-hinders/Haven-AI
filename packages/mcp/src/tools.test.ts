@@ -1082,6 +1082,99 @@ describe('Haven MCP tool handlers', () => {
   })
 })
 
+describe('haven_send', () => {
+  const SEND_DELEGATE_KEY = '0x' + 'b'.repeat(64)
+  const SIGN_HASH = `0x${'aa'.repeat(32)}`
+
+  function sendHandlers() {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      baseUrl: 'http://haven.test',
+      delegateKey: SEND_DELEGATE_KEY,
+    })
+    return createToolHandlers(haven)
+  }
+
+  it('sends USDC in-budget: signs locally and confirms', async () => {
+    const requests: CapturedRequest[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      requests.push({ url: String(url), init })
+      const path = new URL(String(url)).pathname
+      // POST /payments → intent
+      if (path === '/payments' && (!init?.method || init.method === 'POST')) {
+        return jsonResponse({
+          payment_id: 'send_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: SIGN_HASH, components: {} },
+        }, 201)
+      }
+      // POST /payments/send_1/sign → submit signature
+      if (path.endsWith('/sign')) {
+        return jsonResponse({ payment_id: 'send_1', status: 'confirmed', tx_hash: '0xtx' })
+      }
+      // GET /payments/send_1 → waitForConfirmation poll
+      if (path === '/payments/send_1' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse({ payment_id: 'send_1', status: 'confirmed', tx_hash: '0xtx' })
+      }
+      return jsonResponse({})
+    })
+
+    const result = await sendHandlers().haven_send({
+      asset: 'USDC',
+      recipient: '0xRecipient',
+      amount: '5.00',
+    })
+
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect((result.data as any).status).toBe('confirmed')
+      expect((result.data as any).tx_hash).toBe('0xtx')
+    }
+
+    // Only { signature } was sent to Haven — no key material in transit.
+    const signCall = requests.find((r) => r.url.includes('/sign'))
+    const signBody = JSON.parse(signCall?.init?.body as string ?? '{}')
+    expect(Object.keys(signBody)).toEqual(['signature'])
+    expect(JSON.stringify(requests)).not.toContain(SEND_DELEGATE_KEY)
+  })
+
+  it('returns pending_approval for over-allowance send', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).endsWith('/payments')) {
+        return jsonResponse({
+          payment_id: 'send_over',
+          status: 'pending_approval',
+          expires_at: '2099-01-01T00:00:00.000Z',
+        }, 202)
+      }
+      return jsonResponse({})
+    })
+
+    const result = await sendHandlers().haven_send({
+      asset: 'USDC',
+      recipient: '0xRecipient',
+      amount: '9999',
+    })
+
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect((result.data as any).status).toBe('pending_approval')
+    }
+  })
+
+  it('rejects unknown asset at schema level before any network call', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const result = await sendHandlers().haven_send({
+      asset: 'DOGE',
+      recipient: '0xRecipient',
+      amount: '1',
+    })
+    expect(result.success).toBe(false)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,

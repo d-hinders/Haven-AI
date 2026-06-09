@@ -872,6 +872,106 @@ export const openapiSpec = {
         },
       },
     },
+    '/machine-payments/send': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'sendTransfer',
+        summary: 'Send ETH or USDC directly from the agent\'s Safe to a recipient address.',
+        description:
+          'Creates an AllowanceModule payment intent for a plain transfer. ' +
+          'If the amount is within the remaining on-chain allowance, a sign_data hash is returned for the agent to sign (via POST /payments/{id}/sign). ' +
+          'If the amount exceeds the remaining allowance, the transfer is queued as a pending_approval for the wallet owner to approve in Haven.',
+        security: [{ AgentApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['asset', 'recipient', 'amount'],
+                properties: {
+                  asset: {
+                    type: 'string',
+                    enum: ['ETH', 'USDC'],
+                    description: 'Asset to send.',
+                  },
+                  recipient: {
+                    type: 'string',
+                    pattern: '^0x[0-9a-fA-F]{40}$',
+                    description: 'Recipient address (checksummed or lowercase).',
+                  },
+                  amount: {
+                    type: 'string',
+                    description: 'Human-readable amount, e.g. "1.5".',
+                  },
+                  idempotency_key: {
+                    type: 'string',
+                    description: 'Optional idempotency key to deduplicate retried requests.',
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Payment intent created — ready for signing.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['payment_id', 'status', 'expires_at', 'asset', 'amount', 'recipient', 'sign_data'],
+                  properties: {
+                    payment_id: { type: 'string' },
+                    status: { type: 'string', enum: ['pending_signature'] },
+                    expires_at: { type: 'string', format: 'date-time' },
+                    asset: { type: 'string', enum: ['ETH', 'USDC'] },
+                    amount: { type: 'string' },
+                    recipient: { type: 'string' },
+                    sign_data: {
+                      type: 'object',
+                      required: ['hash', 'instructions'],
+                      properties: {
+                        hash: { type: 'string' },
+                        components: { type: 'object' },
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '202': {
+            description: 'Transfer queued as pending_approval — exceeds remaining on-chain allowance.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['payment_id', 'status', 'asset', 'expires_at'],
+                  properties: {
+                    payment_id: { type: 'string' },
+                    status: { type: 'string', enum: ['pending_approval'] },
+                    asset: { type: 'string' },
+                    amount: { type: 'string' },
+                    recipient: { type: 'string' },
+                    expires_at: { type: 'string', format: 'date-time' },
+                    message: { type: 'string' },
+                  },
+                  additionalProperties: true,
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
     '/machine-payments/receipts': {
       get: {
         tags: ['Machine payments'],

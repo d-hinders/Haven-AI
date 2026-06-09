@@ -144,6 +144,22 @@ export const toolDescriptions = {
       'Returns the agent\'s recent machine-payment receipts ordered by recency. Proof header values are not returned.',
     nextActionGuidance: '',
   },
+  send: {
+    summary:
+      'Send ETH or USDC directly from the agent\'s Haven wallet to a recipient address.',
+    selectionGuidance:
+      'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
+      'Do NOT use for x402 paid endpoints (use haven_pay_x402 instead) or MPP merchant payments (use haven_pay_mpp_challenge). ' +
+      'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances.',
+    behavior:
+      'Sends the requested amount through the Safe AllowanceModule. ' +
+      'Amounts within the remaining on-chain allowance for the asset execute automatically; ' +
+      'amounts that exceed the allowance are queued as pending_approval for the wallet owner to approve in Haven. ' +
+      'The agent\'s signing key signs the AllowanceModule transfer hash; Haven never receives the key.',
+    nextActionGuidance:
+      'If pending_approval is returned, preserve the payment_id and wait for the wallet owner to approve in Haven. ' +
+      'Poll haven_get_payment_status until nextAction=none.',
+  },
 } as const satisfies Record<string, ToolDescription>
 
 export type SharedToolKey = keyof typeof toolDescriptions

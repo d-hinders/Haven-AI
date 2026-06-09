@@ -33,6 +33,7 @@ import { z } from 'zod/v3'
 export type HostedToolName =
   | 'haven_get_agent'
   | 'haven_get_allowances'
+  | 'haven_send'
   | 'haven_pay'
   | 'haven_submit'
   | 'haven_quote_x402'
@@ -51,6 +52,12 @@ export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transact
 export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_get_agent: {},
   haven_get_allowances: {},
+  haven_send: {
+    asset: z.enum(['ETH', 'USDC']),
+    recipient: z.string().min(1),
+    amount: z.string().min(1),
+    idempotency_key: z.string().optional(),
+  },
   haven_pay: {
     token: z.string().min(1),
     amount: z.string().min(1),
@@ -186,6 +193,7 @@ const RESUME_MPP_DESCRIPTION = [
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
+  haven_send: composeDescription(sharedDescriptions.send),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
@@ -222,6 +230,39 @@ export function createToolHandlers(
     haven_get_agent: async () => runTool(async () => haven.getAgent()),
 
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
+
+    haven_send: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_send', input)
+        try {
+          const intent = await haven.createIntent({
+            token: args.asset,
+            amount: args.amount,
+            to: args.recipient,
+          })
+          return {
+            payment_id: intent.paymentId,
+            status: intent.status,
+            payload_hash: intent.signData.hash,
+            expires_at: intent.expiresAt,
+            asset: args.asset,
+            amount: args.amount,
+            recipient: args.recipient,
+          }
+        } catch (err) {
+          if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
+            return {
+              payment_id: err.paymentId,
+              status: 'pending_approval',
+              payload_hash: null,
+              asset: args.asset,
+              amount: args.amount,
+              recipient: args.recipient,
+            }
+          }
+          throw err
+        }
+      }),
 
     haven_pay: async (input) =>
       runTool(async () => {

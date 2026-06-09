@@ -1,5 +1,21 @@
 # Haven release scripts
 
+## `verify-connect-bundle.mjs` — Build-time bundle verification
+
+Checks that `packages/connect/dist/index.cjs` resolves the correct `mcpVersion` at runtime by comparing it against the `MCP_VERSION` literal in `packages/mcp/src/server.ts`.
+
+Runs automatically as a `postbuild` step when you run `npm run build -w packages/connect`. Also runnable manually:
+
+```sh
+node scripts/verify-connect-bundle.mjs
+```
+
+This catches the build-order bug (hit twice in production): if `packages/mcp/dist/` is stale when connect's tsup runs, the bundle loads the old MCP dist via the workspace symlink and resolves the wrong `mcpVersion` at runtime.
+
+If it fails, the error message points at the fix: `npm run release:bump -- <type>`, which wipes all `dist/` directories and rebuilds in the correct order.
+
+---
+
 ## `release-bump.mjs` — Atomic version bump for all published packages
 
 ### Problem it solves

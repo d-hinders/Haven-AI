@@ -19,6 +19,7 @@ const headersSchema = z.record(z.string(), z.string()).optional()
 
 export type HavenMcpToolName =
   | 'haven_send'
+  | 'haven_pay_mcp_tool'
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_pay_x402'
@@ -37,6 +38,12 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
     asset: z.enum(['ETH', 'USDC']),
     recipient: z.string().min(1),
     amount: z.string().min(1),
+    idempotencyKey: z.string().optional(),
+  },
+  haven_pay_mcp_tool: {
+    merchant_url: z.string().url(),
+    tool_name: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()).optional(),
     idempotencyKey: z.string().optional(),
   },
   haven_quote_x402: {
@@ -98,6 +105,7 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
  */
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_send: composeDescription(sharedDescriptions.send),
+  haven_pay_mcp_tool: composeDescription(sharedDescriptions.payMcpTool),
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
   haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
   haven_pay_x402: composeDescription(sharedDescriptions.payX402OneShot),
@@ -163,6 +171,23 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           }
           throw err
         }
+      })
+    },
+
+    haven_pay_mcp_tool: async (input) => {
+      return runTool(async () => {
+        const args = objectInput('haven_pay_mcp_tool', input)
+        const envelope = buildMcpToolsCallEnvelope(args.tool_name as string, args.arguments as Record<string, unknown> | undefined)
+        const response = await haven.fetch(
+          args.merchant_url as string,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(envelope),
+          },
+          { idempotencyKey: args.idempotencyKey as string | undefined },
+        )
+        return responsePayload(response)
       })
     },
 
@@ -268,6 +293,22 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
 function isPendingApproval(status: string | undefined): boolean {
   return status === 'pending' || status === 'pending_approval'
+}
+
+/** Build a JSON-RPC 2.0 tools/call envelope for an MCP merchant. */
+function buildMcpToolsCallEnvelope(
+  toolName: string,
+  args?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    jsonrpc: '2.0',
+    id: `haven-mcp-${Date.now()}`,
+    method: 'tools/call',
+    params: {
+      name: toolName,
+      arguments: args ?? {},
+    },
+  }
 }
 
 function objectInput<TName extends HavenMcpToolName>(

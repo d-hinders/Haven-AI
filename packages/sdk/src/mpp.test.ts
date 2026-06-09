@@ -493,6 +493,134 @@ describe('MPP demo helpers', () => {
     })
   })
 
+  const mppPreRetryResponses = (resourceUrl: string, txHash: string): Response[] => [
+    new Response(JSON.stringify({ error: 'Machine payment required', challenge }), {
+      status: 402,
+      headers: {
+        'Content-Type': 'application/json',
+        'MACHINE-PAYMENT-CHALLENGE': btoa(JSON.stringify(challenge)),
+      },
+    }),
+    new Response(JSON.stringify({
+      payment_id: 'pay_123',
+      status: 'pending_signature',
+      chain_id: 8453,
+      safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+      token: 'USDC',
+      amount: '0.01',
+      to: challenge.recipient,
+      resource_url: resourceUrl,
+      rail: 'mpp_demo',
+      challenge_id: challenge.challengeId,
+      sign_data: {
+        hash: `0x${'11'.repeat(32)}`,
+        components: {
+          safe: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+          token: challenge.asset.address,
+          to: challenge.recipient,
+          amount: challenge.amount.atomic,
+          payment_token: '0x0000000000000000000000000000000000000000',
+          payment: '0',
+          nonce: 1,
+        },
+        instructions: 'Sign with delegate key',
+      },
+    }), { status: 201 }),
+    new Response(JSON.stringify({
+      payment_id: 'pay_123',
+      status: 'confirmed',
+      tx_hash: txHash,
+      chain_id: 8453,
+      token: 'USDC',
+      amount: '0.01',
+      to: challenge.recipient,
+    }), { status: 200 }),
+  ]
+
+  it.each([
+    {
+      label: '400 schema-style rejection',
+      status: 400,
+      statusText: 'Bad Request',
+      body: JSON.stringify({ error: 'Field required: challenge_id' }),
+    },
+    {
+      label: '402 signature/balance rejection',
+      status: 402,
+      statusText: 'Payment Required',
+      body: JSON.stringify({ error: 'payment proof rejected' }),
+    },
+    {
+      label: '5xx server error',
+      status: 503,
+      statusText: 'Service Unavailable',
+      body: 'upstream temporarily unavailable',
+    },
+  ])('captures the merchant response body for a $label MPP retry failure', async ({ status, statusText, body }) => {
+    const backendUrl = 'https://haven-api.example'
+    const resourceUrl = challenge.resource
+    const txHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    for (const response of mppPreRetryResponses(resourceUrl, txHash)) {
+      fetchMock.mockResolvedValueOnce(response)
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(body, {
+        status,
+        statusText,
+        headers: { 'Content-Type': 'application/json', 'X-Merchant-Trace': 'mpp-trace-abc' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: backendUrl,
+    })
+
+    await expect(haven.fetch(resourceUrl)).rejects.toMatchObject({
+      statusCode: status,
+      body: expect.objectContaining({
+        marker: 'machine_payment_retry_rejected_after_payment',
+        payment_id: 'pay_123',
+        merchant_status: status,
+        merchant_status_text: statusText,
+        merchant_body: body,
+        merchant_headers: expect.objectContaining({ 'x-merchant-trace': 'mpp-trace-abc' }),
+      }),
+    })
+  })
+
+  it('does not leak the delegate key or agent API key into the captured MPP merchant response', async () => {
+    const backendUrl = 'https://haven-api.example'
+    const resourceUrl = challenge.resource
+    const txHash = `0x${'ab'.repeat(32)}`
+    const delegateKey = `0x${'01'.repeat(32)}`
+    const apiKey = 'sk_agent_secret_value'
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    for (const response of mppPreRetryResponses(resourceUrl, txHash)) {
+      fetchMock.mockResolvedValueOnce(response)
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Merchant unavailable' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
+
+    const haven = new HavenClient({ apiKey, delegateKey, baseUrl: backendUrl })
+
+    const error = await haven.fetch(resourceUrl).then(
+      () => { throw new Error('expected MPP merchant retry to reject') },
+      (err: unknown) => err as { body: Record<string, unknown> },
+    )
+
+    const serialized = JSON.stringify(error.body)
+    expect(serialized).not.toContain(apiKey)
+    expect(serialized).not.toContain(delegateKey)
+    expect(error.body.merchant_body).toBe(JSON.stringify({ error: 'Merchant unavailable' }))
+  })
+
   it('surfaces MPP approval queues as a 202 API error', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

@@ -4,7 +4,7 @@
 
 Checks that `packages/connect/dist/index.cjs` resolves the correct `mcpVersion` at runtime by comparing it against the `MCP_VERSION` literal in `packages/mcp/src/server.ts`.
 
-Runs automatically as a `postbuild` step when you run `npm run build -w packages/connect`. Also runnable manually:
+Runs automatically as part of `npm run build -w packages/connect` (chained after `tsup` in connect's `build` script), and explicitly by `release-bump.mjs` after it builds connect. Also runnable manually:
 
 ```sh
 node scripts/verify-connect-bundle.mjs

@@ -258,6 +258,12 @@ export default function AgentDetailClient({ agentId }: Props) {
   }, [chainId])
   const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const { activity, stats, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
+  const unsettledPayments = useMemo(
+    () => activity
+      .filter(isPaymentActivityItem)
+      .filter((item) => item.payment_attention_reason === 'merchant_retry_rejected_after_payment'),
+    [activity],
+  )
   const managedDelegates = useMemo(
     () => (agent?.delegate_address && agent.status !== 'revoked' ? [agent.delegate_address] : []),
     [agent?.delegate_address, agent?.status],
@@ -507,6 +513,33 @@ export default function AgentDetailClient({ agentId }: Props) {
         <div className="mt-4">
           <ApprovalRequiredBanner title="Paused in Haven" tone="neutral" density="compact">
             New agent payments are blocked until you resume this agent. Existing wallet rules stay in place.
+          </ApprovalRequiredBanner>
+        </div>
+      ) : null}
+
+      {unsettledPayments.length > 0 ? (
+        <div className="mt-4">
+          <ApprovalRequiredBanner title="Payment didn't reach merchant" tone="warning" density="compact">
+            <span>
+              {unsettledPayments.length === 1
+                ? 'One payment was funded on-chain but the merchant rejected the retry.'
+                : `${unsettledPayments.length} payments were funded on-chain but the merchant rejected the retries.`}{' '}
+              The delegate wallet may hold stranded{' '}
+              {unsettledPayments[0]?.token ?? 'funds'}.{' '}
+              Sweep the funds back to your Safe to reclaim them.
+            </span>
+            <div className="mt-2">
+              <a
+                href={`/agents/${agentId}/sweep`}
+                className="inline-flex items-center gap-1 rounded-md bg-[var(--v2-warning)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 transition-opacity"
+                aria-label="Sweep stranded funds back to Safe"
+              >
+                Sweep stranded funds
+                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                  <path d="M3.5 8h9M8.5 4l4.5 4-4.5 4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </a>
+            </div>
           </ApprovalRequiredBanner>
         </div>
       ) : null}

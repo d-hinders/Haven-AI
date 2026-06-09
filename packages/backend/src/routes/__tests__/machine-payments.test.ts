@@ -136,6 +136,7 @@ describe('machine payment routes', () => {
       }),
       x402_idempotency_key: null,
       confirmed_at: '2026-05-15T12:00:00.000Z',
+      funded_but_unsettled: false,
       ...overrides,
     }
   }
@@ -590,6 +591,34 @@ describe('machine payment routes', () => {
         challenge_id: challenge.challengeId,
       },
     })
+  })
+
+  it('returns funded_but_unsettled phase when merchant retry was rejected after funding', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [confirmedPayment({
+          funded_but_unsettled: true,
+          expires_at: '2099-01-02T00:00:00.000Z',
+        })],
+      })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'confirmed',
+      phase: 'funded_but_unsettled',
+      next_action: 'sweep_stranded_funds',
+    })
+    // Message must tell the agent to stop and surface the failure.
+    expect(response.json().message).toMatch(/stranded|merchant rejected|sweep/i)
   })
 
   it('returns unified status for approval request IDs', async () => {

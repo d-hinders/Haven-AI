@@ -14,7 +14,8 @@
  *   4. Published connect installs wrong MCP version → wrong SDK via nested
  *      node_modules resolution → broken wire format in production.
  *
- * Run automatically as a postbuild step (packages/connect/package.json).
+ * Run automatically as part of connect's `build` script (packages/connect/package.json),
+ * and explicitly by scripts/release-bump.mjs after it builds connect via tsup.
  * Also runnable manually: node scripts/verify-connect-bundle.mjs
  *
  * If this fails: run `npm run release:bump -- <type>` (see scripts/README.md),

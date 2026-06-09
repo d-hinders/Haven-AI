@@ -230,6 +230,15 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
           [safeId],
         )
 
+        // Orphan any leftover self-sign agents too. The self-sign track was
+        // removed, but its table lingers with a RESTRICT foreign key on
+        // user_safes(id) — rows from that era would otherwise block deletion
+        // of an old Safe with a "violates foreign key constraint" error.
+        await client.query(
+          `UPDATE self_sign_agents SET safe_id = NULL, updated_at = NOW() WHERE safe_id = $1`,
+          [safeId],
+        )
+
         // Delete the Safe link
         await client.query(
           `DELETE FROM user_safes WHERE id = $1`,

@@ -13,6 +13,7 @@ import type {
   PaymentStatusResult,
   PaymentResumeState,
   SignData,
+  SweepResult,
   X402AuthorizationOptions,
   RawCreateResponse,
   RawSignResponse,
@@ -65,7 +66,7 @@ import {
   encodeMachinePaymentProof,
   parseMachinePaymentChallengeResponse,
 } from './mpp.js'
-import { createJsonRpcProvider } from './provider.js'
+import { createJsonRpcProvider, createWallet, createErc20Contract } from './provider.js'
 
 const DEFAULT_BASE_URL = 'http://localhost:3001'
 
@@ -87,6 +88,13 @@ function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null |
 const DEFAULT_REQUEST_TIMEOUT = 30_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
+
+function formatAtomicAmount(atomic: bigint, decimals: number): string {
+  const s = atomic.toString().padStart(decimals + 1, '0')
+  const intPart = s.slice(0, s.length - decimals) || '0'
+  const fracPart = s.slice(s.length - decimals).replace(/0+$/, '') || '0'
+  return `${intPart}.${fracPart}`
+}
 
 // ── MCP-over-x402 transport (issue #315) ──────────────────────────
 // MCP merchants (Soundside, the Coinbase reference) speak the Streamable
@@ -570,6 +578,102 @@ export class HavenClient {
       safeAddress: raw.safe_address,
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
+    }
+  }
+
+  /**
+   * Sweep stranded USDC and ETH from the delegate EOA back to the originating Safe.
+   *
+   * The delegate key held by this client signs and submits the transfer transactions
+   * directly — Haven's backend never handles the key or constructs signed txs
+   * (CASP/MiCA Red Line #2). Funds always go to the Safe linked to this agent.
+   *
+   * Requires `chainRpcs` to be set for the agent's chain in `HavenClientConfig`.
+   */
+  async sweepDelegate(): Promise<SweepResult> {
+    if (!this.delegateKey) {
+      throw new HavenSigningError('delegateKey is required for sweepDelegate.')
+    }
+
+    const agent = await this.getAgent()
+    const { safeAddress, delegateAddress, chainId } = agent
+
+    if (!delegateAddress) {
+      throw new HavenApiError('Agent has no delegate address.', 422)
+    }
+
+    const rpcUrl = this.chainRpcs[chainId]
+    if (!rpcUrl) {
+      throw new HavenApiError(
+        `chainRpcs[${chainId}] must be configured to sweep the delegate wallet.`,
+        422,
+      )
+    }
+
+    const provider = createJsonRpcProvider(rpcUrl)
+    const wallet = createWallet(this.delegateKey, provider)
+
+    const ERC20_TRANSFER_ABI = ['function balanceOf(address) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'] as const
+
+    // USDC contract address indexed by chain ID.
+    const USDC_BY_CHAIN: Record<number, string> = {
+      8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    }
+
+    const explorerByChain: Record<number, string> = {
+      8453: 'https://basescan.org/tx',
+      100:  'https://gnosisscan.io/tx',
+    }
+    const explorerBase = explorerByChain[chainId] ?? 'https://basescan.org/tx'
+
+    const transfers: SweepResult['transfers'] = []
+
+    // ── 1. Sweep ERC-20 USDC ────────────────────────────────────────
+    const usdcAddress = USDC_BY_CHAIN[chainId]
+    if (usdcAddress) {
+      const usdcContract = createErc20Contract(usdcAddress, ERC20_TRANSFER_ABI, wallet)
+      const usdcBalance: bigint = await usdcContract.balanceOf(delegateAddress)
+      if (usdcBalance > 0n) {
+        const tx = await usdcContract.transfer(safeAddress, usdcBalance)
+        const receipt = await (tx as { wait: (n: number) => Promise<{ hash: string } | null> }).wait(1)
+        const txHash: string = (receipt as { hash: string } | null)?.hash ?? (tx as { hash: string }).hash
+        transfers.push({
+          asset: 'USDC',
+          amount: formatAtomicAmount(usdcBalance, 6),
+          amountAtomic: usdcBalance.toString(),
+          txHash,
+          explorerUrl: `${explorerBase}/${txHash}`,
+        })
+      }
+    }
+
+    // ── 2. Sweep native ETH ─────────────────────────────────────────
+    const ethBalance = await provider.getBalance(delegateAddress)
+    if (ethBalance > 0n) {
+      // Reserve gas for the native transfer itself.
+      const gasPrice = (await provider.getFeeData()).gasPrice ?? 1_000_000n
+      const gasLimit = 21_000n
+      const gasCost = gasPrice * gasLimit
+      const ethToSend = ethBalance > gasCost ? ethBalance - gasCost : 0n
+      if (ethToSend > 0n) {
+        const tx = await wallet.sendTransaction({ to: safeAddress, value: ethToSend })
+        const receipt = await tx.wait(1)
+        const txHash: string = receipt?.hash ?? tx.hash
+        transfers.push({
+          asset: 'ETH',
+          amount: formatAtomicAmount(ethToSend, 18),
+          amountAtomic: ethToSend.toString(),
+          txHash,
+          explorerUrl: `${explorerBase}/${txHash}`,
+        })
+      }
+    }
+
+    return {
+      fromAddress: delegateAddress,
+      toAddress: safeAddress,
+      chainId,
+      transfers,
     }
   }
 

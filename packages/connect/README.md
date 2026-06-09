@@ -8,7 +8,7 @@ public signing address, proof signature, and API-key hash. Haven never receives
 the private key or plaintext API key.
 
 ```sh
-npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
+npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
 
 The connector writes owner-only credential files outside the project by default:

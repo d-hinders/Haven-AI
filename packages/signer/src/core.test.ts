@@ -201,4 +201,43 @@ describe('buildX402PaymentHeader', () => {
       'amount',
     )
   })
+
+  it('wire-format regression: v2 payment_header decodes to spec-compliant {x402Version, accepted, payload}', async () => {
+    // Use x402Version=2 to exercise the wrapped {x402Version, accepted, payload} format.
+    const v2PaymentRequired = {
+      ...PAYMENT_REQUIRED,
+      x402Version: 2,
+    }
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const delegateAddress = signer.delegateAddress
+
+    // Wire the x402 expected context exactly as the hosted MCP would return it.
+    const expected = await expectedX402()
+    const funding = signer.signX402FundingHash(FUNDING_HASH, expected)
+    const result = await signer.buildX402PaymentHeader(v2PaymentRequired, funding.x402Binding)
+
+    // ── 1. The payment_header is a valid base64-JSON string ─────────────────
+    let decoded: Record<string, unknown>
+    expect(() => {
+      decoded = JSON.parse(atob(result.paymentHeader))
+    }).not.toThrow()
+    decoded = JSON.parse(atob(result.paymentHeader))
+
+    // ── 2. Top-level shape: { x402Version, accepted, payload } ──────────────
+    const topLevelKeys = Object.keys(decoded).sort()
+    expect(topLevelKeys).toEqual(['accepted', 'payload', 'x402Version'])
+
+    // ── 3. x402Version matches the request ──────────────────────────────────
+    expect(decoded.x402Version).toBe(2)
+
+    // ── 4. payload has a signature ──────────────────────────────────────────
+    const payload = decoded.payload as Record<string, unknown>
+    expect(typeof payload.signature).toBe('string')
+    expect((payload.signature as string)).toMatch(/^0x[0-9a-fA-F]+$/)
+
+    // ── 5. Authorization.from is the delegate address (key-bound custody) ───
+    const auth = payload.authorization as Record<string, unknown>
+    expect(auth).toBeDefined()
+    expect((auth.from as string).toLowerCase()).toBe(delegateAddress.toLowerCase())
+  })
 })

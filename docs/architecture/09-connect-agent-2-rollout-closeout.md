@@ -26,21 +26,11 @@ Haven only public or hashed material.
 
 ## Rollout Gates
 
-Frontend:
-
-- Connect Agent 2 is the default Connect Agent flow. Unset or truthy
-  `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED` keeps it enabled.
-- `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` restores the old
-  manual setup entry point.
-- The original Connect Agent button remains reachable.
-
-Backend:
-
-- New pending setup creation is enabled by default. Unset or truthy
-  `CONNECT_AGENT_2_ENABLED` allows setup creation.
-- `CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` blocks new setup creation.
-- Existing read, install-status, wallet-approval, and cancel endpoints remain
-  available so in-progress setups can recover, expire, or be cancelled.
+Connect Agent 2 is the only Connect Agent flow. The legacy `CreateAgentModal`
+and the `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED` / `CONNECT_AGENT_2_ENABLED`
+rollback flags were retired in #345 once the new flow proved stable in
+production. Read, install-status, wallet-approval, and cancel endpoints remain
+available so in-progress setups can recover, expire, or be cancelled.
 
 Connector:
 
@@ -49,13 +39,9 @@ Connector:
 
 Rollback:
 
-1. Set `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=false`.
-2. Set `CONNECT_AGENT_2_ENABLED=false`.
-3. Leave old Connect Agent available.
-4. Keep status/cancel recovery endpoints live until pending setups expire or are
-   resolved.
-5. Ask users with completed on-chain approval to pause/revoke from the agent
-   page, or revoke Safe permissions outside Haven if needed.
+The flag-based rollback path is gone. If a regression in Connect Agent 2
+requires reverting to the legacy flow, revert #345 (which removed the modal,
+the flags, and their wiring) and redeploy.
 
 ## Stuck Setup Recovery
 

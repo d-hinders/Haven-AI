@@ -23,7 +23,7 @@ import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifec
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
-import CreateAgentModal from '@/components/CreateAgentModal'
+import ConnectAgent2Modal from '@/components/ConnectAgent2Modal'
 import SendModal from '@/components/SendModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
@@ -700,7 +700,7 @@ export default function DashboardClient() {
     [activeSafe, safes],
   )
 
-  const [createAgentOpen, setCreateAgentOpen] = useState(false)
+  const [connectAgentOpen, setConnectAgentOpen] = useState(false)
   const [pickerAction, setPickerAction] = useState<'send' | 'receive' | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [receiveOpen, setReceiveOpen] = useState(false)
@@ -845,7 +845,7 @@ export default function DashboardClient() {
   }
 
   function openCreateAgent() {
-    setCreateAgentOpen(true)
+    setConnectAgentOpen(true)
   }
 
   function openHeroAction(action: 'send' | 'receive' | 'add-funds') {
@@ -1040,13 +1040,13 @@ export default function DashboardClient() {
         )
       })()}
 
-      <CreateAgentModal
-        open={createAgentOpen}
+      <ConnectAgent2Modal
+        open={connectAgentOpen}
         onClose={() => {
-          setCreateAgentOpen(false)
+          setConnectAgentOpen(false)
         }}
         safeId={defaultSafe?.id ?? null}
-        onCreated={() => {
+        onSetupUpdated={() => {
           refreshDashboardData()
         }}
       />

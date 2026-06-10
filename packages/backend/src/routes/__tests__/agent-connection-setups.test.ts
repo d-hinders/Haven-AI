@@ -174,7 +174,6 @@ describe('agent connection setup routes', () => {
     mockGetTokensForDelegate.mockReset()
     delete process.env.HAVEN_API_URL
     delete process.env.HAVEN_HOSTED_MCP_URL
-    delete process.env.CONNECT_AGENT_2_ENABLED
   })
 
   it('creates a pending setup with a returned-once token stored only as a hash', async () => {
@@ -343,48 +342,6 @@ describe('agent connection setup routes', () => {
     expect(body.setup_prompt).toContain('update Codex MCP config under ~/.codex/config.toml')
     expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
-
-    await app.close()
-  })
-
-  it('creates a pending setup when the rollout gate is explicitly enabled', async () => {
-    process.env.CONNECT_AGENT_2_ENABLED = 'true'
-    const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/agent-connection-setups',
-      payload: {
-        name: 'Research Agent',
-        safe_id: SAFE.id,
-        allowances: [ALLOWANCE],
-      },
-    })
-
-    expect(response.statusCode).toBe(201)
-    expect(response.json()).toMatchObject({ status: 'awaiting_connection' })
-
-    await app.close()
-  })
-
-  it.each(['false', '0', 'off'])('blocks new pending setup creation when the rollout gate is %s', async (gateValue) => {
-    process.env.CONNECT_AGENT_2_ENABLED = gateValue
-    const app = await buildApp()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/agent-connection-setups',
-      payload: {
-        name: 'Research Agent',
-        safe_id: SAFE.id,
-        allowances: [ALLOWANCE],
-      },
-    })
-
-    expect(response.statusCode).toBe(404)
-    expect(mockQuery).not.toHaveBeenCalled()
-    expect(mockConnect).not.toHaveBeenCalled()
 
     await app.close()
   })

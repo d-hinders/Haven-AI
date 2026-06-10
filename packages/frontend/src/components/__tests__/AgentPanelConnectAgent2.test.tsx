@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   SAFE,
@@ -50,17 +50,13 @@ vi.mock('@/lib/signer', () => ({
   useActiveSigner: (args: unknown) => mockUseActiveSigner(args),
 }))
 
-vi.mock('@/components/CreateAgentModal', () => ({
-  default: ({ open }: { open: boolean }) => (open ? <div role="dialog">Old Connect Agent Modal</div> : null),
-}))
-
 vi.mock('@/components/ConnectAgent2Modal', () => ({
   default: ({ open }: { open: boolean }) => (open ? <div role="dialog">Connect Agent 2 Modal</div> : null),
 }))
 
 import AgentPanel from '@/components/AgentPanel'
 
-describe('AgentPanel Connect Agent 2 entry', () => {
+describe('AgentPanel Connect Agent entry', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUseAuth.mockReturnValue({ activeSafe: SAFE })
@@ -84,37 +80,16 @@ describe('AgentPanel Connect Agent 2 entry', () => {
     mockUseActiveSigner.mockReturnValue(null)
   })
 
-  afterEach(() => {
-    vi.unstubAllEnvs()
-  })
-
-  it('opens ConnectAgent2Modal when NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED is true', () => {
-    vi.stubEnv('NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED', 'true')
+  it('opens ConnectAgent2Modal when the Connect agent button is clicked', () => {
     render(<AgentPanel />)
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
     expect(screen.getByText('Connect Agent 2 Modal')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Manual setup' })).not.toBeInTheDocument()
   })
 
-  it('falls back to old modal and shows Manual setup when ConnectAgent2 is explicitly disabled', () => {
-    vi.stubEnv('NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED', 'false')
+  it('does not render a legacy Manual setup button', () => {
     render(<AgentPanel />)
 
-    // "Connect agent" opens the legacy modal when ConnectAgent2 is off
-    fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
-    expect(screen.getByText('Old Connect Agent Modal')).toBeInTheDocument()
-
-    // "Manual setup" is also visible (appears in both header and empty state)
-    expect(screen.getAllByRole('button', { name: 'Manual setup' }).length).toBeGreaterThan(0)
-  })
-
-  it('opens ConnectAgent2Modal by default when the env var is unset', () => {
-    // Unset env — ConnectAgent2 should be enabled by default (opt-out model)
-    render(<AgentPanel />)
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
-    expect(screen.getByText('Connect Agent 2 Modal')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Manual setup' })).not.toBeInTheDocument()
   })
 })

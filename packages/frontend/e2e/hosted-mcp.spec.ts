@@ -60,7 +60,7 @@ test.describe('Hosted MCP — in-budget path', () => {
     // same pattern as the connected-state test below.
     await expect(page.getByText(/USDC/).first()).toBeVisible()
 
-    // Primary CTA is present — clicking it opens the CreateAgentModal
+    // Primary CTA is present — clicking it opens the ConnectAgent2Modal
     await expect(page.getByRole('button', { name: 'Connect agent', exact: true })).toBeVisible()
 
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })

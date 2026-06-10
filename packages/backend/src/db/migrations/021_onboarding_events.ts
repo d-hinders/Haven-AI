@@ -5,8 +5,8 @@ export const version = '021_onboarding_events'
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`
     CREATE TABLE onboarding_events (
-      id          TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
-      user_id     TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       event       TEXT        NOT NULL CHECK (event IN (
                                 'signed_up',
                                 'safe_deployed',

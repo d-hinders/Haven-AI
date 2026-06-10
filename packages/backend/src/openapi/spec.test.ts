@@ -31,6 +31,7 @@ const AGENT_PAYMENT_ROUTE_FILES: Array<{ file: string; prefix: string }> = [
   { file: 'x402.ts', prefix: '/x402' },
   { file: 'machine-payments.ts', prefix: '/machine-payments' },
   { file: 'transactions.ts', prefix: '/transactions' },
+  { file: 'catalog.ts', prefix: '/catalog' },
 ]
 
 /**

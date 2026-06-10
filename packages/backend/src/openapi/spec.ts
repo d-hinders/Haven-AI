@@ -1147,6 +1147,65 @@ export const openapiSpec = {
         },
       },
     },
+    '/catalog': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'listCatalog',
+        summary: 'List curated payable services agents can discover and pay.',
+        description:
+          'Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. ' +
+          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; nothing here creates payments or signatures.',
+        security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
+        parameters: [
+          { name: 'category', in: 'query', schema: { type: 'string' } },
+          { name: 'rail', in: 'query', schema: { type: 'string', enum: ['x402', 'mpp'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'Catalog entries.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['entries'],
+                  properties: {
+                    entries: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/CatalogEntry' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+    },
+    '/catalog/{id}': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'getCatalogEntry',
+        summary: 'Fetch one catalog entry.',
+        security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Catalog entry.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CatalogEntry' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -1190,6 +1249,26 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      CatalogEntry: {
+        type: 'object',
+        required: ['id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string' },
+          description: { type: 'string' },
+          category: { type: 'string' },
+          resource_url: { type: 'string' },
+          rail: { type: 'string', enum: ['x402', 'mpp'] },
+          protocol: { type: 'string', enum: ['http', 'mcp'] },
+          tool_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          price_display: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          price_atomic: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          asset: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          network: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          status: { type: 'string', enum: ['active', 'degraded', 'delisted'] },
+          verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        },
+      },
       AgentPaymentPhase: {
         type: 'string',
         enum: Object.values(AgentPaymentPhase),

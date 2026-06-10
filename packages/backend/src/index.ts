@@ -27,6 +27,8 @@ import x402ResourceRoutes from './routes/x402-resources.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import demoMppRoutes from './routes/demo-mpp.js'
 import openapiRoutes from './routes/openapi.js'
+import catalogRoutes from './routes/catalog.js'
+import { refreshCatalog } from './lib/merchant-catalog.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
 import pool from './db.js'
@@ -139,10 +141,13 @@ await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(safeExecRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(x402ResourceRoutes, { prefix: '/x402' })
+await app.register(catalogRoutes, { prefix: '/catalog' })
 // Public demo — no auth hook, registered separately
 await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
 
 // --- Start ---
+const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
+
 const start = async () => {
   try {
     await runMigrations()
@@ -150,6 +155,20 @@ const start = async () => {
 
     await app.listen({ port: config.port, host: '0.0.0.0' })
     app.log.info(`Haven backend running on port ${config.port}`)
+
+    // Catalog price verification: probe listed merchants hourly so the
+    // catalog never advertises stale prices or dead endpoints. Best-effort —
+    // a failed run logs and waits for the next tick.
+    const runCatalogRefresh = async () => {
+      try {
+        const { verified, degraded } = await refreshCatalog()
+        app.log.info({ verified, degraded }, 'Merchant catalog refreshed')
+      } catch (err) {
+        app.log.warn({ err }, 'Merchant catalog refresh failed')
+      }
+    }
+    void runCatalogRefresh()
+    setInterval(runCatalogRefresh, CATALOG_REFRESH_INTERVAL_MS).unref()
   } catch (err) {
     app.log.error(err)
     process.exit(1)

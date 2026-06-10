@@ -7,7 +7,7 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
 export const testSafe = {
   id: 'safe-main',
   safe_address: testSafeAddress,
-  chain_id: 100,
+  chain_id: 8453,
   name: 'Operations',
   is_default: true,
   created_at: '2026-05-01T10:00:00.000Z',
@@ -64,7 +64,7 @@ const dashboardTransaction = {
   tokenSymbol: 'USDC',
   agentId: testAgent.id,
   agentName: testAgent.name,
-  chainId: 100,
+  chainId: 8453,
   safeId: testSafe.id,
   safeAddress: testSafeAddress,
   safeName: testSafe.name,
@@ -132,7 +132,7 @@ const approval = {
   agent_id: testAgent.id,
   agent_name: testAgent.name,
   safe_address: testSafeAddress,
-  chain_id: 100,
+  chain_id: 8453,
   token_symbol: 'USDC',
   token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
   to_address: testRecipientAddress,
@@ -174,6 +174,8 @@ async function mockWalletNoise(page: Page) {
 
 export async function mockHavenApi(page: Page) {
   await mockWalletNoise(page)
+  let connectAgent2SetupCreated = false
+  let connectAgent2StatusReads = 0
 
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -208,6 +210,78 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path === '/agents') {
       await fulfillJson(route, { agents: [testAgent] })
+      return
+    }
+
+    if (method === 'POST' && path === '/agent-connection-setups') {
+      connectAgent2SetupCreated = true
+      await fulfillJson(route, {
+        setup_id: 'setup-e2e',
+        status: 'awaiting_connection',
+        setup_token: 'hv_setup_e2e123',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        connector_command: 'npx -y @haven_ai/connect@alpha --setup hv_setup_e2e123 --api https://api.haven.example --ack-local-tools --runtime claude-code',
+        setup_prompt: [
+          'Please connect this workspace to Haven.',
+          '',
+          'I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
+          '',
+          'Run this exact command:',
+          '',
+          'npx -y @haven_ai/connect@alpha --setup hv_setup_e2e123 --api https://api.haven.example --ack-local-tools --runtime claude-code',
+          '',
+          'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
+          '',
+          'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
+          '',
+          'When the connector finishes, tell me to return to Haven to approve the agent rules.',
+        ].join('\n'),
+      }, 201)
+      return
+    }
+
+    if (method === 'GET' && path === '/agent-connection-setups/setup-e2e') {
+      connectAgent2StatusReads += 1
+      const connectedLocal = connectAgent2SetupCreated && connectAgent2StatusReads > 1
+      await fulfillJson(route, {
+        setup_id: 'setup-e2e',
+        agent_id: connectedLocal ? 'agent-connect2-e2e' : null,
+        status: connectedLocal ? 'connected_local' : 'awaiting_connection',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        agent: { name: 'Research Agent', description: null },
+        haven_wallet: {
+          id: testSafe.id,
+          name: testSafe.name,
+          address: testSafeAddress,
+          chain_id: 8453,
+          network: 'Base',
+        },
+        agent_budget: [{
+          id: 'budget-connect2-e2e',
+          token_address: '0x0000000000000000000000000000000000000000',
+          token_symbol: 'ETH',
+          allowance_amount: '10000000000000000000',
+          reset_period_min: 1440,
+        }],
+        delegate_address: connectedLocal
+          ? '0x3333333333333333333333333333333333333333'
+          : null,
+        api_key_prefix: connectedLocal ? 'sk_agent_abc' : null,
+        runtime: 'claude-code',
+        connector: { connector_version: '0.1.2', environment_label: 'Local workspace' },
+        install_status: {
+          runtime_mcp_mode: 'local_stdio',
+          hosted_mcp_configured: false,
+          local_signer_configured: true,
+          local_mcp_configured: true,
+          credential_files_written: true,
+          local_mcp_acknowledged: true,
+          activation_command_available: false,
+          restart_required: true,
+          probe_result: 'local_stdio_mcp_ready',
+        },
+        approval: { status: 'pending_approval', safe_tx_hash: null, tx_hash: null },
+      })
       return
     }
 

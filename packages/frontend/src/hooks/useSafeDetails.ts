@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
 import type { SafeDetails } from '@/types/transactions'
 
@@ -13,17 +13,21 @@ interface UseSafeDetailsReturn {
 
 interface UseSafeDetailsOptions {
   enabled?: boolean
+  chainId?: number
 }
 
 export function useSafeDetails(
   safeAddress: string | null,
-  { enabled = true }: UseSafeDetailsOptions = {},
+  { enabled = true, chainId }: UseSafeDetailsOptions = {},
 ): UseSafeDetailsReturn {
   const [details, setDetails] = useState<SafeDetails | null>(null)
   const [loading, setLoading] = useState(Boolean(safeAddress) && enabled)
   const [error, setError] = useState<string | null>(null)
+  const generationRef = useRef(0)
 
   const fetchDetails = useCallback(async () => {
+    const generation = ++generationRef.current
+
     if (!safeAddress) {
       setDetails(null)
       setError(null)
@@ -39,17 +43,25 @@ export function useSafeDetails(
     try {
       setLoading(true)
       setError(null)
-      const data = await api.get<SafeDetails>(`/safe/${safeAddress}/details`)
-      setDetails(data)
+      const chainQuery = chainId === undefined ? '' : `?chain_id=${encodeURIComponent(String(chainId))}`
+      const data = await api.get<SafeDetails>(`/safe/${safeAddress}/details${chainQuery}`)
+      if (generationRef.current === generation) {
+        setDetails(data)
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load Safe details')
+      if (generationRef.current === generation) {
+        setError(err instanceof Error ? err.message : 'Failed to load Safe details')
+      }
     } finally {
-      setLoading(false)
+      if (generationRef.current === generation) {
+        setLoading(false)
+      }
     }
-  }, [enabled, safeAddress])
+  }, [chainId, enabled, safeAddress])
 
   useEffect(() => {
     if (!safeAddress) {
+      generationRef.current += 1
       setDetails(null)
       setError(null)
       setLoading(false)
@@ -57,11 +69,15 @@ export function useSafeDetails(
     }
 
     if (!enabled) {
+      generationRef.current += 1
       setLoading(false)
       return
     }
 
     fetchDetails()
+    return () => {
+      generationRef.current += 1
+    }
   }, [enabled, fetchDetails, safeAddress])
 
   return { details, loading, error, refetch: fetchDetails }

@@ -81,7 +81,9 @@ import WalletButton from '@/components/WalletButton'
 
 function setConnectedWallet({
   address = EOA_ADDRESS,
-  chain = { id: 100, name: 'Gnosis Chain' },
+  // Base is the only user-selectable chain; an EOA on a supported chain
+  // should render the address pill (not "Wrong network").
+  chain = { id: 8453, name: 'Base' },
 }: {
   address?: string
   chain?: { id: number; name: string; unsupported?: boolean }

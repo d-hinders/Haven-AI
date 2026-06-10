@@ -6,6 +6,8 @@ import {
   encodePaymentProof,
   parsePaymentRequired,
   parsePaymentRequiredResponse,
+  selectPaymentOption,
+  selectStandardPaymentOption,
   x402AuthorizationAmount,
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
@@ -20,11 +22,15 @@ const accepted: X402PaymentOption = {
   extra: { name: 'USD Coin', version: '2' },
 }
 
+// Standard-x402 fixture. Its URL is intentionally NOT `/mcp`: these tests
+// exercise the plain x402 path and must not trip the MCP auto-handshake
+// (issue #315). MCP-shaped endpoints are covered in their own describe block
+// below with a `https://mcp.soundside.ai/mcp` fixture.
 const paymentRequired: X402PaymentRequired = {
   x402Version: 2,
   error: 'Payment required',
   resource: {
-    url: 'https://mcp.soundside.ai/mcp',
+    url: 'https://api.merchant.example/paid',
     description: 'create_image via luma - $0.02 USDC',
     mimeType: 'application/json',
   },
@@ -356,6 +362,33 @@ describe('x402 helpers', () => {
       },
     })
 
+    // ── PR #300 regression guard ──────────────────────────────────────
+    //
+    // The x402 v2 spec (and Soundside's facilitator) require the payment
+    // payload to carry `accepted` as a top-level field that is an exact
+    // copy of the chosen `accepts[i]` from the 402 response. See
+    // Soundside Protocol Details item 5:
+    //   https://github.com/soundside-design/soundside-docs/blob/main/guides/x402.md
+    //
+    // PR #300 (cc54083) dropped the `accepted` wrap on the assumption
+    // that the spec required top-level `scheme`/`network` string fields
+    // instead. That broke every compliant v2 facilitator including
+    // Soundside, which rejected the header with `Field required: accepted`
+    // and stranded the agent's USDC on the delegate EOA.
+    //
+    // These assertions are stricter than the `toMatchObject` above on
+    // purpose: `toMatchObject` only checks that the listed keys are
+    // present and match, so it cannot catch a regression where stray
+    // top-level `scheme`/`network` keys leak in alongside `accepted`.
+    // The strict key-set + exact-equality checks here would have failed
+    // on PR #300's payload shape.
+    expect((payment as { accepted: unknown }).accepted).toEqual(accepted)
+    expect(Object.keys(payment as object).sort()).toEqual(
+      ['accepted', 'payload', 'x402Version'].sort(),
+    )
+    expect(payment).not.toHaveProperty('scheme')
+    expect(payment).not.toHaveProperty('network')
+
     expect(fetchMock.mock.calls[4][0]).toBe(`${backendUrl}/machine-payments/evidence`)
     const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
     expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
@@ -413,7 +446,7 @@ describe('x402 helpers', () => {
     })
   })
 
-  it('records a reconciliation event when an x402 retry is rejected after funding', async () => {
+  it('records a reconciliation event when an x402 retry fails after funding', async () => {
     const backendUrl = 'https://haven.example'
     const resourceUrl = paymentRequired.resource.url
     const txHash = `0x${'ab'.repeat(32)}`
@@ -455,7 +488,10 @@ describe('x402 helpers', () => {
         amount: '0.02',
         to: delegateAddress,
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Payment rejected' }), { status: 402 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Missing session ID' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', 'X-Soundside-Trace': 'trace-789' },
+      }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
 
     const haven = new HavenClient({
@@ -465,10 +501,13 @@ describe('x402 helpers', () => {
     })
 
     await expect(haven.fetch(resourceUrl)).rejects.toMatchObject({
-      statusCode: 402,
+      statusCode: 400,
       body: expect.objectContaining({
         marker: 'x402_retry_rejected_after_funding',
         payment_id: 'pay_123',
+        merchant_status: 400,
+        merchant_body: JSON.stringify({ error: 'Missing session ID' }),
+        merchant_headers: expect.objectContaining({ 'x-soundside-trace': 'trace-789' }),
       }),
     })
 
@@ -482,12 +521,135 @@ describe('x402 helpers', () => {
       txHash,
       details: {
         resource_url: resourceUrl,
-        retry_status: 402,
-        retry_body: JSON.stringify({ error: 'Payment rejected' }),
+        retry_status: 400,
+        retry_body: JSON.stringify({ error: 'Missing session ID' }),
         merchant_to: accepted.payTo,
         delegate_to: delegateAddress,
       },
     })
+  })
+
+  const x402PreRetryResponses = (resourceUrl: string, txHash: string): Response[] => [
+    new Response(JSON.stringify(paymentRequired), {
+      status: 402,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    new Response(JSON.stringify({
+      payment_id: 'pay_123',
+      status: 'pending_signature',
+      chain_id: 8453,
+      safe_address: safeAddress,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+      resource_url: resourceUrl,
+      sign_data: {
+        hash: `0x${'11'.repeat(32)}`,
+        components: {
+          safe: safeAddress,
+          token: accepted.asset,
+          to: delegateAddress,
+          amount: accepted.amount,
+          payment_token: '0x0000000000000000000000000000000000000000',
+          payment: '0',
+          nonce: 1,
+        },
+        instructions: 'Sign with delegate key',
+      },
+    }), { status: 201 }),
+    new Response(JSON.stringify({
+      payment_id: 'pay_123',
+      status: 'confirmed',
+      tx_hash: txHash,
+      chain_id: 8453,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+    }), { status: 200 }),
+  ]
+
+  it.each([
+    {
+      label: '400 schema-style rejection',
+      status: 400,
+      statusText: 'Bad Request',
+      body: JSON.stringify({ error: 'Field required: accepted' }),
+    },
+    {
+      label: '402 signature/balance rejection',
+      status: 402,
+      statusText: 'Payment Required',
+      body: JSON.stringify({ error: 'invalid_exact_evm_payload_authorization_valueInsufficient' }),
+    },
+    {
+      label: '5xx server error',
+      status: 503,
+      statusText: 'Service Unavailable',
+      body: 'upstream temporarily unavailable',
+    },
+  ])('captures the merchant response body for a $label retry failure', async ({ status, statusText, body }) => {
+    const backendUrl = 'https://haven.example'
+    const resourceUrl = paymentRequired.resource.url
+    const txHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    for (const response of x402PreRetryResponses(resourceUrl, txHash)) {
+      fetchMock.mockResolvedValueOnce(response)
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(body, {
+        status,
+        statusText,
+        headers: { 'Content-Type': 'application/json', 'X-Merchant-Trace': 'trace-abc' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: backendUrl,
+    })
+
+    await expect(haven.fetch(resourceUrl)).rejects.toMatchObject({
+      statusCode: status,
+      body: expect.objectContaining({
+        marker: 'x402_retry_rejected_after_funding',
+        payment_id: 'pay_123',
+        merchant_status: status,
+        merchant_status_text: statusText,
+        merchant_body: body,
+        merchant_headers: expect.objectContaining({ 'x-merchant-trace': 'trace-abc' }),
+      }),
+    })
+  })
+
+  it('does not leak the delegate key or agent API key into the captured merchant response', async () => {
+    const backendUrl = 'https://haven.example'
+    const resourceUrl = paymentRequired.resource.url
+    const txHash = `0x${'ab'.repeat(32)}`
+    const delegateKey = `0x${'01'.repeat(32)}`
+    const apiKey = 'sk_agent_secret_value'
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    for (const response of x402PreRetryResponses(resourceUrl, txHash)) {
+      fetchMock.mockResolvedValueOnce(response)
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Missing session ID' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ event_id: 'event-123' }), { status: 202 }))
+
+    const haven = new HavenClient({ apiKey, delegateKey, baseUrl: backendUrl })
+
+    const error = await haven.fetch(resourceUrl).then(
+      () => { throw new Error('expected merchant retry to reject') },
+      (err: unknown) => err as { body: Record<string, unknown> },
+    )
+
+    const serialized = JSON.stringify(error.body)
+    expect(serialized).not.toContain(apiKey)
+    expect(serialized).not.toContain(delegateKey)
+    expect(error.body.merchant_body).toBe(JSON.stringify({ error: 'Missing session ID' }))
   })
 
   it('does not fund the delegate wallet for unsupported Base assets', async () => {
@@ -669,6 +831,15 @@ describe('x402 helpers', () => {
         },
       },
     })
+
+    // PR #300 regression guard — see the longer note on the earlier
+    // payX402Quote test for the spec reference (Soundside docs item 5).
+    expect((payment as { accepted: unknown }).accepted).toEqual(accepted)
+    expect(Object.keys(payment as object).sort()).toEqual(
+      ['accepted', 'payload', 'x402Version'].sort(),
+    )
+    expect(payment).not.toHaveProperty('scheme')
+    expect(payment).not.toHaveProperty('network')
   })
 
   it('retries the original x402 request from an approved payment id', async () => {
@@ -1102,5 +1273,97 @@ describe('x402 helpers', () => {
     expect(buildX402IdempotencyKey(paymentRequired, option, 1778440000000)).not.toBe(
       buildX402IdempotencyKey(paymentRequired, { ...option, maxAmountRequired: '30000' }, 1778440000000),
     )
+  })
+
+  it('rejects malformed x402 atomic authorization amounts before selection', () => {
+    const malformedAmounts = [
+      '0x4e20',
+      '1e6',
+      '+20000',
+      '-1',
+      ' 20000',
+      '20000 ',
+      '',
+      '0',
+    ]
+
+    for (const amount of malformedAmounts) {
+      const option = { ...accepted, amount }
+
+      expect(selectPaymentOption([option])).toBeNull()
+      expect(selectStandardPaymentOption([option])).toBeNull()
+      expect(() => x402AuthorizationAmount(option)).toThrow(
+        'Invalid x402 amount: must be a positive decimal atomic amount',
+      )
+    }
+
+    expect(selectPaymentOption([
+      { ...accepted, amount: '10000', maxAmountRequired: '0x4e20' },
+    ])).toBeNull()
+    expect(selectStandardPaymentOption([
+      { ...accepted, amount: '10000', maxAmountRequired: '0x4e20' },
+    ])).toBeNull()
+  })
+
+  // ── v1 x402 path coverage (#324) ────────────────────────────────────────
+  //
+  // `createStandardX402Header` re-wraps v2+ headers as
+  // `{ x402Version, accepted, payload }` (the v2 spec shape, see PR #303's
+  // regression guard above). v1 headers must pass through the x402 library's
+  // output UNCHANGED — v1 facilitators reject the `accepted` wrap. These tests
+  // pin that branch so a future refactor can't silently wrap v1 too.
+
+  it('passes v1 payment headers through unchanged (no accepted wrap)', async () => {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const v1PaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      x402Version: 1,
+    }
+
+    const header = await (haven as unknown as {
+      createStandardX402Header(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+    }).createStandardX402Header(v1PaymentRequired, accepted)
+
+    const decoded = JSON.parse(atob(header)) as Record<string, unknown>
+
+    // V1 shape: the raw library output — no top-level `accepted` key.
+    expect(decoded).not.toHaveProperty('accepted')
+    expect(decoded.x402Version).toBe(1)
+
+    // The library's v1 envelope carries scheme/network at the top level and
+    // the signed payload underneath. Pin the key set exactly so a future
+    // change that adds or renames top-level keys fails loudly.
+    expect(Object.keys(decoded).sort()).toEqual(['network', 'payload', 'scheme', 'x402Version'])
+    expect(decoded.scheme).toBe('exact')
+    expect(decoded.network).toBe('base')
+
+    const payload = decoded.payload as { signature?: string; authorization?: Record<string, unknown> }
+    expect(typeof payload.signature).toBe('string')
+    expect(payload.authorization).toMatchObject({
+      to: accepted.payTo,
+      value: accepted.amount,
+    })
+  })
+
+  it('still wraps v2 headers with accepted — the v1/v2 split is on x402Version', async () => {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const header = await (haven as unknown as {
+      createStandardX402Header(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+    }).createStandardX402Header(paymentRequired, accepted)
+
+    const decoded = JSON.parse(atob(header)) as Record<string, unknown>
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])
+    expect(decoded.x402Version).toBe(2)
+    expect(decoded.accepted).toEqual(accepted)
   })
 })

@@ -23,6 +23,8 @@ export interface Transaction {
   x402MerchantAddress?: string | null
   paymentId?: string
   paymentProofStatus?: string | null
+  paymentFlowStatus?: 'paid' | 'confirming_merchant' | 'needs_attention' | null
+  paymentAttentionReason?: 'merchant_retry_rejected_after_payment' | null
 }
 
 export interface AggregatedTransaction extends Transaction {
@@ -120,6 +122,7 @@ export interface BalanceItem {
   balance: string
   formatted: string
   decimals: number
+  chainId?: number
 }
 
 export interface BalancesResponse {

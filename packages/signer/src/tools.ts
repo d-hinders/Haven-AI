@@ -60,20 +60,23 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
 }
 
 const SIGN_DESCRIPTION = [
-  'Sign an unsigned Haven payment hash with the delegate key on this machine.',
-  'Pass the payload_hash returned by haven_pay or haven_x402_authorize. For x402, also pass',
-  'x402_expected from haven_x402_authorize; the signer records it locally and returns',
-  '{ signature, x402_binding }. Hand signature to haven_submit, then use x402_binding for',
-  'haven_x402_sign_header. The delegate key never leaves this process.',
+  'Sign an unsigned Haven payment hash with the local delegate key. The delegate key never leaves',
+  'this process. Pass the payload_hash returned by haven_pay or haven_pay_x402_quote.',
+  'For x402, also pass x402_expected from haven_pay_x402_quote; the signer records it locally',
+  'and returns { signature, x402_binding }. Hand signature to haven_submit, then pass x402_binding',
+  'to haven_x402_sign_header. For plain SafeTransfer payments, just pass payload_hash and',
+  'relay the returned signature via haven_submit.',
 ].join(' ')
 
 const X402_SIGN_HEADER_DESCRIPTION = [
-  'Build and sign the EIP-3009 X-PAYMENT header for the merchant leg of an x402 payment, using',
-  'the delegate key on this machine. Pass the same payment_required you gave haven_x402_authorize',
-  'and the x402_binding returned by haven_sign. The signer consumes the recorded funding context',
-  'and rejects mismatched amount, merchant, resource, asset, or network before signing. Returns',
-  '{ payment_header } to send to the merchant as the X-PAYMENT header on your retry. Do this only',
-  'after the funding step (haven_submit) has confirmed.',
+  'Build and sign the EIP-3009 X-PAYMENT header for the merchant leg of an x402 payment.',
+  'The delegate key stays local — only the signed header crosses any boundary.',
+  'Pass the payment_required from the original merchant 402 response and the x402_binding',
+  'returned by haven_sign. The signer validates the merchant, amount, resource, asset, and',
+  'network against the recorded funding context before signing, and rejects mismatches.',
+  'Returns { payment_header, accepted }. Set X-PAYMENT: <payment_header> on your retry to the',
+  'merchant. Only call after haven_submit has confirmed the funding step (nextAction=none or',
+  'the funding tx has a confirmed status).',
 ].join(' ')
 
 export const toolDescriptions: Record<SignerToolName, string> = {

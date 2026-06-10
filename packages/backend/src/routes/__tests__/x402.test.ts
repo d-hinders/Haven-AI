@@ -2,14 +2,21 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify'
 import x402Routes from '../x402.js'
 
-const { mockQuery, allowanceMocks } = vi.hoisted(() => ({
+const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
+    getTokenBalance: vi.fn(),
     computeEffectiveAllowance: vi.fn(),
     generateTransferHash: vi.fn(),
     recoverSigner: vi.fn(),
     executeAllowanceTransfer: vi.fn(),
+  },
+  fiatMocks: {
+    getFiatValuesForTokenAmount: vi.fn(),
+  },
+  evidenceMocks: {
+    tryRecordMachinePaymentEvidenceBaseById: vi.fn(),
   },
 }))
 
@@ -20,6 +27,10 @@ vi.mock('../../db.js', () => ({
 }))
 
 vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
+
+vi.mock('../../lib/fiat-values.js', () => fiatMocks)
+
+vi.mock('../../lib/machine-payment-evidence.js', () => evidenceMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -34,10 +45,37 @@ const AGENT = {
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const SIGN_HASH = `0x${'11'.repeat(32)}`
+const TX_HASH = `0x${'ab'.repeat(32)}`
 const X402_BINDING_PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 
 function authRow() {
   return { rows: [AGENT] }
+}
+
+function pendingX402Intent(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '33333333-3333-3333-3333-333333333333',
+    status: 'pending_signature',
+    expires_at: '2026-05-10T20:00:00.000Z',
+    chain_id: 8453,
+    safe_address: AGENT.safe_address,
+    token_symbol: 'USDC',
+    token_address: USDC,
+    amount_human: '0.02',
+    amount_raw: '20000',
+    to_address: AGENT.delegate_address.toLowerCase(),
+    x402_merchant_address: MERCHANT.toLowerCase(),
+    merchant_address: MERCHANT.toLowerCase(),
+    x402_resource_url: 'https://mcp.soundside.ai/mcp',
+    payment_resource_url: 'https://mcp.soundside.ai/mcp',
+    source: 'x402',
+    payment_rail: 'x402',
+    x402_idempotency_key: 'x402:test',
+    machine_idempotency_key: 'x402:test',
+    sign_hash: SIGN_HASH,
+    allowance_nonce: 7,
+    ...overrides,
+  }
 }
 
 describe('x402 routes', () => {
@@ -56,6 +94,14 @@ describe('x402 routes', () => {
     process.env.X402_BINDING_PRIVATE_KEY = X402_BINDING_PRIVATE_KEY
     mockQuery.mockReset()
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
+    for (const mock of Object.values(fiatMocks)) mock.mockReset()
+    for (const mock of Object.values(evidenceMocks)) mock.mockReset()
+    // Default to zero delegate balance for tests that don't care about it.
+    // The pre-flight check (delegateBalance + remainingAllowance >= amount)
+    // still passes because existing tests set `remaining` high enough to
+    // cover the requested amount on its own. Tests that want to exercise
+    // the insufficient-funds branch override this with .mockResolvedValueOnce.
+    allowanceMocks.getTokenBalance.mockResolvedValue(0n)
   })
 
   it('registers /x402/authorize as the explicit authorize endpoint', async () => {
@@ -149,6 +195,194 @@ describe('x402 routes', () => {
     expect(insertCall[1]).toContain('x402:test')
   })
 
+  it('records one-shot x402 signatures without marking the payment submitted before execution', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
+    evidenceMocks.tryRecordMachinePaymentEvidenceBaseById.mockResolvedValueOnce(undefined)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({ rows: [pendingX402Intent()] })
+      .mockResolvedValueOnce({ rows: [{ id: '33333333-3333-3333-3333-333333333333' }] })
+      .mockResolvedValueOnce({ rows: [{ id: '33333333-3333-3333-3333-333333333333' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:test',
+        signature: '0xsig',
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({
+      success: true,
+      payment_id: '33333333-3333-3333-3333-333333333333',
+      status: 'confirmed',
+      tx_hash: TX_HASH,
+    })
+
+    const signatureUpdateIndex = mockQuery.mock.calls.findIndex(([sql]) =>
+      typeof sql === 'string' && sql.includes('SET signature = $1, signed_at = NOW()')
+    )
+    expect(signatureUpdateIndex).toBeGreaterThanOrEqual(0)
+    const signatureUpdateCall = mockQuery.mock.calls[signatureUpdateIndex]
+    expect(signatureUpdateCall[0]).toContain('SET signature = $1, signed_at = NOW()')
+    expect(signatureUpdateCall[0]).toContain('agent_id = $3')
+    expect(signatureUpdateCall[0]).toContain("COALESCE(payment_rail, source) = 'x402'")
+    expect(signatureUpdateCall[0]).toContain("status = 'pending_signature'")
+    expect(signatureUpdateCall[0]).toContain('tx_hash IS NULL')
+    expect(signatureUpdateCall[0]).not.toContain("status = 'submitted'")
+    expect(signatureUpdateCall[0]).not.toContain('submitted_at')
+    expect(signatureUpdateCall[1]).toEqual([
+      '0xsig',
+      '33333333-3333-3333-3333-333333333333',
+      AGENT.id,
+    ])
+
+    const executionOrder = allowanceMocks.executeAllowanceTransfer.mock.invocationCallOrder[0]
+    expect(mockQuery.mock.invocationCallOrder[signatureUpdateIndex]).toBeLessThan(executionOrder)
+
+    const confirmedUpdateCall = mockQuery.mock.calls.find(([sql]) =>
+      typeof sql === 'string' && sql.includes("SET status = 'confirmed'")
+    )
+    expect(confirmedUpdateCall?.[0]).toContain('agent_id = $5')
+    expect(confirmedUpdateCall?.[0]).toContain("COALESCE(payment_rail, source) = 'x402'")
+    expect(confirmedUpdateCall?.[0]).toContain("status = 'pending_signature'")
+    expect(confirmedUpdateCall?.[0]).toContain('tx_hash IS NULL')
+    expect(confirmedUpdateCall?.[1]).toEqual([
+      TX_HASH,
+      '33333333-3333-3333-3333-333333333333',
+      0.02,
+      0.02,
+      AGENT.id,
+    ])
+    expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).toHaveBeenCalledWith(
+      '33333333-3333-3333-3333-333333333333',
+      AGENT.id,
+      expect.anything(),
+    )
+  })
+
+  it('does not overwrite one-shot x402 terminal state after execution failures', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({ rows: [pendingX402Intent()] })
+      .mockResolvedValueOnce({ rows: [{ id: '33333333-3333-3333-3333-333333333333' }] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:test',
+        signature: '0xsig',
+      },
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json()).toMatchObject({
+      payment_id: '33333333-3333-3333-3333-333333333333',
+      status: 'failed',
+      error: 'On-chain execution failed',
+    })
+
+    const failedUpdateCall = mockQuery.mock.calls.find(([sql]) =>
+      typeof sql === 'string' && sql.includes("SET status = 'failed'")
+    )
+    expect(failedUpdateCall?.[0]).toContain('agent_id = $3')
+    expect(failedUpdateCall?.[0]).toContain("COALESCE(payment_rail, source) = 'x402'")
+    expect(failedUpdateCall?.[0]).toContain("status = 'pending_signature'")
+    expect(failedUpdateCall?.[0]).toContain('tx_hash IS NULL')
+    expect(failedUpdateCall?.[1]).toEqual([
+      'relayer unavailable',
+      '33333333-3333-3333-3333-333333333333',
+      AGENT.id,
+    ])
+    expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).not.toHaveBeenCalled()
+  })
+
+  it('does not record x402 evidence when a one-shot confirmation loses a terminal-state race', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({ rows: [pendingX402Intent()] })
+      .mockResolvedValueOnce({ rows: [{ id: '33333333-3333-3333-3333-333333333333' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ status: 'confirmed' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:test',
+        signature: '0xsig',
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toMatchObject({
+      payment_id: '33333333-3333-3333-3333-333333333333',
+      status: 'confirmed',
+      error: 'Payment intent changed after on-chain execution',
+    })
+    expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
+    expect(evidenceMocks.tryRecordMachinePaymentEvidenceBaseById).not.toHaveBeenCalled()
+  })
+
   it('rejects payment requirements whose network does not match the agent chain', async () => {
     mockQuery.mockResolvedValueOnce(authRow())
 
@@ -168,6 +402,60 @@ describe('x402 routes', () => {
     expect(response.statusCode).toBe(400)
     expect(response.json().error).toBe('x402 network eip155:100 does not match agent chain 8453')
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed decimal atomic amounts before allowance checks', async () => {
+    const malformedAmounts = [
+      '0x4e20',
+      '1e6',
+      '+20000',
+      '-1',
+      ' 20000',
+      '20000 ',
+      '0',
+    ]
+
+    for (const amount of malformedAmounts) {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/x402',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {
+          url: 'https://mcp.soundside.ai/mcp',
+          payTo: AGENT.delegate_address,
+          amount,
+          asset: USDC,
+          network: 'base',
+        },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe(
+        'Invalid amount — must be a positive decimal integer in atomic units',
+      )
+    }
+
+    mockQuery.mockResolvedValueOnce(authRow())
+    const blankResponse = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        amount: '',
+        asset: USDC,
+        network: 'base',
+      },
+    })
+
+    expect(blankResponse.statusCode).toBe(400)
+    expect(blankResponse.json().error).toBe('Amount (atomic units) is required')
+    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    expect(mockQuery).toHaveBeenCalledTimes(malformedAmounts.length + 1)
   })
 
   it('returns an existing pending signature intent for duplicate idempotency keys', async () => {
@@ -218,6 +506,7 @@ describe('x402 routes', () => {
       sign_data: { hash: SIGN_HASH },
     })
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls[1][0]).toContain("COALESCE(payment_rail, source) = 'x402'")
   })
 
   it('refreshes stale sign data when a duplicate pending intent has an old allowance nonce', async () => {
@@ -245,7 +534,7 @@ describe('x402 routes', () => {
           allowance_nonce: 7,
         }],
       })
-      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: '33333333-3333-3333-3333-333333333333' }] })
 
     const response = await app.inject({
       method: 'POST',
@@ -277,12 +566,69 @@ describe('x402 routes', () => {
       0n,
       8,
     )
-    expect(mockQuery.mock.calls[2][0]).toContain('UPDATE payment_intents')
+    const refreshCall = mockQuery.mock.calls[2]
+    expect(refreshCall[0]).toContain('UPDATE payment_intents')
+    expect(refreshCall[0]).toContain('agent_id = $4')
+    expect(refreshCall[0]).toContain("COALESCE(payment_rail, source) = 'x402'")
+    expect(refreshCall[0]).toContain("status = 'pending_signature'")
+    expect(refreshCall[0]).toContain('tx_hash IS NULL')
+    expect(refreshCall[1]).toEqual([
+      8,
+      refreshedHash,
+      '33333333-3333-3333-3333-333333333333',
+      AGENT.id,
+    ])
+  })
+
+  it('reloads rail-scoped existing x402 intents after insert idempotency conflicts', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [pendingX402Intent()] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:test',
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({
+      payment_id: '33333333-3333-3333-3333-333333333333',
+      status: 'pending_signature',
+      sign_data: { hash: SIGN_HASH },
+    })
+
+    expect(mockQuery.mock.calls[1][0]).toContain("COALESCE(payment_rail, source) = 'x402'")
+    const fallbackLookup = mockQuery.mock.calls[7]
+    expect(fallbackLookup[0]).toContain("COALESCE(payment_rail, source) = 'x402'")
   })
 
   it('queues over-allowance x402 payments once with rail metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
+    // Delegate already holds enough to satisfy the shortfall after the
+    // top-up, so the pre-flight insufficient-funds check passes and we
+    // fall through into the existing over-budget approval-queue path.
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(20_000n)
 
     mockQuery
       .mockResolvedValueOnce(authRow())
@@ -361,6 +707,213 @@ describe('x402 routes', () => {
       category: 'data',
       description: null,
     }))
+  })
+
+  it('returns 422 insufficient_funds when delegate balance + remaining allowance cannot cover the amount', async () => {
+    // Regression test for the agent-feedback-driven pre-flight check. Before
+    // the check existed, this case would proceed all the way to sign_data
+    // generation and then fail on-chain at executeAllowanceTransfer, leaving
+    // the agent in a dead-end "signed but won't settle" state. The new
+    // pre-flight fails fast with a structured error the agent can act on
+    // (next_action=fund_safe_or_raise_allowance).
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 5_000n })
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:insufficient',
+      },
+    })
+
+    expect(response.statusCode).toBe(422)
+    const body = response.json()
+    expect(body).toMatchObject({
+      error_code: 'insufficient_funds',
+      phase: 'insufficient_funds',
+      next_action: 'fund_safe_or_raise_allowance',
+      rail: 'x402',
+      chain_id: 8453,
+      token: 'USDC',
+      asset: USDC,
+      network: 'base',
+      amount: '0.02',
+      amount_atomic: '20000',
+      delegate_balance: '0.0',
+      delegate_balance_atomic: '0',
+      remaining_allowance: '0.005',
+      remaining_allowance_atomic: '5000',
+      shortfall: '0.015',
+      shortfall_atomic: '15000',
+      resource_url: 'https://mcp.soundside.ai/mcp',
+      merchant_address: MERCHANT.toLowerCase(),
+    })
+    // Delegate / Safe addresses must NOT be echoed back. Agents already know
+    // both from the credential they hold; surfacing them in a structured
+    // pre-flight error widens the surveillance surface for the hot-wallet
+    // delegate EOA for no agent-side benefit.
+    expect(body).not.toHaveProperty('delegate_address')
+    expect(body).not.toHaveProperty('safe_address')
+    expect(body.error).toMatch(/Insufficient funds/i)
+    expect(body.error).toContain('USDC')
+
+    // Critical: no payment intent or approval row was written. The pre-flight
+    // must short-circuit BEFORE any state-creating DB write — the user can
+    // retry after funding without an idempotency conflict.
+    const inserts = mockQuery.mock.calls.filter((call) =>
+      typeof call[0] === 'string' && /INSERT INTO (payment_intents|approval_requests)/.test(call[0] as string),
+    )
+    expect(inserts).toEqual([])
+
+    // The pre-flight read happened on the (chain, delegate, token) tuple
+    // before the over-budget approval-queue path would have run.
+    expect(allowanceMocks.getTokenBalance).toHaveBeenCalledWith(
+      AGENT.chain_id,
+      AGENT.delegate_address,
+      USDC,
+    )
+  })
+
+  it('returns 422 insufficient_funds when delegate balance + remaining is just short of the amount', async () => {
+    // Boundary case: cover = amount - 1. The check must reject (strict >),
+    // not silently round to "close enough", or merchant settlement would
+    // revert downstream.
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(9_999n)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:boundary',
+      },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.json()).toMatchObject({
+      error_code: 'insufficient_funds',
+      shortfall_atomic: '1',
+    })
+  })
+
+  it('falls through pre-flight when delegate balance covers the allowance gap', async () => {
+    // Regression guard: if the delegate already holds enough of the token to
+    // settle the merchant payment, even a zero remaining allowance must NOT
+    // fire the insufficient-funds short-circuit on its own. The over-budget
+    // approval-queue path (or the happy-path sign step) is what should run.
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 0n })
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(50_000n)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'approval-balance-only',
+          status: 'pending',
+          token_symbol: 'USDC',
+          amount_human: '0.02',
+          expires_at: '2026-05-10T20:00:00.000Z',
+          machine_challenge_id: null,
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:balance-only',
+      },
+    })
+
+    // The existing over-budget logic still treats remaining<amount as
+    // approval-required (queues for user approval). The pre-flight check is
+    // narrower than that: it only short-circuits the unrecoverable case.
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      payment_id: 'approval-balance-only',
+      status: 'pending_approval',
+    })
+  })
+
+  it('returns 502 when the delegate balance read itself fails (RPC outage)', async () => {
+    // Make sure a transient RPC failure on the balance read surfaces as a
+    // distinct 502 from the allowance-read failure — agents and dashboards
+    // distinguishing the two read paths can pick the right retry strategy.
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.getTokenBalance.mockRejectedValueOnce(new Error('rpc timeout'))
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:rpc-outage',
+      },
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json().error).toBe('Failed to read delegate token balance')
   })
 
   it('returns an existing pending approval for duplicate over-allowance idempotency keys', async () => {
@@ -528,6 +1081,9 @@ describe('x402 routes', () => {
   it('returns the existing approval when an over-allowance insert hits an idempotency conflict', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10_000n })
+    // Delegate balance covers the shortfall so the pre-flight check passes
+    // and we exercise the over-budget idempotency-conflict path.
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(20_000n)
 
     mockQuery
       .mockResolvedValueOnce(authRow())

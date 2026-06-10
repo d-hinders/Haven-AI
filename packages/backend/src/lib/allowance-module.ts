@@ -19,8 +19,15 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const ALLOWANCE_MODULE_ABI = [
   'function getTokenAllowance(address safe, address delegate, address token) view returns (uint256[5])',
+  'function getTokens(address safe, address delegate) view returns (address[])',
   'function generateTransferHash(address safe, address token, address to, uint96 amount, address paymentToken, uint96 payment, uint16 nonce) view returns (bytes32)',
   'function executeAllowanceTransfer(address safe, address token, address payable to, uint96 amount, address paymentToken, uint96 payment, address delegate, bytes signature)',
+]
+
+// Minimal ABI for the pre-flight balance read. Pulled out of any
+// IERC20 import so this module stays dependency-light.
+const ERC20_BALANCE_OF_ABI = [
+  'function balanceOf(address) view returns (uint256)',
 ]
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -98,6 +105,42 @@ export async function getTokenAllowance(
     lastResetMin: Number(result[3]),
     nonce: Number(result[4]),
   }
+}
+
+/**
+ * Read an on-chain token balance for an arbitrary holder.
+ *
+ * Used by the x402 pre-flight check to decide whether the delegate EOA
+ * already holds enough of the requested token to pay the merchant. Native
+ * balances (`token === ZERO_ADDRESS`) are read directly from the provider;
+ * ERC-20 balances use a minimal `balanceOf` ABI to avoid pulling in a heavy
+ * IERC20 import for what is otherwise a single read.
+ */
+export async function getTokenBalance(
+  chainId: number,
+  holder: string,
+  token: string,
+): Promise<bigint> {
+  const provider = getProvider(chainId)
+  if (!token || token === ZERO_ADDRESS) {
+    return await provider.getBalance(holder)
+  }
+  const contract = new ethers.Contract(token, ERC20_BALANCE_OF_ABI, provider)
+  const balance: bigint = await contract.balanceOf(holder)
+  return balance
+}
+
+/**
+ * Read every token slot configured for a delegate on a Safe.
+ */
+export async function getTokensForDelegate(
+  chainId: number,
+  safe: string,
+  delegate: string,
+): Promise<string[]> {
+  const contract = getContract(chainId)
+  const result: string[] = await contract.getTokens(safe, delegate)
+  return result
 }
 
 /**

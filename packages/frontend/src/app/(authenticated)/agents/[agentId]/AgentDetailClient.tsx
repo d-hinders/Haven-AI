@@ -17,9 +17,10 @@ import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { formatAllowanceAmount } from '@/lib/allowance-format'
-import { getChainConfig } from '@/lib/chains'
+import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
+import { formatAgentLastActivityTitle, formatAgentLastActivityValue } from '@/lib/agent-last-seen'
 import {
   activityStatusPresentation,
   agentStatusPresentation,
@@ -80,6 +81,12 @@ function activityMovement(item: PaymentActivityItem, walletName: string) {
   return <TransactionMovement from={walletName} to={recipient} />
 }
 
+function activityWalletName(item: PaymentActivityItem, fallbackName: string): string {
+  if (item.safe_name) return item.safe_name
+  if (item.safe_address) return `Haven wallet ${truncate(item.safe_address)}`
+  return fallbackName
+}
+
 // Adapts the agent activity feed (payments + approvals) into the shape the
 // shared TransactionsTable expects, so the agent detail screen reuses the
 // same primitive — and the same tinted header band — as the other
@@ -93,6 +100,7 @@ function activityToTransaction(
   const status = activityStatusPresentation(item.status)
   const isError = failedOrRejectedStatus(item.status)
   const createdMs = new Date(item.created_at).getTime()
+  const rowWalletName = activityWalletName(item, walletName)
   return {
     hash: item.tx_hash ?? `activity-${item.type}-${item.id}`,
     type: 'erc20',
@@ -114,11 +122,15 @@ function activityToTransaction(
     chainId: item.chain_id ?? 0,
     safeId: item.safe_id ?? '',
     safeAddress: item.safe_address ?? '',
-    safeName: item.safe_name ?? walletName,
+    safeName: rowWalletName,
     agentId: item.agent_id,
+    paymentId: item.id,
+    paymentProofStatus: item.payment_proof_status ?? null,
+    paymentFlowStatus: item.payment_flow_status ?? null,
+    paymentAttentionReason: item.payment_attention_reason ?? null,
     statusBadge: { label: status.label, tone: status.tone },
     titleOverride: activityTitle(item, agentName),
-    movementOverride: activityMovement(item, walletName),
+    movementOverride: activityMovement(item, rowWalletName),
     explorerUrl: item.explorer_url,
   }
 }
@@ -236,10 +248,22 @@ export default function AgentDetailClient({ agentId }: Props) {
     [agent?.safe_id, user?.safes],
   )
   const safeAddress = safe?.safe_address ?? agent?.safe_address ?? null
-  const chainId = safe?.chain_id ?? 100
-  const chainConfig = safe ? getChainConfig(safe.chain_id) : null
-  const { details: safeDetails } = useSafeDetails(safeAddress)
+  const chainId = safe?.chain_id ?? agent?.safe_chain_id ?? DEFAULT_CHAIN_ID
+  const chainConfig = useMemo(() => {
+    try {
+      return getChainConfig(chainId)
+    } catch {
+      return null
+    }
+  }, [chainId])
+  const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const { activity, stats, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
+  const unsettledPayments = useMemo(
+    () => activity
+      .filter(isPaymentActivityItem)
+      .filter((item) => item.payment_attention_reason === 'merchant_retry_rejected_after_payment'),
+    [activity],
+  )
   const managedDelegates = useMemo(
     () => (agent?.delegate_address && agent.status !== 'revoked' ? [agent.delegate_address] : []),
     [agent?.delegate_address, agent?.status],
@@ -413,9 +437,11 @@ export default function AgentDetailClient({ agentId }: Props) {
         title={currentAgent.name}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <StatusBadge tone={agentStatus.tone}>
-              {agentStatus.label}
-            </StatusBadge>
+            {currentAgent.status === 'active' ? null : (
+              <StatusBadge tone={agentStatus.tone}>
+                {agentStatus.label}
+              </StatusBadge>
+            )}
             {!isRevoked ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -454,7 +480,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
           {currentAgent.description || 'This agent can make payments within the rules you set.'}
         </p>
-        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
             <dd className="mt-1 font-medium text-[var(--v2-ink)]">{walletName}</dd>
@@ -467,6 +493,15 @@ export default function AgentDetailClient({ agentId }: Props) {
             <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Created</dt>
             <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(currentAgent.created_at)}</dd>
           </div>
+          <div>
+            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Last activity</dt>
+            <dd
+              className="mt-1 font-medium text-[var(--v2-ink)] v2-tabular"
+              title={formatAgentLastActivityTitle(currentAgent.mcp_last_seen_at)}
+            >
+              {formatAgentLastActivityValue(currentAgent.mcp_last_seen_at)}
+            </dd>
+          </div>
         </dl>
       </Card>
 
@@ -478,6 +513,33 @@ export default function AgentDetailClient({ agentId }: Props) {
         <div className="mt-4">
           <ApprovalRequiredBanner title="Paused in Haven" tone="neutral" density="compact">
             New agent payments are blocked until you resume this agent. Existing wallet rules stay in place.
+          </ApprovalRequiredBanner>
+        </div>
+      ) : null}
+
+      {unsettledPayments.length > 0 ? (
+        <div className="mt-4">
+          <ApprovalRequiredBanner title="Payment didn't reach merchant" tone="warning" density="compact">
+            <span>
+              {unsettledPayments.length === 1
+                ? 'One payment was funded on-chain but the merchant rejected the retry.'
+                : `${unsettledPayments.length} payments were funded on-chain but the merchant rejected the retries.`}{' '}
+              The delegate wallet may hold stranded{' '}
+              {unsettledPayments[0]?.token ?? 'funds'}.{' '}
+              Sweep the funds back to your Safe to reclaim them.
+            </span>
+            <div className="mt-2">
+              <a
+                href={`/agents/${agentId}/sweep`}
+                className="inline-flex items-center gap-1 rounded-md bg-[var(--v2-warning)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 transition-opacity"
+                aria-label="Sweep stranded funds back to Safe"
+              >
+                Sweep stranded funds
+                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                  <path d="M3.5 8h9M8.5 4l4.5 4-4.5 4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </a>
+            </div>
           </ApprovalRequiredBanner>
         </div>
       ) : null}

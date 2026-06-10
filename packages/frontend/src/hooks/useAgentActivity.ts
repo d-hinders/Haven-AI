@@ -29,6 +29,9 @@ export interface PaymentActivityItem {
   safe_name?: string | null
   explorer_url: string | null
   confirmed_at?: string | null
+  payment_proof_status?: string | null
+  payment_flow_status?: 'paid' | 'confirming_merchant' | 'needs_attention' | null
+  payment_attention_reason?: 'merchant_retry_rejected_after_payment' | null
   created_at: string
 }
 

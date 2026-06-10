@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
 import type { PortfolioResponse, PortfolioBreakdown } from '@/types/transactions'
 
@@ -13,36 +13,70 @@ interface UsePortfolioReturn {
   refetch: () => void
 }
 
-export function usePortfolio(safeAddress: string | null): UsePortfolioReturn {
+interface UsePortfolioOptions {
+  chainId?: number
+}
+
+export function usePortfolio(
+  safeAddress: string | null,
+  { chainId }: UsePortfolioOptions = {},
+): UsePortfolioReturn {
   const [totalUsd, setTotalUsd] = useState(0)
   const [totalEur, setTotalEur] = useState(0)
   const [breakdown, setBreakdown] = useState<PortfolioBreakdown[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const generationRef = useRef(0)
 
   const fetchPortfolio = useCallback(async () => {
-    if (!safeAddress) return
+    const generation = ++generationRef.current
+
+    if (!safeAddress) {
+      setTotalUsd(0)
+      setTotalEur(0)
+      setBreakdown([])
+      setError(null)
+      setLoading(false)
+      return
+    }
 
     try {
+      setLoading(true)
       setError(null)
+      const chainQuery = chainId === undefined ? '' : `?chain_id=${encodeURIComponent(String(chainId))}`
       const data = await api.get<PortfolioResponse>(
-        `/portfolio/${safeAddress}`,
+        `/portfolio/${safeAddress}${chainQuery}`,
       )
-      setTotalUsd(data.totalUsd)
-      setTotalEur(data.totalEur)
-      setBreakdown(data.breakdown)
+      if (generationRef.current === generation) {
+        setTotalUsd(data.totalUsd)
+        setTotalEur(data.totalEur)
+        setBreakdown(data.breakdown)
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load portfolio')
+      if (generationRef.current === generation) {
+        setError(err instanceof Error ? err.message : 'Failed to load portfolio')
+      }
     } finally {
-      setLoading(false)
+      if (generationRef.current === generation) {
+        setLoading(false)
+      }
     }
-  }, [safeAddress])
+  }, [chainId, safeAddress])
 
   useEffect(() => {
+    if (!safeAddress) {
+      generationRef.current += 1
+      setLoading(false)
+      return
+    }
+
     fetchPortfolio()
     const interval = setInterval(fetchPortfolio, 60_000)
-    return () => clearInterval(interval)
-  }, [fetchPortfolio])
+    return () => {
+      generationRef.current += 1
+      clearInterval(interval)
+    }
+  }, [fetchPortfolio, safeAddress])
 
   return { totalUsd, totalEur, breakdown, loading, error, refetch: fetchPortfolio }
 }

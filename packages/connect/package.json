@@ -1,0 +1,54 @@
+{
+  "name": "@haven_ai/connect",
+  "version": "0.1.6-alpha",
+  "description": "Haven Connect Agent 2 local connector — generates the agent signing key locally and registers only the public signing address.",
+  "type": "module",
+  "bin": {
+    "haven-connect": "./dist/cli.js"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm --prefix ../mcp run build && npm --prefix ../signer run build && tsup && node ../../scripts/verify-connect-bundle.mjs",
+    "test": "npm --prefix ../mcp run build && npm --prefix ../signer run build && vitest run",
+    "smoke:pack": "npm --prefix ../sdk run build && npm --prefix ../mcp run build && HAVEN_CONNECT_PACKAGE_SMOKE=1 vitest run src/package-smoke.test.ts",
+    "typecheck": "npm --prefix ../mcp run build && npm --prefix ../signer run build && tsc --noEmit"
+  },
+  "keywords": [
+    "haven",
+    "connect",
+    "agent",
+    "mcp",
+    "non-custodial"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@haven_ai/mcp": "0.1.7-alpha",
+    "@haven_ai/sdk": "0.1.9",
+    "@haven_ai/signer": "0.1.3-alpha",
+    "ethers": "^6.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}

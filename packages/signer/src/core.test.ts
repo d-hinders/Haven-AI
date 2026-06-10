@@ -126,6 +126,43 @@ describe('buildX402PaymentHeader', () => {
     ).toThrow('funding hash')
   })
 
+  // ── v1 x402 path coverage (#324) ────────────────────────────────────────
+  // The edge signer mirrors the SDK's v1/v2 split: v2+ headers are re-wrapped
+  // as { x402Version, accepted, payload }, but v1 headers must pass the x402
+  // library's output through UNCHANGED — v1 facilitators reject the wrap.
+  // The PAYMENT_REQUIRED fixture above is x402Version 1 on purpose.
+
+  it('passes v1 payment headers through unchanged (no accepted wrap)', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const result = await signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)
+
+    const decoded = JSON.parse(
+      Buffer.from(result.paymentHeader, 'base64').toString('utf8'),
+    ) as Record<string, unknown>
+
+    // V1 shape: the raw library envelope — no top-level `accepted` key.
+    expect(decoded).not.toHaveProperty('accepted')
+    expect(decoded.x402Version).toBe(1)
+    expect(Object.keys(decoded).sort()).toEqual(['network', 'payload', 'scheme', 'x402Version'])
+  })
+
+  it('wraps v2 headers with accepted — the v1/v2 split is on x402Version', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const result = await signer.buildX402PaymentHeader(
+      { ...PAYMENT_REQUIRED, x402Version: 2 },
+      funding.x402Binding,
+    )
+
+    const decoded = JSON.parse(
+      Buffer.from(result.paymentHeader, 'base64').toString('utf8'),
+    ) as Record<string, unknown>
+
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])
+    expect(decoded.x402Version).toBe(2)
+  })
+
   it('consumes the x402 binding after signing a merchant header', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
@@ -200,5 +237,44 @@ describe('buildX402PaymentHeader', () => {
     await expect(signer.buildX402PaymentHeader(paymentRequired, mismatch.x402Binding)).rejects.toThrow(
       'amount',
     )
+  })
+
+  it('wire-format regression: v2 payment_header decodes to spec-compliant {x402Version, accepted, payload}', async () => {
+    // Use x402Version=2 to exercise the wrapped {x402Version, accepted, payload} format.
+    const v2PaymentRequired = {
+      ...PAYMENT_REQUIRED,
+      x402Version: 2,
+    }
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const delegateAddress = signer.delegateAddress
+
+    // Wire the x402 expected context exactly as the hosted MCP would return it.
+    const expected = await expectedX402()
+    const funding = signer.signX402FundingHash(FUNDING_HASH, expected)
+    const result = await signer.buildX402PaymentHeader(v2PaymentRequired, funding.x402Binding)
+
+    // ── 1. The payment_header is a valid base64-JSON string ─────────────────
+    let decoded: Record<string, unknown>
+    expect(() => {
+      decoded = JSON.parse(atob(result.paymentHeader))
+    }).not.toThrow()
+    decoded = JSON.parse(atob(result.paymentHeader))
+
+    // ── 2. Top-level shape: { x402Version, accepted, payload } ──────────────
+    const topLevelKeys = Object.keys(decoded).sort()
+    expect(topLevelKeys).toEqual(['accepted', 'payload', 'x402Version'])
+
+    // ── 3. x402Version matches the request ──────────────────────────────────
+    expect(decoded.x402Version).toBe(2)
+
+    // ── 4. payload has a signature ──────────────────────────────────────────
+    const payload = decoded.payload as Record<string, unknown>
+    expect(typeof payload.signature).toBe('string')
+    expect((payload.signature as string)).toMatch(/^0x[0-9a-fA-F]+$/)
+
+    // ── 5. Authorization.from is the delegate address (key-bound custody) ───
+    const auth = payload.authorization as Record<string, unknown>
+    expect(auth).toBeDefined()
+    expect((auth.from as string).toLowerCase()).toBe(delegateAddress.toLowerCase())
   })
 })

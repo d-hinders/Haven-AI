@@ -172,6 +172,8 @@ interface PaymentIntentStatusRow {
   machine_challenge_id: string | null
   machine_idempotency_key: string | null
   machine_metadata: unknown
+  /** True when an open merchant_retry_rejected_after_payment reconciliation event exists. */
+  funded_but_unsettled: boolean
 }
 
 interface ApprovalStatusRow {
@@ -650,20 +652,31 @@ export async function getAgentPaymentStatus(
   )
 
   const paymentResult = await pool.query<PaymentIntentStatusRow>(
-    `SELECT id, chain_id, token_symbol, token_address, amount_human, amount_raw,
-            status, tx_hash, expires_at,
-            source, payment_rail, payment_resource_url, x402_resource_url,
-            merchant_address, x402_merchant_address, x402_idempotency_key,
-            machine_challenge_id, machine_idempotency_key, machine_metadata
-     FROM payment_intents
-     WHERE id = $1 AND agent_id = $2
+    `SELECT pi.id, pi.chain_id, pi.token_symbol, pi.token_address, pi.amount_human, pi.amount_raw,
+            pi.status, pi.tx_hash, pi.expires_at,
+            pi.source, pi.payment_rail, pi.payment_resource_url, pi.x402_resource_url,
+            pi.merchant_address, pi.x402_merchant_address, pi.x402_idempotency_key,
+            pi.machine_challenge_id, pi.machine_idempotency_key, pi.machine_metadata,
+            (mpre.id IS NOT NULL) AS funded_but_unsettled
+     FROM payment_intents pi
+     LEFT JOIN machine_payment_reconciliation_events mpre
+       ON mpre.payment_intent_id = pi.id
+      AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+      AND mpre.status = 'open'
+     WHERE pi.id = $1 AND pi.agent_id = $2
      LIMIT 1`,
     [paymentId, agent.id],
   )
 
   const payment = paymentResult.rows[0]
   if (payment) {
-    const state = paymentIntentState(payment.status)
+    const state = payment.funded_but_unsettled && payment.status === 'confirmed'
+      ? {
+          phase: AgentPaymentPhase.FundedButUnsettled,
+          nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+          message: "Haven's funding leg confirmed but the merchant rejected the payment retry. The delegate wallet may hold stranded funds — tell the user to review this payment in Haven.",
+        }
+      : paymentIntentState(payment.status)
     const rail = railFor(payment)
     const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
     const merchantAddress = payment.merchant_address ?? payment.x402_merchant_address

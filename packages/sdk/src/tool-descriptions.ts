@@ -47,7 +47,8 @@ export const toolDescriptions = {
       'Inspect an HTTP 402 x402 paid resource without creating a Haven payment, signature, approval, or on-chain transaction.',
     behavior:
       'Probes the merchant directly and parses the 402 response. Pure read-only client behavior — Haven is not contacted.',
-    nextActionGuidance: '',
+    nextActionGuidance:
+      'On success the returned quote is the input to haven_pay_x402_quote. Do not call the merchant again — Haven re-uses the captured request when paying.',
   },
   payX402: {
     summary:
@@ -57,7 +58,19 @@ export const toolDescriptions = {
     behavior:
       'Signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, and returns the merchant response or a pending-approval state.',
     nextActionGuidance:
-      'If approval is needed, preserve the returned resume_state and wait for nextAction=retry_original_x402_request before resuming.',
+      'If approval is needed, preserve the returned resume_state and wait for nextAction=retry_original_x402_request before resuming. ' +
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
+  },
+  payX402OneShot: {
+    summary:
+      'Fetch an x402 paid HTTP resource in a single call. Handles the full probe -> pay -> retry round trip and returns the merchant response.',
+    selectionGuidance:
+      'Prefer this over the quote+pay split when the agent just wants the paid resource and does not need to inspect the price first. If you already have a quote from haven_quote_x402, use haven_pay_x402_quote instead. Do not use for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
+    behavior:
+      'Calls the URL, parses any HTTP 402 x402 challenge, signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, then retries the original request with the X-PAYMENT header and returns the merchant response. If the resource returns an MPP machine-payment challenge instead of standard x402, the MPP payment path is used automatically. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
+    nextActionGuidance:
+      'If approval is needed, preserve the returned resume_state or paymentId and call the resume tool once nextAction=retry_original_x402_request. ' +
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
   },
   resumeX402: {
     summary:
@@ -72,7 +85,8 @@ export const toolDescriptions = {
       'Inspect a Haven MPP challenge or paid MPP URL without creating a Haven payment, signature, approval, or on-chain transaction.',
     behavior:
       'Parses an MPP challenge envelope and returns a typed quote with rail tag, amount, asset, and merchant context. Pure read-only — Haven is not contacted.',
-    nextActionGuidance: '',
+    nextActionGuidance:
+      'On success the returned quote is the input to haven_pay_mpp_challenge. Do not call the merchant again — Haven re-uses the captured request when paying.',
   },
   payMpp: {
     summary:
@@ -129,6 +143,53 @@ export const toolDescriptions = {
     behavior:
       'Returns the agent\'s recent machine-payment receipts ordered by recency. Proof header values are not returned.',
     nextActionGuidance: '',
+  },
+  payMcpTool: {
+    summary:
+      'Call a named tool on an MCP merchant that requires an x402 payment, handling the full initialize → pay → retry round trip.',
+    selectionGuidance:
+      'Use this when the agent wants to call a specific tool on an MCP merchant (e.g. Soundside, Coinbase Bazaar) and payment is required. ' +
+      'Prefer this over haven_pay_x402 when you know the merchant_url and tool_name — it builds the JSON-RPC envelope internally. ' +
+      'Use haven_pay_x402 for arbitrary HTTP resources. ' +
+      'Do NOT use for read-only allowance or budget questions — use haven_get_allowances.',
+    behavior:
+      'Builds the JSON-RPC tools/call envelope, runs the MCP Streamable-HTTP initialize handshake automatically (if the endpoint is MCP-shaped), ' +
+      'pays any HTTP 402 x402 challenge through Haven\'s AllowanceModule path, and retries the request. ' +
+      'Returns the JSON-RPC result (the actual merchant output) on success. ' +
+      'Amounts within the on-chain allowance execute automatically; over-allowance transfers are queued as pending_approval.',
+    nextActionGuidance:
+      'If pending_approval is returned, preserve payment_id and resume_state and wait for the wallet owner to approve in Haven. ' +
+      'Use haven_resume_x402_payment once nextAction=retry_original_x402_request.',
+  },
+  sweep_delegate: {
+    summary:
+      'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating Safe.',
+    selectionGuidance:
+      'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
+      'Do NOT use for normal payments — use haven_pay_x402 or haven_pay_mpp_challenge. ' +
+      'Do NOT use to read balances only — use haven_get_allowances.',
+    behavior:
+      'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating Safe (hardcoded destination). ' +
+      'The delegate key signs locally — Haven never sees it and the backend never constructs signed transactions (CASP/MiCA Red Line #2). ' +
+      'Returns tx hashes and recovered amounts. Returns an empty transfers list when nothing is stranded.',
+    nextActionGuidance:
+      'If transfers is non-empty, confirm the amounts with the user. No further action required — funds are on their way back to the Safe.',
+  },
+  send: {
+    summary:
+      'Send ETH or USDC directly from the agent\'s Haven wallet to a recipient address.',
+    selectionGuidance:
+      'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
+      'Do NOT use for x402 paid endpoints (use haven_pay_x402 instead) or MPP merchant payments (use haven_pay_mpp_challenge). ' +
+      'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances.',
+    behavior:
+      'Sends the requested amount through the Safe AllowanceModule. ' +
+      'Amounts within the remaining on-chain allowance for the asset execute automatically; ' +
+      'amounts that exceed the allowance are queued as pending_approval for the wallet owner to approve in Haven. ' +
+      'The agent\'s signing key signs the AllowanceModule transfer hash; Haven never receives the key.',
+    nextActionGuidance:
+      'If pending_approval is returned, preserve the payment_id and wait for the wallet owner to approve in Haven. ' +
+      'Poll haven_get_payment_status until nextAction=none.',
   },
 } as const satisfies Record<string, ToolDescription>
 

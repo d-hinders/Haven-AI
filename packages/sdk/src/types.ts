@@ -31,6 +31,22 @@ export interface HavenClientConfig {
    * standard HTTP and never carry Haven-internal headers.
    */
   defaultHeaders?: Record<string, string>
+
+  /**
+   * JSON-RPC RPC URLs keyed by EIP-155 chain ID.
+   *
+   * When provided for a chain, the SDK waits for ≥1 on-chain confirmation of
+   * the AllowanceModule funding tx before retrying the merchant. This prevents
+   * the race where the merchant's `balanceOf(delegate)` call runs before the
+   * funding block has propagated to the merchant's RPC node.
+   *
+   * Without this option the SDK proceeds as soon as Haven's backend confirms
+   * submission (backward-compatible default). Set it to a reliable RPC
+   * endpoint (e.g. Alchemy / Infura) for production usage.
+   *
+   * @example { 8453: 'https://mainnet.base.org' }
+   */
+  chainRpcs?: Record<number, string>
 }
 
 // ── Payment Types ────────────────────────────────────────────────
@@ -476,6 +492,8 @@ export interface HavenAllowanceSummary {
 export interface HavenPaymentReceipt {
   id: string
   paymentId: string
+  paymentIntentId?: string | null
+  approvalRequestId?: string | null
   rail: string
   proofStatus: string
   txHash: string
@@ -499,6 +517,34 @@ export interface HavenPaymentReceipt {
   confirmedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+// ── Delegate Sweep Types ─────────────────────────────────────────
+
+/** One transferred asset in a delegate sweep. */
+export interface SweepEntry {
+  /** 'USDC' or 'ETH' */
+  asset: string
+  /** Human-readable amount swept (e.g. "0.12") */
+  amount: string
+  /** Atomic amount swept */
+  amountAtomic: string
+  /** Transaction hash of the sweep transfer */
+  txHash: string
+  /** Block explorer URL for the tx */
+  explorerUrl: string
+}
+
+/** Result of a `sweepDelegate()` call. */
+export interface SweepResult {
+  /** Address funds were swept FROM */
+  fromAddress: string
+  /** Address funds were swept TO (always the originating Safe) */
+  toAddress: string
+  /** Chain the sweep occurred on */
+  chainId: number
+  /** One entry per transferred asset. Empty when nothing was stranded. */
+  transfers: SweepEntry[]
 }
 
 // ── Agent Payment State Types ────────────────────────────────────
@@ -533,6 +579,21 @@ export const AgentPaymentPhase = {
   Expired: 'expired',
   /** Haven could not complete the payment; the agent should stop and surface the failure. */
   Failed: 'failed',
+  /**
+   * Pre-flight check determined the delegate's existing balance plus the
+   * remaining on-chain allowance cannot cover the requested amount, so no
+   * payment intent was created. Distinct from `UserApprovalRequired`: there
+   * is no approval that would fix this — the originating Safe needs more
+   * funds or the agent's per-token allowance needs to be raised first.
+   */
+  InsufficientFunds: 'insufficient_funds',
+  /**
+   * Haven's funding leg (Safe → delegate) confirmed on-chain, but the
+   * merchant rejected the x402 retry. The delegate wallet may hold stranded
+   * USDC that was never settled to the merchant. The agent should stop, tell
+   * the user, and wait for the sweep flow to reclaim the funds.
+   */
+  FundedButUnsettled: 'funded_but_unsettled',
 } as const
 
 export type AgentPaymentPhase = (typeof AgentPaymentPhase)[keyof typeof AgentPaymentPhase]
@@ -554,6 +615,18 @@ export const AgentPaymentNextAction = {
   StopAndTellUser: 'stop_and_tell_user',
   /** Ask again only if the user still wants the payment after expiry. */
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
+  /**
+   * Stop and tell the user that the originating Safe needs to be funded or
+   * the agent's per-token allowance needs to be raised before the payment
+   * can succeed. A user approval will not fix this state on its own.
+   */
+  FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
+  /**
+   * The delegate wallet may hold funds that were sent from the Safe but never
+   * settled to the merchant. The wallet owner should initiate a sweep to
+   * return those funds to the originating Safe.
+   */
+  SweepStrandedFunds: 'sweep_stranded_funds',
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
@@ -616,6 +689,10 @@ export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = 
   [AgentPaymentPhase.Rejected]: 'The wallet owner rejected the request; the agent should stop and tell the user.',
   [AgentPaymentPhase.Expired]: 'The payment or approval request expired before completion.',
   [AgentPaymentPhase.Failed]: 'Haven could not complete the payment; the agent should stop and surface the failure.',
+  [AgentPaymentPhase.InsufficientFunds]:
+    'Pre-flight check determined the delegate balance plus the remaining on-chain allowance cannot cover the requested amount, so no payment was created. The originating Safe must be funded or the agent allowance raised before retrying.',
+  [AgentPaymentPhase.FundedButUnsettled]:
+    "Haven's funding leg confirmed on-chain but the merchant rejected the x402 retry. The delegate wallet may hold stranded funds. The agent should stop and wait for the wallet owner to sweep the stranded funds back to the Safe.",
 }
 
 export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, string> = {
@@ -627,6 +704,10 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
   [AgentPaymentNextAction.RetryOriginalX402Request]: 'Resume this payment id and retry the original x402 request with the merchant payment header.',
   [AgentPaymentNextAction.StopAndTellUser]: 'Stop retrying this payment and tell the user what happened.',
   [AgentPaymentNextAction.RequestAgainIfUserStillWantsIt]: 'Ask again only if the user still wants the payment after expiry.',
+  [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
+    'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
+  [AgentPaymentNextAction.SweepStrandedFunds]:
+    'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating Safe.',
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
@@ -955,6 +1036,8 @@ export interface RawHavenAllowanceSummary {
 export interface RawHavenPaymentReceipt {
   id: string
   payment_id: string
+  payment_intent_id?: string | null
+  approval_request_id?: string | null
   rail: string
   proof_status: string
   tx_hash: string

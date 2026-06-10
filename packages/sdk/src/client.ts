@@ -13,6 +13,7 @@ import type {
   PaymentStatusResult,
   PaymentResumeState,
   SignData,
+  SweepResult,
   X402AuthorizationOptions,
   RawCreateResponse,
   RawSignResponse,
@@ -65,6 +66,8 @@ import {
   encodeMachinePaymentProof,
   parseMachinePaymentChallengeResponse,
 } from './mpp.js'
+import { createJsonRpcProvider, createWallet, createErc20Contract } from './provider.js'
+import { decodeBase64Json, encodeBase64Json } from './base64.js'
 
 const DEFAULT_BASE_URL = 'http://localhost:3001'
 
@@ -72,6 +75,7 @@ const CHAIN_EXPLORER_TX: Record<number, string> = {
   100:  'https://gnosisscan.io/tx',
   8453: 'https://basescan.org/tx',
 }
+
 
 function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
   const base = CHAIN_EXPLORER_TX[chainId ?? 8453] ?? CHAIN_EXPLORER_TX[8453]
@@ -85,6 +89,32 @@ function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null |
 const DEFAULT_REQUEST_TIMEOUT = 30_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
+
+function formatAtomicAmount(atomic: bigint, decimals: number): string {
+  const s = atomic.toString().padStart(decimals + 1, '0')
+  const intPart = s.slice(0, s.length - decimals) || '0'
+  const fracPart = s.slice(s.length - decimals).replace(/0+$/, '') || '0'
+  return `${intPart}.${fracPart}`
+}
+
+// ── MCP-over-x402 transport (issue #315) ──────────────────────────
+// MCP merchants (Soundside, the Coinbase reference) speak the Streamable
+// HTTP transport: an `initialize` handshake hands back an `mcp-session-id`
+// that must ride on every subsequent request, and responses arrive as SSE.
+const MCP_PROTOCOL_VERSION = '2025-06-18'
+const MCP_ACCEPT = 'application/json, text/event-stream'
+const MCP_CLIENT_INFO = { name: 'haven-sdk', version: '1' }
+
+/** Cap the merchant body persisted to the reconciliation event (the full body is kept on the thrown error). */
+const MERCHANT_BODY_SNIPPET_LIMIT = 1000
+
+/** A failed merchant retry response, captured verbatim for debugging and surfaced on the structured error. */
+interface CapturedMerchantResponse {
+  merchant_status: number
+  merchant_status_text: string
+  merchant_headers: Record<string, string>
+  merchant_body: string
+}
 
 const PAYMENT_STATE_STATUS_CODES: Record<string, number> = {
   pending: 202,
@@ -198,6 +228,75 @@ function parseMerchantSettlement(header: string | null): {
   return { settlementTxHash: tx }
 }
 
+/**
+ * MCP-over-HTTP merchants expose their endpoint at a path ending in `/mcp`
+ * (Soundside, the Coinbase reference — the convention). That path is the
+ * primary auto-handshake signal. Trailing slashes and query/hash suffixes
+ * are tolerated so `/mcp/`, `/mcp?x=1`, and `/foo/mcp` all match.
+ */
+function isMcpUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, '').endsWith('/mcp')
+  } catch {
+    return /\/mcp(?:[/?#]|$)/.test(url)
+  }
+}
+
+/**
+ * Coinbase Bazaar's published-discovery extension. Its presence in a 402 body
+ * marks an MCP-discoverable resource even when the URL doesn't end in `/mcp`,
+ * so it is the second auto-handshake signal.
+ */
+async function responseHasBazaarExtension(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.clone().json()) as { extensions?: { bazaar?: unknown } } | null
+    return body?.extensions?.bazaar != null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Parse the `data:` frames of an MCP Streamable-HTTP SSE stream into the
+ * JSON-RPC messages they carry. Multiple `data:` lines before a blank line are
+ * concatenated into one payload per the SSE spec; non-JSON frames (keep-alives)
+ * are skipped.
+ */
+function parseSseJsonRpcMessages(text: string): Array<Record<string, unknown>> {
+  const messages: Array<Record<string, unknown>> = []
+  let dataLines: string[] = []
+
+  const flush = (): void => {
+    if (dataLines.length === 0) return
+    try {
+      messages.push(JSON.parse(dataLines.join('\n')) as Record<string, unknown>)
+    } catch {
+      // Ignore keep-alives and non-JSON data frames.
+    }
+    dataLines = []
+  }
+
+  for (const line of text.split(/\r?\n/)) {
+    if (line === '') {
+      flush()
+      continue
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).replace(/^ /, ''))
+    }
+  }
+  flush()
+
+  return messages
+}
+
+/** Pick the JSON-RPC response (result/error) from a set of SSE messages. */
+function selectJsonRpcResult(
+  messages: Array<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  return messages.find((m) => 'result' in m || 'error' in m) ?? messages[messages.length - 1]
+}
+
 export class HavenClient {
   private readonly apiKey: string
   private readonly delegateKey: string | undefined
@@ -206,6 +305,7 @@ export class HavenClient {
   private readonly requestTimeout: number
   private readonly confirmationTimeout: number
   private readonly pollingInterval: number
+  private readonly chainRpcs: Record<number, string>
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
   private readonly x402ReceiptCache = new Map<string, { expiresAt: number; receipt: X402Receipt }>()
   private readonly inFlightMachinePayments = new Map<string, Promise<MachinePaymentReceipt>>()
@@ -223,6 +323,9 @@ export class HavenClient {
    */
   private readonly requestContext = new AsyncLocalStorage<{ headers: Record<string, string> }>()
 
+  /** Monotonic JSON-RPC id source for the MCP `initialize` handshake. */
+  private mcpRequestId = 0
+
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
 
@@ -234,6 +337,7 @@ export class HavenClient {
     this.requestTimeout = config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
     this.pollingInterval = config.pollingInterval ?? DEFAULT_POLLING_INTERVAL
+    this.chainRpcs = config.chainRpcs ?? {}
     this.defaultHeaders = { ...(config.defaultHeaders ?? {}) }
 
     if (this.delegateKey) {
@@ -475,6 +579,102 @@ export class HavenClient {
       safeAddress: raw.safe_address,
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
+    }
+  }
+
+  /**
+   * Sweep stranded USDC and ETH from the delegate EOA back to the originating Safe.
+   *
+   * The delegate key held by this client signs and submits the transfer transactions
+   * directly — Haven's backend never handles the key or constructs signed txs
+   * (CASP/MiCA Red Line #2). Funds always go to the Safe linked to this agent.
+   *
+   * Requires `chainRpcs` to be set for the agent's chain in `HavenClientConfig`.
+   */
+  async sweepDelegate(): Promise<SweepResult> {
+    if (!this.delegateKey) {
+      throw new HavenSigningError('delegateKey is required for sweepDelegate.')
+    }
+
+    const agent = await this.getAgent()
+    const { safeAddress, delegateAddress, chainId } = agent
+
+    if (!delegateAddress) {
+      throw new HavenApiError('Agent has no delegate address.', 422)
+    }
+
+    const rpcUrl = this.chainRpcs[chainId]
+    if (!rpcUrl) {
+      throw new HavenApiError(
+        `chainRpcs[${chainId}] must be configured to sweep the delegate wallet.`,
+        422,
+      )
+    }
+
+    const provider = createJsonRpcProvider(rpcUrl)
+    const wallet = createWallet(this.delegateKey, provider)
+
+    const ERC20_TRANSFER_ABI = ['function balanceOf(address) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'] as const
+
+    // USDC contract address indexed by chain ID.
+    const USDC_BY_CHAIN: Record<number, string> = {
+      8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    }
+
+    const explorerByChain: Record<number, string> = {
+      8453: 'https://basescan.org/tx',
+      100:  'https://gnosisscan.io/tx',
+    }
+    const explorerBase = explorerByChain[chainId] ?? 'https://basescan.org/tx'
+
+    const transfers: SweepResult['transfers'] = []
+
+    // ── 1. Sweep ERC-20 USDC ────────────────────────────────────────
+    const usdcAddress = USDC_BY_CHAIN[chainId]
+    if (usdcAddress) {
+      const usdcContract = createErc20Contract(usdcAddress, ERC20_TRANSFER_ABI, wallet)
+      const usdcBalance: bigint = await usdcContract.balanceOf(delegateAddress)
+      if (usdcBalance > 0n) {
+        const tx = await usdcContract.transfer(safeAddress, usdcBalance)
+        const receipt = await (tx as { wait: (n: number) => Promise<{ hash: string } | null> }).wait(1)
+        const txHash: string = (receipt as { hash: string } | null)?.hash ?? (tx as { hash: string }).hash
+        transfers.push({
+          asset: 'USDC',
+          amount: formatAtomicAmount(usdcBalance, 6),
+          amountAtomic: usdcBalance.toString(),
+          txHash,
+          explorerUrl: `${explorerBase}/${txHash}`,
+        })
+      }
+    }
+
+    // ── 2. Sweep native ETH ─────────────────────────────────────────
+    const ethBalance = await provider.getBalance(delegateAddress)
+    if (ethBalance > 0n) {
+      // Reserve gas for the native transfer itself.
+      const gasPrice = (await provider.getFeeData()).gasPrice ?? 1_000_000n
+      const gasLimit = 21_000n
+      const gasCost = gasPrice * gasLimit
+      const ethToSend = ethBalance > gasCost ? ethBalance - gasCost : 0n
+      if (ethToSend > 0n) {
+        const tx = await wallet.sendTransaction({ to: safeAddress, value: ethToSend })
+        const receipt = await tx.wait(1)
+        const txHash: string = receipt?.hash ?? tx.hash
+        transfers.push({
+          asset: 'ETH',
+          amount: formatAtomicAmount(ethToSend, 18),
+          amountAtomic: ethToSend.toString(),
+          txHash,
+          explorerUrl: `${explorerBase}/${txHash}`,
+        })
+      }
+    }
+
+    return {
+      fromAddress: delegateAddress,
+      toAddress: safeAddress,
+      chainId,
+      transfers,
     }
   }
 
@@ -721,6 +921,13 @@ export class HavenClient {
       this.throwPaymentStateError('x402 payment', execResult)
     }
 
+    // Wait for ≥1 on-chain confirmation before retrying the merchant so the
+    // merchant's balanceOf(delegate) check sees the funded balance.
+    await this.waitForFundingTx(
+      execResult.tx_hash,
+      execResult.chain_id ?? chainIdFromNetwork(option.network),
+    )
+
     const receipt = this.mapX402ReceiptFromAuthorization(paymentRequired, option, paymentHeader, raw, execResult)
     this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
     return receipt
@@ -798,6 +1005,16 @@ export class HavenClient {
    * const data = await response.json()
    * ```
    *
+   * **MCP-over-x402 auto-handshake (issue #315):** when the endpoint is
+   * MCP-shaped — the URL path ends in `/mcp`, or the 402 body carries a
+   * Coinbase Bazaar `extensions.bazaar` block — the SDK runs the MCP
+   * `initialize` handshake, threads the resulting `mcp-session-id`,
+   * `Accept: application/json, text/event-stream`, and `x402-wallet` headers
+   * through every request, and collapses SSE responses to the JSON-RPC
+   * `result`. The caller just passes `(url, { body })` and never sees the
+   * protocol plumbing. A non-MCP server (handshake error / no session id)
+   * falls back to standard x402 behaviour.
+   *
    * Requires `delegateKey` to be set in the client config.
    */
   async fetch(
@@ -805,18 +1022,29 @@ export class HavenClient {
     init?: RequestInit,
     options: X402AuthorizationOptions = {},
   ): Promise<Response> {
-    const initialInit = this.withX402Wallet(init, this.x402PayerAddress())
+    // Signal A: a `/mcp` path is the MCP-over-HTTP convention, so handshake
+    // up front — before the probe — so the session id rides on the probe and
+    // the retry alike. A non-MCP server yields `undefined` and we fall back.
+    let mcpSessionId: string | undefined
+    if (isMcpUrl(url)) {
+      mcpSessionId = await this.mcpInitialize(url, init)
+    }
+
+    let requestInit = this.withX402Wallet(init, this.x402PayerAddress())
+    if (mcpSessionId) requestInit = this.withMcpHeaders(requestInit, mcpSessionId)
 
     // 1. Make the original request
-    const response = await globalThis.fetch(url, initialInit)
+    const response = await globalThis.fetch(url, requestInit)
 
-    // 2. Not a 402 — return as-is
-    if (response.status !== 402) return response
+    // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions)
+    if (response.status !== 402) {
+      return mcpSessionId ? this.surfaceMcpResult(response) : response
+    }
 
     const machineChallengeHeader = response.headers.get('MACHINE-PAYMENT-CHALLENGE')
     if (machineChallengeHeader) {
       const challenge = await parseMachinePaymentChallengeResponse(response)
-      return this.fetchWithMachinePayment(url, initialInit, challenge)
+      return this.fetchWithMachinePayment(url, requestInit, challenge)
     }
 
     // 3. Parse x402 payment requirements
@@ -831,11 +1059,19 @@ export class HavenClient {
         // Not a Haven machine-payment 402 — return original response
         return response
       }
-      return this.fetchWithMachinePayment(url, initialInit, challenge)
+      return this.fetchWithMachinePayment(url, requestInit, challenge)
+    }
+
+    // Signal B: a Bazaar `extensions.bazaar` block marks an MCP-discoverable
+    // resource even without the `/mcp` convention. Handshake now (if we
+    // haven't already) so the paid retry carries the session id.
+    if (!mcpSessionId && (await responseHasBazaarExtension(response))) {
+      mcpSessionId = await this.mcpInitialize(url, init)
+      if (mcpSessionId) requestInit = this.withMcpHeaders(requestInit, mcpSessionId)
     }
 
     // 4. Pay through Haven
-    const request = this.snapshotX402Request(url, initialInit)
+    const request = this.snapshotX402Request(url, requestInit)
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     const idempotencyKey = options.idempotencyKey ?? (option ? buildX402IdempotencyKey(paymentRequired, option) : undefined)
     let receipt: X402Receipt
@@ -853,7 +1089,153 @@ export class HavenClient {
       }
       throw err
     }
-    return this.retryX402Request(url, initialInit, paymentRequired, receipt)
+    const retryResponse = await this.retryX402Request(url, requestInit, paymentRequired, receipt)
+    return mcpSessionId ? this.surfaceMcpResult(retryResponse) : retryResponse
+  }
+
+  // ── MCP-over-x402 transport helpers (issue #315) ─────────────────
+
+  /**
+   * Run the MCP `initialize` handshake against a Streamable-HTTP endpoint and
+   * return the `mcp-session-id` the server assigns.
+   *
+   * Returns `undefined` whenever the endpoint is not actually an MCP server —
+   * a transport/HTTP error, a missing session id, or a JSON-RPC error in the
+   * handshake response — so the caller can fall back to plain x402.
+   */
+  private async mcpInitialize(url: string, init?: RequestInit): Promise<string | undefined> {
+    try {
+      const headers = new Headers(init?.headers)
+      headers.set('Content-Type', 'application/json')
+      headers.set('Accept', MCP_ACCEPT)
+      const wallet = this.x402PayerAddress()
+      if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
+
+      const response = await globalThis.fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: ++this.mcpRequestId,
+          method: 'initialize',
+          params: {
+            protocolVersion: MCP_PROTOCOL_VERSION,
+            capabilities: {},
+            clientInfo: MCP_CLIENT_INFO,
+          },
+        }),
+      })
+
+      if (!response.ok) return undefined
+
+      const sessionId = response.headers.get('mcp-session-id')
+      if (!sessionId) return undefined
+
+      // A JSON-RPC error means the server spoke MCP but rejected the
+      // handshake — treat it as non-MCP and fall back to standard x402.
+      const message = await this.readMcpMessage(response)
+      if (message && 'error' in message) return undefined
+
+      // Per the MCP lifecycle, the client confirms initialization with a
+      // `notifications/initialized` notification. Servers that gate tool
+      // calls on it would otherwise reject every subsequent request.
+      await this.mcpNotifyInitialized(url, init, sessionId)
+
+      return sessionId
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Send the MCP `notifications/initialized` notification that completes the
+   * lifecycle handshake. Best-effort: the session is already established, so a
+   * failed notification must not abort the payment.
+   */
+  private async mcpNotifyInitialized(
+    url: string,
+    init: RequestInit | undefined,
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      const headers = new Headers(init?.headers)
+      headers.set('Content-Type', 'application/json')
+      headers.set('Accept', MCP_ACCEPT)
+      headers.set('mcp-session-id', sessionId)
+      const wallet = this.x402PayerAddress()
+      if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
+
+      await globalThis.fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+      })
+    } catch {
+      // Best-effort — see doc comment.
+    }
+  }
+
+  /** Read a single JSON-RPC message from an MCP response (JSON or SSE body). */
+  private async readMcpMessage(response: Response): Promise<Record<string, unknown> | undefined> {
+    let text: string
+    try {
+      text = await response.clone().text()
+    } catch {
+      return undefined
+    }
+
+    if ((response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      return selectJsonRpcResult(parseSseJsonRpcMessages(text))
+    }
+
+    try {
+      return JSON.parse(text) as Record<string, unknown>
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Add the MCP transport headers (session id + SSE Accept) to a request. */
+  private withMcpHeaders(init: RequestInit | undefined, sessionId: string): RequestInit {
+    const headers = new Headers(init?.headers)
+    headers.set('mcp-session-id', sessionId)
+    headers.set('Accept', MCP_ACCEPT)
+    return { ...init, headers }
+  }
+
+  /**
+   * Collapse an MCP SSE response into a plain JSON response carrying the
+   * JSON-RPC `result`, so callers of `fetch()` never see raw SSE framing.
+   * Non-SSE responses pass through untouched.
+   */
+  private async surfaceMcpResult(response: Response): Promise<Response> {
+    if (!(response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      return response
+    }
+
+    let text: string
+    try {
+      text = await response.clone().text()
+    } catch {
+      return response
+    }
+
+    const message = selectJsonRpcResult(parseSseJsonRpcMessages(text))
+    if (!message) return response
+
+    const body = 'result' in message ? message.result : message
+    const headers = new Headers(response.headers)
+    headers.set('content-type', 'application/json')
+    headers.delete('content-length')
+    // Don't leak the transport session id back to the caller — the whole
+    // point of the auto-handshake is that the agent never sees MCP plumbing.
+    headers.delete('mcp-session-id')
+
+    return new Response(JSON.stringify(body), {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    })
   }
 
   /**
@@ -934,13 +1316,14 @@ export class HavenClient {
       headers: retryHeaders,
     })
 
-    if (retryResponse.status === 402) {
+    if (!retryResponse.ok) {
+      const merchant = await captureMerchantResponse(retryResponse)
       await this.recordMerchantRetryRejected({
         rail: 'x402',
         paymentId: receipt.paymentId,
         txHash: receipt.txHash,
         resourceUrl: receipt.resourceUrl,
-        retryResponse,
+        merchant,
         details: {
           merchant_to: receipt.merchantTo,
           delegate_to: receipt.to,
@@ -948,8 +1331,8 @@ export class HavenClient {
       })
 
       throw new HavenApiError(
-        'x402 retry was rejected after Haven funded the delegate wallet; reconciliation may be required.',
-        402,
+        'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required.',
+        merchant.merchant_status,
         {
           marker: 'x402_retry_rejected_after_funding',
           payment_id: receipt.paymentId,
@@ -957,6 +1340,7 @@ export class HavenClient {
           resource_url: receipt.resourceUrl,
           merchant_to: receipt.merchantTo,
           delegate_to: receipt.to,
+          ...merchant,
         },
       )
     }
@@ -1130,27 +1514,29 @@ export class HavenClient {
       headers: retryHeaders,
     })
 
-    if (retryResponse.status === 402) {
+    if (!retryResponse.ok) {
+      const merchant = await captureMerchantResponse(retryResponse)
       await this.recordMerchantRetryRejected({
         rail: receipt.rail,
         paymentId: receipt.paymentId,
         txHash: receipt.txHash,
         resourceUrl: receipt.resourceUrl,
-        retryResponse,
+        merchant,
         details: {
           challenge_id: receipt.challengeId,
         },
       })
 
       throw new HavenApiError(
-        'Machine payment retry was rejected after Haven sent the payment.',
-        402,
+        'Machine payment retry failed after Haven sent the payment.',
+        merchant.merchant_status,
         {
           marker: 'machine_payment_retry_rejected_after_payment',
           payment_id: receipt.paymentId,
           tx_hash: receipt.txHash,
           resource_url: receipt.resourceUrl,
           rail: receipt.rail,
+          ...merchant,
         },
       )
     }
@@ -1457,11 +1843,11 @@ export class HavenClient {
     if (paymentRequired.x402Version < 2) return header
 
     const payment = decodeBase64Json<{ payload: unknown }>(header)
-    return btoa(JSON.stringify({
+    return encodeBase64Json({
       x402Version: paymentRequired.x402Version,
       accepted: option,
       payload: payment.payload,
-    }))
+    })
   }
 
   private cacheX402Receipt(
@@ -1543,7 +1929,7 @@ export class HavenClient {
     paymentId: string
     txHash: string
     resourceUrl: string
-    retryResponse: Response
+    merchant: CapturedMerchantResponse
     details?: Record<string, unknown>
   }): Promise<void> {
     try {
@@ -1552,11 +1938,11 @@ export class HavenClient {
         rail: input.rail,
         eventType: 'merchant_retry_rejected_after_payment',
         txHash: input.txHash,
-        reason: `Merchant returned HTTP ${input.retryResponse.status} after Haven payment confirmation`,
+        reason: `Merchant returned HTTP ${input.merchant.merchant_status} after Haven payment confirmation`,
         details: {
           resource_url: input.resourceUrl,
-          retry_status: input.retryResponse.status,
-          retry_body: await responseSnippet(input.retryResponse),
+          retry_status: input.merchant.merchant_status,
+          retry_body: input.merchant.merchant_body.slice(0, MERCHANT_BODY_SNIPPET_LIMIT) || null,
           ...input.details,
         },
       })
@@ -1598,6 +1984,34 @@ export class HavenClient {
     } catch {
       // Evidence reporting is best-effort. The paid resource response remains
       // the caller-visible result when merchant retry succeeded.
+    }
+  }
+
+  /**
+   * Wait for a funding tx to be mined with ≥1 confirmation before the
+   * merchant retry, eliminating the race where the merchant's
+   * `balanceOf(delegate)` runs before the funding block propagates.
+   *
+   * Skipped when `chainRpcs` does not include the chain; in that case Haven's
+   * backend has already confirmed on-chain submission and callers accept the
+   * small propagation window as a trade-off for not configuring an RPC URL.
+   */
+  private async waitForFundingTx(
+    txHash: string | undefined,
+    chainId: number | undefined,
+    timeoutMs = 30_000,
+  ): Promise<void> {
+    if (!txHash || !chainId) return
+    const rpcUrl = this.chainRpcs[chainId]
+    if (!rpcUrl) return
+    const provider = createJsonRpcProvider(rpcUrl)
+    const onChainReceipt = await provider.waitForTransaction(txHash, 1, timeoutMs)
+    if (!onChainReceipt || onChainReceipt.status !== 1) {
+      throw new HavenApiError(
+        'Funding tx did not confirm on-chain within the timeout window.',
+        500,
+        { txHash, chainId },
+      )
     }
   }
 
@@ -2314,7 +2728,7 @@ export class HavenClient {
   }
 
   private mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentReceipt {
-    return {
+    const receipt: HavenPaymentReceipt = {
       id: raw.id,
       paymentId: raw.payment_id,
       rail: raw.rail,
@@ -2341,6 +2755,15 @@ export class HavenClient {
       createdAt: raw.created_at,
       updatedAt: raw.updated_at,
     }
+
+    if ('payment_intent_id' in raw) {
+      receipt.paymentIntentId = raw.payment_intent_id ?? null
+    }
+    if ('approval_request_id' in raw) {
+      receipt.approvalRequestId = raw.approval_request_id ?? null
+    }
+
+    return receipt
   }
 }
 
@@ -2363,13 +2786,9 @@ function getPaymentHeaderValidBefore(paymentHeader: string): number {
   return 0
 }
 
-function decodeBase64Json<T>(value: string): T {
-  return JSON.parse(atob(value)) as T
-}
-
 function parseProtocolReceiptHeader(value: string): Record<string, unknown> | undefined {
   try {
-    return JSON.parse(atob(value)) as Record<string, unknown>
+    return decodeBase64Json<Record<string, unknown>>(value)
   } catch {
     try {
       return JSON.parse(value) as Record<string, unknown>
@@ -2379,11 +2798,19 @@ function parseProtocolReceiptHeader(value: string): Record<string, unknown> | un
   }
 }
 
-async function responseSnippet(response: Response): Promise<string | null> {
-  try {
-    const text = await response.clone().text()
-    return text.slice(0, 1000) || null
-  } catch {
-    return null
+/**
+ * Captures a failed merchant retry response so callers can debug exactly why the
+ * merchant rejected a payment Haven already funded. We preserve the status code,
+ * statusText, headers, and full body text verbatim — this is the merchant's
+ * response, so it never contains Haven-side secrets (delegate key, agent API key),
+ * which only ever live in the outbound request.
+ */
+async function captureMerchantResponse(response: Response): Promise<CapturedMerchantResponse> {
+  const merchant_body = await response.text().catch(() => '')
+  return {
+    merchant_status: response.status,
+    merchant_status_text: response.statusText,
+    merchant_headers: Object.fromEntries(response.headers.entries()),
+    merchant_body,
   }
 }

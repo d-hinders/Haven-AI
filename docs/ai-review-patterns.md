@@ -20,6 +20,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 
 - Avoid optional hook or function arguments when missing values make the old call compile but fail at runtime. Make required context required in TypeScript.
 - Audit all callers after changing hook signatures, response fields, status values, or API payloads.
+- Async hooks that fetch keyed data must ignore late responses from older keys. Use a generation guard or abort signal when address, chain, agent id, filters, or enabled state can change while a request is in flight.
 - Prefer explicit response fields over matching on free-text reason strings. If a free-text fallback is necessary, document it as temporary.
 - When SDK or API behavior changes, review generated examples, credential handoff files, demo scripts, and skill bundles for stale instructions.
 - When renaming technical fields to product-facing names, keep compatibility aliases when external users or generated artifacts may already depend on the old env var or field.
@@ -30,6 +31,12 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - Disabled actions should explain what is missing, and labels should not flicker between meanings while prerequisite data is loading.
 - Modal content should fit normal laptop screens when practical. If more information is needed, prefer a step, disclosure, or detail surface over forcing scroll.
 - Check z-index, backdrop, close, Escape, and unsaved-work behavior for modals that contain required actions or wallet/signing controls.
+
+## Signer Readiness Gates
+
+- A connected wallet address is not the same as a ready signer. EOA signing paths that use `useActiveSigner` require both `address` and `walletClient`; gates must stay aligned with the signer hook instead of checking `address` or `isConnected` alone.
+- If wallet or passkey readiness is incomplete, the UI must keep the recovery action visible. A warning such as "Wallet approval unavailable" must be paired with `WalletButton`, passkey guidance, or an equivalent next action.
+- Tests for wallet-gated money or authority actions should cover the intermediate state where a wallet address is present but `walletClient` is not ready. That state should remain blocked and recoverable, not visually ready or silently disabled.
 
 ## Recipient And Form Behavior
 
@@ -91,6 +98,36 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 
 - `OnchainActionGate` and `NetworkGate` notices render **above** the action row, not inside the `flex-1` wrapper that holds the action button. Nesting the notice inside `flex-1` pushes the primary action out of line with its siblings when the gate triggers.
 - Standard pattern: `<OnchainActionNotice />` above the Cancel/Confirm row, with `showNotice={false}` on the gate so it does not double-render. Match the layout used in `SendModal`, `ApprovalQueue`, and `CreateAgentModal`.
+
+## Multi-Entrypoint Parity
+
+- Payment, x402/MPP, MCP, SDK, and demo flows often expose the same capability through multiple entrypoints. A fix in one path is incomplete until header, tool-argument, SDK-helper, direct API, and demo paths share the same validated state or have explicit parity tests.
+- Do not verify payment or authority in one layer and then make a downstream handler rediscover it from a different payload shape. Pass the verified payment state through the request context or a shared helper.
+- When adding an entrypoint, test the smallest cross-path case that would fail if one path still read stale arguments, stale headers, or a different status field.
+
+## Credential And Modal Lifecycle
+
+- One-time credential state must clear on modal close, account switch, agent switch, and failed or abandoned in-flight actions. Plaintext keys should not survive into a later open cycle unless the user is still in the same intentional reveal flow.
+- In-flight flags such as rotating, copying, saving, connecting, or signing must reset when a modal is closed and reopened. A stale spinner with no active request is a product bug, not just polish.
+- Generated snippets and setup prompts must be rebuilt from current credential state after rotation, revocation, or runtime selection changes.
+
+## Identifier Entropy
+
+- Displayed prefixes are product identifiers. A key prefix, setup-token prefix, invoice number, nonce, or payment reference should have enough entropy for the population it helps distinguish.
+- If a displayed identifier can collide, the UI or backend needs duplicate handling or a longer displayed prefix. Do not treat a short prefix as safe just because the hidden full value is unique.
+- Tests should cover duplicate or near-duplicate identifiers when the prefix is used for user recognition, lookup, audit, or support.
+
+## Credential Setup Copy
+
+- Setup copy must be consistent across the modal, generated credential file, hosted-connect prompt, runtime snippets, SDK examples, and docs.
+- Lead with the safety property users need to understand: API credentials identify the agent, local signing keys stay local, and agent budget rules cap spending. Do not make users infer that from implementation details.
+- Avoid contradictions between warnings, reassurance, and generated commands. If copy says a key stays local, no generated snippet, deep link, or setup prompt may include that private key.
+
+## Browser Or Headless Verification
+
+- If browser verification is skipped for UI, routing, modal, animation, or setup-flow work, the PR must name why and include a headless equivalent for the skipped risk.
+- The headless equivalent should match the risk: class stability for animation, shared formatter output for cross-surface display, gated rendering for loading flashes, and render/state tests for empty or populated setup states.
+- Do not use "browser skipped" as a blanket waiver for visual or interaction risk on primary money movement or agent authority flows.
 
 ## Test Gaps Worth Catching
 

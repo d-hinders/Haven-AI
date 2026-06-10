@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, type KeyboardEvent, type MouseEvent } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef, type KeyboardEvent, type MouseEvent } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -13,13 +13,16 @@ import {
   type AllowanceInfo,
 } from '@/lib/allowance-module'
 import { getChainTokens } from '@/lib/safe-tx'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import CreateAgentModal from './CreateAgentModal'
+import ConnectAgent2Modal from './ConnectAgent2Modal'
 import EditAgentModal from './EditAgentModal'
 import ConfirmDialog from './ConfirmDialog'
 import { truncate } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import { formatAllowanceAmount, getTokenDecimals } from '@/lib/allowance-format'
+import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { entityCardClassName } from './ui/entityCardStyles'
@@ -38,6 +41,11 @@ function budgetPeriodLabel(mins: number) {
   if (label === 'weekly') return 'per week'
   if (label === 'monthly') return 'per month'
   return `every ${label}`
+}
+
+function connectAgent2Enabled(): boolean {
+  // Opt-out: ConnectAgent2 is on by default unless explicitly disabled.
+  return !['false', '0', 'off'].includes(String(process.env.NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
 }
 
 /** Resolve token address to symbol (chain-aware) */
@@ -108,7 +116,7 @@ function BotIcon({ size = 15 }: { size?: number }) {
 function AllowanceBar({
   info,
   loading,
-  chainId = 100,
+  chainId = DEFAULT_CHAIN_ID,
 }: {
   info: AllowanceInfo
   loading?: boolean
@@ -249,7 +257,8 @@ function AgentCard({
   onRevoke,
   onDelete,
   busyAction,
-  chainId = 100,
+  canUseWalletActions,
+  chainId = DEFAULT_CHAIN_ID,
 }: {
   agent: Agent
   onChainAllowances: AllowanceInfo[] | null
@@ -261,6 +270,7 @@ function AgentCard({
   onRevoke: (agent: Agent) => void
   onDelete: (agent: Agent) => void
   busyAction: 'pause' | 'resume' | 'revoke' | 'delete' | null
+  canUseWalletActions: boolean
   chainId?: number
 }) {
   const [pauseModalOpen, setPauseModalOpen] = useState(false)
@@ -355,24 +365,24 @@ function AgentCard({
           >
             <BotIcon size={17} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-[var(--v2-ink)] truncate">
                 {agent.name}
               </h3>
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                  isActive
-                    ? 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-                    : isPaused
+              {!isActive ? (
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                    isPaused
                       ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
-                    : agent.status === 'revoked'
-                      ? 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
-                      : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-                }`}
-              >
-                {agent.status}
-              </span>
+                      : agent.status === 'revoked'
+                        ? 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
+                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
+                  }`}
+                >
+                  {agent.status}
+                </span>
+              ) : null}
             </div>
             {agent.safe_name && (
               <p className="text-xs text-[var(--v2-ink-2)] mt-0.5">
@@ -385,6 +395,12 @@ function AgentCard({
               </p>
             )}
           </div>
+          <p
+            className="ml-auto shrink-0 pt-0.5 text-right text-xs text-[var(--v2-ink-3)]"
+            title={formatAgentLastActivityTitle(agent.mcp_last_seen_at)}
+          >
+            {formatAgentLastActivity(agent.mcp_last_seen_at)}
+          </p>
       </div>
 
       {isPaused && (
@@ -398,6 +414,25 @@ function AgentCard({
             <p className="text-xs font-medium text-[var(--v2-warning)]">Paused in Haven</p>
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
               New agent payments are blocked until you resume this agent. Existing network permissions stay in place.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {agent.has_stranded_funds && (
+        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-warning)] flex-shrink-0 mt-0.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-[var(--v2-warning)]">Stranded funds on delegate</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
+              A payment was funded on-chain but not settled.{' '}
+              <a href={`/agents/${agent.id}`} className="underline underline-offset-2">
+                View agent to sweep funds back to Safe.
+              </a>
             </p>
           </div>
         </div>
@@ -435,18 +470,31 @@ function AgentCard({
       <div className="flex items-center gap-2 pt-3 border-t border-[var(--v2-border)]" onClick={stopCardClick}>
         {isOperational && (
           <>
-            <button
-              onClick={() => onEdit(agent)}
-              disabled={isBusy}
-              className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
-            >
-              Edit
-            </button>
+            {canUseWalletActions ? (
+              <button
+                onClick={() => onEdit(agent)}
+                disabled={isBusy}
+                aria-label={`Edit ${agent.name}`}
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+              >
+                Edit
+              </button>
+            ) : (
+              <button
+                onClick={openDetails}
+                disabled={isBusy}
+                aria-label={`Open details for ${agent.name}`}
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+              >
+                Details
+              </button>
+            )}
             <span className="text-[var(--v2-border-strong)]">|</span>
             {isActive ? (
               <button
                 onClick={() => setPauseModalOpen(true)}
                 disabled={isBusy}
+                aria-label={`Pause ${agent.name}`}
                 className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
               >
                 {busyAction === 'pause' ? 'Pausing...' : 'Pause'}
@@ -455,19 +503,25 @@ function AgentCard({
               <button
                 onClick={() => onResume(agent)}
                 disabled={isBusy}
+                aria-label={`Resume ${agent.name}`}
                 className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
               >
                 {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
               </button>
             )}
-            <span className="text-[var(--v2-border-strong)]">|</span>
-            <button
-              onClick={() => setRevokeModalOpen(true)}
-              disabled={isBusy}
-              className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
-            >
-              Revoke
-            </button>
+            {canUseWalletActions ? (
+              <>
+                <span className="text-[var(--v2-border-strong)]">|</span>
+                <button
+                  onClick={() => setRevokeModalOpen(true)}
+                  disabled={isBusy}
+                  aria-label={`Revoke ${agent.name}`}
+                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
+                >
+                  Revoke
+                </button>
+              </>
+            ) : null}
           </>
         )}
         {isRevoked && (
@@ -480,6 +534,7 @@ function AgentCard({
             <button
               onClick={() => setDeleteModalOpen(true)}
               disabled={isBusy}
+              aria-label={`Delete ${agent.name}`}
               className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
             >
               Delete
@@ -558,7 +613,7 @@ function AgentCard({
 function UnmanagedDelegateCard({
   delegate,
   allowances,
-  chainId = 100,
+  chainId = DEFAULT_CHAIN_ID,
 }: {
   delegate: string
   allowances: AllowanceInfo[]
@@ -628,8 +683,8 @@ function UnmanagedDelegateCard({
 export default function AgentPanel() {
   const { activeSafe } = useAuth()
   const safeAddress = activeSafe?.safe_address ?? null
-  const chainId = activeSafe?.chain_id ?? 100
-  const { details: safeDetails } = useSafeDetails(safeAddress)
+  const chainId = activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
+  const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const {
     agents,
     loading,
@@ -646,11 +701,63 @@ export default function AgentPanel() {
   })
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [connect2Open, setConnect2Open] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
   const [showRevokedAgents, setShowRevokedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  // Timers for deferred on-chain refetch after agent create/edit. Tracked in a
+  // ref so they can be cancelled on unmount, preventing spurious API calls and
+  // setState on an unmounted component when the user navigates away within 2s.
+  const onChainRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
+    }
+  }, [])
+
+  // Delegates the user just approved in-modal. The on-chain allowance lands a
+  // moment before the backend status flips `pending_approval` → `active` and
+  // the `/agents` GET filter starts returning the agent. During that window
+  // the agent's delegate is on-chain but absent from `agents`, so the
+  // unmanagedDelegates classifier would tag it as "Unmanaged Delegate /
+  // network only" until the next refresh. We suppress the classification
+  // for up to 30s (or until `agents` catches up).
+  const [recentDelegates, setRecentDelegates] = useState<Set<string>>(new Set())
+  const recentDelegateTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  useEffect(() => {
+    const timers = recentDelegateTimersRef.current
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer))
+      timers.clear()
+    }
+  }, [])
+  const markDelegateRecent = useCallback((address: string | null | undefined) => {
+    if (!address) return
+    const key = address.toLowerCase()
+    setRecentDelegates((prev) => {
+      if (prev.has(key)) return prev
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
+    const timers = recentDelegateTimersRef.current
+    const existing = timers.get(key)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      timers.delete(key)
+      setRecentDelegates((prev) => {
+        if (!prev.has(key)) return prev
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    }, 30_000)
+    timers.set(key, timer)
+  }, [])
+  const showConnectAgent2 = connectAgent2Enabled()
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
     [agents],
@@ -666,13 +773,30 @@ export default function AgentPanel() {
     return () => window.clearTimeout(timeout)
   }, [toastMessage])
 
+  const agentUsesActiveSafe = useCallback((agent: Agent): boolean => {
+    if (agent.safe_id) {
+      return agent.safe_id === activeSafe?.id
+    }
+
+    if (agent.safe_address) {
+      const agentChainId = agent.safe_chain_id ?? DEFAULT_CHAIN_ID
+      return Boolean(
+        safeAddress &&
+          agent.safe_address.toLowerCase() === safeAddress.toLowerCase() &&
+          agentChainId === chainId,
+      )
+    }
+
+    return true
+  }, [activeSafe?.id, chainId, safeAddress])
+
   // Collect managed delegate addresses from DB agents
   const managedDelegates = useMemo(
     () =>
       agents
-        .filter((a) => a.status !== 'revoked' && a.delegate_address && (!a.safe_id || a.safe_id === activeSafe?.id))
+        .filter((a) => a.status !== 'revoked' && a.delegate_address && agentUsesActiveSafe(a))
         .map((a) => a.delegate_address!),
-    [activeSafe?.id, agents],
+    [agentUsesActiveSafe, agents],
   )
 
   // On-chain allowance data — discovers ALL delegates, not just DB agents
@@ -683,21 +807,69 @@ export default function AgentPanel() {
     refetch: refetchOnChain,
   } = useOnChainAllowances(safeAddress, managedDelegates, chainId)
 
-  // Find delegates that exist on-chain but not in Haven DB
+  // Find delegates that exist on-chain but not in Haven DB. `recentDelegates`
+  // suppresses the brief flicker right after a Connect-agent approval lands
+  // on-chain: the delegate is visible on-chain ~immediately, but the
+  // `/agents` GET still filters out `pending_approval` agents until the
+  // backend records the wallet approval. Without suppression, the new agent
+  // shows up as "Unmanaged Delegate / network only" until the next refresh.
   const unmanagedDelegates = useMemo(() => {
     const managedSet = new Set(managedDelegates.map((a) => a.toLowerCase()))
     return onChainDelegates
       .filter((d) => !managedSet.has(d.toLowerCase()))
+      .filter((d) => !recentDelegates.has(d.toLowerCase()))
       .map((d) => ({
         address: d,
         allowances: onChainData.get(d.toLowerCase())?.allowances ?? [],
       }))
       .filter((d) => d.allowances.length > 0) // only show if they have allowances
-  }, [onChainDelegates, managedDelegates, onChainData])
+  }, [onChainDelegates, managedDelegates, onChainData, recentDelegates])
+
+  // Drop the suppression early once the agents list catches up — keeps the
+  // 30s timer as a fallback for slow backends but cleans up immediately
+  // when the agent flips to `active` and reappears in `/agents`.
+  useEffect(() => {
+    if (recentDelegates.size === 0) return
+    const managed = new Set(managedDelegates.map((a) => a.toLowerCase()))
+    const matched: string[] = []
+    recentDelegates.forEach((addr) => {
+      if (managed.has(addr)) matched.push(addr)
+    })
+    if (matched.length === 0) return
+    const timers = recentDelegateTimersRef.current
+    matched.forEach((addr) => {
+      const timer = timers.get(addr)
+      if (timer) clearTimeout(timer)
+      timers.delete(addr)
+    })
+    setRecentDelegates((prev) => {
+      const next = new Set(prev)
+      matched.forEach((addr) => next.delete(addr))
+      return next
+    })
+  }, [managedDelegates, recentDelegates])
+
+  function handleEdit(agent: Agent) {
+    if (!agentUsesActiveSafe(agent)) {
+      handleViewDetails(agent)
+      return
+    }
+    setEditAgent(agent)
+  }
+
+  useEffect(() => {
+    if (editAgent && !agentUsesActiveSafe(editAgent)) {
+      setEditAgent(null)
+    }
+  }, [agentUsesActiveSafe, editAgent])
 
   // ── Revoke handler ─────────────────────────────────────
 
   async function handleRevoke(agent: Agent) {
+    if (!agentUsesActiveSafe(agent)) {
+      setToastMessage('Open this agent to manage its budget from the correct Haven wallet.')
+      return
+    }
     if (
       !publicClient ||
       !signer ||
@@ -818,8 +990,18 @@ export default function AgentPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {!showConnectAgent2 && (
+            // Legacy manual setup — only visible when ConnectAgent2 is disabled.
+            <Button
+              onClick={() => setCreateOpen(true)}
+              size="sm"
+              variant="ghost"
+            >
+              Manual setup
+            </Button>
+          )}
           <Button
-            onClick={() => setCreateOpen(true)}
+            onClick={() => showConnectAgent2 ? setConnect2Open(true) : setCreateOpen(true)}
             size="sm"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -858,7 +1040,16 @@ export default function AgentPanel() {
           icon={<BotIcon size={24} />}
           title="No agents yet"
           body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
-          action={<Button onClick={() => setCreateOpen(true)}>Connect agent</Button>}
+          action={
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button onClick={() => showConnectAgent2 ? setConnect2Open(true) : setCreateOpen(true)}>
+                Connect agent
+              </Button>
+              {!showConnectAgent2 && (
+                <Button onClick={() => setCreateOpen(true)} variant="ghost">Manual setup</Button>
+              )}
+            </div>
+          }
         />
       )}
 
@@ -870,8 +1061,8 @@ export default function AgentPanel() {
             <div className="grid items-start gap-4 lg:grid-cols-2">
               {visibleAgents.map((agent) => {
                 const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
-                const agentUsesActiveSafe = !agent.safe_id || agent.safe_id === activeSafe?.id
-                const chainData = delegateKey && agentUsesActiveSafe
+                const usesActiveSafe = agentUsesActiveSafe(agent)
+                const chainData = delegateKey && usesActiveSafe
                   ? onChainData.get(delegateKey)?.allowances ?? null
                   : null
                 const agentChainId = agent.safe_chain_id ?? chainId
@@ -881,14 +1072,15 @@ export default function AgentPanel() {
                     key={agent.id}
                     agent={agent}
                     onChainAllowances={chainData}
-                    onChainLoading={onChainLoading}
+                    onChainLoading={usesActiveSafe ? onChainLoading : false}
                     onViewDetails={handleViewDetails}
-                    onEdit={setEditAgent}
+                    onEdit={handleEdit}
                     onPause={handlePause}
                     onResume={handleResume}
                     onRevoke={handleRevoke}
                     onDelete={handleDelete}
                     busyAction={busyAgentId === agent.id ? busyAction : null}
+                    canUseWalletActions={usesActiveSafe}
                     chainId={agentChainId}
                   />
                 )
@@ -930,12 +1122,13 @@ export default function AgentPanel() {
                   onChainAllowances={null}
                   onChainLoading={false}
                   onViewDetails={handleViewDetails}
-                  onEdit={setEditAgent}
+                  onEdit={handleEdit}
                   onPause={handlePause}
                   onResume={handleResume}
                   onRevoke={handleRevoke}
                   onDelete={handleDelete}
                   busyAction={busyAgentId === agent.id ? busyAction : null}
+                  canUseWalletActions={agentUsesActiveSafe(agent)}
                   chainId={agent.safe_chain_id ?? chainId}
                 />
               ))}
@@ -965,13 +1158,30 @@ export default function AgentPanel() {
           // setup file / skill bundle / raw credentials. User dismisses via
           // the Done button, which fires onClose.
           refetch()
-          // Refresh network data after a short delay for tx confirmation
-          setTimeout(refetchOnChain, 2000)
+          // Refresh network data after a short delay for tx confirmation.
+          // Tracked so the timer can be cancelled if the component unmounts first.
+          if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
+          onChainRefetchTimerRef.current = setTimeout(refetchOnChain, 2000)
         }}
       />
 
+      {showConnectAgent2 && (
+        <ConnectAgent2Modal
+          open={connect2Open}
+          onClose={() => setConnect2Open(false)}
+          safeAddress={safeAddress}
+          safeId={activeSafe?.id}
+          onSetupUpdated={(info) => {
+            // Suppress the brief "Unmanaged Delegate" race window before
+            // refreshing — see comment on `unmanagedDelegates`.
+            markDelegateRecent(info?.delegateAddress)
+            refetch()
+          }}
+        />
+      )}
+
       {/* Edit agent modal */}
-      {editAgent && (
+      {editAgent && agentUsesActiveSafe(editAgent) && (
         <EditAgentModal
           open={!!editAgent}
           onClose={() => setEditAgent(null)}
@@ -985,7 +1195,8 @@ export default function AgentPanel() {
           onUpdated={() => {
             refetch()
             setEditAgent(null)
-            setTimeout(refetchOnChain, 2000)
+            if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
+            onChainRefetchTimerRef.current = setTimeout(refetchOnChain, 2000)
           }}
         />
       )}

@@ -13,6 +13,7 @@ import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
+import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
 import approvalRoutes from './routes/approvals.js'
@@ -22,10 +23,7 @@ import userSafesRoutes from './routes/user-safes.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
 import safeExecRoutes from './routes/safe-exec.js'
-import selfSignAgentRoutes from './routes/self-sign-agents.js'
-import selfSignPaymentRoutes from './routes/self-sign-payments.js'
 import x402ResourceRoutes from './routes/x402-resources.js'
-import demoX402Routes from './routes/demo-x402.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import demoMppRoutes from './routes/demo-mpp.js'
 import openapiRoutes from './routes/openapi.js'
@@ -129,6 +127,7 @@ await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
+await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })
 await app.register(approvalRoutes, { prefix: '/approvals' })
@@ -138,12 +137,9 @@ await app.register(userSafesRoutes, { prefix: '/user/safes' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(safeExecRoutes, { prefix: '/safe' })
-await app.register(selfSignAgentRoutes, { prefix: '/self-sign-agents' })
-await app.register(selfSignPaymentRoutes, { prefix: '/self-sign-payments' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(x402ResourceRoutes, { prefix: '/x402' })
 // Public demo — no auth hook, registered separately
-await app.register(demoX402Routes, { prefix: '/demo/x402' })
 await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
 
 // --- Start ---

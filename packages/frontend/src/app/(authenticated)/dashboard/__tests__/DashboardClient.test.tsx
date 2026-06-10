@@ -137,6 +137,7 @@ function mockBaseState() {
   mockUseAggregatedBalances.mockReturnValue({
     balances: [{ balance: '1000000' }],
     loading: false,
+    error: null,
     refetch: vi.fn(),
   })
   mockUseDashboardOverview.mockReturnValue({
@@ -321,6 +322,7 @@ describe('DashboardClient', () => {
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],
       loading: true,
+      error: null,
       refetch: vi.fn(),
     })
 
@@ -332,10 +334,28 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
   })
 
+  it('does not mark the account unfunded when aggregate balances fail to load', () => {
+    mockUseAggregatedBalances.mockReturnValue({
+      balances: [],
+      loading: false,
+      error: 'Failed to load balances',
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Receive' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add funds' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Receive funds' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
   it('shows a focused first-run guide instead of the full dashboard when the account needs funds', () => {
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],
       loading: false,
+      error: null,
       refetch: vi.fn(),
     })
 
@@ -352,6 +372,7 @@ describe('DashboardClient', () => {
     mockUseAggregatedBalances.mockReturnValue({
       balances: [],
       loading: false,
+      error: null,
       refetch: vi.fn(),
     })
 

@@ -7,6 +7,8 @@ records the **form** decision for #184 and the flows it has to support.
 
 Contract it must satisfy: [`06-hosted-mcp-connect-flow.md`](06-hosted-mcp-connect-flow.md).
 Custody guardrails: [`../regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md).
+Connect Agent 2 local-key pairing contract:
+[`08-connect-agent-2-local-key-pairing.md`](08-connect-agent-2-local-key-pairing.md).
 
 ## Decision
 
@@ -82,6 +84,10 @@ agent:   retry merchant with X-PAYMENT                 (no Haven involvement)
   merchant, resource URL, asset, and network.
 - Local secret handling mirrors `@haven_ai/mcp`: key from `HAVEN_DELEGATE_KEY`
   or a `--credentials` file's `delegate_key`, with a permissive-file warning.
+- Connect Agent 2 may create the `--credentials` file locally during pairing.
+  Haven still receives only the public signing address, proof, API-key
+  hash/prefix, and install status; the hosted MCP config never receives the
+  delegate key.
 
 ## Scope notes
 

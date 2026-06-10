@@ -1,123 +1,113 @@
-# Migration — Local MCP → Hosted MCP
+# Migration - Local MCP To Hosted MCP
 
-Migrating from the local `npx @haven_ai/mcp` stdio server to the new
-hosted, edge-signing MCP server introduced in Epic #181.
+Migrating from the local `npx @haven_ai/mcp` stdio server to hosted, keyless
+MCP plus local signing.
 
-> **TL;DR** — Replace your `claude mcp add` command (or JSON config block)
-> with one that points at `https://mcp.haven.ai/v1` and carries your Haven
-> API key as a Bearer token.  Keep your credential file where it is — the
-> signing key stays on your machine.
+TL;DR: point your agent runtime at the hosted MCP URL with the Haven API key as
+a Bearer token. Keep the delegate signing key local. Hosted MCP constructs and
+relays; the local runtime or `@haven_ai/signer` signs.
 
----
+## What Changed
 
-## What changed and why
+### Old Approach: Local Stdio MCP
 
-### Old approach — local stdio server
-
-```
-  Agent client (Claude Code / Cursor)
-       │
-       ▼ stdio
-  npx @haven_ai/mcp
-  [reads HAVEN_CREDENTIAL_FILE]
-       │ HTTP (API key + delegate key in process)
-       ▼
-  Haven backend
+```text
+Agent runtime
+  -> local npx @haven_ai/mcp
+  -> reads api_key + delegate_key from local credential file
+  -> signs locally
+  -> sends API identity + signed payloads to Haven
 ```
 
-- The MCP server ran locally (via `npx`) and held the full credential
-  (both the API key **and** the delegate private key) in its process memory.
-- Reinstalling on every new machine, CI runner, or Docker container was
-  required.
-- Any process-level compromise could expose the delegate private key.
+This was non-custodial because the delegate key stayed local, but every runtime
+needed a local server install/config block and the local process held both
+identity and signing authority.
 
-### New approach — hosted MCP + edge signing
+### New Approach: Hosted MCP + Local Signing
 
-```
-  Agent client (Claude Code / Cursor / SDK)
-       │
-       ▼ HTTP (Bearer sk_agent_…)
-  Haven hosted MCP  ← identity only, no key
-  [at mcp.haven.ai/v1]
-       │ hash to sign
-       ▼
-  Edge signer callback (your machine / sidecar)
-  [reads delegate key, signs hash, returns signature]
-       │ signature only
-       ▼
-  Haven backend  →  Safe Allowance Module  →  on-chain
+```text
+Agent runtime
+  -> hosted Haven MCP over HTTP (Bearer sk_agent_*)
+  -> hosted MCP returns unsigned payload hashes
+  -> local runtime or @haven_ai/signer signs with delegate key
+  -> hosted MCP relays { payment_id, signature }
+  -> Haven backend -> Safe AllowanceModule -> on-chain
 ```
 
-- The MCP server is fully managed — no local install, no `npx`.
-- The **delegate private key never crosses the wire**.  The hosted server
-  asks you to sign a hash; only `{payloadHash, signature}` is returned.
-- Runtimes (Claude Code, Claude Desktop, Cursor, any MCP SDK) connect to the
-  same stable URL.
+The split is deliberate:
 
----
+- Hosted MCP receives the API key as identity only.
+- Hosted MCP never receives the delegate private key.
+- The local runtime or `@haven_ai/signer` signs payment hashes.
+- Only `{ payment_id, signature }` goes back to hosted MCP for relay.
+- On-chain Safe AllowanceModule state remains the spend gate.
 
-## Step-by-step migration
+API auth is identity. Signature is authority. On-chain module state is
+enforcement.
 
-### 1 · Get your credential file
+For new agents, Connect Agent 2 can create this split automatically: Haven
+creates a pending setup, the local connector generates the signing key and API
+key on the user's machine, and Haven receives only the public signing address,
+proof, API-key hash/prefix, and install status before wallet approval. This
+migration guide still applies to existing agents and manual hosted-MCP setups.
 
-If you followed the original setup you already have a credential file at
-`~/.haven/credential.json`.  It contains both the API key and the delegate
-private key.
+## Step-By-Step Migration
 
-If you don't have it:
+### 1. Keep Or Recreate Your Credential File
 
-1. Open the Haven app → **Agents** → select your agent → **Show credentials**.
-2. Click **Save signing key** — this downloads the key to `~/.haven/` and
-   records its SHA-256 so Haven can verify custody later.
+If you already have a Haven credential file, keep it. It contains the API key
+and the delegate signing key. The API key goes into the hosted MCP config; the
+delegate key stays local for signing.
 
-### 2 · Remove the old local MCP entry
+If you do not have the credential file, open Haven, select the agent, and use
+the payment-credential flow to rotate the API key. Haven cannot recover a lost
+delegate private key. If the delegate key is gone, pause or revoke the agent
+and create a new signing path.
 
-**Claude Code:**
-```bash
+When using Connect Agent 2 for a new setup, use the Haven-generated connector
+prompt instead of manually rebuilding this file. The prompt carries only a
+setup token and public connection metadata; it does not carry the delegate key
+or plaintext API key.
+
+### 2. Remove The Old Local MCP Server Entry
+
+For Claude Code:
+
+```sh
 claude mcp remove haven
 ```
 
-**Claude Desktop / Cursor — JSON config:**
-
-Open your MCP config file and delete the `haven` entry from `mcpServers`:
+For JSON-configured runtimes, remove the old stdio block:
 
 ```jsonc
-// ← remove this block
 "haven": {
   "command": "npx",
   "args": ["@haven_ai/mcp"],
-  "env": { "HAVEN_CREDENTIAL_FILE": "..." }
+  "env": { "HAVEN_CREDENTIALS": "/path/to/haven-agent.json" }
 }
 ```
 
-### 3 · Add the hosted MCP
+### 3. Add Hosted MCP
 
-#### Claude Code (CLI)
+Use the hosted URL shown in the Haven app's **Connect your agent** flow. The
+current default can also be overridden in deployments with
+`NEXT_PUBLIC_HAVEN_MCP_URL`.
 
-```bash
+Claude Code:
+
+```sh
 claude mcp add --transport http haven \
-  https://mcp.haven.ai/v1 \
+  https://haven-ai-production-5953.up.railway.app/v1 \
   --header "Authorization: Bearer sk_agent_YOUR_KEY"
 ```
 
-Replace `sk_agent_YOUR_KEY` with the `api_key` from your credential file.
-
-#### Claude Desktop — one-click (recommended)
-
-In the Haven app → **Agents** → **Connect** → click **Claude Desktop** tab →
-click **Add to Claude**.  This opens the `claude://` deep link and installs
-the connection automatically.
-
-#### Claude Desktop — manual JSON config
-
-Open `~/Library/Application Support/Claude/claude_desktop_config.json`
-(macOS) and add:
+Claude Desktop / Cursor-style JSON:
 
 ```json
 {
   "mcpServers": {
     "haven": {
-      "url": "https://mcp.haven.ai/v1",
+      "url": "https://haven-ai-production-5953.up.railway.app/v1",
       "headers": {
         "Authorization": "Bearer sk_agent_YOUR_KEY"
       }
@@ -126,26 +116,27 @@ Open `~/Library/Application Support/Claude/claude_desktop_config.json`
 }
 ```
 
-Restart Claude Desktop.
+Codex CLI TOML:
 
-#### Cursor — one-click (recommended)
+```toml
+[mcp_servers.haven]
+url = "https://haven-ai-production-5953.up.railway.app/v1"
+bearer_token_env_var = "HAVEN_TOKEN"
+```
 
-In the Haven app → **Agents** → **Connect** → click **Cursor** tab →
-click **Add to Cursor**.
+Then launch Codex with:
 
-#### Cursor — manual
+```sh
+export HAVEN_TOKEN=sk_agent_YOUR_KEY
+codex
+```
 
-Open Cursor's MCP settings and add the same JSON block shown for Claude
-Desktop above.
+For custom MCP clients:
 
-#### Any MCP SDK / custom agent
+```sh
+export HAVEN_MCP_URL=https://haven-ai-production-5953.up.railway.app/v1
+export HAVEN_API_KEY=sk_agent_YOUR_KEY
 
-```bash
-# Environment
-HAVEN_MCP_URL=https://mcp.haven.ai/v1
-HAVEN_API_KEY=sk_agent_YOUR_KEY
-
-# Verify tools are available
 curl -X POST "$HAVEN_MCP_URL" \
   -H "Authorization: Bearer $HAVEN_API_KEY" \
   -H "Content-Type: application/json" \
@@ -153,121 +144,124 @@ curl -X POST "$HAVEN_MCP_URL" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-### 4 · Run the edge signer
+The hosted connection should list Haven tools such as `haven_get_agent`,
+`haven_get_allowances`, `haven_pay`, `haven_submit`, and
+`haven_x402_authorize`.
 
-The hosted MCP needs a local callback to sign payment hashes.  Haven provides
-a lightweight sidecar that listens for signing requests, reads the delegate
-key from the credential file, and returns the signature — without ever sending
-the key over the wire.
+### 4. Add Local Signing
 
-```bash
-# One-time install (or keep using npx for zero-install)
-npm install -g @haven_ai/mcp
+Hosted MCP does not sign. The agent must sign locally, either with its own
+runtime secret handling or with `@haven_ai/signer`.
 
-# Start the signer sidecar (keeps running alongside your agent session)
-haven-signer --credential ~/.haven/credential.json
-
-# Or as a one-liner for CI / ephemeral sessions
-HAVEN_CREDENTIAL_FILE=~/.haven/credential.json npx @haven_ai/mcp --signer-only
+```sh
+npx @haven_ai/signer --credentials /path/to/haven-agent.json --ack
 ```
 
-> **What the signer exposes:** a localhost-only HTTP endpoint
-> (default `127.0.0.1:3100`).  The hosted MCP calls `POST /sign` with
-> `{payloadHash}` and receives `{signature}`.  The delegate private key
-> never leaves the signer process.
+After acknowledgement, run it normally beside the agent runtime:
 
-### 5 · Verify the connection
-
-Ask your agent anything that triggers a Haven tool:
-
-```
-User: What's my Haven budget?
+```sh
+npx @haven_ai/signer --credentials /path/to/haven-agent.json
 ```
 
-If the connection is live you'll see a **Connected** badge on the Haven app's
-agent card within a few seconds.  The badge is driven by `mcp_last_seen_at` —
-the timestamp of the most recent tool invocation — polled every 3 s until
-connected and every 10 s thereafter.
+The signer exposes local stdio MCP tools:
 
-To confirm the signer is working end-to-end, trigger a small in-budget
-payment and check the transaction feed in the Haven app.
+| Tool | Purpose |
+|---|---|
+| `haven_sign` | Sign the `payload_hash` returned by hosted `haven_pay` or `haven_x402_authorize` |
+| `haven_x402_sign_header` | Build and sign the x402 `X-PAYMENT` header after the Haven funding leg succeeds |
 
----
+The signer does not need the API key and makes no network calls. It reads the
+delegate key locally and emits signatures/headers only.
 
-## What you can remove
+### 5. Verify The Connection
 
-Once the hosted MCP is working you no longer need:
+Ask your agent a read-only question first:
+
+```text
+What is my Haven budget?
+```
+
+It should call `haven_get_allowances`. The Haven dashboard should show recent
+agent activity / last activity after tool calls. Those timestamps and audit
+rows are informational; the Safe AllowanceModule is still the spend gate.
+
+Then test a tiny in-budget payment. The expected direct payment sequence is:
+
+1. Agent calls hosted `haven_pay`.
+2. Hosted MCP returns `{ payment_id, payload_hash, expires_at }`.
+3. Agent calls local `haven_sign` with the payload hash.
+4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.
+5. Haven relays the independently valid signed transaction.
+
+If `haven_pay` returns `pending_approval`, there is no hash to sign. The user
+must approve the action in Haven, and the agent should poll status rather than
+creating duplicate payments.
+
+## What You Can Remove
 
 | Item | Can remove? |
 |---|---|
-| `@haven_ai/mcp` in project dependencies | ✅ Yes |
-| `AGENTS.md` / `CLAUDE.md` with SDK tool descriptions | ✅ Yes — tools are now declared by the hosted server |
-| Local `.env` with `HAVEN_DELEGATE_KEY` | ✅ Yes — key stays in credential file, read by signer only |
-| `stdio` MCP config entries for Haven | ✅ Yes — replaced by the HTTP config above |
-| The signer sidecar | ❌ No — still needed for signing payment hashes |
-| Your credential file (`~/.haven/credential.json`) | ❌ No — the signer reads it at signing time |
+| Old stdio `@haven_ai/mcp` config entry | Yes, if the runtime now uses hosted MCP |
+| Local SDK tool-description prompt files | Usually, because hosted MCP declares the tools |
+| Local `.env` entry that gives the API key to `@haven_ai/mcp` | Yes for hosted-MCP runtime config |
+| Credential file | No; the delegate key is still needed for local signing |
+| Local signer/runtime secret handling | No; hosted MCP is keyless |
 
----
-
-## Environment variables reference
+## Environment Variables
 
 | Variable | Used by | Purpose |
 |---|---|---|
-| `HAVEN_CREDENTIAL_FILE` | Signer sidecar | Path to the credential JSON |
-| `HAVEN_MCP_URL` | SDK / curl examples | Hosted MCP base URL |
-| `HAVEN_API_KEY` | SDK / curl examples | Agent API key (identity) |
-| `NEXT_PUBLIC_HAVEN_MCP_URL` | Frontend | Override the default `mcp.haven.ai` URL |
+| `HAVEN_TOKEN` | Codex CLI example | Bearer token env var used by hosted MCP config |
+| `HAVEN_API_KEY` | SDK/curl examples | Agent API key, identity only |
+| `HAVEN_MCP_URL` | SDK/curl examples | Hosted MCP endpoint |
+| `HAVEN_CREDENTIALS` | `@haven_ai/signer` / local `@haven_ai/mcp` | Path to Haven credential JSON |
+| `HAVEN_DELEGATE_KEY` | `@haven_ai/signer` fallback | Delegate signing key when not using a credential file |
+| `NEXT_PUBLIC_HAVEN_MCP_URL` | Frontend | Hosted MCP URL rendered in connect-agent snippets |
 
----
+## Custody Invariant
 
-## Custody invariant (unchanged)
-
-The fundamental custody guarantee is **the same** as with the local server:
-
-- The delegate private key never appears in any HTTP request URL, body, or
-  header.  See [the regulatory guardrails](../regulatory/casp-risk-guardrails.md)
-  and the tests in `packages/mcp/src/tools.test.ts` (tagged `[#190]`) that
-  enforce this invariant in CI.
-- On-chain spend limits (Safe Allowance Module) constrain every payment
-  regardless of what the hosted MCP or the backend database say.
-- Haven cannot spend user funds — it can only relay transactions that are
-  within limits you approved on-chain.
-
----
+- The delegate private key never appears in hosted MCP URLs, headers, request
+  bodies, logs, or deep links.
+- Hosted MCP has no signing path and should fail startup if a delegate key is
+  injected.
+- API keys identify agents only. They do not authorize payment execution.
+- On-chain Safe AllowanceModule state constrains every automatic payment.
+- Haven can relay independently valid signed transactions, but it cannot move
+  funds with the API key alone.
 
 ## Troubleshooting
 
-**"Unauthorized" from the hosted MCP**
+**Unauthorized from hosted MCP**
 
-Your `Authorization` header is missing or the API key is wrong.  Confirm the
-key matches the `api_key` field in your credential file, not the delegate
-private key.
+Confirm the Bearer token is the `api_key`, not the delegate key. If the full
+API key was lost, rotate it in Haven and update the runtime config.
 
-**Tools list is empty / tools not found**
+**Tools list is empty**
 
-The hosted MCP only exposes Haven tools.  If you see an empty list, the
-Bearer token may be for a revoked or inactive agent.
+The token may be invalid, revoked, or tied to an inactive agent. Rotate the API
+key or create a new agent credential.
 
-**Payment fails with "pending_approval" / over-budget**
+**Payment returns pending approval**
 
-The agent's Safe Allowance Module headroom is exhausted.  Open the Haven app
-→ **Approvals** to review and approve the pending payment.  After approval the
-agent can retry.
+The request is outside the remaining on-chain agent budget. Open Haven,
+approve or reject the action, then have the agent poll status or resume the
+payment when Haven reports the correct next action.
 
-**Signer not responding**
+**Local signer is not available**
 
-Check that `haven-signer` (or `npx @haven_ai/mcp --signer-only`) is running.
-The hosted MCP logs a `signer_unavailable` error when it can't reach the
-callback URL.  The signer must be reachable from wherever the hosted MCP
-server makes outbound connections.
+Start `npx @haven_ai/signer --credentials /path/to/haven-agent.json` in the
+same agent environment, or configure the agent runtime to sign locally from its
+own secret store. Do not send the delegate key to hosted MCP.
 
-> For hosted or serverless agents where you can't run a sidecar, contact
-> Haven — a managed signing service is on the roadmap.
+**Hosted or serverless agent cannot run a local signer**
 
----
+Keep the signing key under the agent operator's control and get product, legal,
+and security review before introducing any hosted signing arrangement. Haven
+must not become the party that holds or operates agent private keys.
 
-## Related docs
+## Related Docs
 
-- [Hosted MCP deploy guide](deploy/hosted-mcp.md)
-- [Architecture — hosted MCP connect flow](architecture/06-hosted-mcp-connect-flow.md)
-- [Regulatory guardrails (CASP / MiCA)](regulatory/casp-risk-guardrails.md)
+- [Hosted MCP deploy guide](../deploy/hosted-mcp.md)
+- [Architecture - hosted MCP connect flow](../architecture/06-hosted-mcp-connect-flow.md)
+- [Edge signer](../architecture/07-edge-signer.md)
+- [Regulatory guardrails (CASP / MiCA)](../regulatory/casp-risk-guardrails.md)

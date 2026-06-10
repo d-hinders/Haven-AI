@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import {
   getDelegates,
   getAllAllowances,
@@ -42,7 +43,7 @@ interface UseOnChainAllowancesResult {
 export function useOnChainAllowances(
   safeAddress: string | null,
   managedDelegates: string[],
-  chainId: number = 100,
+  chainId: number = DEFAULT_CHAIN_ID,
 ): UseOnChainAllowancesResult {
   const publicClient = usePublicClient({ chainId })
 
@@ -55,11 +56,18 @@ export function useOnChainAllowances(
   const managedRef = useRef(managedDelegates)
   managedRef.current = managedDelegates
 
+  // Generation counter — incremented each time the effect re-runs so that a
+  // stale in-flight fetch (triggered by a previous publicClient/safeAddress)
+  // does not overwrite state from the most-recent fetch.
+  const generationRef = useRef(0)
+
   const fetchData = useCallback(async () => {
     if (!publicClient || !safeAddress) {
       setLoading(false)
       return
     }
+
+    const generation = ++generationRef.current
 
     try {
       // 1. Check module enabled
@@ -67,6 +75,7 @@ export function useOnChainAllowances(
         publicClient,
         safeAddress as Address,
       )
+      if (generationRef.current !== generation) return
       setModuleEnabled(enabled)
 
       if (!enabled) {
@@ -81,6 +90,7 @@ export function useOnChainAllowances(
         publicClient,
         safeAddress as Address,
       )
+      if (generationRef.current !== generation) return
       setOnChainDelegates(delegates)
 
       // 3. Fetch allowances for each delegate
@@ -111,16 +121,22 @@ export function useOnChainAllowances(
         }),
       )
 
+      if (generationRef.current !== generation) return
       setData(results)
     } catch (err) {
-      console.error('[Haven] Failed to fetch on-chain allowances:', err)
+      if (generationRef.current === generation) {
+        console.error('[Haven] Failed to fetch on-chain allowances:', err)
+      }
     } finally {
-      setLoading(false)
+      if (generationRef.current === generation) {
+        setLoading(false)
+      }
     }
   }, [publicClient, safeAddress])
 
-  // Initial fetch
+  // Initial fetch — invalidate any stale in-flight fetch from the previous cycle.
   useEffect(() => {
+    generationRef.current += 1
     setLoading(true)
     fetchData()
   }, [fetchData])

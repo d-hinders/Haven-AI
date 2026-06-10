@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify'
+import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import {
@@ -10,7 +11,13 @@ import {
   attachMachinePaymentEvidence,
   type MachinePaymentEvidenceRow,
 } from '../lib/machine-payment-evidence.js'
-import { getTokenAllowance, computeEffectiveAllowance } from '../lib/allowance-module.js'
+import {
+  getTokenAllowance,
+  computeEffectiveAllowance,
+  generateTransferHash,
+} from '../lib/allowance-module.js'
+import { getChain } from '../lib/chains.js'
+import { AgentPaymentPhase, AgentPaymentNextAction } from '../lib/agent-payment-taxonomy.js'
 
 interface MachinePaymentChallengeBody {
   rail: MachinePaymentRail
@@ -76,6 +83,7 @@ interface AgentAllowanceRow {
 
 interface ReconciliationPaymentRow {
   id: string
+  kind: 'payment_intent' | 'approval_request'
   user_id: string
   tx_hash: string | null
   status: string
@@ -90,9 +98,33 @@ interface ReconciliationPaymentRow {
   x402_idempotency_key: string | null
 }
 
+interface ReconciliationEventRow {
+  id: string
+  status: string
+  created_at: string
+}
+
 const RECONCILIATION_EVENT_TYPES = new Set([
   'merchant_retry_rejected_after_payment',
 ])
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+const SUPPORTED_ASSETS = ['ETH', 'USDC'] as const
+type SendAsset = (typeof SUPPORTED_ASSETS)[number]
+
+interface SendBody {
+  asset: SendAsset
+  recipient: string
+  amount: string
+  idempotency_key?: string
+}
+
+interface SendPaymentIntentRow {
+  id: string
+  status: string
+  expires_at: string
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -101,7 +133,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function mapEvidence(row: MachinePaymentEvidenceRow) {
   return {
     id: row.id,
-    payment_id: row.payment_intent_id,
+    payment_id: row.payment_intent_id ?? row.approval_request_id,
+    payment_intent_id: row.payment_intent_id,
+    approval_request_id: row.approval_request_id,
     rail: row.rail,
     proof_status: row.proof_status,
     tx_hash: row.tx_hash,
@@ -146,8 +180,37 @@ function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): strin
   if (challenge.amount?.atomic !== '10000' || challenge.amount?.display !== '0.01') {
     return 'MPP demo payments are fixed at 0.01 USDC'
   }
-  if (new Date(challenge.expiresAt).getTime() <= Date.now()) {
+  if (!challenge.expiresAt || typeof challenge.expiresAt !== 'string') {
+    return 'expiresAt must be a valid ISO timestamp'
+  }
+  const expiresAtMs = new Date(challenge.expiresAt).getTime()
+  if (!Number.isFinite(expiresAtMs)) {
+    return 'expiresAt must be a valid ISO timestamp'
+  }
+  if (expiresAtMs <= Date.now()) {
     return 'MPP demo challenge has expired'
+  }
+  return null
+}
+
+function isValidAddress(addr: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(addr)
+}
+
+/**
+ * Resolve a SendAsset enum value to the token config for a given chain.
+ * 'ETH' resolves to the chain's native token; 'USDC' resolves by symbol match.
+ */
+function resolveAsset(chainId: number, asset: SendAsset) {
+  const chain = getChain(chainId)
+  const tokens = chain.tokens
+  // Native ETH/xDAI = any token with address null
+  if (asset === 'ETH') {
+    return Object.values(tokens).find((t) => t.address === null) ?? null
+  }
+  // USDC = find by uppercase symbol prefix
+  for (const cfg of Object.values(tokens)) {
+    if (cfg.symbol.toUpperCase().startsWith('USDC')) return cfg
   }
   return null
 }
@@ -254,6 +317,190 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
 
     return reply.send(status)
+  })
+
+  // ── POST /send — Plain transfer (asset/recipient naming convention) ─────────
+
+  app.post<{ Body: SendBody }>('/send', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const { asset, recipient, amount } = request.body
+
+    // 1. Validate inputs
+    if (!asset || !SUPPORTED_ASSETS.includes(asset as SendAsset)) {
+      return reply.code(400).send({
+        error: 'asset must be one of: ETH, USDC',
+        supported: SUPPORTED_ASSETS,
+      })
+    }
+    if (!recipient || !isValidAddress(recipient)) {
+      return reply.code(400).send({ error: 'Valid recipient address is required' })
+    }
+    if (!amount || typeof amount !== 'string' || isNaN(Number(amount)) || Number(amount) <= 0) {
+      return reply.code(400).send({ error: 'amount must be a positive number' })
+    }
+
+    // 2. Resolve asset to token config
+    const tokenConfig = resolveAsset(agent.chain_id, asset)
+    if (!tokenConfig) {
+      return reply.code(400).send({ error: `Unsupported asset ${asset} on chain ${agent.chain_id}` })
+    }
+
+    const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
+
+    // 3. Convert human amount to raw units
+    let amountRaw: bigint
+    try {
+      amountRaw = ethers.parseUnits(amount, tokenConfig.decimals)
+    } catch {
+      return reply.code(400).send({ error: `Invalid amount for ${tokenConfig.symbol}` })
+    }
+
+    if (amountRaw <= 0n) {
+      return reply.code(400).send({ error: 'amount must be greater than zero' })
+    }
+
+    // 4. Policy check: agent must have this token configured
+    const dbAllowance = await pool.query<{ allowance_amount: string }>(
+      `SELECT allowance_amount FROM agent_allowances
+       WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
+      [agent.id, tokenAddress],
+    )
+    if (dbAllowance.rows.length === 0) {
+      return reply.code(403).send({
+        error: `Agent is not configured for ${tokenConfig.symbol} transfers`,
+      })
+    }
+
+    // 5. On-chain allowance check
+    let onChainAllowance
+    try {
+      onChainAllowance = await getTokenAllowance(
+        agent.chain_id,
+        agent.safe_address,
+        agent.delegate_address,
+        tokenAddress,
+      )
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to read on-chain allowance',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    const effective = computeEffectiveAllowance(onChainAllowance)
+
+    // 5a. Queue for approval when amount exceeds remaining on-chain allowance
+    if (amountRaw > effective.remaining) {
+      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const approvalReason =
+        `Exceeds remaining allowance (${amount} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
+
+      const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
+        `INSERT INTO approval_requests (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, reason, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
+          NOW() + interval '24 hours')
+        RETURNING id, status, expires_at`,
+        [
+          agent.id,
+          agent.user_id,
+          agent.safe_address,
+          agent.chain_id,
+          tokenConfig.symbol,
+          tokenAddress,
+          recipient.toLowerCase(),
+          amountRaw.toString(),
+          amount,
+          approvalReason,
+        ],
+      )
+
+      const approval = approvalResult.rows[0]
+      return reply.code(202).send({
+        payment_id: approval.id,
+        kind: 'approval_request',
+        status: 'pending_approval',
+        phase: AgentPaymentPhase.UserApprovalRequired,
+        next_action: AgentPaymentNextAction.WaitForUserApproval,
+        message: `Transfer of ${amount} ${tokenConfig.symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
+        remaining: remainingHuman,
+        requested: amount,
+        asset,
+        expires_at: approval.expires_at,
+      })
+    }
+
+    // 6. Generate the AllowanceModule transfer hash
+    let signHash: string
+    try {
+      signHash = await generateTransferHash(
+        agent.chain_id,
+        agent.safe_address,
+        tokenAddress,
+        recipient,
+        amountRaw,
+        ZERO_ADDRESS,
+        0n,
+        onChainAllowance.nonce,
+      )
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to generate transfer hash',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    // 7. Store the payment intent
+    const result = await pool.query<SendPaymentIntentRow>(
+      `INSERT INTO payment_intents (
+        agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+        to_address, amount_raw, amount_human, delegate_address,
+        allowance_nonce, sign_hash, status, expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
+        NOW() + interval '10 minutes')
+      RETURNING id, status, expires_at`,
+      [
+        agent.id,
+        agent.user_id,
+        agent.safe_address,
+        agent.chain_id,
+        tokenConfig.symbol,
+        tokenAddress,
+        recipient.toLowerCase(),
+        amountRaw.toString(),
+        amount,
+        agent.delegate_address,
+        onChainAllowance.nonce,
+        signHash,
+      ],
+    )
+
+    const intent = result.rows[0]
+
+    return reply.code(201).send({
+      payment_id: intent.id,
+      status: intent.status,
+      expires_at: intent.expires_at,
+      asset,
+      amount,
+      recipient: recipient.toLowerCase(),
+      sign_data: {
+        hash: signHash,
+        components: {
+          safe: agent.safe_address,
+          token: tokenAddress,
+          to: recipient.toLowerCase(),
+          amount: amountRaw.toString(),
+          payment_token: ZERO_ADDRESS,
+          payment: '0',
+          nonce: onChainAllowance.nonce,
+        },
+        instructions:
+          'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
+          'The signature must be 65 bytes: r (32) + s (32) + v (1), where v is 27 or 28.',
+      },
+    })
   })
 
   app.post<{ Body: AuthorizeBody }>('/authorize', async (request, reply) => {
@@ -375,14 +622,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       })
 
       if (!evidence) {
-        return reply.code(404).send({ error: 'Payment intent not found' })
+        return reply.code(404).send({ error: 'Payment not found' })
       }
 
       return reply.code(202).send({ evidence: mapEvidence(evidence) })
     } catch (err) {
       const marker = err instanceof Error ? err.message : String(err)
       if (marker === 'payment_not_confirmed') {
-        return reply.code(409).send({ error: 'Evidence requires a confirmed payment intent' })
+        return reply.code(409).send({ error: 'Evidence requires a confirmed payment' })
       }
       if (marker === 'tx_hash_mismatch') {
         return reply.code(409).send({ error: 'txHash does not match payment intent' })
@@ -445,7 +692,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
 
     const paymentResult = await pool.query<ReconciliationPaymentRow>(
-      `SELECT id, user_id, tx_hash, status, payment_rail, source,
+      `SELECT 'payment_intent'::TEXT AS kind,
+              id, user_id, tx_hash, status, payment_rail, source,
               payment_resource_url, x402_resource_url,
               merchant_address, x402_merchant_address,
               machine_challenge_id, machine_idempotency_key, x402_idempotency_key
@@ -454,14 +702,29 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
        LIMIT 1`,
       [paymentId, agent.id],
     )
-    const payment = paymentResult.rows[0]
+    let payment = paymentResult.rows[0]
     if (!payment) {
-      return reply.code(404).send({ error: 'Payment intent not found' })
+      const approvalResult = await pool.query<ReconciliationPaymentRow>(
+        `SELECT 'approval_request'::TEXT AS kind,
+                id, user_id, tx_hash, status, payment_rail, source,
+                payment_resource_url, x402_resource_url,
+                merchant_address, NULL::TEXT AS x402_merchant_address,
+                machine_challenge_id, machine_idempotency_key, NULL::TEXT AS x402_idempotency_key
+         FROM approval_requests
+         WHERE id = $1 AND agent_id = $2
+         LIMIT 1`,
+        [paymentId, agent.id],
+      )
+      payment = approvalResult.rows[0]
+    }
+    if (!payment) {
+      return reply.code(404).send({ error: 'Payment not found' })
     }
 
-    if (payment.status !== 'confirmed' || !payment.tx_hash) {
+    const expectedStatus = payment.kind === 'approval_request' ? 'executed' : 'confirmed'
+    if (payment.status !== expectedStatus || !payment.tx_hash) {
       return reply.code(409).send({
-        error: 'Reconciliation events require a confirmed payment intent',
+        error: 'Reconciliation events require a confirmed payment',
         status: payment.status,
       })
     }
@@ -475,14 +738,18 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(409).send({ error: 'rail does not match payment intent' })
     }
 
-    const result = await pool.query<{ id: string; status: string; created_at: string }>(
+    const paymentIntentId = payment.kind === 'payment_intent' ? payment.id : null
+    const approvalRequestId = payment.kind === 'approval_request' ? payment.id : null
+    const conflictColumn = payment.kind === 'approval_request' ? 'approval_request_id' : 'payment_intent_id'
+
+    const result = await pool.query<ReconciliationEventRow>(
       `INSERT INTO machine_payment_reconciliation_events (
-        agent_id, user_id, payment_intent_id, rail, event_type, tx_hash,
+        agent_id, user_id, payment_intent_id, approval_request_id, rail, event_type, tx_hash,
         resource_url, merchant_address, machine_challenge_id, machine_idempotency_key,
         reason, details
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      ON CONFLICT (payment_intent_id, event_type)
-        WHERE payment_intent_id IS NOT NULL
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      ON CONFLICT (${conflictColumn}, event_type)
+        WHERE ${conflictColumn} IS NOT NULL
       DO UPDATE SET
         tx_hash = EXCLUDED.tx_hash,
         resource_url = EXCLUDED.resource_url,
@@ -493,11 +760,13 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         details = EXCLUDED.details,
         status = 'open',
         updated_at = NOW()
+      WHERE machine_payment_reconciliation_events.status <> 'resolved'
       RETURNING id, status, created_at`,
       [
         agent.id,
         payment.user_id,
-        payment.id,
+        paymentIntentId,
+        approvalRequestId,
         rail,
         eventType,
         payment.tx_hash.toLowerCase(),
@@ -510,7 +779,21 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       ],
     )
 
-    const event = result.rows[0]
+    let event = result.rows[0]
+    if (!event) {
+      const existingResult = await pool.query<ReconciliationEventRow>(
+        `SELECT id, status, created_at
+         FROM machine_payment_reconciliation_events
+         WHERE ${conflictColumn} = $1
+           AND agent_id = $2
+           AND event_type = $3
+         LIMIT 1`,
+        [payment.id, agent.id, eventType],
+      )
+      event = existingResult.rows[0]
+    }
+    if (!event) throw new Error('reconciliation_event_conflict_not_found')
+
     return reply.code(202).send({
       event_id: event.id,
       status: event.status,

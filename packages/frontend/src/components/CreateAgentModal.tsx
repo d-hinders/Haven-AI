@@ -5,8 +5,6 @@ import { usePublicClient } from 'wagmi'
 import { type Address, parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAddress } from 'viem/accounts'
 import {
-  buildAgentSetupTx,
-  isModuleEnabled,
   RESET_PERIODS,
   type AllowanceSetup,
 } from '@/lib/allowance-module'
@@ -14,17 +12,11 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { validateMoneyInput } from '@/lib/money-input'
 import OnchainActionGate from './OnchainActionGate'
-import {
-  getSafeNonce,
-  signSafeTx,
-  executeSafeTx,
-  proposeSafeTx,
-  getSafeTxHash,
-  getChainTokens,
-} from '@/lib/safe-tx'
+import { getChainTokens } from '@/lib/safe-tx'
+import { executeAgentSetup } from '@/lib/agent-setup'
 import { truncate } from '@/lib/format'
 import { buildHandoff, type HandoffInput } from '@/lib/agent-handoff'
 import { buildAgentCredential, type AgentCredentialJson } from '@/lib/agent-credential'
@@ -133,12 +125,12 @@ export default function CreateAgentModal({
     userSafes.find((s) => s.id === selectedSafeId) ?? null
   const safeAddress = selectedSafe?.safe_address ?? propSafeAddress ?? ''
   const safeId = selectedSafe?.id ?? propSafeId ?? null
-  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? 100
+  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
 
   // Self-fetch Safe details from the selected Safe so the modal owns its
   // execution context — caller doesn't need to refetch when the user picks a
   // different Safe.
-  const { details: safeDetails } = useSafeDetails(safeAddress || null)
+  const { details: safeDetails } = useSafeDetails(safeAddress || null, { chainId })
 
   const chainTokens = getChainTokens(chainId)
   const tokenOptions = Object.entries(chainTokens).map(([symbol, cfg]) => ({
@@ -369,8 +361,21 @@ export default function CreateAgentModal({
   // ── Step: Execute ──────────────────────────────────────
 
   async function handleExecute() {
-    if (!publicClient || !signer || !safeDetails)
+    // Surface a clear error rather than silently doing nothing when a
+    // prerequisite becomes unavailable between render and click (e.g. wallet
+    // disconnected, RPC client not yet initialised for the selected chain).
+    if (!publicClient || !signer || !safeDetails) {
+      setStep('executing')
+      setExecStatus('error')
+      setExecError(
+        !signer
+          ? 'No wallet connected. Connect a wallet or passkey and try again.'
+          : !publicClient
+            ? 'No RPC client for this chain. Refresh the page and try again.'
+            : 'Account details are still loading. Wait a moment and try again.',
+      )
       return
+    }
 
     setStep('executing')
     setExecError(null)
@@ -378,14 +383,6 @@ export default function CreateAgentModal({
     setAuthorityResult(null)
 
     try {
-      // 1. Check if module is enabled
-      setExecStatus('checking')
-      const moduleEnabled = await isModuleEnabled(
-        publicClient,
-        safeAddress as Address,
-      )
-
-      // 2. Build the setup allowances
       const setupAllowances: AllowanceSetup[] = allowances.map((a) => ({
         token: (a.tokenAddress ?? '0x0000000000000000000000000000000000000000') as Address,
         tokenSymbol: a.tokenSymbol,
@@ -393,64 +390,39 @@ export default function CreateAgentModal({
         resetTimeMin: a.resetTimeMin,
       }))
 
-      // 3. Get nonce and build batched tx
-      const nonce = await getSafeNonce(publicClient, safeAddress as Address)
-      const safeTx = buildAgentSetupTx(
-        safeAddress as Address,
-        delegateAddress as Address,
-        setupAllowances,
-        !moduleEnabled,
-        nonce,
-      )
-
-      // 4. Sign
-      setExecStatus('signing')
-      const signature = await signSafeTx(
+      const result = await executeAgentSetup({
         signer,
-        safeAddress as Address,
-        safeTx,
+        publicClient,
+        safeAddress: safeAddress as Address,
+        delegateAddress: delegateAddress as Address,
+        allowances: setupAllowances,
         chainId,
-      )
+        threshold: safeDetails.threshold ?? 1,
+        onStatus: setExecStatus,
+      })
 
-      const threshold = safeDetails.threshold ?? 1
-
-      let completedAuthority: AuthorityResult
-      if (threshold <= 1) {
-        // Single-owner: execute directly
-        setExecStatus('executing')
-        const result = await executeSafeTx(
-          signer,
-          publicClient,
-          safeAddress as Address,
-          safeTx,
-          signature,
-          chainId,
-        )
+      // Receipt timeout: the on-chain tx was broadcast and may still land.
+      // Record it as established authority and route the retry to a backend
+      // save-only — re-running would rebuild the whole batch with a fresh nonce
+      // and double-apply (or collide) once the original confirms.
+      if (result.status === 'receipt_timeout') {
         setTxHash(result.txHash)
-        completedAuthority = {
-          status: 'confirmed',
-          txHash: result.txHash,
-        }
-      } else {
-        // Multi-sig: propose
-        setExecStatus('executing')
-        const safeTxHash = getSafeTxHash(safeAddress as Address, safeTx, chainId)
-        await proposeSafeTx(
-          safeAddress as Address,
-          safeTx,
-          safeTxHash,
-          signature,
-          signer.address,
-          chainId,
+        setAuthorityResult({ status: 'confirmed', txHash: result.txHash })
+        setExecError(
+          `Transaction submitted but not yet confirmed after 2 minutes. ` +
+            `It may still land — check the block explorer for ${result.txHash}`,
         )
-        setTxHash(safeTxHash)
-        completedAuthority = {
-          status: 'proposed',
-          txHash: safeTxHash,
-        }
+        setExecStatus('error')
+        return
       }
 
-      // 5. Save agent to Haven backend
+      setTxHash(result.txHash)
+      const completedAuthority: AuthorityResult = {
+        status: result.status,
+        txHash: result.txHash,
+      }
+
+      // Save agent to Haven backend
       setExecStatus('saving')
       setAuthorityResult(completedAuthority)
       await saveAgentToHaven(completedAuthority)
@@ -462,10 +434,6 @@ export default function CreateAgentModal({
             ? 'Face ID or Touch ID was cancelled'
             : 'Transaction rejected in wallet',
         )
-      } else if (message.includes('not yet confirmed after 2 minutes')) {
-        // Transaction submitted but receipt timed out — surface the tx hash so
-        // the user can track it on the block explorer and retry saving later.
-        setExecError(message)
       } else if (message.includes('would revert on-chain')) {
         // Simulation pre-flight detected a revert — avoid showing the raw
         // technical message; give the user a clear actionable hint instead.
@@ -475,6 +443,18 @@ export default function CreateAgentModal({
       } else if (message.includes('Could not verify the transaction')) {
         // RPC/network error during simulation pre-flight.
         setExecError('Network error — check your connection and try again.')
+      } else if (
+        message.includes('RPC Request failed') ||
+        message.includes('fetch failed') ||
+        message.includes('Failed to fetch') ||
+        message.includes('network error') ||
+        message.includes('NetworkError')
+      ) {
+        // Raw RPC/network failure from any step (module check, nonce fetch, etc.)
+        // — surface a human-readable message instead of the viem internal.
+        setExecError(
+          'Could not reach the network. Check your connection and that your wallet is on the correct chain, then try again.',
+        )
       } else {
         setExecError(message)
       }
@@ -503,13 +483,17 @@ export default function CreateAgentModal({
     let message = 'Setup failed'
     if (err instanceof Error) {
       message = err.message
+      // Walk the cause chain — deeper errors are usually more specific.
       let cause = (err as { cause?: unknown }).cause
       while (cause instanceof Error) {
         if (cause.message) message = cause.message
         cause = (cause as { cause?: unknown }).cause
       }
+      // Prefer shortMessage only when it adds information over the raw message.
+      // Viem sets shortMessage to "RPC Request failed." for network errors which
+      // is less informative than the underlying message, so we skip it in that case.
       const short = (err as { shortMessage?: string }).shortMessage
-      if (short) message = short
+      if (short && !short.includes('RPC Request failed')) message = short
     }
     return message
   }
@@ -1075,7 +1059,7 @@ export default function CreateAgentModal({
                     </p>
                     {!backendSaveFailed && execError?.includes('not yet confirmed after 2 minutes') && txHash && (
                       <a
-                        href={`${getChainConfig(chainId ?? 100).explorerUrl}/tx/${txHash}`}
+                        href={`${getChainConfig(chainId ?? DEFAULT_CHAIN_ID).explorerUrl}/tx/${txHash}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-2 inline-block text-xs text-[var(--v2-brand)] underline underline-offset-2"
@@ -1104,7 +1088,10 @@ export default function CreateAgentModal({
                     )}
                   </div>
                   <div className="flex gap-3 pt-2">
-                    {backendSaveFailed ? (
+                    {backendSaveFailed || authorityResult ? (
+                      // On-chain authority already exists (save failed, or the
+                      // tx was submitted but its receipt timed out). Retry must
+                      // only re-save to Haven — never re-run the on-chain batch.
                       <>
                         <Button variant="ghost" onClick={handleClose} className="flex-1">
                           Close

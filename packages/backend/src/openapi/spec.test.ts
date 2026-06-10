@@ -26,6 +26,7 @@ const ROUTES_DIR = join(__dirname, '..', 'routes')
  */
 const AGENT_PAYMENT_ROUTE_FILES: Array<{ file: string; prefix: string }> = [
   { file: 'agents.ts', prefix: '/agents' },
+  { file: 'agent-connection-setups.ts', prefix: '/agent-connection-setups' },
   { file: 'payments.ts', prefix: '/payments' },
   { file: 'x402.ts', prefix: '/x402' },
   { file: 'machine-payments.ts', prefix: '/machine-payments' },
@@ -193,6 +194,12 @@ describe('openapiSpec', () => {
     expect(openapiSpec.openapi).toBe('3.1.0')
     expect(openapiSpec.paths).toHaveProperty('/openapi.json')
     expect(openapiSpec.paths).toHaveProperty('/agents')
+    expect(openapiSpec.paths).toHaveProperty('/agent-connection-setups')
+    expect(openapiSpec.paths).toHaveProperty('/agent-connection-setups/resolve')
+    expect(openapiSpec.paths).toHaveProperty('/agent-connection-setups/register')
+    expect(openapiSpec.paths).toHaveProperty('/agent-connection-setups/{setupId}')
+    expect(openapiSpec.paths).toHaveProperty('/agent-connection-setups/{setupId}/install-status')
+    expect(openapiSpec.paths).toHaveProperty('/agent-connection-setups/{setupId}/cancel')
     expect(openapiSpec.paths).toHaveProperty('/agents/{id}')
     expect(openapiSpec.paths).toHaveProperty('/agents/{id}/revoke')
     expect(openapiSpec.paths).toHaveProperty('/payments')
@@ -216,6 +223,49 @@ describe('openapiSpec', () => {
     expect(openapiSpec.components.schemas.AgentPaymentRail.enum).toEqual(
       Object.values(AgentPaymentRail),
     )
+  })
+
+  it('documents allowance input constraints for owner-created agent rules', () => {
+    const createAgentAllowance =
+      openapiSpec.components.schemas.CreateAgentRequest.properties.allowances.items
+    const setupAllowance =
+      openapiSpec.components.schemas.AgentConnectionAllowanceInput
+
+    for (const schema of [createAgentAllowance, setupAllowance]) {
+      expect(schema.properties.token_symbol).toMatchObject({
+        minLength: 1,
+        maxLength: 20,
+      })
+      expect(schema.properties.allowance_amount).toMatchObject({
+        type: 'string',
+        pattern: '^[0-9]+$',
+      })
+      expect(schema.properties.reset_period_min).toMatchObject({
+        minimum: 0,
+        maximum: 65535,
+      })
+    }
+  })
+
+  it('documents reconciliation event response statuses', () => {
+    const responseSchema =
+      openapiSpec.components.schemas.MachinePaymentReconciliationEventResponse
+
+    expect(responseSchema.required).toContain('status')
+    expect(responseSchema.properties.status).toMatchObject({
+      type: 'string',
+      enum: ['open', 'resolved'],
+    })
+  })
+
+  it('documents machine payment evidence proof statuses', () => {
+    const receiptSchema = openapiSpec.components.schemas.MachinePaymentReceipt
+
+    expect(receiptSchema.required).toContain('proof_status')
+    expect(receiptSchema.properties.proof_status).toMatchObject({
+      type: 'string',
+      enum: ['payment_confirmed', 'merchant_response_observed', 'protocol_receipt_attached'],
+    })
   })
 
   it('documents the non-custodial authority boundary in security schemes and resume state', () => {

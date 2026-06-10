@@ -7,7 +7,7 @@ import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
 import { useActiveSigner } from '@/lib/signer'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainTokens, type SendParams } from '@/lib/safe-tx'
-import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { truncate, isValidAddress } from '@/lib/format'
 import { exceedsRawBalance, validateMoneyInput } from '@/lib/money-input'
 import type { BalanceItem, SafeDetails } from '@/types/transactions'
@@ -24,6 +24,7 @@ import {
 } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 interface SendSafeOption {
   id: string
@@ -143,7 +144,7 @@ export default function SendModal({
   contacts = [],
   contactsError = null,
   resolveAddress,
-  chainId = 100,
+  chainId = DEFAULT_CHAIN_ID,
   safeOptions = [],
   selectedSafeOptionId,
   onSelectSafeOption,
@@ -153,6 +154,9 @@ export default function SendModal({
   const { toast } = useToast()
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
+  // Freeze the page behind the modal so the (often large) account page
+  // isn't continuously laid out and composited while the modal is open.
+  useBodyScrollLock(open)
   const safeAddressForHooks = safeAddress as Address
   const { status, txHash, error, send, reset } = useSendTransaction({
     safeAddress: safeAddressForHooks,

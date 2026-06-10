@@ -2,10 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import {
-  fetchX402ActivityTransactions,
-  mergeTransactionsWithX402Activity,
-} from '@/lib/x402-activity-transactions'
 import type {
   AggregatedTransaction,
   TransactionFilterState,
@@ -42,6 +38,34 @@ function toQueryString(
   return params.toString()
 }
 
+function transactionIdentityKey(tx: AggregatedTransaction): string {
+  return [
+    tx.chainId,
+    tx.safeId,
+    tx.hash.toLowerCase(),
+    tx.type,
+    tx.from.toLowerCase(),
+    tx.to.toLowerCase(),
+    tx.value,
+    tx.tokenAddress?.toLowerCase() ?? 'native',
+  ].join(':')
+}
+
+function appendUniqueTransactions(
+  existing: AggregatedTransaction[],
+  next: AggregatedTransaction[],
+): AggregatedTransaction[] {
+  const seen = new Set(existing.map(transactionIdentityKey))
+  const merged = [...existing]
+  for (const tx of next) {
+    const key = transactionIdentityKey(tx)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(tx)
+  }
+  return merged
+}
+
 export function useTransactionsFeed(
   filters: TransactionFilterState,
   limit = 25,
@@ -65,6 +89,7 @@ export function useTransactionsFeed(
   const fetchPage = useCallback(
     async (offset: number, append: boolean, fresh: boolean) => {
       const requestId = ++requestIdRef.current
+      const filtersForRequest = filtersRef.current
 
       setError(null)
       if (append) {
@@ -77,22 +102,14 @@ export function useTransactionsFeed(
 
       try {
         const data = await api.get<TransactionsFeedResponse>(
-          `/transactions?${toQueryString(filtersRef.current, offset, limit, fresh)}`,
+          `/transactions?${toQueryString(filtersForRequest, offset, limit, fresh)}`,
         )
-        const x402Transactions = offset === 0
-          ? await fetchX402ActivityTransactions(filtersRef.current)
-          : []
-
         if (requestId !== requestIdRef.current) return
-
-        const pageTransactions = offset === 0
-          ? mergeTransactionsWithX402Activity(data.transactions, x402Transactions)
-          : data.transactions
 
         setTransactions((prev) =>
           append
-            ? mergeTransactionsWithX402Activity(prev, pageTransactions)
-            : pageTransactions,
+            ? appendUniqueTransactions(prev, data.transactions)
+            : data.transactions,
         )
         setTotal(data.total)
         setHasMore(data.hasMore)

@@ -39,6 +39,7 @@ describe('buildRuntimeSnippets — inline mode', () => {
       'python',
       'sdk-cli',
       'vscode',
+      'vscode-insiders',
       'windsurf',
     ])
   })
@@ -95,12 +96,28 @@ describe('buildRuntimeSnippets — inline mode', () => {
     expect(config.servers.haven.env.HAVEN_API_KEY).toBe('sk_agent_TESTKEY_NEVERREAL')
   })
 
+  it('VS Code inline snippet guidance references the correct Command Palette label', () => {
+    const snippet = buildRuntimeSnippet({ credential: credential() }, 'vscode', 'inline')
+    expect(snippet.guidance).toContain('MCP: Open User Configuration')
+    expect(snippet.guidance).not.toContain('MCP: Open User Settings')
+  })
+
   it('Python snippet has python language and pip install comment', () => {
     const snippet = buildRuntimeSnippet({ credential: credential() }, 'python', 'inline')
     expect(snippet.language).toBe('python')
     expect(snippet.code).toContain('pip install haven-ai-sdk')
     expect(snippet.code).toContain('HavenClient')
     expect(snippet.code).toContain('HAVEN_API_KEY')
+  })
+
+  it('env-based SDK examples do not echo raw credential values in comments', () => {
+    for (const id of ['sdk-cli', 'python'] as const) {
+      const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
+      expect(snippet.code).toContain('HAVEN_API_KEY')
+      expect(snippet.code).toContain('HAVEN_DELEGATE_KEY')
+      expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+      expect(snippet.code).not.toContain('0xPRIVATEKEY_NEVERREAL')
+    }
   })
 
   it('MCP-based snippets include a consentNote; non-MCP do not', () => {
@@ -183,5 +200,19 @@ describe('buildRuntimeSnippets — file mode', () => {
     expect(snippet.code).toContain(PATH)
     expect(snippet.code).toContain('json.load')
     expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+  })
+
+  it('SDK/CLI file-mode snippet reads the credential file without raw secrets', () => {
+    const snippet = buildRuntimeSnippet(
+      { credential: credential(), credentialFilePath: PATH },
+      'sdk-cli',
+      'file',
+    )
+    expect(snippet.code).toContain(PATH)
+    expect(snippet.code).toContain('readFile')
+    expect(snippet.code).toContain('cred.api_key')
+    expect(snippet.code).toContain('cred.delegate_key')
+    expect(snippet.code).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+    expect(snippet.code).not.toContain('0xPRIVATEKEY_NEVERREAL')
   })
 })

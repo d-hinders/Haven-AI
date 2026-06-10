@@ -118,6 +118,8 @@ Primary surfaces:
 
 Intent: make local and CI checks explicit, non-interactive, and consistent.
 
+Note: the agentic workflow audit is a docs, prompt, and PR-template precursor to this phase. It should not change package scripts, lockfiles, or CI behavior. Keep package and workflow-enforcement changes in a separate Phase 1 PR.
+
 Changes:
 
 - Add package-level `typecheck` scripts for backend and frontend.

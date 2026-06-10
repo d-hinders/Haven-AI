@@ -9,6 +9,7 @@ import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import {
   getTokenAllowance,
+  getTokenBalance,
   computeEffectiveAllowance,
   generateTransferHash,
   recoverSigner,
@@ -23,6 +24,7 @@ import {
 // ── Constants ─────────────────────────────────────────────────────
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -63,6 +65,10 @@ interface X402ExpectedContext {
 
 function isValidAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
+}
+
+function isPositiveDecimalAtomicAmount(value: string): boolean {
+  return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n
 }
 
 /**
@@ -106,6 +112,14 @@ async function signX402ExpectedContext(context: X402ExpectedContext) {
     signature: await wallet.signMessage(message),
     signer: wallet.address,
   }
+}
+
+async function currentPaymentIntentStatus(id: string, agent: AgentContext): Promise<string> {
+  const current = await pool.query<{ status: string }>(
+    `SELECT status FROM payment_intents WHERE id = $1 AND agent_id = $2`,
+    [id, agent.id],
+  )
+  return current.rows[0]?.status ?? 'unknown'
 }
 
 /** Resolve a token from its contract address for a specific chain. */
@@ -210,6 +224,11 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     if (!amount || typeof amount !== 'string') {
       return reply.code(400).send({ error: 'Amount (atomic units) is required' })
     }
+    if (!isPositiveDecimalAtomicAmount(amount)) {
+      return reply.code(400).send({
+        error: 'Invalid amount — must be a positive decimal integer in atomic units',
+      })
+    }
     if (!asset || typeof asset !== 'string') {
       return reply.code(400).send({ error: 'Asset (token address) is required' })
     }
@@ -256,15 +275,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
 
     // 3. Parse amount (already in atomic units from x402)
-    let amountRaw: bigint
-    try {
-      amountRaw = BigInt(amount)
-    } catch {
-      return reply.code(400).send({ error: 'Invalid amount — must be integer atomic units' })
-    }
-    if (amountRaw <= 0n) {
-      return reply.code(400).send({ error: 'Amount must be greater than zero' })
-    }
+    const amountRaw = BigInt(amount)
 
     // Human-readable amount for storage
     const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
@@ -275,6 +286,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
          FROM payment_intents
          WHERE agent_id = $1
            AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
+           AND COALESCE(payment_rail, source) = 'x402'
            AND status NOT IN ('failed', 'expired')
          ORDER BY created_at DESC
          LIMIT 1`,
@@ -321,14 +333,27 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
             refreshedAllowance.nonce,
           )
 
-          await pool.query(
+          const refreshedResult = await pool.query<{ id: string }>(
             `UPDATE payment_intents
              SET allowance_nonce = $1,
                  sign_hash = $2,
                  expires_at = NOW() + interval '10 minutes'
-             WHERE id = $3`,
-            [existingNonce, existingHash, existing.id],
+             WHERE id = $3
+               AND agent_id = $4
+               AND COALESCE(payment_rail, source) = 'x402'
+               AND status = 'pending_signature'
+               AND tx_hash IS NULL
+             RETURNING id`,
+            [existingNonce, existingHash, existing.id, agent.id],
           )
+          if (refreshedResult.rows.length === 0) {
+            const status = await currentPaymentIntentStatus(existing.id, agent)
+            return reply.code(409).send({
+              payment_id: existing.id,
+              status,
+              error: `x402 payment is ${status}, expected pending_signature`,
+            })
+          }
         }
 
         const x402ExpectedAuth = await signX402ExpectedContext({
@@ -449,6 +474,75 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     }
 
     const effective = computeEffectiveAllowance(onChainAllowance)
+
+    // Pre-flight: read the delegate's on-chain balance for this token before
+    // doing anything that creates state. Even with a full Safe AllowanceModule
+    // top-up the merchant payment cannot settle unless the delegate ends up
+    // holding the amount, so the real coverage is
+    // `delegateBalance + remainingAllowance`. If that's short, return a
+    // structured `insufficient_funds` failure with no payment intent or
+    // approval row — there is no approval the wallet owner could grant that
+    // would make this payment succeed; the originating Safe needs more funds
+    // or the agent's per-token allowance needs to be raised.
+    //
+    // Note: the existing over-budget branch below treats `amount > remaining`
+    // as approval-required. That assumes the delegate's existing balance is
+    // zero. The pre-flight short-circuits the unrecoverable case but does
+    // not change the approval-required path — small overages still queue.
+    let delegateBalance: bigint
+    try {
+      delegateBalance = await getTokenBalance(
+        agent.chain_id,
+        agent.delegate_address,
+        tokenAddress,
+      )
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to read delegate token balance',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    const totalCoverage = delegateBalance + effective.remaining
+    if (amountRaw > totalCoverage) {
+      const shortfallRaw = amountRaw - totalCoverage
+      const balanceHuman = ethers.formatUnits(delegateBalance, tokenConfig.decimals)
+      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const coverageHuman = ethers.formatUnits(totalCoverage, tokenConfig.decimals)
+      const shortfallHuman = ethers.formatUnits(shortfallRaw, tokenConfig.decimals)
+      return reply.code(422).send({
+        error:
+          `Insufficient funds to pay ${amountHuman} ${tokenConfig.symbol}: ` +
+          `delegate balance ${balanceHuman} + remaining allowance ${remainingHuman} ` +
+          `= ${coverageHuman} ${tokenConfig.symbol}, short by ${shortfallHuman}. ` +
+          'Fund the Safe or raise the agent allowance and retry.',
+        error_code: 'insufficient_funds',
+        phase: AgentPaymentPhase.InsufficientFunds,
+        next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+        rail: AgentPaymentRail.X402,
+        chain_id: agent.chain_id,
+        token: tokenConfig.symbol,
+        asset: tokenAddress,
+        network,
+        amount: amountHuman,
+        amount_atomic: amountRaw.toString(),
+        delegate_balance: balanceHuman,
+        delegate_balance_atomic: delegateBalance.toString(),
+        remaining_allowance: remainingHuman,
+        remaining_allowance_atomic: effective.remaining.toString(),
+        shortfall: shortfallHuman,
+        shortfall_atomic: shortfallRaw.toString(),
+        resource_url: url,
+        merchant_address: merchantPayTo?.toLowerCase() ?? null,
+        // Intentionally not echoing the agent's delegate or safe address here.
+        // The agent holds both via its credential, and the delegate EOA is
+        // the only entity that briefly holds liquid funds during the x402
+        // hot-wallet leg — leaking it through a structured pre-flight error
+        // (which agent runtimes may log, persist, or relay) is unnecessary
+        // surveillance surface for no agent benefit.
+      })
+    }
+
     if (amountRaw > effective.remaining) {
       const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
       const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''
@@ -585,6 +679,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
          FROM payment_intents
          WHERE agent_id = $1
            AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
+           AND COALESCE(payment_rail, source) = 'x402'
            AND status NOT IN ('failed', 'expired')
          ORDER BY created_at DESC
          LIMIT 1`,
@@ -623,10 +718,25 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       // permanently stuck (idempotency check blocks retry on any status not in
       // ('failed','expired')). Instead we keep the record in 'pending_signature' until
       // execution succeeds, then flip it to 'confirmed' in one atomic write.
-      await pool.query(
-        `UPDATE payment_intents SET signature = $1, signed_at = NOW() WHERE id = $2`,
-        [signature, intent.id],
+      const signatureResult = await pool.query<{ id: string }>(
+        `UPDATE payment_intents
+         SET signature = $1, signed_at = NOW()
+         WHERE id = $2
+           AND agent_id = $3
+           AND COALESCE(payment_rail, source) = 'x402'
+           AND status = 'pending_signature'
+           AND tx_hash IS NULL
+         RETURNING id`,
+        [signature, intent.id, agent.id],
       )
+      if (signatureResult.rows.length === 0) {
+        const status = await currentPaymentIntentStatus(intent.id, agent)
+        return reply.code(409).send({
+          payment_id: intent.id,
+          status,
+          error: 'Payment intent changed before execution',
+        })
+      }
 
       // Execute on-chain
       try {
@@ -647,7 +757,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           amountHuman,
         )
 
-        await pool.query(
+        const confirmedResult = await pool.query<{ id: string }>(
           `UPDATE payment_intents
            SET status = 'confirmed',
                tx_hash = $1,
@@ -655,9 +765,23 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
                confirmed_at = NOW(),
                usd_value = $3,
                eur_value = $4
-           WHERE id = $2`,
-          [txHash, intent.id, fiatValues.usd, fiatValues.eur],
+           WHERE id = $2
+             AND agent_id = $5
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND status = 'pending_signature'
+             AND tx_hash IS NULL
+           RETURNING id`,
+          [txHash, intent.id, fiatValues.usd, fiatValues.eur, agent.id],
         )
+
+        if (confirmedResult.rows.length === 0) {
+          const status = await currentPaymentIntentStatus(intent.id, agent)
+          return reply.code(409).send({
+            payment_id: intent.id,
+            status,
+            error: 'Payment intent changed after on-chain execution',
+          })
+        }
 
         await tryRecordMachinePaymentEvidenceBaseById(intent.id, agent.id, request.log)
 
@@ -679,8 +803,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err)
         await pool.query(
-          `UPDATE payment_intents SET status = 'failed', error_message = $1 WHERE id = $2`,
-          [errorMsg, intent.id],
+          `UPDATE payment_intents
+           SET status = 'failed', error_message = $1
+           WHERE id = $2
+             AND agent_id = $3
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND status = 'pending_signature'
+             AND tx_hash IS NULL`,
+          [errorMsg, intent.id, agent.id],
         )
         return reply.code(502).send({
           success: false,

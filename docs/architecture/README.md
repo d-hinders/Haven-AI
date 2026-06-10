@@ -1,7 +1,7 @@
 # Haven — Architecture Diagrams
 
 Internal engineering reference for how identity, custody, and authority flow
-through Haven today. Each diagram is Mermaid in markdown (canonical) with
+through Haven today. Mermaid in markdown is canonical; some diagrams also have
 exported PNG and SVG alongside.
 
 | # | Diagram | Use when |
@@ -13,10 +13,13 @@ exported PNG and SVG alongside.
 | 5 | [Agent API OpenAPI Contract](05-agent-api-openapi.md) | Public OpenAPI surface for non-TypeScript agent integrators and external reviewers. |
 | 6 | [Hosted MCP Connect Flow & Edge-Signing Contract](06-hosted-mcp-connect-flow.md) | Designing/reviewing the hosted MCP server — the wire contract, the two-credential split, and the non-custodial rule that the delegate key never reaches Haven. |
 | 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |
+| 8 | [Connect Agent 2 Local-Key Pairing](08-connect-agent-2-local-key-pairing.md) | Planning/reviewing the staged setup flow where the local connector generates the agent key, Haven receives only the public signing address, and wallet approval activates agent rules. |
+| 9 | [Connect Agent 2 Rollout Closeout](09-connect-agent-2-rollout-closeout.md) | Final #237 rollout, recovery, sensitive-value, deterministic-coverage, and merge-readiness report for shipping Connect Agent 2 behind gates. |
 
 ## Regenerating exports
 
-Mermaid is the source of truth. Regenerate PNG/SVG after editing:
+Mermaid is the source of truth. Regenerate PNG/SVG after editing when the
+Mermaid CLI is available:
 
 ```sh
 for f in docs/architecture/0*-*.md; do
@@ -30,9 +33,11 @@ done
 
 ## Scope notes
 
-- POC state on **Gnosis Chain (id 100)**. Multi-chain is future work.
-- **API-key agents only.** A self-sign (EIP-191) agent path also exists in
-  the code but is intentionally excluded from these diagrams.
+- Current code supports **Gnosis Chain (id 100)** and **Base (id 8453)** for
+  Haven wallet/Safe flows where configured. Standard merchant x402 demos focus
+  on Base USDC.
+- **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
+  removed — it is no longer part of the codebase.)
 - Diagrams reflect what the code does, not the aspirational model in
   [CLAUDE.md](../../CLAUDE.md). Where they diverge (e.g. Safe ownership is not
   on-chain-verified at import; the delegate EOA is user-supplied, not

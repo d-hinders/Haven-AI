@@ -228,6 +228,12 @@ export interface CredentialIdentitySeed {
   agentId?: string
   /** Safe address from the credential file, used as a fallback. */
   safeAddress?: string
+  /** Delegate address from the credential file, used before live allowance metadata is available. */
+  delegateAddress?: string
+  /** Chain from the credential file, used as a fallback. */
+  chainId?: number
+  /** Intended agent budget from the setup flow, used before on-chain approval is visible. */
+  allowanceSummary?: readonly { token: string; amount: string; resetMinutes: number | null }[]
 }
 
 /**
@@ -246,10 +252,10 @@ export async function consentInputFromClient(
   seed: CredentialIdentitySeed,
   toolNames: readonly HavenMcpToolName[],
 ): Promise<ConsentInput> {
-  let allowanceSummary: ConsentInput['allowanceSummary'] = []
+  let allowanceSummary: ConsentInput['allowanceSummary'] = seed.allowanceSummary ?? []
   let safeAddress = seed.safeAddress
-  let delegateAddress: string | undefined
-  let chainId: number | undefined
+  let delegateAddress: string | undefined = seed.delegateAddress
+  let chainId: number | undefined = seed.chainId
 
   try {
     const summary = await haven.getAllowances()
@@ -263,7 +269,7 @@ export async function consentInputFromClient(
       delegateAddress = summary.delegateAddress
       chainId = typeof summary.chainId === 'number' ? summary.chainId : chainId
     }
-    allowanceSummary = list.map((a) => ({
+    const liveAllowanceSummary = list.map((a) => ({
       token: a.tokenSymbol ?? 'UNKNOWN',
       amount: a.onchain?.amount ?? a.configuredAmount ?? '0',
       resetMinutes:
@@ -273,6 +279,7 @@ export async function consentInputFromClient(
             ? a.resetPeriodMin
             : null,
     }))
+    allowanceSummary = liveAllowanceSummary
   } catch {
     // Identity falls back to what the credential file gave us.
   }

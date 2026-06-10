@@ -33,10 +33,11 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
-import { getExplorerUrl, getChainConfig } from '@/lib/chains'
+import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
@@ -105,6 +106,10 @@ function agentBudgetSummary(agent: Agent, chainId: number | null): string {
   return `${amount} ${allowance.token_symbol} ${formatResetPeriod(allowance.reset_period_min)}`
 }
 
+function agentAccessSummary(agent: Agent, chainId: number | null): string {
+  return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
+}
+
 export default function AccountDetailClient() {
   const params = useParams()
   const router = useRouter()
@@ -121,7 +126,7 @@ export default function AccountDetailClient() {
   // Find this Safe from user's list
   const safe = user?.safes?.find((s) => s.id === safeId)
   const safeAddress = safe?.safe_address ?? null
-  const chainId = safe?.chain_id ?? 100
+  const chainId = safe?.chain_id ?? DEFAULT_CHAIN_ID
 
   // Keep the active Safe in sync with the route. Runs as an effect so we
   // never call setState during render.
@@ -133,7 +138,10 @@ export default function AccountDetailClient() {
 
   const safeNamesByAddress = new Map<string, string>()
   for (const account of user?.safes ?? []) {
-    safeNamesByAddress.set(account.safe_address.toLowerCase(), account.name)
+    safeNamesByAddress.set(
+      `${account.safe_address.toLowerCase()}:${account.chain_id}`,
+      account.name,
+    )
   }
   const passkeyAddresses = new Set(
     passkeys
@@ -153,7 +161,7 @@ export default function AccountDetailClient() {
     loading: detailsLoading,
     error: detailsError,
     refetch: refetchDetails,
-  } = useSafeDetails(safeAddress)
+  } = useSafeDetails(safeAddress, { chainId })
 
   const {
     totalUsd,
@@ -162,13 +170,13 @@ export default function AccountDetailClient() {
     loading: portfolioLoading,
     error: portfolioError,
     refetch: refetchPortfolio,
-  } = usePortfolio(safeAddress)
+  } = usePortfolio(safeAddress, { chainId })
 
   const {
     balances,
     error: balancesError,
     refetch: refetchBalances,
-  } = useBalances(safeAddress)
+  } = useBalances(safeAddress, { chainId })
 
   const {
     transactions,
@@ -411,7 +419,7 @@ export default function AccountDetailClient() {
             </Link>
           </div>
           <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Connected agents can request payments from this Haven wallet when their status and agent budget allow it.
+            Agents can request payments from this Haven wallet when their status and agent budget allow it.
           </p>
         </div>
 
@@ -442,8 +450,12 @@ export default function AccountDetailClient() {
                   key={agent.id}
                   href={`/agents/${agent.id}`}
                   title={agent.name}
-                  subtitle={agentBudgetSummary(agent, chainId)}
-                  trailing={<StatusBadge tone={status.tone}>{status.label}</StatusBadge>}
+                  subtitle={agentAccessSummary(agent, chainId)}
+                  trailing={
+                    agent.status === 'active'
+                      ? undefined
+                      : <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                  }
                 />
               )
             })}
@@ -612,21 +624,29 @@ export default function AccountDetailClient() {
         ) : null}
       </div>
 
-      <SendModal
-        open={sendOpen && Boolean(safeAddress)}
-        onClose={() => setSendOpen(false)}
-        safeAddress={safeAddress ?? ''}
-        safeName={safe.name}
-        safeDetails={details}
-        balances={balances}
-        onSuccess={handleSendSuccess}
-        contacts={contacts}
-        contactsError={contactsError}
-        resolveAddress={resolveAddress}
-        chainId={chainId}
-        contextLoading={detailsLoading}
-        contextError={detailsError}
-      />
+      {/*
+        Mount the modal only while open so its wallet hooks
+        (useSendTransaction / useActiveSigner / useSafeOperationGate, each
+        backing a wagmi wallet-client subscription) don't run in the
+        background on every account page view.
+      */}
+      {sendOpen && safeAddress && (
+        <SendModal
+          open
+          onClose={() => setSendOpen(false)}
+          safeAddress={safeAddress}
+          safeName={safe.name}
+          safeDetails={details}
+          balances={balances}
+          onSuccess={handleSendSuccess}
+          contacts={contacts}
+          contactsError={contactsError}
+          resolveAddress={resolveAddress}
+          chainId={chainId}
+          contextLoading={detailsLoading}
+          contextError={detailsError}
+        />
+      )}
       <ReceiveFundsModal
         open={receiveOpen}
         safe={safe}

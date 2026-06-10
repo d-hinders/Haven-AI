@@ -5,7 +5,11 @@ export interface HavenCredentialFile {
   delegateKey: string
   agentId?: string
   safeAddress?: string
+  delegateAddress?: string
+  chainId?: number
+  network?: string
   apiUrl?: string
+  allowanceSummary?: readonly HavenCredentialAllowance[]
   /**
    * Absolute path the credentials were loaded from, if any. Set when the
    * caller pointed at a JSON file via `--credentials` or `HAVEN_CREDENTIALS`;
@@ -15,6 +19,20 @@ export interface HavenCredentialFile {
    * credential path was supplied.
    */
   sourcePath?: string
+  identityPath?: string
+  signerPath?: string
+}
+
+export interface HavenCredentialAllowance {
+  token: string
+  amount: string
+  resetMinutes: number | null
+}
+
+export interface HavenCredentialSource {
+  credentialsPath?: string
+  identityPath?: string
+  signerPath?: string
 }
 
 interface RawCredentialFile {
@@ -22,12 +40,23 @@ interface RawCredentialFile {
   apiKey?: unknown
   delegate_key?: unknown
   delegateKey?: unknown
+  delegate_address?: unknown
+  delegateAddress?: unknown
   agent_id?: unknown
   agentId?: unknown
   safe_address?: unknown
   safeAddress?: unknown
+  chain_id?: unknown
+  chainId?: unknown
+  network?: unknown
   api_url?: unknown
   apiUrl?: unknown
+  hosted_mcp_url?: unknown
+  hostedMcpUrl?: unknown
+  allowance_summary?: unknown
+  allowanceSummary?: unknown
+  agent_budget?: unknown
+  agentBudget?: unknown
 }
 
 /**
@@ -47,10 +76,19 @@ interface RawCredentialFile {
  * Haven's backend never sees the delegate key either way.
  */
 export async function loadCredentials(
-  path: string | undefined = process.env.HAVEN_CREDENTIALS,
+  source: string | HavenCredentialSource | undefined = process.env.HAVEN_CREDENTIALS,
 ): Promise<HavenCredentialFile> {
-  if (path) {
-    return loadCredentialsFromFile(path)
+  if (typeof source === 'string') {
+    return loadCredentialsFromFile(source)
+  }
+  if (source?.credentialsPath) {
+    return loadCredentialsFromFile(source.credentialsPath)
+  }
+  if (source?.identityPath || source?.signerPath) {
+    if (!source.identityPath || !source.signerPath) {
+      throw new Error('Haven split credentials require both --identity and --signer paths.')
+    }
+    return loadCredentialsFromSplitFiles(source.identityPath, source.signerPath)
   }
 
   const envCreds = loadCredentialsFromEnv()
@@ -90,12 +128,92 @@ async function loadCredentialsFromFile(path: string): Promise<HavenCredentialFil
   }
 
   return {
+      apiKey,
+      delegateKey,
+      agentId: stringField(raw.agent_id ?? raw.agentId),
+      safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
+      delegateAddress: stringField(raw.delegate_address ?? raw.delegateAddress),
+      chainId: numberField(raw.chain_id ?? raw.chainId),
+      network: stringField(raw.network),
+      apiUrl: stringField(raw.api_url ?? raw.apiUrl),
+      allowanceSummary: allowanceSummaryField(raw.allowance_summary ?? raw.allowanceSummary ?? raw.agent_budget ?? raw.agentBudget),
+      sourcePath: path,
+    }
+}
+
+async function loadCredentialsFromSplitFiles(identityPath: string, signerPath: string): Promise<HavenCredentialFile> {
+  const identity = await readJsonFile(identityPath, 'Haven identity credentials')
+  const signer = await readJsonFile(signerPath, 'Haven signer credentials')
+
+  await warnIfCredentialFilePermissive(identityPath)
+  await warnIfCredentialFilePermissive(signerPath)
+
+  const apiKey = stringField(identity.api_key ?? identity.apiKey)
+  const delegateKey = stringField(signer.delegate_key ?? signer.delegateKey)
+
+  if (!apiKey) {
+    throw new Error('Haven identity credentials are missing api_key.')
+  }
+  if (!delegateKey) {
+    throw new Error('Haven signer credentials are missing delegate_key.')
+  }
+
+  return {
     apiKey,
     delegateKey,
-    agentId: stringField(raw.agent_id ?? raw.agentId),
-    safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
-    apiUrl: stringField(raw.api_url ?? raw.apiUrl),
-    sourcePath: path,
+    agentId: matchingStringField(
+      'agent_id',
+      identity.agent_id ?? identity.agentId,
+      signer.agent_id ?? signer.agentId,
+    ),
+    safeAddress: matchingStringField(
+      'safe_address',
+      identity.safe_address ?? identity.safeAddress,
+      signer.safe_address ?? signer.safeAddress,
+      { caseInsensitive: true },
+    ),
+    delegateAddress: matchingStringField(
+      'delegate_address',
+      signer.delegate_address ?? signer.delegateAddress,
+      identity.delegate_address ?? identity.delegateAddress,
+      { caseInsensitive: true },
+    ),
+    chainId: matchingNumberField(
+      'chain_id',
+      identity.chain_id ?? identity.chainId,
+      signer.chain_id ?? signer.chainId,
+    ),
+    network: matchingStringField(
+      'network',
+      identity.network,
+      signer.network,
+      { caseInsensitive: true },
+    ),
+    apiUrl: stringField(identity.api_url ?? identity.apiUrl),
+    allowanceSummary: allowanceSummaryField(
+      identity.allowance_summary ??
+        identity.allowanceSummary ??
+        identity.agent_budget ??
+        identity.agentBudget,
+    ),
+    sourcePath: identityPath,
+    identityPath,
+    signerPath,
+  }
+}
+
+async function readJsonFile(path: string, label: string): Promise<RawCredentialFile> {
+  let rawText: string
+  try {
+    rawText = await readFile(path, 'utf8')
+  } catch (err) {
+    throw new Error(`Could not read ${label} at ${path}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  try {
+    return JSON.parse(rawText) as RawCredentialFile
+  } catch {
+    throw new Error(`${label} must be JSON.`)
   }
 }
 
@@ -115,14 +233,78 @@ function loadCredentialsFromEnv(): HavenCredentialFile | null {
   return {
     apiKey,
     delegateKey,
-    agentId: stringField(process.env.HAVEN_AGENT_ID),
-    safeAddress: stringField(process.env.HAVEN_SAFE_ADDRESS),
-    apiUrl: stringField(process.env.HAVEN_API_URL),
-  }
+      agentId: stringField(process.env.HAVEN_AGENT_ID),
+      safeAddress: stringField(process.env.HAVEN_SAFE_ADDRESS),
+      chainId: numberField(process.env.HAVEN_CHAIN_ID),
+      network: stringField(process.env.HAVEN_NETWORK),
+      apiUrl: stringField(process.env.HAVEN_API_URL),
+    }
 }
 
 function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function numberField(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() && /^\d+$/.test(value.trim())) return Number(value.trim())
+  return undefined
+}
+
+function matchingStringField(
+  label: string,
+  preferred: unknown,
+  fallback: unknown,
+  options: { caseInsensitive?: boolean } = {},
+): string | undefined {
+  const preferredValue = stringField(preferred)
+  const fallbackValue = stringField(fallback)
+  if (
+    preferredValue &&
+    fallbackValue &&
+    !sameCredentialValue(preferredValue, fallbackValue, options.caseInsensitive)
+  ) {
+    throw mismatchedSplitCredentialError(label)
+  }
+  return preferredValue ?? fallbackValue
+}
+
+function matchingNumberField(label: string, preferred: unknown, fallback: unknown): number | undefined {
+  const preferredValue = numberField(preferred)
+  const fallbackValue = numberField(fallback)
+  if (preferredValue !== undefined && fallbackValue !== undefined && preferredValue !== fallbackValue) {
+    throw mismatchedSplitCredentialError(label)
+  }
+  return preferredValue ?? fallbackValue
+}
+
+function sameCredentialValue(first: string, second: string, caseInsensitive = false): boolean {
+  return caseInsensitive ? first.toLowerCase() === second.toLowerCase() : first === second
+}
+
+function mismatchedSplitCredentialError(label: string): Error {
+  return new Error(
+    `Haven split credentials have mismatched ${label} values. ` +
+      'Recreate the identity and signer credential files from the same Haven agent.',
+  )
+}
+
+function allowanceSummaryField(value: unknown): HavenCredentialAllowance[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const allowances = value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const raw = item as Record<string, unknown>
+    const token = stringField(raw.token ?? raw.token_symbol ?? raw.tokenSymbol)
+    const amount = stringField(raw.amount ?? raw.allowance_amount ?? raw.allowanceAmount)
+    const reset = raw.resetMinutes ?? raw.reset_minutes ?? raw.reset_period_min ?? raw.resetPeriodMin
+    if (!token || !amount) return []
+    return [{
+      token,
+      amount,
+      resetMinutes: reset === null ? null : numberField(reset) ?? null,
+    }]
+  })
+  return allowances.length > 0 ? allowances : undefined
 }
 
 /**

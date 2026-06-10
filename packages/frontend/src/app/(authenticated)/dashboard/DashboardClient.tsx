@@ -17,7 +17,9 @@ import { RESET_PERIODS } from '@/lib/allowance-module'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate, timeAgo } from '@/lib/format'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
@@ -601,29 +603,32 @@ function TransactionsSection({
         </div>
       ) : (
         <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-          {transactions.slice(0, 5).map((tx) => (
-            <Link
-              key={`${tx.hash}-${tx.type}-${tx.safeId}`}
-              href="/transactions"
-              className="block"
-            >
-              <TransactionActivityRow
-                title={transactionTitle(tx)}
-                description={transactionMovement(tx, resolveAddress)}
-                amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
-                amountTone={
-                  tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
-                }
-                status={tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent'}
-                statusTone={
-                  tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
-                }
-                timestamp={timeAgo(tx.timestamp * 1000)}
-                direction={tx.direction}
-                density="compact"
-              />
-            </Link>
-          ))}
+          {transactions.slice(0, 5).map((tx) => {
+            const lifecycle = machinePaymentLifecyclePresentation(tx)
+            return (
+              <Link
+                key={`${tx.hash}-${tx.type}-${tx.safeId}`}
+                href="/transactions"
+                className="block"
+              >
+                <TransactionActivityRow
+                  title={transactionTitle(tx)}
+                  description={transactionMovement(tx, resolveAddress)}
+                  amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
+                  amountTone={
+                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
+                  }
+                  status={lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
+                  statusTone={lifecycle?.tone ?? (
+                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
+                  )}
+                  timestamp={timeAgo(tx.timestamp * 1000)}
+                  direction={tx.direction}
+                  density="compact"
+                />
+              </Link>
+            )
+          })}
         </div>
       )}
     </div>
@@ -658,6 +663,7 @@ export default function DashboardClient() {
   const {
     balances,
     loading: balancesLoading,
+    error: balancesError,
     refetch: refetchAggregatedBalances,
   } = useAggregatedBalances()
   const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } = useDashboardOverview()
@@ -674,8 +680,9 @@ export default function DashboardClient() {
   // user can complete them in any order. The guide always renders the
   // canonical Fund → Agent → First payment ordering but a step completed
   // out of order shows as done regardless.
-  const dataReady = safes.length > 0 && !balancesLoading && !agentsLoading
-  const hasFunds = dataReady && hasAnyBalance
+  const fundingStateKnown = safes.length > 0 && !balancesLoading && !balancesError
+  const dataReady = fundingStateKnown && !agentsLoading
+  const hasFunds = fundingStateKnown && hasAnyBalance
   const hasAgents = dataReady && agents.length > 0
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
@@ -800,7 +807,7 @@ export default function DashboardClient() {
     refetch: refetchSelectedBalances,
   } = useBalances(
     selectedActionSafe?.safe_address ?? null,
-    { enabled: sendModalDataEnabled },
+    { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
   )
   const {
     details: selectedSafeDetails,
@@ -808,7 +815,7 @@ export default function DashboardClient() {
     error: selectedSafeDetailsError,
   } = useSafeDetails(
     selectedActionSafe?.safe_address ?? null,
-    { enabled: sendModalDataEnabled },
+    { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
   )
 
   const totalFiat = currency === 'EUR' ? (overview?.totals.eur ?? 0) : (overview?.totals.usd ?? 0)
@@ -898,8 +905,8 @@ export default function DashboardClient() {
       changePercent={changePercent}
       hasAccounts={safes.length > 0}
       hasFunds={hasFunds}
-      fundingStateKnown={dataReady}
-      watchingForDeposit={dataReady && !hasFunds && hasOpenedReceive}
+      fundingStateKnown={fundingStateKnown}
+      watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       onSend={() => openHeroAction('send')}
       onReceive={() => openHeroAction('receive')}
@@ -1052,24 +1059,26 @@ export default function DashboardClient() {
         onSelect={handleActionSafeSelected}
       />
 
-      <SendModal
-        open={sendOpen && Boolean(selectedActionSafe)}
-        onClose={() => setSendOpen(false)}
-        safeAddress={selectedActionSafe?.safe_address ?? ''}
-        safeName={selectedActionSafe?.name}
-        safeDetails={selectedSafeDetails}
-        balances={selectedSafeBalances}
-        onSuccess={() => {
-          refreshDashboardData()
-          setSendOpen(false)
-        }}
-        contacts={contacts}
-        contactsError={contactsError}
-        resolveAddress={resolveAddress}
-        chainId={selectedActionSafe?.chain_id ?? 100}
-        contextLoading={selectedSafeBalancesLoading || selectedSafeDetailsLoading}
-        contextError={selectedSafeBalancesError ?? selectedSafeDetailsError}
-      />
+      {sendOpen && selectedActionSafe && (
+        <SendModal
+          open
+          onClose={() => setSendOpen(false)}
+          safeAddress={selectedActionSafe.safe_address}
+          safeName={selectedActionSafe.name}
+          safeDetails={selectedSafeDetails}
+          balances={selectedSafeBalances}
+          onSuccess={() => {
+            refreshDashboardData()
+            setSendOpen(false)
+          }}
+          contacts={contacts}
+          contactsError={contactsError}
+          resolveAddress={resolveAddress}
+          chainId={selectedActionSafe.chain_id ?? DEFAULT_CHAIN_ID}
+          contextLoading={selectedSafeBalancesLoading || selectedSafeDetailsLoading}
+          contextError={selectedSafeBalancesError ?? selectedSafeDetailsError}
+        />
+      )}
 
       <ReceiveFundsModal
         open={receiveOpen}

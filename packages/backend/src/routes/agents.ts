@@ -2,6 +2,14 @@ import { FastifyInstance } from 'fastify'
 import crypto from 'crypto'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import {
+  normalizeAgentAllowance,
+  normalizeAgentAllowances,
+  normalizeAgentAllowanceTokenAddress,
+} from '../lib/agent-allowance-validation.js'
+import { getTokenBalance } from '../lib/allowance-module.js'
+import { getChain, isSupportedChain } from '../lib/chains.js'
+import { formatTokenValue } from '../lib/tokens.js'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -43,6 +51,7 @@ interface AgentRow {
   status: string
   created_at: string
   mcp_last_seen_at: string | null
+  has_stranded_funds: boolean
 }
 
 interface AllowanceRow {
@@ -71,10 +80,18 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               a.api_key_prefix, a.status, a.created_at,
-              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at
+              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
+              EXISTS(
+                SELECT 1 FROM machine_payment_reconciliation_events mpre
+                JOIN payment_intents pi ON pi.id = mpre.payment_intent_id
+                WHERE pi.agent_id = a.id
+                  AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+                  AND mpre.status = 'open'
+              ) AS has_stranded_funds
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1
+        AND a.status != 'pending_approval'
        ORDER BY a.created_at DESC`,
       [sub],
     )
@@ -115,10 +132,18 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               a.api_key_prefix, a.status, a.created_at,
-              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at
+              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
+              EXISTS(
+                SELECT 1 FROM machine_payment_reconciliation_events mpre
+                JOIN payment_intents pi ON pi.id = mpre.payment_intent_id
+                WHERE pi.agent_id = a.id
+                  AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+                  AND mpre.status = 'open'
+              ) AS has_stranded_funds
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1 AND a.id = $2
+        AND a.status != 'pending_approval'
        LIMIT 1`,
       [sub, id],
     )
@@ -140,6 +165,59 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
   })
 
+  // GET /agents/:id/delegate-balance — on-chain USDC + ETH balance of the delegate EOA
+  app.get<{ Params: { id: string } }>('/:id/delegate-balance', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const { id } = request.params
+
+    const agentResult = await pool.query<{
+      delegate_address: string | null
+      safe_chain_id: number | null
+      safe_address: string | null
+    }>(
+      `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address
+       FROM agents a
+       LEFT JOIN user_safes us ON a.safe_id = us.id
+       WHERE a.user_id = $1 AND a.id = $2 AND a.status != 'revoked'
+       LIMIT 1`,
+      [sub, id],
+    )
+
+    const agent = agentResult.rows[0]
+    if (!agent) {
+      return reply.code(404).send({ error: 'Agent not found' })
+    }
+    if (!agent.delegate_address) {
+      return reply.code(422).send({ error: 'Agent has no delegate address' })
+    }
+
+    const chainId = agent.safe_chain_id ?? 8453
+    if (!isSupportedChain(chainId)) {
+      return reply.code(422).send({ error: `Unsupported chain: ${chainId}` })
+    }
+
+    const chain = getChain(chainId)
+    const delegate = agent.delegate_address
+
+    const usdcConfig = Object.values(chain.tokens).find((t) => t.symbol === 'USDC')
+
+    const [ethAtomic, usdcAtomic] = await Promise.all([
+      getTokenBalance(chainId, delegate, '0x0000000000000000000000000000000000000000'),
+      usdcConfig?.address ? getTokenBalance(chainId, delegate, usdcConfig.address) : Promise.resolve(0n),
+    ])
+
+    return {
+      delegate_address: delegate,
+      safe_address: agent.safe_address,
+      chain_id: chainId,
+      eth: formatTokenValue(ethAtomic.toString(), 18),
+      eth_atomic: ethAtomic.toString(),
+      usdc: formatTokenValue(usdcAtomic.toString(), 6),
+      usdc_atomic: usdcAtomic.toString(),
+      usdc_address: usdcConfig?.address ?? null,
+    }
+  })
+
   // POST /agents — create agent with delegate address and on-chain allowance config
   app.post<{ Body: CreateAgentBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -150,6 +228,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
     if (!delegate_address || !isValidAddress(delegate_address)) {
       return reply.code(400).send({ error: 'Valid delegate address is required' })
+    }
+    const normalizedAllowances = normalizeAgentAllowances(allowances)
+    if (!normalizedAllowances.ok) {
+      return reply.code(400).send({ error: normalizedAllowances.error })
     }
 
     // Validate safe_id belongs to the user (if provided)
@@ -213,15 +295,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const savedAllowances: AllowanceRow[] = []
-      if (allowances && allowances.length > 0) {
-        for (const a of allowances) {
+      if (normalizedAllowances.value.length > 0) {
+        for (const a of normalizedAllowances.value) {
           const res = await client.query<AllowanceRow>(
             `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
              VALUES ($1, $2, $3, $4, $5)
              RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
             [
               agent.id,
-              a.token_address.toLowerCase(),
+              a.token_address,
               a.token_symbol,
               a.allowance_amount,
               a.reset_period_min,
@@ -240,6 +322,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       })
     } catch (err) {
       await client.query('ROLLBACK')
+      if (isUniqueDelegateConflict(err)) {
+        return reply
+          .code(409)
+          .send({ error: 'An active agent with this delegate address already exists' })
+      }
       throw err
     } finally {
       client.release()
@@ -432,23 +519,37 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   }>('/:id/allowances', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
-    const { token_address, token_symbol, allowance_amount, reset_period_min } = request.body
+    const normalizedAllowance = normalizeAgentAllowance(request.body)
+    if (!normalizedAllowance.ok) {
+      return reply.code(400).send({ error: normalizedAllowance.error })
+    }
 
-    const agentCheck = await pool.query(
-      'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
+    const agentCheck = await pool.query<{ id: string; status: string }>(
+      'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
       [id, sub],
     )
     if (agentCheck.rows.length === 0) {
       return reply.code(404).send({ error: 'Agent not found' })
     }
+    if (agentCheck.rows[0].status === 'pending_approval') {
+      return reply
+        .code(409)
+        .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
+    }
+    if (agentCheck.rows[0].status === 'revoked') {
+      return reply
+        .code(409)
+        .send({ error: 'Revoked agent rules cannot be changed' })
+    }
 
+    const { token_address, token_symbol, allowance_amount, reset_period_min } = normalizedAllowance.value
     const result = await pool.query<AllowanceRow>(
       `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (agent_id, token_address)
        DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, updated_at = NOW()
        RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
-      [id, token_address.toLowerCase(), token_symbol, allowance_amount, reset_period_min],
+      [id, token_address, token_symbol, allowance_amount, reset_period_min],
     )
 
     return result.rows[0]
@@ -460,18 +561,32 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id, tokenAddress } = request.params
+      const normalizedTokenAddress = normalizeAgentAllowanceTokenAddress(tokenAddress)
+      if (!normalizedTokenAddress.ok) {
+        return reply.code(400).send({ error: normalizedTokenAddress.error })
+      }
 
-      const agentCheck = await pool.query(
-        'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
+      const agentCheck = await pool.query<{ id: string; status: string }>(
+        'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
         [id, sub],
       )
       if (agentCheck.rows.length === 0) {
         return reply.code(404).send({ error: 'Agent not found' })
       }
+      if (agentCheck.rows[0].status === 'pending_approval') {
+        return reply
+          .code(409)
+          .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
+      }
+      if (agentCheck.rows[0].status === 'revoked') {
+        return reply
+          .code(409)
+          .send({ error: 'Revoked agent rules cannot be changed' })
+      }
 
       const result = await pool.query(
         'DELETE FROM agent_allowances WHERE agent_id = $1 AND token_address = $2 RETURNING id',
-        [id, tokenAddress.toLowerCase()],
+        [id, normalizedTokenAddress.value],
       )
 
       if (result.rows.length === 0) {
@@ -480,5 +595,16 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
       return { success: true }
     },
+  )
+}
+
+function isUniqueDelegateConflict(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      err.code === '23505' &&
+      'constraint' in err &&
+      String(err.constraint).includes('idx_agents_user_delegate_non_revoked_unique'),
   )
 }

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
 
-const { mockQuery, allowanceMocks } = vi.hoisted(() => ({
+const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
@@ -10,6 +10,9 @@ const { mockQuery, allowanceMocks } = vi.hoisted(() => ({
     generateTransferHash: vi.fn(),
     recoverSigner: vi.fn(),
     executeAllowanceTransfer: vi.fn(),
+  },
+  fiatMocks: {
+    getFiatValuesForTokenAmount: vi.fn(),
   },
 }))
 
@@ -20,6 +23,8 @@ vi.mock('../../db.js', () => ({
 }))
 
 vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
+
+vi.mock('../../lib/fiat-values.js', () => fiatMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -70,6 +75,7 @@ describe('machine payment routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
+    for (const mock of Object.values(fiatMocks)) mock.mockReset()
   })
 
   function pendingIntent(overrides: Record<string, unknown> = {}) {
@@ -103,6 +109,7 @@ describe('machine payment routes', () => {
   function confirmedPayment(overrides: Record<string, unknown> = {}) {
     return {
       id: PAYMENT_ID,
+      kind: 'payment_intent',
       agent_id: AGENT.id,
       user_id: AGENT.user_id,
       safe_address: AGENT.safe_address,
@@ -129,6 +136,39 @@ describe('machine payment routes', () => {
       }),
       x402_idempotency_key: null,
       confirmed_at: '2026-05-15T12:00:00.000Z',
+      funded_but_unsettled: false,
+      ...overrides,
+    }
+  }
+
+  function executedApproval(overrides: Record<string, unknown> = {}) {
+    return {
+      id: PAYMENT_ID,
+      kind: 'approval_request',
+      agent_id: AGENT.id,
+      user_id: AGENT.user_id,
+      safe_address: AGENT.safe_address,
+      chain_id: 8453,
+      token_symbol: 'USDC',
+      token_address: USDC,
+      to_address: RECIPIENT.toLowerCase(),
+      amount_raw: '10000',
+      amount_human: '0.01',
+      tx_hash: TX_HASH,
+      status: 'executed',
+      payment_rail: 'mpp_demo',
+      source: 'mpp_demo',
+      payment_resource_url: challenge.resource,
+      x402_resource_url: null,
+      merchant_address: RECIPIENT.toLowerCase(),
+      machine_challenge_id: challenge.challengeId,
+      machine_idempotency_key: 'mpp_demo:test',
+      machine_metadata: JSON.stringify({
+        protocol: 'mpp',
+        network: challenge.network.name,
+        description: challenge.description,
+      }),
+      executed_at: '2026-05-15T12:00:00.000Z',
       ...overrides,
     }
   }
@@ -224,6 +264,7 @@ describe('machine payment routes', () => {
         rows: [{
           id: 'evidence-1',
           payment_intent_id: PAYMENT_ID,
+          approval_request_id: null,
           agent_id: AGENT.id,
           user_id: AGENT.user_id,
           rail: 'mpp_demo',
@@ -265,6 +306,8 @@ describe('machine payment routes', () => {
       receipts: [{
         id: 'evidence-1',
         payment_id: PAYMENT_ID,
+        payment_intent_id: PAYMENT_ID,
+        approval_request_id: null,
         rail: 'mpp_demo',
         proof_status: 'payment_confirmed',
         tx_hash: TX_HASH,
@@ -408,6 +451,99 @@ describe('machine payment routes', () => {
       },
     })
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+
+    expect(mockQuery.mock.calls[1][0]).toContain('COALESCE(payment_rail, source) = $4')
+    expect(mockQuery.mock.calls[1][1]).toEqual([
+      AGENT.id,
+      'mpp_demo:test',
+      challenge.challengeId,
+      'mpp_demo',
+    ])
+  })
+
+  it('guards stale sign data refreshes for duplicate pending intents', async () => {
+    const refreshedHash = `0x${'22'.repeat(32)}`
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 4 })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(refreshedHash)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [pendingIntent({
+          allowance_nonce: 3,
+          sign_hash: SIGN_HASH,
+        })],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().sign_data).toMatchObject({
+      hash: refreshedHash,
+      components: { nonce: 4 },
+    })
+
+    expect(mockQuery.mock.calls[1][0]).toContain('COALESCE(payment_rail, source) = $4')
+
+    const refreshCall = mockQuery.mock.calls[2]
+    expect(refreshCall[0]).toContain('UPDATE payment_intents')
+    expect(refreshCall[0]).toContain('agent_id = $4')
+    expect(refreshCall[0]).toContain('COALESCE(payment_rail, source) = $5')
+    expect(refreshCall[0]).toContain("status = 'pending_signature'")
+    expect(refreshCall[0]).toContain('tx_hash IS NULL')
+    expect(refreshCall[1]).toEqual([
+      4,
+      refreshedHash,
+      PAYMENT_ID,
+      AGENT.id,
+      'mpp_demo',
+    ])
+  })
+
+  it('reloads rail-scoped existing intents after insert idempotency conflicts', async () => {
+    allowanceMocks.getTokenAllowance
+      .mockResolvedValueOnce({ nonce: 3 })
+      .mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'pending_signature',
+      rail: 'mpp_demo',
+      sign_data: { hash: SIGN_HASH },
+    })
+
+    const fallbackLookup = mockQuery.mock.calls[5]
+    expect(fallbackLookup[0]).toContain('COALESCE(payment_rail, source) = $4')
+    expect(fallbackLookup[1]).toEqual([
+      AGENT.id,
+      'mpp_demo:test',
+      challenge.challengeId,
+      'mpp_demo',
+    ])
   })
 
   it('returns unified status for confirmed payment intents', async () => {
@@ -455,6 +591,34 @@ describe('machine payment routes', () => {
         challenge_id: challenge.challengeId,
       },
     })
+  })
+
+  it('returns funded_but_unsettled phase when merchant retry was rejected after funding', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [confirmedPayment({
+          funded_but_unsettled: true,
+          expires_at: '2099-01-02T00:00:00.000Z',
+        })],
+      })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'confirmed',
+      phase: 'funded_but_unsettled',
+      next_action: 'sweep_stranded_funds',
+    })
+    // Message must tell the agent to stop and surface the failure.
+    expect(response.json().message).toMatch(/stranded|merchant rejected|sweep/i)
   })
 
   it('returns unified status for approval request IDs', async () => {
@@ -644,6 +808,36 @@ describe('machine payment routes', () => {
     expect(response.json().error).toBe('MPP demo challenge has expired')
   })
 
+  it('rejects invalid challenge expiry timestamps before authorization work', async () => {
+    const invalidExpiresAtValues = [
+      'not-a-date',
+      '',
+      null,
+    ]
+
+    for (const expiresAt of invalidExpiresAtValues) {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {
+          challenge: { ...challenge, expiresAt },
+          idempotencyKey: 'mpp_demo:test',
+        },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe('expiresAt must be a valid ISO timestamp')
+    }
+
+    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+    expect(mockQuery).toHaveBeenCalledTimes(invalidExpiresAtValues.length)
+  })
+
   it('rejects signatures from the wrong delegate', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
@@ -670,6 +864,150 @@ describe('machine payment routes', () => {
       recovered: '0x0000000000000000000000000000000000000001',
     })
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+  })
+
+  it('records one-shot signatures without marking the payment submitted before execution', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.01, eur: 0.01 })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({
+      success: true,
+      payment_id: PAYMENT_ID,
+      status: 'confirmed',
+      tx_hash: TX_HASH,
+    })
+
+    const signatureUpdateIndex = mockQuery.mock.calls.findIndex(([sql]) =>
+      typeof sql === 'string' && sql.includes('SET signature = $1, signed_at = NOW()')
+    )
+    expect(signatureUpdateIndex).toBeGreaterThanOrEqual(0)
+    const signatureUpdateCall = mockQuery.mock.calls[signatureUpdateIndex]
+    expect(signatureUpdateCall[0]).toContain('SET signature = $1, signed_at = NOW()')
+    expect(signatureUpdateCall[0]).toContain("status = 'pending_signature'")
+    expect(signatureUpdateCall[0]).toContain('agent_id = $3')
+    expect(signatureUpdateCall[0]).toContain('payment_rail = $4')
+    expect(signatureUpdateCall[0]).toContain('tx_hash IS NULL')
+    expect(signatureUpdateCall[0]).not.toContain("status = 'submitted'")
+    expect(signatureUpdateCall[0]).not.toContain('submitted_at')
+    expect(signatureUpdateCall[1]).toEqual(['0xsig', PAYMENT_ID, AGENT.id, 'mpp_demo'])
+
+    const executionOrder = allowanceMocks.executeAllowanceTransfer.mock.invocationCallOrder[0]
+    expect(mockQuery.mock.invocationCallOrder[signatureUpdateIndex]).toBeLessThan(executionOrder)
+
+    const confirmedUpdateIndex = mockQuery.mock.calls.findIndex(([sql]) =>
+      typeof sql === 'string' && sql.includes("SET status = 'confirmed'")
+    )
+    expect(confirmedUpdateIndex).toBeGreaterThanOrEqual(0)
+    const confirmedUpdateCall = mockQuery.mock.calls[confirmedUpdateIndex]
+    expect(confirmedUpdateCall[0]).toContain("SET status = 'confirmed'")
+    expect(confirmedUpdateCall[0]).toContain('tx_hash = $1')
+    expect(confirmedUpdateCall[0]).toContain('submitted_at = NOW()')
+    expect(confirmedUpdateCall[0]).toContain("status = 'pending_signature'")
+    expect(confirmedUpdateCall[0]).toContain('agent_id = $5')
+    expect(confirmedUpdateCall[0]).toContain('payment_rail = $6')
+    expect(confirmedUpdateCall[0]).toContain('tx_hash IS NULL')
+    expect(confirmedUpdateCall[1]).toEqual([TX_HASH, PAYMENT_ID, 0.01, 0.01, AGENT.id, 'mpp_demo'])
+  })
+
+  it('does not overwrite one-shot terminal state after execution failures', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'failed',
+      error: 'On-chain execution failed',
+    })
+
+    const failedUpdateCall = mockQuery.mock.calls.find(([sql]) =>
+      typeof sql === 'string' && sql.includes("SET status = 'failed'")
+    )
+    expect(failedUpdateCall?.[0]).toContain("status = 'pending_signature'")
+    expect(failedUpdateCall?.[0]).toContain('agent_id = $3')
+    expect(failedUpdateCall?.[0]).toContain('payment_rail = $4')
+    expect(failedUpdateCall?.[0]).toContain('tx_hash IS NULL')
+    expect(failedUpdateCall?.[1]).toEqual(['relayer unavailable', PAYMENT_ID, AGENT.id, 'mpp_demo'])
+  })
+
+  it('does not record evidence when a one-shot confirmation loses a terminal-state race', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.01, eur: 0.01 })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ status: 'confirmed' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'confirmed',
+      error: 'Payment intent changed after on-chain execution',
+    })
+    expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
+    expect(
+      mockQuery.mock.calls.some(([sql]) =>
+        typeof sql === 'string' && sql.includes('machine_payment_evidence')
+      ),
+    ).toBe(false)
   })
 
   it('records a reconciliation event for confirmed payments rejected by the merchant retry', async () => {
@@ -710,6 +1048,7 @@ describe('machine payment routes', () => {
     const insertCall = mockQuery.mock.calls[2]
     expect(insertCall[0]).toContain('machine_payment_reconciliation_events')
     expect(insertCall[0]).toContain('ON CONFLICT (payment_intent_id, event_type)')
+    expect(insertCall[0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
     expect(insertCall[1]).toContain(PAYMENT_ID)
     expect(insertCall[1]).toContain('mpp_demo')
     expect(insertCall[1]).toContain('merchant_retry_rejected_after_payment')
@@ -718,6 +1057,134 @@ describe('machine payment routes', () => {
     expect(insertCall[1]).toContain(RECIPIENT.toLowerCase())
     expect(insertCall[1]).toContain(challenge.challengeId)
     expect(insertCall[1]).toContain('mpp_demo:test')
+  })
+
+  it('records a reconciliation event for executed approval requests rejected by the merchant retry', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [executedApproval()] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'event-approval',
+          status: 'open',
+          created_at: '2026-05-15T12:00:00.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: TX_HASH,
+        reason: 'Merchant returned HTTP 402 after approval-funded payment',
+        details: { retryStatus: 402, resourceUrl: challenge.resource },
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      event_id: 'event-approval',
+      payment_id: PAYMENT_ID,
+      event_type: 'merchant_retry_rejected_after_payment',
+    })
+
+    const insertCall = mockQuery.mock.calls[3]
+    expect(insertCall[0]).toContain('approval_request_id')
+    expect(insertCall[0]).toContain('ON CONFLICT (approval_request_id, event_type)')
+    expect(insertCall[0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    expect(insertCall[1]).toContain(PAYMENT_ID)
+    expect(insertCall[1]).toContain('merchant_retry_rejected_after_payment')
+  })
+
+  it('does not reopen resolved reconciliation events for confirmed payments', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'event-resolved',
+          status: 'resolved',
+          created_at: '2026-05-15T12:00:00.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: TX_HASH,
+        reason: 'Merchant returned HTTP 402 after a resolved event',
+        details: { retryStatus: 402, retryAttempt: 2 },
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      event_id: 'event-resolved',
+      status: 'resolved',
+      payment_id: PAYMENT_ID,
+    })
+    expect(mockQuery.mock.calls[2][0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    expect(mockQuery.mock.calls[3][0]).toContain('FROM machine_payment_reconciliation_events')
+    expect(mockQuery.mock.calls[3][0]).toContain('WHERE payment_intent_id = $1')
+    expect(mockQuery.mock.calls[3][1]).toEqual([
+      PAYMENT_ID,
+      AGENT.id,
+      'merchant_retry_rejected_after_payment',
+    ])
+  })
+
+  it('does not reopen resolved reconciliation events for executed approval requests', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [executedApproval()] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'event-approval-resolved',
+          status: 'resolved',
+          created_at: '2026-05-15T12:00:00.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/reconciliation-events',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        eventType: 'merchant_retry_rejected_after_payment',
+        txHash: TX_HASH,
+        reason: 'Merchant returned HTTP 402 after a resolved approval event',
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      event_id: 'event-approval-resolved',
+      status: 'resolved',
+      payment_id: PAYMENT_ID,
+    })
+    expect(mockQuery.mock.calls[3][0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    expect(mockQuery.mock.calls[4][0]).toContain('FROM machine_payment_reconciliation_events')
+    expect(mockQuery.mock.calls[4][0]).toContain('WHERE approval_request_id = $1')
+    expect(mockQuery.mock.calls[4][1]).toEqual([
+      PAYMENT_ID,
+      AGENT.id,
+      'merchant_retry_rejected_after_payment',
+    ])
   })
 
   it('attaches SDK-reported merchant evidence for confirmed machine payments', async () => {
@@ -793,6 +1260,84 @@ describe('machine payment routes', () => {
 
     expect(mockQuery.mock.calls[2][0]).toContain('machine_payment_evidence')
     expect(mockQuery.mock.calls[3][0]).toContain('UPDATE machine_payment_evidence')
+    expect(mockQuery.mock.calls[4][0]).toContain('machine_payment_reconciliation_events')
+    expect(mockQuery.mock.calls[4][0]).toContain("status = 'resolved'")
+    expect(mockQuery.mock.calls[4][0]).toContain('WHERE payment_intent_id = $1')
+  })
+
+  it('attaches SDK-reported merchant evidence for executed approval requests', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [executedApproval()] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'evidence-approval',
+          payment_intent_id: null,
+          approval_request_id: PAYMENT_ID,
+          agent_id: AGENT.id,
+          user_id: AGENT.user_id,
+          rail: 'mpp_demo',
+          proof_status: 'protocol_receipt_attached',
+          tx_hash: TX_HASH,
+          chain_id: 8453,
+          resource_url: challenge.resource,
+          merchant_address: RECIPIENT.toLowerCase(),
+          payer_address: AGENT.safe_address.toLowerCase(),
+          settlement_address: RECIPIENT.toLowerCase(),
+          token_symbol: 'USDC',
+          token_address: USDC.toLowerCase(),
+          amount_raw: '10000',
+          amount_human: '0.01',
+          challenge_id: challenge.challengeId,
+          idempotency_key: 'mpp_demo:test',
+          challenge_payload: challenge,
+          selected_payment: null,
+          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+          payment_proof_header: 'proof-header',
+          protocol_receipt_header_name: 'Payment-Receipt',
+          protocol_receipt_header: 'receipt-header',
+          protocol_receipt_payload: { status: 'settled' },
+          merchant_status: 200,
+          confirmed_at: '2026-05-15T12:00:00.000Z',
+          created_at: '2026-05-15T12:00:00.000Z',
+          updated_at: '2026-05-15T12:00:01.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: TX_HASH,
+        resourceUrl: challenge.resource,
+        merchantStatus: 200,
+        paymentProofHeaderName: 'MACHINE-PAYMENT-PROOF',
+        paymentProofHeader: 'proof-header',
+        protocolReceiptHeaderName: 'Payment-Receipt',
+        protocolReceiptHeader: 'receipt-header',
+        protocolReceiptPayload: { status: 'settled' },
+      },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      evidence: {
+        payment_id: PAYMENT_ID,
+        payment_intent_id: null,
+        approval_request_id: PAYMENT_ID,
+        proof_status: 'protocol_receipt_attached',
+      },
+    })
+    expect(mockQuery.mock.calls[3][0]).toContain('approval_request_id')
+    expect(mockQuery.mock.calls[4][0]).toContain('WHERE approval_request_id = $1')
+    expect(mockQuery.mock.calls[5][0]).toContain('machine_payment_reconciliation_events')
+    expect(mockQuery.mock.calls[5][0]).toContain("status = 'resolved'")
+    expect(mockQuery.mock.calls[5][0]).toContain('WHERE approval_request_id = $1')
   })
 
   it('rejects evidence reports whose tx hash does not match the payment', async () => {
@@ -835,13 +1380,14 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(409)
-    expect(response.json().error).toBe('Evidence requires a confirmed payment intent')
+    expect(response.json().error).toBe('Evidence requires a confirmed payment')
     expect(mockQuery).toHaveBeenCalledTimes(2)
   })
 
   it('does not attach evidence to another agent payment', async () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
 
     const response = await app.inject({
@@ -856,8 +1402,8 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(404)
-    expect(response.json().error).toBe('Payment intent not found')
-    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(response.json().error).toBe('Payment not found')
+    expect(mockQuery).toHaveBeenCalledTimes(3)
   })
 
   it('does not record reconciliation events for unconfirmed payments', async () => {
@@ -880,7 +1426,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(409)
     expect(response.json()).toMatchObject({
-      error: 'Reconciliation events require a confirmed payment intent',
+      error: 'Reconciliation events require a confirmed payment',
       status: 'pending_signature',
     })
     expect(mockQuery).toHaveBeenCalledTimes(2)
@@ -906,5 +1452,162 @@ describe('machine payment routes', () => {
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toBe('txHash does not match payment intent')
     expect(mockQuery).toHaveBeenCalledTimes(2)
+  })
+
+  // ── POST /send ─────────────────────────────────────────────────────────────
+
+  describe('POST /machine-payments/send', () => {
+    const SEND_PAYMENT_ID = '44444444-4444-4444-4444-444444444444'
+    const SEND_HASH = `0x${'22'.repeat(32)}`
+    const SEND_RECIPIENT = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'
+
+    function sendIntentRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: SEND_PAYMENT_ID,
+        status: 'pending_signature',
+        expires_at: '2099-01-01T00:10:00.000Z',
+        ...overrides,
+      }
+    }
+
+    function allowanceWithRemaining(remaining: bigint) {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+        amount: 1_000_000n,
+        spent: 0n,
+        resetTimeMin: 1440,
+        lastResetMin: 0,
+        nonce: 5,
+      })
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
+        remaining,
+        effectiveSpent: 0n,
+        isResetPending: false,
+      })
+    }
+
+    it('creates a USDC payment intent within allowance and returns sign_data', async () => {
+      allowanceWithRemaining(1_000_000_000n)
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SEND_HASH)
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        // agent_allowances check
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '100' }] })
+        // INSERT payment_intent
+        .mockResolvedValueOnce({ rows: [sendIntentRow()] })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1.50' },
+      })
+
+      expect(response.statusCode).toBe(201)
+      const body = response.json()
+      expect(body.payment_id).toBe(SEND_PAYMENT_ID)
+      expect(body.status).toBe('pending_signature')
+      expect(body.asset).toBe('USDC')
+      expect(body.amount).toBe('1.50')
+      expect(body.recipient).toBe(SEND_RECIPIENT.toLowerCase())
+      expect(body.sign_data.hash).toBe(SEND_HASH)
+      expect(body.sign_data.instructions).toContain('delegate private key')
+      expect(allowanceMocks.generateTransferHash).toHaveBeenCalledTimes(1)
+    })
+
+    it('queues over-allowance transfer as pending_approval (202)', async () => {
+      allowanceWithRemaining(0n)
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '0' }] })
+        .mockResolvedValueOnce({
+          rows: [{
+            id: SEND_PAYMENT_ID,
+            status: 'pending',
+            expires_at: '2099-01-02T00:00:00.000Z',
+          }],
+        })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '999' },
+      })
+
+      expect(response.statusCode).toBe(202)
+      const body = response.json()
+      expect(body.status).toBe('pending_approval')
+      expect(body.payment_id).toBe(SEND_PAYMENT_ID)
+      expect(body.asset).toBe('USDC')
+      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    })
+
+    it('rejects unknown asset with 400', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'DOGE', recipient: SEND_RECIPIENT, amount: '1' },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toContain('ETH, USDC')
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    })
+
+    it('rejects invalid recipient address with 400', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: 'not-an-address', amount: '1' },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toContain('recipient')
+    })
+
+    it('rejects missing amount with 400', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toContain('amount')
+    })
+
+    it('rejects when agent has no allowance configured for the token', async () => {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+        amount: 0n, spent: 0n, resetTimeMin: 0, lastResetMin: 0, nonce: 0,
+      })
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
+        remaining: 0n, effectiveSpent: 0n, isResetPending: false,
+      })
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [] }) // no allowance configured
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1' },
+      })
+
+      expect(response.statusCode).toBe(403)
+      expect(response.json().error).toContain('not configured')
+    })
   })
 })

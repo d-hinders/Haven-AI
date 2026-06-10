@@ -9,7 +9,7 @@ Environment:
   HAVEN_API_KEY        sk_agent_* from Haven
   HAVEN_DELEGATE_KEY   local agent delegate private key; never sent to Haven
   HAVEN_API_URL        default: https://havenbackend-production-8a00.up.railway.app
-  HAVEN_X402_URL       default: $HAVEN_API_URL/demo/x402/data
+  HAVEN_X402_URL       required: URL of any x402-gated (HTTP 402) resource to pay for
 
 This intentionally uses only documented HTTP endpoints:
   GET  /openapi.json
@@ -27,7 +27,7 @@ from eth_keys import keys
 
 
 API = os.environ.get("HAVEN_API_URL", "https://havenbackend-production-8a00.up.railway.app").rstrip("/")
-PAID_URL = os.environ.get("HAVEN_X402_URL", f"{API}/demo/x402/data")
+PAID_URL = os.environ["HAVEN_X402_URL"]  # any x402-gated resource to pay for
 API_KEY = os.environ["HAVEN_API_KEY"]
 DELEGATE_KEY = os.environ["HAVEN_DELEGATE_KEY"]
 

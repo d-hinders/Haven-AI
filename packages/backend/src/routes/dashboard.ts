@@ -6,6 +6,7 @@ import { fetchPortfolioForSafe } from '../lib/portfolio.js'
 import {
   compareTransactions,
   type EnrichedTransaction,
+  enrichedTransactionIdentityKey,
   enrichTransactionsWithAgents,
   fetchSafeTransactions,
   mergeX402Transactions,
@@ -114,7 +115,7 @@ export default async function dashboardRoutes(
          FROM agents a
          LEFT JOIN user_safes us ON us.id = a.safe_id
          WHERE a.user_id = $1
-           AND a.status != 'revoked'
+           AND a.status IN ('active', 'paused')
          ORDER BY
            CASE a.status
              WHEN 'active' THEN 0
@@ -144,13 +145,6 @@ export default async function dashboardRoutes(
              FROM approval_requests
              WHERE user_id = $1
                AND status = 'executed'
-               AND tx_hash IS NOT NULL
-           )
-           OR EXISTS (
-             SELECT 1
-             FROM self_sign_payment_intents
-             WHERE user_id = $1
-               AND status = 'confirmed'
                AND tx_hash IS NOT NULL
            )
          ) AS has_first_agent_payment`,
@@ -323,7 +317,7 @@ export default async function dashboardRoutes(
 
     const seen = new Set<string>()
     const dedupedTransactions = visibleTransactions.filter((tx) => {
-      const key = `${tx.hash}:${tx.type}:${tx.from}:${tx.to}:${tx.safeAddress.toLowerCase()}`
+      const key = enrichedTransactionIdentityKey(tx)
       if (seen.has(key)) return false
       seen.add(key)
       return true

@@ -44,6 +44,8 @@ import type {
   RawHavenAllowanceSummary,
   RawHavenPaymentReceiptsResponse,
   RawHavenPaymentReceipt,
+  HavenCatalogEntry,
+  RawCatalogEntry,
 } from './types.js'
 import {
   AgentPaymentNextAction,
@@ -706,6 +708,39 @@ export class HavenClient {
         },
       })),
     }
+  }
+
+  /**
+   * Discover payable services from Haven's curated merchant catalog.
+   *
+   * Read-only: returns catalog entries (price, rail, protocol) so an agent
+   * can choose a service and pay it with the regular payment tools in the
+   * same session. Never creates payments or signatures.
+   */
+  async discoverTools(
+    options: { category?: string; rail?: 'x402' | 'mpp' } = {},
+  ): Promise<HavenCatalogEntry[]> {
+    const params = new URLSearchParams()
+    if (options.category) params.set('category', options.category)
+    if (options.rail) params.set('rail', options.rail)
+    const query = params.size > 0 ? `?${params.toString()}` : ''
+    const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)
+    return raw.entries.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      description: entry.description,
+      category: entry.category,
+      resourceUrl: entry.resource_url,
+      rail: entry.rail,
+      protocol: entry.protocol,
+      toolName: entry.tool_name,
+      priceDisplay: entry.price_display,
+      priceAtomic: entry.price_atomic,
+      asset: entry.asset,
+      network: entry.network,
+      status: entry.status,
+      verifiedAt: entry.verified_at,
+    }))
   }
 
   /**

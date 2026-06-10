@@ -47,6 +47,7 @@ export type HostedToolName =
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
   | 'haven_sweep_delegate'
+  | 'haven_discover_tools'
 
 /** Legacy aliases kept for one release cycle so existing agents don't break. */
 export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transactions'
@@ -55,6 +56,10 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_get_agent: {},
   haven_get_allowances: {},
   haven_sweep_delegate: {},
+  haven_discover_tools: {
+    category: z.string().optional(),
+    rail: z.enum(['x402', 'mpp']).optional(),
+  },
   haven_send: {
     asset: z.enum(['ETH', 'USDC']),
     recipient: z.string().min(1),
@@ -214,6 +219,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
   haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
+  haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
   haven_send: composeDescription(sharedDescriptions.send),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
@@ -256,6 +262,37 @@ export function createToolHandlers(
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
 
     haven_sweep_delegate: async () => runTool(async () => haven.sweepDelegate()),
+
+    haven_discover_tools: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_discover_tools', input)
+        const entries = await haven.discoverTools({
+          category: args.category,
+          rail: args.rail,
+        })
+        return entries.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          description: entry.description,
+          category: entry.category,
+          resource_url: entry.resourceUrl,
+          rail: entry.rail,
+          protocol: entry.protocol,
+          tool_name: entry.toolName,
+          price_display: entry.priceDisplay,
+          price_atomic: entry.priceAtomic,
+          asset: entry.asset,
+          network: entry.network,
+          status: entry.status,
+          verified_at: entry.verifiedAt,
+          // Hosted surface is keyless: x402 entries start with the quote half
+          // of the split flow; MCP entries go through haven_pay_mcp_tool.
+          suggested_tool:
+            entry.protocol === 'mcp' ? 'haven_pay_mcp_tool'
+            : entry.rail === 'x402' ? 'haven_quote_x402'
+            : 'haven_quote_mpp',
+        }))
+      }),
 
     haven_send: async (input) =>
       runTool(async () => {

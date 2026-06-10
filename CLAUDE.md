@@ -34,7 +34,7 @@ Protocols → x402, Stripe MPP (agent payment standards)
 - Holds funds, executes transactions
 - Multi-owner / threshold security
 - **Gnosis Chain** (POC target)
-- Users **import** an existing Safe (via `POST /user/safes`); in-app deployment is not yet a feature
+- Two onboarding paths: **in-app deployment** during signup (passkey-owned Safe via `POST /safe/deploy`, or EOA-owned via the connected-wallet flow) and **import** of an existing Safe (`POST /user/safes`)
 - Interaction is via direct contract calls with `ethers.js` against Safe + the AllowanceModule (no `@safe-global/protocol-kit` yet — see Tech Stack)
 
 ### 2. Haven Control Layer

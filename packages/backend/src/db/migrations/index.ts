@@ -19,6 +19,7 @@ import * as agentLastSeen from './016_agent_last_seen.js'
 import * as agentConnectionSetups from './017_agent_connection_setups.js'
 import * as machinePaymentApprovalEvidenceRefs from './018_machine_payment_approval_evidence_refs.js'
 import * as merchantCatalog from './019_merchant_catalog.js'
+import * as sendIdempotencyKey from './020_send_idempotency_key.js'
 
 export interface Migration {
   version: string
@@ -51,4 +52,5 @@ export const migrations: Migration[] = [
   agentConnectionSetups,
   machinePaymentApprovalEvidenceRefs,
   merchantCatalog,
+  sendIdempotencyKey,
 ]

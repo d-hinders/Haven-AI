@@ -695,11 +695,26 @@ export default function AgentPanel() {
   })
 
   const [connect2Open, setConnect2Open] = useState(false)
+  const [firstAgentSetup, setFirstAgentSetup] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
   const [showRevokedAgents, setShowRevokedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  // First-agent hand-off from onboarding: /agents?setup=first auto-opens the
+  // connect flow with a starter allowance prefilled. The param is consumed
+  // once and stripped from the URL so refresh/back doesn't re-trigger it.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('setup') !== 'first') return
+    setFirstAgentSetup(true)
+    setConnect2Open(true)
+    params.delete('setup')
+    const query = params.toString()
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
+  }, [])
 
   // Timers for deferred on-chain refetch after agent create/edit. Tracked in a
   // ref so they can be cancelled on unmount, preventing spurious API calls and
@@ -1129,6 +1144,7 @@ export default function AgentPanel() {
       <ConnectAgent2Modal
         open={connect2Open}
         onClose={() => setConnect2Open(false)}
+        starterAllowance={firstAgentSetup}
         safeAddress={safeAddress}
         safeId={activeSafe?.id}
         onSetupUpdated={(info) => {

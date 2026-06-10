@@ -333,6 +333,32 @@ describe('ConnectAgent2Modal', () => {
     })
   })
 
+  it('prefills a 10/day starter budget when opened with starterAllowance (#352)', () => {
+    render(
+      <ConnectAgent2Modal
+        open
+        onClose={vi.fn()}
+        safeAddress={SAFE.safe_address}
+        safeId={SAFE.id}
+        starterAllowance
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Agent name'), {
+      target: { value: 'First Agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    if (!screen.queryByText('Budget draft')) {
+      fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    }
+
+    // The policy step opens with the starter budget already drafted —
+    // visible in the budget card and still removable/editable.
+    expect(screen.getByText('Budget draft')).toBeInTheDocument()
+    expect(screen.getAllByText(/USDC/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/10/)).toBeInTheDocument()
+  })
+
   it('creates a pending setup and shows a private-key-free setup prompt', async () => {
     renderModal()
 

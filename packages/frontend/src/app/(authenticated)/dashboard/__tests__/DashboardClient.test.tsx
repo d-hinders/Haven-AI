@@ -72,7 +72,7 @@ vi.mock('@/components/ReceiveFundsModal', () => ({
   default: () => null,
 }))
 
-vi.mock('@/components/ComingSoonModal', () => ({
+vi.mock('@/components/AddFundsModal', () => ({
   default: () => null,
 }))
 

@@ -412,6 +412,26 @@ Escalate for legal and product review if a proposal or PR introduces any of the 
 - Any ability for Haven to expand, override, or bypass Safe module constraints.
 - Any user lock-in that prevents Safe access outside Haven.
 
+## Third-Party On-Ramp Integration
+
+Haven's "Add funds" feature embeds a link to a licensed third-party on-ramp provider (currently Coinbase Onramp). The regulatory position is as follows:
+
+**Haven's role:** UI only. Haven constructs a provider URL containing the user's Safe address as the fixed destination. Haven never receives, holds, transmits, or processes fiat funds or crypto-assets at any point in the flow.
+
+**Provider's role:** The third-party provider (Coinbase) handles KYC/AML, fiat custody during purchase, fiat-to-crypto conversion, and direct settlement of USDC to the user's Safe address on-chain.
+
+**Why this does not create a Haven CASP exposure:**
+- Haven does not participate in the fiat leg, the conversion, or the settlement.
+- Haven does not receive any fees, spreads, or commissions from the provider for routing users (if a referral programme is used, re-evaluate this claim).
+- USDC settles directly to the user's Safe — Haven never holds it in transit.
+- The user contracts directly with the provider; Haven is the referring product, not a party to the purchase.
+
+**Constraints that must be maintained to preserve this position:**
+- The Safe address must be the non-editable destination inside the widget context; Haven must never allow a user to redirect the destination to an arbitrary address through Haven-controlled UI.
+- Haven must not co-mingle on-ramp proceeds with Haven-controlled funds.
+- If a revenue-share or referral arrangement with the provider is introduced, obtain a separate legal review before enabling it.
+- If Haven ever pre-funds purchases (e.g., instant availability before on-chain settlement), this becomes a credit or payment service — do not implement without a separate regulatory review.
+
 ## Payment-Related Merge Checklist
 
 Before merging any payment-related, agent-authority, Safe, SDK, x402/MPP, or relayer change, verify:

@@ -157,7 +157,7 @@ export default function OnboardingClient() {
   // welcome toast / hero fade exactly once on first arrival. Session-scoped
   // so a normal refresh of the dashboard later in the session doesn't
   // re-fire.
-  const handleGoToDashboard = () => {
+  const markJustOnboarded = () => {
     if (typeof window !== 'undefined') {
       try {
         window.sessionStorage.setItem('haven-just-onboarded', '1')
@@ -166,7 +166,16 @@ export default function OnboardingClient() {
         // dashboard arrival without the celebration. No user-facing impact.
       }
     }
+  }
+
+  const handleGoToDashboard = () => {
+    markJustOnboarded()
     router.push('/dashboard')
+  }
+
+  const handleSetUpFirstAgent = () => {
+    markJustOnboarded()
+    router.push('/agents?setup=first')
   }
 
   return (
@@ -505,11 +514,18 @@ export default function OnboardingClient() {
               </div>
 
               <button
-                onClick={handleGoToDashboard}
+                onClick={handleSetUpFirstAgent}
                 className="v2-animate-stagger w-full py-3 rounded-md bg-[var(--v2-brand)] text-white text-sm font-semibold hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)] hover:-translate-y-0.5 hover:shadow-[var(--v2-shadow-card)]"
                 style={{ ['--v2-stagger-delay' as string]: '340ms' }}
               >
-                Go to dashboard →
+                Set up your first agent →
+              </button>
+              <button
+                onClick={handleGoToDashboard}
+                className="v2-animate-stagger mt-3 w-full py-3 rounded-md text-sm font-medium text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] transition-colors"
+                style={{ ['--v2-stagger-delay' as string]: '400ms' }}
+              >
+                Skip for now — go to dashboard
               </button>
             </div>
           )}

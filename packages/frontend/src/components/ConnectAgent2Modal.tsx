@@ -117,6 +117,13 @@ interface Props {
    * `pending_approval` to `active`.
    */
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
+  /**
+   * Prefill the policy step with a starter allowance (10 USDC, daily reset)
+   * when the form is empty. Used by the first-agent onboarding hand-off so a
+   * new user lands in a payment-ready default they can still edit before
+   * confirming. Never overwrites allowances the user already added.
+   */
+  starterAllowance?: boolean
 }
 
 const RUNTIME_OPTIONS = [
@@ -136,6 +143,7 @@ export default function ConnectAgent2Modal({
   safeAddress: propSafeAddress,
   safeId: propSafeId,
   onSetupUpdated,
+  starterAllowance = false,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
@@ -264,6 +272,27 @@ export default function ConnectAgent2Modal({
     if (!validSymbols.has(addToken)) setAddToken(tokenOptions[0]?.symbol ?? '')
     setAllowances((prev) => prev.filter((allowance) => validSymbols.has(allowance.tokenSymbol)))
   }, [addToken, open, tokenOptions])
+
+  // First-agent hand-off: seed a starter budget so the policy step is
+  // payment-ready by default. Only when the form is empty — user edits win.
+  useEffect(() => {
+    if (!open || !starterAllowance) return
+    const usdc =
+      tokenOptions.find((token) => token.symbol === 'USDC') ??
+      tokenOptions.find((token) => token.symbol === 'USDC.e')
+    if (!usdc) return
+    setAllowances((prev) =>
+      prev.length > 0
+        ? prev
+        : [{
+            tokenSymbol: usdc.symbol,
+            tokenAddress: usdc.address,
+            decimals: usdc.decimals,
+            amount: '10',
+            resetTimeMin: 1440,
+          }],
+    )
+  }, [open, starterAllowance, tokenOptions])
 
   const resetForm = useCallback(() => {
     setStep('details')

@@ -51,7 +51,12 @@ vi.mock('@/lib/signer', () => ({
 }))
 
 vi.mock('@/components/ConnectAgent2Modal', () => ({
-  default: ({ open }: { open: boolean }) => (open ? <div role="dialog">Connect Agent 2 Modal</div> : null),
+  default: ({ open, starterAllowance }: { open: boolean; starterAllowance?: boolean }) =>
+    open ? (
+      <div role="dialog">
+        Connect Agent 2 Modal{starterAllowance ? ' (starter allowance)' : ''}
+      </div>
+    ) : null,
 }))
 
 import AgentPanel from '@/components/AgentPanel'
@@ -91,5 +96,27 @@ describe('AgentPanel Connect Agent entry', () => {
     render(<AgentPanel />)
 
     expect(screen.queryByRole('button', { name: 'Manual setup' })).not.toBeInTheDocument()
+  })
+
+  it('auto-opens the connect flow with a starter allowance on ?setup=first (#352)', () => {
+    window.history.replaceState(null, '', '/agents?setup=first')
+
+    render(<AgentPanel />)
+
+    expect(screen.getByText('Connect Agent 2 Modal (starter allowance)')).toBeInTheDocument()
+    // the param is consumed so refresh/back doesn't re-trigger the hand-off
+    expect(window.location.search).toBe('')
+
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('does not auto-open the connect flow without the setup param', () => {
+    window.history.replaceState(null, '', '/agents')
+
+    render(<AgentPanel />)
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    window.history.replaceState(null, '', '/')
   })
 })

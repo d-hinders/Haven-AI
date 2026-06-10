@@ -8,6 +8,7 @@ import {
   normalizeAgentAllowanceTokenAddress,
 } from '../lib/agent-allowance-validation.js'
 import { getTokenBalance } from '../lib/allowance-module.js'
+import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { formatTokenValue } from '../lib/tokens.js'
 
@@ -314,6 +315,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       await client.query('COMMIT')
+      emitFunnelEvent(sub, 'agent_created', { agent_id: agent.id })
+      if (savedAllowances.length > 0) {
+        emitFunnelEvent(sub, 'allowance_granted', { agent_id: agent.id })
+      }
       return reply.code(201).send({
         ...agent,
         ...safeInfo,

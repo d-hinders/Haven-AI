@@ -14,6 +14,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
 import { getRelayer, warnIfRelayerLow } from '../lib/relayer.js'
+import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 
 const SAFE_SETUP_ABI = [
   'function setup(address[] _owners, uint256 _threshold, address to, bytes data, address fallbackHandler, address paymentToken, uint256 payment, address paymentReceiver)',
@@ -271,6 +272,7 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
       await client.query('COMMIT')
       transactionOpen = false
 
+      emitFunnelEvent(sub, 'safe_deployed', { safe_address: safeAddress, chain_id })
       return reply.code(201).send({
         safe_address: safeAddress,
         tx_hash: tx.hash,

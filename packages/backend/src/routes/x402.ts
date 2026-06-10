@@ -16,6 +16,7 @@ import {
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
+import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import {
   agentPaymentStatusHttpCode,
   getAgentPaymentStatus,
@@ -784,6 +785,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         }
 
         await tryRecordMachinePaymentEvidenceBaseById(intent.id, agent.id, request.log)
+        emitFunnelEvent(agent.user_id, 'first_payment_settled', { payment_id: intent.id, rail: 'x402' })
 
         return reply.code(201).send({
           success: true,

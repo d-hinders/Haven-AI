@@ -977,6 +977,10 @@ export const openapiSpec = {
                         instructions: { type: 'string' },
                       },
                     },
+                    idempotent_replay: {
+                      type: 'boolean',
+                      description: 'Present and true when this is a replay of an earlier request with the same idempotency_key.',
+                    },
                   },
                   additionalProperties: false,
                 },
@@ -998,6 +1002,10 @@ export const openapiSpec = {
                     recipient: { type: 'string' },
                     expires_at: { type: 'string', format: 'date-time' },
                     message: { type: 'string' },
+                    idempotent_replay: {
+                      type: 'boolean',
+                      description: 'Present and true when this is a replay of an earlier request with the same idempotency_key.',
+                    },
                   },
                   additionalProperties: true,
                 },

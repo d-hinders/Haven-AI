@@ -78,6 +78,13 @@ const CHAIN_EXPLORER_TX: Record<number, string> = {
   8453: 'https://basescan.org/tx',
 }
 
+// Canonical USDC contract address per chain — the single source the sweep flow
+// resolves against. Base (8453) is the only chain Haven sweeps today; the x402
+// path keeps its own lowercase copy for header comparison (see x402.ts
+// BASE_TOKENS). Add a chain here to make its USDC sweepable.
+const CHAIN_USDC: Record<number, string> = {
+  8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+}
 
 function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
   const base = CHAIN_EXPLORER_TX[chainId ?? 8453] ?? CHAIN_EXPLORER_TX[8453]
@@ -618,21 +625,10 @@ export class HavenClient {
 
     const ERC20_TRANSFER_ABI = ['function balanceOf(address) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'] as const
 
-    // USDC contract address indexed by chain ID.
-    const USDC_BY_CHAIN: Record<number, string> = {
-      8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    }
-
-    const explorerByChain: Record<number, string> = {
-      8453: 'https://basescan.org/tx',
-      100:  'https://gnosisscan.io/tx',
-    }
-    const explorerBase = explorerByChain[chainId] ?? 'https://basescan.org/tx'
-
     const transfers: SweepResult['transfers'] = []
 
     // ── 1. Sweep ERC-20 USDC ────────────────────────────────────────
-    const usdcAddress = USDC_BY_CHAIN[chainId]
+    const usdcAddress = CHAIN_USDC[chainId]
     if (usdcAddress) {
       const usdcContract = createErc20Contract(usdcAddress, ERC20_TRANSFER_ABI, wallet)
       const usdcBalance: bigint = await usdcContract.balanceOf(delegateAddress)
@@ -645,7 +641,7 @@ export class HavenClient {
           amount: formatAtomicAmount(usdcBalance, 6),
           amountAtomic: usdcBalance.toString(),
           txHash,
-          explorerUrl: `${explorerBase}/${txHash}`,
+          explorerUrl: buildExplorerUrl(chainId, txHash),
         })
       }
     }
@@ -667,7 +663,7 @@ export class HavenClient {
           amount: formatAtomicAmount(ethToSend, 18),
           amountAtomic: ethToSend.toString(),
           txHash,
-          explorerUrl: `${explorerBase}/${txHash}`,
+          explorerUrl: buildExplorerUrl(chainId, txHash),
         })
       }
     }

@@ -215,6 +215,137 @@ function resolveAsset(chainId: number, asset: SendAsset) {
   return null
 }
 
+const PG_UNIQUE_VIOLATION = '23505'
+
+const SEND_SIGN_INSTRUCTIONS =
+  'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
+  'The signature must be 65 bytes: r (32) + s (32) + v (1), where v is 27 or 28.'
+
+/**
+ * Build the AllowanceModule `sign_data` payload returned by /send.
+ *
+ * Shared by the create path and the idempotent-replay path so a retried request
+ * can never receive a structurally different hash/components than its original
+ * 201 — the retry path is exactly what idempotency exists to protect.
+ */
+function buildSendSignData(
+  hash: string,
+  components: { safe: string; token: string; to: string; amount: string; nonce: number },
+) {
+  return {
+    hash,
+    components: {
+      safe: components.safe,
+      token: components.token,
+      to: components.to,
+      amount: components.amount,
+      payment_token: ZERO_ADDRESS,
+      payment: '0',
+      nonce: components.nonce,
+    },
+    instructions: SEND_SIGN_INSTRUCTIONS,
+  }
+}
+
+interface SendReplay {
+  code: 201 | 202
+  body: Record<string, unknown>
+}
+
+/**
+ * Resolve an existing /send result for an idempotency key, if one exists.
+ *
+ * A send lands as either a signable payment intent (within allowance) or a
+ * queued approval (over allowance), so both tables are checked. Returns the
+ * original response so a retried request is a true replay rather than a second
+ * intent with a fresh hash. Returns null when the key has never been seen (or
+ * its prior row reached a terminal state and is therefore reusable).
+ */
+async function findExistingSend(
+  agent: AgentContext,
+  idempotencyKey: string,
+  asset: SendAsset,
+): Promise<SendReplay | null> {
+  const intent = await pool.query<{
+    id: string
+    status: string
+    expires_at: string
+    token_address: string
+    to_address: string
+    amount_raw: string
+    amount_human: string
+    allowance_nonce: number
+    sign_hash: string
+  }>(
+    `SELECT id, status, expires_at, token_address, to_address,
+            amount_raw, amount_human, allowance_nonce, sign_hash
+     FROM payment_intents
+     WHERE agent_id = $1 AND send_idempotency_key = $2
+       AND status NOT IN ('failed', 'expired')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [agent.id, idempotencyKey],
+  )
+  const pi = intent.rows[0]
+  if (pi) {
+    return {
+      code: 201,
+      body: {
+        payment_id: pi.id,
+        status: pi.status,
+        expires_at: pi.expires_at,
+        asset,
+        amount: pi.amount_human,
+        recipient: pi.to_address,
+        idempotent_replay: true,
+        sign_data: buildSendSignData(pi.sign_hash, {
+          safe: agent.safe_address,
+          token: pi.token_address,
+          to: pi.to_address,
+          amount: pi.amount_raw,
+          nonce: pi.allowance_nonce,
+        }),
+      },
+    }
+  }
+
+  const approval = await pool.query<{
+    id: string
+    status: string
+    expires_at: string
+    token_symbol: string
+    amount_human: string
+  }>(
+    `SELECT id, status, expires_at, token_symbol, amount_human
+     FROM approval_requests
+     WHERE agent_id = $1 AND send_idempotency_key = $2
+       AND status NOT IN ('rejected', 'expired')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [agent.id, idempotencyKey],
+  )
+  const ar = approval.rows[0]
+  if (ar) {
+    return {
+      code: 202,
+      body: {
+        payment_id: ar.id,
+        kind: 'approval_request',
+        status: 'pending_approval',
+        phase: AgentPaymentPhase.UserApprovalRequired,
+        next_action: AgentPaymentNextAction.WaitForUserApproval,
+        message: `Transfer of ${ar.amount_human} ${ar.token_symbol} is queued for owner approval.`,
+        requested: ar.amount_human,
+        asset,
+        expires_at: ar.expires_at,
+        idempotent_replay: true,
+      },
+    }
+  }
+
+  return null
+}
+
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', agentAuthMiddleware)
 
@@ -339,6 +470,15 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(400).send({ error: 'amount must be a positive number' })
     }
 
+    let idempotencyKey: string | undefined
+    if (request.body.idempotency_key !== undefined) {
+      const key = request.body.idempotency_key
+      if (typeof key !== 'string' || key.length < 1 || key.length > 128) {
+        return reply.code(400).send({ error: 'idempotency_key must be a string of 1–128 characters' })
+      }
+      idempotencyKey = key
+    }
+
     // 2. Resolve asset to token config
     const tokenConfig = resolveAsset(agent.chain_id, asset)
     if (!tokenConfig) {
@@ -357,6 +497,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
     if (amountRaw <= 0n) {
       return reply.code(400).send({ error: 'amount must be greater than zero' })
+    }
+
+    // Idempotency replay: a retried send returns the original intent/approval
+    // rather than minting a second one. Checked before the on-chain read so a
+    // replay skips the RPC round trip entirely (see migration 020).
+    if (idempotencyKey) {
+      const replay = await findExistingSend(agent, idempotencyKey, asset)
+      if (replay) return reply.code(replay.code).send(replay.body)
     }
 
     // 4. Policy check: agent must have this token configured
@@ -395,26 +543,37 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       const approvalReason =
         `Exceeds remaining allowance (${amount} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
 
-      const approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
-        `INSERT INTO approval_requests (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, reason, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending',
-          NOW() + interval '24 hours')
-        RETURNING id, status, expires_at`,
-        [
-          agent.id,
-          agent.user_id,
-          agent.safe_address,
-          agent.chain_id,
-          tokenConfig.symbol,
-          tokenAddress,
-          recipient.toLowerCase(),
-          amountRaw.toString(),
-          amount,
-          approvalReason,
-        ],
-      )
+      let approvalResult
+      try {
+        approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
+          `INSERT INTO approval_requests (
+            agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+            to_address, amount_raw, amount_human, reason, send_idempotency_key, status, expires_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending',
+            NOW() + interval '24 hours')
+          RETURNING id, status, expires_at`,
+          [
+            agent.id,
+            agent.user_id,
+            agent.safe_address,
+            agent.chain_id,
+            tokenConfig.symbol,
+            tokenAddress,
+            recipient.toLowerCase(),
+            amountRaw.toString(),
+            amount,
+            approvalReason,
+            idempotencyKey ?? null,
+          ],
+        )
+      } catch (err) {
+        // Lost an idempotency-key race with a concurrent send — replay the winner.
+        if (idempotencyKey && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
+          const replay = await findExistingSend(agent, idempotencyKey, asset)
+          if (replay) return reply.code(replay.code).send(replay.body)
+        }
+        throw err
+      }
 
       const approval = approvalResult.rows[0]
       return reply.code(202).send({
@@ -452,29 +611,40 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
 
     // 7. Store the payment intent
-    const result = await pool.query<SendPaymentIntentRow>(
-      `INSERT INTO payment_intents (
-        agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-        to_address, amount_raw, amount_human, delegate_address,
-        allowance_nonce, sign_hash, status, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
-        NOW() + interval '10 minutes')
-      RETURNING id, status, expires_at`,
-      [
-        agent.id,
-        agent.user_id,
-        agent.safe_address,
-        agent.chain_id,
-        tokenConfig.symbol,
-        tokenAddress,
-        recipient.toLowerCase(),
-        amountRaw.toString(),
-        amount,
-        agent.delegate_address,
-        onChainAllowance.nonce,
-        signHash,
-      ],
-    )
+    let result
+    try {
+      result = await pool.query<SendPaymentIntentRow>(
+        `INSERT INTO payment_intents (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, delegate_address,
+          allowance_nonce, sign_hash, send_idempotency_key, status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending_signature',
+          NOW() + interval '10 minutes')
+        RETURNING id, status, expires_at`,
+        [
+          agent.id,
+          agent.user_id,
+          agent.safe_address,
+          agent.chain_id,
+          tokenConfig.symbol,
+          tokenAddress,
+          recipient.toLowerCase(),
+          amountRaw.toString(),
+          amount,
+          agent.delegate_address,
+          onChainAllowance.nonce,
+          signHash,
+          idempotencyKey ?? null,
+        ],
+      )
+    } catch (err) {
+      // Lost an idempotency-key race with a concurrent send — replay the winner.
+      if (idempotencyKey && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
+        const replay = await findExistingSend(agent, idempotencyKey, asset)
+        if (replay) return reply.code(replay.code).send(replay.body)
+      }
+      throw err
+    }
 
     const intent = result.rows[0]
 
@@ -485,21 +655,13 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       asset,
       amount,
       recipient: recipient.toLowerCase(),
-      sign_data: {
-        hash: signHash,
-        components: {
-          safe: agent.safe_address,
-          token: tokenAddress,
-          to: recipient.toLowerCase(),
-          amount: amountRaw.toString(),
-          payment_token: ZERO_ADDRESS,
-          payment: '0',
-          nonce: onChainAllowance.nonce,
-        },
-        instructions:
-          'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
-          'The signature must be 65 bytes: r (32) + s (32) + v (1), where v is 27 or 28.',
-      },
+      sign_data: buildSendSignData(signHash, {
+        safe: agent.safe_address,
+        token: tokenAddress,
+        to: recipient.toLowerCase(),
+        amount: amountRaw.toString(),
+        nonce: onChainAllowance.nonce,
+      }),
     })
   })
 

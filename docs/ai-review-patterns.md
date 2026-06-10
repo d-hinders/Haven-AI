@@ -97,7 +97,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 ## Inline Gate Placement
 
 - `OnchainActionGate` and `NetworkGate` notices render **above** the action row, not inside the `flex-1` wrapper that holds the action button. Nesting the notice inside `flex-1` pushes the primary action out of line with its siblings when the gate triggers.
-- Standard pattern: `<OnchainActionNotice />` above the Cancel/Confirm row, with `showNotice={false}` on the gate so it does not double-render. Match the layout used in `SendModal`, `ApprovalQueue`, and `CreateAgentModal`.
+- Standard pattern: `<OnchainActionNotice />` above the Cancel/Confirm row, with `showNotice={false}` on the gate so it does not double-render. Match the layout used in `SendModal` and `ApprovalQueue`.
 
 ## Multi-Entrypoint Parity
 

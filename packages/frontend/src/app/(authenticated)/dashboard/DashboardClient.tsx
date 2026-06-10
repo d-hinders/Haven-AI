@@ -844,7 +844,7 @@ export default function DashboardClient() {
     refetchSelectedBalances()
   }
 
-  function openCreateAgent() {
+  function openConnectAgent() {
     setConnectAgentOpen(true)
   }
 
@@ -969,7 +969,7 @@ export default function DashboardClient() {
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
-        onConnectAgent={openCreateAgent}
+        onConnectAgent={openConnectAgent}
       />
       <TransactionsSection
         transactions={overview?.transactions ?? []}
@@ -1004,7 +1004,7 @@ export default function DashboardClient() {
             hasAgents={hasAgents}
             hasFirstAgentPayment={hasFirstAgentPayment}
             onReceiveFunds={openReceiveForDefaultSafe}
-            onAddAgent={openCreateAgent}
+            onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
             onDismiss={dismissInProgressGuide}
             onDismissComplete={dismissCompleteBanner}

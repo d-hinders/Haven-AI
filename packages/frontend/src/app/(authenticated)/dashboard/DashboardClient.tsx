@@ -27,7 +27,7 @@ import ConnectAgent2Modal from '@/components/ConnectAgent2Modal'
 import SendModal from '@/components/SendModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
-import ComingSoonModal from '@/components/ComingSoonModal'
+import AddFundsModal from '@/components/AddFundsModal'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -701,10 +701,10 @@ export default function DashboardClient() {
   )
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
-  const [pickerAction, setPickerAction] = useState<'send' | 'receive' | null>(null)
+  const [pickerAction, setPickerAction] = useState<'send' | 'receive' | 'add-funds' | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   const [receiveOpen, setReceiveOpen] = useState(false)
-  const [comingSoonOpen, setComingSoonOpen] = useState(false)
+  const [addFundsOpen, setAddFundsOpen] = useState(false)
   const [agentUsageOpen, setAgentUsageOpen] = useState(false)
   // Set true the first time the user opens Receive in this session. Combined
   // with !hasFunds it drives the hero's "Watching for incoming deposits…"
@@ -849,12 +849,10 @@ export default function DashboardClient() {
   }
 
   function openHeroAction(action: 'send' | 'receive' | 'add-funds') {
-    if (action === 'add-funds') {
-      setComingSoonOpen(true)
+    if (safes.length === 0) {
+      if (action === 'add-funds') setAddFundsOpen(true)
       return
     }
-
-    if (safes.length === 0) return
 
     if (safes.length > 1) {
       setPickerAction(action)
@@ -867,6 +865,7 @@ export default function DashboardClient() {
       setHasOpenedReceive(true)
       setReceiveOpen(true)
     }
+    if (action === 'add-funds') setAddFundsOpen(true)
   }
 
   function openReceiveForDefaultSafe() {
@@ -880,6 +879,7 @@ export default function DashboardClient() {
     setActionSafeId(safeId)
     if (pickerAction === 'send') setSendOpen(true)
     if (pickerAction === 'receive') setReceiveOpen(true)
+    if (pickerAction === 'add-funds') setAddFundsOpen(true)
     setPickerAction(null)
   }
 
@@ -1086,9 +1086,11 @@ export default function DashboardClient() {
         onClose={() => setReceiveOpen(false)}
       />
 
-      <ComingSoonModal
-        open={comingSoonOpen}
-        onClose={() => setComingSoonOpen(false)}
+      <AddFundsModal
+        open={addFundsOpen}
+        onClose={() => setAddFundsOpen(false)}
+        safeAddress={selectedActionSafe?.safe_address}
+        chainId={selectedActionSafe?.chain_id}
         onReceive={() => {
           setHasOpenedReceive(true)
           setReceiveOpen(true)

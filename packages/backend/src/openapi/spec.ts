@@ -296,6 +296,45 @@ export const openapiSpec = {
         },
       },
     },
+    '/agents/{id}/delegate-balance': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'getDelegateBalance',
+        summary: 'Get on-chain USDC and ETH balance of the agent delegate EOA.',
+        description:
+          'Reads on-chain balances for the delegate EOA linked to this agent. ' +
+          'Used by the dashboard to surface stranded funds and by the sweep flow to show exact amounts. ' +
+          'Haven never holds the delegate key; this endpoint only reads balances from the chain.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'Delegate balance.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
+                  properties: {
+                    delegate_address: { type: 'string' },
+                    safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+                    chain_id: { type: 'integer' },
+                    eth: { type: 'string' },
+                    eth_atomic: { type: 'string' },
+                    usdc: { type: 'string' },
+                    usdc_atomic: { type: 'string' },
+                    usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '422': errorResponse,
+        },
+      },
+    },
     '/agents/{id}/revoke': {
       post: {
         tags: ['Agents'],

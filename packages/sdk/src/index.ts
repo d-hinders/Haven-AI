@@ -57,6 +57,8 @@ export type {
   HavenAllowance,
   HavenAllowanceSummary,
   HavenPaymentReceipt,
+  SweepResult,
+  SweepEntry,
 } from './types.js'
 
 export type { ClaudeTool, OpenAITool } from './tools.js'

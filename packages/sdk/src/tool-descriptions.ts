@@ -161,6 +161,20 @@ export const toolDescriptions = {
       'If pending_approval is returned, preserve payment_id and resume_state and wait for the wallet owner to approve in Haven. ' +
       'Use haven_resume_x402_payment once nextAction=retry_original_x402_request.',
   },
+  sweep_delegate: {
+    summary:
+      'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating Safe.',
+    selectionGuidance:
+      'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
+      'Do NOT use for normal payments — use haven_pay_x402 or haven_pay_mpp_challenge. ' +
+      'Do NOT use to read balances only — use haven_get_allowances.',
+    behavior:
+      'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating Safe (hardcoded destination). ' +
+      'The delegate key signs locally — Haven never sees it and the backend never constructs signed transactions (CASP/MiCA Red Line #2). ' +
+      'Returns tx hashes and recovered amounts. Returns an empty transfers list when nothing is stranded.',
+    nextActionGuidance:
+      'If transfers is non-empty, confirm the amounts with the user. No further action required — funds are on their way back to the Safe.',
+  },
   send: {
     summary:
       'Send ETH or USDC directly from the agent\'s Haven wallet to a recipient address.',

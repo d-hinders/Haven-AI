@@ -29,6 +29,8 @@ export interface Agent {
   allowances: AgentAllowance[]
   /** ISO timestamp of the most recent MCP tool call. Null until first contact. */
   mcp_last_seen_at?: string | null
+  /** True when there are open reconciliation events indicating stranded delegate funds. */
+  has_stranded_funds?: boolean
 }
 
 interface CreateAgentParams {

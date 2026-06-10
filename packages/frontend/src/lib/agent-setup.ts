@@ -43,10 +43,9 @@ export interface ExecuteAgentSetupParams {
  * Build, sign, and submit the agent-setup batch (enableModule + addDelegate +
  * setAllowance per token) as a single Safe transaction.
  *
- * Shared by the manual (CreateAgentModal) and staged (ConnectAgent2Modal) flows
- * so the on-chain orchestration — and its timeout/confirm semantics — stays in
- * one place. Callers own everything after: saving the agent, recording the
- * wallet approval, and rendering the result.
+ * Used by the ConnectAgent2Modal flow so the on-chain orchestration — and its
+ * timeout/confirm semantics — stays in one place. Callers own everything after:
+ * saving the agent, recording the wallet approval, and rendering the result.
  *
  * A receipt timeout is returned as a status (not thrown) so the caller can act
  * on the partially-applied state with the tx hash in hand, rather than treating

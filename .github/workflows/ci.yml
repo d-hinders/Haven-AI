@@ -426,7 +426,6 @@ jobs:
         run: npm run build -w packages/frontend
         env:
           NEXT_TELEMETRY_DISABLED: 1
-          NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED: true
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
 
       - name: Upload frontend build
@@ -480,7 +479,6 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || inputs.ui_suite != 'full'
         run: npm run test:e2e:desktop -w packages/frontend
         env:
-          NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED: true
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1
 
@@ -488,7 +486,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.ui_suite == 'full'
         run: npm run test:e2e:full -w packages/frontend
         env:
-          NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED: true
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1
 

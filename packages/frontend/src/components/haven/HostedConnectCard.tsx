@@ -69,10 +69,7 @@ export interface HostedConnectCardProps {
   /**
    * Optional callback fired when the user copies the delegate key from
    * section 2. The parent uses it for analytics and "credentials saved"
-   * gating. The card no longer renders a separate "Save signing key"
-   * download button — that responsibility moved to the standalone
-   * "Download backup" row in CreateAgentModal, which dumps the full
-   * credential file (including the key) to disk in one action.
+   * gating.
    */
   onCopySigningKey?: () => void
   /**

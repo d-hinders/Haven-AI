@@ -14,7 +14,6 @@ import {
 } from '@/lib/allowance-module'
 import { getChainTokens } from '@/lib/safe-tx'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
-import CreateAgentModal from './CreateAgentModal'
 import ConnectAgent2Modal from './ConnectAgent2Modal'
 import EditAgentModal from './EditAgentModal'
 import ConfirmDialog from './ConfirmDialog'
@@ -41,11 +40,6 @@ function budgetPeriodLabel(mins: number) {
   if (label === 'weekly') return 'per week'
   if (label === 'monthly') return 'per month'
   return `every ${label}`
-}
-
-function connectAgent2Enabled(): boolean {
-  // Opt-out: ConnectAgent2 is on by default unless explicitly disabled.
-  return !['false', '0', 'off'].includes(String(process.env.NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED ?? '').toLowerCase())
 }
 
 /** Resolve token address to symbol (chain-aware) */
@@ -700,7 +694,6 @@ export default function AgentPanel() {
     chainId,
   })
 
-  const [createOpen, setCreateOpen] = useState(false)
   const [connect2Open, setConnect2Open] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
@@ -757,7 +750,6 @@ export default function AgentPanel() {
     }, 30_000)
     timers.set(key, timer)
   }, [])
-  const showConnectAgent2 = connectAgent2Enabled()
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
     [agents],
@@ -990,18 +982,8 @@ export default function AgentPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!showConnectAgent2 && (
-            // Legacy manual setup — only visible when ConnectAgent2 is disabled.
-            <Button
-              onClick={() => setCreateOpen(true)}
-              size="sm"
-              variant="ghost"
-            >
-              Manual setup
-            </Button>
-          )}
           <Button
-            onClick={() => showConnectAgent2 ? setConnect2Open(true) : setCreateOpen(true)}
+            onClick={() => setConnect2Open(true)}
             size="sm"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1042,12 +1024,9 @@ export default function AgentPanel() {
           body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button onClick={() => showConnectAgent2 ? setConnect2Open(true) : setCreateOpen(true)}>
+              <Button onClick={() => setConnect2Open(true)}>
                 Connect agent
               </Button>
-              {!showConnectAgent2 && (
-                <Button onClick={() => setCreateOpen(true)} variant="ghost">Manual setup</Button>
-              )}
             </div>
           }
         />
@@ -1147,38 +1126,18 @@ export default function AgentPanel() {
         </div>
       )}
 
-      {/* Create modal */}
-      <CreateAgentModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
+      <ConnectAgent2Modal
+        open={connect2Open}
+        onClose={() => setConnect2Open(false)}
         safeAddress={safeAddress}
         safeId={activeSafe?.id}
-        onCreated={() => {
-          // Don't close the modal here — the Done step shows the one-time
-          // setup file / skill bundle / raw credentials. User dismisses via
-          // the Done button, which fires onClose.
+        onSetupUpdated={(info) => {
+          // Suppress the brief "Unmanaged Delegate" race window before
+          // refreshing — see comment on `unmanagedDelegates`.
+          markDelegateRecent(info?.delegateAddress)
           refetch()
-          // Refresh network data after a short delay for tx confirmation.
-          // Tracked so the timer can be cancelled if the component unmounts first.
-          if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
-          onChainRefetchTimerRef.current = setTimeout(refetchOnChain, 2000)
         }}
       />
-
-      {showConnectAgent2 && (
-        <ConnectAgent2Modal
-          open={connect2Open}
-          onClose={() => setConnect2Open(false)}
-          safeAddress={safeAddress}
-          safeId={activeSafe?.id}
-          onSetupUpdated={(info) => {
-            // Suppress the brief "Unmanaged Delegate" race window before
-            // refreshing — see comment on `unmanagedDelegates`.
-            markDelegateRecent(info?.delegateAddress)
-            refetch()
-          }}
-        />
-      )}
 
       {/* Edit agent modal */}
       {editAgent && agentUsesActiveSafe(editAgent) && (

@@ -41,10 +41,6 @@ vi.mock('@/lib/signer', () => ({
   useActiveSigner: () => mockUseActiveSigner(),
 }))
 
-vi.mock('../CreateAgentModal', () => ({
-  default: () => null,
-}))
-
 vi.mock('../ConnectAgent2Modal', () => ({
   default: () => null,
 }))

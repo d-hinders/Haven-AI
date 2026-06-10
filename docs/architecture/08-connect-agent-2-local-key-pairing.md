@@ -953,25 +953,12 @@ Do not remove the old Connect Agent flow in this sequence.
 
 ## Feature Gate And Rollback
 
-Connect Agent 2 ships with rollback gates:
-
-- frontend Connect Agent 2 is enabled by default; set
-  `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` to restore the old
-  manual setup entry point
-- backend setup-token creation is enabled by default; set
-  `CONNECT_AGENT_2_ENABLED=false`, `0`, or `off` to block new setup creation
-- connector package published as alpha/beta until the flow is verified
-
-Rollback plan:
-
-- hide Connect Agent 2 entry point
-- keep old Connect Agent flow unchanged
-- disable new setup-token creation if a security or runtime-install issue is
-  found
-- keep read/cancel endpoints available long enough for in-progress setups to
-  recover or expire
-- do not delete old credential and hosted-connect code until a separate removal
-  issue is opened and reviewed
+Connect Agent 2 originally shipped behind `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED`
+(frontend) and `CONNECT_AGENT_2_ENABLED` (backend) rollback gates. Both flags,
+along with the legacy `CreateAgentModal`, were retired in #345 once the new
+flow was proven in production. Rolling back now means reverting #345 rather
+than flipping a flag — see `09-connect-agent-2-rollout-closeout.md` for the
+current state.
 
 ## Review Checklist
 

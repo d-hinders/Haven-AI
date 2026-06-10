@@ -417,3 +417,141 @@ describe('custody invariant', () => {
     expect(wire).not.toContain('private_key')
   })
 })
+
+// ── MCP merchant tool calls (issue #316) ───────────────────────────────────────
+
+const MCP_URL = 'https://mcp.merchant.test/mcp'
+
+/** Frame a JSON-RPC message as a single MCP Streamable-HTTP SSE event. */
+function mcpSse(payload: unknown): Response {
+  return new Response(`event: message\ndata: ${JSON.stringify(payload)}\n\n`, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+/**
+ * Route a single hosted MCP merchant flow by URL, method, and JSON-RPC method.
+ * The merchant endpoint multiplexes initialize / notifications / tools/call on
+ * one path, so the path-keyed `stubFetch` can't express it.
+ */
+function stubMcpFlow(opts: { paid: Response }): void {
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+    const u = String(url)
+    const method = (init.method ?? 'GET').toUpperCase()
+    const headers = new Headers(init.headers)
+    const body = init.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : undefined
+    calls.push({ url: u, method, body, headers: (init.headers ?? {}) as Record<string, string> })
+
+    if (u.endsWith('/machine-payments/agent')) {
+      return new Response(JSON.stringify(AGENT_RESPONSE), { status: 200 })
+    }
+    if (u === MCP_URL) {
+      if (body?.method === 'initialize') {
+        return new Response(
+          `event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-06-18' } })}\n\n`,
+          { status: 200, headers: { 'Content-Type': 'text/event-stream', 'mcp-session-id': 'sess-h' } },
+        )
+      }
+      if (body?.method === 'notifications/initialized') {
+        return new Response(null, { status: 202 })
+      }
+      if (headers.has('X-PAYMENT')) return opts.paid
+      return new Response(JSON.stringify({ ...PAYMENT_REQUIRED, resource: { url: MCP_URL } }), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (u.endsWith('/x402')) {
+      return new Response(JSON.stringify(X402_INTENT_RESPONSE), { status: 201 })
+    }
+    return new Response(JSON.stringify({}), { status: 200 })
+  })
+}
+
+describe('haven_pay_mcp_tool', () => {
+  it('constructs the funding hash from an MCP merchant probe and echoes the tool context', async () => {
+    stubMcpFlow({ paid: mcpSse({ jsonrpc: '2.0', id: 'x', result: { ok: true } }) })
+
+    const result = ok<{ payload_hash: string; payment_id: string; mcp: Record<string, unknown> }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: MCP_URL,
+        tool_name: 'create_image',
+        arguments: { prompt: 'a cat' },
+      }),
+    )
+
+    expect(result.data.payment_id).toBe('pay_x402')
+    expect(result.data.payload_hash).toBe('0xfunding')
+    expect(result.data.mcp).toEqual({
+      merchant_url: MCP_URL,
+      tool_name: 'create_image',
+      arguments: { prompt: 'a cat' },
+    })
+
+    // The probe carried the JSON-RPC tools/call envelope built from the args.
+    const probe = calls.find((c) => c.url === MCP_URL && c.body?.method === 'tools/call')
+    expect(probe?.body).toMatchObject({
+      method: 'tools/call',
+      params: { name: 'create_image', arguments: { prompt: 'a cat' } },
+    })
+    // Custody invariant: no key material crosses the wire from the hosted server.
+    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+    expect(JSON.stringify(calls)).not.toContain('delegate_key')
+  })
+
+  it('surfaces pending_approval (no hash) when the amount is over budget', async () => {
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const u = String(url)
+      const body = init.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : undefined
+      calls.push({ url: u, method: (init.method ?? 'GET').toUpperCase(), body, headers: {} })
+      if (u.endsWith('/machine-payments/agent')) return new Response(JSON.stringify(AGENT_RESPONSE), { status: 200 })
+      if (u === MCP_URL) {
+        if (body?.method === 'initialize') {
+          return new Response(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} })}\n\n`, {
+            status: 200, headers: { 'Content-Type': 'text/event-stream', 'mcp-session-id': 'sess-h' },
+          })
+        }
+        if (body?.method === 'notifications/initialized') return new Response(null, { status: 202 })
+        return new Response(JSON.stringify({ ...PAYMENT_REQUIRED, resource: { url: MCP_URL } }), {
+          status: 402, headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (u.endsWith('/x402')) {
+        return new Response(JSON.stringify({ payment_id: 'pay_over', status: 'pending_approval' }), { status: 202 })
+      }
+      return new Response(JSON.stringify({}), { status: 200 })
+    })
+
+    const result = ok<{ status: string; payload_hash: unknown }>(
+      await handlers().haven_pay_mcp_tool({ merchant_url: MCP_URL, tool_name: 'create_image' }),
+    )
+
+    expect(result.data.status).toBe('pending_approval')
+    expect(result.data.payload_hash).toBeNull()
+  })
+})
+
+describe('haven_mcp_tool_retry', () => {
+  it('replays the tool call with the edge-built X-PAYMENT header and returns the result', async () => {
+    stubMcpFlow({
+      paid: mcpSse({ jsonrpc: '2.0', id: 'haven-mcp-call-1', result: { content: [{ type: 'text', text: 'a poem' }] } }),
+    })
+
+    const result = ok<{ status: number; result: { content: unknown } }>(
+      await handlers().haven_mcp_tool_retry({
+        merchant_url: MCP_URL,
+        tool_name: 'create_text',
+        arguments: { prompt: 'haiku' },
+        x_payment_header: 'x402-header',
+      }),
+    )
+
+    expect(result.data.status).toBe(200)
+    expect(result.data.result).toEqual({ content: [{ type: 'text', text: 'a poem' }] })
+
+    const retry = calls.find((c) => c.url === MCP_URL && c.body?.method === 'tools/call')
+    expect(new Headers(retry?.headers).get('X-PAYMENT')).toBe('x402-header')
+    expect(retry?.body).toMatchObject({ params: { name: 'create_text', arguments: { prompt: 'haiku' } } })
+  })
+})

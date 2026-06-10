@@ -252,6 +252,20 @@ export interface X402RequestSnapshot {
   body?: string
 }
 
+/**
+ * The named-tool context for an MCP-over-x402 merchant call. Present on a quote
+ * when it was produced by `quoteMcpTool` rather than a plain HTTP 402 probe, so
+ * the paid retry can rebuild the same JSON-RPC `tools/call` envelope.
+ */
+export interface McpToolContext {
+  /** The MCP merchant endpoint (a URL ending in `/mcp`). */
+  merchantUrl: string
+  /** The merchant tool that was called. */
+  toolName: string
+  /** Arguments passed to the merchant tool. */
+  arguments?: Record<string, unknown>
+}
+
 /** Quote parsed from an HTTP 402 response without creating a Haven payment. */
 export interface X402Quote {
   rail: 'x402'
@@ -270,6 +284,12 @@ export interface X402Quote {
   chainId: number | null
   merchantAddress: string
   maxTimeoutSeconds: number
+  /**
+   * Set when the quote came from an MCP merchant (`quoteMcpTool`). The paid
+   * retry re-runs the MCP handshake, so the merchant tool call is described
+   * here rather than baked into the captured request snapshot.
+   */
+  mcp?: McpToolContext
 }
 
 /** State bundle an agent can persist while waiting for manual x402 approval. */

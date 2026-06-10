@@ -166,6 +166,7 @@ describe('Haven MCP tool descriptions', () => {
     { tool: 'haven_quote_x402', key: 'quoteX402' },
     { tool: 'haven_pay_x402_quote', key: 'payX402' },
     { tool: 'haven_pay_x402', key: 'payX402OneShot' },
+    { tool: 'haven_pay_mcp_tool', key: 'payMcpTool' },
     { tool: 'haven_resume_x402_payment', key: 'resumeX402' },
     { tool: 'haven_quote_mpp', key: 'quoteMpp' },
     { tool: 'haven_pay_mpp_challenge', key: 'payMpp' },
@@ -480,6 +481,134 @@ describe('Haven MCP tool handlers', () => {
     expect(merchantRetries).toBe(1)
     expect(requests.some((r) => r.url.endsWith('/x402'))).toBe(true)
     expect(requests.some((r) => r.url.endsWith('/payments/x402-one-shot-1/sign'))).toBe(true)
+    assertNoDelegateKeyLeak(requests, delegateKey)
+  })
+
+  it('haven_pay_mcp_tool: handshakes the MCP merchant, pays, and returns the tool result', async () => {
+    // Slice 7 (#316): the agent passes merchant_url + tool_name + arguments and
+    // never touches the JSON-RPC envelope or MCP transport. The tool builds the
+    // tools/call envelope and delegates to fetch()'s slice-6 auto-handshake.
+    const mcpUrl = 'https://mcp.merchant.example/mcp'
+    const mcpPaymentRequired = {
+      ...x402PaymentRequired,
+      resource: { ...x402PaymentRequired.resource, url: mcpUrl },
+    }
+    const requests: CapturedRequest[] = []
+    let merchantRetries = 0
+    let toolCallEnvelope: Record<string, unknown> | undefined
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      requests.push({ url: String(url), init })
+      const u = String(url)
+      const headers = init?.headers ? new Headers(init.headers) : new Headers()
+      const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : undefined
+
+      if (u === mcpUrl) {
+        if (body?.method === 'initialize') {
+          return new Response(`data: ${JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-06-18' } })}\n\n`, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream', 'mcp-session-id': 'sess-mcp' },
+          })
+        }
+        if (body?.method === 'notifications/initialized') {
+          return new Response(null, { status: 202 })
+        }
+        // tools/call — 402 first, paid result on the X-PAYMENT retry.
+        if (headers.has('X-PAYMENT')) {
+          merchantRetries += 1
+          toolCallEnvelope = body
+          return new Response(
+            `data: ${JSON.stringify({ jsonrpc: '2.0', id: 'haven-mcp-call-1', result: { content: [{ type: 'text', text: 'a haiku' }] } })}\n\n`,
+            {
+              status: 200,
+              headers: {
+                'Content-Type': 'text/event-stream',
+                'PAYMENT-RESPONSE': btoa(JSON.stringify({ success: true, transaction: txHash, network: mcpPaymentRequired.accepts[0].network })),
+              },
+            },
+          )
+        }
+        return new Response(JSON.stringify(mcpPaymentRequired), {
+          status: 402,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      if (u.endsWith('/x402')) {
+        return jsonResponse({
+          payment_id: 'mcp-pay-1',
+          status: 'pending_signature',
+          chain_id: 8453,
+          safe_address: safeAddress,
+          token: 'USDC',
+          amount: '0.01',
+          to: delegateAddress,
+          resource_url: mcpUrl,
+          sign_data: {
+            hash: `0x${'44'.repeat(32)}`,
+            components: {
+              safe: safeAddress,
+              token: mcpPaymentRequired.accepts[0].asset,
+              to: delegateAddress,
+              amount: mcpPaymentRequired.accepts[0].amount,
+              payment_token: '0x0000000000000000000000000000000000000000',
+              payment: '0',
+              nonce: 1,
+            },
+            instructions: 'Sign with delegate key',
+          },
+        }, 201)
+      }
+
+      if (u.endsWith('/payments/mcp-pay-1/sign')) {
+        return jsonResponse({
+          payment_id: 'mcp-pay-1',
+          status: 'confirmed',
+          tx_hash: txHash,
+          token: 'USDC',
+          amount: '0.01',
+          to: delegateAddress,
+          explorer_url: `https://basescan.org/tx/${txHash}`,
+        })
+      }
+
+      if (u.endsWith('/machine-payments/evidence')) {
+        return jsonResponse({ evidence: { id: 'evidence-1' } }, 202)
+      }
+
+      return jsonResponse({})
+    })
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl,
+      x402Wallet: safeAddress,
+    })
+    const handlers = createToolHandlers(haven)
+
+    const result = await handlers.haven_pay_mcp_tool({
+      merchant_url: mcpUrl,
+      tool_name: 'create_text',
+      arguments: { prompt: 'Write me a haiku about agents.' },
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('mcp tool pay failed')
+    // The merchant tool result (SSE collapsed to JSON-RPC result) reaches the agent.
+    expect(JSON.stringify(result.data)).toContain('a haiku')
+    expect(merchantRetries).toBe(1)
+
+    // The agent never built the envelope — the tool did, from tool_name + arguments.
+    expect(toolCallEnvelope).toMatchObject({
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { name: 'create_text', arguments: { prompt: 'Write me a haiku about agents.' } },
+    })
+
+    // Haven funding happened and the delegate key never left the machine.
+    expect(requests.some((r) => r.url.endsWith('/x402'))).toBe(true)
+    expect(requests.some((r) => r.url.endsWith('/payments/mcp-pay-1/sign'))).toBe(true)
     assertNoDelegateKeyLeak(requests, delegateKey)
   })
 

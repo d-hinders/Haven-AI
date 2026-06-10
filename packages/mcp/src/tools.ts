@@ -5,6 +5,7 @@ import {
   HavenError,
   HavenPaymentStateError,
   HavenSigningError,
+  buildMcpToolCallEnvelope,
   composeDescription,
   toolDescriptions as sharedDescriptions,
   type MachinePaymentChallenge,
@@ -21,6 +22,7 @@ export type HavenMcpToolName =
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_pay_x402'
+  | 'haven_pay_mcp_tool'
   | 'haven_resume_x402_payment'
   | 'haven_quote_mpp'
   | 'haven_pay_mpp_challenge'
@@ -48,6 +50,12 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
     method: z.string().optional(),
     headers: headersSchema,
     body: z.string().optional(),
+    idempotencyKey: z.string().optional(),
+  },
+  haven_pay_mcp_tool: {
+    merchant_url: z.string().url(),
+    tool_name: z.string(),
+    arguments: z.record(z.string(), z.unknown()).optional(),
     idempotencyKey: z.string().optional(),
   },
   haven_resume_x402_payment: {
@@ -93,6 +101,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
   haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
   haven_pay_x402: composeDescription(sharedDescriptions.payX402OneShot),
+  haven_pay_mcp_tool: composeDescription(sharedDescriptions.payMcpTool),
   haven_resume_x402_payment: composeDescription(sharedDescriptions.resumeX402),
   haven_quote_mpp: composeDescription(sharedDescriptions.quoteMpp),
   haven_pay_mpp_challenge: composeDescription(sharedDescriptions.payMpp),
@@ -143,6 +152,23 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       const args = objectInput('haven_pay_x402', input)
       return runTool(async () => {
         const response = await haven.fetch(args.url, requestInit(args), { idempotencyKey: args.idempotencyKey })
+        return responsePayload(response)
+      })
+    },
+
+    haven_pay_mcp_tool: async (input) => {
+      const args = objectInput('haven_pay_mcp_tool', input)
+      return runTool(async () => {
+        const envelope = buildMcpToolCallEnvelope(args.tool_name, args.arguments)
+        const response = await haven.fetch(
+          args.merchant_url,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(envelope),
+          },
+          { idempotencyKey: args.idempotencyKey },
+        )
         return responsePayload(response)
       })
     },

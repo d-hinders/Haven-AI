@@ -38,6 +38,8 @@ export type HostedToolName =
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
+  | 'haven_pay_mcp_tool'
+  | 'haven_mcp_tool_retry'
   | 'haven_quote_mpp'
   | 'haven_pay_mpp_challenge'
   | 'haven_resume_mpp_payment'
@@ -78,6 +80,18 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
     resume_state: z.unknown().optional(),
+  },
+  haven_pay_mcp_tool: {
+    merchant_url: z.string().url(),
+    tool_name: z.string().min(1),
+    arguments: z.record(z.unknown()).optional(),
+    idempotency_key: z.string().optional(),
+  },
+  haven_mcp_tool_retry: {
+    merchant_url: z.string().url(),
+    tool_name: z.string().min(1),
+    arguments: z.record(z.unknown()).optional(),
+    x_payment_header: z.string().min(1),
   },
   haven_quote_mpp: {
     url: z.string().url().optional(),
@@ -160,6 +174,31 @@ const RESUME_X402_DESCRIPTION = [
   '(or re-derive it via haven_sign if the binding was lost across a signer restart).',
 ].join(' ')
 
+const PAY_MCP_TOOL_DESCRIPTION = [
+  'Construct the funding step for a paid call to a named tool on an MCP-over-x402 merchant',
+  '(an endpoint whose URL ends in /mcp) and return the unsigned hash for the local signer.',
+  'Pass merchant_url, tool_name, and the tool arguments — the JSON-RPC envelope and MCP',
+  'handshake are built here; no protocol plumbing is exposed. Use haven_pay_x402_quote instead',
+  'for a plain (non-MCP) x402 endpoint. For read-only allowance, budget, spend-limit,',
+  'remaining-amount, or reset-period questions, call haven_get_allowances instead.',
+  'Returns { payment_id, payload_hash, x402, mcp } where x402 carries the signing context and',
+  'mcp echoes { merchant_url, tool_name, arguments } for haven_mcp_tool_retry.',
+  'Sign payload_hash via haven_sign (passing x402.expected) on the local signer, relay with',
+  'haven_submit to fund the delegate wallet, build the X-PAYMENT header via',
+  'haven_x402_sign_header, then call haven_mcp_tool_retry to complete the paid tool call.',
+  'Returns { status: "pending_approval", payload_hash: null } when the amount exceeds the',
+  'budget. Haven never receives the signing key.',
+].join(' ')
+
+const MCP_TOOL_RETRY_DESCRIPTION = [
+  'Complete a paid MCP merchant tool call after the funding transfer has been relayed via',
+  'haven_submit and the X-PAYMENT header built via haven_x402_sign_header.',
+  'Pass the same merchant_url, tool_name, and arguments from haven_pay_mcp_tool plus the',
+  'x_payment_header from the local signer. Re-runs the MCP handshake, replays the tools/call',
+  'with the X-PAYMENT header, parses the SSE response, and returns { status, result } with the',
+  'merchant tool result. The delegate signing key is never sent to Haven or this server.',
+].join(' ')
+
 const QUOTE_MPP_DESCRIPTION = composeDescription({
   ...sharedDescriptions.quoteMpp,
   behavior:
@@ -191,6 +230,8 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
+  haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,
+  haven_mcp_tool_retry: MCP_TOOL_RETRY_DESCRIPTION,
   haven_quote_mpp: QUOTE_MPP_DESCRIPTION,
   haven_pay_mpp_challenge: PAY_MPP_CHALLENGE_DESCRIPTION,
   haven_resume_mpp_payment: RESUME_MPP_DESCRIPTION,
@@ -333,6 +374,48 @@ export function createToolHandlers(
             network: state.network,
           },
         }
+      }),
+
+    haven_pay_mcp_tool: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_pay_mcp_tool', input)
+        try {
+          const quote = await haven.quoteMcpTool(
+            args.merchant_url,
+            args.tool_name,
+            args.arguments,
+            { idempotencyKey: args.idempotency_key },
+          )
+          const intent = await haven.createX402Intent(quote.paymentRequired, {
+            idempotencyKey: quote.idempotencyKey,
+          })
+          return {
+            ...buildX402SigningContext(intent),
+            mcp: {
+              merchant_url: args.merchant_url,
+              tool_name: args.tool_name,
+              arguments: args.arguments ?? {},
+            },
+          }
+        } catch (err) {
+          if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
+            return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }
+          }
+          throw err
+        }
+      }),
+
+    haven_mcp_tool_retry: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_mcp_tool_retry', input)
+        const response = await haven.retryMcpToolWithHeader(
+          args.merchant_url,
+          args.tool_name,
+          args.arguments,
+          args.x_payment_header,
+        )
+        const text = await response.text()
+        return { status: response.status, result: parseMaybeJson(text) }
       }),
 
     haven_quote_mpp: async (input) =>
@@ -511,6 +594,15 @@ async function resolveResumeState(
 
 function isPendingApproval(status: string | undefined): boolean {
   return status === 'pending' || status === 'pending_approval'
+}
+
+function parseMaybeJson(text: string): unknown {
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
 }
 
 function parse<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {

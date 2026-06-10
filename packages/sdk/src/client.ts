@@ -65,6 +65,7 @@ import {
   encodeMachinePaymentProof,
   parseMachinePaymentChallengeResponse,
 } from './mpp.js'
+import { buildMcpToolCallEnvelope } from './mcp.js'
 
 const DEFAULT_BASE_URL = 'http://localhost:3001'
 
@@ -987,13 +988,16 @@ export class HavenClient {
    * a transport/HTTP error, a missing session id, or a JSON-RPC error in the
    * handshake response — so the caller can fall back to plain x402.
    */
-  private async mcpInitialize(url: string, init?: RequestInit): Promise<string | undefined> {
+  private async mcpInitialize(
+    url: string,
+    init?: RequestInit,
+    payer: string | undefined = this.x402PayerAddress(),
+  ): Promise<string | undefined> {
     try {
       const headers = new Headers(init?.headers)
       headers.set('Content-Type', 'application/json')
       headers.set('Accept', MCP_ACCEPT)
-      const wallet = this.x402PayerAddress()
-      if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
+      if (payer && !headers.has('x402-wallet')) headers.set('x402-wallet', payer)
 
       const response = await globalThis.fetch(url, {
         method: 'POST',
@@ -1023,7 +1027,7 @@ export class HavenClient {
       // Per the MCP lifecycle, the client confirms initialization with a
       // `notifications/initialized` notification. Servers that gate tool
       // calls on it would otherwise reject every subsequent request.
-      await this.mcpNotifyInitialized(url, init, sessionId)
+      await this.mcpNotifyInitialized(url, init, sessionId, payer)
 
       return sessionId
     } catch {
@@ -1040,14 +1044,14 @@ export class HavenClient {
     url: string,
     init: RequestInit | undefined,
     sessionId: string,
+    payer: string | undefined = this.x402PayerAddress(),
   ): Promise<void> {
     try {
       const headers = new Headers(init?.headers)
       headers.set('Content-Type', 'application/json')
       headers.set('Accept', MCP_ACCEPT)
       headers.set('mcp-session-id', sessionId)
-      const wallet = this.x402PayerAddress()
-      if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
+      if (payer && !headers.has('x402-wallet')) headers.set('x402-wallet', payer)
 
       await globalThis.fetch(url, {
         method: 'POST',
@@ -1120,6 +1124,138 @@ export class HavenClient {
       statusText: response.statusText,
       headers,
     })
+  }
+
+  /**
+   * The x402 payer address (delegate EOA) for keyless callers.
+   *
+   * Local clients derive it from the delegate key; the hosted keyless server
+   * has neither a key nor a configured wallet, so it resolves the address from
+   * the authenticated agent record. The merchant needs it as the `x402-wallet`
+   * routing hint during the MCP handshake. Returns `undefined` only if the
+   * agent record can't be read — callers proceed without the hint.
+   */
+  private async resolveX402PayerAddress(): Promise<string | undefined> {
+    const local = this.x402PayerAddress()
+    if (local) return local
+    try {
+      const agent = await this.getAgent()
+      return agent.delegateAddress
+    } catch {
+      return undefined
+    }
+  }
+
+  // ── MCP merchant tool calls (issue #316) ─────────────────────────
+
+  /**
+   * Keyless MCP-merchant probe.
+   *
+   * Builds the JSON-RPC `tools/call` envelope, runs the MCP `initialize`
+   * handshake, and POSTs the envelope to surface the merchant's HTTP 402
+   * challenge as an `X402Quote` — without creating a Haven payment or signing
+   * anything. It is the MCP-shaped counterpart to `quoteX402`, for the hosted
+   * keyless split flow where construction happens here and signing at the edge.
+   *
+   * The returned quote carries an `mcp` context (merchant URL, tool name,
+   * arguments) so the paid retry can rebuild the same envelope and re-run the
+   * handshake — the transport session is not reused across the edge round trip.
+   */
+  async quoteMcpTool(
+    merchantUrl: string,
+    toolName: string,
+    args?: Record<string, unknown>,
+    options: X402AuthorizationOptions = {},
+  ): Promise<X402Quote> {
+    const envelope = buildMcpToolCallEnvelope(toolName, args)
+    const body = JSON.stringify(envelope)
+    const payer = await this.resolveX402PayerAddress()
+
+    const sessionId = await this.mcpInitialize(merchantUrl, undefined, payer)
+
+    let init: RequestInit = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    }
+    init = this.withX402Wallet(init, payer) ?? init
+    if (sessionId) init = this.withMcpHeaders(init, sessionId)
+
+    const response = await globalThis.fetch(merchantUrl, init)
+    if (response.status !== 402) {
+      throw new HavenApiError(
+        `Expected an x402 quote response with HTTP 402 from the MCP merchant, got HTTP ${response.status}.`,
+        response.status || 400,
+      )
+    }
+    if (response.headers.get('MACHINE-PAYMENT-CHALLENGE')) {
+      throw new HavenApiError('quoteMcpTool only supports standard x402 Payment Required responses.', 400)
+    }
+
+    const paymentRequired = await parsePaymentRequiredResponse(response)
+    // Snapshot the POST body but not the transient session id — the retry
+    // re-handshakes for a fresh session before replaying the envelope.
+    const request = this.snapshotX402Request(merchantUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    })
+    const quote = this.buildX402Quote(paymentRequired, request, options.idempotencyKey)
+    return { ...quote, mcp: { merchantUrl, toolName, arguments: args } }
+  }
+
+  /**
+   * Keyless MCP-merchant paid retry.
+   *
+   * Replays a merchant `tools/call` with the edge-built `X-PAYMENT` header after
+   * the funding transfer has been relayed via `submitSignature`. Re-runs the MCP
+   * handshake (the transport session does not survive the edge round trip),
+   * POSTs the rebuilt envelope with the header, and collapses the SSE response
+   * to the JSON-RPC result. This is the MCP counterpart to the merchant retry an
+   * agent would otherwise perform itself for plain x402 — done here so the agent
+   * never touches MCP plumbing.
+   */
+  async retryMcpToolWithHeader(
+    merchantUrl: string,
+    toolName: string,
+    args: Record<string, unknown> | undefined,
+    paymentHeader: string,
+  ): Promise<Response> {
+    const envelope = buildMcpToolCallEnvelope(toolName, args)
+    const payer = await this.resolveX402PayerAddress()
+
+    const sessionId = await this.mcpInitialize(merchantUrl, undefined, payer)
+
+    const headers = new Headers({ 'Content-Type': 'application/json' })
+    headers.set('X-PAYMENT', paymentHeader)
+    if (payer) headers.set('x402-wallet', payer)
+    if (sessionId) {
+      headers.set('mcp-session-id', sessionId)
+      headers.set('Accept', MCP_ACCEPT)
+    }
+
+    const response = await globalThis.fetch(merchantUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(envelope),
+    })
+
+    if (!response.ok) {
+      const merchant = await captureMerchantResponse(response)
+      throw new HavenApiError(
+        'MCP merchant rejected the paid tool call after Haven funded the delegate wallet; ' +
+          'reconciliation may be required.',
+        merchant.merchant_status,
+        {
+          marker: 'mcp_tool_retry_rejected_after_funding',
+          merchant_url: merchantUrl,
+          tool_name: toolName,
+          ...merchant,
+        },
+      )
+    }
+
+    return sessionId ? this.surfaceMcpResult(response) : response
   }
 
   /**

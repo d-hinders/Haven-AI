@@ -72,6 +72,17 @@ export const toolDescriptions = {
       'If approval is needed, preserve the returned resume_state or paymentId and call the resume tool once nextAction=retry_original_x402_request. ' +
       'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
   },
+  payMcpTool: {
+    summary:
+      'Call a named tool on an MCP-over-x402 merchant in one step: build the JSON-RPC tools/call envelope, run the MCP handshake, pay the x402 charge, and return the merchant tool result.',
+    selectionGuidance:
+      'Use this to call a named tool at a known MCP merchant (an endpoint whose URL ends in /mcp) — pass merchant_url, tool_name, and arguments, with no protocol plumbing. Use haven_pay_x402 instead for a plain HTTP endpoint that returns 402 and is not MCP-shaped. Do not use either for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
+    behavior:
+      'Constructs the JSON-RPC tools/call envelope from tool_name and arguments, performs the MCP initialize handshake, parses the HTTP 402 x402 challenge, signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, retries the tool call with the X-PAYMENT header, parses the SSE response, and returns the JSON-RPC result. MCP session, SSE framing, and x402 plumbing are never exposed to the caller.',
+    nextActionGuidance:
+      'If approval is needed, preserve the returned resume_state or paymentId and call the resume tool once nextAction=retry_original_x402_request. ' +
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
+  },
   resumeX402: {
     summary:
       'Resume an x402 payment after the Haven wallet owner approved the funding step.',

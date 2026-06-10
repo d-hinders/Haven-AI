@@ -42,6 +42,7 @@ export type {
   X402RequestSnapshot,
   X402Quote,
   X402ResumeState,
+  McpToolContext,
   PaymentResumeState,
   ResumeAuthorizedX402Input,
   ResumeX402PaymentInput,
@@ -86,3 +87,6 @@ export {
   buildMachinePaymentIdempotencyKey,
   encodeMachinePaymentProof,
 } from './mpp.js'
+
+export { buildMcpToolCallEnvelope } from './mcp.js'
+export type { McpToolCallEnvelope } from './mcp.js'

@@ -330,3 +330,140 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     await expect(response.json()).resolves.toEqual({ ok: true })
   })
 })
+
+// ── Keyless MCP merchant primitives (issue #316) ──────────────────────
+
+/** A keyless client (no delegate key): the hosted-server construct/relay shape. */
+function keylessClient(): HavenClient {
+  return new HavenClient({ apiKey: 'sk_agent_test', baseUrl: backendUrl })
+}
+
+/** The agent record the keyless client reads to resolve its delegate (payer). */
+function agentRecord(): Response {
+  return new Response(JSON.stringify({
+    id: 'agt_1',
+    name: 'Test Agent',
+    status: 'active',
+    safe_address: safeAddress,
+    delegate_address: delegateAddress,
+    chain_id: 8453,
+  }), { status: 200 })
+}
+
+describe('quoteMcpTool (issue #316)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('handshakes the merchant, posts a tools/call envelope, and returns an x402 quote with mcp context', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // 0: resolve the keyless payer from the agent record
+      .mockResolvedValueOnce(agentRecord())
+      // 1: MCP initialize handshake
+      .mockResolvedValueOnce(initializeOk('sess-q'))
+      // 2: notifications/initialized
+      .mockResolvedValueOnce(notificationAccepted())
+      // 3: probe → 402 with x402 requirements
+      .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequiredFor(mcpUrl)), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = keylessClient()
+    const quote = await haven.quoteMcpTool(mcpUrl, 'create_image', { prompt: 'a cat' })
+
+    // The probe body was the JSON-RPC tools/call envelope built from the args.
+    const probeCall = fetchMock.mock.calls.find(
+      (call) => String(call[0]) === mcpUrl && bodyOf(call).method === 'tools/call',
+    )!
+    expect(probeCall).toBeDefined()
+    expect(bodyOf(probeCall)).toMatchObject({
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { name: 'create_image', arguments: { prompt: 'a cat' } },
+    })
+    // Session id + SSE Accept + payer routing threaded onto the probe.
+    expect(headersOf(probeCall).get('mcp-session-id')).toBe('sess-q')
+    expect(headersOf(probeCall).get('Accept')).toBe('application/json, text/event-stream')
+    expect(headersOf(probeCall).get('x402-wallet')).toBe(delegateAddress)
+
+    // The quote carries the merchant tool context for the paid retry.
+    expect(quote.rail).toBe('x402')
+    expect(quote.mcp).toEqual({
+      merchantUrl: mcpUrl,
+      toolName: 'create_image',
+      arguments: { prompt: 'a cat' },
+    })
+    // The captured request snapshot does NOT pin the transient session id.
+    expect(quote.request.headers.some(([name]) => name.toLowerCase() === 'mcp-session-id')).toBe(false)
+  })
+
+  it('throws when the merchant does not return a 402', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(agentRecord())
+      .mockResolvedValueOnce(initializeOk('sess-q'))
+      .mockResolvedValueOnce(notificationAccepted())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+
+    const haven = keylessClient()
+    await expect(haven.quoteMcpTool(mcpUrl, 'create_image')).rejects.toThrow(/HTTP 200/)
+  })
+})
+
+describe('retryMcpToolWithHeader (issue #316)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('re-handshakes, replays the tool call with X-PAYMENT, and surfaces the JSON-RPC result', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // 0: resolve the keyless payer
+      .mockResolvedValueOnce(agentRecord())
+      // 1: MCP initialize handshake (fresh session for the paid leg)
+      .mockResolvedValueOnce(initializeOk('sess-r'))
+      // 2: notifications/initialized
+      .mockResolvedValueOnce(notificationAccepted())
+      // 3: paid retry → SSE JSON-RPC result
+      .mockResolvedValueOnce(sseResponse(
+        sse({ jsonrpc: '2.0', id: 'haven-mcp-call-1', result: { content: [{ type: 'text', text: 'a poem' }] } }),
+      ))
+
+    const haven = keylessClient()
+    const response = await haven.retryMcpToolWithHeader(
+      mcpUrl,
+      'create_text',
+      { prompt: 'haiku' },
+      'x402-payment-header',
+    )
+
+    const retryCall = fetchMock.mock.calls.find(
+      (call) => String(call[0]) === mcpUrl && bodyOf(call).method === 'tools/call',
+    )!
+    expect(headersOf(retryCall).get('X-PAYMENT')).toBe('x402-payment-header')
+    expect(headersOf(retryCall).get('mcp-session-id')).toBe('sess-r')
+    expect(bodyOf(retryCall)).toMatchObject({ params: { name: 'create_text', arguments: { prompt: 'haiku' } } })
+
+    // SSE collapsed to the JSON-RPC result; session id not leaked back.
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('application/json')
+    expect(response.headers.has('mcp-session-id')).toBe(false)
+    await expect(response.json()).resolves.toEqual({ content: [{ type: 'text', text: 'a poem' }] })
+  })
+
+  it('throws a structured failure when the merchant rejects the paid retry', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(agentRecord())
+      .mockResolvedValueOnce(initializeOk('sess-r'))
+      .mockResolvedValueOnce(notificationAccepted())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'payment invalid' }), { status: 402 }))
+
+    const haven = keylessClient()
+    await expect(
+      haven.retryMcpToolWithHeader(mcpUrl, 'create_text', undefined, 'bad-header'),
+    ).rejects.toMatchObject({
+      body: { marker: 'mcp_tool_retry_rejected_after_funding', merchant_url: mcpUrl, tool_name: 'create_text' },
+    })
+  })
+})

@@ -8,7 +8,7 @@ import type { UserSafe } from '@/context/AuthContext'
 
 interface Props {
   open: boolean
-  action: 'send' | 'receive'
+  action: 'send' | 'receive' | 'add-funds'
   safes: UserSafe[]
   onClose: () => void
   onSelect: (safeId: string) => void
@@ -27,7 +27,12 @@ export default function DashboardActionPickerModal({
 
   if (!open) return null
 
-  const title = action === 'send' ? 'Choose account to send from' : 'Choose account to receive into'
+  const title =
+    action === 'send'
+      ? 'Choose account to send from'
+      : action === 'receive'
+        ? 'Choose account to receive into'
+        : 'Choose account to add funds to'
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center">

@@ -3,14 +3,7 @@ import type {
   MachinePaymentChallenge,
   MachinePaymentReceipt,
 } from './types.js'
-
-function decodeBase64Json<T>(value: string, label: string): T {
-  try {
-    return JSON.parse(atob(value)) as T
-  } catch {
-    throw new Error(`Failed to decode ${label}`)
-  }
-}
+import { decodeBase64Json, encodeBase64Json } from './base64.js'
 
 function normalizeChallenge(value: unknown): MachinePaymentChallenge | null {
   const candidate = value as Partial<MachinePaymentChallenge> | null
@@ -99,7 +92,7 @@ export function buildMachinePaymentIdempotencyKey(
 }
 
 export function encodeMachinePaymentProof(receipt: Omit<MachinePaymentReceipt, 'proofHeader'>): string {
-  return btoa(JSON.stringify({
+  return encodeBase64Json({
     rail: receipt.rail,
     challengeId: receipt.challengeId,
     paymentId: receipt.paymentId,
@@ -107,5 +100,5 @@ export function encodeMachinePaymentProof(receipt: Omit<MachinePaymentReceipt, '
     settledVia: 'haven',
     payer: receipt.payer,
     chainId: receipt.chainId,
-  }))
+  })
 }

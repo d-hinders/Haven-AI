@@ -144,6 +144,53 @@ export const toolDescriptions = {
       'Returns the agent\'s recent machine-payment receipts ordered by recency. Proof header values are not returned.',
     nextActionGuidance: '',
   },
+  payMcpTool: {
+    summary:
+      'Call a named tool on an MCP merchant that requires an x402 payment, handling the full initialize → pay → retry round trip.',
+    selectionGuidance:
+      'Use this when the agent wants to call a specific tool on an MCP merchant (e.g. Soundside, Coinbase Bazaar) and payment is required. ' +
+      'Prefer this over haven_pay_x402 when you know the merchant_url and tool_name — it builds the JSON-RPC envelope internally. ' +
+      'Use haven_pay_x402 for arbitrary HTTP resources. ' +
+      'Do NOT use for read-only allowance or budget questions — use haven_get_allowances.',
+    behavior:
+      'Builds the JSON-RPC tools/call envelope, runs the MCP Streamable-HTTP initialize handshake automatically (if the endpoint is MCP-shaped), ' +
+      'pays any HTTP 402 x402 challenge through Haven\'s AllowanceModule path, and retries the request. ' +
+      'Returns the JSON-RPC result (the actual merchant output) on success. ' +
+      'Amounts within the on-chain allowance execute automatically; over-allowance transfers are queued as pending_approval.',
+    nextActionGuidance:
+      'If pending_approval is returned, preserve payment_id and resume_state and wait for the wallet owner to approve in Haven. ' +
+      'Use haven_resume_x402_payment once nextAction=retry_original_x402_request.',
+  },
+  sweep_delegate: {
+    summary:
+      'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating Safe.',
+    selectionGuidance:
+      'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
+      'Do NOT use for normal payments — use haven_pay_x402 or haven_pay_mpp_challenge. ' +
+      'Do NOT use to read balances only — use haven_get_allowances.',
+    behavior:
+      'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating Safe (hardcoded destination). ' +
+      'The delegate key signs locally — Haven never sees it and the backend never constructs signed transactions (CASP/MiCA Red Line #2). ' +
+      'Returns tx hashes and recovered amounts. Returns an empty transfers list when nothing is stranded.',
+    nextActionGuidance:
+      'If transfers is non-empty, confirm the amounts with the user. No further action required — funds are on their way back to the Safe.',
+  },
+  send: {
+    summary:
+      'Send ETH or USDC directly from the agent\'s Haven wallet to a recipient address.',
+    selectionGuidance:
+      'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
+      'Do NOT use for x402 paid endpoints (use haven_pay_x402 instead) or MPP merchant payments (use haven_pay_mpp_challenge). ' +
+      'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances.',
+    behavior:
+      'Sends the requested amount through the Safe AllowanceModule. ' +
+      'Amounts within the remaining on-chain allowance for the asset execute automatically; ' +
+      'amounts that exceed the allowance are queued as pending_approval for the wallet owner to approve in Haven. ' +
+      'The agent\'s signing key signs the AllowanceModule transfer hash; Haven never receives the key.',
+    nextActionGuidance:
+      'If pending_approval is returned, preserve the payment_id and wait for the wallet owner to approve in Haven. ' +
+      'Poll haven_get_payment_status until nextAction=none.',
+  },
 } as const satisfies Record<string, ToolDescription>
 
 export type SharedToolKey = keyof typeof toolDescriptions

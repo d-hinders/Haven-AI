@@ -292,11 +292,45 @@ jobs:
       - name: Run connector unit tests
         run: npm run test -w packages/connect
 
-      - name: Run connector package smoke
-        run: npm run smoke:pack -w packages/connect
-
       - name: Build connector
         run: npm run build -w packages/connect
+
+  install_smoke:
+    name: Install-path smoke
+    needs: changes
+    # Run whenever connect, mcp, or sdk changes — these are the packages that
+    # get packed and installed. Any of them can introduce the class of bugs
+    # the smoke catches (stale MCP_VERSION, nested SDK resolution, broken
+    # wire-format signing).
+    if: >-
+      needs.changes.outputs.connect == 'true' ||
+      needs.changes.outputs.mcp == 'true' ||
+      needs.changes.outputs.sdk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SDK (required by MCP build step inside smoke:pack)
+        run: npm run build -w packages/sdk
+
+      - name: Build MCP (packs the up-to-date dist into the tarball)
+        run: npm run build -w packages/mcp
+
+      - name: Run install-path smoke tests
+        # HAVEN_CONNECT_PACKAGE_SMOKE=1 enables the describeSmoke block.
+        # smoke:pack also rebuilds sdk + mcp before running so the tarballs
+        # contain fresh dist output — belt and suspenders.
+        run: npm run smoke:pack -w packages/connect
 
   mcp_server_checks:
     name: MCP server checks
@@ -470,7 +504,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, backend_checks, mcp_checks, connect_checks, mcp_server_checks, signer_checks, frontend_checks]
+    needs: [changes, sdk_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -506,6 +540,15 @@ jobs:
 
           if [ "${{ needs.changes.outputs.connect }}" = "true" ] && [ "${{ needs.connect_checks.result }}" != "success" ]; then
             echo "Connect checks result: ${{ needs.connect_checks.result }}"
+            exit 1
+          fi
+
+          connect_or_mcp_or_sdk_changed=false
+          if [ "${{ needs.changes.outputs.connect }}" = "true" ] || [ "${{ needs.changes.outputs.mcp }}" = "true" ] || [ "${{ needs.changes.outputs.sdk }}" = "true" ]; then
+            connect_or_mcp_or_sdk_changed=true
+          fi
+          if [ "$connect_or_mcp_or_sdk_changed" = "true" ] && [ "${{ needs.install_smoke.result }}" != "success" ]; then
+            echo "Install-path smoke result: ${{ needs.install_smoke.result }}"
             exit 1
           fi
 

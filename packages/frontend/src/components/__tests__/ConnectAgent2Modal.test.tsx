@@ -250,11 +250,11 @@ function countOccurrences(value: string, needle: string): number {
 const SETUP_PROMPT = [
   'Please connect this workspace to Haven.',
   '',
-  'I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@0.1.3-alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
+  'I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
   '',
   'Run this exact command:',
   '',
-  'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+  'npx -y @haven_ai/connect@alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
   '',
   'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
   '',
@@ -328,7 +328,7 @@ describe('ConnectAgent2Modal', () => {
       status: 'awaiting_connection',
       setup_token: 'hv_setup_abc',
       expires_at: '2099-01-01T00:00:00.000Z',
-      connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+      connector_command: 'npx -y @haven_ai/connect@alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
       setup_prompt: SETUP_PROMPT,
     })
   })
@@ -361,6 +361,30 @@ describe('ConnectAgent2Modal', () => {
     expect(screen.getAllByText(/public signing address/i).length).toBeGreaterThan(0)
     const modalText = screen.getByRole('dialog').textContent ?? ''
     expect(modalText).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
+  })
+
+  it('defaults the wallet picker to a supported-chain wallet and does not offer the legacy Gnosis one', () => {
+    // Regression: with a leftover Gnosis (unsupported) wallet as the default,
+    // the picker used to default to it and snap back to it when the user tried
+    // to switch to a Base wallet (the chain change re-ran the init effect).
+    mockUseAuth.mockReturnValue({
+      user: { safes: [SAFE, BASE_SAFE] }, // SAFE = Gnosis (default, unsupported), BASE_SAFE = Base
+      activeSafe: SAFE,
+    })
+
+    renderModal({ safeAddress: '', safeId: null })
+
+    fireEvent.change(screen.getByLabelText('Agent name'), {
+      target: { value: 'Research Agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+
+    const select = screen.getByLabelText('Haven wallet') as HTMLSelectElement
+    // Defaults to the supported Base wallet, not the Gnosis default.
+    expect(select.value).toBe(BASE_SAFE.id)
+    // The unsupported Gnosis wallet is not offered for a new agent.
+    expect(within(select).getByRole('option', { name: 'Base wallet' })).toBeInTheDocument()
+    expect(within(select).queryByRole('option', { name: 'Operating wallet' })).not.toBeInTheDocument()
   })
 
   it('supports Codex Desktop as a first-class runtime option', async () => {
@@ -773,7 +797,7 @@ describe('ConnectAgent2Modal', () => {
           status: 'awaiting_connection',
           setup_token: 'hv_setup_abc',
           expires_at: '2099-01-01T00:00:00.000Z',
-          connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+          connector_command: 'npx -y @haven_ai/connect@alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
           setup_prompt: SETUP_PROMPT,
         }
       }
@@ -888,7 +912,7 @@ describe('ConnectAgent2Modal', () => {
           status: 'awaiting_connection',
           setup_token: 'hv_setup_abc',
           expires_at: '2099-01-01T00:00:00.000Z',
-          connector_command: 'npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+          connector_command: 'npx -y @haven_ai/connect@alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
           setup_prompt: SETUP_PROMPT,
         }
       }

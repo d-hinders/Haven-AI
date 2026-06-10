@@ -236,7 +236,7 @@ sequenceDiagram
   API-->>UI: setup token + command
   UI-->>User: Show command and manual instructions
   User->>Shell: Run connector command manually
-  Shell->>Connector: npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_...
+  Shell->>Connector: npx -y @haven_ai/connect@alpha --setup hv_setup_...
   Connector->>API: Resolve setup, register public signing address, receive API key
   Connector-->>Shell: Setup saved locally; return to Haven
   Shell-->>User: No private key printed
@@ -349,7 +349,7 @@ Response:
   "status": "awaiting_connection",
   "setup_token": "hv_setup_...",
   "expires_at": "2026-06-03T12:00:00.000Z",
-  "connector_command": "npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools",
+  "connector_command": "npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools",
   "setup_prompt": "Copy-ready prompt text"
 }
 ```
@@ -670,7 +670,7 @@ Rules:
 Preferred command shape:
 
 ```sh
-npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
+npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
 
 The setup prompt may ask the agent to run that command, but the command is the
@@ -744,11 +744,11 @@ Example:
 ```text
 Please connect this workspace to Haven.
 
-I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@0.1.3-alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update Codex MCP config under ~/.codex/config.toml.
+I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update Codex MCP config under ~/.codex/config.toml.
 
 Run this exact command:
 
-npx -y @haven_ai/connect@0.1.3-alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime codex-desktop
+npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime codex-desktop
 
 Do not print private keys, API keys, credential file contents, or config secrets
 in chat or logs.

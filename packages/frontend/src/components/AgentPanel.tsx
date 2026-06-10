@@ -413,6 +413,25 @@ function AgentCard({
         </div>
       )}
 
+      {agent.has_stranded_funds && (
+        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-warning)] flex-shrink-0 mt-0.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-[var(--v2-warning)]">Stranded funds on delegate</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
+              A payment was funded on-chain but not settled.{' '}
+              <a href={`/agents/${agent.id}`} className="underline underline-offset-2">
+                View agent to sweep funds back to Safe.
+              </a>
+            </p>
+          </div>
+        </div>
+      )}
+
       {isOperational && (
         <div className="mb-3">
           <div className="space-y-2">

@@ -19,3 +19,4 @@ export {
 } from './runtime-install.js'
 export { normalizeRuntime, runtimeProfile, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
 export { defaultAgentDirectory, writeCredentialFiles, type StoredCredentialPaths, type WriteCredentialInput } from './storage.js'
+export { MCP_RUNTIME_MANIFEST, mcpPackageSpec, sdkPackageSpec, signerPackageSpec } from './runtime-manifest.js'

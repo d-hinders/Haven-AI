@@ -7,6 +7,9 @@ import {
   normalizeAgentAllowances,
   normalizeAgentAllowanceTokenAddress,
 } from '../lib/agent-allowance-validation.js'
+import { getTokenBalance } from '../lib/allowance-module.js'
+import { getChain, isSupportedChain } from '../lib/chains.js'
+import { formatTokenValue } from '../lib/tokens.js'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -48,6 +51,7 @@ interface AgentRow {
   status: string
   created_at: string
   mcp_last_seen_at: string | null
+  has_stranded_funds: boolean
 }
 
 interface AllowanceRow {
@@ -76,7 +80,14 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               a.api_key_prefix, a.status, a.created_at,
-              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at
+              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
+              EXISTS(
+                SELECT 1 FROM machine_payment_reconciliation_events mpre
+                JOIN payment_intents pi ON pi.id = mpre.payment_intent_id
+                WHERE pi.agent_id = a.id
+                  AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+                  AND mpre.status = 'open'
+              ) AS has_stranded_funds
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1
@@ -121,7 +132,14 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               a.api_key_prefix, a.status, a.created_at,
-              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at
+              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
+              EXISTS(
+                SELECT 1 FROM machine_payment_reconciliation_events mpre
+                JOIN payment_intents pi ON pi.id = mpre.payment_intent_id
+                WHERE pi.agent_id = a.id
+                  AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+                  AND mpre.status = 'open'
+              ) AS has_stranded_funds
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1 AND a.id = $2
@@ -144,6 +162,59 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     return {
       ...agent,
       allowances: allowanceResult.rows,
+    }
+  })
+
+  // GET /agents/:id/delegate-balance — on-chain USDC + ETH balance of the delegate EOA
+  app.get<{ Params: { id: string } }>('/:id/delegate-balance', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const { id } = request.params
+
+    const agentResult = await pool.query<{
+      delegate_address: string | null
+      safe_chain_id: number | null
+      safe_address: string | null
+    }>(
+      `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address
+       FROM agents a
+       LEFT JOIN user_safes us ON a.safe_id = us.id
+       WHERE a.user_id = $1 AND a.id = $2 AND a.status != 'revoked'
+       LIMIT 1`,
+      [sub, id],
+    )
+
+    const agent = agentResult.rows[0]
+    if (!agent) {
+      return reply.code(404).send({ error: 'Agent not found' })
+    }
+    if (!agent.delegate_address) {
+      return reply.code(422).send({ error: 'Agent has no delegate address' })
+    }
+
+    const chainId = agent.safe_chain_id ?? 8453
+    if (!isSupportedChain(chainId)) {
+      return reply.code(422).send({ error: `Unsupported chain: ${chainId}` })
+    }
+
+    const chain = getChain(chainId)
+    const delegate = agent.delegate_address
+
+    const usdcConfig = Object.values(chain.tokens).find((t) => t.symbol === 'USDC')
+
+    const [ethAtomic, usdcAtomic] = await Promise.all([
+      getTokenBalance(chainId, delegate, '0x0000000000000000000000000000000000000000'),
+      usdcConfig?.address ? getTokenBalance(chainId, delegate, usdcConfig.address) : Promise.resolve(0n),
+    ])
+
+    return {
+      delegate_address: delegate,
+      safe_address: agent.safe_address,
+      chain_id: chainId,
+      eth: formatTokenValue(ethAtomic.toString(), 18),
+      eth_atomic: ethAtomic.toString(),
+      usdc: formatTokenValue(usdcAtomic.toString(), 6),
+      usdc_atomic: usdcAtomic.toString(),
+      usdc_address: usdcConfig?.address ?? null,
     }
   })
 
@@ -196,7 +267,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     const apiKey = `sk_agent_${crypto.randomBytes(24).toString('hex')}`
     const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest('hex')
-    const apiKeyPrefix = apiKey.slice(0, 12)
+    const apiKeyPrefix = apiKey.slice(0, 20)
 
     const client = await pool.connect()
     try {

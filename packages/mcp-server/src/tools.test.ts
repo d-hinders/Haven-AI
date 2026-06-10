@@ -19,8 +19,15 @@ interface CapturedCall {
 
 let calls: CapturedCall[]
 
+interface RouteDefinition {
+  status?: number
+  body?: unknown
+  /** Extra response headers to include. */
+  responseHeaders?: Record<string, string>
+}
+
 /** Install a fetch stub that records every request and returns canned bodies. */
-function stubFetch(routes: Record<string, { status?: number; body: unknown }>) {
+function stubFetch(routes: Record<string, RouteDefinition>) {
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const method = (init.method ?? 'GET').toUpperCase()
     const path = new URL(url).pathname
@@ -32,11 +39,21 @@ function stubFetch(routes: Record<string, { status?: number; body: unknown }>) {
     })
     const route = routes[`${method} ${path}`]
     const status = route?.status ?? 200
-    return {
+    const responseHeaders = new Headers(route?.responseHeaders ?? {})
+    const bodySnapshot = route?.body
+    const response = {
       ok: status >= 200 && status < 300,
       status,
-      json: async () => route?.body ?? {},
+      headers: responseHeaders,
+      json: async () => bodySnapshot ?? {},
+      clone: () => ({
+        ok: status >= 200 && status < 300,
+        status,
+        headers: responseHeaders,
+        json: async () => bodySnapshot ?? {},
+      }),
     }
+    return response
   })
 }
 
@@ -57,6 +74,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
 })
+
+// ── haven_pay ─────────────────────────────────────────────────────────────────
 
 describe('haven_pay', () => {
   it('returns the unsigned payload hash for an in-budget payment', async () => {
@@ -119,6 +138,8 @@ describe('haven_pay', () => {
   })
 })
 
+// ── haven_submit ──────────────────────────────────────────────────────────────
+
 describe('haven_submit', () => {
   it('relays ONLY { signature } and returns the tx hash', async () => {
     stubFetch({
@@ -150,6 +171,8 @@ describe('haven_submit', () => {
   })
 })
 
+// ── x402 fixtures ─────────────────────────────────────────────────────────────
+
 const PAYMENT_REQUIRED = {
   x402Version: 1,
   resource: { url: 'https://merchant.test/paid', description: 'paid data' },
@@ -167,29 +190,36 @@ const PAYMENT_REQUIRED = {
   ],
 }
 
-describe('haven_x402_authorize', () => {
+const X402_INTENT_RESPONSE = {
+  payment_id: 'pay_x402',
+  status: 'pending_signature',
+  merchant_to: '0xMerchant',
+  x402_expected_auth: X402_EXPECTED_AUTH,
+  sign_data: { hash: '0xfunding' },
+}
+
+const AGENT_RESPONSE = {
+  id: 'agt_1',
+  name: 'A',
+  status: 'active',
+  delegate_address: '0xDelegate',
+  chain_id: 8453,
+}
+
+// ── haven_pay_x402_quote ──────────────────────────────────────────────────────
+
+describe('haven_pay_x402_quote', () => {
   it('returns the unsigned funding hash + x402 data for the edge, signing nothing', async () => {
     stubFetch({
-      // createX402Intent resolves the delegate address from the agent record first.
-      'GET /machine-payments/agent': {
-        status: 200,
-        body: { id: 'agt_1', name: 'A', status: 'active', delegate_address: '0xDelegate', chain_id: 8453 },
-      },
-      'POST /x402': {
-        status: 201,
-        body: {
-          payment_id: 'pay_x402',
-          status: 'pending_signature',
-          merchant_to: '0xMerchant',
-          x402_expected_auth: X402_EXPECTED_AUTH,
-          sign_data: { hash: '0xfunding' },
-        },
-      },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
     })
 
-    const result = ok<{ payment_id: string; payload_hash: string; x402: Record<string, unknown> }>(
-      await handlers().haven_x402_authorize({ payment_required: PAYMENT_REQUIRED }),
-    )
+    const result = ok<{
+      payment_id: string
+      payload_hash: string
+      x402: Record<string, unknown>
+    }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
 
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.payload_hash).toBe('0xfunding')
@@ -221,20 +251,313 @@ describe('haven_x402_authorize', () => {
 
   it('surfaces pending_approval (no hash) when the x402 amount is over budget', async () => {
     stubFetch({
-      'GET /machine-payments/agent': {
-        status: 200,
-        body: { id: 'agt_1', name: 'A', status: 'active', delegate_address: '0xDelegate', chain_id: 8453 },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 202, body: { payment_id: 'pay_over', status: 'pending_approval' } },
+    })
+
+    const result = ok<{ status: string; payload_hash: unknown }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+    expect(result.data.status).toBe('pending_approval')
+    expect(result.data.payload_hash).toBeNull()
+  })
+})
+
+// ── haven_quote_x402 ──────────────────────────────────────────────────────────
+
+describe('haven_quote_x402', () => {
+  it('probes the merchant, returns payment_required without creating a Haven payment', async () => {
+    // The SDK reads payment_required from the PAYMENT-REQUIRED response header (base64 JSON).
+    const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+    stubFetch({
+      'GET /paid': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader },
       },
-      'POST /x402': {
+    })
+
+    const result = ok<{
+      payment_required: unknown
+      amount: string
+      resource_url: string
+    }>(await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }))
+
+    expect(result.data.payment_required).toBeDefined()
+    // Haven was never contacted — only the merchant URL.
+    expect(calls.every((c) => c.url.includes('merchant.test'))).toBe(true)
+    // No x402 intent created.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+})
+
+// ── haven_resume_x402_payment ─────────────────────────────────────────────────
+
+describe('haven_resume_x402_payment', () => {
+  it('returns signing context when payment is ready to retry', async () => {
+    const resumeState = {
+      rail: 'x402' as const,
+      paymentId: 'pay_approved',
+      idempotencyKey: 'idem_1',
+      paymentRequired: PAYMENT_REQUIRED,
+      accepted: PAYMENT_REQUIRED.accepts[0],
+      url: 'https://merchant.test/paid',
+      resourceUrl: 'https://merchant.test/paid',
+      description: null,
+      amountAtomic: '1500000',
+      amount: '1.50',
+      token: 'USDC',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      network: 'base',
+      chainId: 8453,
+      merchantAddress: '0xMerchant',
+    }
+
+    stubFetch({
+      // getPaymentStatus calls /machine-payments/:id/status
+      'GET /machine-payments/pay_approved/status': {
+        status: 200,
+        body: {
+          payment_id: 'pay_approved',
+          status: 'confirmed',
+          next_action: 'retry_original_x402_request',
+          tx_hash: '0xfunded',
+          rail: 'x402',
+        },
+      },
+    })
+
+    const result = ok<{
+      payment_id: string
+      payment_required: unknown
+      x402: Record<string, unknown>
+      tx_hash: string
+    }>(await handlers().haven_resume_x402_payment({ resume_state: resumeState }))
+
+    expect(result.data.payment_id).toBe('pay_approved')
+    expect(result.data.payment_required).toBeDefined()
+    expect(result.data.x402).toBeDefined()
+    expect(result.data.tx_hash).toBe('0xfunded')
+  })
+
+  it('rejects when no payment_id and no resume_state provided', async () => {
+    stubFetch({})
+    const result = await handlers().haven_resume_x402_payment({})
+    expect(result.success).toBe(false)
+    // HavenApiError uses code 'API_ERROR'
+    expect((result as any).code).toBe('API_ERROR')
+  })
+})
+
+// ── haven_list_receipts ───────────────────────────────────────────────────────
+
+describe('haven_list_receipts', () => {
+  it('calls the receipts endpoint and returns results', async () => {
+    // listReceipts calls /machine-payments/receipts
+    stubFetch({
+      'GET /machine-payments/receipts': {
+        status: 200,
+        body: { receipts: [{ id: 'rcpt_1', amount: '1.00', payment_id: 'pay_1', rail: 'x402' }] },
+      },
+    })
+
+    const result = ok<unknown[]>(await handlers().haven_list_receipts({}))
+    expect(Array.isArray(result.data)).toBe(true)
+  })
+})
+
+// ── haven_get_resume_state ────────────────────────────────────────────────────
+
+describe('haven_get_resume_state', () => {
+  it('calls the resume state endpoint', async () => {
+    // getResumeState calls /payments/:id/resume_state
+    stubFetch({
+      'GET /payments/pay_1/resume_state': {
+        status: 200,
+        body: {
+          rail: 'x402',
+          paymentId: 'pay_1',
+          payment_required: PAYMENT_REQUIRED,
+        },
+      },
+    })
+
+    const result = ok<{ rail: string }>(
+      await handlers().haven_get_resume_state({ payment_id: 'pay_1' }),
+    )
+    expect(result.data.rail).toBe('x402')
+  })
+})
+
+// ── haven_send ────────────────────────────────────────────────────────────────
+
+describe('haven_send', () => {
+  it('returns payload_hash for in-budget transfer', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+
+    const result = ok<{ payment_id: string; payload_hash: string; asset: string; amount: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    expect(result.data.payment_id).toBe('pay_send_1')
+    expect(result.data.payload_hash).toBe('0xsendhash')
+    expect(result.data.asset).toBe('USDC')
+    expect(result.data.amount).toBe('5.00')
+
+    const postCall = calls.find((c) => c.url.endsWith('/payments'))
+    expect(postCall?.body).toEqual({ token: 'USDC', amount: '5.00', to: '0xRecipient' })
+    // Custody invariant
+    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+  })
+
+  it('surfaces pending_approval when over allowance budget', async () => {
+    stubFetch({
+      'POST /payments': {
         status: 202,
         body: { payment_id: 'pay_over', status: 'pending_approval' },
       },
     })
 
     const result = ok<{ status: string; payload_hash: unknown }>(
-      await handlers().haven_x402_authorize({ payment_required: PAYMENT_REQUIRED }),
+      await handlers().haven_send({ asset: 'ETH', recipient: '0xRecipient', amount: '999' }),
     )
+
     expect(result.data.status).toBe('pending_approval')
     expect(result.data.payload_hash).toBeNull()
+  })
+
+  it('rejects unknown asset values', async () => {
+    stubFetch({})
+    const result = await handlers().haven_send({ asset: 'DAI', recipient: '0xRecipient', amount: '1' })
+    expect(result.success).toBe(false)
+    expect(calls).toHaveLength(0)
+  })
+})
+
+// ── haven_pay_mcp_tool ────────────────────────────────────────────────────────
+
+describe('haven_pay_mcp_tool', () => {
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+
+  it('probes merchant, creates x402 intent, returns signing context with merchant context', async () => {
+    stubFetch({
+      // tools/call probe → 402 with PAYMENT-REQUIRED header
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader },
+      },
+      // createX402Intent first fetches agent (for delegateAddress)
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      // createX402Intent calls POST /x402
+      'POST /x402': {
+        status: 201,
+        body: X402_INTENT_RESPONSE,
+      },
+    })
+
+    const result = ok<{
+      payment_id: string
+      payload_hash: string
+      merchant_url: string
+      tool_name: string
+      x402: unknown
+    }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+
+    expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+    expect(result.data.payload_hash).toBe(X402_INTENT_RESPONSE.sign_data.hash)
+    // Merchant context threaded through for the agent to retry after signing
+    expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(result.data.tool_name).toBe('create_text')
+    expect(result.data.x402).toBeDefined()
+    // createX402Intent was called (POST /x402 route was hit)
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('returns pending_approval when over allowance', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader },
+      },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': {
+        status: 202,
+        body: { payment_id: 'over_1', status: 'pending_approval' },
+      },
+    })
+
+    const result = ok<{ status: string; payload_hash: unknown }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: {},
+      }),
+    )
+
+    expect(result.data.status).toBe('pending_approval')
+    expect(result.data.payload_hash).toBeNull()
+  })
+
+  it('rejects invalid merchant_url at schema level', async () => {
+    stubFetch({})
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'not-a-url',
+      tool_name: 'create_text',
+    })
+    expect(result.success).toBe(false)
+    expect(calls).toHaveLength(0)
+  })
+})
+
+// ── custody invariant (all tools) ────────────────────────────────────────────
+
+describe('custody invariant', () => {
+  it('no tool ever emits a delegate key in the network requests', async () => {
+    // Stub enough routes to exercise all tools that touch the Haven API.
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: { payment_id: 'p1', status: 'pending_signature', sign_data: { hash: '0x1' } },
+      },
+      'POST /payments/p1/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xtx' } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': {
+        status: 201,
+        body: X402_INTENT_RESPONSE,
+      },
+      // haven_pay_mcp_tool: merchant probe + intent creation
+      // (agent fetch reuses GET /machine-payments/agent already stubbed above)
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
+      },
+    })
+
+    const h = handlers()
+    await h.haven_pay({ token: 'USDC', amount: '1', to: '0xabc' })
+    await h.haven_send({ asset: 'USDC', recipient: '0xabc', amount: '1' })
+    await h.haven_submit({ payment_id: 'p1', signature: '0x' + '11'.repeat(65) })
+    await h.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED })
+    await h.haven_pay_mcp_tool({ merchant_url: 'http://merchant.test/mcp', tool_name: 'probe_tool' })
+
+    const wire = JSON.stringify(calls)
+    expect(wire).not.toContain(DELEGATE_KEY)
+    expect(wire).not.toContain('delegate_key')
+    expect(wire).not.toContain('private_key')
   })
 })

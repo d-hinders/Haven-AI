@@ -57,6 +57,8 @@ export type {
   HavenAllowance,
   HavenAllowanceSummary,
   HavenPaymentReceipt,
+  SweepResult,
+  SweepEntry,
 } from './types.js'
 
 export type { ClaudeTool, OpenAITool } from './tools.js'
@@ -86,3 +88,10 @@ export {
   buildMachinePaymentIdempotencyKey,
   encodeMachinePaymentProof,
 } from './mpp.js'
+
+export {
+  encodeBase64Utf8,
+  decodeBase64Utf8,
+  encodeBase64Json,
+  decodeBase64Json,
+} from './base64.js'

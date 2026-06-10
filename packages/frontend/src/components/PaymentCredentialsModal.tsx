@@ -30,8 +30,9 @@ interface Props {
  * on-chain signing address. Replaces the inline "Haven credential" +
  * "Advanced details" cards that used to sit on the agent detail page.
  *
- * Pure presentation — no API calls. Reads everything it needs from the
- * agent prop the caller already has in hand.
+ * Also handles key rotation: when the full credential is no longer available
+ * (masked), the user can rotate to get a new key via POST /agents/:id/rotate-key.
+ * The caller is notified via onKeyRotated so it can update its local state.
  */
 export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRotated }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -47,12 +48,15 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
 
   // Reset toggles + copy state every time the modal opens so we don't
   // leak "Show" state from a previous open into a fresh view.
+  // Also reset `rotating` so a mid-flight rotation that was closed doesn't
+  // leave the button stuck in spinner state on reopen.
   useEffect(() => {
     if (open) {
       setShowCredential(false)
       setCredentialCopied(false)
       setAddressCopied(false)
       setIdCopied(false)
+      setRotating(false)
     }
   }, [open])
 

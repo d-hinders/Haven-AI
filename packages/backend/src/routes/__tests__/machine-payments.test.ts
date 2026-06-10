@@ -1609,5 +1609,114 @@ describe('machine payment routes', () => {
       expect(response.statusCode).toBe(403)
       expect(response.json().error).toContain('not configured')
     })
+
+    // ── Idempotency ──────────────────────────────────────────────────────────
+
+    function existingIntentRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: SEND_PAYMENT_ID,
+        status: 'pending_signature',
+        expires_at: '2099-01-01T00:10:00.000Z',
+        token_address: USDC,
+        to_address: SEND_RECIPIENT.toLowerCase(),
+        amount_raw: '1500000',
+        amount_human: '1.50',
+        allowance_nonce: 5,
+        sign_hash: SEND_HASH,
+        ...overrides,
+      }
+    }
+
+    it('replays an idempotent request and returns the original intent without re-reading chain', async () => {
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        // findExistingSend: payment_intents lookup hits
+        .mockResolvedValueOnce({ rows: [existingIntentRow()] })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1.50', idempotency_key: 'send-key-1' },
+      })
+
+      expect(response.statusCode).toBe(201)
+      const body = response.json()
+      expect(body.payment_id).toBe(SEND_PAYMENT_ID)
+      expect(body.idempotent_replay).toBe(true)
+      expect(body.sign_data.hash).toBe(SEND_HASH)
+      expect(body.sign_data.components.nonce).toBe(5)
+      // No second intent minted and no on-chain reads on a replay.
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+      expect(mockQuery).toHaveBeenCalledTimes(2) // auth + single dedup lookup
+    })
+
+    it('persists the idempotency_key when creating a new intent', async () => {
+      allowanceWithRemaining(1_000_000_000n)
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SEND_HASH)
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [] }) // payment_intents dedup miss
+        .mockResolvedValueOnce({ rows: [] }) // approval_requests dedup miss
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '100' }] }) // agent_allowances
+        .mockResolvedValueOnce({ rows: [sendIntentRow()] }) // INSERT
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1.50', idempotency_key: 'send-key-2' },
+      })
+
+      expect(response.statusCode).toBe(201)
+      const insertCall = mockQuery.mock.calls.find(
+        ([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO payment_intents'),
+      )
+      expect(insertCall).toBeDefined()
+      expect(insertCall![1]).toContain('send-key-2')
+    })
+
+    it('replays the winner when a concurrent insert wins the idempotency race', async () => {
+      allowanceWithRemaining(1_000_000_000n)
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SEND_HASH)
+
+      const uniqueViolation = Object.assign(new Error('duplicate key value'), { code: '23505' })
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [] }) // payment_intents dedup miss
+        .mockResolvedValueOnce({ rows: [] }) // approval_requests dedup miss
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '100' }] }) // agent_allowances
+        .mockRejectedValueOnce(uniqueViolation) // INSERT loses the race
+        .mockResolvedValueOnce({ rows: [existingIntentRow()] }) // re-lookup finds the winner
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1.50', idempotency_key: 'send-key-3' },
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(response.json().payment_id).toBe(SEND_PAYMENT_ID)
+      expect(response.json().idempotent_replay).toBe(true)
+    })
+
+    it('rejects an empty idempotency_key with 400', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1', idempotency_key: '' },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toContain('idempotency_key')
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    })
   })
 })

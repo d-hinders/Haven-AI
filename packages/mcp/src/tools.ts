@@ -32,6 +32,7 @@ export type HavenMcpToolName =
   | 'haven_get_agent'
   | 'haven_get_allowances'
   | 'haven_list_receipts'
+  | 'haven_sweep_delegate'
 
 export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_send: {
@@ -92,6 +93,7 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   },
   haven_get_agent: {},
   haven_get_allowances: {},
+  haven_sweep_delegate: {},
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
   },
@@ -117,6 +119,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
+  haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
 }
 
@@ -364,6 +367,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
     haven_get_agent: async () => runTool(async () => haven.getAgent()),
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
+    haven_sweep_delegate: async () => runTool(async () => haven.sweepDelegate()),
     haven_list_receipts: async (input) => {
       const args = objectInput('haven_list_receipts', input)
       return runTool(async () => haven.listReceipts({ limit: args.limit }))

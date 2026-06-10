@@ -46,6 +46,7 @@ export type HostedToolName =
   | 'haven_get_payment_status'
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
+  | 'haven_sweep_delegate'
 
 /** Legacy aliases kept for one release cycle so existing agents don't break. */
 export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transactions'
@@ -53,6 +54,7 @@ export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transact
 export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_get_agent: {},
   haven_get_allowances: {},
+  haven_sweep_delegate: {},
   haven_send: {
     asset: z.enum(['ETH', 'USDC']),
     recipient: z.string().min(1),
@@ -211,6 +213,7 @@ const RESUME_MPP_DESCRIPTION = [
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
+  haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
   haven_send: composeDescription(sharedDescriptions.send),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
@@ -251,6 +254,8 @@ export function createToolHandlers(
     haven_get_agent: async () => runTool(async () => haven.getAgent()),
 
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
+
+    haven_sweep_delegate: async () => runTool(async () => haven.sweepDelegate()),
 
     haven_send: async (input) =>
       runTool(async () => {

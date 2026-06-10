@@ -189,6 +189,14 @@ const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =
   'Currently scoped to the internal MPP demo rail. ' +
   'The agent signs the payment, Haven relays it within the on-chain allowance, and the tool returns a proof header for the retry request.'
 
+const SWEEP_DELEGATE_DESCRIPTION = composeDescription(sharedDescriptions.sweep_delegate)
+
+const sweepDelegateSchema = {
+  type: 'object' as const,
+  properties: {},
+  required: [] as readonly string[],
+}
+
 // ── Claude (Anthropic) format ────────────────────────────────────
 
 export interface ClaudeTool {
@@ -232,6 +240,11 @@ function claudeTools(): ClaudeTool[] {
       name: 'authorize_machine_payment',
       description: AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION,
       input_schema: authorizeMachinePaymentSchema,
+    },
+    {
+      name: 'haven_sweep_delegate',
+      description: SWEEP_DELEGATE_DESCRIPTION,
+      input_schema: sweepDelegateSchema,
     },
   ]
 }
@@ -299,6 +312,14 @@ function openaiTools(): OpenAITool[] {
         name: 'authorize_machine_payment',
         description: AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION,
         parameters: authorizeMachinePaymentSchema,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'haven_sweep_delegate',
+        description: SWEEP_DELEGATE_DESCRIPTION,
+        parameters: sweepDelegateSchema,
       },
     },
   ]

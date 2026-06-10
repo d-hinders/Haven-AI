@@ -67,6 +67,7 @@ import {
   parseMachinePaymentChallengeResponse,
 } from './mpp.js'
 import { createJsonRpcProvider, createWallet, createErc20Contract } from './provider.js'
+import { decodeBase64Json, encodeBase64Json } from './base64.js'
 
 const DEFAULT_BASE_URL = 'http://localhost:3001'
 
@@ -1842,11 +1843,11 @@ export class HavenClient {
     if (paymentRequired.x402Version < 2) return header
 
     const payment = decodeBase64Json<{ payload: unknown }>(header)
-    return btoa(JSON.stringify({
+    return encodeBase64Json({
       x402Version: paymentRequired.x402Version,
       accepted: option,
       payload: payment.payload,
-    }))
+    })
   }
 
   private cacheX402Receipt(
@@ -2785,13 +2786,9 @@ function getPaymentHeaderValidBefore(paymentHeader: string): number {
   return 0
 }
 
-function decodeBase64Json<T>(value: string): T {
-  return JSON.parse(atob(value)) as T
-}
-
 function parseProtocolReceiptHeader(value: string): Record<string, unknown> | undefined {
   try {
-    return JSON.parse(atob(value)) as Record<string, unknown>
+    return decodeBase64Json<Record<string, unknown>>(value)
   } catch {
     try {
       return JSON.parse(value) as Record<string, unknown>

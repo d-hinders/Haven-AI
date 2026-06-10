@@ -13,18 +13,11 @@
 import { createHash } from 'node:crypto'
 import type { X402ExpectedContext, X402PaymentRequired, X402PaymentOption } from './types.js'
 import type { PaymentRequirements } from 'x402/types'
+import { decodeBase64Json, encodeBase64Json } from './base64.js'
 
 const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 const X402_IDEMPOTENCY_BUCKET_MS = 300_000
 const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
-
-function decodeBase64Json<T>(value: string, label: string): T {
-  try {
-    return JSON.parse(atob(value)) as T
-  } catch {
-    throw new Error(`Failed to decode ${label}`)
-  }
-}
 
 function isPositiveDecimalAtomicAmount(value: string): boolean {
   return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n
@@ -387,7 +380,7 @@ export function encodePaymentProof(receipt: {
       chainId: receipt.chainId,
     },
   }
-  return btoa(JSON.stringify(payload))
+  return encodeBase64Json(payload)
 }
 
 /**

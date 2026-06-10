@@ -88,3 +88,10 @@ export {
   buildMachinePaymentIdempotencyKey,
   encodeMachinePaymentProof,
 } from './mpp.js'
+
+export {
+  encodeBase64Utf8,
+  decodeBase64Utf8,
+  encodeBase64Json,
+  decodeBase64Json,
+} from './base64.js'

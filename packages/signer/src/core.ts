@@ -10,6 +10,8 @@ import {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  decodeBase64Json,
+  encodeBase64Json,
   HavenSigningError,
   HavenApiError,
   type X402ExpectedAuth,
@@ -236,10 +238,3 @@ function sameAddress(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase()
 }
 
-function decodeBase64Json<T>(value: string): T {
-  return JSON.parse(Buffer.from(value, 'base64').toString('utf8')) as T
-}
-
-function encodeBase64Json(value: unknown): string {
-  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64')
-}

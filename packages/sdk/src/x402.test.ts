@@ -1304,4 +1304,66 @@ describe('x402 helpers', () => {
       { ...accepted, amount: '10000', maxAmountRequired: '0x4e20' },
     ])).toBeNull()
   })
+
+  // ── v1 x402 path coverage (#324) ────────────────────────────────────────
+  //
+  // `createStandardX402Header` re-wraps v2+ headers as
+  // `{ x402Version, accepted, payload }` (the v2 spec shape, see PR #303's
+  // regression guard above). v1 headers must pass through the x402 library's
+  // output UNCHANGED — v1 facilitators reject the `accepted` wrap. These tests
+  // pin that branch so a future refactor can't silently wrap v1 too.
+
+  it('passes v1 payment headers through unchanged (no accepted wrap)', async () => {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const v1PaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      x402Version: 1,
+    }
+
+    const header = await (haven as unknown as {
+      createStandardX402Header(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+    }).createStandardX402Header(v1PaymentRequired, accepted)
+
+    const decoded = JSON.parse(atob(header)) as Record<string, unknown>
+
+    // V1 shape: the raw library output — no top-level `accepted` key.
+    expect(decoded).not.toHaveProperty('accepted')
+    expect(decoded.x402Version).toBe(1)
+
+    // The library's v1 envelope carries scheme/network at the top level and
+    // the signed payload underneath. Pin the key set exactly so a future
+    // change that adds or renames top-level keys fails loudly.
+    expect(Object.keys(decoded).sort()).toEqual(['network', 'payload', 'scheme', 'x402Version'])
+    expect(decoded.scheme).toBe('exact')
+    expect(decoded.network).toBe('base')
+
+    const payload = decoded.payload as { signature?: string; authorization?: Record<string, unknown> }
+    expect(typeof payload.signature).toBe('string')
+    expect(payload.authorization).toMatchObject({
+      to: accepted.payTo,
+      value: accepted.amount,
+    })
+  })
+
+  it('still wraps v2 headers with accepted — the v1/v2 split is on x402Version', async () => {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const header = await (haven as unknown as {
+      createStandardX402Header(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+    }).createStandardX402Header(paymentRequired, accepted)
+
+    const decoded = JSON.parse(atob(header)) as Record<string, unknown>
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])
+    expect(decoded.x402Version).toBe(2)
+    expect(decoded.accepted).toEqual(accepted)
+  })
 })

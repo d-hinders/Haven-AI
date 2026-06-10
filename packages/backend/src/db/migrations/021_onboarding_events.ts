@@ -1,5 +1,7 @@
 import type { PoolClient } from 'pg'
 
+export const version = '021_onboarding_events'
+
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`
     CREATE TABLE onboarding_events (

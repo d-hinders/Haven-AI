@@ -14,6 +14,7 @@ import {
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
+import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -408,6 +409,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         }
 
         await tryRecordMachinePaymentEvidenceBaseById(id, agent.id, request.log)
+        emitFunnelEvent(agent.user_id, 'first_payment_settled', { payment_id: id, rail: 'manual' })
 
         return reply.send({
           payment_id: id,

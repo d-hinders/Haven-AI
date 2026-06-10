@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getSafeDetails } from '../lib/safe-details.js'
+import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const MAX_NAME_LENGTH = 80
@@ -182,6 +183,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       [sub, safe_address, chain_id],
     )
 
+    emitFunnelEvent(sub, 'safe_imported', { safe_address, chain_id })
     return result.rows[0]
   })
 

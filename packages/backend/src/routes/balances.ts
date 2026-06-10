@@ -6,6 +6,7 @@ import { getChain, isSupportedChain } from '../lib/chains.js'
 import { getProvider } from '../lib/allowance-module.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import { createCache } from '../lib/cache.js'
+import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -79,7 +80,7 @@ export default async function balanceRoutes(
       const chain = getChain(chainId)
 
       const cacheKey = `bal:${chainId}:${safeAddress.toLowerCase()}`
-      return balanceCache.getOrFetch(cacheKey, async () => {
+      const result = await balanceCache.getOrFetch(cacheKey, async () => {
         const provider = getProvider(chainId)
         const tokens = Object.values(chain.tokens)
         const nativeToken = tokens.find((t) => t.address === null)!
@@ -122,6 +123,14 @@ export default async function balanceRoutes(
 
         return { balances }
       })
+
+      // Emit safe_funded once when the Safe first receives any tokens.
+      // Fire-and-forget; ON CONFLICT DO NOTHING in the insert deduplicates.
+      if (result.balances.some((b) => BigInt(b.balance) > 0n)) {
+        emitFunnelEvent(sub, 'safe_funded', { safe_address: safeAddress, chain_id: chainId })
+      }
+
+      return result
     },
   )
 }

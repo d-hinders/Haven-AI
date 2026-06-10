@@ -19,6 +19,7 @@ import {
 import { normalizeAgentAllowances } from '../lib/agent-allowance-validation.js'
 import { getTokenAllowance, getTokensForDelegate } from '../lib/allowance-module.js'
 import { getChain } from '../lib/chains.js'
+import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 
 interface AllowanceInput {
   token_address: string
@@ -396,6 +397,8 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         ],
       )
       await client.query('COMMIT')
+      emitFunnelEvent(setup.user_id, 'agent_created', { agent_id: agentId, via: 'connection_setup' })
+      emitFunnelEvent(setup.user_id, 'allowance_granted', { agent_id: agentId, via: 'connection_setup' })
     } catch (err) {
       await client.query('ROLLBACK')
       if (isUniqueDelegateConflict(err)) {

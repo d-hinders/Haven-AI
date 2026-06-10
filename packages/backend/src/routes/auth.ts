@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 
 const SALT_ROUNDS = 10
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -91,6 +92,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     )
 
     const user = result.rows[0]
+    emitFunnelEvent(user.id, 'signed_up')
 
     const token = app.jwt.sign(
       { sub: user.id, email: user.email },

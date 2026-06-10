@@ -1566,6 +1566,123 @@ describe('Tool selection errors (#318)', () => {
   })
 })
 
+describe('haven_discover_tools (#349)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const catalogEntries = [
+    {
+      id: 'cat-mcp', name: 'Text generation', description: 'd', category: 'media',
+      resource_url: 'https://mcp.merchant.example/mcp', rail: 'x402', protocol: 'mcp',
+      tool_name: 'create_text', price_display: '$0.01 USDC', price_atomic: '10000',
+      asset: 'USDC', network: 'eip155:8453', status: 'active', verified_at: '2026-06-10T00:00:00.000Z',
+    },
+    {
+      id: 'cat-http', name: 'Paid API', description: 'd', category: 'data',
+      resource_url: 'https://api.merchant.example/paid', rail: 'x402', protocol: 'http',
+      tool_name: null, price_display: '$0.02 USDC', price_atomic: '20000',
+      asset: 'USDC', network: 'eip155:8453', status: 'active', verified_at: null,
+    },
+    {
+      id: 'cat-mpp', name: 'MPP resource', description: 'd', category: 'demo',
+      resource_url: 'https://api.merchant.example/mpp', rail: 'mpp', protocol: 'http',
+      tool_name: null, price_display: '$0.01 USDC', price_atomic: '10000',
+      asset: 'USDC', network: 'eip155:8453', status: 'degraded', verified_at: null,
+    },
+  ]
+
+  function handlers() {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    return createToolHandlers(haven)
+  }
+
+  it('returns catalog entries with the correct suggested_tool per rail and protocol', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({ entries: catalogEntries }),
+    )
+
+    const result = await handlers().haven_discover_tools({})
+    expect(result.success).toBe(true)
+    const data = (result as { data: Array<Record<string, unknown>> }).data
+
+    expect(data).toHaveLength(3)
+    expect(data[0]).toMatchObject({ id: 'cat-mcp', suggested_tool: 'haven_pay_mcp_tool' })
+    expect(data[1]).toMatchObject({ id: 'cat-http', suggested_tool: 'haven_pay_x402' })
+    expect(data[2]).toMatchObject({ id: 'cat-mpp', suggested_tool: 'haven_quote_mpp', status: 'degraded' })
+
+    // read-only: exactly one request, a GET to /catalog, nothing else
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0][0])).toBe(`${baseUrl}/catalog`)
+  })
+
+  it('forwards category and rail filters as query parameters', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({ entries: [] }),
+    )
+
+    await handlers().haven_discover_tools({ category: 'media', rail: 'x402' })
+    expect(String(fetchMock.mock.calls[0][0])).toBe(`${baseUrl}/catalog?category=media&rail=x402`)
+  })
+
+  it('lets the agent pay a discovered entry in the same session (discover -> pay)', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      // 1. discovery
+      .mockResolvedValueOnce(jsonResponse({ entries: [catalogEntries[1]] }))
+      // 2. merchant 402 probe from haven_pay_x402
+      .mockResolvedValueOnce(new Response(JSON.stringify(x402PaymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      // 3. Haven funding authorize
+      .mockResolvedValueOnce(jsonResponse({
+        payment_id: 'pay_349',
+        status: 'pending_signature',
+        chain_id: 8453,
+        safe_address: safeAddress,
+        sign_data: {
+          hash: `0x${'11'.repeat(32)}`,
+          components: {
+            safe: safeAddress,
+            token: x402PaymentRequired.accepts[0].asset,
+            to: delegateAddress,
+            amount: x402PaymentRequired.accepts[0].amount,
+            payment_token: '0x0000000000000000000000000000000000000000',
+            payment: '0',
+            nonce: 1,
+          },
+          instructions: 'Sign locally',
+        },
+      }, 201))
+      // 4. sign/relay confirmation
+      .mockResolvedValueOnce(jsonResponse({
+        payment_id: 'pay_349', status: 'confirmed', tx_hash: txHash, chain_id: 8453,
+        token: 'USDC', amount: '0.02', to: delegateAddress,
+      }))
+      // 5. merchant retry succeeds
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          'PAYMENT-RESPONSE': btoa(JSON.stringify({
+            success: true, transaction: txHash, network: 'eip155:8453',
+          })),
+        },
+      }))
+      // 6. evidence write
+      .mockResolvedValueOnce(jsonResponse({ evidence: { id: 'ev-349' } }, 202))
+
+    const h = handlers()
+    const discovery = await h.haven_discover_tools({})
+    expect(discovery.success).toBe(true)
+    const entry = (discovery as { data: Array<{ resource_url: string; suggested_tool: string }> }).data[0]
+    expect(entry.suggested_tool).toBe('haven_pay_x402')
+
+    const payment = await h.haven_pay_x402({ url: entry.resource_url, method: 'GET' })
+    expect(payment.success).toBe(true)
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(5)
+  })
+})
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,

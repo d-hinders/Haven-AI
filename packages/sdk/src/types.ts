@@ -1064,6 +1064,42 @@ export interface RawHavenPaymentReceipt {
 }
 
 /** @internal */
+/** One payable service in Haven's curated merchant catalog. */
+export interface HavenCatalogEntry {
+  id: string
+  name: string
+  description: string
+  category: string
+  resourceUrl: string
+  rail: 'x402' | 'mpp'
+  protocol: 'http' | 'mcp'
+  toolName: string | null
+  priceDisplay: string | null
+  priceAtomic: string | null
+  asset: string | null
+  network: string | null
+  status: 'active' | 'degraded' | 'delisted'
+  verifiedAt: string | null
+}
+
+/** @internal */
+export interface RawCatalogEntry {
+  id: string
+  name: string
+  description: string
+  category: string
+  resource_url: string
+  rail: 'x402' | 'mpp'
+  protocol: 'http' | 'mcp'
+  tool_name: string | null
+  price_display: string | null
+  price_atomic: string | null
+  asset: string | null
+  network: string | null
+  status: 'active' | 'degraded' | 'delisted'
+  verified_at: string | null
+}
+
 export interface RawHavenPaymentReceiptsResponse {
   receipts: RawHavenPaymentReceipt[]
 }

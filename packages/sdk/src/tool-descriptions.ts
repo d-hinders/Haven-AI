@@ -161,6 +161,20 @@ export const toolDescriptions = {
       'If pending_approval is returned, preserve payment_id and resume_state and wait for the wallet owner to approve in Haven. ' +
       'Use haven_resume_x402_payment once nextAction=retry_original_x402_request.',
   },
+  discoverTools: {
+    summary:
+      'Discover payable services from Haven\'s curated merchant catalog — names, prices, and which pay tool to use.',
+    selectionGuidance:
+      'Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. ' +
+      'Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. ' +
+      'Do NOT use to pay — each returned entry names the pay tool to use next.',
+    behavior:
+      'Read-only lookup against Haven\'s curated catalog. Entries are periodically re-verified against the live merchant; degraded entries are flagged. ' +
+      'Returns name, description, price, rail, resource URL, and a suggested_tool field naming the exact Haven pay tool for that entry. ' +
+      'Never creates a payment, signature, or approval.',
+    nextActionGuidance:
+      'Pick an entry, confirm the price with the user if it is non-trivial, and pay it with the tool named in suggested_tool, passing the entry\'s resource_url (and tool_name for MCP merchants).',
+  },
   sweep_delegate: {
     summary:
       'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating Safe.',

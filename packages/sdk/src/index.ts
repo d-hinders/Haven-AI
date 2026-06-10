@@ -59,6 +59,7 @@ export type {
   HavenPaymentReceipt,
   SweepResult,
   SweepEntry,
+  HavenCatalogEntry,
 } from './types.js'
 
 export type { ClaudeTool, OpenAITool } from './tools.js'

@@ -33,6 +33,7 @@ export type HavenMcpToolName =
   | 'haven_get_allowances'
   | 'haven_list_receipts'
   | 'haven_sweep_delegate'
+  | 'haven_discover_tools'
 
 export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_send: {
@@ -94,6 +95,10 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_get_agent: {},
   haven_get_allowances: {},
   haven_sweep_delegate: {},
+  haven_discover_tools: {
+    category: z.string().optional(),
+    rail: z.enum(['x402', 'mpp']).optional(),
+  },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
   },
@@ -120,6 +125,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
   haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
+  haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
 }
 
@@ -368,6 +374,36 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
     haven_get_agent: async () => runTool(async () => haven.getAgent()),
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
     haven_sweep_delegate: async () => runTool(async () => haven.sweepDelegate()),
+    haven_discover_tools: async (input) => {
+      const args = objectInput('haven_discover_tools', input)
+      return runTool(async () => {
+        const entries = await haven.discoverTools({
+          category: typeof args.category === 'string' ? args.category : undefined,
+          rail: args.rail === 'x402' || args.rail === 'mpp' ? args.rail : undefined,
+        })
+        return entries.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          description: entry.description,
+          category: entry.category,
+          resource_url: entry.resourceUrl,
+          rail: entry.rail,
+          protocol: entry.protocol,
+          tool_name: entry.toolName,
+          price_display: entry.priceDisplay,
+          price_atomic: entry.priceAtomic,
+          asset: entry.asset,
+          network: entry.network,
+          status: entry.status,
+          verified_at: entry.verifiedAt,
+          // Which Haven pay tool reaches this entry from the local MCP surface.
+          suggested_tool:
+            entry.protocol === 'mcp' ? 'haven_pay_mcp_tool'
+            : entry.rail === 'x402' ? 'haven_pay_x402'
+            : 'haven_quote_mpp',
+        }))
+      })
+    },
     haven_list_receipts: async (input) => {
       const args = objectInput('haven_list_receipts', input)
       return runTool(async () => haven.listReceipts({ limit: args.limit }))

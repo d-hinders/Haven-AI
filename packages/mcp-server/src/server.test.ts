@@ -33,6 +33,7 @@ describe('buildHostedMcpServer', () => {
 
     expect(names).toEqual(
       [
+        'haven_discover_tools',
         'haven_get_agent',
         'haven_get_allowances',
         'haven_get_payment_status',

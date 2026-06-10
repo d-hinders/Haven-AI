@@ -221,6 +221,32 @@ const SEND_SIGN_INSTRUCTIONS =
   'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
   'The signature must be 65 bytes: r (32) + s (32) + v (1), where v is 27 or 28.'
 
+/**
+ * Build the AllowanceModule `sign_data` payload returned by /send.
+ *
+ * Shared by the create path and the idempotent-replay path so a retried request
+ * can never receive a structurally different hash/components than its original
+ * 201 — the retry path is exactly what idempotency exists to protect.
+ */
+function buildSendSignData(
+  hash: string,
+  components: { safe: string; token: string; to: string; amount: string; nonce: number },
+) {
+  return {
+    hash,
+    components: {
+      safe: components.safe,
+      token: components.token,
+      to: components.to,
+      amount: components.amount,
+      payment_token: ZERO_ADDRESS,
+      payment: '0',
+      nonce: components.nonce,
+    },
+    instructions: SEND_SIGN_INSTRUCTIONS,
+  }
+}
+
 interface SendReplay {
   code: 201 | 202
   body: Record<string, unknown>
@@ -272,19 +298,13 @@ async function findExistingSend(
         amount: pi.amount_human,
         recipient: pi.to_address,
         idempotent_replay: true,
-        sign_data: {
-          hash: pi.sign_hash,
-          components: {
-            safe: agent.safe_address,
-            token: pi.token_address,
-            to: pi.to_address,
-            amount: pi.amount_raw,
-            payment_token: ZERO_ADDRESS,
-            payment: '0',
-            nonce: pi.allowance_nonce,
-          },
-          instructions: SEND_SIGN_INSTRUCTIONS,
-        },
+        sign_data: buildSendSignData(pi.sign_hash, {
+          safe: agent.safe_address,
+          token: pi.token_address,
+          to: pi.to_address,
+          amount: pi.amount_raw,
+          nonce: pi.allowance_nonce,
+        }),
       },
     }
   }
@@ -635,19 +655,13 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       asset,
       amount,
       recipient: recipient.toLowerCase(),
-      sign_data: {
-        hash: signHash,
-        components: {
-          safe: agent.safe_address,
-          token: tokenAddress,
-          to: recipient.toLowerCase(),
-          amount: amountRaw.toString(),
-          payment_token: ZERO_ADDRESS,
-          payment: '0',
-          nonce: onChainAllowance.nonce,
-        },
-        instructions: SEND_SIGN_INSTRUCTIONS,
-      },
+      sign_data: buildSendSignData(signHash, {
+        safe: agent.safe_address,
+        token: tokenAddress,
+        to: recipient.toLowerCase(),
+        amount: amountRaw.toString(),
+        nonce: onChainAllowance.nonce,
+      }),
     })
   })
 

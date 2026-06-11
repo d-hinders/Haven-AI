@@ -26,6 +26,21 @@ export function normalizeMoneyInput(input: string): string {
   return trimmed
 }
 
+/**
+ * True while the value is an in-progress state the user is still typing
+ * ("", ".", "0", "12.", "0.0"). Used to suppress live error styling —
+ * these values are not submittable, but they are not mistakes either.
+ */
+export function isIncompleteMoneyInput(input: string): boolean {
+  const trimmed = input.trim()
+  return (
+    trimmed === '' ||
+    trimmed === '.' ||
+    /^\d+\.$/.test(trimmed) ||
+    /^0+(\.0*)?$/.test(trimmed)
+  )
+}
+
 export function validateMoneyInput(
   input: string,
   decimals: number,

@@ -141,6 +141,7 @@ describe('installRuntime', () => {
       ackLocalTools: true,
       localMcp: true,
     }, {
+      homeDir: dir,
       runCommand,
       fetch: okToolsFetch(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
@@ -334,9 +335,17 @@ describe('installRuntime hosted default topology', () => {
       credentialDirectory,
       ackLocalTools: true,
     }, {
+      homeDir: dir,
       runCommand,
       fetch: okToolsFetch(),
     })
+
+    const skill = await readFile(join(dir, '.claude', 'skills', 'haven-pay', 'SKILL.md'), 'utf8')
+    expect(result.skillInstalled).toBe(true)
+    expect(skill).toContain('name: haven-pay')
+    expect(skill).toContain('haven_get_agent')
+    expect(skill).not.toContain(API_KEY)
+    expect(skill).not.toContain(PRIVATE_KEY)
 
     expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
     expect(result.hostedMcpConfigured).toBe(true)

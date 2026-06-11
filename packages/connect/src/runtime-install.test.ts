@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { installRuntime } from './runtime-install.js'
+import { installRuntime, supportsLocalMcp } from './runtime-install.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
 const API_KEY = 'sk_agent_secret_for_runtime_test'
@@ -24,6 +24,7 @@ describe('installRuntime', () => {
       identityPath,
       credentialDirectory,
       ackLocalTools: true,
+      localMcp: true,
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
@@ -73,6 +74,7 @@ describe('installRuntime', () => {
       identityPath,
       credentialDirectory,
       ackLocalTools: true,
+      localMcp: true,
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
@@ -104,6 +106,7 @@ describe('installRuntime', () => {
       signerPath,
       identityPath,
       credentialDirectory,
+      localMcp: true,
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
@@ -136,6 +139,7 @@ describe('installRuntime', () => {
       identityPath,
       credentialDirectory,
       ackLocalTools: true,
+      localMcp: true,
     }, {
       runCommand,
       fetch: okToolsFetch(),
@@ -192,6 +196,7 @@ describe('installRuntime', () => {
       identityPath,
       credentialDirectory,
       ackLocalTools: true,
+      localMcp: true,
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
@@ -225,6 +230,7 @@ describe('installRuntime', () => {
       identityPath,
       credentialDirectory,
       ackLocalTools: true,
+      localMcp: true,
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
@@ -256,6 +262,7 @@ describe('installRuntime', () => {
       identityPath,
       credentialDirectory,
       ackLocalTools: true,
+      localMcp: true,
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
@@ -268,6 +275,159 @@ describe('installRuntime', () => {
     expect(result.errorCode).toBe('local_mcp_probe_missing_tools')
     expect(result.probeResult).toBe('local_stdio_mcp_missing_tools')
     expect(result.messages.join('\n')).toContain('Local Haven MCP handshake failed: missing_tools.')
+  })
+})
+
+describe('installRuntime hosted default topology', () => {
+  it('writes hosted MCP + signer for Codex by default (no opt-in)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-codex-hosted-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+    })
+
+    const codexConfig = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
+
+    expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
+    expect(result.hostedMcpConfigured).toBe(true)
+    expect(result.localSignerConfigured).toBe(true)
+    expect(result.localMcpConfigured).toBe(false)
+    expect(result.errorCode).toBeUndefined()
+    expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_restart_codex')
+    expect(codexConfig).toContain('[mcp_servers.haven]')
+    expect(codexConfig).toContain(`url = "${HOSTED_URL}"`)
+    expect(codexConfig).toContain(`http_headers = { "Authorization" = "Bearer ${API_KEY}" }`)
+    expect(codexConfig).toContain('[mcp_servers.haven_signer]')
+    expect(codexConfig).toContain('command = "npx"')
+    expect(codexConfig).toContain(signerPath)
+    expect(codexConfig).not.toContain(PRIVATE_KEY)
+  })
+
+  it('writes hosted MCP + signer for Claude Code by default (no opt-in)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-claude-hosted-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const commands: Array<{ command: string; args: string[] }> = []
+    const runCommand = vi.fn(async (command: string, args: string[]) => {
+      commands.push({ command, args })
+    })
+
+    const result = await installRuntime({
+      runtime: 'claude-code',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      runCommand,
+      fetch: okToolsFetch(),
+    })
+
+    expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
+    expect(result.hostedMcpConfigured).toBe(true)
+    expect(result.localSignerConfigured).toBe(true)
+    expect(result.localMcpConfigured).toBe(false)
+    expect(result.errorCode).toBeUndefined()
+    expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_restart_claude_code')
+
+    const addCalls = commands.filter((c) => c.args[1] === 'add-json')
+    expect(addCalls).toHaveLength(2)
+    const hostedAdd = addCalls.find((c) => c.args[2] === 'haven')
+    const signerAdd = addCalls.find((c) => c.args[2] === 'haven-signer')
+    expect(hostedAdd).toBeDefined()
+    expect(signerAdd).toBeDefined()
+    const hostedServer = JSON.parse(hostedAdd!.args[3]) as Record<string, unknown>
+    expect(hostedServer).toMatchObject({
+      type: 'http',
+      url: HOSTED_URL,
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    })
+    const signerServer = JSON.parse(signerAdd!.args[3]) as Record<string, unknown>
+    expect(signerServer).toMatchObject({ type: 'stdio', command: 'npx' })
+    expect((signerServer.args as string[])).toContain('--credentials')
+    expect((signerServer.args as string[])).toContain(signerPath)
+    expect(JSON.stringify(commands)).not.toContain(PRIVATE_KEY)
+  })
+
+  it('never produces local_stdio or manual for any known runtime by default', async () => {
+    const runtimes = [
+      'claude-code', 'codex-cli', 'codex-desktop', 'cursor', 'vscode', 'vscode-insiders', 'claude-desktop',
+    ] as const
+    for (const runtime of runtimes) {
+      const dir = await mkdtemp(join(tmpdir(), `haven-connect-default-${runtime}-`))
+      const credentialDirectory = join(dir, 'agent-1')
+      const identityPath = await writeIdentityCredential(credentialDirectory)
+      const signerPath = await writeSignerCredential(credentialDirectory)
+
+      const result = await installRuntime({
+        runtime,
+        hostedMcpUrl: HOSTED_URL,
+        apiKey: API_KEY,
+        signerPath,
+        identityPath,
+        credentialDirectory,
+        ackLocalTools: true,
+      }, {
+        homeDir: dir,
+        fetch: okToolsFetch(),
+        runCommand: vi.fn(async () => undefined),
+      })
+
+      expect(result.runtimeMcpMode, runtime).toBe('hosted_plus_signer')
+      expect(result.hostedMcpConfigured, runtime).toBe(true)
+      expect(result.localSignerConfigured, runtime).toBe(true)
+      expect(result.localMcpConfigured, runtime).toBe(false)
+    }
+  })
+
+  it('limits local MCP support to Claude Code and Codex', () => {
+    expect(supportsLocalMcp('claude-code')).toBe(true)
+    expect(supportsLocalMcp('codex-cli')).toBe(true)
+    expect(supportsLocalMcp('codex-desktop')).toBe(true)
+    expect(supportsLocalMcp('cursor')).toBe(false)
+    expect(supportsLocalMcp('vscode')).toBe(false)
+    expect(supportsLocalMcp('vscode-insiders')).toBe(false)
+    expect(supportsLocalMcp('claude-desktop')).toBe(false)
+    expect(supportsLocalMcp('other')).toBe(false)
+  })
+
+  it('ignores the local opt-in on runtimes that do not support local MCP', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-cursor-localflag-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'cursor',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+      localMcp: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+    })
+
+    expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
+    expect(result.hostedMcpConfigured).toBe(true)
   })
 })
 

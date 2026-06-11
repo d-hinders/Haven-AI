@@ -30,6 +30,7 @@ export interface ConnectOptions {
   connectorVersion?: string
   ackSigner?: boolean
   ackLocalTools?: boolean
+  localMcp?: boolean
 }
 
 export interface ConnectDeps {
@@ -127,6 +128,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     environmentLabel: options.environmentLabel ?? 'Local workspace',
     ackSigner: options.ackSigner,
     ackLocalTools: options.ackLocalTools,
+    localMcp: options.localMcp,
   })
   printRuntimeInstall(runtimeInstall, log)
 

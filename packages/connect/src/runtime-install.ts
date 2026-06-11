@@ -18,7 +18,7 @@ import {
   type PreparedLocalMcpRuntime,
   type PrepareLocalMcpRuntimeInput,
 } from './local-mcp-runtime.js'
-import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
+import { MCP_RUNTIME_MANIFEST, signerPackageSpec } from './runtime-manifest.js'
 import { normalizeRuntime, restartRequiredForRuntime, runtimeProfile, type RuntimeId } from './runtime-registry.js'
 import {
   acknowledgeLocalSignerConsent,
@@ -38,6 +38,12 @@ export interface RuntimeInstallInput {
   environmentLabel?: string
   ackSigner?: boolean
   ackLocalTools?: boolean
+  /**
+   * Explicit opt-in to the local-stdio MCP topology (zero hosted dependency).
+   * Default is hosted MCP + local signer for every runtime; local MCP is only
+   * used when this is true and the runtime supports it.
+   */
+  localMcp?: boolean
 }
 
 export interface RuntimeInstallResult {
@@ -77,7 +83,7 @@ export async function installRuntime(
 ): Promise<RuntimeInstallResult> {
   const runtime = normalizeRuntime(input.runtime, deps.env)
   const profile = runtimeProfile(runtime, deps.env)
-  const localRuntime = usesLocalMcp(runtime)
+  const localRuntime = input.localMcp === true && supportsLocalMcp(runtime)
   const consentMessages: string[] = []
   const localMcpConsent = localRuntime
     ? await resolveLocalMcpConsent(input, consentMessages)
@@ -147,7 +153,9 @@ export async function installRuntime(
   }
 
   const configResult = runtime === 'claude-code'
-    ? await configureClaudeCode(deps, localRuntimeInstall?.command ?? '')
+    ? localRuntime
+      ? await configureClaudeCode(deps, localRuntimeInstall?.command ?? '')
+      : await configureClaudeCodeHosted(deps, input)
     : await writeRuntimeConfig({
         runtime,
         hostedMcpUrl: input.hostedMcpUrl,
@@ -157,6 +165,7 @@ export async function installRuntime(
         credentialDirectory: input.credentialDirectory,
         localMcpCommand: localRuntimeInstall?.command,
         homeDir: deps.homeDir,
+        mode: localRuntime ? 'local' : 'hosted',
       })
 
   const localProbePromise = configResult.runtimeMcpMode === 'local_stdio' && localRuntimeInstall
@@ -283,6 +292,75 @@ async function configureClaudeCode(
   }
 }
 
+async function configureClaudeCodeHosted(
+  deps: RuntimeInstallDeps,
+  input: RuntimeInstallInput,
+): Promise<{
+  hostedConfigured: boolean
+  signerConfigured: boolean
+  localMcpConfigured: boolean
+  runtimeMcpMode: RuntimeMcpMode
+  target: string
+  changed: boolean
+  restartRequired: boolean
+  messages: string[]
+  errorCode?: string
+  activationCommand?: string
+}> {
+  const runCommand = deps.runCommand ?? defaultRunCommand
+  const hostedJson = JSON.stringify({
+    type: 'http',
+    url: input.hostedMcpUrl,
+    headers: { Authorization: `Bearer ${input.apiKey}` },
+  })
+  const signerJson = JSON.stringify({
+    type: 'stdio',
+    command: 'npx',
+    args: ['-y', signerPackageSpec(), '--credentials', input.signerPath],
+    env: {},
+  })
+  try {
+    // Remove stale entries first so re-runs and local→hosted switches are
+    // idempotent — `claude mcp add-json` fails when the name already exists.
+    await runCommand('claude', ['mcp', 'remove', 'haven']).catch(() => undefined)
+    await runCommand('claude', ['mcp', 'remove', 'haven-signer']).catch(() => undefined)
+    await runCommand('claude', ['mcp', 'add-json', 'haven', hostedJson, '--scope', 'user'])
+    await runCommand('claude', ['mcp', 'add-json', 'haven-signer', signerJson, '--scope', 'user'])
+    const verified = await runCommand('claude', ['mcp', 'get', 'haven'])
+      .then(() => true)
+      .catch(() => false)
+    return {
+      hostedConfigured: true,
+      signerConfigured: true,
+      localMcpConfigured: false,
+      runtimeMcpMode: 'hosted_plus_signer',
+      target: 'Claude Code MCP config',
+      changed: true,
+      restartRequired: true,
+      messages: [
+        'Updated hosted Haven MCP and local signer entries with Claude Code.',
+        ...(verified ? ['Verified Claude Code MCP entry.'] : []),
+        'After Haven approval, Haven tools should appear in your next Claude Code message. If they don\'t, restart the session to load them.',
+      ],
+    }
+  } catch (err) {
+    return {
+      hostedConfigured: false,
+      signerConfigured: false,
+      localMcpConfigured: false,
+      runtimeMcpMode: 'hosted_plus_signer',
+      target: 'Claude Code MCP config',
+      changed: false,
+      restartRequired: true,
+      messages: [
+        `Could not update Claude Code MCP config: ${err instanceof Error ? err.message : String(err)}`,
+        'Install Claude Code or rerun the Haven setup command inside a Claude Code terminal.',
+      ],
+      errorCode: 'claude_code_config_failed',
+    }
+  }
+}
+
 async function defaultRunCommand(command: string, args: string[]): Promise<void> {
   await execFileAsync(command, args, { timeout: 10_000 })
 }
@@ -370,7 +448,12 @@ function nextAction(
   return 'return_to_haven_for_wallet_approval_then_configure_runtime'
 }
 
-function usesLocalMcp(runtime: RuntimeId): boolean {
+/**
+ * Runtimes where the local-stdio MCP topology can be installed when the user
+ * explicitly opts in. Never used by default — the default topology is hosted
+ * MCP + local signer for every runtime.
+ */
+export function supportsLocalMcp(runtime: RuntimeId): boolean {
   return runtime === 'codex-cli' || runtime === 'codex-desktop' || runtime === 'claude-code'
 }
 

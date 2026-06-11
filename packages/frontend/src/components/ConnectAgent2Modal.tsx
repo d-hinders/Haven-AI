@@ -592,7 +592,7 @@ export default function ConnectAgent2Modal({
               <StatusBadge tone="brand">Preview</StatusBadge>
             </div>
             <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-              {headerSubtitle(step, visibleStatus, setupStatus?.install_status?.local_mcp_configured)}
+              {headerSubtitle(step, visibleStatus, runtimeIsConfigured(setupStatus?.install_status))}
             </p>
           </div>
           <button
@@ -878,13 +878,13 @@ export default function ConnectAgent2Modal({
               )}
 
               {visibleStatus === 'connected_local' &&
-                !setupStatus?.install_status?.local_mcp_configured &&
+                !runtimeIsConfigured(setupStatus?.install_status) &&
                 !setupStatus?.install_status?.error_code && (
                 <FinalizingLocalSetup loading={statusQuery.loading} />
               )}
 
               {((visibleStatus === 'connected_local' &&
-                (setupStatus?.install_status?.local_mcp_configured ||
+                (runtimeIsConfigured(setupStatus?.install_status) ||
                   setupStatus?.install_status?.error_code)) ||
                 visibleStatus === 'awaiting_wallet_approval') && (
                 <LocalConnectionReady
@@ -1494,9 +1494,9 @@ function SetupStatusState({
   )
 }
 
-function headerSubtitle(step: SetupStep, status: string | undefined, localMcpConfigured?: boolean): string {
+function headerSubtitle(step: SetupStep, status: string | undefined, runtimeConfigured?: boolean): string {
   if (step === 'connect') {
-    if (status === 'connected_local' && !localMcpConfigured) return 'Finishing local setup'
+    if (status === 'connected_local' && !runtimeConfigured) return 'Finishing local setup'
     if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent rules'
     if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
     if (status === 'active') return 'Agent rules approved'

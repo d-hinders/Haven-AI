@@ -1012,9 +1012,35 @@ export const openapiSpec = {
               },
             },
           },
+          '200': {
+            description:
+              'Idempotent replay of a request whose payment has already progressed (e.g. confirmed, or an approval the owner executed). Body is the canonical payment-status object with idempotent_replay: true.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
           '400': errorResponse,
           '401': errorResponse,
           '403': errorResponse,
+          '409': {
+            description:
+              'Idempotent replay of a request that is mid-flight (intent submitted but not yet confirmed) or whose approval was rejected.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
+          '410': {
+            description: 'Idempotent replay of a request whose payment has expired.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
           '502': errorResponse,
         },
       },

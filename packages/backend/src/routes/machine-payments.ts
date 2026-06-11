@@ -6,7 +6,7 @@ import {
   authorizeMachinePayment,
   type MachinePaymentRail,
 } from '../lib/machine-payments.js'
-import { getAgentPaymentStatus } from '../lib/agent-payment-status.js'
+import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../lib/agent-payment-status.js'
 import {
   attachMachinePaymentEvidence,
   type MachinePaymentEvidenceRow,
@@ -248,18 +248,38 @@ function buildSendSignData(
 }
 
 interface SendReplay {
-  code: 201 | 202
+  code: number
   body: Record<string, unknown>
+}
+
+/**
+ * Build the canonical status response for an already-progressed payment, so a
+ * replay of a settled/approved/submitted send reports its *real* state rather
+ * than re-emitting the create-time "sign this" / "waiting for approval" framing.
+ * Mirrors what GET status / haven_get_payment_status returns for the same id.
+ */
+async function replayStatusOf(agent: AgentContext, paymentId: string): Promise<SendReplay> {
+  const status = await getAgentPaymentStatus(agent, paymentId)
+  if (status) {
+    return { code: agentPaymentStatusHttpCode(status), body: { ...status, idempotent_replay: true } }
+  }
+  return {
+    code: 409,
+    body: { payment_id: paymentId, error: 'Payment already exists but could not be loaded', idempotent_replay: true },
+  }
 }
 
 /**
  * Resolve an existing /send result for an idempotency key, if one exists.
  *
  * A send lands as either a signable payment intent (within allowance) or a
- * queued approval (over allowance), so both tables are checked. Returns the
- * original response so a retried request is a true replay rather than a second
- * intent with a fresh hash. Returns null when the key has never been seen (or
- * its prior row reached a terminal state and is therefore reusable).
+ * queued approval (over allowance), so both tables are checked. A replay returns
+ * the original *signable* response only while the row is still actionable
+ * (intent pending_signature / approval pending); once it has progressed it
+ * returns the row's real status instead, so an agent that retries after the
+ * payment already settled is not told to sign or wait again. Returns null when
+ * the key has never been seen (or its prior row reached a terminal state
+ * excluded by the unique index and is therefore reusable).
  */
 async function findExistingSend(
   agent: AgentContext,
@@ -288,6 +308,10 @@ async function findExistingSend(
   )
   const pi = intent.rows[0]
   if (pi) {
+    // Already submitted/confirmed — report the real state, not a stale sign request.
+    if (pi.status !== 'pending_signature') {
+      return replayStatusOf(agent, pi.id)
+    }
     return {
       code: 201,
       body: {
@@ -326,6 +350,10 @@ async function findExistingSend(
   )
   const ar = approval.rows[0]
   if (ar) {
+    // Owner has approved / executed it — report the real state, not "still waiting".
+    if (ar.status !== 'pending') {
+      return replayStatusOf(agent, ar.id)
+    }
     return {
       code: 202,
       body: {

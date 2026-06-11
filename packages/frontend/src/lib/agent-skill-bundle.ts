@@ -1,22 +1,99 @@
 /**
- * Agent "skill bundle" generator.
+ * Haven agent skill + SDK starter downloads.
  *
- * Produces a zipped folder that a developer can drop into an agent runtime
- * (Claude Code `~/.claude/skills/`, MCP-aware tooling, or any folder-based
- * agent config) and have the agent making Haven payments immediately.
+ * Two clearly separated artifacts:
  *
- * Contents:
- *   SKILL.md           — tool description / when-to-use rules
- *   README.md          — the same handoff document (duplicated for humans)
- *   .env.example       — env vars with values pre-filled
- *   pay.ts             — minimal reference implementation using @haven_ai/sdk
- *   package.json       — dependencies so the example runs standalone
+ * 1. **The skill** (`buildGenericSkillMd` / `buildSkillBundle`) — a single
+ *    generic, secret-free SKILL.md, byte-for-byte identical for every agent.
+ *    Identity and live budget come from the `haven_get_agent` /
+ *    `haven_get_allowances` runtime tools, never from the file. This is the
+ *    download fallback for runtimes the connector cannot write to; the
+ *    connector auto-installs the same content where supported.
  *
- * The zip is built client-side with JSZip. No backend calls.
+ * 2. **The SDK starter** (`buildSdkStarterBundle`) — an optional, per-agent
+ *    runnable example using @haven_ai/sdk with env-filled credentials. This
+ *    is NOT the skill and must never be presented as one.
+ *
+ * KEEP IN SYNC: packages/connect/src/skill-content.ts ships the exact same
+ * skill content for connector auto-install. Both sides assert genericness in
+ * their tests.
  */
 
 import JSZip from 'jszip'
 import { buildHandoff, buildDotenv, type HandoffInput } from './agent-handoff'
+
+// ── The generic skill ──────────────────────────────────────────────
+
+export function buildGenericSkillMd(): string {
+  return `---
+name: haven-pay
+description: Pay for things from the user's Haven wallet within their agent rules. Use when the user asks to send, pay, tip, or transfer crypto — or when a request hits an HTTP 402 (x402) paywall.
+---
+
+# Haven: pay from a Haven wallet
+
+This skill lets the agent make payments from the user's Haven wallet through
+the Haven MCP tools. Every payment is checked against the agent's on-chain
+budget before money moves; payments above the remaining budget wait for the
+user's approval in Haven.
+
+## When to use this skill
+
+- The user asks to send money, pay someone, tip, donate, or transfer tokens.
+- A request returns HTTP 402 (x402): use the Haven pay tools to settle it,
+  then retry the original request.
+
+## Identity and budget come from the tools — never assume them
+
+Do not guess the wallet address, network, or budget. Read them live:
+
+- \`haven_get_agent\` — agent identity, Haven wallet address, network.
+- \`haven_get_allowances\` — current per-token budgets and what remains.
+
+Budgets reset on a period the user chose. If a payment exceeds the remaining
+budget it is queued for the user to approve in the Haven dashboard — this is
+normal, not an error.
+
+## Paying
+
+- **Direct transfer:** \`haven_pay\` with recipient, amount, and token.
+- **x402 paywall:** \`haven_quote_x402\` to get a quote, then
+  \`haven_pay_x402_quote\`. In the hosted setup the signing step happens in
+  the local Haven signer; follow the tool results — they tell you the next
+  action at every step. Retry the original request only when the result says
+  \`retry_original_x402_request\`.
+- **Status:** \`haven_get_payment_status\` with a \`payment_id\` to check on
+  queued or in-flight payments. Do not poll in a tight loop.
+
+## Approval semantics
+
+- A result with \`pending_approval\` means the payment exceeded the remaining
+  budget and is waiting for the user in Haven. Tell the user, then check
+  status later.
+- Never ask the user for private keys and never try to sign anything
+  yourself — Haven signs. If a tool reports a missing or invalid credential,
+  tell the user to re-run the Haven setup command.
+
+## Failure handling
+
+Haven errors are shaped \`{ error, status, details? }\` and written for
+humans — surface the message verbatim. Common cases:
+
+- \`pending_approval\`: queued for the user's approval (see above).
+- \`insufficient_funds\`: the Haven wallet doesn't hold enough of that token.
+  Suggest the user add funds in the Haven dashboard.
+- Budget exceeded: tell the user how much remains (from
+  \`haven_get_allowances\`) and that they can raise the budget in Haven.
+
+## Revoke
+
+If this agent's credential may have leaked, tell the user to pause or revoke
+the agent in the Haven dashboard under Agents. New requests stop immediately
+for that credential.
+`
+}
+
+// ── SDK starter (optional, per-agent, clearly not the skill) ───────
 
 function slugify(name: string): string {
   return (
@@ -27,96 +104,6 @@ function slugify(name: string): string {
       .slice(0, 40) || 'agent'
   )
 }
-
-// ── SKILL.md ───────────────────────────────────────────────────────
-
-function buildSkillMd(input: HandoffInput): string {
-  const { agent, policy, appBaseUrl } = input
-  const policySummary = policy.allowances
-    .map((a) => `${a.amount} ${a.tokenSymbol}`)
-    .join(', ') || 'none configured'
-  const revokeUrl = `${(appBaseUrl ?? 'https://haven-ai-frontend.vercel.app').replace(/\/+$/, '')}/agents`
-
-  return `---
-name: haven-pay
-description: Sign Haven payment requests locally and submit payments within the user's agent rules. Use when the user asks to send, pay, tip, or transfer crypto — or when the agent hits an HTTP 402 response from a paid API.
----
-
-# Haven: pay from a Haven wallet
-
-This skill lets the agent make payments from a Haven wallet. Every payment is
-checked against the user's agent rules before money moves; payments above the
-remaining budget wait for approval in Haven.
-
-## When to use this skill
-
-- The user asks to send money, pay someone, tip, donate, or transfer tokens.
-- The agent makes a request and receives an HTTP 402 response (x402) — use
-  \`haven.fetch()\` instead of \`fetch()\` and Haven handles the payment loop.
-
-## Agent identity
-
-- **Name:** ${agent.name}
-- **Haven wallet:** \`${agent.safeAddress}\`
-- **Network:** chain id \`${agent.chainId}\`
-- **Credential address:** \`${agent.delegateAddress}\`
-
-## What this agent is allowed to do
-
-- **Spending limits:** ${policySummary}
-
-If a payment exceeds the remaining budget, Haven queues it for approval in the
-dashboard. The SDK surfaces this as a structured payment state with a
-\`payment_id\`, \`phase\`, and \`next_action\`. Tell the user the payment is
-awaiting approval, then check \`get_payment_status\` later; don't retry in a
-tight loop.
-
-## Setup (one-time)
-
-1. Copy \`.env.example\` to \`.env\` — credentials are pre-filled.
-2. \`npm install\`
-3. Ready. See \`pay.ts\` for the minimal call.
-
-## Usage
-
-\`\`\`ts
-import { haven } from './pay'
-
-// Direct payment
-const result = await haven.pay({
-  to: '0xRecipient',
-  amount: '1',
-  token: 'USDC',
-})
-
-// x402 fetch — handles 402 → pay → retry automatically
-const res = await haven.fetch('https://paid-api.example/data')
-const data = await res.json()
-\`\`\`
-
-## What to return on failure
-
-Haven errors are shaped \`{ error, status, details? }\`. Surface the error
-message to the user verbatim — it's written for humans. Common cases:
-
-- \`pending_approval\` (HTTP 202): the payment exceeds the remaining budget
-  and was queued. Tell the user it's waiting for approval in Haven. Check
-  \`get_payment_status\` with the returned \`payment_id\`.
-- x402 approvals have two steps: Haven first waits for the user to fund the
-  agent delegate wallet from the Haven wallet, then the agent retries the
-  original paid API request. Retry only when \`next_action\` is
-  \`retry_original_x402_request\`. Do not rewrite the SDK while waiting.
-- \`insufficient_funds\`: the Haven wallet doesn't have enough of that token.
-
-## Revoke
-
-If this skill or its credentials leak, pause or revoke the agent at
-${revokeUrl}. New Haven requests stop for that credential, and Haven may ask
-the user to approve a network update to remove the agent budget from the wallet.
-`
-}
-
-// ── pay.ts ─────────────────────────────────────────────────────────
 
 function buildPayTs(): string {
   return `/**
@@ -140,7 +127,7 @@ export const haven = new HavenClient({
   baseUrl: process.env.HAVEN_API_URL,
 })
 
-// Convenience helpers the skill uses directly.
+// Convenience helpers.
 
 export async function pay(to: string, amount: string, token = 'USDC') {
   return haven.pay({ to, amount, token })
@@ -152,16 +139,14 @@ export async function fetchWith402(url: string, init?: RequestInit) {
 `
 }
 
-// ── package.json ───────────────────────────────────────────────────
-
 function buildPackageJson(input: HandoffInput): string {
   const name = slugify(input.agent.name)
   return (
     JSON.stringify(
       {
-        name: `haven-skill-${name}`,
+        name: `haven-sdk-starter-${name}`,
         version: '0.1.0',
-        description: `Haven payment skill for ${input.agent.name}`,
+        description: `Haven SDK starter for ${input.agent.name}`,
         type: 'module',
         private: true,
         dependencies: {
@@ -184,14 +169,36 @@ export interface SkillBundle {
 }
 
 /**
- * Build a drop-in skill folder zipped for download.
- *
- * Produces a .zip with SKILL.md, README.md, .env.example, pay.ts, package.json.
+ * Build the generic skill download: a zip containing only
+ * `haven-pay/SKILL.md`. Identical for every agent — takes no input.
  */
-export async function buildSkillBundle(input: HandoffInput): Promise<SkillBundle> {
+export async function buildSkillBundle(): Promise<SkillBundle> {
+  const zip = new JSZip()
+  const folder = zip.folder('haven-pay')
+  if (!folder) {
+    throw new Error('Failed to initialise zip folder')
+  }
+
+  folder.file('SKILL.md', buildGenericSkillMd())
+
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  })
+
+  return { blob, filename: 'haven-pay-skill.zip' }
+}
+
+/**
+ * Build the optional per-agent SDK starter (README, .env.example, pay.ts,
+ * package.json). Contains env-filled credentials — treat as sensitive and
+ * never present it as "the skill".
+ */
+export async function buildSdkStarterBundle(input: HandoffInput): Promise<SkillBundle> {
   const zip = new JSZip()
   const slug = slugify(input.agent.name)
-  const folder = zip.folder(`haven-skill-${slug}`)
+  const folder = zip.folder(`haven-sdk-starter-${slug}`)
   if (!folder) {
     throw new Error('Failed to initialise zip folder')
   }
@@ -199,7 +206,6 @@ export async function buildSkillBundle(input: HandoffInput): Promise<SkillBundle
   const handoff = buildHandoff(input)
   const dotenv = buildDotenv(input)
 
-  folder.file('SKILL.md', buildSkillMd(input))
   folder.file('README.md', handoff.markdown)
   folder.file('.env.example', dotenv)
   folder.file('pay.ts', buildPayTs())
@@ -213,6 +219,6 @@ export async function buildSkillBundle(input: HandoffInput): Promise<SkillBundle
 
   return {
     blob,
-    filename: `haven-skill-${slug}.zip`,
+    filename: `haven-sdk-starter-${slug}.zip`,
   }
 }

@@ -1,17 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import JSZip from 'jszip'
-import { buildSkillBundle } from '@/lib/agent-skill-bundle'
+import {
+  buildGenericSkillMd,
+  buildSdkStarterBundle,
+  buildSkillBundle,
+} from '@/lib/agent-skill-bundle'
 import { type HandoffInput } from '@/lib/agent-handoff'
 
 /**
- * Tests for the agent skill-bundle generator.
+ * Tests for the skill download and the SDK starter.
  *
- * The skill bundle is a zip we hand to external developers — it lands on
- * disk and the user follows the README to wire it into their agent. These
- * tests check the shape and key contents, not exact wording.
+ * The skill is generic: secret-free and byte-for-byte identical for every
+ * agent — identity and budget come from the runtime tools. The SDK starter
+ * is the separate, per-agent runnable example and the only artifact allowed
+ * to carry env-filled credentials.
  */
 
-const BASE_INPUT: HandoffInput = {
+const AGENT_A: HandoffInput = {
   agent: {
     id: 'agt_abc123',
     name: 'My Payment Agent',
@@ -28,12 +33,25 @@ const BASE_INPUT: HandoffInput = {
   },
 }
 
-async function readBundle(input: HandoffInput) {
-  const { blob, filename } = await buildSkillBundle(input)
-  // JSZip accepts Blob directly — jsdom's Blob lacks arrayBuffer() in this
-  // version, so we hand the Blob over and let JSZip's reader sort it out.
+const AGENT_B: HandoffInput = {
+  agent: {
+    id: 'agt_zzz999',
+    name: 'Completely Different Agent',
+    delegateAddress: '0x1111111111111111111111111111111111111111',
+    safeAddress: '0x2222222222222222222222222222222222222222',
+    chainId: 8453,
+  },
+  policy: {
+    allowances: [{ tokenSymbol: 'USDC', amount: '500', resetPeriodMin: 0 }],
+  },
+  credentials: {
+    apiKey: 'sk_agent_OTHERKEY_NEVERREAL',
+    delegatePrivateKey: '0xOTHERPRIVATEKEY_NEVERREAL',
+  },
+}
+
+async function readZip(blob: Blob) {
   const zip = await JSZip.loadAsync(blob as unknown as Parameters<typeof JSZip.loadAsync>[0])
-  // All bundle contents live under a single top-level folder.
   const folderName = Object.keys(zip.files).find((p) => p.endsWith('/') && !p.slice(0, -1).includes('/'))
   expect(folderName).toBeTruthy()
   async function read(path: string): Promise<string> {
@@ -41,91 +59,92 @@ async function readBundle(input: HandoffInput) {
     if (!entry) throw new Error(`missing entry: ${path}`)
     return entry.async('string')
   }
-  return { filename, folderName: folderName!, read, zip }
+  return { folderName: folderName!, read, zip }
 }
 
-function expectNoRawSecrets(value: string) {
-  expect(value).not.toContain('sk_agent_TESTKEY_NEVERREAL')
-  expect(value).not.toContain('0xPRIVATEKEY_NEVERREAL')
-}
-
-describe('buildSkillBundle — structure', () => {
-  it('produces a slug-named zip with no secrets in the filename', async () => {
-    const { filename } = await readBundle(BASE_INPUT)
-    expect(filename).toBe('haven-skill-my-payment-agent.zip')
-    expect(filename).not.toContain('sk_agent')
-    expect(filename).not.toContain('0x')
+describe('generic skill', () => {
+  it('is byte-for-byte identical regardless of agent input (genericness invariant)', () => {
+    // buildGenericSkillMd takes no input at all — the strongest version of
+    // the invariant. The assertions below pin that nothing per-agent leaks in.
+    const skill = buildGenericSkillMd()
+    expect(skill).toBe(buildGenericSkillMd())
+    for (const input of [AGENT_A, AGENT_B]) {
+      expect(skill).not.toContain(input.agent.name)
+      expect(skill).not.toContain(input.agent.safeAddress)
+      expect(skill).not.toContain(input.agent.delegateAddress)
+      expect(skill).not.toContain(input.credentials.apiKey)
+      expect(skill).not.toContain(input.credentials.delegatePrivateKey)
+      expect(skill).not.toContain(String(input.agent.chainId))
+    }
+    expect(skill).not.toMatch(/0x[0-9a-fA-F]{40}/)
   })
 
-  it('contains the expected files', async () => {
-    const { read } = await readBundle(BASE_INPUT)
-    // Each call throws if the entry is missing — calling them all is the test.
+  it('directs the agent to runtime tools for identity, budget, and payment', () => {
+    const skill = buildGenericSkillMd()
+    expect(skill).toContain('haven_get_agent')
+    expect(skill).toContain('haven_get_allowances')
+    expect(skill).toContain('haven_pay')
+    expect(skill).toContain('haven_quote_x402')
+    expect(skill).toContain('haven_pay_x402_quote')
+    expect(skill).toContain('haven_get_payment_status')
+    expect(skill).toContain('retry_original_x402_request')
+    expect(skill).toContain('pending_approval')
+    expect(skill).toMatch(/never.*private keys|private keys.*never/i)
+  })
+
+  it('zips as haven-pay/SKILL.md with a fixed filename and no other files', async () => {
+    const { blob, filename } = await buildSkillBundle()
+    expect(filename).toBe('haven-pay-skill.zip')
+    const { folderName, read, zip } = await readZip(blob)
+    expect(folderName).toBe('haven-pay/')
+    expect(await read('SKILL.md')).toBe(buildGenericSkillMd())
+    const fileEntries = Object.values(zip.files).filter((entry) => !entry.dir)
+    expect(fileEntries).toHaveLength(1)
+  })
+})
+
+describe('SDK starter (separate from the skill)', () => {
+  it('is named as a starter, never as the skill', async () => {
+    const { filename } = await buildSdkStarterBundle(AGENT_A)
+    expect(filename).toBe('haven-sdk-starter-my-payment-agent.zip')
+    expect(filename).not.toContain('skill')
+  })
+
+  it('contains the runnable example and no SKILL.md', async () => {
+    const { blob } = await buildSdkStarterBundle(AGENT_A)
+    const { read, zip } = await readZip(blob)
     await Promise.all([
-      read('SKILL.md'),
       read('README.md'),
       read('.env.example'),
       read('pay.ts'),
       read('package.json'),
     ])
+    expect(Object.keys(zip.files).some((path) => path.endsWith('SKILL.md'))).toBe(false)
   })
 
-  it('package.json is valid JSON with a slugged name and a single dep', async () => {
-    const { read } = await readBundle(BASE_INPUT)
-    const pkg = JSON.parse(await read('package.json'))
-    expect(pkg.name).toBe('haven-skill-my-payment-agent')
-    expect(pkg.dependencies).toHaveProperty('@haven_ai/sdk')
-    expect(pkg.private).toBe(true)
-    expect(pkg.type).toBe('module')
-  })
-})
-
-describe('buildSkillBundle — credential plumbing', () => {
-  it('embeds credentials in .env.example and README, not SKILL.md or pay.ts', async () => {
-    const { read } = await readBundle(BASE_INPUT)
-    const envFile = await read('.env.example')
-    const readme = await read('README.md')
-    const skillMd = await read('SKILL.md')
-    const payTs = await read('pay.ts')
-
-    // Where credentials should appear:
-    expect(envFile).toContain('sk_agent_TESTKEY_NEVERREAL')
-    expect(envFile).toContain('0xPRIVATEKEY_NEVERREAL')
-    expect(readme).toContain('sk_agent_TESTKEY_NEVERREAL')
-    expect(readme).toContain('0xPRIVATEKEY_NEVERREAL')
-
-    // Where they must not — pay.ts reads from process.env, and SKILL.md is a
-    // tool description that may be read by every agent invocation.
-    expect(skillMd).not.toContain('sk_agent_TESTKEY_NEVERREAL')
-    expect(skillMd).not.toContain('0xPRIVATEKEY_NEVERREAL')
-    expect(payTs).not.toContain('sk_agent_TESTKEY_NEVERREAL')
-    expect(payTs).not.toContain('0xPRIVATEKEY_NEVERREAL')
-  })
-
-  it('keeps raw credentials confined to the intentionally secret-bearing files', async () => {
-    const { filename, folderName, read, zip } = await readBundle(BASE_INPUT)
-
-    expectNoRawSecrets(filename)
-    expectNoRawSecrets(folderName)
+  it('keeps raw credentials confined to README and .env.example', async () => {
+    const { blob } = await buildSdkStarterBundle(AGENT_A)
+    const { folderName, zip } = await readZip(blob)
 
     const secretBearingFiles = new Set(['README.md', '.env.example'])
     for (const [path, entry] of Object.entries(zip.files)) {
-      expectNoRawSecrets(path)
+      expect(path).not.toContain('sk_agent_TESTKEY_NEVERREAL')
       if (entry.dir) continue
-
-      expect(path.startsWith(folderName)).toBe(true)
       const relativePath = path.slice(folderName.length)
       const contents = await entry.async('string')
       if (secretBearingFiles.has(relativePath)) {
         expect(contents).toContain('sk_agent_TESTKEY_NEVERREAL')
         expect(contents).toContain('0xPRIVATEKEY_NEVERREAL')
       } else {
-        expectNoRawSecrets(contents)
+        expect(contents).not.toContain('sk_agent_TESTKEY_NEVERREAL')
+        expect(contents).not.toContain('0xPRIVATEKEY_NEVERREAL')
       }
     }
   })
 
   it('pay.ts loads credentials from process.env and throws if missing', async () => {
-    const { read } = await readBundle(BASE_INPUT)
+    const { blob } = await buildSdkStarterBundle(AGENT_A)
+    const { read } = await readZip(blob)
     const payTs = await read('pay.ts')
     expect(payTs).toContain('process.env.HAVEN_API_KEY')
     expect(payTs).toContain('process.env.HAVEN_DELEGATE_KEY')
@@ -133,55 +152,10 @@ describe('buildSkillBundle — credential plumbing', () => {
     expect(payTs).toMatch(/throw new Error\([^)]*HAVEN_DELEGATE_KEY/)
   })
 
-  it('keeps SKILL.md aligned with current Haven agent rules and fetch support', async () => {
-    const { read } = await readBundle(BASE_INPUT)
-    const skillMd = await read('SKILL.md')
-
-    expect(skillMd).toContain('Haven wallet')
-    expect(skillMd).toContain('Credential address')
-    expect(skillMd).toContain('Sign Haven payment requests locally')
-    expect(skillMd).toContain('within the user\'s agent rules')
-    expect(skillMd).toContain('haven.fetch()')
-    expect(skillMd).toContain('get_payment_status')
-    expect(skillMd).toContain('retry_original_x402_request')
-    expect(skillMd).not.toContain('on behalf of the user')
-    expect(skillMd).not.toContain('server-side policy')
-    expect(skillMd).not.toContain('AllowanceModule')
-  })
-})
-
-describe('buildSkillBundle — revoke link', () => {
-  it('uses the provided appBaseUrl in SKILL.md', async () => {
-    const { read } = await readBundle({ ...BASE_INPUT, appBaseUrl: 'https://app.example.com' })
-    const skillMd = await read('SKILL.md')
-    expect(skillMd).toContain('https://app.example.com/agents')
-  })
-
-  it('falls back to a host that resolves when appBaseUrl is omitted', async () => {
-    // Regression: SKILL.md previously hardcoded https://app.haven.xyz/agents
-    // (an unowned domain returning NXDOMAIN), shipping a dead revoke link to
-    // every user who downloaded a bundle. The fallback must resolve, and the
-    // unowned host must never appear.
-    const { read } = await readBundle(BASE_INPUT)
-    const skillMd = await read('SKILL.md')
-    expect(skillMd).not.toContain('app.haven.xyz')
-    expect(skillMd).toMatch(/https?:\/\/[^/\s]+\/agents/)
-  })
-
-  it('strips trailing slashes from appBaseUrl', async () => {
-    const { read } = await readBundle({ ...BASE_INPUT, appBaseUrl: 'https://app.example.com///' })
-    const skillMd = await read('SKILL.md')
-    expect(skillMd).toContain('https://app.example.com/agents')
-    expect(skillMd).not.toContain('app.example.com//')
-  })
-})
-
-describe('buildSkillBundle — README parity with handoff doc', () => {
-  it('the README is the same artefact buildHandoff produces', async () => {
-    const { read } = await readBundle(BASE_INPUT)
+  it('README carries the per-agent handoff content', async () => {
+    const { blob } = await buildSdkStarterBundle(AGENT_A)
+    const { read } = await readZip(blob)
     const readme = await read('README.md')
-    // Sanity: contains the same identity and policy content the handoff doc
-    // promises. We rely on agent-handoff.test.ts for fine-grained coverage.
     expect(readme).toContain('My Payment Agent')
     expect(readme).toContain('agt_abc123')
     expect(readme).toContain('10 EURe per day')

@@ -1718,5 +1718,83 @@ describe('machine payment routes', () => {
       expect(response.json().error).toContain('idempotency_key')
       expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
+
+    it('reports the real status (not a stale sign request) when replaying an already-confirmed intent', async () => {
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        // findExistingSend: payment_intents dedup hits, but it already confirmed
+        .mockResolvedValueOnce({ rows: [existingIntentRow({ status: 'confirmed' })] })
+        // getAgentPaymentStatus: expire-sweep UPDATE, then status SELECT
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' })] })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '1.50', idempotency_key: 'send-key-confirmed' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const body = response.json()
+      expect(body.status).toBe('confirmed')
+      expect(body.phase).toBe('payment_confirmed')
+      expect(body.idempotent_replay).toBe(true)
+      // Must NOT re-emit a sign request for a settled payment.
+      expect(body.sign_data).toBeUndefined()
+      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    })
+
+    it('reports the real status (not still-pending) when replaying an approval the owner already executed', async () => {
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [] }) // payment_intents dedup miss
+        // approval_requests dedup hits, but it has already been executed
+        .mockResolvedValueOnce({ rows: [{
+          id: 'approval-exec',
+          status: 'executed',
+          expires_at: '2099-01-02T00:00:00.000Z',
+          token_symbol: 'USDC',
+          amount_human: '999',
+        }] })
+        // getAgentPaymentStatus: intent expire-sweep + miss, then approval expire-sweep + hit
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{
+          id: 'approval-exec',
+          chain_id: 8453,
+          token_symbol: 'USDC',
+          token_address: USDC,
+          amount_human: '999',
+          amount_raw: '999000000',
+          status: 'executed',
+          tx_hash: TX_HASH,
+          expires_at: '2099-01-02T00:00:00.000Z',
+          source: 'agent_transfer',
+          payment_rail: null,
+          payment_resource_url: null,
+          x402_resource_url: null,
+          merchant_address: null,
+          machine_challenge_id: null,
+          machine_idempotency_key: null,
+          machine_metadata: null,
+        }] })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { asset: 'USDC', recipient: SEND_RECIPIENT, amount: '999', idempotency_key: 'send-key-executed' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const body = response.json()
+      expect(body.kind).toBe('approval_request')
+      expect(body.status).toBe('executed')
+      expect(body.idempotent_replay).toBe(true)
+      // Must NOT tell the agent to keep waiting for an approval that already completed.
+      expect(body.next_action).not.toBe('wait_for_user_approval')
+    })
   })
 })

@@ -30,6 +30,16 @@ export function createCache<T>(ttlMs: number): Cache<T> {
   const store = new Map<string, { data: T; ts: number }>()
   const inflight = new Map<string, Promise<T>>()
 
+  // Expired entries are otherwise only dropped when their own key is read
+  // again — keys that never get re-read (removed Safes, departed users)
+  // would accumulate forever in a long-lived process.
+  setInterval(() => {
+    const now = Date.now()
+    for (const [key, entry] of store) {
+      if (now - entry.ts >= ttlMs) store.delete(key)
+    }
+  }, Math.max(ttlMs, 60_000)).unref()
+
   const get = (key: string): T | undefined => {
     const entry = store.get(key)
     if (!entry) return undefined

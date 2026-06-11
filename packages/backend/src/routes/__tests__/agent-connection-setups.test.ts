@@ -229,6 +229,65 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
+  it('appends --local to the connector command when local_mcp is requested for a supported runtime', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'claude-code',
+        local_mcp: true,
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().connector_command).toContain('--local')
+  })
+
+  it('omits --local from the connector command by default', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'claude-code',
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().connector_command).not.toContain('--local')
+  })
+
+  it('rejects local_mcp for runtimes without local MCP support', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'cursor',
+        local_mcp: true,
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatch(/Local MCP is only available/)
+  })
+
   it('normalizes setup allowances before storing pending wallet approval state', async () => {
     const app = await buildApp()
     mockQuery.mockResolvedValueOnce({ rows: [SAFE] })

@@ -34,6 +34,8 @@ interface CreateSetupBody {
   safe_id?: string
   runtime?: string
   allowances?: AllowanceInput[]
+  /** Advanced opt-in: generate a connector command for the fully-local MCP topology. */
+  local_mcp?: boolean
 }
 
 interface ResolveSetupBody {
@@ -219,7 +221,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       }
 
       const apiUrl = apiBaseUrl(request)
-      const command = buildConnectorCommand(setupToken, apiUrl, parsed.runtime)
+      const command = buildConnectorCommand(setupToken, apiUrl, parsed.runtime, parsed.localMcp)
       return reply.code(201).send({
         setup_id: setupId,
         status: 'awaiting_connection',
@@ -647,6 +649,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   description: string | null
   runtime: string | null
   allowances: AllowanceInput[]
+  localMcp: boolean
 } | null {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name) {
@@ -658,17 +661,25 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     reply.code(400).send({ error: allowances.error })
     return null
   }
+  const runtime = typeof body.runtime === 'string' && body.runtime.trim()
+    ? body.runtime.trim().slice(0, 80)
+    : null
+  if (body.local_mcp === true && (!runtime || !LOCAL_MCP_RUNTIMES.has(runtime))) {
+    reply.code(400).send({ error: 'Local MCP is only available for Claude Code and Codex runtimes' })
+    return null
+  }
   return {
     name,
     description: typeof body.description === 'string' && body.description.trim()
       ? body.description.trim()
       : null,
-    runtime: typeof body.runtime === 'string' && body.runtime.trim()
-      ? body.runtime.trim().slice(0, 80)
-      : null,
+    runtime,
     allowances: allowances.value,
+    localMcp: body.local_mcp === true,
   }
 }
+
+const LOCAL_MCP_RUNTIMES = new Set(['claude-code', 'codex-cli', 'codex-desktop'])
 
 async function resolveUserSafe(userId: string, safeId?: string): Promise<{
   id: string
@@ -1111,7 +1122,7 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
   }
 }
 
-function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: string | null): string {
+function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: string | null, localMcp = false): string {
   const args = [
     `npx -y ${CONNECTOR_PACKAGE}`,
     `--setup ${shellQuote(setupToken)}`,
@@ -1119,6 +1130,7 @@ function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: stri
     '--ack-local-tools',
   ]
   if (runtime) args.push(`--runtime ${shellQuote(runtime)}`)
+  if (localMcp) args.push('--local')
   return args.join(' ')
 }
 

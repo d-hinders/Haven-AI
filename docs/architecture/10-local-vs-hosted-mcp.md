@@ -2,6 +2,12 @@
 
 Deployment model decision guide for agent developers.
 
+> **Default: hosted MCP + edge signer — for every runtime.** The connector
+> (`npx @haven_ai/connect`) writes the hosted topology for all supported agent
+> environments. Local MCP is an **advanced, explicit opt-in** (`--local`),
+> available only for Claude Code and Codex. See
+> "Advanced: fully-local MCP" below for when that trade-off makes sense.
+
 ## The two models
 
 | | **Local MCP** (`@haven_ai/mcp`) | **Hosted MCP + Edge Signer** (`@haven_ai/mcp-server` + `@haven_ai/signer`) |
@@ -14,26 +20,53 @@ Deployment model decision guide for agent developers.
 | **Runtime requirement** | Node.js on the user's machine | Internet access to Haven's endpoint; Node.js for the local signer only |
 | **Multi-runtime** | One local server per agent runtime | One hosted URL shared across all runtimes; each runtime runs its own signer |
 
-## When to use local MCP
+## The default: hosted MCP + edge signer
 
-Use `@haven_ai/mcp` when:
+`npx @haven_ai/connect` writes the hosted topology for every runtime — a hosted
+MCP entry (URL + Bearer API key) plus a local `haven-signer` stdio entry. This
+is the path all users land on unless they explicitly opt out:
 
-- You're a developer running a single agent on your own machine.
-- The agent runtime and the key are co-located (e.g. Claude Desktop / Claude Code on your laptop).
-- You want the simplest possible setup: one `npx @haven_ai/connect` call and you're done.
-- You don't need to share a single agent identity across multiple runtimes or devices.
+- **Uniform key isolation** — the delegate key lives only in the dedicated
+  sign-only signer process on every runtime; only `{ payment_id, signature }`
+  crosses to the hosted server.
+- **Server-side updatability** — construct/relay fixes ship once, centrally;
+  no local MCP package for users to keep current.
+- **Central audit** — every payment is logged by Haven's hosted infrastructure
+  (Layer 5 of the security model).
+- **One well-tested path** — a single topology across all runtimes instead of
+  a silent per-runtime fork.
 
-The `npx @haven_ai/connect` flow sets up the local MCP automatically. See
-[Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md).
+See [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
+for the pairing flow.
 
-## When to use hosted MCP + edge signer
+## Advanced: fully-local MCP (no hosted dependency)
 
-Use `@haven_ai/mcp-server` + `@haven_ai/signer` when:
+Local MCP (`@haven_ai/mcp`) is the only topology where Haven's hosted
+infrastructure is **not** in the construct/relay path. It remains available as
+an explicit opt-in for users who need:
 
-- You want a **stable hosted URL** for the MCP endpoint (no local server to manage or update).
-- You're connecting **multiple agent runtimes** to the same Haven agent identity.
-- You're deploying in a **server-side environment** where running a local Node.js process per user is undesirable.
-- You want the **key isolation guarantee**: the hosted server never has access to the signing key, not even transiently.
+- **Offline / air-gapped-adjacent operation** — no dependency on hosted-MCP
+  uptime or latency.
+- **Self-hosting / privacy** — payment construction and relay happen entirely
+  on your machine.
+
+Opt in with the connector flag (Claude Code and Codex only):
+
+```bash
+npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code --local
+```
+
+Trade-offs you accept with `--local`:
+
+- **No central audit** — Haven keeps no hosted log of payment construction.
+- **You update it yourself** — fixes ship as new package versions you must
+  pick up; nothing updates server-side.
+- **Wider key surface** — the delegate key is loaded into the same process
+  that runs construct/relay business logic, instead of a dedicated signer.
+- **No usage-based relay** — hosted-relay features do not apply.
+
+On unsupported runtimes the flag fails with a clear error and the connector
+suggests re-running without `--local`.
 
 ## Why the split exists (CASP/MiCA compliance)
 

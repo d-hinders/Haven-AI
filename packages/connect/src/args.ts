@@ -31,6 +31,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     } else if (arg === '--ack-signer') {
       options.ackSigner = true
       options.ackLocalTools = true
+    } else if (arg === '--local' || arg === '--local-mcp') {
+      options.localMcp = true
     } else if (arg === '--version') {
       process.stdout.write(`${CONNECTOR_VERSION}\n`)
       process.exit(0)
@@ -72,6 +74,8 @@ export function helpText(): string {
     '  --environment-label <text> Non-sensitive label shown in Haven setup review.',
     '  --ack-local-tools          Write the one-time local Haven tools acknowledgement during setup.',
     '  --ack-signer               Backward-compatible alias for --ack-local-tools.',
+    '  --local                    Advanced: install the fully-local Haven MCP (no hosted dependency).',
+    '                             Only available for Claude Code and Codex. Default is hosted MCP + local signer.',
     '  --help                     Show this help.',
     '',
     'The connector never prints the private key and never sends it to Haven.',

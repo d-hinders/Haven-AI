@@ -389,6 +389,41 @@ describe('ConnectAgent2Modal', () => {
     expect(modalText).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
   })
 
+  it('exposes local MCP only as an Advanced opt-in and sends local_mcp when chosen', async () => {
+    renderModal()
+
+    // Advanced affordance is visible for Claude Code (supports local MCP)
+    fireEvent.click(screen.getByText('Advanced'))
+    fireEvent.click(screen.getByRole('checkbox'))
+
+    await fillAndCreateSetup()
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
+      '/agent-connection-setups',
+      expect.objectContaining({ runtime: 'claude-code', local_mcp: true }),
+    ))
+  })
+
+  it('hides the Advanced local MCP affordance for runtimes without local support', () => {
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Agent environment'), {
+      target: { value: 'cursor' },
+    })
+
+    expect(screen.queryByText('Advanced')).not.toBeInTheDocument()
+  })
+
+  it('does not send local_mcp by default', async () => {
+    renderModal()
+
+    await fillAndCreateSetup()
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalled())
+    const body = mockApiPost.mock.calls[0][1] as Record<string, unknown>
+    expect(body.local_mcp).toBeUndefined()
+  })
+
   it('defaults the wallet picker to a supported-chain wallet and does not offer the legacy Gnosis one', () => {
     // Regression: with a leftover Gnosis (unsupported) wallet as the default,
     // the picker used to default to it and snap back to it when the user tried

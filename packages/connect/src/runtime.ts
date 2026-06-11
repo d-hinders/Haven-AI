@@ -15,9 +15,10 @@ import {
 import {
   installRuntime,
   runtimeInstallCapabilities,
+  supportsLocalMcp,
   type RuntimeInstallResult,
 } from './runtime-install.js'
-import { runtimeRequiresHardRestart } from './runtime-registry.js'
+import { normalizeRuntime, runtimeProfile, runtimeRequiresHardRestart } from './runtime-registry.js'
 
 export const CONNECTOR_VERSION = '0.1.2'
 
@@ -60,6 +61,17 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   const generateKey = deps.generateKey ?? generateDelegateKey
   const generateLocalApiKey = deps.generateApiKey ?? generateAgentApiKey
   const installCapabilities = runtimeInstallCapabilities(options.runtime)
+
+  if (options.localMcp) {
+    const resolvedRuntime = normalizeRuntime(options.runtime)
+    if (!supportsLocalMcp(resolvedRuntime)) {
+      throw new Error(
+        `--local (fully-local Haven MCP) is only available for Claude Code and Codex. ` +
+        `The detected runtime is ${runtimeProfile(resolvedRuntime).label}. ` +
+        'Re-run without --local to use the default hosted MCP + local signer setup.',
+      )
+    }
+  }
 
   const setup = await api.resolveSetup({
     setupToken: options.setupToken,

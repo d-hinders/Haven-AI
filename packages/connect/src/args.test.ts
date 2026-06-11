@@ -25,6 +25,21 @@ describe('parseArgs', () => {
     })
   })
 
+  it('parses --local as the advanced local MCP opt-in', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--local'], {})
+    expect(parsed.options.localMcp).toBe(true)
+  })
+
+  it('does not enable local MCP by default', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test'], {})
+    expect(parsed.options.localMcp).toBeUndefined()
+  })
+
+  it('documents --local in help output', () => {
+    expect(helpText()).toContain('--local')
+    expect(helpText()).toContain('Claude Code and Codex')
+  })
+
   it('keeps --ack-signer as an alias for local tools acknowledgement', () => {
     const parsed = parseArgs(['--setup', 'hv_setup_test', '--ack-signer'], {})
 

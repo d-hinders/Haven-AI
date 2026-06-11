@@ -134,6 +134,15 @@ describe('runConnect', () => {
     expect(output).not.toMatch(/restart this agent so it can load Haven tools/)
   })
 
+  it('rejects --local on runtimes that do not support local MCP', async () => {
+    await expect(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'cursor',
+      localMcp: true,
+    })).rejects.toThrow(/only available for Claude Code and Codex/)
+  })
+
   it('uses the hard-restart copy on desktop GUI runtimes', async () => {
     // Desktop GUI runtimes (Claude Desktop, Codex Desktop) really do need a
     // restart — the MCP server is bound to app launch. The softened copy

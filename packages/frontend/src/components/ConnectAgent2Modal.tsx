@@ -173,6 +173,7 @@ export default function ConnectAgent2Modal({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [runtime, setRuntime] = useState('claude-code')
+  const [localMcp, setLocalMcp] = useState(false)
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
   const [addToken, setAddToken] = useState('')
   const [addAmount, setAddAmount] = useState('')
@@ -299,6 +300,7 @@ export default function ConnectAgent2Modal({
     setName('')
     setDescription('')
     setRuntime('claude-code')
+    setLocalMcp(false)
     setAllowances([])
     setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
@@ -360,6 +362,7 @@ export default function ConnectAgent2Modal({
       ? addAmountValidation.message
       : '')
   const walletUnavailable = !safeId
+  const localMcpSupported = runtime === 'claude-code' || runtime === 'codex-cli' || runtime === 'codex-desktop'
 
   async function handleCreateSetup() {
     if (!safeId) {
@@ -379,6 +382,7 @@ export default function ConnectAgent2Modal({
         description: description.trim() || undefined,
         safe_id: safeId,
         runtime,
+        local_mcp: localMcpSupported && localMcp ? true : undefined,
         allowances: allowances.map((allowance) => ({
           token_address:
             allowance.tokenAddress ?? '0x0000000000000000000000000000000000000000',
@@ -658,6 +662,26 @@ export default function ConnectAgent2Modal({
                 <p className="mt-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                   Haven will create a local setup prompt for this environment.
                 </p>
+                {localMcpSupported && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)]">
+                      Advanced
+                    </summary>
+                    <label className="mt-2 flex items-start gap-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                      <input
+                        type="checkbox"
+                        checked={localMcp}
+                        onChange={(event) => setLocalMcp(event.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        Run a fully-local Haven MCP (no hosted dependency). Construct and relay happen on
+                        this machine; you update it yourself and Haven keeps no central payment log.
+                        Recommended only for offline or self-host setups.
+                      </span>
+                    </label>
+                  </details>
+                )}
               </div>
               <Button
                 onClick={() => setStep(detailsNextStep)}

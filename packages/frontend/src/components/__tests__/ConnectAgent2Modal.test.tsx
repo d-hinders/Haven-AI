@@ -570,7 +570,7 @@ describe('ConnectAgent2Modal', () => {
         },
         agent_budget: [],
         delegate_address: '0x3333333333333333333333333333333333333333',
-        install_status: { credential_files_written: true, local_mcp_configured: true },
+        install_status: { credential_files_written: true, local_mcp_configured: true, local_mcp_acknowledged: true },
         approval: { status: 'pending_approval' },
       },
       loading: false,
@@ -584,6 +584,34 @@ describe('ConnectAgent2Modal', () => {
     expect(await screen.findByText('Approval unavailable')).toBeInTheDocument()
     expect(screen.getByText(/Connect a wallet or use a passkey/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument()
+  })
+
+  it('renders the approval screen for the hosted MCP + signer topology', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({
+        install_status: {
+          runtime_mcp_mode: 'hosted_plus_signer',
+          hosted_mcp_configured: true,
+          local_signer_configured: true,
+          local_mcp_configured: false,
+          credential_files_written: true,
+          local_mcp_acknowledged: false,
+          activation_command_available: false,
+          restart_required: true,
+          probe_result: 'hosted_ok_local_signer_ready',
+        },
+      }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+
+    await fillAndCreateSetup()
+
+    // The hosted topology must not get stuck on the local finalizing spinner.
+    expect(await screen.findByRole('button', { name: 'Approve rules' })).toBeInTheDocument()
+    expect(screen.queryByText('Finishing local setup')).not.toBeInTheDocument()
   })
 
   it('uses the connector-registered public address for single-owner wallet approval', async () => {

@@ -15,6 +15,12 @@ export interface RuntimeConfigInput {
   credentialDirectory: string
   localMcpCommand?: string
   homeDir?: string
+  /**
+   * Topology to write. 'hosted' (default) configures the keyless hosted MCP
+   * server plus the local signer; 'local' restores the local-stdio MCP for
+   * runtimes that support it (explicit opt-in only).
+   */
+  mode?: 'hosted' | 'local'
 }
 
 export interface RuntimeConfigWriteResult {
@@ -130,6 +136,29 @@ export function mergeCodexToml(existingToml: string, localMcpCommand: string): s
   return merged
 }
 
+export function mergeCodexTomlHosted(
+  existingToml: string,
+  hostedMcpUrl: string,
+  apiKey: string,
+  signerPath: string,
+): string {
+  let next = removeTomlTableTree(removeTomlTableTree(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
+  next = next.trimEnd()
+  const block = [
+    '[mcp_servers.haven]',
+    `url = ${tomlString(hostedMcpUrl)}`,
+    `http_headers = { "Authorization" = ${tomlString(`Bearer ${apiKey}`)} }`,
+    '',
+    '[mcp_servers.haven_signer]',
+    'command = "npx"',
+    `args = ["-y", ${tomlString(signerPackageSpec())}, "--credentials", ${tomlString(signerPath)}]`,
+    'startup_timeout_sec = 120',
+  ].join('\n')
+  validateCodexToml(block, 'Generated Codex Haven config')
+  const merged = `${next ? `${next}\n\n` : ''}${block}\n`
+  return merged
+}
+
 async function writeJsonRuntimeConfig(
   input: RuntimeConfigInput,
   target: string,
@@ -171,29 +200,48 @@ async function writeJsonRuntimeConfig(
 
 async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
   const target = codexConfigPath(input.homeDir)
+  const local = input.mode === 'local'
+  const restartMessage = runtimeRequiresHardRestart(input.runtime)
+    ? 'After Haven approval, restart Codex Desktop so it can load Haven tools.'
+    : 'After Haven approval, Haven tools should appear in your next Codex message. If they don\'t, restart Codex to load them.'
   try {
     const existing = await readOptional(target)
-    if (!input.localMcpCommand) {
-      throw new Error('local MCP wrapper command is required')
+    if (local) {
+      if (!input.localMcpCommand) {
+        throw new Error('local MCP wrapper command is required')
+      }
+      const merged = mergeCodexToml(existing ?? '', input.localMcpCommand)
+      await writeOwnerOnlyText(target, merged)
+      return {
+        hostedConfigured: false,
+        signerConfigured: true,
+        localMcpConfigured: true,
+        runtimeMcpMode: 'local_stdio',
+        target: configTargetLabel(input.runtime),
+        changed: existing !== merged,
+        restartRequired: true,
+        messages: [
+          `Updated local Haven MCP entry in ${configTargetLabel(input.runtime)}.`,
+          // Codex Desktop loads MCP servers at app launch; Codex CLI typically
+          // picks them up in the next session. Branch the copy so desktop users
+          // get the unambiguous instruction.
+          restartMessage,
+        ],
+      }
     }
-    const merged = mergeCodexToml(existing ?? '', input.localMcpCommand)
+    const merged = mergeCodexTomlHosted(existing ?? '', input.hostedMcpUrl, input.apiKey, input.signerPath)
     await writeOwnerOnlyText(target, merged)
     return {
-      hostedConfigured: false,
+      hostedConfigured: true,
       signerConfigured: true,
-      localMcpConfigured: true,
-      runtimeMcpMode: 'local_stdio',
+      localMcpConfigured: false,
+      runtimeMcpMode: 'hosted_plus_signer',
       target: configTargetLabel(input.runtime),
       changed: existing !== merged,
       restartRequired: true,
       messages: [
-        `Updated local Haven MCP entry in ${configTargetLabel(input.runtime)}.`,
-        // Codex Desktop loads MCP servers at app launch; Codex CLI typically
-        // picks them up in the next session. Branch the copy so desktop users
-        // get the unambiguous instruction.
-        runtimeRequiresHardRestart(input.runtime)
-          ? 'After Haven approval, restart Codex Desktop so it can load Haven tools.'
-          : 'After Haven approval, Haven tools should appear in your next Codex message. If they don\'t, restart Codex to load them.',
+        `Updated Haven MCP entries in ${configTargetLabel(input.runtime)}.`,
+        restartMessage,
       ],
     }
   } catch (err) {
@@ -202,7 +250,7 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
       hostedConfigured: false,
       signerConfigured: false,
       localMcpConfigured: false,
-      runtimeMcpMode: 'local_stdio',
+      runtimeMcpMode: local ? 'local_stdio' : 'hosted_plus_signer',
       target: configTargetLabel(input.runtime),
       changed: false,
       restartRequired: true,

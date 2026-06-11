@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import {
   mergeCodexToml,
+  mergeCodexTomlHosted,
   mergeJsonMcpConfig,
   validateCodexToml,
   writeRuntimeConfig,
@@ -114,6 +115,65 @@ describe('runtime config writers', () => {
     expect(() => validateCodexToml('command = node\n')).toThrow(/invalid TOML/i)
   })
 
+  it('writes hosted Codex config with hosted MCP url and signer entry by default', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-codex-hosted-config-'))
+    const credentialsDir = join(dir, 'agent-1')
+
+    const result = await writeRuntimeConfig({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(credentialsDir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: credentialsDir,
+      homeDir: dir,
+    })
+
+    const toml = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
+    expect(result.hostedConfigured).toBe(true)
+    expect(result.signerConfigured).toBe(true)
+    expect(result.localMcpConfigured).toBe(false)
+    expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
+    expect(result.errorCode).toBeUndefined()
+    expect(toml).toContain('[mcp_servers.haven]')
+    expect(toml).toContain(`url = "${HOSTED_URL}"`)
+    expect(toml).toContain(`http_headers = { "Authorization" = "Bearer ${API_KEY}" }`)
+    expect(toml).toContain('[mcp_servers.haven_signer]')
+    expect(toml).toContain('command = "npx"')
+    expect(toml).toContain(SIGNER_PACKAGE)
+    expect(toml).toContain(SIGNER_PATH)
+    expect(toml).toContain('startup_timeout_sec = 120')
+    expect(toml).not.toContain(PRIVATE_KEY)
+    expect(toml).not.toMatch(/delegate_key|private_key/i)
+  })
+
+  it('hosted Codex merge replaces stale Haven tables and keeps unrelated tables', () => {
+    const merged = mergeCodexTomlHosted(
+      [
+        'model = "gpt-5"',
+        '',
+        '[mcp_servers.other]',
+        'command = "node"',
+        '',
+        '[mcp_servers.haven]',
+        'command = "/old/wrapper"',
+        '',
+        '[mcp_servers.haven_signer]',
+        'command = "old"',
+      ].join('\n'),
+      HOSTED_URL,
+      API_KEY,
+      SIGNER_PATH,
+    )
+
+    expect(merged).toContain('model = "gpt-5"')
+    expect(merged).toContain('[mcp_servers.other]')
+    expect(merged).toContain(`url = "${HOSTED_URL}"`)
+    expect(merged).not.toContain('/old/wrapper')
+    expect(merged).not.toContain('command = "old"')
+    expect(() => validateCodexToml(merged)).not.toThrow()
+  })
+
   it('writes Codex config with local stdio MCP and no env launcher', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-config-'))
     const credentialsDir = join(dir, 'agent-1')
@@ -127,6 +187,7 @@ describe('runtime config writers', () => {
       credentialDirectory: credentialsDir,
       localMcpCommand: join(credentialsDir, 'bin', 'haven-mcp'),
       homeDir: dir,
+      mode: 'local',
     })
 
     const toml = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
@@ -162,6 +223,7 @@ describe('runtime config writers', () => {
       credentialDirectory: credentialsDir,
       localMcpCommand: join(credentialsDir, 'bin', 'haven-mcp'),
       homeDir: dir,
+      mode: 'local',
     })
 
     const toml = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')

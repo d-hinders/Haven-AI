@@ -15,7 +15,7 @@ import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { formatAllowanceAmount } from '@/lib/allowance-format'
-import { validateMoneyInput } from '@/lib/money-input'
+import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
 import OnchainActionGate, { OnchainActionNotice } from './OnchainActionGate'
 import {
   getSafeNonce,
@@ -175,6 +175,9 @@ export default function EditAgentModal({
   const budgetDisplayAmount = budgetValidation?.ok ? budgetValidation.amount : amount
   const budgetChanged = budgetValidation?.ok ?? false
   const hasInvalidBudget = hasBudgetInput && !budgetChanged
+  // Keep gating on hasInvalidBudget, but don't flash error styling while the
+  // user is mid-keystroke on values like "0." that are merely incomplete.
+  const showBudgetError = hasInvalidBudget && !isIncompleteMoneyInput(amount)
   // Step-gate logic per mode:
   //   'agent'  — name is required, budget is hidden, so we just need details to differ.
   //   'budget' — budget is required, name/description is hidden.
@@ -570,8 +573,8 @@ export default function EditAgentModal({
                       if (/^\d*\.?\d*$/.test(value)) setAmount(value)
                     }}
                     placeholder="Amount"
-                    invalid={hasInvalidBudget}
-                    helperText={hasInvalidBudget && budgetValidation && !budgetValidation.ok ? budgetValidation.message : undefined}
+                    invalid={showBudgetError}
+                    helperText={showBudgetError && budgetValidation && !budgetValidation.ok ? budgetValidation.message : undefined}
                     className="v2-tabular"
                   />
                   <Select
@@ -590,7 +593,7 @@ export default function EditAgentModal({
                     This will replace the existing {selectedToken} budget for this agent.
                   </p>
                 )}
-                {hasInvalidBudget && (
+                {showBudgetError && (
                   <p className="text-xs text-[var(--v2-danger)]">
                     Enter a budget amount greater than zero, or leave the amount blank to edit details only.
                   </p>

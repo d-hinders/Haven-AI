@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   exceedsRawBalance,
+  isIncompleteMoneyInput,
   normalizeMoneyInput,
   rawAmountFromBalance,
   validateMoneyInput,
@@ -38,6 +39,22 @@ describe('money input utilities', () => {
       ok: false,
       message: 'ETH supports up to 0 decimal places',
     })
+  })
+
+  it('treats mid-typing states as incomplete, not invalid, so live errors stay quiet', () => {
+    // States on the way to "0.01" must not flash an error
+    expect(isIncompleteMoneyInput('')).toBe(true)
+    expect(isIncompleteMoneyInput('.')).toBe(true)
+    expect(isIncompleteMoneyInput('0')).toBe(true)
+    expect(isIncompleteMoneyInput('0.')).toBe(true)
+    expect(isIncompleteMoneyInput('0.0')).toBe(true)
+    expect(isIncompleteMoneyInput('12.')).toBe(true)
+
+    // Real values and real mistakes are not incomplete
+    expect(isIncompleteMoneyInput('0.01')).toBe(false)
+    expect(isIncompleteMoneyInput('12.5')).toBe(false)
+    expect(isIncompleteMoneyInput('abc')).toBe(false)
+    expect(isIncompleteMoneyInput('1,5')).toBe(false)
   })
 
   it('compares parsed raw amounts against raw balances without float rounding', () => {

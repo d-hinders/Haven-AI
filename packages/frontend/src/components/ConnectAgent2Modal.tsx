@@ -22,7 +22,7 @@ import {
 import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { truncate } from '@/lib/format'
-import { validateMoneyInput } from '@/lib/money-input'
+import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
 import { getChainTokens } from '@/lib/safe-tx'
 import { executeAgentSetup } from '@/lib/agent-setup'
 import { useActiveSigner } from '@/lib/signer'
@@ -355,7 +355,10 @@ export default function ConnectAgent2Modal({
       ? validateMoneyInput(addAmount, addTokenOption.decimals, { tokenSymbol: addTokenOption.symbol })
       : null
   const addAmountMessage =
-    addAmountError || (addAmountValidation && !addAmountValidation.ok ? addAmountValidation.message : '')
+    addAmountError ||
+    (addAmountValidation && !addAmountValidation.ok && !isIncompleteMoneyInput(addAmount)
+      ? addAmountValidation.message
+      : '')
   const walletUnavailable = !safeId
 
   async function handleCreateSetup() {

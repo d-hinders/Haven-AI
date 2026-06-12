@@ -1343,7 +1343,7 @@ function LocalConnectionReady({
                       <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
                         Runtime setup
                       </dt>
-                      <dd className="mt-0.5 text-[12px] text-[var(--v2-ink-2)]">
+                      <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
                         <span className="text-[var(--v2-ink)]">{runtimeStatusLabel(install)}</span>
                         {runtimeStatusHelper(install) ? ` — ${runtimeStatusHelper(install)}` : ''}
                       </dd>
@@ -1354,7 +1354,7 @@ function LocalConnectionReady({
                       <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
                         Approvals required
                       </dt>
-                      <dd className="mt-0.5 text-[12px] text-[var(--v2-ink-2)]">
+                      <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
                         {safeThreshold} of {safeOwnerCount}
                       </dd>
                     </div>

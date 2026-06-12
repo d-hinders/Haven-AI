@@ -104,7 +104,7 @@ export default function OnboardingClient() {
       await api.post('/user/safes', {
         safe_address: deployed.safe_address,
         chain_id: selectedChainId,
-        name: 'My Safe',
+        name: 'My account',
       })
       updateUser({ safe_address: deployed.safe_address, wallet_address: address })
       await refreshUser()

@@ -621,8 +621,8 @@ export default function SendModal({
                 {selectedContactName && (
                   <div className="flex items-center gap-2 mb-1.5">
                     <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 rounded-md">
-                      <div className="w-4 h-4 rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center">
-                        <span className="text-xs font-semibold text-[var(--v2-brand)]">
+                      <div className="w-4 h-4 overflow-hidden rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center">
+                        <span className="text-xs font-semibold leading-none text-[var(--v2-brand)]">
                           {selectedContactName.slice(0, 2).toUpperCase()}
                         </span>
                       </div>

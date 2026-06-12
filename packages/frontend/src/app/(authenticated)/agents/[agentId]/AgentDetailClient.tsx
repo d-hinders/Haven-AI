@@ -532,7 +532,7 @@ export default function AgentDetailClient({ agentId }: Props) {
               <a
                 href={`/agents/${agentId}/sweep`}
                 className="inline-flex items-center gap-1 rounded-md bg-[var(--v2-warning)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 transition-opacity"
-                aria-label="Sweep stranded funds back to Safe"
+                aria-label="Sweep stranded funds back to your account"
               >
                 Sweep stranded funds
                 <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>

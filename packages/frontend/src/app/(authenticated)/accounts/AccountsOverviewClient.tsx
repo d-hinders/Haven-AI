@@ -112,7 +112,7 @@ function AddSafeModal({
       setDeployTxHash(deployed.tx_hash)
 
       // Register in Haven (same as import flow)
-      await onAdd(deployed.safe_address, name || 'My Safe', deployChainId)
+      await onAdd(deployed.safe_address, name || 'My account', deployChainId)
       setDeployStep('done')
     } catch (err: unknown) {
       setDeployStep('wallet')
@@ -324,7 +324,7 @@ function AddSafeModal({
 
               <div className="space-y-2">
                 <div className="p-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-                  <span className="block text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Account address</span>
+                  <span className="block text-xs text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Account address</span>
                   <a
                     href={getExplorerUrl(deployChainId, 'address', deployedAddress)}
                     target="_blank"
@@ -335,7 +335,7 @@ function AddSafeModal({
                   </a>
                 </div>
                 <div className="p-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-                  <span className="block text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Transaction</span>
+                  <span className="block text-xs text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Transaction</span>
                   <a
                     href={getExplorerUrl(deployChainId, 'tx', deployTxHash)}
                     target="_blank"

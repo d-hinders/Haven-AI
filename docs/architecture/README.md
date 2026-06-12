@@ -16,6 +16,7 @@ exported PNG and SVG alongside.
 | 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |
 | 8 | [Connect Agent 2 Local-Key Pairing](08-connect-agent-2-local-key-pairing.md) | Planning/reviewing the staged setup flow where the local connector generates the agent key, Haven receives only the public signing address, and wallet approval activates agent rules. |
 | 9 | [Connect Agent 2 Rollout Closeout](09-connect-agent-2-rollout-closeout.md) | Final #237 rollout, recovery, sensitive-value, deterministic-coverage, and merge-readiness report for shipping Connect Agent 2 behind gates. |
+| 10 | [Local vs Hosted MCP](10-local-vs-hosted-mcp.md) | Choosing the deployment model — the default hosted MCP + edge signer vs the advanced fully-local MCP opt-in, with the custody rationale and tool parity. |
 
 ## Regenerating exports
 

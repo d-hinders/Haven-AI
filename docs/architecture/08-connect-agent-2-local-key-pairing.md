@@ -15,9 +15,9 @@ Related source docs:
 - [Hosted MCP connect flow](06-hosted-mcp-connect-flow.md)
 - [Edge signer](07-edge-signer.md)
 - [Identity and custody map](02-identity-and-custody.md)
-- [Local to hosted MCP migration](../migration/local-to-hosted-mcp.md)
-- [Hosted MCP deploy guide](../deploy/hosted-mcp.md)
-- [UX copy guidelines](../design_system/UX_COPY_GUIDELINES.md)
+- [Local to hosted MCP migration](../operations/local-to-hosted-mcp.md)
+- [Hosted MCP deploy guide](../operations/hosted-mcp.md)
+- [UX copy guidelines](../product/copy-guidelines.md)
 
 ## Decision
 

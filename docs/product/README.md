@@ -1,19 +1,19 @@
-# Haven UX Guidelines
+# Haven Product & UX Guide
 
-This is the durable product UX entrypoint for Haven. Read it together with the current design-system and copy docs:
+This is the durable product UX entrypoint for Haven and the index for the `docs/product/` folder. Read it together with the current design-system and copy docs:
 
-- Visual system: [DESIGN_SYSTEM.md](./design_system/DESIGN_SYSTEM.md)
-- UX copy: [UX_COPY_GUIDELINES.md](./design_system/UX_COPY_GUIDELINES.md)
-- Screen recipes: [haven-screen-recipes.md](./ux/haven-screen-recipes.md)
-- AI review checklist: [haven-design-review.md](./ux/haven-design-review.md)
-- Redesign implementation history: [REDESIGN_HANDOFF.md](./design_system/REDESIGN_HANDOFF.md)
+- Visual system: [design-system.md](./design-system.md)
+- UX copy: [copy-guidelines.md](./copy-guidelines.md)
+- Screen recipes: [screen-recipes.md](./screen-recipes.md)
+- UI review checklist: [design-review.md](./design-review.md)
+- Redesign implementation history (archived): [../archive/redesign-handoff.md](../archive/redesign-handoff.md)
 
 When these docs overlap, use this order of authority:
 
-1. `UX_COPY_GUIDELINES.md` for user-facing wording and terminology.
-2. `DESIGN_SYSTEM.md` for visual tokens, components, layout, and interaction styling.
+1. `copy-guidelines.md` for user-facing wording and terminology.
+2. `design-system.md` for visual tokens, components, layout, and interaction styling.
 3. This file for product doctrine, IA, accessibility, and money-movement UX rules.
-4. `haven-screen-recipes.md` for repeatable product structures and `haven-design-review.md` for closeout review.
+4. `screen-recipes.md` for repeatable product structures and `design-review.md` for closeout review.
 
 The old dark app system is retired. Do not extend old dark token patterns, gradient buttons, glow shadows, or dark modal surfaces unless a future design-system doc explicitly reintroduces them.
 
@@ -39,20 +39,9 @@ Avoid showing analytics cards, empty management panels, transaction previews, mu
 
 ## 2. Language
 
-The source of truth for copy is [UX_COPY_GUIDELINES.md](./design_system/UX_COPY_GUIDELINES.md). Keep these high-level rules in mind:
+The single source of truth for terminology and user-facing wording is [copy-guidelines.md](./copy-guidelines.md) — read it start to finish before writing any product string. The full preferred/avoided term mapping lives there; it is intentionally **not** duplicated here so the two never drift.
 
-| Prefer | Avoid in product UI |
-|---|---|
-| Haven account, account | Safe, smart account, smart wallet |
-| Haven wallet | deployed Safe, smart contract wallet |
-| Sign in, approve actions | signer, owner type |
-| Agent rules, agent budgets | policy engine, spending policy |
-| Credential | generate credentials, hand/drop credential |
-| Network | chain, blockchain |
-
-Exceptions are allowed in advanced disclosures, protocol pages, developer docs, and block-explorer/Safe transaction links where the technical name is the point.
-
-Voice rules:
+High-level voice rules:
 
 - Plain, direct, quiet.
 - No exclamation marks or emoji in product UI.
@@ -77,7 +66,7 @@ Voice rules:
 
 ## 4. Visual System
 
-Use [DESIGN_SYSTEM.md](./design_system/DESIGN_SYSTEM.md) for exact tokens and classes.
+Use [design-system.md](./design-system.md) for exact tokens and classes.
 
 Core rules:
 

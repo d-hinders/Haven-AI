@@ -36,13 +36,13 @@ Last updated: 2026-06-06
 - PR #271: owner-side agent allowance mirror writes reject invalid token, amount, reset-period, duplicate-token, and revoked-agent mutation states before storing rows.
 - PR #272: one-shot x402 and MPP/generic machine-payment writes are terminal-state guarded for signature recording, stale sign-data refresh, confirmed transition, failed transition, and rail-scoped idempotency replay.
 - Antonio PR #273: `useSafeOperationGate` now requires both wallet `address` and `walletClient` before treating EOA signing as ready, keeping wallet recovery visible when the client is not ready.
-- PR #274: durable review memory now captures the signer-readiness gate trap from PR #273 in `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the Haven reviewer prompt.
+- PR #274: durable review memory now captures the signer-readiness gate trap from PR #273 in `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the Haven reviewer prompt.
 - PR #275: older `/self-sign-agents` allowance writes use the shared owner-side allowance normalizer and block revoked-agent allowance mutations.
 - PR #276: whole-agent `/self-sign-agents/:id` delete now requires `status = 'revoked'`, matching `/agents`.
 - PR #277: resolved `machine_payment_reconciliation_events` stay resolved on later merchant-retry upserts.
 - PR #278: reconciliation event response status values are explicit in OpenAPI/tests.
 - Planned current PR: machine-payment evidence proof-status values are explicit in OpenAPI/tests.
-- Prior roadmap exists at `docs/plans/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
+- Prior roadmap exists at `docs/contributing/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
 
 ## Deferred Items
 

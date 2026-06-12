@@ -126,7 +126,7 @@ Changes:
 - Add root scripts for `typecheck`, `test:unit`, and a conservative `quality` command that mirrors current reliable gates.
 - Do not add lint as a required gate until the ESLint migration is explicit and non-interactive.
 - Update CI to call package/root scripts instead of ad hoc `npx tsc` commands.
-- Update `docs/pr-workflow-checklist.md` with exact check commands by change type.
+- Update `docs/contributing/pr-workflow-checklist.md` with exact check commands by change type.
 - Add a Playwright reliability note: local desktop smoke may need CI-like server mode or cache cleanup before it is a dependable local gate.
 
 Ownership:

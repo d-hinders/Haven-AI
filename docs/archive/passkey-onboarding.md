@@ -1,5 +1,7 @@
 # Passkey-Native Safe Onboarding for Haven
 
+> **ARCHIVED — shipped.** This is the original design doc for passkey-native onboarding, which is now implemented (passkey enrollment, relayer-paid Safe deploy, and the signer abstraction are live in `packages/backend` and `packages/frontend`). Kept for design rationale; it is not a description of current code.
+
 ## Context
 
 Haven currently requires every user to connect an external EOA (Wagmi/RainbowKit) to deploy a Safe. The frontend deployment in `packages/frontend/src/lib/safe.ts` calls `SafeProxyFactory.createProxyWithNonce` directly with the connected wallet as the gas payer and sole owner. This locks out non-crypto-native users — the entire onboarding success criterion in CLAUDE.md ("a developer can sign up, deploy a Safe, fund it, create an agent, run an x402 payment") is gated behind installing MetaMask, getting xDAI/ETH, and understanding seed phrases.

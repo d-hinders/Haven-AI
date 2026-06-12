@@ -1,5 +1,7 @@
 # Haven Agentic Workflow Audit
 
+> **ARCHIVED — historical.** This is a point-in-time audit (2026-06-02) whose recommendations have been actioned. Frozen for context; current workflow guidance lives in `docs/contributing/ai-agent-workflow.md`.
+
 Last updated: 2026-06-02
 
 ## Summary

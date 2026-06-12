@@ -1,5 +1,9 @@
 # MCP Runtime Compatibility
 
+> **Scope:** This covers the **local stdio MCP runtime** installed during agent
+> setup — the advanced/local path. For the default topology (hosted MCP + local
+> signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
 startup; setup preinstalls a tested runtime and writes a stable wrapper:

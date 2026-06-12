@@ -185,5 +185,5 @@ snippets, x402 signing, or relay code:
 - [Edge signer](07-edge-signer.md)
 - [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
 - [x402 payment sequence](04-x402-payment-sequence.md)
-- [Local to hosted MCP migration](../migration/local-to-hosted-mcp.md)
+- [Local to hosted MCP migration](../operations/local-to-hosted-mcp.md)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

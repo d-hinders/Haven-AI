@@ -1,5 +1,11 @@
 # Migration - Local MCP To Hosted MCP
 
+> **Scope:** This guide is for agents with an **existing local MCP setup**. New
+> agents do not need it — Connect Agent 2 creates the hosted-MCP + local-signer
+> split automatically. For the deployment model tradeoff, see
+> [architecture/10-local-vs-hosted-mcp.md](../architecture/10-local-vs-hosted-mcp.md);
+> to deploy the hosted server, see [hosted-mcp.md](hosted-mcp.md).
+
 Migrating from the local `npx @haven_ai/mcp` stdio server to hosted, keyless
 MCP plus local signing.
 
@@ -261,7 +267,7 @@ must not become the party that holds or operates agent private keys.
 
 ## Related Docs
 
-- [Hosted MCP deploy guide](../deploy/hosted-mcp.md)
+- [Hosted MCP deploy guide](./hosted-mcp.md)
 - [Architecture - hosted MCP connect flow](../architecture/06-hosted-mcp-connect-flow.md)
 - [Edge signer](../architecture/07-edge-signer.md)
 - [Regulatory guardrails (CASP / MiCA)](../regulatory/casp-risk-guardrails.md)

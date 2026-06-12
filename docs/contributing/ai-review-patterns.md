@@ -2,7 +2,7 @@
 
 Use this as shared memory for PR review feedback that was worth fixing. Keep it pattern-based, not PR-based, so future agents can apply it to new surfaces.
 
-The patterns below are also the items checked by the **Captain Self-Check Preflight** in `docs/ai-agent-workflow.md` and the **Recurring traps** must-check list in `.claude/agents/haven-reviewer.md`. The three lists should stay in sync.
+The patterns below are also the items checked by the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` and the **Recurring traps** must-check list in `.claude/agents/haven-reviewer.md`. The three lists should stay in sync.
 
 ## Data Semantics
 

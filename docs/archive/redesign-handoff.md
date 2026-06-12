@@ -1,15 +1,17 @@
 # Haven redesign — implementation handoff
 
+> **ARCHIVED — historical.** The v2 redesign migration is complete. This document is frozen for context only; do not action its tasks. References to old doc paths below are left as written at the time. For current guidance start from `docs/product/README.md`, `docs/product/design-system.md`, and `docs/product/copy-guidelines.md`.
+
 This file is historical project context for the v2 redesign migration. The migration phases are complete; use it only when you need to understand why specific implementation choices were made.
 
-**Reference:**
+**Reference (current locations):**
 - Production marketing routes: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`
-- Design system: `docs/design_system/DESIGN_SYSTEM.md`
-- **Copy (authoritative):** `docs/design_system/UX_COPY_GUIDELINES.md` — read this before touching any user‑facing string
-- Product doctrine + IA + accessibility: `docs/UX_GUIDELINES.md`
+- Design system: `docs/product/design-system.md`
+- **Copy (authoritative):** `docs/product/copy-guidelines.md` — read this before touching any user‑facing string
+- Product doctrine + IA + accessibility: `docs/product/README.md`
 - Regulatory perimeter: `docs/regulatory/casp-risk-guardrails.md`
 
-**Status:** Phase 0, Phase 0.5, Phase 1, Phase 2, and Phase 3 are implemented. New work should start from `UX_GUIDELINES.md`, `DESIGN_SYSTEM.md`, and `UX_COPY_GUIDELINES.md`.
+**Status:** Phase 0, Phase 0.5, Phase 1, Phase 2, and Phase 3 are implemented. New work should start from `docs/product/README.md`, `docs/product/design-system.md`, and `docs/product/copy-guidelines.md`.
 
 **Original order of work:** Phase 0 → Phase 1 (marketing) → Phase 2 (app) → Phase 3 (cleanup).
 

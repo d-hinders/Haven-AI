@@ -32,7 +32,7 @@ Examples: copy fixes, small docs edits, a one-line display bug, or a local type 
 
 ## Review Lessons From Recent PRs
 
-Use `docs/ai-review-patterns.md` as shared memory for recurring PR review issues that were relevant enough to fix.
+Use `docs/contributing/ai-review-patterns.md` as shared memory for recurring PR review issues that were relevant enough to fix.
 
 Before final review, the captain should do a risk-specific self-check based on the changed surface:
 
@@ -45,13 +45,13 @@ Before final review, the captain should do a risk-specific self-check based on t
 - credential and setup surfaces: one-time credential visibility, modal reset behavior, in-flight action reset, identifier entropy, and setup-copy consistency
 - generated artifacts: credential files, SDK examples, demo scripts, and skill bundles stay aligned with current Haven capabilities, env vars, product language, and regulatory guardrails
 
-After a Claude or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer prompt together. Do not add one-off preferences or obsolete implementation details.
+After a Claude or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer prompt together. Do not add one-off preferences or obsolete implementation details.
 
 Workers can implement narrow slices, but the captain owns cross-surface consistency, shared abstractions, PR shape, final review judgment, and deciding which review comments become durable workflow memory.
 
 ## Captain Self-Check Preflight
 
-Before opening or pushing a non-trivial PR, the captain runs this preflight. Each item is one grep or one quick read. The list maps the recurring trap families from `docs/ai-review-patterns.md` to the smallest check that would have caught each of them on the first push.
+Before opening or pushing a non-trivial PR, the captain runs this preflight. Each item is one grep or one quick read. The list maps the recurring trap families from `docs/contributing/ai-review-patterns.md` to the smallest check that would have caught each of them on the first push.
 
 Run only the items that match the changed surface. Skip the rest.
 
@@ -70,7 +70,7 @@ Run only the items that match the changed surface. Skip the rest.
 - **Credential Setup Copy.** If the diff changes setup copy, credential handoffs, signing-key guidance, or done-step instructions: confirm the copy is consistent across surfaces, leads with the user-facing safety property, and does not imply API credentials or Haven backend custody can spend.
 - **Browser Or Headless Verification.** If browser verification is skipped for UI or routing changes: name the reason and add a headless equivalent that covers the skipped risk.
 
-Run the matching items before invoking `haven-reviewer` so the reviewer finds fewer issues. If the reviewer surfaces a new trap family, add it to `docs/ai-review-patterns.md`, this preflight, and the reviewer agent's recurring-traps list together — the three should stay in sync.
+Run the matching items before invoking `haven-reviewer` so the reviewer finds fewer issues. If the reviewer surfaces a new trap family, add it to `docs/contributing/ai-review-patterns.md`, this preflight, and the reviewer agent's recurring-traps list together — the three should stay in sync.
 
 If browser verification is skipped (preview environment unavailable, slow, flaky), pair the skipped visual check with at least one **headless equivalent** in vitest:
 
@@ -234,7 +234,7 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 10. Ask `haven-reviewer` for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
 11. Let the captain fix final issues, commit, push, and open the PR.
 12. Add the PR closeout contract and merge-readiness report before calling the work complete.
-13. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur. Keep `docs/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer agent's recurring-traps list in sync.
+13. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur. Keep `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer agent's recurring-traps list in sync.
 
 ## Files The Captain Should Usually Own
 
@@ -266,7 +266,7 @@ Avoid worktrees for multiple agents editing the same feature surface. That usual
 
 ## Common Captain Instructions
 
-Paste this after any task-specific template below, or tell the agent to use `docs/ai-agent-workflow.md` when working inside this repo.
+Paste this after any task-specific template below, or tell the agent to use `docs/contributing/ai-agent-workflow.md` when working inside this repo.
 
 ```text
 Use the defined Haven agents to deliver this in the best way.
@@ -311,7 +311,7 @@ For UI work, enforce the Haven UI instructions from AGENTS.md:
 - hide technical wallet details from primary UX unless the surface is explicitly advanced or developer-facing
 - review copy against the UX copy guidelines
 - check mobile and desktop layouts when practical
-- use `docs/ai-review-patterns.md` for known reviewer traps before final review
+- use `docs/contributing/ai-review-patterns.md` for known reviewer traps before final review
 - use `docs/regulatory/casp-risk-guardrails.md` for payment, Safe, relayer, SDK payment API, x402/MPP, merchant, fiat/card, swap, yield, or advice work
 
 Before implementation, briefly tell me:
@@ -344,7 +344,7 @@ Here is a new feature I want to build:
 
 [Describe the feature, user problem, desired behavior, and any constraints.]
 
-[Paste the Common Captain Instructions here, or say: Use docs/ai-agent-workflow.md and follow the Common Captain Instructions.]
+[Paste the Common Captain Instructions here, or say: Use docs/contributing/ai-agent-workflow.md and follow the Common Captain Instructions.]
 ```
 
 ## UX Feedback Iteration Prompt Template
@@ -380,7 +380,7 @@ Evaluate the changed flow against these questions:
 - Does the layout hold up on mobile and desktop?
 - Are loading, empty, error, and success states handled?
 
-[Paste the Common Captain Instructions here, or say: Use docs/ai-agent-workflow.md and follow the Common Captain Instructions.]
+[Paste the Common Captain Instructions here, or say: Use docs/contributing/ai-agent-workflow.md and follow the Common Captain Instructions.]
 ```
 
 ## Bug Fix Prompt Template
@@ -421,7 +421,7 @@ Before calling the work complete, report:
 - verification run
 - any residual risk or follow-up worth tracking
 
-[Paste the Common Captain Instructions here, or say: Use docs/ai-agent-workflow.md and follow the Common Captain Instructions.]
+[Paste the Common Captain Instructions here, or say: Use docs/contributing/ai-agent-workflow.md and follow the Common Captain Instructions.]
 ```
 
 ## Good Worker Contract

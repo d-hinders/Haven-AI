@@ -39,7 +39,7 @@ import {
   WalletIdentityBlock,
 } from './haven'
 
-type SetupStep = 'details' | 'account' | 'policy' | 'review' | 'connect'
+type SetupStep = 'details' | 'policy' | 'review' | 'connect'
 
 interface AllowanceEntry {
   tokenSymbol: string
@@ -187,6 +187,7 @@ export default function ConnectAgent2Modal({
   const [cancelled, setCancelled] = useState(false)
   const [approving, setApproving] = useState(false)
   const [approvalError, setApprovalError] = useState<string | null>(null)
+  const [manualPathRevealed, setManualPathRevealed] = useState(false)
   const [manualFallbackConfirmed, setManualFallbackConfirmed] = useState(false)
   const [manualCredential, setManualCredential] = useState<ManualCredential | null>(null)
   const [manualCredentialAcknowledged, setManualCredentialAcknowledged] = useState(false)
@@ -336,12 +337,8 @@ export default function ConnectAgent2Modal({
   if (!open) return null
 
   const hasMultipleSafes = userSafes.length > 1
-  const setupSteps: SetupStep[] = hasMultipleSafes
-    ? ['details', 'account', 'policy', 'review', 'connect']
-    : ['details', 'policy', 'review', 'connect']
+  const setupSteps: SetupStep[] = ['details', 'policy', 'review', 'connect']
   const currentStepIndex = setupSteps.indexOf(step)
-  const detailsNextStep = hasMultipleSafes ? 'account' : 'policy'
-  const policyBackStep = hasMultipleSafes ? 'account' : 'details'
   const budgetRows = allowances.map((allowance) => ({
     id: allowance.tokenSymbol,
     tokenSymbol: allowance.tokenSymbol,
@@ -646,7 +643,7 @@ export default function ConnectAgent2Modal({
               </div>
               <div>
                 <label htmlFor="connect2-runtime" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
-                  Agent environment
+                  Where will this agent run?
                 </label>
                 <Select
                   id="connect2-runtime"
@@ -660,7 +657,7 @@ export default function ConnectAgent2Modal({
                   ))}
                 </Select>
                 <p className="mt-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                  Haven will create a local setup prompt for this environment.
+                  Haven tailors the setup prompt and restart steps to this environment. "Other" always works.
                 </p>
                 {localMcpSupported && (
                   <details className="mt-2">
@@ -684,7 +681,7 @@ export default function ConnectAgent2Modal({
                 )}
               </div>
               <Button
-                onClick={() => setStep(detailsNextStep)}
+                onClick={() => setStep('policy')}
                 disabled={!name.trim()}
                 className="w-full"
               >
@@ -693,41 +690,26 @@ export default function ConnectAgent2Modal({
             </div>
           )}
 
-          {step === 'account' && (
-            <div className="v2-animate-step-rise space-y-4">
-              <WalletIdentityBlock name={walletName} network={walletNetworkName} address={walletDisplayAddress} />
-              <div>
-                <label htmlFor="connect2-safe" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
-                  Haven wallet
-                </label>
-                <Select
-                  id="connect2-safe"
-                  value={selectedSafeId ?? ''}
-                  onChange={(event) => setSelectedSafeId(event.target.value)}
-                >
-                  {selectableSafes.map((safe) => (
-                    <option key={safe.id} value={safe.id}>
-                      {safe.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                The agent can request payments from this Haven wallet within the budget you set next.
-              </p>
-              <div className="flex gap-3">
-                <Button variant="ghost" onClick={() => setStep('details')} className="flex-1">
-                  Back
-                </Button>
-                <Button onClick={() => setStep('policy')} disabled={!selectedSafeId} className="flex-1">
-                  Set agent budget
-                </Button>
-              </div>
-            </div>
-          )}
-
           {step === 'policy' && (
             <div className="v2-animate-step-rise space-y-4">
+              {hasMultipleSafes && (
+                <div>
+                  <label htmlFor="connect2-safe" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                    Spend from
+                  </label>
+                  <Select
+                    id="connect2-safe"
+                    value={selectedSafeId ?? ''}
+                    onChange={(event) => setSelectedSafeId(event.target.value)}
+                  >
+                    {selectableSafes.map((safe) => (
+                      <option key={safe.id} value={safe.id}>
+                        {safe.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
               {allowances.length > 0 && (
                 <AgentBudgetCard
                   agentName={name || 'New agent'}
@@ -805,12 +787,12 @@ export default function ConnectAgent2Modal({
               )}
 
               <div className="flex gap-3">
-                <Button variant="ghost" onClick={() => setStep(policyBackStep)} className="flex-1">
+                <Button variant="ghost" onClick={() => setStep('details')} className="flex-1">
                   Back
                 </Button>
                 <Button
                   onClick={() => setStep('review')}
-                  disabled={allowances.length === 0}
+                  disabled={allowances.length === 0 || (hasMultipleSafes && !selectedSafeId)}
                   className="flex-1"
                 >
                   Review agent rules
@@ -822,8 +804,8 @@ export default function ConnectAgent2Modal({
           {step === 'review' && (
             <div className="v2-animate-step-rise space-y-5">
               <AgentRulesSummary
-                title="Review agent rules"
-                description="Haven will create a pending setup. The agent creates its key locally after you paste the setup prompt into its environment."
+                title="Confirm agent rules"
+                description="Haven creates a pending setup; the agent creates its key locally and Haven receives only the public signing address. Nothing can spend until you approve the budget with your wallet — the signature is the authority."
                 density="compact"
                 items={[
                   { label: 'Who can spend', value: name, helper: description.trim() || undefined },
@@ -848,11 +830,7 @@ export default function ConnectAgent2Modal({
                 ]}
               />
 
-              <ApprovalRequiredBanner title="The spending key stays local" density="compact" tone="neutral">
-                The setup prompt lets your agent create the key in its own environment. Haven receives the public signing address only.
-              </ApprovalRequiredBanner>
-
-              {createError && (
+               {createError && (
                 <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
                   {createError}
                 </div>
@@ -886,6 +864,8 @@ export default function ConnectAgent2Modal({
                   runtime={runtime}
                   copied={copied}
                   onCopy={copyText}
+                  manualPathRevealed={manualPathRevealed}
+                  onManualPathRevealedChange={setManualPathRevealed}
                   manualFallbackConfirmed={manualFallbackConfirmed}
                   onManualFallbackConfirmedChange={setManualFallbackConfirmed}
                   manualCredential={manualCredential}
@@ -954,16 +934,10 @@ export default function ConnectAgent2Modal({
               )}
 
               {visibleStatus === 'active' && (
-                <SetupStatusState
-                  title="Agent rules approved"
-                  body={
-                    setupStatus?.install_status?.restart_required
-                      ? 'Your agent can now spend within budget. Restart the agent so it can load Haven tools.'
-                      : "Your agent can now spend within budget. If you haven't already, restart the agent so it loads Haven tools."
-                  }
-                  tone="success"
-                  primaryLabel="Done"
-                  onPrimary={handleClose}
+                <SetupDoneState
+                  runtime={runtime}
+                  skillInstalled={Boolean(setupStatus?.install_status?.skill_installed)}
+                  onClose={handleClose}
                 />
               )}
 
@@ -1046,6 +1020,8 @@ function WaitingForConnector({
   runtime,
   copied,
   onCopy,
+  manualPathRevealed,
+  onManualPathRevealedChange,
   manualFallbackConfirmed,
   onManualFallbackConfirmedChange,
   manualCredential,
@@ -1063,6 +1039,8 @@ function WaitingForConnector({
   runtime: string
   copied: 'prompt' | 'command' | 'manual' | null
   onCopy: (kind: 'prompt' | 'command' | 'manual', value: string) => void
+  manualPathRevealed: boolean
+  onManualPathRevealedChange: (revealed: boolean) => void
   manualFallbackConfirmed: boolean
   onManualFallbackConfirmedChange: (confirmed: boolean) => void
   manualCredential: ManualCredential | null
@@ -1124,6 +1102,17 @@ function WaitingForConnector({
           <p className="leading-relaxed text-[var(--v2-ink-2)]">
             Use this only if the agent cannot run the setup command or store the local connector files. Haven will still receive only the public signing address and API key hash.
           </p>
+          {!manualPathRevealed && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onManualPathRevealedChange(true)}
+              className="w-full"
+            >
+              I really can't run the connector — show the manual path
+            </Button>
+          )}
+          {manualPathRevealed && (<>
           <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
             <p className="font-semibold text-[var(--v2-ink)]">Before creating a manual credential</p>
             <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed text-[var(--v2-ink-2)]">
@@ -1176,6 +1165,7 @@ function WaitingForConnector({
               )}
             </div>
           )}
+          </>)}
         </div>
       </details>
 
@@ -1492,6 +1482,89 @@ function TerminalSetupState({
   )
 }
 
+function restartCopyForRuntime(runtime: string): string | null {
+  // Mirrors the connector runtime registry's restartMode semantics:
+  // hot-reload runtimes need no restart; desktop apps load MCP at launch.
+  switch (runtime) {
+    case 'cursor':
+    case 'vscode':
+    case 'vscode-insiders':
+      return null
+    case 'claude-desktop':
+      return 'Restart Claude Desktop now — it only loads Haven tools at app launch.'
+    case 'codex-desktop':
+      return 'Restart Codex Desktop now — it only loads Haven tools at app launch.'
+    case 'claude-code':
+      return "Haven tools appear in your next Claude Code message. If they don't, restart the session."
+    case 'codex-cli':
+      return "Haven tools appear in your next Codex message. If they don't, restart the session."
+    default:
+      return 'Restart the agent session so it loads Haven tools.'
+  }
+}
+
+function SetupDoneState({
+  runtime,
+  skillInstalled,
+  onClose,
+}: {
+  runtime: string
+  skillInstalled: boolean
+  onClose: () => void
+}) {
+  const [downloading, setDownloading] = useState(false)
+  const restartCopy = restartCopyForRuntime(runtime)
+
+  async function handleDownloadSkill() {
+    setDownloading(true)
+    try {
+      const { buildSkillBundle } = await import('@/lib/agent-skill-bundle')
+      const { blob, filename } = await buildSkillBundle()
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-center">
+        <StatusBadge tone="success">Agent rules approved</StatusBadge>
+      </div>
+      <p className="mx-auto max-w-sm text-center text-sm leading-relaxed text-[var(--v2-ink-2)]">
+        Your agent can now spend within budget.
+      </p>
+      <ul className="mx-auto max-w-sm space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+        <li>✓ Haven tools wired into your agent environment</li>
+        {skillInstalled ? (
+          <li>✓ Haven payment skill installed</li>
+        ) : (
+          <li>
+            <button
+              type="button"
+              onClick={handleDownloadSkill}
+              disabled={downloading}
+              className="text-[var(--v2-brand)] underline-offset-2 hover:underline disabled:opacity-50"
+            >
+              {downloading ? 'Preparing skill…' : 'Download the Haven payment skill'}
+            </button>
+            {' '}— a generic, secret-free guide your agent can load for payment best practice.
+          </li>
+        )}
+        {restartCopy && <li>{restartCopy}</li>}
+      </ul>
+      <Button onClick={onClose} className="w-full">
+        Done
+      </Button>
+    </div>
+  )
+}
+
 function SetupStatusState({
   title,
   body,
@@ -1529,7 +1602,6 @@ function headerSubtitle(step: SetupStep, status: string | undefined, runtimeConf
     return 'Paste the setup prompt into your agent environment'
   }
   if (step === 'details') return 'Name the agent and choose where it runs'
-  if (step === 'account') return 'Choose the Haven wallet this agent can spend from'
   if (step === 'policy') return 'Set agent budget and approval boundaries'
   return 'Review before creating the local setup prompt'
 }

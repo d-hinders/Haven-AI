@@ -143,6 +143,7 @@ export function sanitizeInstallStatus(value: unknown): Record<string, unknown> {
     'signer_acknowledged',
     'local_mcp_acknowledged',
     'activation_command_available',
+    'skill_installed',
     'restart_required',
   ]) {
     if (typeof raw[key] === 'boolean') status[key] = raw[key]

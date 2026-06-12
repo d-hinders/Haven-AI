@@ -407,7 +407,7 @@ describe('ConnectAgent2Modal', () => {
   it('hides the Advanced local MCP affordance for runtimes without local support', () => {
     renderModal()
 
-    fireEvent.change(screen.getByLabelText('Agent environment'), {
+    fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
       target: { value: 'cursor' },
     })
 
@@ -440,7 +440,7 @@ describe('ConnectAgent2Modal', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
 
-    const select = screen.getByLabelText('Haven wallet') as HTMLSelectElement
+    const select = screen.getByLabelText('Spend from') as HTMLSelectElement
     // Defaults to the supported Base wallet, not the Gnosis default.
     expect(select.value).toBe(BASE_SAFE.id)
     // The unsupported Gnosis wallet is not offered for a new agent.
@@ -451,7 +451,7 @@ describe('ConnectAgent2Modal', () => {
   it('supports Codex Desktop as a first-class runtime option', async () => {
     renderModal()
 
-    fireEvent.change(screen.getByLabelText('Agent environment'), {
+    fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
       target: { value: 'codex-desktop' },
     })
     await fillAndCreateSetup()
@@ -529,7 +529,10 @@ describe('ConnectAgent2Modal', () => {
     // appears in both the StatusBadge title and the header subtitle.
     const approvedMatches = await screen.findAllByText('Agent rules approved')
     expect(approvedMatches.length).toBeGreaterThan(0)
-    expect(screen.getByText(/restart the agent/i)).toBeInTheDocument()
+    // Runtime-specific restart copy: Claude Code (the default) is a session
+    // runtime, so users are not told to restart needlessly.
+    expect(screen.getByText(/next Claude Code message/i)).toBeInTheDocument()
+    expect(screen.getByText(/Haven tools wired/i)).toBeInTheDocument()
     expect(screen.queryByText('Agent restart prepared')).not.toBeInTheDocument()
   })
 
@@ -940,6 +943,10 @@ describe('ConnectAgent2Modal', () => {
     expect(dialogBefore).not.toContain(MANUAL_API_KEY)
 
     fireEvent.click(screen.getByText('Manual credential fallback'))
+    // Extra explicit step: the warnings and create button stay hidden until
+    // the user states they cannot run the connector.
+    expect(screen.queryByRole('button', { name: 'Create manual credential' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /I really can't run the connector/i }))
     expect(screen.getByRole('button', { name: 'Create manual credential' })).toBeDisabled()
     fireEvent.click(screen.getByLabelText(/I understand this fallback shows/i))
 
@@ -1055,6 +1062,7 @@ describe('ConnectAgent2Modal', () => {
 
     await fillAndCreateSetup()
     fireEvent.click(screen.getByText('Manual credential fallback'))
+    fireEvent.click(screen.getByRole('button', { name: /I really can't run the connector/i }))
     fireEvent.click(screen.getByLabelText(/I understand this fallback shows/i))
 
     await act(async () => {

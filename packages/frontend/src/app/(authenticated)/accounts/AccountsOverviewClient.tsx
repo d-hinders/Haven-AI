@@ -239,7 +239,7 @@ function AddSafeModal({
           {mode === 'deploy' && deployStep === 'wallet' && (
             <div className="space-y-4">
               <p className="text-sm text-[var(--v2-ink-3)]">
-                Your connected wallet will be the owner of this Safe. Haven&rsquo;s relayer pays gas &mdash; no signature needed.
+                Your connected wallet will be the owner of this Safe. Network fees are paid by Haven &mdash; no wallet signature needed.
               </p>
 
               {/* Wallet connection */}
@@ -293,7 +293,7 @@ function AddSafeModal({
                 Create account
               </Button>
               <p className="text-center text-xs text-[var(--v2-ink-3)]">
-                Haven&rsquo;s relayer pays the gas &mdash; no wallet signature needed.
+                Network fees are paid by Haven &mdash; no wallet signature needed.
               </p>
             </div>
           )}
@@ -303,7 +303,7 @@ function AddSafeModal({
               <div className="w-12 h-12 rounded-full border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] animate-spin mb-6" />
               <h3 className="text-sm font-medium text-[var(--v2-ink)] mb-2">Deploying your Safe</h3>
               <p className="text-xs text-[var(--v2-ink-3)] text-center max-w-xs">
-                Haven&rsquo;s relayer is deploying your Safe on {getChainConfig(deployChainId).name}. No wallet action needed.
+                Haven is deploying your Safe on {getChainConfig(deployChainId).name}. No wallet action needed.
               </p>
             </div>
           )}

@@ -38,6 +38,7 @@ export interface UpdateInstallStatusInput {
   signerAcknowledged?: boolean
   localMcpAcknowledged?: boolean
   activationCommandAvailable?: boolean
+  skillInstalled?: boolean
   probeResult: string
   restartRequired: boolean
   nextUserAction: string
@@ -139,6 +140,7 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
           signer_acknowledged: input.signerAcknowledged,
           local_mcp_acknowledged: input.localMcpAcknowledged,
           activation_command_available: input.activationCommandAvailable,
+          skill_installed: input.skillInstalled,
           probe_result: input.probeResult,
           restart_required: input.restartRequired,
           next_user_action: input.nextUserAction,

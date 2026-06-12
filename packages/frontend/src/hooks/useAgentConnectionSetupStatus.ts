@@ -48,6 +48,7 @@ export interface AgentConnectionSetupStatusResponse {
   }
   install_status?: {
     runtime_mcp_mode?: string
+    skill_installed?: boolean
     hosted_mcp_configured?: boolean
     local_signer_configured?: boolean
     local_mcp_configured?: boolean

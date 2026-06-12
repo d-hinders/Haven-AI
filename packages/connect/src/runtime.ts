@@ -156,6 +156,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
       signerAcknowledged: runtimeInstall.signerAcknowledged,
       localMcpAcknowledged: runtimeInstall.localMcpAcknowledged,
       activationCommandAvailable: Boolean(runtimeInstall.activationCommand),
+      skillInstalled: runtimeInstall.skillInstalled,
       probeResult: runtimeInstall.probeResult,
       restartRequired: runtimeInstall.restartRequired,
       nextUserAction: runtimeInstall.nextUserAction,

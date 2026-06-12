@@ -36,7 +36,6 @@ for the wire contract and the custody invariant.
      e.g. `https://havenbackend-production-8a00.up.railway.app`.
    - `HAVEN_MCP_PATH` = `/v1` (default — only change if you need a different
      mount path).
-   - `LOG_LEVEL` = `info` (optional).
    - **Do not set** `HAVEN_DELEGATE_KEY`. The process refuses to start if it
      is set; this is intentional defense-in-depth.
    - `PORT` is provided by Railway automatically.
@@ -111,7 +110,8 @@ tests above.
 ## Verifying the custody posture in production
 
 - Railway → Service → **Variables** has no `HAVEN_DELEGATE_KEY`, no
-  credential JSON, no relayer key. (Only `HAVEN_API_URL` + optional log/port.)
+  credential JSON, no relayer key. (Only `HAVEN_API_URL`, optional
+  `HAVEN_MCP_PATH`, and the Railway-provided `PORT`.)
 - Service logs at startup do **not** include the line
   `HAVEN_DELEGATE_KEY is set in the environment…` — if they do, the process
   has refused to boot and the deploy is misconfigured.

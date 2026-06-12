@@ -75,8 +75,8 @@ used for payments:
 6. Hosted MCP uses the locally stored API key for identity, while the local
    signer/runtime keeps using the local delegate key for authority.
 
-See [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
-and [Connect Agent 2 rollout closeout](09-connect-agent-2-rollout-closeout.md).
+See [Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md)
+and [Connect Agent 2 rollout closeout](../archive/connect-agent-2-rollout-closeout.md).
 
 ## Direct Payment Sequence
 
@@ -183,7 +183,7 @@ snippets, x402 signing, or relay code:
 ## Related Docs
 
 - [Edge signer](07-edge-signer.md)
-- [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
+- [Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md)
 - [x402 payment sequence](04-x402-payment-sequence.md)
 - [Local to hosted MCP migration](../operations/local-to-hosted-mcp.md)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

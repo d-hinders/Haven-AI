@@ -3,7 +3,7 @@
 > **Scope:** This guide is for agents with an **existing local MCP setup**. New
 > agents do not need it — Connect Agent 2 creates the hosted-MCP + local-signer
 > split automatically. For the deployment model tradeoff, see
-> [architecture/10-local-vs-hosted-mcp.md](../architecture/10-local-vs-hosted-mcp.md);
+> [architecture/08-local-vs-hosted-mcp.md](../architecture/08-local-vs-hosted-mcp.md);
 > to deploy the hosted server, see [hosted-mcp.md](hosted-mcp.md).
 
 Migrating from the local `npx @haven_ai/mcp` stdio server to hosted, keyless
@@ -152,7 +152,7 @@ curl -X POST "$HAVEN_MCP_URL" \
 
 The hosted connection should list Haven tools such as `haven_get_agent`,
 `haven_get_allowances`, `haven_pay`, `haven_submit`, and
-`haven_x402_authorize`.
+`haven_pay_x402_quote`.
 
 ### 4. Add Local Signing
 

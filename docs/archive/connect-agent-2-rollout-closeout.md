@@ -1,5 +1,9 @@
 # Haven - Connect Agent 2 Rollout Closeout
 
+> **ARCHIVED — historical.** Point-in-time merge-readiness and rollout report for
+> #237 (shipped via PR #243; legacy flow later retired in #345). Frozen for
+> context only.
+
 Issue: #237
 Date: 2026-06-03
 

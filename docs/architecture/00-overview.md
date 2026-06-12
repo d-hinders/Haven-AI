@@ -28,14 +28,14 @@ hosted MCP entry (URL + Bearer API key) plus a local `haven-signer` stdio
 entry for all supported agent environments (Claude Code, Codex, Cursor,
 VS Code, Claude Desktop). Local MCP exists only behind the explicit `--local`
 opt-in for Claude Code and Codex. Details and trade-offs:
-[local vs. hosted MCP](10-local-vs-hosted-mcp.md), [edge signer](07-edge-signer.md).
+[local vs. hosted MCP](08-local-vs-hosted-mcp.md), [edge signer](07-edge-signer.md).
 
 ## Connect flow (brief)
 
 Dashboard creates a pending setup → user pastes one prompt into their agent →
 connector pairs, generates the key locally, configures the runtime → user
 approves the on-chain budget in Haven → the agent can pay. Full contract:
-[Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md).
+[Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md).
 
 ## External pieces
 

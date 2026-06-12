@@ -1,5 +1,11 @@
 # Haven - Connect Agent 2 Local-Key Pairing
 
+> **ARCHIVED — shipped.** This is the detailed staged-pairing contract written to
+> ship Connect Agent 2 (#230–#237), now live. Kept for design rationale and
+> recovery detail. For the current connect mechanism at architecture level, see
+> [hosted MCP connect flow](../architecture/06-hosted-mcp-connect-flow.md) and
+> [edge signer](../architecture/07-edge-signer.md).
+
 Contract for the Connect Agent 2 flow. This is the implementation source of
 truth for issue #230 and the child work in #231 through #237.
 
@@ -12,9 +18,9 @@ Haven wallet before any automatic spend authority exists.
 Related source docs:
 
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
-- [Hosted MCP connect flow](06-hosted-mcp-connect-flow.md)
-- [Edge signer](07-edge-signer.md)
-- [Identity and custody map](02-identity-and-custody.md)
+- [Hosted MCP connect flow](../architecture/06-hosted-mcp-connect-flow.md)
+- [Edge signer](../architecture/07-edge-signer.md)
+- [Identity and custody map](../architecture/02-identity-and-custody.md)
 - [Local to hosted MCP migration](../operations/local-to-hosted-mcp.md)
 - [Hosted MCP deploy guide](../operations/hosted-mcp.md)
 - [UX copy guidelines](../product/copy-guidelines.md)
@@ -957,7 +963,7 @@ Connect Agent 2 originally shipped behind `NEXT_PUBLIC_CONNECT_AGENT_2_ENABLED`
 (frontend) and `CONNECT_AGENT_2_ENABLED` (backend) rollback gates. Both flags,
 along with the legacy `CreateAgentModal`, were retired in #345 once the new
 flow was proven in production. Rolling back now means reverting #345 rather
-than flipping a flag — see `09-connect-agent-2-rollout-closeout.md` for the
+than flipping a flag — see `connect-agent-2-rollout-closeout.md` for the
 current state.
 
 ## Review Checklist

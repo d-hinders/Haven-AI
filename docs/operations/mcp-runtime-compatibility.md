@@ -14,15 +14,17 @@ startup; setup preinstalls a tested runtime and writes a stable wrapper:
 
 ## Supported Runtime Manifest
 
-The source of truth is `packages/connect/src/runtime-manifest.ts`.
+The source of truth is `packages/connect/src/runtime-manifest.ts` (the SDK and
+signer versions are pinned there; `@haven_ai/mcp` tracks its own `MCP_VERSION`).
+Keep this table in sync with that file.
 
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 20.0.0 |
-| `@haven_ai/connect` | current package version |
-| `@haven_ai/mcp` | `0.1.4-alpha` |
-| `@haven_ai/sdk` | `0.1.6` |
-| `@haven_ai/signer` | `0.1.0-alpha` |
+| `@haven_ai/connect` | `0.1.6-alpha` |
+| `@haven_ai/mcp` | `0.1.7-alpha` |
+| `@haven_ai/sdk` | `0.1.9` |
+| `@haven_ai/signer` | `0.1.3-alpha` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

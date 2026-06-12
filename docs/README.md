@@ -29,7 +29,7 @@ describe how the system is actually built and how we work on it.
 - [x402 payment sequence](architecture/04-x402-payment-sequence.md)
 - [Agent API (OpenAPI) contract](architecture/05-agent-api-openapi.md)
 - [Hosted MCP connect flow](architecture/06-hosted-mcp-connect-flow.md)
-- [Local vs hosted MCP](architecture/10-local-vs-hosted-mcp.md)
+- [Local vs hosted MCP](architecture/08-local-vs-hosted-mcp.md)
 
 **Product / UX**
 - [Product & UX guide (start)](product/README.md)

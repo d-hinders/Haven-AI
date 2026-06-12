@@ -8,7 +8,7 @@ records the **form** decision for #184 and the flows it has to support.
 Contract it must satisfy: [`06-hosted-mcp-connect-flow.md`](06-hosted-mcp-connect-flow.md).
 Custody guardrails: [`../regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md).
 Connect Agent 2 local-key pairing contract:
-[`08-connect-agent-2-local-key-pairing.md`](08-connect-agent-2-local-key-pairing.md).
+[`../archive/connect-agent-2-local-key-pairing.md`](../archive/connect-agent-2-local-key-pairing.md).
 
 ## Decision
 

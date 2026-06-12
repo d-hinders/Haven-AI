@@ -34,6 +34,7 @@ This is a TypeScript monorepo:
 ## Team Docs
 
 - [About Haven](ABOUT_HAVEN.md)
+- [Architecture overview](docs/architecture/00-overview.md)
 - [Architecture diagrams](docs/architecture/README.md)
 - [Hosted MCP connect flow](docs/architecture/06-hosted-mcp-connect-flow.md)
 - [PR Workflow Checklist](docs/pr-workflow-checklist.md)

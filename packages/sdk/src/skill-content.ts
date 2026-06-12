@@ -1,15 +1,19 @@
 /**
- * The generic Haven payment skill.
+ * The generic Haven payment skill — canonical copy.
  *
- * This content is intentionally static and secret-free: no wallet address,
- * no budget numbers, no per-agent values. The agent learns its identity and
- * live budget at runtime via the `haven_get_agent` / `haven_get_allowances`
- * MCP tools, so the same file works for every user and can be shipped inside
- * this package and auto-installed into runtime skills folders.
+ * This SDK file is the single source of truth for the generic, secret-free
+ * skill content: no wallet address, no budget numbers, no per-agent values.
+ * The agent learns its identity and live budget at runtime via the
+ * `haven_get_agent` / `haven_get_allowances` MCP tools, so the same file works
+ * for every user. `packages/connect` imports this directly to auto-install the
+ * skill into runtime skills folders.
  *
- * KEEP IN SYNC: packages/frontend/src/lib/agent-skill-bundle.ts emits the
- * exact same content as the download fallback for runtimes the connector
- * cannot write to. Both files assert genericness in their tests.
+ * `packages/frontend/src/lib/agent-skill-bundle.ts` keeps a deliberately
+ * decoupled inline copy (the download fallback): frontend has zero
+ * `@haven_ai/*` dependencies so it can deploy standalone on Vercel without an
+ * unpublished SDK export. A parity test in that package's test suite imports
+ * this canonical string and asserts byte-for-byte equality, so the two copies
+ * cannot drift.
  */
 
 export const HAVEN_SKILL_MD = `---

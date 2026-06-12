@@ -22,7 +22,7 @@ import {
   type PrepareLocalMcpRuntimeInput,
 } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST, signerPackageSpec } from './runtime-manifest.js'
-import { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from './skill-content.js'
+import { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from '@haven_ai/sdk'
 import { normalizeRuntime, restartRequiredForRuntime, runtimeProfile, type RuntimeId } from './runtime-registry.js'
 import {
   acknowledgeLocalSignerConsent,

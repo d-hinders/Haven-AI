@@ -6,6 +6,7 @@ exported PNG and SVG alongside.
 
 | # | Diagram | Use when |
 |---|---|---|
+| 0 | [Architecture Overview](00-overview.md) | First stop — the whole stack at a glance: components, default topology, connect flow, external pieces. |
 | 1 | [System Context](01-system-context.md) | Onboarding, security reviews, "who talks to who" questions. Shows trust boundaries. |
 | 2 | [Identity & Custody Map](02-identity-and-custody.md) | Reasoning about blast radius — what is held by user, Haven, agent, and on-chain. |
 | 3 | [Payment Execution Sequence](03-payment-sequence.md) | Tracing a payment from API call to on-chain settlement; auto-execute vs over-allowance branches. |

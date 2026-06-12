@@ -425,7 +425,7 @@ function AgentCard({
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
               A payment was funded on-chain but not settled.{' '}
               <a href={`/agents/${agent.id}`} className="underline underline-offset-2">
-                View agent to sweep funds back to Safe.
+                View agent to sweep funds back to your account.
               </a>
             </p>
           </div>

@@ -77,7 +77,7 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
           <div>
             <h2 id="add-funds-title" className="text-base font-semibold text-[var(--v2-ink)]">Add funds</h2>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-              Fund your Safe with USDC to enable agent payments.
+              Fund your account with USDC to enable agent payments.
             </p>
           </div>
           <button
@@ -104,7 +104,7 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[var(--v2-ink)]">Buy with card</p>
                   <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-                    Purchase USDC directly to your Safe via Coinbase. KYC handled by Coinbase — Haven never holds your funds.
+                    Purchase USDC directly to your account via Coinbase. KYC handled by Coinbase — Haven never holds your funds.
                   </p>
                 </div>
               </div>
@@ -125,21 +125,21 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-[var(--v2-ink)]">Transfer from another wallet</p>
                 <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-                  Send USDC to your Safe address on {chainName}.
+                  Send USDC to your account address on {chainName}.
                 </p>
               </div>
             </div>
 
             {safeAddress ? (
               <div className="mt-3">
-                <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Safe address ({chainName})</p>
+                <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Account address ({chainName})</p>
                 <div className="flex items-center gap-2 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2">
                   <code className="min-w-0 flex-1 truncate text-xs text-[var(--v2-ink)]">
                     {safeAddress}
                   </code>
                   <button
                     onClick={handleCopy}
-                    aria-label="Copy Safe address"
+                    aria-label="Copy account address"
                     className="flex-shrink-0 rounded p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)]"
                   >
                     {copied ? (

@@ -105,14 +105,14 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                 <div className="flex items-center gap-2">
                   <p className="truncate text-sm font-semibold text-[var(--v2-ink)]">{safe.name}</p>
                   {safe.is_default && (
-                    <span className="rounded-full bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--v2-brand)]">
+                    <span className="rounded-full bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-brand)]">
                       Default
                     </span>
                   )}
                 </div>
                 <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{chainConfig.name}</p>
               </div>
-              <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-1 text-[11px] font-medium text-[var(--v2-ink-2)]">
+              <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-1 text-xs font-medium text-[var(--v2-ink-2)]">
                 On-chain receive
               </span>
             </div>

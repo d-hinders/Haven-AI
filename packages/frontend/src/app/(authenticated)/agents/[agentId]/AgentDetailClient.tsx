@@ -526,7 +526,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 : `${unsettledPayments.length} payments were funded on-chain but the merchant rejected the retries.`}{' '}
               The delegate wallet may hold stranded{' '}
               {unsettledPayments[0]?.token ?? 'funds'}.{' '}
-              Sweep the funds back to your Safe to reclaim them.
+              Sweep the funds back to your account to reclaim them.
             </span>
             <div className="mt-2">
               <a

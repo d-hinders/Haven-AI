@@ -549,7 +549,7 @@ export default function EditAgentModal({
 
               {/* Add / update allowance */}
               {showBudgetFields && (
-              <div className="space-y-3 p-4 bg-[var(--v2-surface)] rounded-xl border border-dashed border-[var(--v2-border)]">
+              <div className="space-y-3 p-4 rounded-xl border border-dashed border-[var(--v2-border)]">
                 <p className="text-xs font-medium text-[var(--v2-ink-3)]">
                   {isExistingToken ? 'Update agent budget' : 'Add new agent budget'}
                 </p>
@@ -741,7 +741,7 @@ export default function EditAgentModal({
             <div className="py-8 text-center space-y-4">
               {execStatus !== 'error' ? (
                 <>
-                  <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <div className="w-10 h-10 border-2 border-[var(--v2-brand)] border-t-transparent rounded-full animate-spin mx-auto" />
                   <div>
                     <p className="text-sm text-[var(--v2-ink)] font-medium">
                       {execStatus === 'signing' && (budgetChanged ? 'Awaiting signature...' : 'Saving changes...')}
@@ -772,18 +772,12 @@ export default function EditAgentModal({
                     <p className="mx-auto mt-1 max-w-xs text-xs text-[var(--v2-ink-3)]">{execError}</p>
                   </div>
                   <div className="flex gap-3 pt-2">
-                    <button
-                      onClick={() => setStep('review')}
-                      className="flex-1 text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
-                    >
+                    <Button variant="ghost" onClick={() => setStep('review')} className="flex-1">
                       Back
-                    </button>
-                    <button
-                      onClick={handleExecute}
-                      className="flex-1 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white rounded-xl py-2.5 transition-colors"
-                    >
+                    </Button>
+                    <Button onClick={handleExecute} className="flex-1">
                       Retry
-                    </button>
+                    </Button>
                   </div>
                 </>
               )}
@@ -820,16 +814,13 @@ export default function EditAgentModal({
                     rel="noopener noreferrer"
                     className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] underline underline-offset-2 mt-1 inline-block"
                   >
-                    {execStatus === 'confirmed' ? 'View on Explorer' : 'View in Safe{Wallet}'}
+                    {execStatus === 'confirmed' ? 'View on Explorer' : 'View pending approval'}
                   </a>
                 )}
               </div>
-              <button
-                onClick={handleClose}
-                className="w-full text-sm font-medium bg-white border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] rounded-xl py-2.5 transition-colors"
-              >
+              <Button variant="ghost" onClick={handleClose} className="w-full">
                 Done
-              </button>
+              </Button>
             </div>
           )}
         </div>

@@ -28,7 +28,7 @@ export function DiagramBox({
       <p className={`text-xs font-medium ${accent ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink)]'}`}>
         {label}
       </p>
-      {sub && <p className="text-[10px] text-[var(--v2-ink-3)] mt-0.5">{sub}</p>}
+      {sub && <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">{sub}</p>}
     </div>
   )
 }
@@ -54,7 +54,7 @@ export function Arrow({ direction = 'down' }: { direction?: 'down' | 'right' }) 
 
 export function Label({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-block text-[10px] font-medium uppercase tracking-wider text-[var(--v2-brand)] bg-[var(--v2-brand-soft)] rounded px-1.5 py-0.5">
+    <span className="inline-block text-xs font-medium uppercase tracking-wider text-[var(--v2-brand)] bg-[var(--v2-brand-soft)] rounded px-1.5 py-0.5">
       {children}
     </span>
   )
@@ -63,7 +63,7 @@ export function Label({ children }: { children: React.ReactNode }) {
 /**
  * Numbered explanation step used inside InfoModal pages.
  *
- * Sizes are intentionally larger than the legacy inline markup (`text-[11px]`
+ * Sizes are intentionally larger than the legacy inline markup (`text-xs`
  * etc.) — body text at 13–14px lands within WCAG-friendly territory and
  * matches the readability bump applied across V2 modals.
  */

@@ -1330,20 +1330,20 @@ function LocalConnectionReady({
                 <dl className="mt-2 space-y-2 border-l border-[var(--v2-border)] pl-3">
                   {status?.delegate_address && (
                     <div>
-                      <dt className="text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+                      <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
                         Public address
                       </dt>
-                      <dd className="mt-0.5 break-all font-mono text-[11px] text-[var(--v2-ink)]">
+                      <dd className="mt-0.5 break-all font-mono text-xs text-[var(--v2-ink)]">
                         {status.delegate_address}
                       </dd>
                     </div>
                   )}
                   {install && (
                     <div>
-                      <dt className="text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+                      <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
                         Runtime setup
                       </dt>
-                      <dd className="mt-0.5 text-[12px] text-[var(--v2-ink-2)]">
+                      <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
                         <span className="text-[var(--v2-ink)]">{runtimeStatusLabel(install)}</span>
                         {runtimeStatusHelper(install) ? ` — ${runtimeStatusHelper(install)}` : ''}
                       </dd>
@@ -1351,10 +1351,10 @@ function LocalConnectionReady({
                   )}
                   {safeThreshold > 1 && (
                     <div>
-                      <dt className="text-[11px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+                      <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
                         Approvals required
                       </dt>
-                      <dd className="mt-0.5 text-[12px] text-[var(--v2-ink-2)]">
+                      <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
                         {safeThreshold} of {safeOwnerCount}
                       </dd>
                     </div>

@@ -112,7 +112,7 @@ function AddSafeModal({
       setDeployTxHash(deployed.tx_hash)
 
       // Register in Haven (same as import flow)
-      await onAdd(deployed.safe_address, name || 'My Safe', deployChainId)
+      await onAdd(deployed.safe_address, name || 'My account', deployChainId)
       setDeployStep('done')
     } catch (err: unknown) {
       setDeployStep('wallet')
@@ -239,7 +239,7 @@ function AddSafeModal({
           {mode === 'deploy' && deployStep === 'wallet' && (
             <div className="space-y-4">
               <p className="text-sm text-[var(--v2-ink-3)]">
-                Your connected wallet will be the owner of this Safe. Network fees are paid by Haven &mdash; no wallet signature needed.
+                Your connected wallet will be the owner of this account. Network fees are paid by Haven &mdash; no wallet signature needed.
               </p>
 
               {/* Wallet connection */}
@@ -301,9 +301,9 @@ function AddSafeModal({
           {mode === 'deploy' && deployStep === 'deploying' && (
             <div className="flex flex-col items-center py-8">
               <div className="w-12 h-12 rounded-full border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] animate-spin mb-6" />
-              <h3 className="text-sm font-medium text-[var(--v2-ink)] mb-2">Deploying your Safe</h3>
+              <h3 className="text-sm font-medium text-[var(--v2-ink)] mb-2">Deploying your account</h3>
               <p className="text-xs text-[var(--v2-ink-3)] text-center max-w-xs">
-                Haven is deploying your Safe on {getChainConfig(deployChainId).name}. No wallet action needed.
+                Haven is deploying your account on {getChainConfig(deployChainId).name}. No wallet action needed.
               </p>
             </div>
           )}
@@ -324,7 +324,7 @@ function AddSafeModal({
 
               <div className="space-y-2">
                 <div className="p-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-                  <span className="block text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Account address</span>
+                  <span className="block text-xs text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Account address</span>
                   <a
                     href={getExplorerUrl(deployChainId, 'address', deployedAddress)}
                     target="_blank"
@@ -335,7 +335,7 @@ function AddSafeModal({
                   </a>
                 </div>
                 <div className="p-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
-                  <span className="block text-[10px] text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Transaction</span>
+                  <span className="block text-xs text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">Transaction</span>
                   <a
                     href={getExplorerUrl(deployChainId, 'tx', deployTxHash)}
                     target="_blank"
@@ -494,7 +494,7 @@ function SafeCard({
       <div className="mb-2 flex items-center gap-2 pr-12">
         <h3 className="truncate text-base font-semibold text-[var(--v2-ink)]">{safe.name}</h3>
         {showDefaultBadge && (
-          <span className="flex-shrink-0 rounded bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-medium text-[var(--v2-brand)]">
+          <span className="flex-shrink-0 rounded bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--v2-brand)]">
             default
           </span>
         )}
@@ -614,12 +614,12 @@ export default function AccountsOverviewClient() {
 
       {/* Orphaned agents warning */}
       {orphanedAgents.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-3 mb-6 rounded-lg bg-amber-500/[0.05] border border-amber-500/20">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-amber-400 flex-shrink-0">
+        <div className="flex items-center gap-2 px-4 py-3 mb-6 rounded-lg bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[var(--v2-warning)] flex-shrink-0">
             <circle cx="12" cy="12" r="10" />
             <path d="M12 8v4M12 16h.01" />
           </svg>
-          <span className="text-sm text-amber-400">
+          <span className="text-sm text-[var(--v2-warning)]">
             {orphanedAgents.length} agent{orphanedAgents.length !== 1 ? 's have' : ' has'} no linked account. Reassign them in the Agents page.
           </span>
         </div>

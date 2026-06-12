@@ -18,8 +18,8 @@ Default posture:
 Start by reading:
 - `AGENTS.md`
 - `CLAUDE.md`
-- `docs/ai-agent-workflow.md`
-- `docs/ai-review-patterns.md`
+- `docs/contributing/ai-agent-workflow.md`
+- `docs/contributing/ai-review-patterns.md`
 - task-specific docs named by the captain
 
 Use this workflow for:

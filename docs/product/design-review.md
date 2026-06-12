@@ -23,8 +23,8 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 - Existing primitives in `packages/frontend/src/components/ui` are reused before adding new styles.
 - Haven-domain components in `packages/frontend/src/components/haven` are reused for agent budget, wallet identity, approvals, and risk explanations.
 - Authenticated pages use `PageHeader` unless the route has a deliberate special layout.
-- Activity previews reuse `AgentActivityRow` or `TransactionActivityRow`; full transaction history uses `TransactionsTable`.
-- Cards, buttons, inputs, shadows, radii, and typography match `docs/design_system/DESIGN_SYSTEM.md`.
+- Activity previews reuse `TransactionActivityRow`; full transaction history uses `TransactionsTable`.
+- Cards, buttons, inputs, shadows, radii, and typography match `docs/product/design-system.md`.
 - `Card elevation="raised"` is used only for prominent page-anchor surfaces, not ordinary cards.
 - Inputs use the shared `Input` primitive for visible borders, focus, validation, Max/Paste actions, and helper text.
 - Skeleton loading uses `Skeleton` rather than inline pulse divs.

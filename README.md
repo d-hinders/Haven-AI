@@ -34,10 +34,11 @@ This is a TypeScript monorepo:
 ## Team Docs
 
 - [About Haven](ABOUT_HAVEN.md)
+- [Documentation index](docs/README.md) — start here
 - [Architecture overview](docs/architecture/00-overview.md)
 - [Architecture diagrams](docs/architecture/README.md)
 - [Hosted MCP connect flow](docs/architecture/06-hosted-mcp-connect-flow.md)
-- [PR Workflow Checklist](docs/pr-workflow-checklist.md)
+- [PR Workflow Checklist](docs/contributing/pr-workflow-checklist.md)
 - [CASP / MiCA Risk Minimisation Guardrails](docs/regulatory/casp-risk-guardrails.md)
 
 ## Prerequisites
@@ -404,7 +405,7 @@ From `packages/backend/`:
 ```
 Haven-AI/
 |-- ABOUT_HAVEN.md             # Product and architecture mental model
-|-- docs/                      # UX, architecture, regulatory, workflow, migration docs
+|-- docs/                      # architecture, product/UX, contributing, operations, regulatory docs (see docs/README.md)
 |-- packages/
 |   |-- backend/               # Fastify API, database migrations, Safe/module relaying, OpenAPI
 |   |-- frontend/              # Next.js dashboard and connect-agent UX

@@ -1,6 +1,6 @@
 # Haven Design System
 
-This is the source of truth for Haven's current light visual language. Companion to `UX_GUIDELINES.md` (which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
+This is the source of truth for Haven's current light visual language. Companion to the product UX guide (`docs/product/README.md`, which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
 
 The production authenticated app and `/design-system` are the live references for product UX. The production marketing routes are the live references for marketing UX: `/`, `/how-it-works`, `/protocols/x402`, and `/protocols/mpp`. When in doubt, open the live route, inspect the element, and match the system here.
 
@@ -207,7 +207,7 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Date and Amount are sortable; amount sorting uses the raw transaction value, never the formatted display string.
 - Empty state renders inside the table with the correct column span.
 
-Use `TransactionActivityRow` or `AgentActivityRow` for compact dashboard, account detail, or agent detail previews.
+Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
 
 ### Sections (`Section`)
 
@@ -281,11 +281,11 @@ Animated, cycling state machine showing one payment lifecycle (Intent → Policy
 
 ## 6. Vocabulary, voice, accessibility
 
-**Authoritative copy source: `docs/UX_COPY_GUIDELINES.md`.** Read it before writing any user‑facing string — landing page, onboarding, dashboard, error message, anything.
+**Authoritative copy source: `docs/product/copy-guidelines.md`.** Read it before writing any user‑facing string — landing page, onboarding, dashboard, error message, anything.
 
-It supersedes the terminology table in `docs/UX_GUIDELINES.md` section 1 and the voice rules in section 6. Where the two conflict, **the copy guidelines win.** Specifically:
+It supersedes the terminology table in `docs/product/README.md` section 1 and the voice rules in section 6. Where the two conflict, **the copy guidelines win.** Specifically:
 
-| Old (UX_GUIDELINES.md) | New (UX_COPY_GUIDELINES.md) |
+| Old (product/README.md) | New (copy-guidelines.md) |
 |---|---|
 | "Account" / "Safe smart account" | **"Haven account"** (and "Haven wallet" for funds) |
 | "Signing wallet" | **"Sign‑in method"** in onboarding; "your wallet" elsewhere |
@@ -297,7 +297,7 @@ It supersedes the terminology table in `docs/UX_GUIDELINES.md` section 1 and the
 | "Owner" / "Signer" / "Enroll signer" | **"Approve actions"** / **"Sign‑in method"** / **"Save your sign‑in method"** |
 | "Relayer", "Metadata" | **avoid mentioning** |
 
-What survives unchanged from `UX_GUIDELINES.md`: the **product doctrine** (section 0), **information architecture** rules (section 2 — collection routes, no dead ends), **accessibility** (section 7), and the **voice principles** that don't conflict (sentences not jargon, no exclamation marks, no emoji in product UI, error copy is the user's friend).
+What survives unchanged from `docs/product/README.md`: the **product doctrine** (section 0), **information architecture** rules (section 2 — collection routes, no dead ends), **accessibility** (section 7), and the **voice principles** that don't conflict (sentences not jargon, no exclamation marks, no emoji in product UI, error copy is the user's friend).
 
 Tonally: marketing copy can be **slightly more inviting** to match the more energetic visual; product UI stays quiet. Confidence over over‑explanation. Lead with the user outcome, not the infrastructure.
 
@@ -326,11 +326,11 @@ Accessibility expectations for production primitives:
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
-| Agent activity rows | `packages/frontend/src/components/haven/AgentActivityRow.tsx` |
-| Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/AgentActivityRow.tsx` |
+| Agent & transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
+| Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/TransactionMovement.tsx` |
 | Full transaction history | `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
 
-The handoff plan in `docs/design_system/REDESIGN_HANDOFF.md` is now project history.
+The handoff plan in `docs/archive/redesign-handoff.md` is now project history.
 
 ---
 

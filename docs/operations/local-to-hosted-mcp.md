@@ -1,5 +1,11 @@
 # Migration - Local MCP To Hosted MCP
 
+> **Scope:** This guide is for agents with an **existing local MCP setup**. New
+> agents do not need it — Connect Agent 2 creates the hosted-MCP + local-signer
+> split automatically. For the deployment model tradeoff, see
+> [architecture/08-local-vs-hosted-mcp.md](../architecture/08-local-vs-hosted-mcp.md);
+> to deploy the hosted server, see [hosted-mcp.md](hosted-mcp.md).
+
 Migrating from the local `npx @haven_ai/mcp` stdio server to hosted, keyless
 MCP plus local signing.
 
@@ -146,7 +152,7 @@ curl -X POST "$HAVEN_MCP_URL" \
 
 The hosted connection should list Haven tools such as `haven_get_agent`,
 `haven_get_allowances`, `haven_pay`, `haven_submit`, and
-`haven_x402_authorize`.
+`haven_pay_x402_quote`.
 
 ### 4. Add Local Signing
 
@@ -167,7 +173,7 @@ The signer exposes local stdio MCP tools:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign the `payload_hash` returned by hosted `haven_pay` or `haven_x402_authorize` |
+| `haven_sign` | Sign the `payload_hash` returned by hosted `haven_pay` or `haven_pay_x402_quote` |
 | `haven_x402_sign_header` | Build and sign the x402 `X-PAYMENT` header after the Haven funding leg succeeds |
 
 The signer does not need the API key and makes no network calls. It reads the
@@ -261,7 +267,7 @@ must not become the party that holds or operates agent private keys.
 
 ## Related Docs
 
-- [Hosted MCP deploy guide](../deploy/hosted-mcp.md)
+- [Hosted MCP deploy guide](./hosted-mcp.md)
 - [Architecture - hosted MCP connect flow](../architecture/06-hosted-mcp-connect-flow.md)
 - [Edge signer](../architecture/07-edge-signer.md)
 - [Regulatory guardrails (CASP / MiCA)](../regulatory/casp-risk-guardrails.md)

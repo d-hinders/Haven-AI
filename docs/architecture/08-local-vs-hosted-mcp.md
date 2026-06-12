@@ -36,7 +36,7 @@ is the path all users land on unless they explicitly opt out:
 - **One well-tested path** — a single topology across all runtimes instead of
   a silent per-runtime fork.
 
-See [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
+See [Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md)
 for the pairing flow.
 
 ## Advanced: fully-local MCP (no hosted dependency)

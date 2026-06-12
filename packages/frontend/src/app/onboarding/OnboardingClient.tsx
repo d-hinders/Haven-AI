@@ -285,7 +285,7 @@ export default function OnboardingClient() {
             <div key="deploy-eoa" className="v2-animate-step-rise">
               <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Create your Haven account</h1>
               <p className="text-sm text-[var(--v2-ink-2)] mb-8 leading-relaxed">
-                Your connected wallet will be the owner of this account. Haven&rsquo;s relayer pays gas &mdash; no wallet signature needed.
+                Your connected wallet will be the owner of this account. Network fees are paid by Haven &mdash; no wallet signature needed.
               </p>
 
               <div className="mb-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
@@ -363,7 +363,7 @@ export default function OnboardingClient() {
                         {
                           id: 'deploying',
                           label: 'Deploying on-chain',
-                          hint: 'Relayer is submitting the transaction — no wallet action needed.',
+                          hint: 'Haven is submitting the transaction — no wallet action needed.',
                         },
                         {
                           id: 'registering',

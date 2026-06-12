@@ -188,8 +188,8 @@ Example:
 Use the haven-ui-worker agent to implement the empty and loading states for the agent budget panel.
 
 Ownership:
-- packages/frontend/src/components/haven/AgentBudgetPanel.tsx
-- packages/frontend/src/components/haven/AgentBudgetPanel.test.tsx
+- packages/frontend/src/components/haven/AgentBudgetCard.tsx
+- packages/frontend/src/components/haven/__tests__/AgentBudgetCard.test.tsx
 
 Create new files only if they are listed above. Do not edit globals.css, Tailwind config, package files, shared UI primitives, or route shells. Report any shared change you need.
 ```
@@ -204,8 +204,8 @@ Example:
 Use the haven-backend-worker agent to add validation for over-allowance payment requests.
 
 Ownership:
-- packages/backend/src/payments/paymentPolicy.ts
-- packages/backend/src/payments/paymentPolicy.test.ts
+- packages/backend/src/routes/payments.ts
+- packages/backend/src/routes/__tests__/payments.test.ts
 
 Create new files only if they are listed above. Do not edit package files, lockfiles, or central shared types. Report any shared change you need.
 ```

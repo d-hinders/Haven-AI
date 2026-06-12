@@ -2,6 +2,13 @@
 
 Last updated: 2026-05-13
 
+> **Point-in-time plan.** This is the strategic roadmap as of the date above;
+> some named surfaces have since changed (e.g. the old `CreateAgentModal` was
+> split out and replaced by `ConnectAgent2Modal` in #345). File paths below have
+> been refreshed to current locations, but treat the phase analysis as the
+> snapshot it was. The live, tactical status is tracked in
+> [code-quality-loop.md](code-quality-loop.md).
+
 ## Summary
 
 This roadmap starts a risk-first, whole-repo quality program for Haven. Phase 0 is intentionally audit-only: no product behavior changes, no schema changes, and no cleanup hidden inside the planning PR.
@@ -78,7 +85,7 @@ Primary surfaces:
 
 Primary surfaces:
 
-- `packages/frontend/src/components/CreateAgentModal.tsx`
+- `packages/frontend/src/components/ConnectAgent2Modal.tsx`
 - `packages/frontend/src/components/EditAgentModal.tsx`
 - `packages/frontend/src/components/AgentPanel.tsx`
 - `packages/frontend/src/hooks/useOnChainAllowances.ts`
@@ -93,7 +100,7 @@ Primary surfaces:
 
 - `packages/frontend/src/components/SendModal.tsx`
 - `packages/frontend/src/hooks/useTransactionsFeed.ts`
-- `packages/frontend/src/lib/x402-activity-transactions.ts`
+- `packages/frontend/src/lib/transaction-scope.ts`
 - `packages/frontend/src/components/transactions/TransactionsTable.tsx`
 - `packages/frontend/src/components/haven/TransactionMovement.tsx`
 
@@ -107,7 +114,7 @@ Primary surfaces:
 
 - `packages/frontend/src/components/ui/Modal.tsx`
 - `packages/frontend/src/components/SendModal.tsx`
-- `packages/frontend/src/components/CreateAgentModal.tsx`
+- `packages/frontend/src/components/ConnectAgent2Modal.tsx`
 - `packages/frontend/src/components/EditAgentModal.tsx`
 - `packages/frontend/src/__tests__/setup.ts`
 - `packages/frontend/e2e/*`

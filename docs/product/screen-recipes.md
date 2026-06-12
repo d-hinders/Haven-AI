@@ -188,7 +188,7 @@ Structure:
 Money and risk clarity:
 - Each row should show amount, token, direction/status, and whether it was automatic or required approval.
 - Technical hashes stay in detail surfaces.
-- Prefer `AgentActivityRow` for agent-specific lists. The primary row title should be `Agent payment`, `Approval request`, `Payment rejected`, or similar human event copy, not a raw recipient address.
+- Prefer `TransactionActivityRow` for agent-specific lists. The primary row title should be `Agent payment`, `Approval request`, `Payment rejected`, or similar human event copy, not a raw recipient address.
 - Put recipient, source, and links in row metadata or detail actions.
 
 ## Policy Violation

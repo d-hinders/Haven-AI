@@ -66,7 +66,6 @@ Last updated: 2026-06-06
   - Confirmed OpenAPI previously described `MachinePaymentReceipt.proof_status` as a generic string.
 - Captain self-check covered CASP guardrails, payment authority boundaries, API schema drift, multi-entrypoint retry consumers, and OpenAPI regression coverage.
 - Do not run package tests/typecheck/build in parallel when they trigger `npm --prefix ../sdk run build`; the SDK clean build can race on `packages/sdk/dist`.
-- Existing untracked directory `docs/plans/haven-landing-audit-2026-06-04/` was present before this run and is unrelated.
 
 ## Recommended Next Target
 

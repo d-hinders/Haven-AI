@@ -207,7 +207,7 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Date and Amount are sortable; amount sorting uses the raw transaction value, never the formatted display string.
 - Empty state renders inside the table with the correct column span.
 
-Use `TransactionActivityRow` or `AgentActivityRow` for compact dashboard, account detail, or agent detail previews.
+Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
 
 ### Sections (`Section`)
 
@@ -326,8 +326,8 @@ Accessibility expectations for production primitives:
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
-| Agent activity rows | `packages/frontend/src/components/haven/AgentActivityRow.tsx` |
-| Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/AgentActivityRow.tsx` |
+| Agent & transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
+| Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/TransactionMovement.tsx` |
 | Full transaction history | `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
 
 The handoff plan in `docs/archive/redesign-handoff.md` is now project history.

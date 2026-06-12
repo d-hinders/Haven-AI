@@ -173,7 +173,7 @@ The signer exposes local stdio MCP tools:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign the `payload_hash` returned by hosted `haven_pay` or `haven_x402_authorize` |
+| `haven_sign` | Sign the `payload_hash` returned by hosted `haven_pay` or `haven_pay_x402_quote` |
 | `haven_x402_sign_header` | Build and sign the x402 `X-PAYMENT` header after the Haven funding leg succeeds |
 
 The signer does not need the API key and makes no network calls. It reads the

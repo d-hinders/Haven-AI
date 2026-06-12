@@ -239,7 +239,7 @@ function AddSafeModal({
           {mode === 'deploy' && deployStep === 'wallet' && (
             <div className="space-y-4">
               <p className="text-sm text-[var(--v2-ink-3)]">
-                Your connected wallet will be the owner of this Safe. Network fees are paid by Haven &mdash; no signature needed.
+                Your connected wallet will be the owner of this Safe. Network fees are paid by Haven &mdash; no wallet signature needed.
               </p>
 
               {/* Wallet connection */}

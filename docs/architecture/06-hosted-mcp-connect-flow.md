@@ -75,8 +75,8 @@ used for payments:
 6. Hosted MCP uses the locally stored API key for identity, while the local
    signer/runtime keeps using the local delegate key for authority.
 
-See [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
-and [Connect Agent 2 rollout closeout](09-connect-agent-2-rollout-closeout.md).
+See [Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md)
+and [Connect Agent 2 rollout closeout](../archive/connect-agent-2-rollout-closeout.md).
 
 ## Direct Payment Sequence
 
@@ -122,7 +122,7 @@ hosted MCP because the hosted server must obtain the funding hash before the
 edge can sign.
 
 1. Agent receives an HTTP 402 challenge from the merchant/resource server.
-2. Agent calls hosted `haven_x402_authorize` with the parsed
+2. Agent calls hosted `haven_pay_x402_quote` with the parsed
    `payment_required` challenge.
 3. Hosted MCP asks Haven to construct the Safe-to-delegate funding leg.
 4. Haven returns `{ payment_id, payload_hash, x402.expected }` or
@@ -147,7 +147,7 @@ the merchant payment header on the hosted server.
 | `haven_get_allowances` | No | Read configured and on-chain budget state |
 | `haven_pay` | No | Construct direct payment hash or queue approval |
 | `haven_submit` | No | Relay a locally produced signature |
-| `haven_x402_authorize` | No | Construct x402 funding hash or queue approval |
+| `haven_pay_x402_quote` | No | Construct x402 funding hash or queue approval |
 | `haven_get_payment_status` | No | Read direct/x402/MPP payment state |
 | `haven_list_transactions` | No | Read recent receipts/activity |
 
@@ -183,7 +183,7 @@ snippets, x402 signing, or relay code:
 ## Related Docs
 
 - [Edge signer](07-edge-signer.md)
-- [Connect Agent 2 local-key pairing](08-connect-agent-2-local-key-pairing.md)
+- [Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md)
 - [x402 payment sequence](04-x402-payment-sequence.md)
-- [Local to hosted MCP migration](../migration/local-to-hosted-mcp.md)
+- [Local to hosted MCP migration](../operations/local-to-hosted-mcp.md)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

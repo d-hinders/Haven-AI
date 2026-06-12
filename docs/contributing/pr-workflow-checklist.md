@@ -6,7 +6,7 @@ Use this checklist for feature branches so PRs stay mergeable, reviewable, and d
 
 - Branch from `main` unless the work truly depends on another unmerged branch.
 - Keep the branch scoped to one shippable outcome.
-- For non-trivial feature, UX feedback, or bug-fix work, use `docs/ai-agent-workflow.md` before implementation and decide the captain, explorer, worker, and reviewer shape up front.
+- For non-trivial feature, UX feedback, or bug-fix work, use `docs/contributing/ai-agent-workflow.md` before implementation and decide the captain, explorer, worker, and reviewer shape up front.
 - If the work touches payments, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, fiat/card, swaps, merchant flows, yield, or advice, read `docs/regulatory/casp-risk-guardrails.md` first.
 - If the work spans backend, frontend, and migrations, ask whether it should be split into multiple PRs first.
 - If the change touches migrations, assume merge risk is high and keep the branch short-lived.
@@ -45,7 +45,7 @@ Good split examples:
 - Confirm payment-related changes preserve the CASP guardrails: no Haven-held user or agent keys, no API-key-only payment authority, no off-chain-only spend control, no mutation of signed amount/token/recipient/route, and no unreviewed swap, ramp, fiat, card, merchant settlement, yield, or advice functionality.
 - Complete the PR template sections for changed surfaces, workflow used, agents used or skipped, local checks, browser or headless verification, generated artifacts, CASP/MiCA guardrails, review status, and merge readiness.
 - Include a merge-readiness section using the template below for non-trivial PRs.
-- Run the **Captain Self-Check Preflight** in `docs/ai-agent-workflow.md` for the surfaces the diff touches.
+- Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches.
 - If browser verification is skipped for UI, routing, modal, setup-flow, or animation work, add the smallest headless equivalent that covers the skipped risk and name it in the PR.
 - If SDK/API behavior, credential semantics, x402/MPP behavior, setup prompts, or product language changes, review generated credential files, `.env` examples, SDK snippets, demo scripts, and skill bundles.
 - Use `haven-reviewer` before requesting review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.

@@ -23,6 +23,12 @@ export interface OnChainDelegateData {
 interface UseOnChainAllowancesResult {
   /** Map of lowercase delegate address → on-chain allowance data */
   data: Map<string, OnChainDelegateData>
+  /**
+   * Latest block timestamp (seconds) captured with this fetch. Pass this into
+   * `computeEffectiveAllowance` so reset decisions key off chain time, not the
+   * user's device clock. Null until the first successful fetch.
+   */
+  chainTimeSec: number | null
   /** True while the first fetch is in progress */
   loading: boolean
   /** Whether the AllowanceModule is enabled on this Safe */
@@ -48,6 +54,7 @@ export function useOnChainAllowances(
   const publicClient = usePublicClient({ chainId })
 
   const [data, setData] = useState<Map<string, OnChainDelegateData>>(new Map())
+  const [chainTimeSec, setChainTimeSec] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [moduleEnabled, setModuleEnabled] = useState<boolean | null>(null)
   const [onChainDelegates, setOnChainDelegates] = useState<Address[]>([])
@@ -85,13 +92,16 @@ export function useOnChainAllowances(
         return
       }
 
-      // 2. Discover ALL on-chain delegates (not just DB agents)
-      const delegates = await getDelegates(
-        publicClient,
-        safeAddress as Address,
-      )
+      // 2. Discover ALL on-chain delegates (not just DB agents), and capture
+      // the chain time alongside so the UI's reset math uses block.timestamp
+      // rather than the device clock.
+      const [delegates, latestBlock] = await Promise.all([
+        getDelegates(publicClient, safeAddress as Address),
+        publicClient.getBlock({ blockTag: 'latest' }),
+      ])
       if (generationRef.current !== generation) return
       setOnChainDelegates(delegates)
+      setChainTimeSec(Number(latestBlock.timestamp))
 
       // 3. Fetch allowances for each delegate
       const managed = new Set(
@@ -151,6 +161,7 @@ export function useOnChainAllowances(
 
   return {
     data,
+    chainTimeSec,
     loading,
     moduleEnabled,
     onChainDelegates,

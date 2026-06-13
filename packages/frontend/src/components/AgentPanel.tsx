@@ -120,7 +120,7 @@ function AllowanceBar({
 }) {
   const decimals = tokenDecimals(info.token, chainId)
   const symbol = tokenSymbol(info.token, chainId)
-  // chainTimeSec is captured with the same on-chain read as `info`, so it is
+  // chainTimeSec is captured in the same fetch cycle as `info`, so it is
   // non-null whenever real allowances render. The fallback only covers the
   // brief pre-load frame (where `loading` is already shown); the reset decision
   // must otherwise use chain time, never the device clock.

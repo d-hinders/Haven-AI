@@ -137,10 +137,6 @@ describe('Frontend · computeEffectiveAllowance vs AllowanceModule reference mod
       expect(haven.nextResetTime!.getTime()).toBe(correctMs)
       expect(haven.nextResetTime!.getTime()).toBe(chain.nextResetTime!.getTime())
       expect(haven.nextResetTime!.getTime()).not.toBe(oldNextResetMs) // the bug we removed
-      console.warn(
-        `[F-3] old nextReset=${new Date(oldNextResetMs).toISOString()} ` +
-          `vs correct=${haven.nextResetTime!.toISOString()}`,
-      )
     })
   })
 })

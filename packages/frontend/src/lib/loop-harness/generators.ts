@@ -33,6 +33,11 @@ function randBigInt(rng: () => number, maxExclusive: bigint): bigint {
 
 const UINT96_MAX = (1n << 96n) - 1n
 const DUMMY_TOKEN = '0x0000000000000000000000000000000000000001' as Address
+// Fixed minute-since-epoch anchor (~2025) so generated cases — and therefore
+// any reported divergence — are fully reproducible from the seed alone. The
+// arithmetic under test is clock-source-free, so there is no reason to anchor to
+// wall-clock time.
+const BASE_NOW_MIN = 29_000_000
 
 export interface AllowanceCase {
   seed: number
@@ -60,13 +65,12 @@ export function* generateAllowanceCases(
 
     const resetTimeMin = rng() < 0.25 ? 0 : randInt(rng, 1, 0xffff)
 
-    const nowMin = Math.floor(Date.now() / 1000 / 60)
-    const lastResetMin = randInt(rng, nowMin - 30 * 24 * 60, nowMin)
+    const lastResetMin = randInt(rng, BASE_NOW_MIN - 30 * 24 * 60, BASE_NOW_MIN)
 
     const info: AllowanceInfo = {
       token: DUMMY_TOKEN,
       amount,
-      spent: spent < 0n ? 0n : spent,
+      spent,
       resetTimeMin,
       lastResetMin,
       nonce: randInt(rng, 0, 0xffff),
@@ -77,7 +81,7 @@ export function* generateAllowanceCases(
     // plus sub-period jitter to probe the boundary.
     let blockTimeSec: number
     if (resetTimeMin === 0) {
-      blockTimeSec = Math.floor(Date.now() / 1000)
+      blockTimeSec = BASE_NOW_MIN * 60
     } else {
       const periodsAhead = randInt(rng, 0, 5)
       const jitterMin = randInt(rng, -2, 2)

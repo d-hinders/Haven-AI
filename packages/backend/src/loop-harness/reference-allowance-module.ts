@@ -7,13 +7,13 @@
  * off-chain mirror — `computeEffectiveAllowance` in
  * `../lib/allowance-module.ts` — is tested against this model.
  *
- * IMPORTANT — model fidelity is a Tier-2 concern.
- * Until certified by the fork-conformance suite
- * (`allowance-fork.conformance.test.ts`) against the live deployed contract,
- * a Tier-1 divergence is a *candidate* finding, not a confirmed bug. The one
- * exception is divergence caused purely by the CLOCK SOURCE: the contract can
- * only ever read `block.timestamp`, so any decision that flips based on the
- * relayer's wall clock is a real defect regardless of model fidelity.
+ * IMPORTANT — this model is not machine-certified against the live contract
+ * (that would need a forked-chain conformance run, which this repo does not
+ * currently set up). Treat a divergence from this model as a *candidate*
+ * finding to triage, not an automatically-confirmed bug — with one exception:
+ * divergence caused purely by the CLOCK SOURCE. The contract can only ever read
+ * `block.timestamp`, so any decision that flips based on the relayer's wall
+ * clock is a real defect regardless of model fidelity.
  *
  * On-chain logic being modelled (AllowanceModule.executeAllowanceTransfer →
  * the reset branch applied before the spend check):
@@ -59,16 +59,4 @@ export function referenceEffectiveAllowance(
 
   const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
   return { remaining, effectiveSpent: info.spent, isResetPending: false }
-}
-
-/**
- * The exact second at which the contract's reset branch flips from
- * "not pending" to "pending" for the given allowance, i.e. the first
- * `block.timestamp` for which `referenceEffectiveAllowance` reports a reset.
- *
- * Because the contract floors to the minute, the boundary always lands on a
- * minute edge: reset fires once `floor(ts/60) >= lastResetMin + resetTimeMin`.
- */
-export function referenceResetBoundarySec(info: AllowanceInfo): number {
-  return (info.lastResetMin + info.resetTimeMin) * 60
 }

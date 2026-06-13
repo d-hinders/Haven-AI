@@ -7,6 +7,7 @@ import { getChain, getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import {
   getTokenAllowance,
+  getLatestBlockTimeSec,
   computeEffectiveAllowance,
   generateTransferHash,
   recoverSigner,
@@ -133,15 +134,20 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       })
     }
 
-    // 5. On-chain allowance check
+    // 5. On-chain allowance check. Read the allowance and chain time together:
+    // the reset decision must key off chain `block.timestamp`, not wall-clock.
     let onChainAllowance
+    let chainTimeSec: number
     try {
-      onChainAllowance = await getTokenAllowance(
-        agent.chain_id,
-        agent.safe_address,
-        agent.delegate_address,
-        tokenAddress,
-      )
+      ;[onChainAllowance, chainTimeSec] = await Promise.all([
+        getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          tokenAddress,
+        ),
+        getLatestBlockTimeSec(agent.chain_id),
+      ])
     } catch (err) {
       return reply.code(502).send({
         error: 'Failed to read on-chain allowance',
@@ -149,7 +155,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       })
     }
 
-    const effective = computeEffectiveAllowance(onChainAllowance)
+    const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
     // 5a. Auto-queue for owner approval when the amount exceeds the on-chain
     // remaining allowance. Agents can request payments of any size — the

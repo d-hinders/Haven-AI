@@ -6,6 +6,7 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
+    getLatestBlockTimeSec: vi.fn(),
     computeEffectiveAllowance: vi.fn(),
     generateTransferHash: vi.fn(),
     recoverSigner: vi.fn(),

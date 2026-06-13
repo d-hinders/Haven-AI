@@ -131,6 +131,23 @@ export async function getTokenBalance(
 }
 
 /**
+ * Read the latest block timestamp (seconds) for a chain.
+ *
+ * This is the clock source for allowance reset decisions: it mirrors the
+ * `block.timestamp` the AllowanceModule will see when it applies its reset
+ * branch, unlike the relayer's wall clock (`Date.now()`) which can drift from
+ * chain time and flip the routing decision near a reset boundary.
+ */
+export async function getLatestBlockTimeSec(chainId: number): Promise<number> {
+  const provider = getProvider(chainId)
+  const block = await provider.getBlock('latest')
+  if (!block) {
+    throw new Error('Failed to read latest block for allowance reset timing')
+  }
+  return Number(block.timestamp)
+}
+
+/**
  * Read every token slot configured for a delegate on a Safe.
  */
 export async function getTokensForDelegate(
@@ -144,9 +161,20 @@ export async function getTokensForDelegate(
 }
 
 /**
- * Compute effective remaining allowance accounting for reset logic.
+ * Compute effective remaining allowance accounting for the AllowanceModule's
+ * reset logic.
+ *
+ * `nowSec` MUST be chain time — a block `timestamp` in seconds, e.g. from
+ * `getLatestBlockTimeSec` — NOT the relayer's wall clock. The on-chain reset
+ * branch keys off `block.timestamp`; deciding auto-execute-vs-queue against
+ * `Date.now()` lets server clock skew flip the decision near a reset boundary
+ * (skew ahead → false auto-execute → on-chain revert; skew behind → a valid
+ * in-budget payment is needlessly queued).
  */
-export function computeEffectiveAllowance(info: AllowanceInfo): EffectiveAllowance {
+export function computeEffectiveAllowance(
+  info: AllowanceInfo,
+  nowSec: number,
+): EffectiveAllowance {
   if (info.resetTimeMin === 0) {
     const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
     return { remaining, effectiveSpent: info.spent, isResetPending: false }
@@ -154,7 +182,6 @@ export function computeEffectiveAllowance(info: AllowanceInfo): EffectiveAllowan
 
   const lastResetSec = info.lastResetMin * 60
   const resetPeriodSec = info.resetTimeMin * 60
-  const nowSec = Math.floor(Date.now() / 1000)
 
   if (nowSec >= lastResetSec + resetPeriodSec) {
     return { remaining: info.amount, effectiveSpent: 0n, isResetPending: true }

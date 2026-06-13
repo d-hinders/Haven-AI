@@ -13,6 +13,7 @@ import {
 } from '../lib/machine-payment-evidence.js'
 import {
   getTokenAllowance,
+  getLatestBlockTimeSec,
   computeEffectiveAllowance,
   generateTransferHash,
 } from '../lib/allowance-module.js'
@@ -403,13 +404,16 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const allowances = []
     for (const row of result.rows) {
       try {
-        const onchain = await getTokenAllowance(
-          agent.chain_id,
-          agent.safe_address,
-          agent.delegate_address,
-          row.token_address,
-        )
-        const effective = computeEffectiveAllowance(onchain)
+        const [onchain, chainTimeSec] = await Promise.all([
+          getTokenAllowance(
+            agent.chain_id,
+            agent.safe_address,
+            agent.delegate_address,
+            row.token_address,
+          ),
+          getLatestBlockTimeSec(agent.chain_id),
+        ])
+        const effective = computeEffectiveAllowance(onchain, chainTimeSec)
 
         allowances.push({
           id: row.id,
@@ -547,15 +551,20 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       })
     }
 
-    // 5. On-chain allowance check
+    // 5. On-chain allowance check. Read the allowance and chain time together:
+    // the reset decision must key off chain `block.timestamp`, not wall-clock.
     let onChainAllowance
+    let chainTimeSec: number
     try {
-      onChainAllowance = await getTokenAllowance(
-        agent.chain_id,
-        agent.safe_address,
-        agent.delegate_address,
-        tokenAddress,
-      )
+      ;[onChainAllowance, chainTimeSec] = await Promise.all([
+        getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          tokenAddress,
+        ),
+        getLatestBlockTimeSec(agent.chain_id),
+      ])
     } catch (err) {
       return reply.code(502).send({
         error: 'Failed to read on-chain allowance',
@@ -563,7 +572,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       })
     }
 
-    const effective = computeEffectiveAllowance(onChainAllowance)
+    const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
     // 5a. Queue for approval when amount exceeds remaining on-chain allowance
     if (amountRaw > effective.remaining) {

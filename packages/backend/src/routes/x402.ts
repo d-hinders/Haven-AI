@@ -10,6 +10,7 @@ import { formatTokenValue } from '../lib/tokens.js'
 import {
   getTokenAllowance,
   getTokenBalance,
+  getLatestBlockTimeSec,
   computeEffectiveAllowance,
   generateTransferHash,
   recoverSigner,
@@ -460,13 +461,17 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
     // 6. On-chain allowance check + auto-queue when over the remaining allowance
     let onChainAllowance
+    let chainTimeSec: number
     try {
-      onChainAllowance = await getTokenAllowance(
-        agent.chain_id,
-        agent.safe_address,
-        agent.delegate_address,
-        tokenAddress,
-      )
+      ;[onChainAllowance, chainTimeSec] = await Promise.all([
+        getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          tokenAddress,
+        ),
+        getLatestBlockTimeSec(agent.chain_id),
+      ])
     } catch (err) {
       return reply.code(502).send({
         error: 'Failed to read on-chain allowance',
@@ -474,7 +479,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    const effective = computeEffectiveAllowance(onChainAllowance)
+    const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
     // Pre-flight: read the delegate's on-chain balance for this token before
     // doing anything that creates state. Even with a full Safe AllowanceModule

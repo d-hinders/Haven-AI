@@ -212,7 +212,7 @@ export function RuntimeConnectCard({
           {copyError === active.id && (
             <p
               role="alert"
-              className="text-[11px] leading-relaxed text-[var(--v2-danger)]"
+              className="text-xs leading-relaxed text-[var(--v2-danger)]"
             >
               Couldn’t copy automatically — select the snippet above and copy it
               by hand. The “credentials saved” step won’t unlock until the copy
@@ -221,7 +221,7 @@ export function RuntimeConnectCard({
           )}
 
           {/* Credential format note */}
-          <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+          <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
             {mode === 'inline'
               ? 'Credentials are embedded in the snippet — paste once and you\'re done. Your agent budget still caps what it can spend.'
               : 'The snippet references your saved credential file by path. No secret is stored in the configuration.'}
@@ -229,7 +229,7 @@ export function RuntimeConnectCard({
 
           {/* File-mode permission hint — the file holds a private key */}
           {mode === 'file' && (
-            <p className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+            <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
               After saving, restrict the file to your user:
               {' '}
               <span className="font-mono text-[var(--v2-ink-2)]">chmod 600</span>
@@ -244,10 +244,10 @@ export function RuntimeConnectCard({
           {/* Consent gate note — only for MCP-based runtimes */}
           {active.consentNote && (
             <div className="rounded-[8px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-3 py-2.5">
-              <p className="text-[11px] font-medium text-[var(--v2-warning)]">
+              <p className="text-xs font-medium text-[var(--v2-warning)]">
                 One-time setup required
               </p>
-              <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[var(--v2-warning)]">
+              <pre className="mt-1 whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--v2-warning)]">
                 {active.consentNote}
               </pre>
             </div>
@@ -255,7 +255,7 @@ export function RuntimeConnectCard({
 
           {/* Try it — Card.Section inset for secondary context */}
           <Card.Section inset className="py-3">
-            <p className="text-[11px] font-medium text-[var(--v2-ink-3)] uppercase tracking-tight">
+            <p className="text-xs font-medium text-[var(--v2-ink-3)] uppercase tracking-tight">
               Try it
             </p>
             <p className="mt-0.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">

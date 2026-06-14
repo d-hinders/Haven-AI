@@ -8,11 +8,11 @@ Haven is an agentic stablecoin payment wallet. Users create or link a Haven acco
 
 Before changing product UI, read these sources in order:
 
-1. `docs/UX_GUIDELINES.md` for product doctrine, IA, money movement, accessibility, and closeout checks.
-2. `docs/design_system/DESIGN_SYSTEM.md` for tokens, typography, cards, buttons, motion, and visual constraints.
-3. `docs/design_system/UX_COPY_GUIDELINES.md` for user-facing wording and banned technical language.
-4. `docs/ux/haven-screen-recipes.md` for repeatable screen structures.
-5. `docs/ux/haven-design-review.md` before finishing UI work.
+1. `docs/product/README.md` for product doctrine, IA, money movement, accessibility, and closeout checks.
+2. `docs/product/design-system.md` for tokens, typography, cards, buttons, motion, and visual constraints.
+3. `docs/product/copy-guidelines.md` for user-facing wording and banned technical language.
+4. `docs/product/screen-recipes.md` for repeatable screen structures.
+5. `docs/product/design-review.md` before finishing UI work.
 
 If `/design-system` exists, inspect it before editing UX and reuse the visual language shown there.
 
@@ -53,10 +53,10 @@ Before completing UI work:
 - Reuse shared primitives and Haven-domain components where possible.
 - Check mobile and desktop layouts.
 - Include empty, loading, error, and success states when the screen can enter them.
-- Review copy against `docs/design_system/UX_COPY_GUIDELINES.md`.
-- Review the changed UX against `docs/ux/haven-design-review.md`.
+- Review copy against `docs/product/copy-guidelines.md`.
+- Review the changed UX against `docs/product/design-review.md`.
 - Run relevant frontend tests or build checks when practical.
-- Run the **Captain Self-Check Preflight** in `docs/ai-agent-workflow.md` for the surfaces the diff touches (numeric formatters, counter/summary stats, conditional copy, animations, inline gates, cross-surface values, paginated-list-derived progress).
+- Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches (numeric formatters, counter/summary stats, conditional copy, animations, inline gates, cross-surface values, paginated-list-derived progress).
 - If browser verification is skipped (preview environment unavailable, slow, flaky), add at least one **headless equivalent** in vitest:
   - Animation/style bugs: assert the expected `className` is stable across state transitions.
   - Cross-surface display drift: assert the same shared formatter is imported and produces the same output for the fixture.
@@ -78,7 +78,7 @@ Green CI is necessary but not sufficient for changes that touch money movement, 
 
 ## Agentic Workflow
 
-When a user asks to build a feature, improve a UX flow from feedback, or fix a bug from a report, use `docs/ai-agent-workflow.md`.
+When a user asks to build a feature, improve a UX flow from feedback, or fix a bug from a report, use `docs/contributing/ai-agent-workflow.md`.
 
 Agentic delivery is the default decision path for non-trivial Haven work. This file is the user's standing instruction to use subagents, delegated workers, and parallel agent work whenever the captain decides that is the best workflow. The user does not need to explicitly ask to "use agents", "use workers", or "use parallel agents" on each request. Act as the captain, decide whether the agentic flow is useful from the task shape and risk, and proceed with it when it is the better workflow:
 

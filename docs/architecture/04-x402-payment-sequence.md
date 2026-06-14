@@ -74,7 +74,7 @@ sequenceDiagram
 
   Agent->>Resource: Request paid resource
   Resource-->>Agent: 402 Payment Required
-  Agent->>MCP: haven_x402_authorize { payment_required }
+  Agent->>MCP: haven_pay_x402_quote { payment_required }
   MCP->>API: Construct funding intent
   API-->>MCP: { payment_id, payload_hash, x402.expected } or pending_approval
   MCP-->>Agent: Unsigned funding context

@@ -11,6 +11,7 @@ import { getFiatValuesForTokenAmount } from './fiat-values.js'
 import { formatTokenValue } from './tokens.js'
 import {
   getTokenAllowance,
+  getLatestBlockTimeSec,
   computeEffectiveAllowance,
   generateTransferHash,
   recoverSigner,
@@ -571,13 +572,17 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   }
 
   let onChainAllowance
+  let chainTimeSec: number
   try {
-    onChainAllowance = await getTokenAllowance(
-      agent.chain_id,
-      agent.safe_address,
-      agent.delegate_address,
-      tokenAddress,
-    )
+    ;[onChainAllowance, chainTimeSec] = await Promise.all([
+      getTokenAllowance(
+        agent.chain_id,
+        agent.safe_address,
+        agent.delegate_address,
+        tokenAddress,
+      ),
+      getLatestBlockTimeSec(agent.chain_id),
+    ])
   } catch (err) {
     return {
       statusCode: 502,
@@ -588,7 +593,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  const effective = computeEffectiveAllowance(onChainAllowance)
+  const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
   if (amountRaw > effective.remaining) {
     const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
     const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''

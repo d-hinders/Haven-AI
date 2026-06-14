@@ -66,7 +66,7 @@ export default function DashboardActionPickerModal({
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-[var(--v2-ink)] truncate">{safe.name}</span>
                     {safe.is_default && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
+                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
                         Default
                       </span>
                     )}

@@ -14,9 +14,13 @@
  *    runnable example using @haven_ai/sdk with env-filled credentials. This
  *    is NOT the skill and must never be presented as one.
  *
- * KEEP IN SYNC: packages/connect/src/skill-content.ts ships the exact same
- * skill content for connector auto-install. Both sides assert genericness in
- * their tests.
+ * Canonical copy lives in packages/sdk/src/skill-content.ts (the SDK is the
+ * single source of truth, consumed directly by packages/connect for connector
+ * auto-install). This inline copy is deliberately decoupled: frontend keeps
+ * zero @haven_ai/* dependencies so it can deploy standalone on Vercel without
+ * an unpublished SDK export. The parity test in
+ * __tests__/agent-skill-bundle.test.ts imports the canonical string from the
+ * SDK source and asserts byte-for-byte equality, so the two cannot drift.
  */
 
 import JSZip from 'jszip'

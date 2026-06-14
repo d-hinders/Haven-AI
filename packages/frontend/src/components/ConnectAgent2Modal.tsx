@@ -314,6 +314,7 @@ export default function ConnectAgent2Modal({
     setCancelled(false)
     setApproving(false)
     setApprovalError(null)
+    setManualPathRevealed(false)
     setManualFallbackConfirmed(false)
     setManualCredential(null)
     setManualCredentialAcknowledged(false)

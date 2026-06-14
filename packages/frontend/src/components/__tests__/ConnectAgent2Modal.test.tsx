@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -184,6 +185,24 @@ function renderModal({
     />,
   )
   return { onClose }
+}
+
+function ReopenableModal() {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Reopen modal
+      </button>
+      <ConnectAgent2Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        safeAddress={SAFE.safe_address}
+        safeId={SAFE.id}
+      />
+    </>
+  )
 }
 
 async function fillAndCreateSetup() {
@@ -985,6 +1004,37 @@ describe('ConnectAgent2Modal', () => {
       await Promise.resolve()
     })
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining(MANUAL_DELEGATE_PRIVATE_KEY))
+  })
+
+  it('resets the manual fallback reveal after closing and reopening the modal', async () => {
+    mockApiPost.mockImplementation(async (path: string) => {
+      if (path === '/agent-connection-setups') {
+        return {
+          setup_id: 'setup-1',
+          status: 'awaiting_connection',
+          setup_token: 'hv_setup_abc',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: 'npx -y @haven_ai/connect@alpha --setup hv_setup_abc --api https://api.haven.example --ack-local-tools --runtime claude-code',
+          setup_prompt: SETUP_PROMPT,
+        }
+      }
+      return {}
+    })
+
+    render(<ReopenableModal />)
+
+    await fillAndCreateSetup()
+    fireEvent.click(screen.getByText('Manual credential fallback'))
+    fireEvent.click(screen.getByRole('button', { name: /I really can't run the connector/i }))
+    expect(screen.getByLabelText(/I understand this fallback shows/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen modal' }))
+
+    await fillAndCreateSetup()
+    fireEvent.click(screen.getByText('Manual credential fallback'))
+    expect(screen.getByRole('button', { name: /I really can't run the connector/i })).toBeInTheDocument()
+    expect(screen.queryByLabelText(/I understand this fallback shows/i)).not.toBeInTheDocument()
   })
 
   it('runs one deterministic fallback setup from registration proof to wallet approval request', async () => {

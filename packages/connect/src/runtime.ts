@@ -20,7 +20,7 @@ import {
 } from './runtime-install.js'
 import { normalizeRuntime, runtimeProfile, runtimeRequiresHardRestart } from './runtime-registry.js'
 
-export const CONNECTOR_VERSION = '0.1.11-alpha.0'
+export const CONNECTOR_VERSION = '0.1.12-alpha.0'
 
 export interface ConnectOptions {
   setupToken: string

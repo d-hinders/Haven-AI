@@ -28,7 +28,7 @@
   "scripts": {
     "build": "npm --prefix ../mcp run build && npm --prefix ../signer run build && tsup && node ../../scripts/verify-connect-bundle.mjs",
     "test": "npm --prefix ../mcp run build && npm --prefix ../signer run build && vitest run",
-    "smoke:pack": "npm --prefix ../sdk run build && npm --prefix ../mcp run build && HAVEN_CONNECT_PACKAGE_SMOKE=1 vitest run src/package-smoke.test.ts",
+    "smoke:pack": "npm --prefix ../sdk run build && npm --prefix ../mcp run build && npm --prefix ../signer run build && HAVEN_CONNECT_PACKAGE_SMOKE=1 vitest run src/package-smoke.test.ts",
     "typecheck": "npm --prefix ../mcp run build && npm --prefix ../signer run build && tsc --noEmit"
   },
   "keywords": [

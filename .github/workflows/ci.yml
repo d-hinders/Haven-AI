@@ -328,8 +328,8 @@ jobs:
 
       - name: Run install-path smoke tests
         # HAVEN_CONNECT_PACKAGE_SMOKE=1 enables the describeSmoke block.
-        # smoke:pack also rebuilds sdk + mcp before running so the tarballs
-        # contain fresh dist output — belt and suspenders.
+        # smoke:pack also rebuilds sdk + mcp + signer before running so the
+        # tarballs contain fresh dist output — belt and suspenders.
         run: npm run smoke:pack -w packages/connect
 
   mcp_server_checks:

@@ -106,6 +106,57 @@ describe('MCP_VERSION constant parity', () => {
   })
 })
 
+// ── Always-run: no wildcard internal deps in published packages ───────────────
+// The signer@0.1.10-alpha.0 outage came from `"@haven_ai/sdk": "*"`: in-repo
+// `*` resolves to the workspace SDK (green), but a fresh `npx` install resolves
+// it to whatever the registry serves — an SDK without the `decodeBase64Json`
+// export, crashing the signer on startup. This static check fails CI the moment
+// any published package reintroduces a wildcard internal dep, with no packing
+// or network. It mirrors verifyNoWildcardInternalDeps() in scripts/release-bump.mjs.
+describe('published packages pin internal @haven_ai/* deps', () => {
+  // Packages whose published/deployed artifact resolves @haven_ai/* deps from
+  // outside the workspace. Keep in sync with PUBLISHED_PACKAGES in the release script.
+  const PUBLISHED_PACKAGES = ['sdk', 'signer', 'mcp', 'mcp-server', 'connect']
+
+  const isWildcardRange = (range: string): boolean =>
+    range === '*' ||
+    range === 'latest' ||
+    range === 'x' ||
+    range === '' ||
+    range.includes('*') ||
+    range.startsWith('workspace:')
+
+  it.each(PUBLISHED_PACKAGES)(
+    'packages/%s declares no wildcard internal @haven_ai/* dependency',
+    async (name) => {
+      const pkgPath = fileURLToPath(new URL(`../../${name}/package.json`, import.meta.url))
+      const data = JSON.parse(await readFile(pkgPath, 'utf8')) as Record<string, Record<string, string>>
+
+      const violations: string[] = []
+      for (const depType of ['dependencies', 'devDependencies', 'peerDependencies']) {
+        const deps = data[depType]
+        if (!deps) continue
+        for (const [depName, range] of Object.entries(deps)) {
+          if (depName.startsWith('@haven_ai/') && isWildcardRange(range)) {
+            violations.push(`${depType}.${depName} = "${range}"`)
+          }
+        }
+      }
+
+      expect(
+        violations,
+        [
+          `packages/${name}/package.json pins internal @haven_ai/* deps to a wildcard:`,
+          violations.join(', ') + '.',
+          'A wildcard resolves to the workspace sibling in-repo but to an arbitrary',
+          'registry version on a fresh install. Pin a concrete version instead',
+          '(the release script keeps these in lockstep).',
+        ].join(' '),
+      ).toEqual([])
+    },
+  )
+})
+
 // ── Pack-and-install smoke tests ──────────────────────────────────────────────
 describeSmoke('published package smoke', () => {
   // Shared state populated by beforeAll.
@@ -357,11 +408,47 @@ describeSmoke('published package smoke', () => {
     )
     expect(probe.status, `MCP tools probe failed with status "${probe.status}"`).toBe('ok')
   }, 60_000)
+
+  // ── 4. Edge signer launches from packed tarballs ─────────────────────────
+  // Packs @haven_ai/sdk + @haven_ai/signer, lays them out in an isolated
+  // node_modules (no workspace symlinks for the Haven packages), and launches
+  // the signer CLI. `--help` exits 0 only after the entire module graph loads.
+  // The decodeBase64Json outage was an ES-module link-time SyntaxError — it
+  // aborts before --help can print — so a clean exit here proves the packed
+  // signer resolves a compatible packed SDK rather than crashing on import.
+  it('edge signer from packed tarballs launches without an import crash', async () => {
+    const signerRoot = join(tempDir, 'signer-launch')
+    const packDir = join(signerRoot, 'packs')
+    const cacheDir = join(signerRoot, 'pack-npm-cache')
+    const nodeModules = join(signerRoot, 'node_modules')
+    await mkdir(packDir, { recursive: true })
+    await mkdir(cacheDir, { recursive: true, mode: 0o700 })
+
+    const sdkTarball = await npmPack(packageDir('sdk'), packDir, cacheDir)
+    const signerTarball = await npmPack(packageDir('signer'), packDir, cacheDir)
+    await extractPackageTarball(sdkTarball, join(nodeModules, '@haven_ai', 'sdk'))
+    await extractPackageTarball(signerTarball, join(nodeModules, '@haven_ai', 'signer'))
+    // The signer pulls in the SDK, which imports ethers at module load.
+    for (const dependency of ['@modelcontextprotocol', 'ethers', 'viem', 'x402', 'zod']) {
+      await linkWorkspaceDependency(nodeModules, dependency)
+    }
+
+    const signerCli = join(nodeModules, '@haven_ai', 'signer', 'dist', 'cli.js')
+    const { stdout } = await execFileAsync('node', [signerCli, '--help'], {
+      cwd: signerRoot,
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+    })
+    expect(
+      stdout,
+      'signer --help should print its usage, proving the module graph (including @haven_ai/sdk) loaded',
+    ).toContain('--credentials')
+  }, 60_000)
 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function packageDir(name: 'sdk' | 'mcp'): string {
+function packageDir(name: 'sdk' | 'mcp' | 'signer'): string {
   return fileURLToPath(new URL(`../../${name}/`, import.meta.url))
 }
 

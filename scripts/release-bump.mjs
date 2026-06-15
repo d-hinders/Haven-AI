@@ -36,9 +36,42 @@ const pkg = (name) => join(ROOT, 'packages', name, 'package.json')
 
 const PACKAGES = ['sdk', 'signer', 'mcp', 'connect']
 
+// Every package whose published/deployed artifact resolves @haven_ai/* deps
+// from outside the workspace (fresh `npx` install or container build). These
+// MUST pin internal deps to a concrete version — a `*` / `latest` / `workspace:*`
+// range resolves to the workspace sibling in-repo (green) but to whatever the
+// registry serves on a user's machine (the signer@0.1.10-alpha.0 / sdk crash
+// that motivated this guard). `mcp-server` is Docker-deployed rather than
+// npx-installed, but it is not private, so it is held to the same rule.
+const PUBLISHED_PACKAGES = ['sdk', 'signer', 'mcp', 'mcp-server', 'connect']
+
+// Dep ranges that are forbidden for an internal @haven_ai/* dependency in any
+// published package, because none of them pin a concrete co-released version.
+function isWildcardRange(range) {
+  return (
+    range === '*' ||
+    range === 'latest' ||
+    range === 'x' ||
+    range === '' ||
+    range.includes('*') ||
+    range.startsWith('workspace:')
+  )
+}
+
 // Source files that contain inlined version literals.
 const MCP_SERVER_TS    = join(ROOT, 'packages', 'mcp', 'src', 'server.ts')
 const RUNTIME_MANIFEST = join(ROOT, 'packages', 'connect', 'src', 'runtime-manifest.ts')
+
+// Source-level version constants that must stay in lockstep with the release.
+// Each is an `export const NAME = '...'` literal. They are self-reported
+// versions (MCP/server handshake `version` field, connector `--version`),
+// not dependency ranges — but they drift on every release if not rewritten
+// here, so the bump is only atomic if the script owns them all.
+const SOURCE_VERSION_CONSTANTS = [
+  { name: 'SIGNER_VERSION',        file: join(ROOT, 'packages', 'signer', 'src', 'server.ts'),     label: 'packages/signer/src/server.ts' },
+  { name: 'HOSTED_SERVER_VERSION', file: join(ROOT, 'packages', 'mcp-server', 'src', 'server.ts'), label: 'packages/mcp-server/src/server.ts' },
+  { name: 'CONNECTOR_VERSION',     file: join(ROOT, 'packages', 'connect', 'src', 'runtime.ts'),   label: 'packages/connect/src/runtime.ts' },
+]
 
 // ── Semver helpers ────────────────────────────────────────────────────────────
 
@@ -99,6 +132,41 @@ async function updateDepPin(packageName, depName, newVersion) {
   }
 
   await writeJson(path, data)
+}
+
+/**
+ * Replace an `export const NAME = '...'` string literal in a source file.
+ * Used for the self-reported version constants in SOURCE_VERSION_CONSTANTS.
+ */
+async function updateSourceVersionConstant({ name, file, label }, newVersion) {
+  const source = await readFile(file, 'utf8')
+  const updated = source.replace(
+    new RegExp(`^(export const ${name}\\s*=\\s*)(['"]).*?\\2`, 'm'),
+    `$1$2${newVersion}$2`,
+  )
+  if (updated === source) {
+    die(`Could not find ${name} constant in ${label}. Pattern: export const ${name} = '...'`)
+  }
+  await writeFile(file, updated, 'utf8')
+  log(`  ${name} → '${newVersion}' in ${label}`)
+}
+
+/**
+ * Verify each SOURCE_VERSION_CONSTANTS entry now reads the new version.
+ * Guards against a constant being renamed/moved so the regex silently misses it.
+ */
+async function verifySourceVersionConstants(newVersion) {
+  for (const entry of SOURCE_VERSION_CONSTANTS) {
+    const source = await readFile(entry.file, 'utf8')
+    const match = source.match(new RegExp(`export const ${entry.name}\\s*=\\s*(['"])(.+?)\\1`))
+    if (!match || match[2] !== newVersion) {
+      die(
+        `Verification failed: ${entry.name} in ${entry.label} is ` +
+        `'${match ? match[2] : '<not found>'}' but should be '${newVersion}'.`,
+      )
+    }
+    log(`  ✓ ${entry.name} = '${newVersion}' in ${entry.label}`)
+  }
 }
 
 /**
@@ -166,6 +234,39 @@ async function wipeAllDists() {
 }
 
 // ── Verification ──────────────────────────────────────────────────────────────
+
+/**
+ * Fail the release if any published package declares a wildcard range
+ * (`*`, `latest`, `workspace:*`, anything containing `*`) for an internal
+ * `@haven_ai/*` dependency. Such ranges resolve to the workspace sibling
+ * in-repo but to an arbitrary registry version on a fresh install — exactly
+ * how signer@0.1.10-alpha.0 shipped pointing at an SDK without the
+ * `decodeBase64Json` export.
+ */
+async function verifyNoWildcardInternalDeps() {
+  const violations = []
+  for (const name of PUBLISHED_PACKAGES) {
+    const data = await readJson(pkg(name))
+    for (const depType of ['dependencies', 'devDependencies', 'peerDependencies']) {
+      const deps = data[depType]
+      if (!deps) continue
+      for (const [depName, range] of Object.entries(deps)) {
+        if (depName.startsWith('@haven_ai/') && isWildcardRange(range)) {
+          violations.push(`  ${data.name} → ${depType}.${depName} = "${range}"`)
+        }
+      }
+    }
+  }
+  if (violations.length > 0) {
+    die(
+      'Wildcard internal dependency range(s) found in published package(s):\n' +
+      violations.join('\n') + '\n\n' +
+      'Internal @haven_ai/* deps must pin a concrete version so a fresh install\n' +
+      'resolves the co-released package, not whatever the registry serves.',
+    )
+  }
+  log('  ✓ no wildcard internal @haven_ai/* deps in published packages')
+}
 
 /**
  * Verify that connect's built dist contains the expected sdkVersion and
@@ -242,10 +343,12 @@ async function main() {
 
   // ── 2. Preview + confirm ──────────────────────────────────────────────────
   header('Changes to be applied')
-  log(`  All four packages: ${currentVersion} → ${newVersion}`)
+  log(`  All published packages (${PUBLISHED_PACKAGES.join(', ')}): ${currentVersion} → ${newVersion}`)
   log(`  Cross-package pins updated to ${newVersion}`)
   log(`  MCP_VERSION = '${newVersion}'  (packages/mcp/src/server.ts)`)
   log(`  sdkVersion + signerVersion = '${newVersion}'  (packages/connect/src/runtime-manifest.ts)`)
+  log(`  ${SOURCE_VERSION_CONSTANTS.map((c) => c.name).join(', ')} = '${newVersion}'`)
+  log(`  no wildcard internal @haven_ai/* deps (verified)`)
   log(`  dist directories wiped, packages rebuilt in order: sdk → signer → mcp → connect`)
 
   if (!process.argv.includes('--yes') && process.stdout.isTTY) {
@@ -264,17 +367,33 @@ async function main() {
   }
 
   // ── 3. Update package.json versions ──────────────────────────────────────
+  // All published packages move to the same version number in lockstep.
+  // mcp-server is bumped here for version coherence (it pairs with its
+  // HOSTED_SERVER_VERSION constant) even though build/publish below is scoped
+  // to PACKAGES — it is Docker-deployed from source, not npm-published here.
   header('Updating package.json versions')
-  for (const name of PACKAGES) {
+  for (const name of PUBLISHED_PACKAGES) {
     await updatePackageVersion(name, newVersion)
   }
 
   // ── 4. Update cross-package dep pins ─────────────────────────────────────
   header('Updating cross-package dependency pins')
 
+  // signer depends on sdk (exact pin). MUST be rewritten: the signer is
+  // npx-installed standalone, so a stale `*` here resolves to whatever the
+  // registry serves rather than the co-released SDK (the bug this guards).
+  await updateDepPin('signer', '@haven_ai/sdk', newVersion)
+  log(`  packages/signer: @haven_ai/sdk → "${newVersion}"`)
+
   // mcp depends on sdk (exact pin)
   await updateDepPin('mcp', '@haven_ai/sdk', newVersion)
   log(`  packages/mcp: @haven_ai/sdk → "${newVersion}"`)
+
+  // mcp-server depends on sdk (runtime) + signer (dev). Docker-deployed, but
+  // pinned so the hosted build tracks the released SDK/signer.
+  await updateDepPin('mcp-server', '@haven_ai/sdk', newVersion)
+  await updateDepPin('mcp-server', '@haven_ai/signer', newVersion)
+  log(`  packages/mcp-server: @haven_ai/sdk, @haven_ai/signer → "${newVersion}"`)
 
   // connect depends on sdk, mcp, signer (exact pins)
   await updateDepPin('connect', '@haven_ai/sdk', newVersion)
@@ -282,10 +401,17 @@ async function main() {
   await updateDepPin('connect', '@haven_ai/signer', newVersion)
   log(`  packages/connect: @haven_ai/sdk, @haven_ai/mcp, @haven_ai/signer → "${newVersion}"`)
 
+  // Guard: after rewriting pins, no published package may still carry a
+  // wildcard internal dep. Fail loudly here rather than discover it post-publish.
+  await verifyNoWildcardInternalDeps()
+
   // ── 5. Update source-code version constants ───────────────────────────────
   header('Updating source-code version constants')
   await updateMcpVersionConstant(newVersion)
   await updateRuntimeManifest(newVersion)
+  for (const entry of SOURCE_VERSION_CONSTANTS) {
+    await updateSourceVersionConstant(entry, newVersion)
+  }
 
   // ── 6. Wipe all dists ────────────────────────────────────────────────────
   header('Wiping dist directories')
@@ -312,6 +438,7 @@ async function main() {
   // ── 9. Verify bundle ──────────────────────────────────────────────────────
   header('Verifying connect bundle')
   await verifyConnectBundle(newVersion)
+  await verifySourceVersionConstants(newVersion)
 
   // Strong build-order check: the dedicated verifier require()s the built
   // bundle and compares its runtime-resolved mcpVersion against the

@@ -1,0 +1,112 @@
+name: Publish npm alpha packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Version to publish. Must match all four package.json files.
+        required: true
+        default: 0.1.10-alpha.0
+      tag:
+        description: npm dist-tag to publish.
+        required: true
+        default: alpha
+        type: choice
+        options:
+          - alpha
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-alpha-publish-${{ inputs.expected_version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish npm alpha packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release version inputs
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          NPM_TAG: ${{ inputs.tag }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+
+          const expected = process.env.EXPECTED_VERSION
+          const tag = process.env.NPM_TAG
+          const workspaces = ['sdk', 'signer', 'mcp', 'connect']
+
+          if (tag !== 'alpha') {
+            throw new Error(`Refusing to publish with unsupported tag "${tag}".`)
+          }
+
+          for (const workspace of workspaces) {
+            const pkg = JSON.parse(readFileSync(`packages/${workspace}/package.json`, 'utf8'))
+            if (pkg.version !== expected) {
+              throw new Error(`${pkg.name} is ${pkg.version}, expected ${expected}.`)
+            }
+            console.log(`${pkg.name}@${pkg.version}`)
+          }
+          NODE
+
+      - name: Run SDK tests
+        run: npm run test -w packages/sdk
+
+      - name: Run signer tests
+        run: npm run test -w packages/signer
+
+      - name: Run MCP tests
+        run: npm run test -w packages/mcp
+
+      - name: Run connect tests
+        run: npm run test -w packages/connect
+
+      - name: Run connect package smoke
+        run: npm run smoke:pack -w packages/connect
+
+      - name: Build publish artifacts
+        run: |
+          npm run build -w packages/sdk
+          npm run build -w packages/signer
+          npm run build -w packages/mcp
+          npm run build -w packages/connect
+
+      - name: Publish packages
+        env:
+          NPM_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          for workspace in sdk signer mcp connect; do
+            package_dir="packages/${workspace}"
+            package_name="$(node -p "require('./${package_dir}/package.json').name")"
+            package_version="$(node -p "require('./${package_dir}/package.json').version")"
+
+            if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+              echo "${package_name}@${package_version} is already published; skipping."
+              continue
+            fi
+
+            npm publish -w "${package_dir}" --tag "${NPM_TAG}" --provenance
+          done

@@ -40,6 +40,35 @@ describe('writeCredentialFiles', () => {
     }
   })
 
+  it('writes x402_binding_signer into signer.json when provided, and omits it otherwise', async () => {
+    const bindingSigner = '0x3b35f00021032F6cC8ad20bd136BD945DAd04d04'
+
+    const withBinding = await writeCredentialFiles({
+      baseDir: await mkdtemp(join(tmpdir(), 'haven-connect-binding-')),
+      agentId: 'agent-binding',
+      apiKey: 'sk_agent_b',
+      delegateKey: `0x${'22'.repeat(32)}`,
+      delegateAddress: '0x2222222222222222222222222222222222222222',
+      apiUrl: 'https://api.haven.example',
+      hostedMcpUrl: 'https://mcp.haven.example/v1',
+      x402BindingSigner: bindingSigner,
+    })
+    const signerWith = JSON.parse(await readFile(withBinding.signerPath, 'utf8'))
+    expect(signerWith.x402_binding_signer).toBe(bindingSigner)
+
+    const withoutBinding = await writeCredentialFiles({
+      baseDir: await mkdtemp(join(tmpdir(), 'haven-connect-nobinding-')),
+      agentId: 'agent-nobinding',
+      apiKey: 'sk_agent_n',
+      delegateKey: `0x${'33'.repeat(32)}`,
+      delegateAddress: '0x3333333333333333333333333333333333333333',
+      apiUrl: 'https://api.haven.example',
+      hostedMcpUrl: 'https://mcp.haven.example/v1',
+    })
+    const signerWithout = JSON.parse(await readFile(withoutBinding.signerPath, 'utf8'))
+    expect('x402_binding_signer' in signerWithout).toBe(false)
+  })
+
   it('does not overwrite an existing credential file', async () => {
     const baseDir = await mkdtemp(join(tmpdir(), 'haven-connect-existing-'))
     const input = {

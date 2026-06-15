@@ -125,10 +125,21 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     })),
     apiUrl: options.apiBaseUrl,
     hostedMcpUrl: registration.hosted_mcp_url,
+    x402BindingSigner: setup.x402_binding_signer ?? undefined,
     warn: log,
   })
   log(`Stored Haven identity credential locally: ${credentialPaths.identityPath}`)
   log(`Stored local signer credential locally: ${credentialPaths.signerPath}`)
+  if (setup.x402_binding_signer) {
+    log('Configured x402 binding signer for the local signer.')
+  } else {
+    // Fail loud here rather than silently at x402 sign time: without a trusted
+    // binding signer the edge signer refuses to sign x402 funding hashes.
+    log(
+      'Warning: Haven did not provide an x402 binding signer, so x402 payments will not sign ' +
+        'until HAVEN_X402_BINDING_SIGNER is set for the signer. Non-x402 payments are unaffected.',
+    )
+  }
 
   const runtimeInstall = await runRuntimeInstall({
     runtime: options.runtime,

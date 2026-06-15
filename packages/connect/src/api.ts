@@ -73,6 +73,9 @@ export interface ResolvedSetup {
     reset_period_min: number
   }>
   hosted_mcp_url: string
+  // Address the edge signer verifies x402 expected-context signatures against.
+  // null/absent when the backend has no x402 binding key configured.
+  x402_binding_signer?: string | null
   challenge: {
     id: string
     message: string

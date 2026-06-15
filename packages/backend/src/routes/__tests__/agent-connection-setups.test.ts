@@ -532,17 +532,29 @@ describe('agent connection setup routes', () => {
     )
     expect(insertedSetup?.[1]).not.toContain(created.setup_token)
 
-    const resolveResponse = await app.inject({
-      method: 'POST',
-      url: '/agent-connection-setups/resolve',
-      payload: {
-        setup_token: created.setup_token,
-        connector_version: '0.1.0',
-        runtime: 'claude-code',
-      },
-    })
-    expect(resolveResponse.statusCode).toBe(200)
-    const resolved = resolveResponse.json()
+    // The resolve response must carry the x402 binding signer so the connector
+    // can write it into signer.json (else the edge signer refuses to sign x402).
+    const BINDING_SIGNER = '0x3b35f00021032F6cC8ad20bd136BD945DAd04d04'
+    const priorBindingSigner = process.env.HAVEN_X402_BINDING_SIGNER
+    process.env.HAVEN_X402_BINDING_SIGNER = BINDING_SIGNER
+    let resolved: Record<string, any>
+    try {
+      const resolveResponse = await app.inject({
+        method: 'POST',
+        url: '/agent-connection-setups/resolve',
+        payload: {
+          setup_token: created.setup_token,
+          connector_version: '0.1.0',
+          runtime: 'claude-code',
+        },
+      })
+      expect(resolveResponse.statusCode).toBe(200)
+      resolved = resolveResponse.json()
+      expect(resolved.x402_binding_signer).toBe(BINDING_SIGNER)
+    } finally {
+      if (priorBindingSigner === undefined) delete process.env.HAVEN_X402_BINDING_SIGNER
+      else process.env.HAVEN_X402_BINDING_SIGNER = priorBindingSigner
+    }
     expect(resolved.challenge.message).toBe(setupRows[0].challenge_message)
     expect(JSON.stringify(resolved)).not.toMatch(/api_key|delegate_key|private_key|privateKey/)
 

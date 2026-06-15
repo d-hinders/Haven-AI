@@ -25,6 +25,7 @@ export interface WriteCredentialInput {
   }>
   apiUrl: string
   hostedMcpUrl: string
+  x402BindingSigner?: string
   warn?: (message: string) => void
 }
 
@@ -70,6 +71,7 @@ export async function writeCredentialFiles(input: WriteCredentialInput): Promise
         safe_address: input.safeAddress,
         chain_id: input.chainId,
       network: input.network,
+      x402_binding_signer: input.x402BindingSigner,
       note: 'Local signer credential. Haven backend never receives this private key.',
     },
     input.warn,

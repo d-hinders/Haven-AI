@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'crypto'
+import { ethers } from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import {
@@ -1073,6 +1074,7 @@ function buildConnectorSetupResponse(setup: SetupRow, allowances: AllowanceRow[]
       reset_period_min: allowance.reset_period_min,
     })),
     hosted_mcp_url: hostedMcpUrl(),
+    x402_binding_signer: x402BindingSignerAddress(),
     challenge: {
       id: setup.challenge_id,
       message: setup.challenge_message,
@@ -1181,6 +1183,35 @@ function hostedMcpUrl(): string {
     process.env.NEXT_PUBLIC_HAVEN_MCP_URL ??
     DEFAULT_HOSTED_MCP_URL
   ).replace(/\/+$/, '')
+}
+
+// Address of the dedicated x402 binding key the backend signs expected-context
+// with (X402_BINDING_PRIVATE_KEY). The edge signer must verify expected-context
+// signatures against this address before signing an x402 funding hash, so we
+// hand it to the connector at setup time to write into signer.json — otherwise
+// the signer has no trusted verifier and refuses to sign x402 payments. Returns
+// null when x402 binding is not configured on this deployment (the field is
+// then omitted from the setup response). HAVEN_X402_BINDING_SIGNER overrides the
+// derived address for deployments that hold only the public address here. Read
+// fresh per call — /resolve is a low-frequency connect-time endpoint.
+function x402BindingSignerAddress(): string | null {
+  const explicit = process.env.HAVEN_X402_BINDING_SIGNER?.trim()
+  if (explicit) {
+    try {
+      return ethers.getAddress(explicit)
+    } catch {
+      console.warn('HAVEN_X402_BINDING_SIGNER is not a valid address; ignoring.')
+    }
+  }
+
+  const privateKey = process.env.X402_BINDING_PRIVATE_KEY?.trim()
+  if (!privateKey) return null
+  try {
+    return new ethers.Wallet(privateKey).address
+  } catch {
+    console.warn('X402_BINDING_PRIVATE_KEY is set but invalid; cannot derive the x402 binding signer.')
+    return null
+  }
 }
 
 function extractAgentApiKey(request: FastifyRequest): string | null {

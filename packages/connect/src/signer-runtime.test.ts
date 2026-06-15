@@ -1,9 +1,13 @@
+import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { describe, expect, it, vi } from 'vitest'
 import { prepareSignerRuntime } from './signer-runtime.js'
 import { MCP_RUNTIME_MANIFEST, sdkPackageSpec, signerPackageSpec } from './runtime-manifest.js'
+
+const execFileAsync = promisify(execFile)
 
 // Pull the pinned versions from the manifest so a release bump can't silently
 // desync this test from the layout prepareSignerRuntime installs.
@@ -47,7 +51,7 @@ describe('prepareSignerRuntime', () => {
       sdkPackageSpec(),
     ]))
     // Registered command is the absolute wrapper, not a runtime npx invocation.
-    expect(result.command).toBe(join(credentialDirectory, 'bin', 'haven-signer'))
+    expect(result.command).toBe(join(credentialDirectory, 'bin', 'haven-signer.mjs'))
     expect(result.args).toEqual([])
 
     const wrapper = await readFile(result.wrapperPath, 'utf8')
@@ -61,6 +65,31 @@ describe('prepareSignerRuntime', () => {
     const sidecar = await readFile(join(credentialDirectory, 'signer-runtime.json'), 'utf8')
     expect(sidecar).toContain(PINNED_SIGNER_VERSION)
     expect(sidecar).not.toContain(PRIVATE_KEY)
+  })
+
+  it('the generated wrapper is directly executable and forwards --credentials + extra args to the CLI', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-signer-runtime-exec-'))
+    const credentialDirectory = join(homeDir, '.haven', 'agents', 'agent-1')
+    const signerPath = join(credentialDirectory, 'signer.json')
+    await mkdir(credentialDirectory, { recursive: true })
+    await writeFile(signerPath, JSON.stringify({ delegate_key: PRIVATE_KEY }), 'utf8')
+
+    // Stand in for the signer CLI: echo the argv the wrapper hands it.
+    const runCommand = vi.fn(async () => {
+      const cliPath = signerNodeModule(homeDir, 'signer', 'dist', 'cli.js')
+      await mkdir(join(cliPath, '..'), { recursive: true })
+      await writeFile(cliPath, 'console.log(JSON.stringify(process.argv.slice(2)))\n', 'utf8')
+      await writePackage(signerNodeModule(homeDir, 'signer', 'package.json'), PINNED_SIGNER_VERSION)
+      await writePackage(signerNodeModule(homeDir, 'sdk', 'package.json'), PINNED_SDK_VERSION)
+    })
+
+    const result = await prepareSignerRuntime({ credentialDirectory, signerPath, homeDir }, { runCommand })
+
+    // Exec the wrapper directly (relying on its shebang + exec bit), the way an
+    // agent runtime spawns an MCP stdio command — not via `node <wrapper>`.
+    const { stdout } = await execFileAsync(result.command, ['--extra-flag'], { timeout: 15_000 })
+    const forwarded = JSON.parse(stdout.trim()) as string[]
+    expect(forwarded).toEqual(['--credentials', signerPath, '--extra-flag'])
   })
 
   it('reuses the cached runtime when the pinned versions already match', async () => {

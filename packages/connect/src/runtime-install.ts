@@ -71,6 +71,14 @@ export interface RuntimeInstallResult {
   localMcpAcknowledged?: boolean
   activationCommand?: string
   skillInstalled?: boolean
+  /**
+   * Hosted topology only: true when the signer was pre-installed and registered
+   * via its absolute wrapper, false when prep failed and it fell back to the
+   * fragile runtime-`npx` launch. Undefined for local/manual topologies that
+   * do not run the signer as a separate MCP. Lets callers/tests detect the
+   * silent npx fallback instead of treating every write as fully healthy.
+   */
+  signerRuntimePrepared?: boolean
   messages: string[]
 }
 
@@ -179,6 +187,7 @@ export async function installRuntime(
       )
     }
   }
+  const signerRuntimePrepared = localRuntime ? undefined : signerCommand !== undefined
 
   const configResult = runtime === 'claude-code'
     ? localRuntime
@@ -249,6 +258,7 @@ export async function installRuntime(
     localMcpAcknowledged: localMcpConsent?.acknowledged,
     activationCommand: configResult.activationCommand,
     skillInstalled: skillInstall?.installed,
+    signerRuntimePrepared,
     messages: [...consentMessages, ...(localRuntimeInstall?.messages ?? []), ...configResult.messages, ...localProbeMessages, ...(skillInstall?.messages ?? [])],
   }
 }

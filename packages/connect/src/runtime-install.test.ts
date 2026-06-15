@@ -318,6 +318,39 @@ describe('installRuntime hosted default topology', () => {
     expect(codexConfig).not.toContain(PRIVATE_KEY)
   })
 
+  it('falls back to npx (non-fatal) and flags signerRuntimePrepared=false when signer prep fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-prepfail-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      prepareSignerRuntime: vi.fn(async () => {
+        throw new Error('npm registry unreachable')
+      }),
+    })
+
+    const codexConfig = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
+
+    // Degrades gracefully: still hosted+signer, but observably on the npx path.
+    expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
+    expect(result.signerRuntimePrepared).toBe(false)
+    expect(codexConfig).toContain('command = "npx"')
+    expect(codexConfig).toContain(signerPath)
+    expect(result.messages.join('\n')).toContain('falling back to npx launch')
+    expect(codexConfig).not.toContain(PRIVATE_KEY)
+  })
+
   it('writes hosted MCP + signer for Claude Code by default (no opt-in)', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-claude-hosted-'))
     const credentialDirectory = join(dir, 'agent-1')
@@ -513,7 +546,7 @@ function fakePrepareLocalMcpRuntime() {
 }
 
 function signerWrapperPath(credentialDirectory: string): string {
-  return join(credentialDirectory, 'bin', 'haven-signer')
+  return join(credentialDirectory, 'bin', 'haven-signer.mjs')
 }
 
 function fakePrepareSignerRuntime() {

@@ -68,7 +68,10 @@ export async function prepareSignerRuntime(
 
   await assertFileExists(cliPath, 'local Haven signer CLI')
 
-  const wrapperPath = join(input.credentialDirectory, 'bin', 'haven-signer')
+  // .mjs so the wrapper is unambiguously ESM when the runtime exec's it via the
+  // shebang — Node < 20.10 has no automatic module detection, and there is no
+  // package.json with "type":"module" under ~/.haven to disambiguate otherwise.
+  const wrapperPath = join(input.credentialDirectory, 'bin', 'haven-signer.mjs')
   await writeWrapper({ wrapperPath, cliPath, signerPath: input.signerPath })
 
   await writeRuntimeSidecar({

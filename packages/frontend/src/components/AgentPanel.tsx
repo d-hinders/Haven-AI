@@ -110,15 +110,22 @@ function BotIcon({ size = 15 }: { size?: number }) {
 function AllowanceBar({
   info,
   loading,
+  chainTimeSec,
   chainId = DEFAULT_CHAIN_ID,
 }: {
   info: AllowanceInfo
   loading?: boolean
+  chainTimeSec: number | null
   chainId?: number
 }) {
   const decimals = tokenDecimals(info.token, chainId)
   const symbol = tokenSymbol(info.token, chainId)
-  const effective = computeEffectiveAllowance(info)
+  // chainTimeSec is captured in the same fetch cycle as `info`, so it is
+  // non-null whenever real allowances render. The fallback only covers the
+  // brief pre-load frame (where `loading` is already shown); the reset decision
+  // must otherwise use chain time, never the device clock.
+  const nowSec = chainTimeSec ?? Math.floor(Date.now() / 1000)
+  const effective = computeEffectiveAllowance(info, nowSec)
   const total = info.amount
   const spent = effective.effectiveSpent
   const remaining = effective.remaining
@@ -244,6 +251,7 @@ function AgentCard({
   agent,
   onChainAllowances,
   onChainLoading,
+  chainTimeSec,
   onViewDetails,
   onEdit,
   onPause,
@@ -257,6 +265,7 @@ function AgentCard({
   agent: Agent
   onChainAllowances: AllowanceInfo[] | null
   onChainLoading: boolean
+  chainTimeSec: number | null
   onViewDetails: (agent: Agent) => void
   onEdit: (agent: Agent) => void
   onPause: (agent: Agent) => void
@@ -425,7 +434,7 @@ function AgentCard({
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
               A payment was funded on-chain but not settled.{' '}
               <a href={`/agents/${agent.id}`} className="underline underline-offset-2">
-                View agent to sweep funds back to Safe.
+                View agent to sweep funds back to your account.
               </a>
             </p>
           </div>
@@ -439,7 +448,7 @@ function AgentCard({
 
             {hasNetworkAllowances ? (
               displayAllowances.map((info) => (
-                <AllowanceBar key={info.token} info={info} chainId={chainId} />
+                <AllowanceBar key={info.token} info={info} chainTimeSec={chainTimeSec} chainId={chainId} />
               ))
             ) : showConfiguredFallback ? (
               agent.allowances.map((allowance) => (
@@ -607,10 +616,12 @@ function AgentCard({
 function UnmanagedDelegateCard({
   delegate,
   allowances,
+  chainTimeSec,
   chainId = DEFAULT_CHAIN_ID,
 }: {
   delegate: string
   allowances: AllowanceInfo[]
+  chainTimeSec: number | null
   chainId?: number
 }) {
   return (
@@ -664,7 +675,7 @@ function UnmanagedDelegateCard({
         <div className="space-y-2">
           <p className="text-xs font-medium text-[var(--v2-warning)]">Agent budget</p>
           {allowances.map((info) => (
-            <AllowanceBar key={info.token} info={info} chainId={chainId} />
+            <AllowanceBar key={info.token} info={info} chainTimeSec={chainTimeSec} chainId={chainId} />
           ))}
         </div>
       )}
@@ -809,6 +820,7 @@ export default function AgentPanel() {
   // On-chain allowance data — discovers ALL delegates, not just DB agents
   const {
     data: onChainData,
+    chainTimeSec,
     loading: onChainLoading,
     onChainDelegates,
     refetch: refetchOnChain,
@@ -1067,6 +1079,7 @@ export default function AgentPanel() {
                     agent={agent}
                     onChainAllowances={chainData}
                     onChainLoading={usesActiveSafe ? onChainLoading : false}
+                    chainTimeSec={chainTimeSec}
                     onViewDetails={handleViewDetails}
                     onEdit={handleEdit}
                     onPause={handlePause}
@@ -1115,6 +1128,7 @@ export default function AgentPanel() {
                   agent={agent}
                   onChainAllowances={null}
                   onChainLoading={false}
+                  chainTimeSec={chainTimeSec}
                   onViewDetails={handleViewDetails}
                   onEdit={handleEdit}
                   onPause={handlePause}
@@ -1135,6 +1149,7 @@ export default function AgentPanel() {
               key={d.address}
               delegate={d.address}
               allowances={d.allowances}
+              chainTimeSec={chainTimeSec}
               chainId={chainId}
             />
           ))}

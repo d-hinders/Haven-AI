@@ -122,6 +122,7 @@ describe('AgentPanel last-activity metadata', () => {
     mockUseActiveSigner.mockReturnValue(null)
     mockUseOnChainAllowances.mockReturnValue({
       data: new Map(),
+      chainTimeSec: null,
       loading: false,
       onChainDelegates: [],
       refetch: vi.fn(),
@@ -192,6 +193,7 @@ describe('AgentPanel last-activity metadata', () => {
     })
     mockUseOnChainAllowances.mockReturnValue({
       data: new Map(),
+      chainTimeSec: null,
       loading: true,
       onChainDelegates: [],
       refetch: vi.fn(),
@@ -275,6 +277,7 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
           }],
         }],
       ]),
+      chainTimeSec: 1_700_000_000,
       loading: false,
       onChainDelegates: [NEW_DELEGATE],
       refetch: vi.fn(),

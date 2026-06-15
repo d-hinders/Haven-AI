@@ -5,6 +5,8 @@ export { signHash, addressFromKey, verifySignature } from './signer.js'
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
 export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
 
+export { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from './skill-content.js'
+
 export {
   AgentPaymentPhase,
   AgentPaymentNextAction,

@@ -8,7 +8,7 @@ records the **form** decision for #184 and the flows it has to support.
 Contract it must satisfy: [`06-hosted-mcp-connect-flow.md`](06-hosted-mcp-connect-flow.md).
 Custody guardrails: [`../regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md).
 Connect Agent 2 local-key pairing contract:
-[`08-connect-agent-2-local-key-pairing.md`](08-connect-agent-2-local-key-pairing.md).
+[`../archive/connect-agent-2-local-key-pairing.md`](../archive/connect-agent-2-local-key-pairing.md).
 
 ## Decision
 
@@ -62,7 +62,7 @@ hosted:  haven_submit     -> { status, tx_hash }
 
 **x402** — two delegate signatures, both local:
 ```
-hosted:  haven_x402_authorize     -> { payment_id, payload_hash, x402.expected }
+hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
 local:   haven_sign + expected    -> funding signature + x402_binding
 hosted:  haven_submit             -> funds Safe -> delegate EOA
 local:   haven_x402_sign_header   -> EIP-3009 X-PAYMENT header if binding matches
@@ -95,10 +95,12 @@ agent:   retry merchant with X-PAYMENT                 (no Haven involvement)
   the architecture set.
 - The signer needs no `api_key` — it only signs. Identity (the API key) lives
   with the hosted connection, not the signer.
-- Hosted x402 construct requires Haven to sign the expected context with
-  `X402_BINDING_PRIVATE_KEY` (falling back to `RELAYER_PRIVATE_KEY`); the edge
-  signer verifies it against `HAVEN_X402_BINDING_SIGNER` or
-  `x402_binding_signer` in the credential file.
+- Hosted x402 construct requires Haven to sign the expected context with a
+  dedicated `X402_BINDING_PRIVATE_KEY`. The backend deliberately does **not**
+  fall back to `RELAYER_PRIVATE_KEY` — it throws if the binding key is unset, so
+  the binding signer is always a separate key. The edge signer verifies it
+  against `HAVEN_X402_BINDING_SIGNER` or `x402_binding_signer` in the credential
+  file.
 - Standard x402 briefly creates a delegate hot-wallet balance. Keep x402
   allowances small and reset-bound, retry the original merchant session after
   funding confirms, and reconcile or sweep stranded delegate balances when a

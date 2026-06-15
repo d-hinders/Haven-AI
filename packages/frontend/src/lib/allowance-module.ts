@@ -19,6 +19,15 @@ import {
 } from 'viem'
 import type { SafeTxParams } from './safe-tx'
 
+// The pure allowance arithmetic lives in a viem-free module so it can be unit-
+// and loop-tested without the wallet stack. Imported for local use and
+// re-exported for back-compat: existing importers keep getting
+// `computeEffectiveAllowance` / the types from `./allowance-module`.
+import { computeEffectiveAllowance } from './allowance-math'
+import type { AllowanceInfo, EffectiveAllowance } from './allowance-math'
+export { computeEffectiveAllowance }
+export type { AllowanceInfo, EffectiveAllowance }
+
 // ── Contract addresses (deterministic across chains) ───────────────
 export const ALLOWANCE_MODULE_ADDRESS =
   '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134' as Address
@@ -137,54 +146,6 @@ const MULTISEND_ABI = [
 ] as const
 
 // ── Types ──────────────────────────────────────────────────────────
-
-export interface AllowanceInfo {
-  token: Address
-  amount: bigint
-  spent: bigint
-  resetTimeMin: number
-  lastResetMin: number
-  nonce: number
-}
-
-export interface EffectiveAllowance {
-  remaining: bigint
-  effectiveSpent: bigint
-  nextResetTime: Date | null
-  isResetPending: boolean
-}
-
-/**
- * Compute effective remaining allowance accounting for reset logic.
- *
- * The AllowanceModule resets `spent` to 0 when resetTimeMin > 0 and enough time
- * has passed since lastResetMin. However this reset only materialises on-chain
- * when the next executeAllowanceTransfer happens.  This helper mirrors the
- * contract's arithmetic so the UI shows accurate "remaining" even before the
- * on-chain state is poked.
- */
-export function computeEffectiveAllowance(info: AllowanceInfo): EffectiveAllowance {
-  if (info.resetTimeMin === 0) {
-    // One-time allowance — no reset
-    const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
-    return { remaining, effectiveSpent: info.spent, nextResetTime: null, isResetPending: false }
-  }
-
-  const lastResetSec = info.lastResetMin * 60
-  const resetPeriodSec = info.resetTimeMin * 60
-  const nowSec = Math.floor(Date.now() / 1000)
-
-  if (nowSec >= lastResetSec + resetPeriodSec) {
-    // Reset period has elapsed — spent is effectively 0 even though
-    // the chain hasn't been poked yet
-    const nextResetTime = new Date((lastResetSec + resetPeriodSec * 2) * 1000)
-    return { remaining: info.amount, effectiveSpent: 0n, nextResetTime, isResetPending: true }
-  }
-
-  const remaining = info.amount > info.spent ? info.amount - info.spent : 0n
-  const nextResetTime = new Date((lastResetSec + resetPeriodSec) * 1000)
-  return { remaining, effectiveSpent: info.spent, nextResetTime, isResetPending: false }
-}
 
 export interface AllowanceSetup {
   token: Address

@@ -312,7 +312,7 @@ export function HostedConnectCard({
                     Copy setup prompt
                   </h4>
                   {active.tagline && (
-                    <span className="text-[11px] text-[var(--v2-ink-3)]">{active.tagline}</span>
+                    <span className="text-xs text-[var(--v2-ink-3)]">{active.tagline}</span>
                   )}
                 </div>
                 <p className="mt-1.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
@@ -324,7 +324,7 @@ export function HostedConnectCard({
                   <Button onClick={() => void handleCopySetupPrompt()}>
                     {copiedSetupPrompt ? 'Copied' : 'Copy setup prompt'}
                   </Button>
-                  <span className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                  <span className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
                     Paste only into an agent or workspace you trust.
                   </span>
                 </div>
@@ -339,7 +339,7 @@ export function HostedConnectCard({
                   >
                     {probeState?.status === 'pending' ? 'Testing…' : 'Test connection'}
                   </Button>
-                  <span className="text-[11px] leading-relaxed text-[var(--v2-ink-3)]">
+                  <span className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
                     Checks that Haven&rsquo;s tools can be reached with this credential.
                   </span>
                   {probeState && probeState.status !== 'pending' && (
@@ -350,7 +350,7 @@ export function HostedConnectCard({
                   <p
                     role="status"
                     className={
-                      'mt-1.5 text-[11px] leading-relaxed ' +
+                      'mt-1.5 text-xs leading-relaxed ' +
                       (probeState.status === 'ok'
                         ? 'text-[var(--v2-success)]'
                         : 'text-[var(--v2-ink-3)]')
@@ -375,7 +375,7 @@ export function HostedConnectCard({
                 >
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="inline-flex items-center rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-2)]">
+                      <span className="inline-flex items-center rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-2)]">
                         Optional
                       </span>
                       <span className="text-[13px] font-semibold text-[var(--v2-ink)]">
@@ -468,7 +468,7 @@ export function HostedConnectCard({
                         <Button onClick={() => void handleCopyKey()}>
                           {copiedKey ? 'Copied' : 'Copy signing key'}
                         </Button>
-                        <span className="text-[11px] text-[var(--v2-ink-3)]">
+                        <span className="text-xs text-[var(--v2-ink-3)]">
                           Shown once. Full backup below.
                         </span>
                       </div>
@@ -491,9 +491,9 @@ export function HostedConnectCard({
                         </summary>
                         <div className="mt-2 rounded-[8px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
                           <p>
-                            Use <code className="font-mono text-[11px]">npx -y @haven_ai/mcp</code> with{' '}
-                            <code className="font-mono text-[11px]">HAVEN_API_KEY</code> +{' '}
-                            <code className="font-mono text-[11px]">HAVEN_DELEGATE_KEY</code> for a local
+                            Use <code className="font-mono text-xs">npx -y @haven_ai/mcp</code> with{' '}
+                            <code className="font-mono text-xs">HAVEN_API_KEY</code> +{' '}
+                            <code className="font-mono text-xs">HAVEN_DELEGATE_KEY</code> for a local
                             stdio server with no hosted URL. See the{' '}
                             <a
                               href="https://www.npmjs.com/package/@haven_ai/mcp"
@@ -576,7 +576,7 @@ function RuntimeTile({
       {option.tagline && (
         <span
           className={
-            'block w-full truncate text-[11px] leading-tight ' +
+            'block w-full truncate text-xs leading-tight ' +
             (active ? 'text-[var(--v2-brand-strong)]/70' : 'text-[var(--v2-ink-3)]')
           }
         >
@@ -594,7 +594,7 @@ function RuntimeTile({
  */
 function SigningKeyChip({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-2)]">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-2)]">
       {icon}
       {children}
     </span>
@@ -606,7 +606,7 @@ function OneClickChip({ active }: { active: boolean }) {
     <span
       aria-label="one-click install"
       className={
-        'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ' +
+        'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide ' +
         (active
           ? 'bg-white/70 text-[var(--v2-brand-strong)]'
           : 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]')
@@ -673,7 +673,7 @@ function DestinationPathBlock({ paths }: { paths: { label: string; path: string 
       aria-label="Where to save"
     >
       <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+        <span className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
           {isMulti ? 'Save to one of' : 'Save to'}
         </span>
       </div>
@@ -709,7 +709,7 @@ function DestinationPathRow({
       <FolderIcon className="h-3.5 w-3.5 shrink-0 text-[var(--v2-ink-3)]" />
       <div className="flex min-w-0 flex-1 flex-col">
         {showLabel && (
-          <span className="text-[11px] font-medium text-[var(--v2-ink-2)]">{path.label}</span>
+          <span className="text-xs font-medium text-[var(--v2-ink-2)]">{path.label}</span>
         )}
         {/* `<code>` is inline-level by default — `overflow-x-auto` only takes
             effect on block (or inline-block) elements. Without `block` here
@@ -765,7 +765,7 @@ function ProbeResultChip({ result }: { result: ProbeResult }) {
     <span
       role="status"
       aria-label={`Test connection result: ${tone.label}`}
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${tone.bg} ${tone.fg}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${tone.bg} ${tone.fg}`}
     >
       {tone.label}
       {result.status === 'ok' && typeof result.toolCount === 'number' ? ` · ${result.toolCount} tools` : null}
@@ -785,7 +785,7 @@ function ConnectCodeBlock({
   return (
     <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)]">
       <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-3 py-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+        <span className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
           {snippet.language}
         </span>
         <Button variant="ghost" size="sm" onClick={onCopy} aria-label="Copy snippet">

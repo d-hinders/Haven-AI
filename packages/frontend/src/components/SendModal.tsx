@@ -466,7 +466,7 @@ export default function SendModal({
                           {selectedSafeOption.name}
                         </span>
                         {selectedSafeOption.isDefault && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
                             Default
                           </span>
                         )}
@@ -499,7 +499,7 @@ export default function SendModal({
                               {safe.name}
                             </span>
                             {safe.isDefault && (
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
                                 isSelected
                                   ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                                   : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]'
@@ -621,8 +621,8 @@ export default function SendModal({
                 {selectedContactName && (
                   <div className="flex items-center gap-2 mb-1.5">
                     <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 rounded-md">
-                      <div className="w-4 h-4 rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center">
-                        <span className="text-[10px] font-semibold text-[var(--v2-brand)]">
+                      <div className="w-4 h-4 overflow-hidden rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center">
+                        <span className="text-xs font-semibold leading-none text-[var(--v2-brand)]">
                           {selectedContactName.slice(0, 2).toUpperCase()}
                         </span>
                       </div>
@@ -726,7 +726,7 @@ export default function SendModal({
                               : 'border-[var(--v2-border)] bg-[var(--v2-surface)] text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)]'
                           }`}
                         >
-                          <span className="w-5 h-5 rounded-full bg-[var(--v2-brand-soft)] text-[10px] font-semibold text-[var(--v2-brand)] flex items-center justify-center">
+                          <span className="w-5 h-5 rounded-full bg-[var(--v2-brand-soft)] text-xs font-semibold text-[var(--v2-brand)] flex items-center justify-center">
                             {contact.name.slice(0, 2).toUpperCase()}
                           </span>
                           <span className="text-xs font-medium">{contact.name}</span>
@@ -786,7 +786,7 @@ export default function SendModal({
                             }`}
                           >
                             <div className="w-7 h-7 rounded-full bg-[var(--v2-brand-soft)] flex items-center justify-center flex-shrink-0">
-                              <span className="text-[10px] font-semibold text-[var(--v2-brand)]">
+                              <span className="text-xs font-semibold text-[var(--v2-brand)]">
                                 {contact.name.slice(0, 2).toUpperCase()}
                               </span>
                             </div>
@@ -799,7 +799,7 @@ export default function SendModal({
                               </p>
                             </div>
                             {isSelected && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
+                              <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] font-medium">
                                 Selected
                               </span>
                             )}

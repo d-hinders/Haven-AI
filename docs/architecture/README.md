@@ -14,8 +14,13 @@ exported PNG and SVG alongside.
 | 5 | [Agent API OpenAPI Contract](05-agent-api-openapi.md) | Public OpenAPI surface for non-TypeScript agent integrators and external reviewers. |
 | 6 | [Hosted MCP Connect Flow & Edge-Signing Contract](06-hosted-mcp-connect-flow.md) | Designing/reviewing the hosted MCP server — the wire contract, the two-credential split, and the non-custodial rule that the delegate key never reaches Haven. |
 | 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |
-| 8 | [Connect Agent 2 Local-Key Pairing](08-connect-agent-2-local-key-pairing.md) | Planning/reviewing the staged setup flow where the local connector generates the agent key, Haven receives only the public signing address, and wallet approval activates agent rules. |
-| 9 | [Connect Agent 2 Rollout Closeout](09-connect-agent-2-rollout-closeout.md) | Final #237 rollout, recovery, sensitive-value, deterministic-coverage, and merge-readiness report for shipping Connect Agent 2 behind gates. |
+| 8 | [Local vs Hosted MCP](08-local-vs-hosted-mcp.md) | Choosing the deployment model — the default hosted MCP + edge signer vs the advanced fully-local MCP opt-in, with the custody rationale and tool parity. |
+
+The detailed Connect Agent 2 contract and its rollout closeout were point-in-time
+artifacts for shipping that feature; they now live in
+[`docs/archive/`](../archive/connect-agent-2-local-key-pairing.md) for reference.
+The current connect mechanism is covered by docs 6 (hosted MCP connect flow) and
+7 (edge signer).
 
 ## Regenerating exports
 
@@ -23,13 +28,19 @@ Mermaid is the source of truth. Regenerate PNG/SVG after editing when the
 Mermaid CLI is available:
 
 ```sh
-for f in docs/architecture/0*-*.md; do
+# Needs a headless Chromium; run where one is available.
+for f in docs/architecture/[0-9]*-*.md; do
   base="${f%.md}"
   npx -y @mermaid-js/mermaid-cli@latest -i "$f" -o "$base.png" -b transparent
   npx -y @mermaid-js/mermaid-cli@latest -i "$f" -o "$base.svg" -b transparent
 done
-# mmdc adds a -1 suffix when input is .md; drop it
-( cd docs/architecture && for f in *-1.png *-1.svg; do mv "$f" "${f%-1.*}.${f##*.}"; done )
+# mmdc appends -1, -2, ... per diagram. Single-diagram files drop the suffix;
+# multi-diagram files (e.g. 04) keep -1/-2.
+( cd docs/architecture
+  for base in $(ls *-1.png 2>/dev/null | sed 's/-1\.png$//'); do
+    [ -e "${base}-2.png" ] && continue
+    mv "${base}-1.png" "${base}.png"; mv "${base}-1.svg" "${base}.svg"
+  done )
 ```
 
 ## Scope notes

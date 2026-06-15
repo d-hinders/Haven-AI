@@ -15,11 +15,11 @@ Default posture:
 - Surface uncertainty instead of guessing.
 
 For UI work, read these first:
-1. `docs/UX_GUIDELINES.md`
-2. `docs/design_system/DESIGN_SYSTEM.md`
-3. `docs/design_system/UX_COPY_GUIDELINES.md`
-4. `docs/ux/haven-screen-recipes.md`
-5. `docs/ux/haven-design-review.md`
+1. `docs/product/README.md`
+2. `docs/product/design-system.md`
+3. `docs/product/copy-guidelines.md`
+4. `docs/product/screen-recipes.md`
+5. `docs/product/design-review.md`
 
 Also inspect:
 - `packages/frontend/src/components/ui`

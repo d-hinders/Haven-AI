@@ -6,6 +6,11 @@ import {
   buildSkillBundle,
 } from '@/lib/agent-skill-bundle'
 import { type HandoffInput } from '@/lib/agent-handoff'
+// Canonical skill content lives in the SDK source. Frontend keeps a decoupled
+// inline copy (no @haven_ai/* runtime dependency, for standalone Vercel
+// deploys), so we import the canonical string directly from the SDK source via
+// a relative path and assert byte-for-byte parity below.
+import { HAVEN_SKILL_MD as CANONICAL_SKILL_MD } from '../../../../sdk/src/skill-content'
 
 /**
  * Tests for the skill download and the SDK starter.
@@ -90,6 +95,17 @@ describe('generic skill', () => {
     expect(skill).toContain('retry_original_x402_request')
     expect(skill).toContain('pending_approval')
     expect(skill).toMatch(/never.*private keys|private keys.*never/i)
+  })
+
+  it('stays byte-for-byte identical to the canonical SDK copy (cross-package parity)', async () => {
+    // The frontend inline copy must never drift from packages/sdk's canonical
+    // HAVEN_SKILL_MD. Assert parity against both the builder output and the
+    // SKILL.md the bundle actually emits.
+    expect(buildGenericSkillMd()).toBe(CANONICAL_SKILL_MD)
+
+    const { blob } = await buildSkillBundle()
+    const { read } = await readZip(blob)
+    expect(await read('SKILL.md')).toBe(CANONICAL_SKILL_MD)
   })
 
   it('zips as haven-pay/SKILL.md with a fixed filename and no other files', async () => {

@@ -74,7 +74,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
     <div className="max-w-2xl">
       <PageHeader
         title="Sweep stranded funds"
-        subtitle="Return stranded delegate funds to your Safe."
+        subtitle="Return stranded delegate funds to your account."
       />
 
       <div className="mt-1 mb-6">
@@ -150,7 +150,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
               <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-2">How to sweep</h2>
               <p className="text-sm text-[var(--v2-ink-2)] mb-4">
                 Only your agent can sweep because only it has the delegate signing key.
-                Tell your agent to run this tool — it will sign and submit the transfer back to your Safe.
+                Tell your agent to run this tool — it will sign and submit the transfer back to your account.
               </p>
 
               <div className="rounded-lg bg-[var(--v2-surface-2)] px-4 py-3">

@@ -18,7 +18,7 @@ import type { AgentCredentialJson } from './agent-credential'
 /**
  * Default hosted MCP endpoint.
  * Override via `NEXT_PUBLIC_HAVEN_MCP_URL` at deploy time.
- * See `docs/deploy/hosted-mcp.md`.
+ * See `docs/operations/hosted-mcp.md`.
  */
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
 

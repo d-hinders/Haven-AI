@@ -15,12 +15,12 @@ Default posture:
 - If there are no serious findings, say that clearly and mention residual risk or test gaps.
 
 For UI review, check against:
-- `docs/UX_GUIDELINES.md`
-- `docs/design_system/DESIGN_SYSTEM.md`
-- `docs/design_system/UX_COPY_GUIDELINES.md`
-- `docs/ux/haven-screen-recipes.md`
-- `docs/ux/haven-design-review.md`
-- `docs/ai-review-patterns.md`
+- `docs/product/README.md`
+- `docs/product/design-system.md`
+- `docs/product/copy-guidelines.md`
+- `docs/product/screen-recipes.md`
+- `docs/product/design-review.md`
+- `docs/contributing/ai-review-patterns.md`
 
 Review questions:
 - Is it clear who can spend?
@@ -53,7 +53,7 @@ Recurring traps to check:
 
 Recurring traps from the **Captain Self-Check Preflight** (must-check):
 
-These mirror the preflight items in `docs/ai-agent-workflow.md` and the trap families in `docs/ai-review-patterns.md`. Treat them as a backstop when the captain skipped the preflight. If a new trap family recurs, update all three lists together.
+These mirror the preflight items in `docs/contributing/ai-agent-workflow.md` and the trap families in `docs/contributing/ai-review-patterns.md`. Treat them as a backstop when the captain skipped the preflight. If a new trap family recurs, update all three lists together.
 
 - **Numeric Formatters.** Sign handling on negative bigints (separate sign, format magnitude, re-attach — never let `${q}.${r}` render as `"-5.-5"`). Reject scientific-notation strings rather than silently losing precision via `Number(...).toFixed()`. One shared formatter owns both raw-bigint and already-decimal input shapes. Tests cover negative, zero, scientific notation, and both input shapes.
 - **Counter And Summary Buckets.** Buckets are mutually exclusive, or the UI labels them as overlapping. A failed outbound send is `failed`, not `failed AND sent`. Tone/colour wiring propagates to every caller (dashboard, detail, design-system).

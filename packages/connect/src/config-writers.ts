@@ -6,6 +6,12 @@ import { runtimeRequiresHardRestart, type RuntimeId } from './runtime-registry.j
 
 export type RuntimeMcpMode = 'local_stdio' | 'hosted_plus_signer' | 'manual'
 
+/** How to launch the local edge signer as an MCP stdio server. */
+export interface SignerLaunchSpec {
+  command: string
+  args: string[]
+}
+
 export interface RuntimeConfigInput {
   runtime: RuntimeId
   hostedMcpUrl: string
@@ -14,6 +20,13 @@ export interface RuntimeConfigInput {
   signerPath: string
   credentialDirectory: string
   localMcpCommand?: string
+  /**
+   * Prepared signer launch command (absolute wrapper from prepareSignerRuntime).
+   * When absent, falls back to a runtime `npx -y @haven_ai/signer@…` invocation,
+   * which is fragile under the agent runtime's MCP-spawn environment — prefer
+   * always passing a prepared command.
+   */
+  signerCommand?: SignerLaunchSpec
   homeDir?: string
   /**
    * Topology to write. 'hosted' (default) configures the keyless hosted MCP
@@ -85,10 +98,23 @@ export function buildHostedServer(hostedMcpUrl: string, apiKey: string, runtime:
   }
 }
 
-export function buildSignerServer(signerPath: string, runtime: RuntimeId): Record<string, unknown> {
+/**
+ * Resolve how to launch the signer: the prepared absolute-path wrapper when
+ * available, otherwise a runtime npx invocation (fallback only).
+ */
+export function resolveSignerLaunchSpec(input: RuntimeConfigInput): SignerLaunchSpec {
+  return (
+    input.signerCommand ?? {
+      command: 'npx',
+      args: ['-y', signerPackageSpec(), '--credentials', input.signerPath],
+    }
+  )
+}
+
+export function buildSignerServer(spec: SignerLaunchSpec, runtime: RuntimeId): Record<string, unknown> {
   const server = {
-    command: 'npx',
-    args: ['-y', signerPackageName(), '--credentials', signerPath],
+    command: spec.command,
+    args: spec.args,
   }
   if (runtime === 'vscode' || runtime === 'vscode-insiders') return { type: 'stdio', ...server }
   return server
@@ -140,7 +166,7 @@ export function mergeCodexTomlHosted(
   existingToml: string,
   hostedMcpUrl: string,
   apiKey: string,
-  signerPath: string,
+  signerSpec: SignerLaunchSpec,
 ): string {
   let next = removeTomlTableTree(removeTomlTableTree(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
   next = next.trimEnd()
@@ -150,8 +176,8 @@ export function mergeCodexTomlHosted(
     `http_headers = { "Authorization" = ${tomlString(`Bearer ${apiKey}`)} }`,
     '',
     '[mcp_servers.haven_signer]',
-    'command = "npx"',
-    `args = ["-y", ${tomlString(signerPackageSpec())}, "--credentials", ${tomlString(signerPath)}]`,
+    `command = ${tomlString(signerSpec.command)}`,
+    `args = [${signerSpec.args.map((arg) => tomlString(arg)).join(', ')}]`,
     'startup_timeout_sec = 120',
   ].join('\n')
   validateCodexToml(block, 'Generated Codex Haven config')
@@ -170,7 +196,7 @@ async function writeJsonRuntimeConfig(
       existing,
       serverRoot,
       buildHostedServer(input.hostedMcpUrl, input.apiKey, input.runtime),
-      buildSignerServer(input.signerPath, input.runtime),
+      buildSignerServer(resolveSignerLaunchSpec(input), input.runtime),
     )
     await writeOwnerOnlyText(target, merged)
     return {
@@ -229,7 +255,7 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
         ],
       }
     }
-    const merged = mergeCodexTomlHosted(existing ?? '', input.hostedMcpUrl, input.apiKey, input.signerPath)
+    const merged = mergeCodexTomlHosted(existing ?? '', input.hostedMcpUrl, input.apiKey, resolveSignerLaunchSpec(input))
     await writeOwnerOnlyText(target, merged)
     return {
       hostedConfigured: true,
@@ -539,8 +565,4 @@ function configTargetLabel(runtime: RuntimeId): string {
     default:
       return 'runtime MCP config'
   }
-}
-
-function signerPackageName(): string {
-  return signerPackageSpec()
 }

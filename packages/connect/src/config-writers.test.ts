@@ -163,7 +163,7 @@ describe('runtime config writers', () => {
       ].join('\n'),
       HOSTED_URL,
       API_KEY,
-      SIGNER_PATH,
+      { command: '/home/u/.haven/agents/agent-1/bin/haven-signer', args: [] },
     )
 
     expect(merged).toContain('model = "gpt-5"')
@@ -171,6 +171,9 @@ describe('runtime config writers', () => {
     expect(merged).toContain(`url = "${HOSTED_URL}"`)
     expect(merged).not.toContain('/old/wrapper')
     expect(merged).not.toContain('command = "old"')
+    // The prepared wrapper command is written, not a runtime npx invocation.
+    expect(merged).toContain('command = "/home/u/.haven/agents/agent-1/bin/haven-signer"')
+    expect(merged).not.toContain('npx')
     expect(() => validateCodexToml(merged)).not.toThrow()
   })
 

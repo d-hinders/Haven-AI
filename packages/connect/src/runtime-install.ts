@@ -21,6 +21,11 @@ import {
   type PreparedLocalMcpRuntime,
   type PrepareLocalMcpRuntimeInput,
 } from './local-mcp-runtime.js'
+import {
+  prepareSignerRuntime,
+  type PreparedSignerRuntime,
+  type PrepareSignerRuntimeInput,
+} from './signer-runtime.js'
 import { MCP_RUNTIME_MANIFEST, signerPackageSpec } from './runtime-manifest.js'
 import { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from '@haven_ai/sdk'
 import { normalizeRuntime, restartRequiredForRuntime, runtimeProfile, type RuntimeId } from './runtime-registry.js'
@@ -66,6 +71,14 @@ export interface RuntimeInstallResult {
   localMcpAcknowledged?: boolean
   activationCommand?: string
   skillInstalled?: boolean
+  /**
+   * Hosted topology only: true when the signer was pre-installed and registered
+   * via its absolute wrapper, false when prep failed and it fell back to the
+   * fragile runtime-`npx` launch. Undefined for local/manual topologies that
+   * do not run the signer as a separate MCP. Lets callers/tests detect the
+   * silent npx fallback instead of treating every write as fully healthy.
+   */
+  signerRuntimePrepared?: boolean
   messages: string[]
 }
 
@@ -75,6 +88,7 @@ export interface RuntimeInstallDeps {
   fetch?: typeof fetch
   runCommand?: (command: string, args: string[]) => Promise<void>
   prepareLocalMcpRuntime?: (input: PrepareLocalMcpRuntimeInput) => Promise<PreparedLocalMcpRuntime>
+  prepareSignerRuntime?: (input: PrepareSignerRuntimeInput) => Promise<PreparedSignerRuntime>
   probeLocalMcpTools?: (
     command: string,
     args: string[],
@@ -157,10 +171,28 @@ export async function installRuntime(
     }
   }
 
+  // Hosted topology launches the local signer as its own MCP stdio server.
+  // Pre-install it and register an absolute wrapper instead of a runtime
+  // `npx -y` invocation, which is fragile in the agent runtime's MCP-spawn
+  // environment. Prep failure is non-fatal: fall back to the npx command.
+  let signerCommand: { command: string; args: string[] } | undefined
+  if (!localRuntime) {
+    try {
+      const signerRuntime = await prepareSignerForRuntime(input, deps)
+      signerCommand = { command: signerRuntime.command, args: signerRuntime.args }
+      consentMessages.push(...signerRuntime.messages)
+    } catch (err) {
+      consentMessages.push(
+        `Could not pre-install the local Haven signer; falling back to npx launch: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }
+  const signerRuntimePrepared = localRuntime ? undefined : signerCommand !== undefined
+
   const configResult = runtime === 'claude-code'
     ? localRuntime
       ? await configureClaudeCode(deps, localRuntimeInstall?.command ?? '')
-      : await configureClaudeCodeHosted(deps, input)
+      : await configureClaudeCodeHosted(deps, input, signerCommand)
     : await writeRuntimeConfig({
         runtime,
         hostedMcpUrl: input.hostedMcpUrl,
@@ -169,6 +201,7 @@ export async function installRuntime(
         signerPath: input.signerPath,
         credentialDirectory: input.credentialDirectory,
         localMcpCommand: localRuntimeInstall?.command,
+        signerCommand,
         homeDir: deps.homeDir,
         mode: localRuntime ? 'local' : 'hosted',
       })
@@ -225,6 +258,7 @@ export async function installRuntime(
     localMcpAcknowledged: localMcpConsent?.acknowledged,
     activationCommand: configResult.activationCommand,
     skillInstalled: skillInstall?.installed,
+    signerRuntimePrepared,
     messages: [...consentMessages, ...(localRuntimeInstall?.messages ?? []), ...configResult.messages, ...localProbeMessages, ...(skillInstall?.messages ?? [])],
   }
 }
@@ -307,6 +341,7 @@ async function configureClaudeCode(
 async function configureClaudeCodeHosted(
   deps: RuntimeInstallDeps,
   input: RuntimeInstallInput,
+  signerCommand?: { command: string; args: string[] },
 ): Promise<{
   hostedConfigured: boolean
   signerConfigured: boolean
@@ -327,8 +362,8 @@ async function configureClaudeCodeHosted(
   })
   const signerJson = JSON.stringify({
     type: 'stdio',
-    command: 'npx',
-    args: ['-y', signerPackageSpec(), '--credentials', input.signerPath],
+    command: signerCommand?.command ?? 'npx',
+    args: signerCommand?.args ?? ['-y', signerPackageSpec(), '--credentials', input.signerPath],
     env: {},
   })
   try {
@@ -495,6 +530,19 @@ async function prepareRuntimeForLocalMcp(
   return prepare({
     credentialDirectory: input.credentialDirectory,
     identityPath: input.identityPath,
+    signerPath: input.signerPath,
+    homeDir: deps.homeDir,
+  })
+}
+
+async function prepareSignerForRuntime(
+  input: RuntimeInstallInput,
+  deps: RuntimeInstallDeps,
+): Promise<PreparedSignerRuntime> {
+  const prepare = deps.prepareSignerRuntime ?? ((runtimeInput: PrepareSignerRuntimeInput) =>
+    prepareSignerRuntime(runtimeInput, { runCommand: deps.runCommand }))
+  return prepare({
+    credentialDirectory: input.credentialDirectory,
     signerPath: input.signerPath,
     homeDir: deps.homeDir,
   })

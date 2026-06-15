@@ -297,6 +297,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
     const codexConfig = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
@@ -311,8 +312,42 @@ describe('installRuntime hosted default topology', () => {
     expect(codexConfig).toContain(`url = "${HOSTED_URL}"`)
     expect(codexConfig).toContain(`http_headers = { "Authorization" = "Bearer ${API_KEY}" }`)
     expect(codexConfig).toContain('[mcp_servers.haven_signer]')
+    // Signer is launched via the prepared absolute wrapper, not runtime npx.
+    expect(codexConfig).toContain(`command = "${signerWrapperPath(credentialDirectory)}"`)
+    expect(codexConfig).not.toContain('npx')
+    expect(codexConfig).not.toContain(PRIVATE_KEY)
+  })
+
+  it('falls back to npx (non-fatal) and flags signerRuntimePrepared=false when signer prep fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-prepfail-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      prepareSignerRuntime: vi.fn(async () => {
+        throw new Error('npm registry unreachable')
+      }),
+    })
+
+    const codexConfig = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
+
+    // Degrades gracefully: still hosted+signer, but observably on the npx path.
+    expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
+    expect(result.signerRuntimePrepared).toBe(false)
     expect(codexConfig).toContain('command = "npx"')
     expect(codexConfig).toContain(signerPath)
+    expect(result.messages.join('\n')).toContain('falling back to npx launch')
     expect(codexConfig).not.toContain(PRIVATE_KEY)
   })
 
@@ -338,6 +373,7 @@ describe('installRuntime hosted default topology', () => {
       homeDir: dir,
       runCommand,
       fetch: okToolsFetch(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
     const skill = await readFile(join(dir, '.claude', 'skills', 'haven-pay', 'SKILL.md'), 'utf8')
@@ -367,9 +403,12 @@ describe('installRuntime hosted default topology', () => {
       headers: { Authorization: `Bearer ${API_KEY}` },
     })
     const signerServer = JSON.parse(signerAdd!.args[3]) as Record<string, unknown>
-    expect(signerServer).toMatchObject({ type: 'stdio', command: 'npx' })
-    expect((signerServer.args as string[])).toContain('--credentials')
-    expect((signerServer.args as string[])).toContain(signerPath)
+    // Signer launches via the prepared absolute wrapper (creds baked in), not npx.
+    expect(signerServer).toMatchObject({
+      type: 'stdio',
+      command: signerWrapperPath(credentialDirectory),
+      args: [],
+    })
     expect(JSON.stringify(commands)).not.toContain(PRIVATE_KEY)
   })
 
@@ -395,6 +434,7 @@ describe('installRuntime hosted default topology', () => {
         homeDir: dir,
         fetch: okToolsFetch(),
         runCommand: vi.fn(async () => undefined),
+        prepareSignerRuntime: fakePrepareSignerRuntime(),
       })
 
       expect(result.runtimeMcpMode, runtime).toBe('hosted_plus_signer')
@@ -433,6 +473,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
     expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
@@ -500,6 +541,25 @@ function fakePrepareLocalMcpRuntime() {
       npmCacheDirectory: join(input.credentialDirectory, '..', '..', 'npm-cache'),
       cliPath: join(input.credentialDirectory, '..', '..', 'mcp-runtime', MCP_RUNTIME_MANIFEST.mcpVersion, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js'),
       messages: ['Prepared stable local Haven MCP wrapper.'],
+    }
+  })
+}
+
+function signerWrapperPath(credentialDirectory: string): string {
+  return join(credentialDirectory, 'bin', 'haven-signer.mjs')
+}
+
+function fakePrepareSignerRuntime() {
+  return vi.fn(async (input: { credentialDirectory: string }) => {
+    const wrapperPath = signerWrapperPath(input.credentialDirectory)
+    return {
+      command: wrapperPath,
+      args: [],
+      wrapperPath,
+      runtimeDirectory: join(input.credentialDirectory, '..', '..', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion),
+      npmCacheDirectory: join(input.credentialDirectory, '..', '..', 'npm-cache'),
+      cliPath: join(input.credentialDirectory, '..', '..', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion, 'node_modules', '@haven_ai', 'signer', 'dist', 'cli.js'),
+      messages: ['Prepared stable local Haven signer wrapper.'],
     }
   })
 }

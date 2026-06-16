@@ -9,7 +9,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.1.12-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.1.13-alpha.0'
 
 export interface HostedClientOptions {
   /** Agent API key (identity) extracted from the request Bearer token. */

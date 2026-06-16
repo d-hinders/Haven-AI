@@ -171,9 +171,10 @@ export const toolDescriptions = {
     behavior:
       'Read-only lookup against Haven\'s curated catalog. Entries are periodically re-verified against the live merchant; degraded entries are flagged. ' +
       'Returns name, description, price, rail, resource URL, and a suggested_tool field naming the exact Haven pay tool for that entry. ' +
+      'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',
     nextActionGuidance:
-      'Pick an entry, confirm the price with the user if it is non-trivial, and pay it with the tool named in suggested_tool, passing the entry\'s resource_url (and tool_name for MCP merchants).',
+      'Pick an entry and pay it with the tool named in suggested_tool, passing the entry\'s resource_url (and tool_name for MCP merchants). Confirm the price from the live pay-tool result (not the catalog), and pass max_amount when the user has a cap.',
   },
   sweep_delegate: {
     summary:

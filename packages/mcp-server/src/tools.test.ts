@@ -192,6 +192,46 @@ const PAYMENT_REQUIRED = {
   ],
 }
 
+// ── haven_discover_tools ────────────────────────────────────────────────────
+
+describe('haven_discover_tools', () => {
+  it('marks catalog prices as indicative (not authoritative)', async () => {
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            {
+              id: 'cat_1',
+              name: 'create_text',
+              description: 'Generate text',
+              category: 'ai',
+              resource_url: 'https://mcp.soundside.ai/mcp',
+              rail: 'x402',
+              protocol: 'mcp',
+              tool_name: 'create_text',
+              price_display: '$0.01 USDC',
+              price_atomic: '10000',
+              asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+              network: 'base',
+              status: 'active',
+              verified_at: '2026-06-16T08:50:39.772Z',
+            },
+          ],
+        },
+      },
+    })
+
+    const result = ok<Array<{ price_is_indicative: boolean; price_atomic: string; suggested_tool: string }>>(
+      await handlers().haven_discover_tools({}),
+    )
+
+    expect(result.data[0].price_is_indicative).toBe(true)
+    expect(result.data[0].price_atomic).toBe('10000')
+    expect(result.data[0].suggested_tool).toBe('haven_pay_mcp_tool')
+  })
+})
+
 const X402_INTENT_RESPONSE = {
   payment_id: 'pay_x402',
   status: 'pending_signature',
@@ -211,6 +251,23 @@ const AGENT_RESPONSE = {
 // ── haven_pay_x402_quote ──────────────────────────────────────────────────────
 
 describe('haven_pay_x402_quote', () => {
+  it('rejects with PRICE_EXCEEDS_MAX before funding when the option price is above max_amount', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const payload = await handlers().haven_pay_x402_quote({
+      payment_required: PAYMENT_REQUIRED,
+      max_amount: '1000000', // below the fixture's authoritative 1500000
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('PRICE_EXCEEDS_MAX')
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+
   it('returns the unsigned funding hash + x402 data for the edge, signing nothing', async () => {
     stubFetch({
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
@@ -496,6 +553,52 @@ describe('haven_pay_mcp_tool', () => {
     expect(Array.isArray(result.data.payment_required.accepts)).toBe(true)
     expect(result.data.x402).toBeDefined()
     // createX402Intent was called (POST /x402 route was hit)
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('rejects with PRICE_EXCEEDS_MAX before funding when the live price is above max_amount', async () => {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    // Authoritative price for the fixture is maxAmountRequired = 1500000.
+    const payload = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      max_amount: '1000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('PRICE_EXCEEDS_MAX')
+    expect(payload.message).toContain('1500000')
+    expect(payload.message).toContain('1000000')
+    // No funding intent was created — the guard fired before POST /x402.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+
+  it('proceeds and returns the live price when max_amount is high enough', async () => {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ amount_atomic: string; payment_id: string }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        max_amount: '1500000',
+      }),
+    )
+
+    expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+    // Live merchant price is surfaced for user-facing confirmation.
+    expect(result.data.amount_atomic).toBe('1500000')
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 

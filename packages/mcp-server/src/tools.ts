@@ -5,7 +5,9 @@ import {
   HavenError,
   HavenPaymentStateError,
   composeDescription,
+  selectStandardPaymentOption,
   toolDescriptions as sharedDescriptions,
+  x402AuthorizationAmount,
   type MachinePaymentChallenge,
   type MppQuote,
   type MppResumeState,
@@ -102,6 +104,10 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     merchant_url: z.string().url(),
     tool_name: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()).optional(),
+    // Optional pre-funding price cap, atomic units of the merchant's asset
+    // (same unit as payment_required.accepts[].amount). If the live merchant
+    // price exceeds this, the call is rejected before any funding transfer.
+    max_amount: z.string().regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount').optional(),
     idempotency_key: z.string().optional(),
   },
   haven_complete_mcp_tool: {
@@ -127,6 +133,9 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // Validated downstream by the SDK; typed as an object (not z.unknown()) so
     // MCP clients embed it as JSON rather than serialising it to a string.
     payment_required: z.record(z.string(), z.unknown()),
+    // Optional pre-funding price cap, atomic units (same unit as
+    // payment_required.accepts[].amount). Rejected before funding if exceeded.
+    max_amount: z.string().regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount').optional(),
     idempotency_key: z.string().optional(),
   },
   haven_resume_x402_payment: {
@@ -190,7 +199,9 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     '(2) haven_submit the signature to fund the delegate; ' +
     '(3) haven_x402_sign_header on the local signer with payment_required + x402_binding → payment_header; ' +
     '(4) haven_complete_mcp_tool with payment_id, merchant_url, tool_name, arguments, mcp_transport, and payment_header to settle with the merchant and get the tool result. ' +
-    'Pass payment_required, arguments, and mcp_transport through verbatim from this response. Haven never receives the signing key.',
+    'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
+    'The returned amount/amount_atomic is the authoritative live merchant price — show THAT to the user, not any catalog/discovery price. ' +
+    'Pass max_amount (atomic units) to reject a quote above the user\'s cap before any funding moves. Haven never receives the signing key.',
 })
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -220,6 +231,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'signer to sign. For read-only allowance, budget, spend-limit, remaining-amount, or',
   'reset-period questions, call haven_get_allowances instead of calling this tool.',
   'Pass the payment_required from haven_quote_x402 or directly from the merchant 402 response.',
+  'Pass max_amount (atomic units) to reject a quote above the user\'s cap before any funding moves.',
   'Returns { payment_id, payload_hash, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context.',
   'Sign payload_hash via haven_sign (passing x402.expected) on the local signer, then relay',
@@ -395,6 +407,11 @@ export function createToolHandlers(
           tool_name: entry.toolName,
           price_display: entry.priceDisplay,
           price_atomic: entry.priceAtomic,
+          // Catalog price is a last-verified hint, NOT authoritative. Always
+          // confirm the real price from the merchant's live 402 (returned as
+          // payment_required / amount_atomic by haven_pay_mcp_tool) before
+          // showing a price to the user or paying.
+          price_is_indicative: true,
           asset: entry.asset,
           network: entry.network,
           status: entry.status,
@@ -493,6 +510,9 @@ export function createToolHandlers(
           const quote = await haven.quoteX402(args.merchant_url as string, init, {
             idempotencyKey: args.idempotency_key,
           })
+          // Enforce the optional price cap against the LIVE merchant price,
+          // before creating the funding intent. The catalog price is only a hint.
+          assertWithinMaxAmount(quote.amountAtomic, args.max_amount as string | undefined, quote.token)
           const intent = await haven.createX402Intent(
             quote.paymentRequired as X402PaymentRequired,
             { idempotencyKey: args.idempotency_key ?? quote.idempotencyKey },
@@ -502,6 +522,11 @@ export function createToolHandlers(
             // The raw merchant 402 PaymentRequired — the local signer needs this
             // verbatim in haven_x402_sign_header to build the EIP-3009 header.
             payment_required: quote.paymentRequired,
+            // Authoritative live merchant price — show THIS to the user, not any
+            // catalog/discovery price (which is indicative and can be stale).
+            amount_atomic: quote.amountAtomic,
+            amount: quote.amount,
+            token: quote.token,
             // Request details to pass back to haven_complete_mcp_tool after signing.
             merchant_url: args.merchant_url,
             tool_name: args.tool_name,
@@ -615,6 +640,14 @@ export function createToolHandlers(
       }
       return runTool(async () => {
         try {
+          // Enforce the optional price cap against the merchant-authoritative
+          // selected option, before creating the funding intent.
+          const option = selectStandardPaymentOption(
+            (args.payment_required as X402PaymentRequired).accepts,
+          )
+          if (option) {
+            assertWithinMaxAmount(x402AuthorizationAmount(option), args.max_amount as string | undefined, undefined)
+          }
           const intent = await haven.createX402Intent(
             args.payment_required as X402PaymentRequired,
             { idempotencyKey: args.idempotency_key },
@@ -921,6 +954,42 @@ function isPendingApproval(status: string | undefined): boolean {
 
 function wrongTool(code: string, message: string, suggested_tool?: string): ToolFailure {
   return { success: false, code, message, suggested_tool }
+}
+
+/**
+ * Pre-funding price guard. Throws a typed PRICE_EXCEEDS_MAX (preserved by
+ * normalizeError) when the merchant's authoritative atomic price is above the
+ * agent's optional cap, so the call fails BEFORE any funding transfer. The
+ * on-chain allowance is still the hard gate; this is an extra agent affordance
+ * against surprise overcharges within budget. Compared in atomic BigInt units.
+ */
+function assertWithinMaxAmount(
+  quotedAtomic: string,
+  maxAmount: string | undefined,
+  token: string | undefined,
+): void {
+  if (maxAmount === undefined) return
+  let quoted: bigint
+  let cap: bigint
+  try {
+    quoted = BigInt(quotedAtomic)
+    cap = BigInt(maxAmount)
+  } catch {
+    throw new HavenError(
+      'max_amount and the merchant price must be decimal atomic amounts.',
+      'INVALID_MAX_AMOUNT',
+      400,
+    )
+  }
+  if (quoted > cap) {
+    const unit = token ? `${token}, atomic units` : 'atomic units'
+    throw new HavenError(
+      `Merchant price ${quotedAtomic} exceeds max_amount ${maxAmount} (${unit}). ` +
+        `No funds were moved. Confirm the higher price with the user before retrying with a larger max_amount.`,
+      'PRICE_EXCEEDS_MAX',
+      400,
+    )
+  }
 }
 
 function parse<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {

@@ -61,6 +61,14 @@ normal, not an error.
   \`payment_required\`, \`mcp_transport\`, and \`arguments\` through verbatim from the
   \`haven_pay_mcp_tool\` result. Do not call the merchant yourself — Haven
   completes the merchant leg for you.
+- **Prices:** show the user the live price from the pay-tool result, never a
+  catalog price. \`haven_discover_tools\` prices are indicative
+  (\`price_is_indicative\`) and can be stale. The pay-tool result's \`amount\` /
+  \`amount_atomic\` is the amount Haven authorizes for the call — a ceiling the
+  merchant settles at or below — so present it as the most the user will pay.
+  Pass \`max_amount\` (atomic units) to \`haven_pay_mcp_tool\` /
+  \`haven_pay_x402_quote\` to reject a quote whose authorized amount is above the
+  user's cap, before any funds move.
 - **Status:** \`haven_get_payment_status\` with a \`payment_id\` to check on
   queued or in-flight payments. Do not poll in a tight loop.
 

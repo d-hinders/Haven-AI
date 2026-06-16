@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   HavenApiError,
   HavenClient,
@@ -37,6 +38,7 @@ export type HostedToolName =
   | 'haven_pay'
   | 'haven_submit'
   | 'haven_pay_mcp_tool'
+  | 'haven_complete_mcp_tool'
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
@@ -83,6 +85,13 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     arguments: z.record(z.string(), z.unknown()).optional(),
     idempotency_key: z.string().optional(),
   },
+  haven_complete_mcp_tool: {
+    merchant_url: z.string().url(),
+    tool_name: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()).optional(),
+    // The X-PAYMENT header built by the local signer (haven_x402_sign_header).
+    payment_header: z.string().min(1),
+  },
   haven_quote_x402: {
     url: z.string().url(),
     method: z.string().optional(),
@@ -91,28 +100,28 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_pay_x402_quote: {
     // The parsed HTTP 402 PaymentRequired the agent received from the merchant
     // (or the paymentRequired field from a haven_quote_x402 result).
-    // Validated downstream by the SDK; kept loose here to avoid forking the
-    // x402 schema in two places.
-    payment_required: z.unknown(),
+    // Validated downstream by the SDK; typed as an object (not z.unknown()) so
+    // MCP clients embed it as JSON rather than serialising it to a string.
+    payment_required: z.record(z.string(), z.unknown()),
     idempotency_key: z.string().optional(),
   },
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
-    resume_state: z.unknown().optional(),
+    resume_state: z.record(z.string(), z.unknown()).optional(),
   },
   haven_quote_mpp: {
     url: z.string().url().optional(),
-    challenge: z.unknown().optional(),
+    challenge: z.record(z.string(), z.unknown()).optional(),
     method: z.string().optional(),
     headers: z.record(z.string()).optional(),
   },
   haven_pay_mpp_challenge: {
-    quote: z.unknown(),
+    quote: z.record(z.string(), z.unknown()),
     idempotency_key: z.string().optional(),
   },
   haven_resume_mpp_payment: {
     payment_id: z.string().optional(),
-    resume_state: z.unknown().optional(),
+    resume_state: z.record(z.string(), z.unknown()).optional(),
   },
   haven_get_payment_status: {
     payment_id: z.string().min(1),
@@ -152,11 +161,25 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
   ...sharedDescriptions.payMcpTool,
   behavior:
     'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. ' +
-    'Creates a funding intent and returns the unsigned payload_hash for the local edge signer. ' +
-    'Sign via haven_sign, relay via haven_submit, use haven_x402_sign_header on the local signer ' +
-    'to build the X-PAYMENT header, and retry the merchant with the original JSON-RPC envelope ' +
-    'plus the X-PAYMENT header to get the tool result. ' +
-    'Haven never receives the signing key.',
+    'Creates a funding intent and returns { payment_id, payload_hash, payment_required, x402, merchant_url, tool_name, arguments }. ' +
+    'Full flow: (1) haven_sign payload_hash with x402 (the x402.expected context) on the local signer → x402_binding; ' +
+    '(2) haven_submit the signature to fund the delegate; ' +
+    '(3) haven_x402_sign_header on the local signer with payment_required + x402_binding → payment_header; ' +
+    '(4) haven_complete_mcp_tool with merchant_url, tool_name, arguments, and payment_header to settle with the merchant and get the tool result. ' +
+    'Pass payment_required and arguments through verbatim from this response. Haven never receives the signing key.',
+})
+
+const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
+  summary:
+    'Complete an x402 MCP tool payment by delivering the signed X-PAYMENT header to the merchant and returning the tool result.',
+  behavior:
+    'Final step after haven_x402_sign_header. Re-issues the MCP tools/call to the merchant with the X-PAYMENT header ' +
+    '(running a fresh MCP initialize/session handshake server-side) and returns the merchant tool result. ' +
+    'Pass merchant_url, tool_name, and arguments exactly as returned by haven_pay_mcp_tool, plus the payment_header from ' +
+    'haven_x402_sign_header. The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; ' +
+    'Haven relays it but never holds signing authority. Call only after haven_submit has confirmed the funding transfer.',
+  nextActionGuidance:
+    'If the merchant rejects the payment after funding, the delegate holds stranded funds — reconcile with haven_sweep_delegate.',
 })
 
 const QUOTE_X402_DESCRIPTION = composeDescription({
@@ -224,6 +247,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
   haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,
+  haven_complete_mcp_tool: COMPLETE_MCP_TOOL_DESCRIPTION,
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
@@ -385,15 +409,63 @@ export function createToolHandlers(
           )
           return {
             ...buildX402SigningContext(intent),
-            // Give the agent the request details it needs to retry after signing.
+            // The raw merchant 402 PaymentRequired — the local signer needs this
+            // verbatim in haven_x402_sign_header to build the EIP-3009 header.
+            payment_required: quote.paymentRequired,
+            // Request details to pass back to haven_complete_mcp_tool after signing.
             merchant_url: args.merchant_url,
             tool_name: args.tool_name,
+            arguments: args.arguments ?? {},
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
             return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }
           }
           throw err
+        }
+      }),
+
+    haven_complete_mcp_tool: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_complete_mcp_tool', input)
+        // Rebuild the same JSON-RPC tools/call envelope haven_pay_mcp_tool used,
+        // then deliver the signed X-PAYMENT header to the merchant. The header
+        // is a signed authorization the edge signer produced — Haven relays it
+        // but never holds the key.
+        const envelope = {
+          jsonrpc: '2.0',
+          id: `haven-mcp-${randomUUID()}`,
+          method: 'tools/call',
+          params: {
+            name: args.tool_name,
+            arguments: args.arguments ?? {},
+          },
+        }
+        const result = await haven.completeX402MerchantCall({
+          url: args.merchant_url as string,
+          init: {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(envelope),
+          },
+          paymentHeader: args.payment_header as string,
+        })
+        // Funding already confirmed before this step, so a non-2xx merchant
+        // response means the delegate holds stranded funds. Surface a distinct
+        // failure (not a soft ok:false) so the agent reconciles via
+        // haven_sweep_delegate instead of treating it as a transient error.
+        if (!result.ok) {
+          throw new Error(
+            `Merchant rejected the payment after funding (HTTP ${result.status}). ` +
+              `The delegate wallet holds stranded funds — reconcile with haven_sweep_delegate. ` +
+              `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
+          )
+        }
+        return {
+          status: result.status,
+          ok: result.ok,
+          result: result.body,
+          settlement_tx_hash: result.settlementTxHash ?? null,
         }
       }),
 
@@ -439,7 +511,7 @@ export function createToolHandlers(
     },
 
     haven_pay_x402_quote: async (input) => {
-      const args = parse('haven_pay_x402_quote', input)
+      const args = parse('haven_pay_x402_quote', coerceJsonField(input, 'payment_required'))
       const payReq = args.payment_required as Record<string, unknown> | null | undefined
       if (!payReq || typeof payReq !== 'object') {
         return wrongTool(
@@ -739,6 +811,22 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
 
 function parse<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {
   return z.object(toolSchemas[name]).parse(input ?? {})
+}
+
+/**
+ * If a caller's transport serialised an object-typed field to a JSON string,
+ * parse it back before schema validation (the object-typed schema would
+ * otherwise reject the string). Mirrors the same guard in the edge signer.
+ */
+function coerceJsonField(input: unknown, field: string): unknown {
+  if (!input || typeof input !== 'object') return input
+  const record = input as Record<string, unknown>
+  if (typeof record[field] !== 'string') return input
+  try {
+    return { ...record, [field]: JSON.parse(record[field] as string) }
+  } catch {
+    return input
+  }
 }
 
 async function runTool<T>(fn: () => Promise<T>): Promise<ToolPayload<T>> {

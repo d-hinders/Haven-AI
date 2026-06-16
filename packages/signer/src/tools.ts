@@ -52,8 +52,10 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     x402_expected: x402ExpectedSchema.optional(),
   },
   haven_x402_sign_header: {
-    // The parsed HTTP 402 PaymentRequired from the merchant.
-    payment_required: z.unknown(),
+    // The parsed HTTP 402 PaymentRequired from the merchant. Typed as an object
+    // (not z.unknown(), which becomes empty JSON Schema `{}`) so MCP clients
+    // embed it as JSON rather than serialising the object to a string.
+    payment_required: z.record(z.string(), z.unknown()),
     // Opaque binding returned by haven_sign when x402_expected was supplied.
     x402_binding: z.string().min(1),
   },
@@ -136,7 +138,12 @@ export function createToolHandlers(
 
     haven_x402_sign_header: async (input) =>
       runTool(async () => {
-        const args = parse('haven_x402_sign_header', input)
+        // Defensive: the object-typed schema makes conformant MCP clients embed
+        // payment_required as JSON, but some transports still serialise it to a
+        // string. Coerce it back to an object BEFORE Zod validation so the
+        // tightened schema doesn't reject it (else `.accepts` would be undefined
+        // → "No compatible payment option found").
+        const args = parse('haven_x402_sign_header', coercePaymentRequired(input))
         const result = await signer.buildX402PaymentHeader(
           args.payment_required as X402PaymentRequired,
           args.x402_binding,
@@ -164,6 +171,22 @@ export function createToolHandlers(
 
 function parse<TName extends SignerToolName>(name: TName, input: unknown): Record<string, any> {
   return z.object(toolSchemas[name]).parse(input ?? {})
+}
+
+/**
+ * If a caller's transport serialised `payment_required` to a JSON string,
+ * parse it back to an object before schema validation. Leaves a real object
+ * (or anything that isn't valid JSON) untouched.
+ */
+function coercePaymentRequired(input: unknown): unknown {
+  if (!input || typeof input !== 'object') return input
+  const record = input as Record<string, unknown>
+  if (typeof record.payment_required !== 'string') return input
+  try {
+    return { ...record, payment_required: JSON.parse(record.payment_required) }
+  } catch {
+    return input
+  }
 }
 
 async function runTool<T>(fn: () => Promise<T>): Promise<ToolPayload<T>> {

@@ -46,11 +46,13 @@ function stubFetch(routes: Record<string, RouteDefinition>) {
       status,
       headers: responseHeaders,
       json: async () => bodySnapshot ?? {},
+      text: async () => JSON.stringify(bodySnapshot ?? {}),
       clone: () => ({
         ok: status >= 200 && status < 300,
         status,
         headers: responseHeaders,
         json: async () => bodySnapshot ?? {},
+        text: async () => JSON.stringify(bodySnapshot ?? {}),
       }),
     }
     return response
@@ -469,6 +471,8 @@ describe('haven_pay_mcp_tool', () => {
       payload_hash: string
       merchant_url: string
       tool_name: string
+      arguments: Record<string, unknown>
+      payment_required: { accepts?: unknown[] }
       x402: unknown
     }>(
       await handlers().haven_pay_mcp_tool({
@@ -480,12 +484,73 @@ describe('haven_pay_mcp_tool', () => {
 
     expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
     expect(result.data.payload_hash).toBe(X402_INTENT_RESPONSE.sign_data.hash)
-    // Merchant context threaded through for the agent to retry after signing
+    // Merchant context + payment_required threaded through so the agent can
+    // complete the flow (haven_x402_sign_header then haven_complete_mcp_tool).
     expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
     expect(result.data.tool_name).toBe('create_text')
+    expect(result.data.arguments).toEqual({ prompt: 'Hello' })
+    // The raw merchant 402 PaymentRequired must be returned (the signer needs it).
+    expect(result.data.payment_required).toBeDefined()
+    expect(Array.isArray(result.data.payment_required.accepts)).toBe(true)
     expect(result.data.x402).toBeDefined()
     // createX402Intent was called (POST /x402 route was hit)
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('haven_complete_mcp_tool delivers the signed header to the merchant and returns the tool result', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'a joke about agents' }] } },
+      settlementTxHash: '0xsettle',
+    })
+
+    const result = ok<{ ok: boolean; result: unknown; settlement_tx_hash: string | null }>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        payment_header: 'eyJwYXltZW50IjoiaGVhZGVyIn0=',
+      }),
+    )
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    const callArg = spy.mock.calls[0][0]
+    expect(callArg.url).toBe('http://merchant.test/mcp')
+    expect(callArg.paymentHeader).toBe('eyJwYXltZW50IjoiaGVhZGVyIn0=')
+    // Rebuilds the same JSON-RPC tools/call envelope haven_pay_mcp_tool used.
+    const envelope = JSON.parse(callArg.init!.body as string)
+    expect(envelope.method).toBe('tools/call')
+    expect(envelope.params).toEqual({ name: 'create_text', arguments: { prompt: 'Hello' } })
+
+    expect(result.data.ok).toBe(true)
+    expect(result.data.result).toMatchObject({ result: { content: [{ text: 'a joke about agents' }] } })
+    expect(result.data.settlement_tx_hash).toBe('0xsettle')
+  })
+
+  it('haven_complete_mcp_tool fails with a sweep hint when the merchant rejects after funding', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 402,
+      ok: false,
+      body: { error: 'payment verification failed' },
+    })
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: {},
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    // Funding already happened, so a merchant rejection is a hard failure that
+    // points the agent at reconciliation — not a soft ok:false the agent ignores.
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.message).toContain('haven_sweep_delegate')
+    expect(payload.message).toContain('402')
   })
 
   it('returns pending_approval when over allowance', async () => {
@@ -554,6 +619,12 @@ describe('custody invariant', () => {
     await h.haven_submit({ payment_id: 'p1', signature: '0x' + '11'.repeat(65) })
     await h.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED })
     await h.haven_pay_mcp_tool({ merchant_url: 'http://merchant.test/mcp', tool_name: 'probe_tool' })
+    await h.haven_complete_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'probe_tool',
+      arguments: {},
+      payment_header: 'eyJwYXltZW50X29wYXF1ZSI6dHJ1ZX0=',
+    })
 
     const wire = JSON.stringify(calls)
     expect(wire).not.toContain(DELEGATE_KEY)

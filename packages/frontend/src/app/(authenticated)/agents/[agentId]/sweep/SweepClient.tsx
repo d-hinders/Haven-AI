@@ -66,15 +66,14 @@ export default function SweepClient({ agentId }: { agentId: string }) {
 
   const hasUsdc = balance && balance.usdc_atomic !== '0'
   const hasEth = balance && balance.eth_atomic !== '0'
-  const hasStranded = hasUsdc || hasEth
 
   const sweepCommand = `haven_sweep_delegate`
 
   return (
     <div className="max-w-2xl">
       <PageHeader
-        title="Sweep stranded funds"
-        subtitle="Return stranded delegate funds to your account."
+        title="Recover funds"
+        subtitle="Move funds left in your agent's wallet back to your Haven wallet."
       />
 
       <div className="mt-1 mb-6">
@@ -102,12 +101,14 @@ export default function SweepClient({ agentId }: { agentId: string }) {
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{error}</p>
           </div>
         </Card>
-      ) : !hasStranded ? (
+      ) : !hasUsdc ? (
         <Card>
           <div className="px-6 py-8 text-center">
-            <p className="text-sm font-medium text-[var(--v2-ink)]">No stranded funds</p>
+            <p className="text-sm font-medium text-[var(--v2-ink)]">No recoverable funds</p>
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-              The delegate wallet holds no USDC or ETH. Nothing to sweep.
+              {hasEth
+                ? `Your agent's wallet holds ${balance!.eth} ETH but no USDC. The one-click recovery tool returns USDC only — ETH can't be recovered this way.`
+                : 'Your agent\'s wallet holds no USDC. Nothing to recover.'}
             </p>
             <div className="mt-4">
               <Button href={`/agents/${agentId}`} variant="ghost" size="sm">
@@ -120,37 +121,36 @@ export default function SweepClient({ agentId }: { agentId: string }) {
         <div className="space-y-4">
           <Card>
             <div className="px-6 py-5">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-4">Stranded balance on delegate</h2>
+              <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-4">Recoverable balance</h2>
 
               <div className="space-y-2">
-                {hasUsdc && (
-                  <div className="flex items-center justify-between py-2 border-b border-[var(--v2-border)]">
-                    <span className="text-sm text-[var(--v2-ink-2)]">USDC</span>
-                    <span className="text-sm font-medium text-[var(--v2-ink)]">{balance!.usdc}</span>
-                  </div>
-                )}
-                {hasEth && (
-                  <div className="flex items-center justify-between py-2 border-b border-[var(--v2-border)]">
-                    <span className="text-sm text-[var(--v2-ink-2)]">ETH</span>
-                    <span className="text-sm font-medium text-[var(--v2-ink)]">{balance!.eth}</span>
-                  </div>
-                )}
+                <div className="flex items-center justify-between py-2 border-b border-[var(--v2-border)]">
+                  <span className="text-sm text-[var(--v2-ink-2)]">USDC</span>
+                  <span className="text-sm font-medium text-[var(--v2-ink)]">{balance!.usdc}</span>
+                </div>
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-sm text-[var(--v2-ink-3)]">Destination</span>
+                  <span className="text-sm text-[var(--v2-ink-3)]">Goes to your Haven wallet</span>
                   <span className="text-sm text-[var(--v2-ink-2)] font-mono text-right truncate max-w-[240px]">
-                    {balance!.safe_address ?? 'Your Safe'}
+                    {balance!.safe_address ?? 'Your Haven wallet'}
                   </span>
                 </div>
               </div>
+
+              {hasEth && (
+                <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+                  The wallet also holds {balance!.eth} ETH. This recovery returns USDC only; ETH stays on the wallet.
+                </p>
+              )}
             </div>
           </Card>
 
           <Card elevation="anchor">
             <div className="px-6 py-5">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-2">How to sweep</h2>
+              <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-2">How to recover</h2>
               <p className="text-sm text-[var(--v2-ink-2)] mb-4">
-                Only your agent can sweep because only it has the delegate signing key.
-                Tell your agent to run this tool — it will sign and submit the transfer back to your account.
+                Only your agent can do this, because only it holds the signing key.
+                Tell your agent to run this tool — it signs the transfer and Haven covers the gas,
+                so the funds come straight back to your Haven wallet.
               </p>
 
               <div className="rounded-lg bg-[var(--v2-surface-2)] px-4 py-3">

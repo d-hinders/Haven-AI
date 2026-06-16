@@ -69,6 +69,11 @@ import {
   encodeMachinePaymentProof,
   parseMachinePaymentChallengeResponse,
 } from './mpp.js'
+import type {
+  SweepAuthorization,
+  SweepPrepareResponse,
+  SweepSubmitResponse,
+} from './sweep.js'
 import { createJsonRpcProvider, createWallet, createErc20Contract } from './provider.js'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
 
@@ -675,6 +680,35 @@ export class HavenClient {
       chainId,
       transfers,
     }
+  }
+
+  /**
+   * Hosted (keyless) split-signer sweep — step 1 of 2.
+   *
+   * Asks the backend to build a gasless EIP-3009 sweep authorization for the
+   * delegate's stranded USDC. Returns `nothing_stranded` when the delegate is
+   * empty, otherwise an `authorization` + Haven `expected_auth` to hand to the
+   * edge signer's `haven_sign_sweep_delegate`. No key is required on this client.
+   */
+  async prepareSweep(): Promise<SweepPrepareResponse> {
+    return this.post<SweepPrepareResponse>('/machine-payments/sweep/prepare', {})
+  }
+
+  /**
+   * Hosted (keyless) split-signer sweep — step 2 of 2.
+   *
+   * Relays the delegate-signed authorization. The Haven relayer submits the
+   * on-chain `transferWithAuthorization` and pays gas; this client never holds
+   * the key.
+   */
+  async submitSweep(
+    authorization: SweepAuthorization,
+    signature: string,
+  ): Promise<SweepSubmitResponse> {
+    return this.post<SweepSubmitResponse>('/machine-payments/sweep/submit', {
+      authorization,
+      signature,
+    })
   }
 
   /**

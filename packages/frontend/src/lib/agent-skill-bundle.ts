@@ -66,6 +66,13 @@ normal, not an error.
   the local Haven signer; follow the tool results — they tell you the next
   action at every step. Retry the original request only when the result says
   \`retry_original_x402_request\`.
+- **Paid MCP tool call:** \`haven_pay_mcp_tool\` with the merchant URL, tool
+  name, and arguments. Then follow the returned steps: \`haven_sign\` the
+  funding hash, \`haven_submit\` the signature, \`haven_x402_sign_header\` to
+  build the payment header, and finally \`haven_complete_mcp_tool\` to settle
+  with the merchant and get the tool result. Pass \`payment_required\` and
+  \`arguments\` through verbatim from the \`haven_pay_mcp_tool\` result. Do not
+  call the merchant yourself — Haven completes the merchant leg for you.
 - **Status:** \`haven_get_payment_status\` with a \`payment_id\` to check on
   queued or in-flight payments. Do not poll in a tight loop.
 

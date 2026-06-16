@@ -9,6 +9,7 @@ import {
   type MachinePaymentChallenge,
   type MppQuote,
   type MppResumeState,
+  type X402McpTransport,
   type X402PaymentRequired,
   type X402Quote,
   type X402ResumeState,
@@ -90,6 +91,10 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     merchant_url: z.string().url(),
     tool_name: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()).optional(),
+    mcp_transport: z.object({
+      handshake_required: z.boolean(),
+      source: z.enum(['path', 'bazaar']),
+    }).optional(),
     // The X-PAYMENT header built by the local signer (haven_x402_sign_header).
     payment_header: z.string().min(1),
   },
@@ -162,12 +167,12 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
   ...sharedDescriptions.payMcpTool,
   behavior:
     'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. ' +
-    'Creates a funding intent and returns { payment_id, payload_hash, payment_required, x402, merchant_url, tool_name, arguments }. ' +
+    'Creates a funding intent and returns { payment_id, payload_hash, payment_required, x402, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'Full flow: (1) haven_sign payload_hash with x402 (the x402.expected context) on the local signer → x402_binding; ' +
     '(2) haven_submit the signature to fund the delegate; ' +
     '(3) haven_x402_sign_header on the local signer with payment_required + x402_binding → payment_header; ' +
-    '(4) haven_complete_mcp_tool with payment_id, merchant_url, tool_name, arguments, and payment_header to settle with the merchant and get the tool result. ' +
-    'Pass payment_required and arguments through verbatim from this response. Haven never receives the signing key.',
+    '(4) haven_complete_mcp_tool with payment_id, merchant_url, tool_name, arguments, mcp_transport, and payment_header to settle with the merchant and get the tool result. ' +
+    'Pass payment_required, arguments, and mcp_transport through verbatim from this response. Haven never receives the signing key.',
 })
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -176,7 +181,7 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
   behavior:
     'Final step after haven_x402_sign_header. Re-issues the MCP tools/call to the merchant with the X-PAYMENT header ' +
     '(running a fresh MCP initialize/session handshake server-side) and returns the merchant tool result. ' +
-    'Pass payment_id, merchant_url, tool_name, and arguments exactly as returned by haven_pay_mcp_tool, plus the payment_header from ' +
+    'Pass payment_id, merchant_url, tool_name, arguments, and mcp_transport exactly as returned by haven_pay_mcp_tool, plus the payment_header from ' +
     'haven_x402_sign_header. The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; ' +
     'Haven relays it but never holds signing authority. Call only after haven_submit has confirmed the funding transfer. ' +
     'The payment_id is used to attach merchant evidence or reconciliation context to the already-funded payment.',
@@ -418,6 +423,7 @@ export function createToolHandlers(
             merchant_url: args.merchant_url,
             tool_name: args.tool_name,
             arguments: args.arguments ?? {},
+            ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
@@ -452,6 +458,7 @@ export function createToolHandlers(
           },
           paymentId: args.payment_id as string,
           paymentHeader: args.payment_header as string,
+          mcpTransport: parseMcpTransport(args.mcp_transport),
         })
         // Funding already confirmed before this step, so a non-2xx merchant
         // response means the delegate holds stranded funds. Surface a distinct
@@ -784,6 +791,27 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
         auth: intent.expectedAuth,
       },
     },
+  }
+}
+
+function serializeMcpTransport(input: X402McpTransport | undefined):
+  | { handshake_required: boolean; source: X402McpTransport['source'] }
+  | undefined {
+  if (!input) return undefined
+  return {
+    handshake_required: input.handshakeRequired,
+    source: input.source,
+  }
+}
+
+function parseMcpTransport(input: unknown): X402McpTransport | undefined {
+  if (!input || typeof input !== 'object') return undefined
+  const transport = input as { handshake_required?: unknown; source?: unknown }
+  if (transport.handshake_required !== true) return undefined
+  if (transport.source !== 'path' && transport.source !== 'bazaar') return undefined
+  return {
+    handshakeRequired: true,
+    source: transport.source,
   }
 }
 

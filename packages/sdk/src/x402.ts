@@ -106,6 +106,9 @@ function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
     resource,
     accepts,
     error: candidate.error,
+    ...(candidate.extensions && typeof candidate.extensions === 'object'
+      ? { extensions: candidate.extensions as Record<string, unknown> }
+      : {}),
   }
 }
 

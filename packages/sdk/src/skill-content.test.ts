@@ -17,6 +17,7 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('haven_pay_x402_quote')
     expect(HAVEN_SKILL_MD).toContain('haven_get_payment_status')
     expect(HAVEN_SKILL_MD).toContain('retry_original_x402_request')
+    expect(HAVEN_SKILL_MD).toContain('mcp_transport')
   })
 
   it('has valid skill frontmatter and the expected folder name', () => {

@@ -36,6 +36,7 @@ export type {
   SignData,
   X402PaymentRequired,
   X402PaymentOption,
+  X402McpTransport,
   X402Receipt,
   X402AuthorizationOptions,
   X402Intent,

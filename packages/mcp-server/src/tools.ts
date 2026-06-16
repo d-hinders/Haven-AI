@@ -200,8 +200,8 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     '(3) haven_x402_sign_header on the local signer with payment_required + x402_binding → payment_header; ' +
     '(4) haven_complete_mcp_tool with payment_id, merchant_url, tool_name, arguments, mcp_transport, and payment_header to settle with the merchant and get the tool result. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
-    'The returned amount/amount_atomic is the authoritative live merchant price — show THAT to the user, not any catalog/discovery price. ' +
-    'Pass max_amount (atomic units) to reject a quote above the user\'s cap before any funding moves. Haven never receives the signing key.',
+    'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. ' +
+    'Pass max_amount (atomic units) to reject a quote whose authorized amount exceeds the user\'s cap, before any funding moves. Haven never receives the signing key.',
 })
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -522,8 +522,9 @@ export function createToolHandlers(
             // The raw merchant 402 PaymentRequired — the local signer needs this
             // verbatim in haven_x402_sign_header to build the EIP-3009 header.
             payment_required: quote.paymentRequired,
-            // Authoritative live merchant price — show THIS to the user, not any
-            // catalog/discovery price (which is indicative and can be stale).
+            // Authorized amount for this call — a ceiling the merchant settles
+            // at or below (maxAmountRequired ?? amount). Show THIS to the user
+            // as the maximum, not any catalog price (which is indicative/stale).
             amount_atomic: quote.amountAtomic,
             amount: quote.amount,
             token: quote.token,
@@ -957,35 +958,39 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
 }
 
 /**
- * Pre-funding price guard. Throws a typed PRICE_EXCEEDS_MAX (preserved by
- * normalizeError) when the merchant's authoritative atomic price is above the
- * agent's optional cap, so the call fails BEFORE any funding transfer. The
- * on-chain allowance is still the hard gate; this is an extra agent affordance
- * against surprise overcharges within budget. Compared in atomic BigInt units.
+ * Pre-funding price guard. `authorizedAtomic` is the amount Haven would
+ * authorize for the call — the ceiling the merchant can settle at
+ * (`maxAmountRequired ?? amount`), i.e. the user's worst-case spend, which is
+ * the right figure to cap. Throws a typed PRICE_EXCEEDS_MAX (preserved by
+ * normalizeError) when it exceeds the agent's optional cap, so the call fails
+ * BEFORE any funding transfer. The on-chain allowance is still the hard gate;
+ * this is an extra agent affordance against surprise overcharges within budget.
+ * Compared in atomic BigInt units.
  */
 function assertWithinMaxAmount(
-  quotedAtomic: string,
+  authorizedAtomic: string,
   maxAmount: string | undefined,
   token: string | undefined,
 ): void {
   if (maxAmount === undefined) return
-  let quoted: bigint
+  let authorized: bigint
   let cap: bigint
   try {
-    quoted = BigInt(quotedAtomic)
+    authorized = BigInt(authorizedAtomic)
     cap = BigInt(maxAmount)
   } catch {
     throw new HavenError(
-      'max_amount and the merchant price must be decimal atomic amounts.',
+      'max_amount and the authorized amount must be decimal atomic amounts.',
       'INVALID_MAX_AMOUNT',
       400,
     )
   }
-  if (quoted > cap) {
+  if (authorized > cap) {
     const unit = token ? `${token}, atomic units` : 'atomic units'
     throw new HavenError(
-      `Merchant price ${quotedAtomic} exceeds max_amount ${maxAmount} (${unit}). ` +
-        `No funds were moved. Confirm the higher price with the user before retrying with a larger max_amount.`,
+      `Authorized amount ${authorizedAtomic} exceeds max_amount ${maxAmount} (${unit}); ` +
+        `this is the ceiling the merchant can settle at. No funds were moved. ` +
+        `Confirm the higher amount with the user before retrying with a larger max_amount.`,
       'PRICE_EXCEEDS_MAX',
       400,
     )

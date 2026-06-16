@@ -265,6 +265,8 @@ describe('haven_pay_x402_quote', () => {
     expect(payload.success).toBe(false)
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe('PRICE_EXCEEDS_MAX')
+    // Guard is pure + pre-funding: neither the agent fetch nor the intent ran.
+    expect(calls.find((c) => c.url.includes('/agent'))).toBeUndefined()
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
@@ -576,7 +578,10 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.code).toBe('PRICE_EXCEEDS_MAX')
     expect(payload.message).toContain('1500000')
     expect(payload.message).toContain('1000000')
-    // No funding intent was created — the guard fired before POST /x402.
+    // No funding intent was created — the guard fired before createX402Intent
+    // (which would have hit GET /agent then POST /x402). The quote probe to the
+    // merchant (POST /mcp) is expected; only the funding path must be absent.
+    expect(calls.find((c) => c.url.includes('/agent'))).toBeUndefined()
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 

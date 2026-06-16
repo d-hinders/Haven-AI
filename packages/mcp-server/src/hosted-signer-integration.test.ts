@@ -10,7 +10,8 @@
  *
  * Critical invariants asserted:
  *   - The delegate key NEVER appears in any HTTP request to the hosted MCP or Haven.
- *   - Only { payment_id, signature } crosses from the signer side to hosted MCP.
+ *   - Funding relay sends only { payment_id, signature } to hosted MCP.
+ *     Paid MCP completion may send a signed merchant payment_header, never a key.
  *   - The payment header produced by the signer is spec-compliant wire format.
  *
  * docs/architecture/06-hosted-mcp-connect-flow.md

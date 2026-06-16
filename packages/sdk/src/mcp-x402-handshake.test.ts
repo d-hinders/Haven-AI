@@ -358,7 +358,7 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
       // 2: the paid tools/call → SSE JSON-RPC result
       .mockResolvedValueOnce(
         sseResponse(sse({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'a joke' }] } }), {
-          headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ settlement: { transaction: '0xsettle' } })) },
+          headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: '0xsettle' })) },
         }),
       )
 
@@ -377,6 +377,8 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
     expect(result.status).toBe(200)
     // SSE result is collapsed to the JSON-RPC `result` payload.
     expect(result.body).toEqual({ content: [{ type: 'text', text: 'a joke' }] })
+    // The PAYMENT-RESPONSE settlement tx is extracted through surfaceMcpResult.
+    expect(result.settlementTxHash).toBe('0xsettle')
   })
 
   it('does not handshake for a non-MCP merchant URL and still sends X-PAYMENT', async () => {

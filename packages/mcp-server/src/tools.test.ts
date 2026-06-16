@@ -46,11 +46,13 @@ function stubFetch(routes: Record<string, RouteDefinition>) {
       status,
       headers: responseHeaders,
       json: async () => bodySnapshot ?? {},
+      text: async () => JSON.stringify(bodySnapshot ?? {}),
       clone: () => ({
         ok: status >= 200 && status < 300,
         status,
         headers: responseHeaders,
         json: async () => bodySnapshot ?? {},
+        text: async () => JSON.stringify(bodySnapshot ?? {}),
       }),
     }
     return response
@@ -528,6 +530,29 @@ describe('haven_pay_mcp_tool', () => {
     expect(result.data.settlement_tx_hash).toBe('0xsettle')
   })
 
+  it('haven_complete_mcp_tool fails with a sweep hint when the merchant rejects after funding', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 402,
+      ok: false,
+      body: { error: 'payment verification failed' },
+    })
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: {},
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    // Funding already happened, so a merchant rejection is a hard failure that
+    // points the agent at reconciliation — not a soft ok:false the agent ignores.
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.message).toContain('haven_sweep_delegate')
+    expect(payload.message).toContain('402')
+  })
+
   it('returns pending_approval when over allowance', async () => {
     stubFetch({
       'POST /mcp': {
@@ -594,6 +619,12 @@ describe('custody invariant', () => {
     await h.haven_submit({ payment_id: 'p1', signature: '0x' + '11'.repeat(65) })
     await h.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED })
     await h.haven_pay_mcp_tool({ merchant_url: 'http://merchant.test/mcp', tool_name: 'probe_tool' })
+    await h.haven_complete_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'probe_tool',
+      arguments: {},
+      payment_header: 'eyJwYXltZW50X29wYXF1ZSI6dHJ1ZX0=',
+    })
 
     const wire = JSON.stringify(calls)
     expect(wire).not.toContain(DELEGATE_KEY)

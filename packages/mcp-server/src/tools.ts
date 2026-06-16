@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   HavenApiError,
   HavenClient,
@@ -90,7 +91,6 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     arguments: z.record(z.string(), z.unknown()).optional(),
     // The X-PAYMENT header built by the local signer (haven_x402_sign_header).
     payment_header: z.string().min(1),
-    payment_id: z.string().optional(),
   },
   haven_quote_x402: {
     url: z.string().url(),
@@ -434,7 +434,7 @@ export function createToolHandlers(
         // but never holds the key.
         const envelope = {
           jsonrpc: '2.0',
-          id: `haven-mcp-${Date.now()}`,
+          id: `haven-mcp-${randomUUID()}`,
           method: 'tools/call',
           params: {
             name: args.tool_name,
@@ -450,6 +450,17 @@ export function createToolHandlers(
           },
           paymentHeader: args.payment_header as string,
         })
+        // Funding already confirmed before this step, so a non-2xx merchant
+        // response means the delegate holds stranded funds. Surface a distinct
+        // failure (not a soft ok:false) so the agent reconciles via
+        // haven_sweep_delegate instead of treating it as a transient error.
+        if (!result.ok) {
+          throw new Error(
+            `Merchant rejected the payment after funding (HTTP ${result.status}). ` +
+              `The delegate wallet holds stranded funds — reconcile with haven_sweep_delegate. ` +
+              `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
+          )
+        }
         return {
           status: result.status,
           ok: result.ok,
@@ -500,7 +511,7 @@ export function createToolHandlers(
     },
 
     haven_pay_x402_quote: async (input) => {
-      const args = parse('haven_pay_x402_quote', input)
+      const args = parse('haven_pay_x402_quote', coerceJsonField(input, 'payment_required'))
       const payReq = args.payment_required as Record<string, unknown> | null | undefined
       if (!payReq || typeof payReq !== 'object') {
         return wrongTool(
@@ -800,6 +811,22 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
 
 function parse<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {
   return z.object(toolSchemas[name]).parse(input ?? {})
+}
+
+/**
+ * If a caller's transport serialised an object-typed field to a JSON string,
+ * parse it back before schema validation (the object-typed schema would
+ * otherwise reject the string). Mirrors the same guard in the edge signer.
+ */
+function coerceJsonField(input: unknown, field: string): unknown {
+  if (!input || typeof input !== 'object') return input
+  const record = input as Record<string, unknown>
+  if (typeof record[field] !== 'string') return input
+  try {
+    return { ...record, [field]: JSON.parse(record[field] as string) }
+  } catch {
+    return input
+  }
 }
 
 async function runTool<T>(fn: () => Promise<T>): Promise<ToolPayload<T>> {

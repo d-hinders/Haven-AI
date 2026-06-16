@@ -1412,11 +1412,16 @@ export class HavenClient {
    * amount/merchant/nonce-bound EIP-3009 authorization the edge signer already
    * produced — the hosted server cannot mint or reuse signing authority.
    *
-   * When the URL is MCP-shaped, runs a fresh `initialize` handshake (the
-   * quote-time session is gone once funding confirms; the x402 challenge is
-   * stateless w.r.t. the MCP session, so a fresh session is accepted), threads
-   * the session + wallet headers, sets `X-PAYMENT`, and collapses an SSE
-   * JSON-RPC response to its `result`.
+   * When the URL is MCP-shaped (`/mcp` path), runs a fresh `initialize`
+   * handshake (the quote-time session is gone once funding confirms; the x402
+   * challenge is stateless w.r.t. the MCP session, so a fresh session is
+   * accepted), threads the session + wallet headers, sets `X-PAYMENT`, and
+   * collapses an SSE JSON-RPC response to its `result`.
+   *
+   * Limitation: detects MCP only by the `/mcp` path convention, not the
+   * Coinbase Bazaar `extensions.bazaar` 402 signal that `fetch()` also honors.
+   * A Bazaar-discoverable merchant on a non-`/mcp` URL would need the standard
+   * `fetch()` path. All current MCP-tool merchants use the `/mcp` convention.
    */
   async completeX402MerchantCall(input: {
     url: string

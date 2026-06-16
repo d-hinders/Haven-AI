@@ -44,7 +44,7 @@ This is a TypeScript monorepo:
 ## Prerequisites
 
 - **Node.js** v18+ — [nodejs.org](https://nodejs.org)
-- **Docker Desktop** — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
+- **Docker Desktop** (for local hosting) — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
 - **A browser wallet** (MetaMask, Rabby, etc.) with Gnosis Chain or Base configured
 
 ## Getting Started

@@ -66,7 +66,7 @@ hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
 local:   haven_sign + expected    -> funding signature + x402_binding
 hosted:  haven_submit             -> funds Safe -> delegate EOA
 local:   haven_x402_sign_header   -> EIP-3009 X-PAYMENT header if binding matches
-agent:   retry merchant with X-PAYMENT                 (no Haven involvement)
+agent:   retry merchant with X-PAYMENT, or hosted haven_complete_mcp_tool for paid MCP tools
 ```
 
 ## Custody invariants
@@ -74,9 +74,11 @@ agent:   retry merchant with X-PAYMENT                 (no Haven involvement)
 - The signer process is the **only** holder of the delegate key. Nothing it
   emits contains key material — only `{ signature }` or an `X-PAYMENT` header.
 - The hosted server (#183) never receives the key (it's a different process /
-  host entirely); it gets only `{ payment_id, signature }` via `haven_submit`.
-- The merchant gets only the standard EIP-3009 header; Haven never talks to the
-  merchant.
+  host entirely). Funding relay sends only `{ payment_id, signature }` via
+  `haven_submit`; paid MCP-tool completion can receive a signed, merchant-bound
+  `payment_header` with the funding `payment_id` for settlement/evidence.
+- The merchant gets only the standard EIP-3009 header. Haven never builds that
+  header on the hosted server.
 - The edge signer refuses to build the merchant header unless the caller first
   signed the funding hash with a Haven-authenticated `x402.expected`; the
   resulting binding is process-local and is consumed after one successful

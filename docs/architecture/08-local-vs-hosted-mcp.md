@@ -27,8 +27,8 @@ MCP entry (URL + Bearer API key) plus a local `haven-signer` stdio entry. This
 is the path all users land on unless they explicitly opt out:
 
 - **Uniform key isolation** — the delegate key lives only in the dedicated
-  sign-only signer process on every runtime; only `{ payment_id, signature }`
-  crosses to the hosted server.
+  sign-only signer process on every runtime; funding relay sends only
+  `{ payment_id, signature }` to the hosted server.
 - **Server-side updatability** — construct/relay fixes ship once, centrally;
   no local MCP package for users to keep current.
 - **Central audit** — every payment is logged by Haven's hosted infrastructure
@@ -141,11 +141,20 @@ Agent → Merchant:    GET /data   X-PAYMENT: <payment_header>
                      → receives the paid resource
 ```
 
+For paid MCP tools, the final merchant call can be `haven_complete_mcp_tool`
+instead: the agent passes the funding `payment_id`, merchant tool arguments, and
+signed `payment_header` back to hosted MCP. Hosted MCP does not sign; it relays
+the header to the merchant and records success evidence or a reconciliation
+event if the merchant rejects after funding.
+
 ## Custody invariant
 
 The hosted server must **never** receive the delegate private key:
 
-- The only data crossing from the signer side to the hosted MCP is `{ payment_id, signature }` via `haven_submit`.
+- Funding relay sends only `{ payment_id, signature }` via `haven_submit`.
+- Paid MCP-tool completion can send a signed, single-use `payment_header` back
+  to hosted MCP with the funding `payment_id`; the header is already bound to
+  the merchant, amount, and nonce, and is not a key.
 - The hosted MCP boot guard (`createHostedHavenClient`) throws if a delegate key is detected on the client.
 - Deep links and setup tokens from Haven may carry the hosted URL and Bearer token, but **never** the delegate key.
 

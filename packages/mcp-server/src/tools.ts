@@ -104,6 +104,7 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     idempotency_key: z.string().optional(),
   },
   haven_complete_mcp_tool: {
+    payment_id: z.string().min(1),
     merchant_url: z.string().url(),
     tool_name: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()).optional(),
@@ -171,8 +172,8 @@ const PAY_DESCRIPTION = [
 const SUBMIT_DESCRIPTION = [
   'Relay a delegate signature produced by the local signer to execute a previously constructed',
   'payment. Pass the payment_id from haven_pay, haven_pay_x402_quote, haven_pay_mpp_challenge,',
-  'or a resume tool, and the signature over its payload_hash. Only { payment_id, signature } is',
-  'sent to Haven — never the signing key. Returns { status, tx_hash }.',
+  'or a resume tool, and the signature over its payload_hash. Funding relay sends',
+  '{ payment_id, signature } to Haven — never the signing key. Returns { status, tx_hash }.',
 ].join(' ')
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -183,7 +184,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Full flow: (1) haven_sign payload_hash with x402 (the x402.expected context) on the local signer → x402_binding; ' +
     '(2) haven_submit the signature to fund the delegate; ' +
     '(3) haven_x402_sign_header on the local signer with payment_required + x402_binding → payment_header; ' +
-    '(4) haven_complete_mcp_tool with merchant_url, tool_name, arguments, and payment_header to settle with the merchant and get the tool result. ' +
+    '(4) haven_complete_mcp_tool with payment_id, merchant_url, tool_name, arguments, and payment_header to settle with the merchant and get the tool result. ' +
     'Pass payment_required and arguments through verbatim from this response. Haven never receives the signing key.',
 })
 
@@ -193,9 +194,10 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
   behavior:
     'Final step after haven_x402_sign_header. Re-issues the MCP tools/call to the merchant with the X-PAYMENT header ' +
     '(running a fresh MCP initialize/session handshake server-side) and returns the merchant tool result. ' +
-    'Pass merchant_url, tool_name, and arguments exactly as returned by haven_pay_mcp_tool, plus the payment_header from ' +
+    'Pass payment_id, merchant_url, tool_name, and arguments exactly as returned by haven_pay_mcp_tool, plus the payment_header from ' +
     'haven_x402_sign_header. The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; ' +
-    'Haven relays it but never holds signing authority. Call only after haven_submit has confirmed the funding transfer.',
+    'Haven relays it but never holds signing authority. Call only after haven_submit has confirmed the funding transfer. ' +
+    'The payment_id is used to attach merchant evidence or reconciliation context to the already-funded payment.',
   nextActionGuidance:
     'If the merchant rejects the payment after funding, the delegate holds stranded funds — reconcile with haven_sweep_delegate.',
 })
@@ -531,6 +533,7 @@ export function createToolHandlers(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(envelope),
           },
+          paymentId: args.payment_id as string,
           paymentHeader: args.payment_header as string,
         })
         // Funding already confirmed before this step, so a non-2xx merchant

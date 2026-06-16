@@ -18,6 +18,7 @@ const delegateKey = `0x${'01'.repeat(32)}`
 const delegateAddress = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
 const safeAddress = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 const backendUrl = 'https://haven.example'
+const fundingTxHash = `0x${'ab'.repeat(32)}`
 
 const mcpUrl = 'https://mcp.soundside.ai/mcp'
 const genericUrl = 'https://api.merchant.example/paid'
@@ -96,6 +97,48 @@ function fundingConfirmed(): Response {
 
 function evidenceAccepted(): Response {
   return new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 })
+}
+
+function reconciliationAccepted(): Response {
+  return new Response(JSON.stringify({ event_id: 'event-123', status: 'open' }), { status: 202 })
+}
+
+function paymentStatusReady(resourceUrl: string = mcpUrl): Response {
+  return new Response(JSON.stringify({
+    payment_id: 'pay_123',
+    kind: 'payment_intent',
+    rail: 'x402',
+    status: 'confirmed',
+    phase: 'payment_confirmed',
+    next_action: 'none',
+    amount: '0.02',
+    token: 'USDC',
+    resource_url: resourceUrl,
+    merchant_address: accepted.payTo,
+    tx_hash: fundingTxHash,
+    expires_at: '2099-01-01T00:00:00.000Z',
+    chain_id: 8453,
+    message: 'Retry the original x402 request.',
+  }), { status: 200 })
+}
+
+function paymentStatusNeedsSignature(resourceUrl: string = genericUrl): Response {
+  return new Response(JSON.stringify({
+    payment_id: 'pay_123',
+    kind: 'payment_intent',
+    rail: 'x402',
+    status: 'pending_signature',
+    phase: 'agent_signature_required',
+    next_action: 'sign_and_submit_payment',
+    amount: '0.02',
+    token: 'USDC',
+    resource_url: resourceUrl,
+    merchant_address: accepted.payTo,
+    tx_hash: null,
+    expires_at: '2099-01-01T00:00:00.000Z',
+    chain_id: 8453,
+    message: 'Haven is waiting for the agent to sign and submit this payment.',
+  }), { status: 200 })
 }
 
 function newClient(): HavenClient {
@@ -351,25 +394,33 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
   it('runs a fresh MCP handshake, sends X-PAYMENT, and surfaces the merchant tool result', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      // 0: fresh MCP initialize handshake
+      // 0: confirm the funding payment is ready to complete with the merchant
+      .mockResolvedValueOnce(paymentStatusReady())
+      // 1: fresh MCP initialize handshake
       .mockResolvedValueOnce(initializeOk('sess-pay'))
-      // 1: notifications/initialized
+      // 2: notifications/initialized
       .mockResolvedValueOnce(notificationAccepted())
-      // 2: the paid tools/call → SSE JSON-RPC result
+      // 3: the paid tools/call → SSE JSON-RPC result
       .mockResolvedValueOnce(
         sseResponse(sse({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'a joke' }] } }), {
           headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: '0xsettle' })) },
         }),
       )
+      // 4: evidence
+      .mockResolvedValueOnce(evidenceAccepted())
 
     const result = await newClient().completeX402MerchantCall({
       url: mcpUrl,
       init: merchantInit,
+      paymentId: 'pay_123',
       paymentHeader: 'PAYMENT_HEADER_ABC',
     })
 
     // The paid call carried the X-PAYMENT header and the fresh session id.
-    const paidCall = fetchMock.mock.calls.find((c) => bodyOf(c).method === 'tools/call')!
+    const paidCall = fetchMock.mock.calls.find((c) => {
+      if (!(c[1] as RequestInit | undefined)?.body) return false
+      return bodyOf(c).method === 'tools/call'
+    })!
     expect(headersOf(paidCall).get('X-PAYMENT')).toBe('PAYMENT_HEADER_ABC')
     expect(headersOf(paidCall).get('mcp-session-id')).toBe('sess-pay')
 
@@ -379,22 +430,90 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
     expect(result.body).toEqual({ content: [{ type: 'text', text: 'a joke' }] })
     // The PAYMENT-RESPONSE settlement tx is extracted through surfaceMcpResult.
     expect(result.settlementTxHash).toBe('0xsettle')
+
+    const evidenceCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/machine-payments/evidence'))!
+    expect(bodyOf(evidenceCall)).toMatchObject({
+      paymentId: 'pay_123',
+      rail: 'x402',
+      txHash: fundingTxHash,
+      resourceUrl: mcpUrl,
+      merchantStatus: 200,
+      paymentProofHeaderName: 'X-PAYMENT',
+      paymentProofHeader: 'PAYMENT_HEADER_ABC',
+      protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
+    })
   })
 
   it('does not handshake for a non-MCP merchant URL and still sends X-PAYMENT', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(paymentStatusReady(genericUrl))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(evidenceAccepted())
 
     const result = await newClient().completeX402MerchantCall({
       url: genericUrl,
       init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      paymentId: 'pay_123',
       paymentHeader: 'PAYMENT_HEADER_XYZ',
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock.mock.calls.some(isInitializeCall)).toBe(false)
-    expect(headersOf(fetchMock.mock.calls[0]).get('X-PAYMENT')).toBe('PAYMENT_HEADER_XYZ')
+    expect(headersOf(fetchMock.mock.calls[1]).get('X-PAYMENT')).toBe('PAYMENT_HEADER_XYZ')
     expect(result.body).toEqual({ ok: true })
+  })
+
+  it('records a reconciliation event when the merchant rejects after funding', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(paymentStatusReady(genericUrl))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'payment verification failed' }), {
+        status: 402,
+        statusText: 'Payment Required',
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(reconciliationAccepted())
+
+    const result = await newClient().completeX402MerchantCall({
+      url: genericUrl,
+      init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_REJECTED',
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe(402)
+    expect(result.body).toEqual({ error: 'payment verification failed' })
+
+    const reconciliationCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith('/machine-payments/reconciliation-events')
+    )!
+    expect(bodyOf(reconciliationCall)).toMatchObject({
+      paymentId: 'pay_123',
+      rail: 'x402',
+      eventType: 'merchant_retry_rejected_after_payment',
+      txHash: fundingTxHash,
+      details: {
+        resource_url: genericUrl,
+        retry_status: 402,
+        merchant_to: accepted.payTo,
+      },
+    })
+  })
+
+  it('does not call the merchant before the x402 funding payment is confirmed', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(paymentStatusNeedsSignature())
+
+    await expect(newClient().completeX402MerchantCall({
+      url: genericUrl,
+      init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_TOO_EARLY',
+    })).rejects.toThrow('waiting for the agent to sign')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

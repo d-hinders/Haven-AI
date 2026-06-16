@@ -34,8 +34,11 @@ enforcement.
 ## Custody Rule
 
 Only `{ payment_id, signature }` should cross from the signer side back to
-hosted MCP for relay. The delegate private key must never appear in hosted MCP
-headers, URLs, request bodies, logs, deep links, or config snippets.
+hosted MCP for funding relay. Paid MCP-tool completion may also send the signed
+`payment_header` back to hosted MCP so it can settle with the merchant and
+attach evidence to the funding `payment_id`. The delegate private key must
+never appear in hosted MCP headers, URLs, request bodies, logs, deep links, or
+config snippets.
 
 Hosted MCP also has a boot-time custody guard: it must not start when a
 delegate key is injected into its environment.
@@ -134,10 +137,14 @@ edge can sign.
    signer binding.
 8. The local signer builds the EIP-3009 `X-PAYMENT` header only if amount,
    merchant, resource URL, asset, and network match the funded intent.
-9. Agent retries the merchant request with `X-PAYMENT`.
+9. Agent retries the merchant request with `X-PAYMENT`. For paid MCP tools, the
+   agent can instead pass the funding `payment_id` and signed `payment_header`
+   to hosted `haven_complete_mcp_tool`; hosted MCP calls the merchant tool and
+   records success evidence or a merchant-rejection reconciliation event.
 
-Haven never talks to the merchant in this standard x402 flow and never builds
-the merchant payment header on the hosted server.
+Haven never builds the merchant payment header on the hosted server. Hosted MCP
+only relays an already signed, merchant-bound header for paid MCP-tool
+completion.
 
 ## Hosted MCP Tools
 
@@ -148,6 +155,7 @@ the merchant payment header on the hosted server.
 | `haven_pay` | No | Construct direct payment hash or queue approval |
 | `haven_submit` | No | Relay a locally produced signature |
 | `haven_pay_x402_quote` | No | Construct x402 funding hash or queue approval |
+| `haven_complete_mcp_tool` | No | Complete a paid MCP tool with a signed merchant header and attach evidence |
 | `haven_get_payment_status` | No | Read direct/x402/MPP payment state |
 | `haven_list_transactions` | No | Read recent receipts/activity |
 

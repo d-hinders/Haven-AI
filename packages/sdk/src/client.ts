@@ -1460,8 +1460,13 @@ export class HavenClient {
   async completeX402MerchantCall(input: {
     url: string
     init?: RequestInit
+    paymentId: string
     paymentHeader: string
   }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string }> {
+    const evidenceContext = await this.resolveX402MerchantCompletionContext({
+      paymentId: input.paymentId,
+      url: input.url,
+    })
     let mcpSessionId: string | undefined
     if (isMcpUrl(input.url)) {
       mcpSessionId = await this.mcpInitialize(input.url, input.init)
@@ -1475,7 +1480,8 @@ export class HavenClient {
 
     const response = await globalThis.fetch(input.url, requestInit)
     const surfaced = mcpSessionId ? await this.surfaceMcpResult(response) : response
-    const settlement = parseMerchantSettlement(surfaced.headers.get('PAYMENT-RESPONSE'))
+    const protocolReceiptHeader = surfaced.headers.get('PAYMENT-RESPONSE') ?? undefined
+    const settlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
 
     const text = await surfaced.text()
     let body: unknown
@@ -1485,11 +1491,100 @@ export class HavenClient {
       body = text
     }
 
+    if (!surfaced.ok) {
+      await this.recordMerchantRetryRejected({
+        rail: 'x402',
+        paymentId: evidenceContext.paymentId,
+        txHash: evidenceContext.txHash,
+        resourceUrl: evidenceContext.resourceUrl,
+        merchant: {
+          merchant_status: surfaced.status,
+          merchant_status_text: surfaced.statusText,
+          merchant_headers: Object.fromEntries(surfaced.headers.entries()),
+          merchant_body: text,
+        },
+        details: {
+          merchant_to: evidenceContext.merchantAddress,
+        },
+      })
+    } else {
+      await this.reportMachinePaymentEvidence({
+        paymentId: evidenceContext.paymentId,
+        rail: 'x402',
+        txHash: evidenceContext.txHash,
+        resourceUrl: evidenceContext.resourceUrl,
+        merchantStatus: surfaced.status,
+        paymentProofHeaderName: 'X-PAYMENT',
+        paymentProofHeader: input.paymentHeader,
+        protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
+        protocolReceiptHeader,
+      })
+    }
+
     return {
       status: surfaced.status,
       ok: surfaced.ok,
       body,
       settlementTxHash: settlement.settlementTxHash ?? undefined,
+    }
+  }
+
+  private async resolveX402MerchantCompletionContext(input: {
+    paymentId: string
+    url: string
+  }): Promise<{
+    paymentId: string
+    txHash: string
+    resourceUrl: string
+    merchantAddress: string | null
+  }> {
+    const status = await this.getPaymentStatus(input.paymentId)
+
+    if (status.rail !== 'x402') {
+      throw new HavenPaymentStateError(
+        `Payment ${status.paymentId} is ${status.rail}, not x402.`,
+        409,
+        status,
+      )
+    }
+
+    const readyForMerchantCompletion =
+      status.nextAction === AgentPaymentNextAction.RetryOriginalX402Request ||
+      (
+        status.kind === 'payment_intent' &&
+        status.status === 'confirmed' &&
+        status.phase === AgentPaymentPhase.PaymentConfirmed &&
+        status.nextAction === AgentPaymentNextAction.None
+      )
+
+    if (!readyForMerchantCompletion) {
+      throw new HavenPaymentStateError(status.message, PAYMENT_STATE_STATUS_CODES[status.status] ?? 409, status)
+    }
+
+    if (!status.txHash) {
+      throw new HavenApiError(
+        `x402 payment ${status.paymentId} is ready for merchant completion but has no Haven transaction hash.`,
+        502,
+        status,
+        status.paymentId,
+      )
+    }
+
+    const approvedResourceUrl = status.resourceUrl ?? status.x402?.resourceUrl ?? null
+    if (approvedResourceUrl && approvedResourceUrl !== input.url) {
+      throw new HavenApiError(
+        'x402 merchant completion does not match the approved resource URL.',
+        409,
+        { status, url: input.url },
+        status.paymentId,
+      )
+    }
+
+    return {
+      paymentId: status.paymentId,
+      txHash: status.txHash,
+      resourceUrl: approvedResourceUrl ?? input.url,
+      merchantAddress: status.merchantAddress ?? status.x402?.merchantAddress ?? null,
     }
   }
 

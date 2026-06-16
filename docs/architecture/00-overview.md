@@ -17,7 +17,7 @@ enforcement.**
 | `@haven_ai/sdk` | TypeScript SDK; the single core for construction, signing, and payment state. Everything else is a thin shell over it. |
 | `@haven_ai/connect` | Connector CLI (Connect Agent 2): one-shot provisioning — generates the delegate key locally, registers only the public address, writes runtime config, hands back to the dashboard for approval. |
 | `@haven_ai/mcp-server` | Hosted, keyless MCP — constructs and relays payments; never holds the key. |
-| `@haven_ai/signer` | Local edge signer — holds the delegate key, signs only. Only `{ payment_id, signature }` crosses to the hosted server. |
+| `@haven_ai/signer` | Local edge signer — holds the delegate key, signs only. Funding relay sends `{ payment_id, signature }` to hosted MCP; paid MCP-tool completion can also send a signed, merchant-bound `payment_header` for settlement/evidence. |
 | `@haven_ai/mcp` | Fully-local MCP — the whole loop on one machine; **advanced opt-in** (`--local`), not the default. |
 | `@haven_ai/demo-merchant-mcp` | Internal x402 demo merchant — test counterparty, not product. |
 

@@ -86,6 +86,27 @@ export {
 } from './x402.js'
 
 export {
+  SWEEP_BASE_CHAIN_ID,
+  SWEEP_BASE_USDC_ADDRESS,
+  TRANSFER_WITH_AUTHORIZATION_TYPES,
+  sweepUsdcAddress,
+  sweepUsdcDomain,
+  buildSweepTypedData,
+  buildSweepAuthorizationMessage,
+} from './sweep.js'
+
+export type {
+  SweepEip712Domain,
+  SweepAuthorization,
+  SweepExpectedAuth,
+  SweepPreparation,
+  SweepPrepareResponse,
+  SweepSubmitResponse,
+  SweepSubmitResult,
+  SweepTypedData,
+} from './sweep.js'
+
+export {
   parseMachinePaymentChallenge,
   parseMachinePaymentChallengeResponse,
   buildMachinePaymentIdempotencyKey,

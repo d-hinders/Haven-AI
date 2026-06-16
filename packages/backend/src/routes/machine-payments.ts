@@ -13,11 +13,23 @@ import {
 } from '../lib/machine-payment-evidence.js'
 import {
   getTokenAllowance,
+  getTokenBalance,
   getLatestBlockTimeSec,
   computeEffectiveAllowance,
   generateTransferHash,
 } from '../lib/allowance-module.js'
-import { getChain } from '../lib/chains.js'
+import { getChain, getExplorerUrl } from '../lib/chains.js'
+import {
+  SWEEP_BASE_CHAIN_ID,
+  sweepUsdcAddress,
+  type SweepAuthorization,
+} from '@haven_ai/sdk'
+import {
+  buildSweepAuthorization,
+  signSweepExpectedContext,
+  recoverSweepSigner,
+  relaySweepAuthorization,
+} from '../lib/sweep.js'
 import { AgentPaymentPhase, AgentPaymentNextAction } from '../lib/agent-payment-taxonomy.js'
 
 interface MachinePaymentChallengeBody {
@@ -196,6 +208,52 @@ function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): strin
 
 function isValidAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
+}
+
+function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
+  return Boolean(a && b && a.toLowerCase() === b.toLowerCase())
+}
+
+const USDC_DECIMALS = 6
+
+function sweepResultBody(fields: {
+  txHash: string
+  valueAtomic: string
+  from: string
+  to: string
+  chainId: number
+  idempotent?: boolean
+}) {
+  return {
+    tx_hash: fields.txHash,
+    asset: 'USDC',
+    amount: ethers.formatUnits(BigInt(fields.valueAtomic), USDC_DECIMALS),
+    amount_atomic: fields.valueAtomic,
+    from_address: fields.from,
+    to_address: fields.to,
+    chain_id: fields.chainId,
+    explorer_url: getExplorerUrl(fields.chainId, 'tx', fields.txHash),
+    ...(fields.idempotent ? { idempotent_replay: true } : {}),
+  }
+}
+
+interface SweepSubmitBody {
+  authorization?: Partial<SweepAuthorization>
+  signature?: string
+}
+
+interface DelegateSweepRow {
+  id: string
+  chain_id: number
+  token_address: string
+  from_address: string
+  to_address: string
+  value_atomic: string
+  valid_after: string
+  valid_before: string
+  nonce: string
+  status: string
+  tx_hash: string | null
 }
 
 /**
@@ -1001,5 +1059,274 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       event_type: eventType,
       created_at: event.created_at,
     })
+  })
+
+  // ── POST /sweep/prepare — build a gasless USDC sweep authorization ──────────
+  //
+  // Reads the delegate's stranded USDC and returns an EIP-3009
+  // TransferWithAuthorization (delegate → the agent's own Safe) plus Haven's
+  // binding signature. The edge signer signs it; /sweep/submit relays it. The
+  // delegate never needs ETH and the hosted server never holds the key.
+  app.post('/sweep/prepare', async (request, reply) => {
+    const agent = request.agent as AgentContext
+
+    if (agent.chain_id !== SWEEP_BASE_CHAIN_ID) {
+      return reply.code(422).send({
+        error: `Sweep is only supported on Base (chainId ${SWEEP_BASE_CHAIN_ID}). Agent chain is ${agent.chain_id}.`,
+      })
+    }
+    if (!agent.delegate_address || !agent.safe_address) {
+      return reply.code(422).send({ error: 'Agent is missing a delegate or Safe address.' })
+    }
+
+    const token = sweepUsdcAddress(agent.chain_id)
+
+    let balance: bigint
+    try {
+      balance = await getTokenBalance(agent.chain_id, agent.delegate_address, token)
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to read delegate USDC balance',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    if (balance <= 0n) {
+      return reply.code(200).send({
+        nothing_stranded: true,
+        asset: 'USDC',
+        chain_id: agent.chain_id,
+        message: 'No stranded USDC on the delegate wallet — nothing to recover.',
+      })
+    }
+
+    const authorization = buildSweepAuthorization({
+      delegateAddress: agent.delegate_address,
+      safeAddress: agent.safe_address,
+      chainId: agent.chain_id,
+      valueAtomic: balance,
+    })
+
+    await pool.query(
+      `INSERT INTO delegate_sweeps (
+        agent_id, user_id, chain_id, token_address, from_address, to_address,
+        value_atomic, valid_after, valid_before, nonce, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'prepared')`,
+      [
+        agent.id,
+        agent.user_id,
+        authorization.chainId,
+        authorization.token.toLowerCase(),
+        authorization.from.toLowerCase(),
+        authorization.to.toLowerCase(),
+        authorization.value,
+        authorization.validAfter,
+        authorization.validBefore,
+        authorization.nonce.toLowerCase(),
+      ],
+    )
+
+    const expectedAuth = await signSweepExpectedContext(authorization)
+
+    return reply.code(201).send({
+      authorization,
+      expected_auth: expectedAuth,
+      asset: 'USDC',
+      amount: ethers.formatUnits(balance, USDC_DECIMALS),
+      amount_atomic: balance.toString(),
+      chain_id: agent.chain_id,
+      sign_instructions:
+        'Sign `authorization` with the local signer tool haven_sign_sweep_delegate ' +
+        '(pass authorization and expected_auth), then POST the returned signature to ' +
+        '/machine-payments/sweep/submit with the same authorization.',
+    })
+  })
+
+  // ── POST /sweep/submit — relay a signed sweep authorization ─────────────────
+  //
+  // Trusts nothing from the client payload: the authorization is re-derived from
+  // the prepared row, the delegate signature is verified off-chain, and the
+  // balance is re-read before the relayer spends gas.
+  app.post<{ Body: SweepSubmitBody }>('/sweep/submit', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const body = request.body ?? {}
+    const signature = body.signature
+    const nonce = body.authorization?.nonce
+
+    if (!signature || typeof signature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+      return reply.code(400).send({ error: 'signature must be a 0x-prefixed hex string' })
+    }
+    if (!nonce || typeof nonce !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(nonce)) {
+      return reply.code(400).send({ error: 'authorization.nonce must be a 0x-prefixed 32-byte hex string' })
+    }
+
+    const rowResult = await pool.query<DelegateSweepRow>(
+      `SELECT id, chain_id, token_address, from_address, to_address, value_atomic,
+              valid_after, valid_before, nonce, status, tx_hash
+       FROM delegate_sweeps
+       WHERE nonce = $1 AND agent_id = $2
+       LIMIT 1`,
+      [nonce.toLowerCase(), agent.id],
+    )
+    const row = rowResult.rows[0]
+    if (!row) {
+      return reply.code(404).send({ error: 'No prepared sweep found for this nonce. Call /sweep/prepare first.' })
+    }
+
+    // Idempotent replay: a retried submit of an already-relayed sweep returns the
+    // original tx rather than relaying (and reverting) a second time.
+    if (row.status === 'submitted' && row.tx_hash) {
+      return reply.code(200).send(
+        sweepResultBody({
+          txHash: row.tx_hash,
+          valueAtomic: row.value_atomic,
+          from: row.from_address,
+          to: row.to_address,
+          chainId: row.chain_id,
+          idempotent: true,
+        }),
+      )
+    }
+    if (row.status !== 'prepared') {
+      return reply.code(409).send({ error: `Sweep is ${row.status}, expected prepared.`, status: row.status })
+    }
+    if (Number(row.valid_before) <= Math.floor(Date.now() / 1000)) {
+      await pool.query(
+        `UPDATE delegate_sweeps SET status = 'expired' WHERE id = $1 AND status = 'prepared'`,
+        [row.id],
+      )
+      return reply.code(409).send({ error: 'Sweep authorization expired. Call /sweep/prepare again.' })
+    }
+
+    // Re-derive the authorization from server state — never from the client.
+    const expected: SweepAuthorization = {
+      from: row.from_address,
+      to: row.to_address,
+      value: row.value_atomic,
+      validAfter: String(row.valid_after),
+      validBefore: String(row.valid_before),
+      nonce: row.nonce,
+      token: row.token_address,
+      chainId: row.chain_id,
+    }
+
+    if (!sameAddress(expected.from, agent.delegate_address)) {
+      return reply.code(409).send({ error: 'Prepared sweep `from` no longer matches the agent delegate.' })
+    }
+    if (!sameAddress(expected.to, agent.safe_address)) {
+      return reply.code(409).send({ error: 'Prepared sweep `to` no longer matches the agent Safe.' })
+    }
+
+    let recovered: string
+    try {
+      recovered = recoverSweepSigner(expected, signature)
+    } catch (err) {
+      return reply.code(400).send({
+        error: 'Invalid signature format',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+    if (!sameAddress(recovered, agent.delegate_address)) {
+      return reply.code(403).send({
+        error: 'Signature does not recover the registered delegate address',
+        expected: agent.delegate_address,
+        recovered,
+      })
+    }
+
+    // Re-read balance: an exact-value transferWithAuthorization reverts if the
+    // delegate no longer holds at least `value` (e.g. a concurrent payment).
+    let balance: bigint
+    try {
+      balance = await getTokenBalance(expected.chainId, expected.from, expected.token)
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'Failed to re-read delegate USDC balance',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    }
+    if (balance < BigInt(expected.value)) {
+      return reply.code(409).send({
+        error: 'Delegate balance changed since prepare; re-run /sweep/prepare.',
+        error_code: 'balance_changed',
+        expected_atomic: expected.value,
+        current_atomic: balance.toString(),
+      })
+    }
+
+    // Atomically claim the prepared sweep before relaying. Two concurrent submits
+    // can otherwise both read 'prepared' and both broadcast — the second tx
+    // reverts on the spent EIP-3009 nonce, and if its failure write lands first
+    // it records a successful recovery as 'failed' and breaks replay. The loser
+    // of this compare-and-swap re-reads and replays instead of relaying.
+    const claim = await pool.query<{ id: string }>(
+      `UPDATE delegate_sweeps SET status = 'submitting'
+       WHERE id = $1 AND status = 'prepared'
+       RETURNING id`,
+      [row.id],
+    )
+    if (claim.rows.length === 0) {
+      const currentResult = await pool.query<DelegateSweepRow>(
+        `SELECT id, chain_id, token_address, from_address, to_address, value_atomic,
+                valid_after, valid_before, nonce, status, tx_hash
+         FROM delegate_sweeps WHERE id = $1 LIMIT 1`,
+        [row.id],
+      )
+      const current = currentResult.rows[0]
+      if (current?.status === 'submitted' && current.tx_hash) {
+        return reply.code(200).send(
+          sweepResultBody({
+            txHash: current.tx_hash,
+            valueAtomic: current.value_atomic,
+            from: current.from_address,
+            to: current.to_address,
+            chainId: current.chain_id,
+            idempotent: true,
+          }),
+        )
+      }
+      return reply.code(409).send({
+        error: 'Sweep is already being submitted.',
+        status: current?.status ?? 'unknown',
+      })
+    }
+
+    let txHash: string
+    try {
+      ;({ txHash } = await relaySweepAuthorization(expected, signature))
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      await pool.query(
+        `UPDATE delegate_sweeps SET status = 'failed', error_message = $1 WHERE id = $2 AND status = 'submitting'`,
+        [errorMsg, row.id],
+      )
+      return reply.code(502).send({ error: 'Sweep relay failed', details: errorMsg })
+    }
+
+    await pool.query(
+      `UPDATE delegate_sweeps SET status = 'submitted', tx_hash = $1, submitted_at = NOW()
+       WHERE id = $2 AND status = 'submitting'`,
+      [txHash, row.id],
+    )
+
+    // Recovering the stranded funds resolves the open stranded-funds reconciliation.
+    await pool.query(
+      `UPDATE machine_payment_reconciliation_events
+       SET status = 'resolved', updated_at = NOW()
+       WHERE agent_id = $1
+         AND status <> 'resolved'
+         AND event_type = 'merchant_retry_rejected_after_payment'`,
+      [agent.id],
+    )
+
+    return reply.code(200).send(
+      sweepResultBody({
+        txHash,
+        valueAtomic: expected.value,
+        from: expected.from,
+        to: expected.to,
+        chainId: expected.chainId,
+      }),
+    )
   })
 }

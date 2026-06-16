@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { hashMessage } from 'viem'
+import { hashMessage, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { exact } from 'x402/schemes'
 import {
   addressFromKey,
   buildX402ExpectedMessage,
+  buildSweepAuthorizationMessage,
+  buildSweepTypedData,
   signHash,
   verifySignature,
   selectStandardPaymentOption,
@@ -14,6 +16,8 @@ import {
   encodeBase64Json,
   HavenSigningError,
   HavenApiError,
+  type SweepAuthorization,
+  type SweepExpectedAuth,
   type X402ExpectedAuth,
   type X402PaymentRequired,
   type X402PaymentOption,
@@ -39,6 +43,27 @@ export interface EdgeSigner {
     paymentRequired: X402PaymentRequired,
     x402Binding: string,
   ): Promise<X402HeaderResult>
+  /**
+   * Sign a Haven-prepared EIP-3009 sweep authorization (gasless USDC recovery
+   * delegate → Safe). Verifies the authorization came from Haven and pays out to
+   * the delegate's own Safe before signing; the relayer broadcasts it and pays
+   * gas. Never broadcasts — pure signing.
+   */
+  signSweepAuthorization(input: SweepSignatureInput): Promise<SweepSignatureResult>
+}
+
+export interface SweepSignatureInput {
+  /** The authorization fields prepared by the backend. */
+  authorization: SweepAuthorization
+  /** Haven's signature over the authorization context (binding). */
+  expectedAuth: SweepExpectedAuth
+  /** Optional Safe address from the local credential, cross-checked against `to`. */
+  expectedSafe?: string
+}
+
+export interface SweepSignatureResult {
+  /** EIP-712 signature over the TransferWithAuthorization, by the delegate key. */
+  signature: string
 }
 
 export interface X402ExpectedPayment {
@@ -167,6 +192,89 @@ export function createEdgeSigner(
         x402Bindings.delete(x402Binding)
       }
     },
+
+    async signSweepAuthorization({
+      authorization,
+      expectedAuth,
+      expectedSafe,
+    }: SweepSignatureInput): Promise<SweepSignatureResult> {
+      // 1. The authorization must have come from Haven (binding), so a malicious
+      //    hosted server can't get the delegate to sign a transfer to an attacker.
+      assertSweepBinding(authorization, expectedAuth, options.x402BindingSigner)
+
+      // 2. Funds can only leave the delegate's own key, and only to its own Safe.
+      if (!sameAddress(authorization.from, delegateAddress)) {
+        throw new HavenSigningError(
+          'Sweep authorization `from` does not match this delegate address.',
+        )
+      }
+      if (expectedSafe && !sameAddress(authorization.to, expectedSafe)) {
+        throw new HavenSigningError(
+          'Sweep authorization `to` does not match the Safe in the local credential.',
+        )
+      }
+
+      // 3. Build the EIP-712 typed data (asserts token/chain are canonical USDC),
+      //    sign it locally, and verify the recovered signer is the delegate.
+      const typedData = buildSweepTypedData(authorization)
+      // The SDK keeps addresses framework-neutral (`string`); viem wants its
+      // `0x`-branded template type. Narrow at the call boundary only.
+      const viemTypedData = {
+        domain: {
+          ...typedData.domain,
+          verifyingContract: typedData.domain.verifyingContract as `0x${string}`,
+        },
+        types: typedData.types,
+        primaryType: typedData.primaryType,
+        message: {
+          ...typedData.message,
+          from: typedData.message.from as `0x${string}`,
+          to: typedData.message.to as `0x${string}`,
+          nonce: typedData.message.nonce as `0x${string}`,
+        },
+      } as const
+      const account = privateKeyToAccount(delegateKey as `0x${string}`)
+      const signature = await account.signTypedData(viemTypedData)
+      const recovered = await recoverTypedDataAddress({ ...viemTypedData, signature })
+      if (!sameAddress(recovered, delegateAddress)) {
+        throw new HavenSigningError(
+          'Local sweep signature verification failed — recovered address does not match the delegate key.',
+        )
+      }
+      return { signature }
+    },
+  }
+}
+
+/**
+ * Verify Haven signed the sweep authorization context. Mirrors
+ * `assertExpectedBinding` for x402: re-derive the canonical message from the
+ * authorization fields, require it match the binding, require the binding signer
+ * be the trusted Haven address, and verify the signature. Reuses the x402
+ * binding signer — the message namespace differs so the two can't cross-replay.
+ */
+function assertSweepBinding(
+  authorization: SweepAuthorization,
+  expectedAuth: SweepExpectedAuth,
+  trustedSigner: string | undefined,
+): void {
+  if (!expectedAuth || typeof expectedAuth !== 'object') {
+    throw new HavenSigningError('Sweep authorization binding is required before signing.')
+  }
+  if (!trustedSigner) {
+    throw new HavenSigningError(
+      'Sweep binding verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing sweep authorizations.',
+    )
+  }
+  const message = buildSweepAuthorizationMessage(authorization)
+  if (expectedAuth.version !== 1 || expectedAuth.message !== message) {
+    throw new HavenSigningError('Sweep authorization binding does not match the authorization being signed.')
+  }
+  if (!sameAddress(expectedAuth.signer, trustedSigner)) {
+    throw new HavenSigningError('Sweep authorization binding was not signed by the configured Haven signer.')
+  }
+  if (!verifySignature(hashMessage(message), expectedAuth.signature, trustedSigner)) {
+    throw new HavenSigningError('Sweep authorization binding signature could not be verified.')
   }
 }
 

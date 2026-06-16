@@ -330,3 +330,69 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     await expect(response.json()).resolves.toEqual({ ok: true })
   })
 })
+
+describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const envelope = {
+    jsonrpc: '2.0',
+    id: 'haven-mcp-1',
+    method: 'tools/call',
+    params: { name: 'create_text', arguments: { prompt: 'Hello' } },
+  }
+  const merchantInit: RequestInit = {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(envelope),
+  }
+
+  it('runs a fresh MCP handshake, sends X-PAYMENT, and surfaces the merchant tool result', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // 0: fresh MCP initialize handshake
+      .mockResolvedValueOnce(initializeOk('sess-pay'))
+      // 1: notifications/initialized
+      .mockResolvedValueOnce(notificationAccepted())
+      // 2: the paid tools/call → SSE JSON-RPC result
+      .mockResolvedValueOnce(
+        sseResponse(sse({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'a joke' }] } }), {
+          headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ settlement: { transaction: '0xsettle' } })) },
+        }),
+      )
+
+    const result = await newClient().completeX402MerchantCall({
+      url: mcpUrl,
+      init: merchantInit,
+      paymentHeader: 'PAYMENT_HEADER_ABC',
+    })
+
+    // The paid call carried the X-PAYMENT header and the fresh session id.
+    const paidCall = fetchMock.mock.calls.find((c) => bodyOf(c).method === 'tools/call')!
+    expect(headersOf(paidCall).get('X-PAYMENT')).toBe('PAYMENT_HEADER_ABC')
+    expect(headersOf(paidCall).get('mcp-session-id')).toBe('sess-pay')
+
+    expect(result.ok).toBe(true)
+    expect(result.status).toBe(200)
+    // SSE result is collapsed to the JSON-RPC `result` payload.
+    expect(result.body).toEqual({ content: [{ type: 'text', text: 'a joke' }] })
+  })
+
+  it('does not handshake for a non-MCP merchant URL and still sends X-PAYMENT', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const result = await newClient().completeX402MerchantCall({
+      url: genericUrl,
+      init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      paymentHeader: 'PAYMENT_HEADER_XYZ',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls.some(isInitializeCall)).toBe(false)
+    expect(headersOf(fetchMock.mock.calls[0]).get('X-PAYMENT')).toBe('PAYMENT_HEADER_XYZ')
+    expect(result.body).toEqual({ ok: true })
+  })
+})

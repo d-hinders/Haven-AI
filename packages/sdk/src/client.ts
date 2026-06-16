@@ -1402,6 +1402,58 @@ export class HavenClient {
     return retryResponse
   }
 
+  /**
+   * Deliver an already-signed x402 payment header to the merchant and return
+   * the merchant's response. Used by the hosted MCP server to complete the
+   * merchant leg of an MCP tool payment after the edge signer has built the
+   * `X-PAYMENT` header.
+   *
+   * Custody note: this never needs the delegate key. It relays a signed,
+   * amount/merchant/nonce-bound EIP-3009 authorization the edge signer already
+   * produced — the hosted server cannot mint or reuse signing authority.
+   *
+   * When the URL is MCP-shaped, runs a fresh `initialize` handshake (the
+   * quote-time session is gone once funding confirms; the x402 challenge is
+   * stateless w.r.t. the MCP session, so a fresh session is accepted), threads
+   * the session + wallet headers, sets `X-PAYMENT`, and collapses an SSE
+   * JSON-RPC response to its `result`.
+   */
+  async completeX402MerchantCall(input: {
+    url: string
+    init?: RequestInit
+    paymentHeader: string
+  }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string }> {
+    let mcpSessionId: string | undefined
+    if (isMcpUrl(input.url)) {
+      mcpSessionId = await this.mcpInitialize(input.url, input.init)
+    }
+
+    let requestInit: RequestInit = this.withX402Wallet(input.init, this.x402PayerAddress()) ?? {}
+    if (mcpSessionId) requestInit = this.withMcpHeaders(requestInit, mcpSessionId)
+    const headers = new Headers(requestInit.headers)
+    headers.set('X-PAYMENT', input.paymentHeader)
+    requestInit = { ...requestInit, headers }
+
+    const response = await globalThis.fetch(input.url, requestInit)
+    const surfaced = mcpSessionId ? await this.surfaceMcpResult(response) : response
+    const settlement = parseMerchantSettlement(surfaced.headers.get('PAYMENT-RESPONSE'))
+
+    const text = await surfaced.text()
+    let body: unknown
+    try {
+      body = text ? JSON.parse(text) : null
+    } catch {
+      body = text
+    }
+
+    return {
+      status: surfaced.status,
+      ok: surfaced.ok,
+      body,
+      settlementTxHash: settlement.settlementTxHash ?? undefined,
+    }
+  }
+
   async authorizeMachinePayment(
     challenge: MachinePaymentChallenge,
     options: MppAuthorizationOptions = {},

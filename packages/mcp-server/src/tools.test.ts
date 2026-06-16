@@ -473,6 +473,7 @@ describe('haven_pay_mcp_tool', () => {
       tool_name: string
       arguments: Record<string, unknown>
       payment_required: { accepts?: unknown[] }
+      mcp_transport: { handshake_required: boolean; source: string }
       x402: unknown
     }>(
       await handlers().haven_pay_mcp_tool({
@@ -489,12 +490,47 @@ describe('haven_pay_mcp_tool', () => {
     expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
     expect(result.data.tool_name).toBe('create_text')
     expect(result.data.arguments).toEqual({ prompt: 'Hello' })
+    expect(result.data.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
     // The raw merchant 402 PaymentRequired must be returned (the signer needs it).
     expect(result.data.payment_required).toBeDefined()
     expect(Array.isArray(result.data.payment_required.accepts)).toBe(true)
     expect(result.data.x402).toBeDefined()
     // createX402Intent was called (POST /x402 route was hit)
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('returns Bazaar MCP transport context for non-/mcp merchants', async () => {
+    stubFetch({
+      'POST /paid': {
+        status: 402,
+        body: {
+          ...PAYMENT_REQUIRED,
+          resource: { url: 'http://merchant.test/paid', description: 'paid tool' },
+          extensions: { bazaar: { discovery: 'https://bazaar.example/published' } },
+        },
+      },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': {
+        status: 201,
+        body: X402_INTENT_RESPONSE,
+      },
+    })
+
+    const result = ok<{
+      merchant_url: string
+      mcp_transport: { handshake_required: boolean; source: string }
+      payment_required: { extensions?: { bazaar?: unknown } }
+    }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/paid',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/paid')
+    expect(result.data.mcp_transport).toEqual({ handshake_required: true, source: 'bazaar' })
+    expect(result.data.payment_required.extensions?.bazaar).toBeDefined()
   })
 
   it('haven_complete_mcp_tool delivers the signed header to the merchant and returns the tool result', async () => {
@@ -513,6 +549,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        mcp_transport: { handshake_required: true, source: 'bazaar' },
         payment_header: 'eyJwYXltZW50IjoiaGVhZGVyIn0=',
       }),
     )
@@ -522,6 +559,7 @@ describe('haven_pay_mcp_tool', () => {
     expect(callArg.paymentId).toBe('pay_x402')
     expect(callArg.url).toBe('http://merchant.test/mcp')
     expect(callArg.paymentHeader).toBe('eyJwYXltZW50IjoiaGVhZGVyIn0=')
+    expect(callArg.mcpTransport).toEqual({ handshakeRequired: true, source: 'bazaar' })
     // Rebuilds the same JSON-RPC tools/call envelope haven_pay_mcp_tool used.
     const envelope = JSON.parse(callArg.init!.body as string)
     expect(envelope.method).toBe('tools/call')

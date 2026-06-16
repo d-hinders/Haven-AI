@@ -152,6 +152,7 @@ export interface X402PaymentRequired {
   }
   accepts: X402PaymentOption[]
   error?: string
+  extensions?: Record<string, unknown>
 }
 
 /** A single payment option from x402 PaymentRequired. */
@@ -268,6 +269,11 @@ export interface X402RequestSnapshot {
   body?: string
 }
 
+export interface X402McpTransport {
+  handshakeRequired: boolean
+  source: 'path' | 'bazaar'
+}
+
 /** Quote parsed from an HTTP 402 response without creating a Haven payment. */
 export interface X402Quote {
   rail: 'x402'
@@ -275,6 +281,7 @@ export interface X402Quote {
   paymentRequired: X402PaymentRequired
   accepted: X402PaymentOption
   request: X402RequestSnapshot
+  mcpTransport?: X402McpTransport
   resourceUrl: string
   description: string | null
   mimeType: string | null

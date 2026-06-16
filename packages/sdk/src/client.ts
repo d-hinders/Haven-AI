@@ -22,6 +22,7 @@ import type {
   X402PaymentRequired,
   X402PaymentOption,
   X402Intent,
+  X402McpTransport,
   X402Quote,
   X402Receipt,
   X402RequestSnapshot,
@@ -895,7 +896,8 @@ export class HavenClient {
     }
 
     const paymentRequired = await parsePaymentRequiredResponse(response)
-    return this.buildX402Quote(paymentRequired, request, options.idempotencyKey)
+    const mcpTransport = await this.detectX402McpTransport(url, paymentRequired, response)
+    return this.buildX402Quote(paymentRequired, request, options.idempotencyKey, mcpTransport)
   }
 
   /**
@@ -1168,12 +1170,15 @@ export class HavenClient {
    * a transport/HTTP error, a missing session id, or a JSON-RPC error in the
    * handshake response — so the caller can fall back to plain x402.
    */
-  private async mcpInitialize(url: string, init?: RequestInit): Promise<string | undefined> {
+  private async mcpInitialize(
+    url: string,
+    init?: RequestInit,
+    wallet = this.x402PayerAddress(),
+  ): Promise<string | undefined> {
     try {
       const headers = new Headers(init?.headers)
       headers.set('Content-Type', 'application/json')
       headers.set('Accept', MCP_ACCEPT)
-      const wallet = this.x402PayerAddress()
       if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
 
       const response = await globalThis.fetch(url, {
@@ -1204,7 +1209,7 @@ export class HavenClient {
       // Per the MCP lifecycle, the client confirms initialization with a
       // `notifications/initialized` notification. Servers that gate tool
       // calls on it would otherwise reject every subsequent request.
-      await this.mcpNotifyInitialized(url, init, sessionId)
+      await this.mcpNotifyInitialized(url, init, sessionId, wallet)
 
       return sessionId
     } catch {
@@ -1221,13 +1226,13 @@ export class HavenClient {
     url: string,
     init: RequestInit | undefined,
     sessionId: string,
+    wallet = this.x402PayerAddress(),
   ): Promise<void> {
     try {
       const headers = new Headers(init?.headers)
       headers.set('Content-Type', 'application/json')
       headers.set('Accept', MCP_ACCEPT)
       headers.set('mcp-session-id', sessionId)
-      const wallet = this.x402PayerAddress()
       if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
 
       await globalThis.fetch(url, {
@@ -1446,33 +1451,34 @@ export class HavenClient {
    * amount/merchant/nonce-bound EIP-3009 authorization the edge signer already
    * produced — the hosted server cannot mint or reuse signing authority.
    *
-   * When the URL is MCP-shaped (`/mcp` path), runs a fresh `initialize`
+   * When the URL is MCP-shaped (`/mcp` path) or the quote-time transport context
+   * says the merchant was Bazaar-discoverable, runs a fresh `initialize`
    * handshake (the quote-time session is gone once funding confirms; the x402
    * challenge is stateless w.r.t. the MCP session, so a fresh session is
    * accepted), threads the session + wallet headers, sets `X-PAYMENT`, and
    * collapses an SSE JSON-RPC response to its `result`.
-   *
-   * Limitation: detects MCP only by the `/mcp` path convention, not the
-   * Coinbase Bazaar `extensions.bazaar` 402 signal that `fetch()` also honors.
-   * A Bazaar-discoverable merchant on a non-`/mcp` URL would need the standard
-   * `fetch()` path. All current MCP-tool merchants use the `/mcp` convention.
    */
   async completeX402MerchantCall(input: {
     url: string
     init?: RequestInit
     paymentId: string
     paymentHeader: string
+    mcpTransport?: X402McpTransport
   }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string }> {
     const evidenceContext = await this.resolveX402MerchantCompletionContext({
       paymentId: input.paymentId,
       url: input.url,
     })
+    const shouldHandshakeMcp =
+      isMcpUrl(input.url) ||
+      input.mcpTransport?.handshakeRequired === true
+    const x402Wallet = shouldHandshakeMcp ? await this.resolveX402WalletForMerchantCall() : this.x402PayerAddress()
     let mcpSessionId: string | undefined
-    if (isMcpUrl(input.url)) {
-      mcpSessionId = await this.mcpInitialize(input.url, input.init)
+    if (shouldHandshakeMcp) {
+      mcpSessionId = await this.mcpInitialize(input.url, input.init, x402Wallet)
     }
 
-    let requestInit: RequestInit = this.withX402Wallet(input.init, this.x402PayerAddress()) ?? {}
+    let requestInit: RequestInit = this.withX402Wallet(input.init, x402Wallet) ?? {}
     if (mcpSessionId) requestInit = this.withMcpHeaders(requestInit, mcpSessionId)
     const headers = new Headers(requestInit.headers)
     headers.set('X-PAYMENT', input.paymentHeader)
@@ -1585,6 +1591,18 @@ export class HavenClient {
       txHash: status.txHash,
       resourceUrl: approvedResourceUrl ?? input.url,
       merchantAddress: status.merchantAddress ?? status.x402?.merchantAddress ?? null,
+    }
+  }
+
+  private async resolveX402WalletForMerchantCall(): Promise<string | undefined> {
+    const localWallet = this.x402PayerAddress()
+    if (localWallet) return localWallet
+
+    try {
+      const agent = await this.getAgent()
+      return agent.delegateAddress ?? undefined
+    } catch {
+      return undefined
     }
   }
 
@@ -2386,6 +2404,7 @@ export class HavenClient {
     paymentRequired: X402PaymentRequired,
     request: X402RequestSnapshot,
     idempotencyKey?: string,
+    mcpTransport?: X402McpTransport,
   ): X402Quote {
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     if (!option) {
@@ -2403,6 +2422,7 @@ export class HavenClient {
       paymentRequired,
       accepted: option,
       request,
+      ...(mcpTransport ? { mcpTransport } : {}),
       resourceUrl: paymentRequired.resource.url,
       description: paymentRequired.resource.description ?? option.description ?? null,
       mimeType: paymentRequired.resource.mimeType ?? option.mimeType ?? null,
@@ -2415,6 +2435,23 @@ export class HavenClient {
       merchantAddress: option.payTo,
       maxTimeoutSeconds: option.maxTimeoutSeconds,
     }
+  }
+
+  private async detectX402McpTransport(
+    url: string,
+    paymentRequired: X402PaymentRequired,
+    response: Response,
+  ): Promise<X402McpTransport | undefined> {
+    if (isMcpUrl(url)) {
+      return { handshakeRequired: true, source: 'path' }
+    }
+    if (paymentRequired.extensions?.bazaar != null) {
+      return { handshakeRequired: true, source: 'bazaar' }
+    }
+    if (await responseHasBazaarExtension(response)) {
+      return { handshakeRequired: true, source: 'bazaar' }
+    }
+    return undefined
   }
 
   private buildX402ResumeState(input: {

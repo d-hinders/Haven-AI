@@ -60,6 +60,21 @@ describe('x402 helpers', () => {
     expect(parsePaymentRequired(response)).toEqual(paymentRequired)
   })
 
+  it('preserves Bazaar extensions from base64 PAYMENT-REQUIRED headers', () => {
+    const bazaarPaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      extensions: { bazaar: { discovery: 'https://bazaar.example/published' } },
+    }
+    const response = new Response(null, {
+      status: 402,
+      headers: {
+        'PAYMENT-REQUIRED': btoa(JSON.stringify(bazaarPaymentRequired)),
+      },
+    })
+
+    expect(parsePaymentRequired(response)).toEqual(bazaarPaymentRequired)
+  })
+
   it('parses Soundside-style JSON 402 bodies asynchronously', async () => {
     const response = new Response(JSON.stringify(paymentRequired), {
       status: 402,
@@ -190,6 +205,28 @@ describe('x402 helpers', () => {
     const headers = new Headers(quote.request.headers)
     expect(headers.get('Content-Type')).toBe('application/json')
     expect(headers.get('x402-wallet')).toBe(delegateAddress)
+  })
+
+  it('quotes Bazaar MCP transport metadata for non-/mcp x402 endpoints', async () => {
+    const bazaarPaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      extensions: { bazaar: { discovery: 'https://bazaar.example/published' } },
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(bazaarPaymentRequired), {
+      status: 402,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const quote = await haven.quoteX402(paymentRequired.resource.url)
+
+    expect(quote.mcpTransport).toEqual({ handshakeRequired: true, source: 'bazaar' })
+    expect(quote.paymentRequired.extensions?.bazaar).toBeDefined()
   })
 
   it('attaches a serializable resume state when quote payment needs approval', async () => {

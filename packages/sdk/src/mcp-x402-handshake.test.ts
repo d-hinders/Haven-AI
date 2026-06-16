@@ -149,6 +149,24 @@ function newClient(): HavenClient {
   })
 }
 
+function newKeylessHostedClient(): HavenClient {
+  return new HavenClient({
+    apiKey: 'sk_agent_test',
+    baseUrl: backendUrl,
+  })
+}
+
+function agentResponse(): Response {
+  return new Response(JSON.stringify({
+    id: 'agt_1',
+    name: 'Hosted Agent',
+    status: 'active',
+    safe_address: safeAddress,
+    delegate_address: delegateAddress,
+    chain_id: 8453,
+  }), { status: 200 })
+}
+
 function headersOf(call: unknown[]): Headers {
   return new Headers((call[1] as RequestInit).headers)
 }
@@ -461,6 +479,48 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock.mock.calls.some(isInitializeCall)).toBe(false)
     expect(headersOf(fetchMock.mock.calls[1]).get('X-PAYMENT')).toBe('PAYMENT_HEADER_XYZ')
+    expect(result.body).toEqual({ ok: true })
+  })
+
+  it('uses quote-time Bazaar transport context to handshake a non-/mcp hosted merchant completion', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // 0: confirm the funding payment is ready to complete with the merchant
+      .mockResolvedValueOnce(paymentStatusReady(genericUrl))
+      // 1: keyless hosted client resolves the registered delegate as x402-wallet
+      .mockResolvedValueOnce(agentResponse())
+      // 2: fresh MCP initialize handshake triggered by mcpTransport
+      .mockResolvedValueOnce(initializeOk('sess-bazaar-complete'))
+      // 3: notifications/initialized
+      .mockResolvedValueOnce(notificationAccepted())
+      // 4: paid tools/call → SSE JSON-RPC result
+      .mockResolvedValueOnce(sseResponse(sse({ jsonrpc: '2.0', id: 2, result: { ok: true } })))
+      // 5: evidence
+      .mockResolvedValueOnce(evidenceAccepted())
+
+    const result = await newKeylessHostedClient().completeX402MerchantCall({
+      url: genericUrl,
+      init: merchantInit,
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_BAZAAR',
+      mcpTransport: { handshakeRequired: true, source: 'bazaar' },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(isInitializeCall(fetchMock.mock.calls[2])).toBe(true)
+    expect(isInitializedNotificationCall(fetchMock.mock.calls[3])).toBe(true)
+
+    const initializeHeaders = headersOf(fetchMock.mock.calls[2])
+    expect(initializeHeaders.get('Accept')).toBe('application/json, text/event-stream')
+    expect(initializeHeaders.get('x402-wallet')).toBe(delegateAddress)
+
+    const paidCall = fetchMock.mock.calls[4]
+    const paidHeaders = headersOf(paidCall)
+    expect(paidHeaders.get('mcp-session-id')).toBe('sess-bazaar-complete')
+    expect(paidHeaders.get('Accept')).toBe('application/json, text/event-stream')
+    expect(paidHeaders.get('x402-wallet')).toBe(delegateAddress)
+    expect(paidHeaders.get('X-PAYMENT')).toBe('PAYMENT_HEADER_BAZAAR')
+    expect(bodyOf(paidCall).method).toBe('tools/call')
     expect(result.body).toEqual({ ok: true })
   })
 

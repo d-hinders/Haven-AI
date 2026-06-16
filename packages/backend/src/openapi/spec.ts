@@ -1153,6 +1153,83 @@ export const openapiSpec = {
         },
       },
     },
+    '/machine-payments/sweep/prepare': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'prepareDelegateSweep',
+        summary: 'Prepare a gasless USDC sweep from the delegate wallet to the Safe.',
+        description:
+          'Reads the delegate EOA\'s stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent\'s own Safe) plus Haven\'s authorization binding. ' +
+          'The edge signer signs the authorization with haven_sign_sweep_delegate; POST /machine-payments/sweep/submit relays it. The delegate never needs ETH and Haven never holds the key. ' +
+          'Returns { nothing_stranded: true } when the delegate is empty.',
+        security: [{ AgentApiKey: [] }],
+        responses: {
+          '200': {
+            description: 'Nothing stranded — no authorization to sign.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    nothing_stranded: { type: 'boolean', enum: [true] },
+                    asset: { type: 'string', examples: ['USDC'] },
+                    chain_id: { type: 'integer', examples: [8453] },
+                    message: { type: 'string' },
+                  },
+                  required: ['nothing_stranded', 'chain_id'],
+                },
+              },
+            },
+          },
+          '201': {
+            description: 'Sweep authorization prepared; sign and submit it.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SweepPrepareResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '422': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/machine-payments/sweep/submit': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'submitDelegateSweep',
+        summary: 'Relay a delegate-signed gasless USDC sweep.',
+        description:
+          'Submits the delegate-signed EIP-3009 authorization from /machine-payments/sweep/prepare. Haven\'s relayer pays gas; the relayer is never a spender. ' +
+          'The authorization is re-derived from server state, the delegate signature is verified, and the balance is re-read before relaying.',
+        security: [{ AgentApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SweepSubmitRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Sweep relayed (or idempotent replay of a prior relay).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SweepSubmitResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
     '/transactions': {
       get: {
         tags: ['Transactions'],
@@ -2197,6 +2274,73 @@ export const openapiSpec = {
           rail: { type: 'string' },
           event_type: { type: 'string' },
           created_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      SweepAuthorization: {
+        type: 'object',
+        description: 'EIP-3009 TransferWithAuthorization fields for a delegate → Safe USDC sweep.',
+        required: ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce', 'token', 'chainId'],
+        properties: {
+          from: address,
+          to: address,
+          value: { type: 'string', description: 'Atomic USDC amount.' },
+          validAfter: { type: 'string', description: 'Unix seconds the authorization becomes valid.' },
+          validBefore: { type: 'string', description: 'Unix seconds the authorization expires.' },
+          nonce: { type: 'string', description: '0x-prefixed 32-byte hex nonce.' },
+          token: address,
+          chainId: { type: 'integer', examples: [8453] },
+        },
+        additionalProperties: false,
+      },
+      SweepExpectedAuth: {
+        type: 'object',
+        description: 'Haven\'s binding over the sweep authorization context, verified by the edge signer.',
+        required: ['version', 'message', 'signature', 'signer'],
+        properties: {
+          version: { type: 'integer', enum: [1] },
+          message: { type: 'string' },
+          signature: { type: 'string' },
+          signer: address,
+        },
+        additionalProperties: false,
+      },
+      SweepPrepareResponse: {
+        type: 'object',
+        required: ['authorization', 'expected_auth', 'asset', 'amount', 'amount_atomic', 'chain_id'],
+        properties: {
+          authorization: { $ref: '#/components/schemas/SweepAuthorization' },
+          expected_auth: { $ref: '#/components/schemas/SweepExpectedAuth' },
+          asset: { type: 'string', examples: ['USDC'] },
+          amount: { type: 'string' },
+          amount_atomic: { type: 'string' },
+          chain_id: { type: 'integer', examples: [8453] },
+          sign_instructions: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+      SweepSubmitRequest: {
+        type: 'object',
+        required: ['authorization', 'signature'],
+        properties: {
+          authorization: { $ref: '#/components/schemas/SweepAuthorization' },
+          signature: { type: 'string', description: 'Delegate EIP-712 signature over the authorization.' },
+        },
+        additionalProperties: false,
+      },
+      SweepSubmitResponse: {
+        type: 'object',
+        required: ['tx_hash', 'asset', 'amount', 'amount_atomic', 'from_address', 'to_address', 'chain_id', 'explorer_url'],
+        properties: {
+          tx_hash: { type: 'string' },
+          asset: { type: 'string', examples: ['USDC'] },
+          amount: { type: 'string' },
+          amount_atomic: { type: 'string' },
+          from_address: address,
+          to_address: address,
+          chain_id: { type: 'integer', examples: [8453] },
+          explorer_url: { type: 'string' },
+          idempotent_replay: { type: 'boolean' },
         },
         additionalProperties: false,
       },

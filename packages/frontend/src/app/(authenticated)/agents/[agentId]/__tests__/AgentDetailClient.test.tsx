@@ -11,6 +11,7 @@ const {
   mockUseSafeDetails,
   mockUseSafeOperationGate,
   mockUseActiveSigner,
+  mockUseDelegateBalance,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
@@ -20,6 +21,7 @@ const {
   mockUseSafeDetails: vi.fn(),
   mockUseSafeOperationGate: vi.fn(),
   mockUseActiveSigner: vi.fn(),
+  mockUseDelegateBalance: vi.fn(),
 }))
 
 vi.mock('wagmi', () => ({
@@ -44,6 +46,10 @@ vi.mock('@/hooks/useAgentActivity', async () => {
 
 vi.mock('@/hooks/useOnChainAllowances', () => ({
   useOnChainAllowances: (...args: unknown[]) => mockUseOnChainAllowances(...args),
+}))
+
+vi.mock('@/hooks/useDelegateBalance', () => ({
+  useDelegateBalance: (...args: unknown[]) => mockUseDelegateBalance(...args),
 }))
 
 vi.mock('@/hooks/useSafeDetails', () => ({
@@ -164,6 +170,13 @@ describe('AgentDetailClient last-activity metadata', () => {
     })
     mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
     mockUseActiveSigner.mockReturnValue(null)
+    // Default: delegate wallet is empty, so recovery UI stays hidden.
+    mockUseDelegateBalance.mockReturnValue({
+      balance: null,
+      hasStranded: false,
+      loading: false,
+      refetch: vi.fn(),
+    })
   })
 
   afterEach(() => {
@@ -177,6 +190,41 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByText('Last activity')).toBeInTheDocument()
     expect(screen.getByText('2h ago')).toBeInTheDocument()
     expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+  })
+
+  it('hides the recover-funds prompt when the delegate wallet is empty', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(
+      screen.queryByRole('link', { name: 'Recover funds to your Haven wallet' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Recoverable funds in agent wallet')).not.toBeInTheDocument()
+  })
+
+  it('shows the recover-funds prompt with the amount when the delegate holds USDC', () => {
+    mockUseDelegateBalance.mockReturnValue({
+      balance: {
+        delegate_address: '0x2222222222222222222222222222222222222222',
+        safe_address: SAFE.safe_address,
+        chain_id: 8453,
+        eth: '0',
+        eth_atomic: '0',
+        usdc: '0.04',
+        usdc_atomic: '40000',
+        usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      },
+      hasStranded: true,
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByText('Recoverable funds in agent wallet')).toBeInTheDocument()
+    expect(screen.getByText(/Recover 0\.04 USDC to your Haven wallet\./)).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'Recover funds to your Haven wallet' }),
+    ).toHaveAttribute('href', '/agents/agent-1/sweep')
   })
 
   it('uses the activity row wallet name for historical payment movement', () => {

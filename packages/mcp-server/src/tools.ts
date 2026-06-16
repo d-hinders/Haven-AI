@@ -9,6 +9,7 @@ import {
   type MachinePaymentChallenge,
   type MppQuote,
   type MppResumeState,
+  type SweepAuthorization,
   type X402PaymentRequired,
   type X402Quote,
   type X402ResumeState,
@@ -57,7 +58,24 @@ export type HostedToolNameLegacy = 'haven_x402_authorize' | 'haven_list_transact
 export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_get_agent: {},
   haven_get_allowances: {},
-  haven_sweep_delegate: {},
+  haven_sweep_delegate: {
+    // Phase 2 only: the authorization returned by phase 1 and the signature from
+    // the local signer. Omit both to run phase 1 (prepare). Passed through to the
+    // backend, which re-derives and re-verifies everything before relaying.
+    authorization: z
+      .object({
+        from: z.string(),
+        to: z.string(),
+        value: z.string(),
+        validAfter: z.string(),
+        validBefore: z.string(),
+        nonce: z.string(),
+        token: z.string(),
+        chainId: z.number(),
+      })
+      .optional(),
+    signature: z.string().optional(),
+  },
   haven_discover_tools: {
     category: z.string().optional(),
     rail: z.enum(['x402', 'mpp']).optional(),
@@ -238,10 +256,23 @@ const RESUME_MPP_DESCRIPTION = [
   'signing context the local signer needs to complete the payment.',
 ].join(' ')
 
+const SWEEP_DELEGATE_DESCRIPTION = [
+  'Recover stranded USDC from the delegate wallet back to the user\'s Haven wallet, gaslessly.',
+  'Use when a payment failed or expired after funding, or when a payment status returns',
+  'nextAction=sweep_stranded_funds. Two phases, both keyless on this server:',
+  '(1) Call with no arguments — returns { status: "signature_required", authorization, expected_auth }',
+  '(or { status: "nothing_stranded" } if the delegate is empty).',
+  '(2) Pass authorization and expected_auth to the local signer tool haven_sign_sweep_delegate,',
+  'then call this tool again with { authorization, signature } to relay it.',
+  'The delegate signs an EIP-3009 authorization off-chain (no ETH needed on the delegate);',
+  'Haven\'s relayer submits it on-chain and pays gas. Returns { status: "swept", tx_hash, amount }.',
+  'Recovers USDC only — stranded native ETH is not recoverable through this gasless path.',
+].join(' ')
+
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
-  haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
+  haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
   haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
   haven_send: composeDescription(sharedDescriptions.send),
   haven_pay: PAY_DESCRIPTION,
@@ -285,7 +316,59 @@ export function createToolHandlers(
 
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
 
-    haven_sweep_delegate: async () => runTool(async () => haven.sweepDelegate()),
+    haven_sweep_delegate: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_sweep_delegate', input)
+
+        // Phase 2 — a signature is present: relay the delegate-signed authorization.
+        if (args.signature) {
+          if (!args.authorization) {
+            throw new HavenApiError(
+              'authorization is required alongside signature to submit a sweep. ' +
+                'Call haven_sweep_delegate with no arguments first to get one.',
+              400,
+            )
+          }
+          const result = await haven.submitSweep(
+            args.authorization as SweepAuthorization,
+            args.signature as string,
+          )
+          return {
+            status: 'swept',
+            tx_hash: result.tx_hash,
+            asset: result.asset,
+            amount: result.amount,
+            from_address: result.from_address,
+            to_address: result.to_address,
+            chain_id: result.chain_id,
+            explorer_url: result.explorer_url,
+          }
+        }
+
+        // Phase 1 — prepare. Keyless: the backend builds the authorization; the
+        // local signer (haven_sign_sweep_delegate) signs it.
+        const prep = await haven.prepareSweep()
+        if (prep.nothing_stranded) {
+          return {
+            status: 'nothing_stranded',
+            asset: prep.asset ?? 'USDC',
+            chain_id: prep.chain_id,
+            message: prep.message ?? 'No stranded funds to recover.',
+          }
+        }
+        return {
+          status: 'signature_required',
+          authorization: prep.authorization,
+          expected_auth: prep.expected_auth,
+          asset: prep.asset,
+          amount: prep.amount,
+          amount_atomic: prep.amount_atomic,
+          sign_with: 'haven_sign_sweep_delegate',
+          next_step:
+            'Call the local signer tool haven_sign_sweep_delegate with { authorization, expected_auth } ' +
+            'to get a signature, then call haven_sweep_delegate again with { authorization, signature }.',
+        }
+      }),
 
     haven_discover_tools: async (input) =>
       runTool(async () => {

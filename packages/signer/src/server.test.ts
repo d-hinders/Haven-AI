@@ -104,7 +104,7 @@ describe('runSignerConsentGate', () => {
       safeAddress: credentials.safeAddress,
       chainId: credentials.chainId,
       network: credentials.network,
-      toolNames: ['haven_sign', 'haven_x402_sign_header'],
+      toolNames: ['haven_sign', 'haven_x402_sign_header', 'haven_sign_sweep_delegate'],
     }
     const allowed = await runSignerConsentGate(signer, credentials, {
       consentEnv: { HAVEN_SIGNER_ACK: computeSignerConsentHash(input) },
@@ -123,7 +123,11 @@ describe('buildSignerMcpServer', () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
 
     const { tools } = await client.listTools()
-    expect(tools.map((t) => t.name).sort()).toEqual(['haven_sign', 'haven_x402_sign_header'])
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      'haven_sign',
+      'haven_sign_sweep_delegate',
+      'haven_x402_sign_header',
+    ])
 
     await client.close()
     await server.close()

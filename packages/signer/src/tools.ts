@@ -18,7 +18,30 @@ import type { EdgeSigner } from './core.js'
  * and pair with the hosted server's construct/relay tools (#183). They sign;
  * they never call the Haven API and never emit the key.
  */
-export type SignerToolName = 'haven_sign' | 'haven_x402_sign_header'
+export type SignerToolName =
+  | 'haven_sign'
+  | 'haven_x402_sign_header'
+  | 'haven_sign_sweep_delegate'
+
+const sweepAuthorizationSchema = z.object({
+  from: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'from must be a 0x address'),
+  to: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'to must be a 0x address'),
+  value: z.string().regex(/^[0-9]+$/, 'value must be a decimal atomic amount'),
+  validAfter: z.string().regex(/^[0-9]+$/, 'validAfter must be a decimal unix time'),
+  validBefore: z.string().regex(/^[0-9]+$/, 'validBefore must be a decimal unix time'),
+  nonce: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'nonce must be a 0x-prefixed 32-byte hex string'),
+  token: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'token must be a 0x address'),
+  chainId: z.number().int().positive(),
+})
+
+const sweepExpectedAuthSchema = z.object({
+  version: z.literal(1),
+  message: z.string().min(1),
+  signature: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
+  signer: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'signer must be a 0x address'),
+})
 
 const x402ExpectedSchema = z.object({
   payment_id: z.string().min(1),
@@ -41,6 +64,14 @@ const x402ExpectedSchema = z.object({
 })
 
 export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
+  haven_sign_sweep_delegate: {
+    // The authorization fields prepared by Haven's POST /sweep/prepare. Passed
+    // through verbatim from the hosted haven_sweep_delegate tool — the signer
+    // re-derives the binding message from these exact values.
+    authorization: sweepAuthorizationSchema,
+    // Haven's signature over the authorization context (the binding).
+    expected_auth: sweepExpectedAuthSchema,
+  },
   haven_sign: {
     // The unsigned hash from haven_pay / haven_x402_authorize (payload_hash).
     payload_hash: z
@@ -81,9 +112,20 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   'the funding tx has a confirmed status).',
 ].join(' ')
 
+const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
+  'Sign a Haven-prepared gasless USDC sweep that recovers stranded funds from the delegate',
+  'wallet back to your Haven wallet. The delegate key never leaves this process and this tool',
+  'never broadcasts — it returns only an EIP-3009 signature that Haven\'s relayer submits and',
+  'pays gas for. Pass the authorization and expected_auth returned by the hosted',
+  'haven_sweep_delegate tool. The signer verifies Haven authored the authorization and that it',
+  'pays out to your own Safe before signing, then returns { signature } to hand back to',
+  'haven_sweep_delegate to complete recovery.',
+].join(' ')
+
 export const toolDescriptions: Record<SignerToolName, string> = {
   haven_sign: SIGN_DESCRIPTION,
   haven_x402_sign_header: X402_SIGN_HEADER_DESCRIPTION,
+  haven_sign_sweep_delegate: SIGN_SWEEP_DELEGATE_DESCRIPTION,
 }
 
 export interface ToolSuccess<T> {
@@ -153,6 +195,22 @@ export function createToolHandlers(
           hashPayloadForAudit(args.payment_required),
         )
         return { payment_header: result.paymentHeader, accepted: result.accepted }
+      }),
+
+    haven_sign_sweep_delegate: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_sign_sweep_delegate', input)
+        const result = await signer.signSweepAuthorization({
+          authorization: args.authorization,
+          expectedAuth: args.expected_auth,
+          // Cross-check `to` against the Safe in the local credential when present.
+          expectedSafe: options.audit?.safeAddress,
+        })
+        await auditSigning(
+          'haven_sign_sweep_delegate',
+          hashPayloadForAudit(args.authorization),
+        )
+        return { signature: result.signature }
       }),
   }
 

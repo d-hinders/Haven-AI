@@ -73,8 +73,8 @@ export default function SweepClient({ agentId }: { agentId: string }) {
   return (
     <div className="max-w-2xl">
       <PageHeader
-        title="Sweep stranded funds"
-        subtitle="Return stranded delegate funds to your account."
+        title="Recover funds"
+        subtitle="Move funds left in your agent's wallet back to your Haven wallet."
       />
 
       <div className="mt-1 mb-6">
@@ -136,9 +136,9 @@ export default function SweepClient({ agentId }: { agentId: string }) {
                   </div>
                 )}
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-sm text-[var(--v2-ink-3)]">Destination</span>
+                  <span className="text-sm text-[var(--v2-ink-3)]">Goes to your Haven wallet</span>
                   <span className="text-sm text-[var(--v2-ink-2)] font-mono text-right truncate max-w-[240px]">
-                    {balance!.safe_address ?? 'Your Safe'}
+                    {balance!.safe_address ?? 'Your Haven wallet'}
                   </span>
                 </div>
               </div>
@@ -147,10 +147,11 @@ export default function SweepClient({ agentId }: { agentId: string }) {
 
           <Card elevation="anchor">
             <div className="px-6 py-5">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-2">How to sweep</h2>
+              <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-2">How to recover</h2>
               <p className="text-sm text-[var(--v2-ink-2)] mb-4">
-                Only your agent can sweep because only it has the delegate signing key.
-                Tell your agent to run this tool — it will sign and submit the transfer back to your account.
+                Only your agent can do this, because only it holds the signing key.
+                Tell your agent to run this tool — it signs the transfer and Haven covers the gas,
+                so the funds come straight back to your Haven wallet.
               </p>
 
               <div className="rounded-lg bg-[var(--v2-surface-2)] px-4 py-3">

@@ -13,6 +13,7 @@ import {
   type McpToolCallActivityItem,
 } from '@/hooks/useAgentActivity'
 import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
+import { useDelegateBalance } from '@/hooks/useDelegateBalance'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { RESET_PERIODS } from '@/lib/allowance-module'
@@ -264,6 +265,19 @@ export default function AgentDetailClient({ agentId }: Props) {
       .filter((item) => item.payment_attention_reason === 'merchant_retry_rejected_after_payment'),
     [activity],
   )
+  // Gate recovery UI on the delegate EOA actually holding funds right now — not on
+  // a funded-but-unsettled payment record, which can linger after a sweep or never
+  // strand anything. Skip the read for revoked agents (the endpoint 404s anyway).
+  const { balance: delegateBalance, hasStranded: hasStrandedFunds } = useDelegateBalance(
+    agent && agent.status !== 'revoked' ? agentId : null,
+  )
+  const strandedSummary = useMemo(() => {
+    if (!delegateBalance) return null
+    const parts: string[] = []
+    if (delegateBalance.usdc_atomic !== '0') parts.push(`${delegateBalance.usdc} USDC`)
+    if (delegateBalance.eth_atomic !== '0') parts.push(`${delegateBalance.eth} ETH`)
+    return parts.length > 0 ? parts.join(' and ') : null
+  }, [delegateBalance])
   const managedDelegates = useMemo(
     () => (agent?.delegate_address && agent.status !== 'revoked' ? [agent.delegate_address] : []),
     [agent?.delegate_address, agent?.status],
@@ -517,24 +531,24 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
-      {unsettledPayments.length > 0 ? (
+      {hasStrandedFunds ? (
         <div className="mt-4">
-          <ApprovalRequiredBanner title="Payment didn't reach merchant" tone="warning" density="compact">
+          <ApprovalRequiredBanner title="Recoverable funds in agent wallet" tone="warning" density="compact">
             <span>
-              {unsettledPayments.length === 1
-                ? 'One payment was funded on-chain but the merchant rejected the retry.'
-                : `${unsettledPayments.length} payments were funded on-chain but the merchant rejected the retries.`}{' '}
-              The delegate wallet may hold stranded{' '}
-              {unsettledPayments[0]?.token ?? 'funds'}.{' '}
-              Sweep the funds back to your account to reclaim them.
+              {unsettledPayments.length > 0
+                ? 'A payment was funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.'
+                : 'Your agent’s wallet is holding funds that weren’t spent.'}{' '}
+              {strandedSummary
+                ? `Recover ${strandedSummary} to your Haven wallet.`
+                : 'Recover it to your Haven wallet.'}
             </span>
             <div className="mt-2">
               <a
                 href={`/agents/${agentId}/sweep`}
                 className="inline-flex items-center gap-1 rounded-md bg-[var(--v2-warning)] px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 transition-opacity"
-                aria-label="Sweep stranded funds back to your account"
+                aria-label="Recover funds to your Haven wallet"
               >
-                Sweep stranded funds
+                Recover funds
                 <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
                   <path d="M3.5 8h9M8.5 4l4.5 4-4.5 4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>

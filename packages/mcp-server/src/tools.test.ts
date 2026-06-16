@@ -509,6 +509,7 @@ describe('haven_pay_mcp_tool', () => {
 
     const result = ok<{ ok: boolean; result: unknown; settlement_tx_hash: string | null }>(
       await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
@@ -518,6 +519,7 @@ describe('haven_pay_mcp_tool', () => {
 
     expect(spy).toHaveBeenCalledTimes(1)
     const callArg = spy.mock.calls[0][0]
+    expect(callArg.paymentId).toBe('pay_x402')
     expect(callArg.url).toBe('http://merchant.test/mcp')
     expect(callArg.paymentHeader).toBe('eyJwYXltZW50IjoiaGVhZGVyIn0=')
     // Rebuilds the same JSON-RPC tools/call envelope haven_pay_mcp_tool used.
@@ -530,6 +532,24 @@ describe('haven_pay_mcp_tool', () => {
     expect(result.data.settlement_tx_hash).toBe('0xsettle')
   })
 
+  it('haven_complete_mcp_tool requires the funding payment_id for evidence', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: {},
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toContain('payment_id')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it('haven_complete_mcp_tool fails with a sweep hint when the merchant rejects after funding', async () => {
     stubFetch({})
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
@@ -540,6 +560,7 @@ describe('haven_pay_mcp_tool', () => {
     })
 
     const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
       arguments: {},
@@ -620,6 +641,7 @@ describe('custody invariant', () => {
     await h.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED })
     await h.haven_pay_mcp_tool({ merchant_url: 'http://merchant.test/mcp', tool_name: 'probe_tool' })
     await h.haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'probe_tool',
       arguments: {},

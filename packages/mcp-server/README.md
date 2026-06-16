@@ -24,15 +24,19 @@ Hosted MCP tools are deliberately split:
 
 - read state: agent info, live allowances, payment status, transactions
 - construct: return unsigned direct-payment or x402 funding hashes
-- relay: submit `{ payment_id, signature }` after the edge signs
+- relay: submit `{ payment_id, signature }` after the edge signs funding
+- complete paid MCP tools: relay an already signed, merchant-bound `payment_header`
+  together with the funding `payment_id` so evidence can be attached
 
 It does not expose local signing tools. Those live in `@haven_ai/signer`
 (`haven_sign`, `haven_x402_sign_header`).
 
 ## Custody invariant
 
-> Only `{ payment_id, signature }` ever crosses the wire to this server. The
-> delegate private key never appears in any request, in any field.
+> The delegate private key never crosses the wire to this server. Funding relay
+> sends only `{ payment_id, signature }`; paid MCP completion may additionally
+> send a signed, single-use `payment_header` that is already bound to the
+> merchant, amount, and nonce.
 
 The bound `HavenClient` is constructed without a `delegateKey`, so the signing
 methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
@@ -47,6 +51,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_pay` | `POST /payments` (returns `payload_hash`) | no — edge signs |
 | `haven_submit` | `POST /payments/:id/sign` (relays signature) | no |
 | `haven_x402_authorize` | `POST /x402` (returns funding `payload_hash`) | no — edge signs |
+| `haven_complete_mcp_tool` | merchant MCP endpoint + evidence/reconciliation APIs | no — relays signed header |
 | `haven_get_payment_status` | `GET /machine-payments/:id/status` | no |
 | `haven_list_transactions` | `GET /machine-payments/receipts` | no |
 
@@ -66,17 +71,20 @@ signs nothing — backed by the SDK's keyless `createX402Intent`. The full round
 3. **edge** builds + signs the EIP-3009 `X-PAYMENT` header with the delegate key,
    but only after the current `payment_required` matches the process-local
    `x402_binding` returned by the funding signature step
-4. **edge** retries the merchant with the header
+4. for ordinary URL x402 requests, the edge/agent retries the merchant with the
+   header; for paid MCP tools, hosted `haven_complete_mcp_tool` can relay the
+   already signed header with the funding `payment_id` and attach evidence
 
-Steps 3–4 are intentionally at the edge: the EIP-3009 header is a delegate-key
-signature, so it can't run on the keyless hosted server, and Haven never talks
-to the merchant. The header-builder lives in the edge signer (#184). Pass
-`x402.expected` unchanged to the local `haven_sign` call, then pass the returned
-`x402_binding` to `haven_x402_sign_header` so mismatched amount, merchant,
-resource, asset, or network challenges are rejected before the delegate hot
-wallet signs the merchant header. `x402.expected.auth` is signed by Haven; the
-edge signer must be configured with the trusted `HAVEN_X402_BINDING_SIGNER`
-address so it can reject locally invented expected contexts.
+The header-builder is intentionally at the edge: the EIP-3009 header is a
+delegate-key signature, so it can't run on the keyless hosted server. Hosted MCP
+may relay that already signed, merchant-bound header for paid MCP tool
+completion, but it never builds or signs it. Pass `x402.expected` unchanged to
+the local `haven_sign` call, then pass the returned `x402_binding` to
+`haven_x402_sign_header` so mismatched amount, merchant, resource, asset, or
+network challenges are rejected before the delegate hot wallet signs the
+merchant header. `x402.expected.auth` is signed by Haven; the edge signer must be
+configured with the trusted `HAVEN_X402_BINDING_SIGNER` address so it can reject
+locally invented expected contexts.
 
 ## Run
 

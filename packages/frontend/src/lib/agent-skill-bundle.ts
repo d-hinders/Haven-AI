@@ -70,9 +70,10 @@ normal, not an error.
   name, and arguments. Then follow the returned steps: \`haven_sign\` the
   funding hash, \`haven_submit\` the signature, \`haven_x402_sign_header\` to
   build the payment header, and finally \`haven_complete_mcp_tool\` to settle
-  with the merchant and get the tool result. Pass \`payment_required\` and
-  \`arguments\` through verbatim from the \`haven_pay_mcp_tool\` result. Do not
-  call the merchant yourself — Haven completes the merchant leg for you.
+  with the merchant and get the tool result. Pass \`payment_id\`,
+  \`payment_required\`, and \`arguments\` through verbatim from the
+  \`haven_pay_mcp_tool\` result. Do not call the merchant yourself — Haven
+  completes the merchant leg for you.
 - **Status:** \`haven_get_payment_status\` with a \`payment_id\` to check on
   queued or in-flight payments. Do not poll in a tight loop.
 

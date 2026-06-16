@@ -36,7 +36,7 @@ Agent runtime
   -> hosted Haven MCP over HTTP (Bearer sk_agent_*)
   -> hosted MCP returns unsigned payload hashes
   -> local runtime or @haven_ai/signer signs with delegate key
-  -> hosted MCP relays { payment_id, signature }
+  -> hosted MCP relays { payment_id, signature } for funding
   -> Haven backend -> Safe AllowanceModule -> on-chain
 ```
 
@@ -45,7 +45,10 @@ The split is deliberate:
 - Hosted MCP receives the API key as identity only.
 - Hosted MCP never receives the delegate private key.
 - The local runtime or `@haven_ai/signer` signs payment hashes.
-- Only `{ payment_id, signature }` goes back to hosted MCP for relay.
+- Funding relay sends only `{ payment_id, signature }` back to hosted MCP.
+- Paid MCP-tool completion can also send a signed, merchant-bound
+  `payment_header` with the funding `payment_id` so hosted MCP can settle the
+  merchant call and attach evidence.
 - On-chain Safe AllowanceModule state remains the spend gate.
 
 API auth is identity. Signature is authority. On-chain module state is

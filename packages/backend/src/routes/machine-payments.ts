@@ -216,6 +216,27 @@ function sameAddress(a: string | null | undefined, b: string | null | undefined)
 
 const USDC_DECIMALS = 6
 
+function sweepResultBody(fields: {
+  txHash: string
+  valueAtomic: string
+  from: string
+  to: string
+  chainId: number
+  idempotent?: boolean
+}) {
+  return {
+    tx_hash: fields.txHash,
+    asset: 'USDC',
+    amount: ethers.formatUnits(BigInt(fields.valueAtomic), USDC_DECIMALS),
+    amount_atomic: fields.valueAtomic,
+    from_address: fields.from,
+    to_address: fields.to,
+    chain_id: fields.chainId,
+    explorer_url: getExplorerUrl(fields.chainId, 'tx', fields.txHash),
+    ...(fields.idempotent ? { idempotent_replay: true } : {}),
+  }
+}
+
 interface SweepSubmitBody {
   authorization?: Partial<SweepAuthorization>
   signature?: string
@@ -1155,17 +1176,16 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // Idempotent replay: a retried submit of an already-relayed sweep returns the
     // original tx rather than relaying (and reverting) a second time.
     if (row.status === 'submitted' && row.tx_hash) {
-      return reply.code(200).send({
-        tx_hash: row.tx_hash,
-        asset: 'USDC',
-        amount: ethers.formatUnits(BigInt(row.value_atomic), USDC_DECIMALS),
-        amount_atomic: row.value_atomic,
-        from_address: row.from_address,
-        to_address: row.to_address,
-        chain_id: row.chain_id,
-        explorer_url: getExplorerUrl(row.chain_id, 'tx', row.tx_hash),
-        idempotent_replay: true,
-      })
+      return reply.code(200).send(
+        sweepResultBody({
+          txHash: row.tx_hash,
+          valueAtomic: row.value_atomic,
+          from: row.from_address,
+          to: row.to_address,
+          chainId: row.chain_id,
+          idempotent: true,
+        }),
+      )
     }
     if (row.status !== 'prepared') {
       return reply.code(409).send({ error: `Sweep is ${row.status}, expected prepared.`, status: row.status })
@@ -1234,13 +1254,50 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       })
     }
 
+    // Atomically claim the prepared sweep before relaying. Two concurrent submits
+    // can otherwise both read 'prepared' and both broadcast — the second tx
+    // reverts on the spent EIP-3009 nonce, and if its failure write lands first
+    // it records a successful recovery as 'failed' and breaks replay. The loser
+    // of this compare-and-swap re-reads and replays instead of relaying.
+    const claim = await pool.query<{ id: string }>(
+      `UPDATE delegate_sweeps SET status = 'submitting'
+       WHERE id = $1 AND status = 'prepared'
+       RETURNING id`,
+      [row.id],
+    )
+    if (claim.rows.length === 0) {
+      const currentResult = await pool.query<DelegateSweepRow>(
+        `SELECT id, chain_id, token_address, from_address, to_address, value_atomic,
+                valid_after, valid_before, nonce, status, tx_hash
+         FROM delegate_sweeps WHERE id = $1 LIMIT 1`,
+        [row.id],
+      )
+      const current = currentResult.rows[0]
+      if (current?.status === 'submitted' && current.tx_hash) {
+        return reply.code(200).send(
+          sweepResultBody({
+            txHash: current.tx_hash,
+            valueAtomic: current.value_atomic,
+            from: current.from_address,
+            to: current.to_address,
+            chainId: current.chain_id,
+            idempotent: true,
+          }),
+        )
+      }
+      return reply.code(409).send({
+        error: 'Sweep is already being submitted.',
+        status: current?.status ?? 'unknown',
+      })
+    }
+
     let txHash: string
     try {
       ;({ txHash } = await relaySweepAuthorization(expected, signature))
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
       await pool.query(
-        `UPDATE delegate_sweeps SET status = 'failed', error_message = $1 WHERE id = $2 AND status = 'prepared'`,
+        `UPDATE delegate_sweeps SET status = 'failed', error_message = $1 WHERE id = $2 AND status = 'submitting'`,
         [errorMsg, row.id],
       )
       return reply.code(502).send({ error: 'Sweep relay failed', details: errorMsg })
@@ -1248,7 +1305,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
     await pool.query(
       `UPDATE delegate_sweeps SET status = 'submitted', tx_hash = $1, submitted_at = NOW()
-       WHERE id = $2 AND status = 'prepared'`,
+       WHERE id = $2 AND status = 'submitting'`,
       [txHash, row.id],
     )
 
@@ -1262,15 +1319,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       [agent.id],
     )
 
-    return reply.code(200).send({
-      tx_hash: txHash,
-      asset: 'USDC',
-      amount: ethers.formatUnits(BigInt(expected.value), USDC_DECIMALS),
-      amount_atomic: expected.value,
-      from_address: expected.from,
-      to_address: expected.to,
-      chain_id: expected.chainId,
-      explorer_url: getExplorerUrl(expected.chainId, 'tx', txHash),
-    })
+    return reply.code(200).send(
+      sweepResultBody({
+        txHash,
+        valueAtomic: expected.value,
+        from: expected.from,
+        to: expected.to,
+        chainId: expected.chainId,
+      }),
+    )
   })
 }

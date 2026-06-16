@@ -126,6 +126,7 @@ describe('machine payment sweep routes', () => {
     it('relays when the signature recovers the delegate and balance covers it', async () => {
       mockQuery.mockResolvedValueOnce(authRow()) // auth
       mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] }) // SELECT prepared
+      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
       sweepMocks.relaySweepAuthorization.mockResolvedValueOnce({ txHash: TX })
@@ -140,6 +141,47 @@ describe('machine payment sweep routes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json().tx_hash).toBe(TX)
       expect(sweepMocks.relaySweepAuthorization).toHaveBeenCalledOnce()
+    })
+
+    it('does not relay when a concurrent submitter already claimed the sweep', async () => {
+      mockQuery.mockResolvedValueOnce(authRow()) // auth
+      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] }) // SELECT prepared
+      mockQuery.mockResolvedValueOnce({ rows: [] }) // claim lost (no row updated)
+      mockQuery.mockResolvedValueOnce({ rows: [preparedRow({ status: 'submitting' })] }) // re-read
+      sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { nonce: NONCE }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(409)
+      expect(sweepMocks.relaySweepAuthorization).not.toHaveBeenCalled()
+    })
+
+    it('replays the winner tx when the claim is lost but the sweep already submitted', async () => {
+      mockQuery.mockResolvedValueOnce(authRow()) // auth
+      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] }) // SELECT prepared
+      mockQuery.mockResolvedValueOnce({ rows: [] }) // claim lost
+      mockQuery.mockResolvedValueOnce({
+        rows: [preparedRow({ status: 'submitted', tx_hash: TX })],
+      }) // re-read: winner already finished
+      sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { nonce: NONCE }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ tx_hash: TX, idempotent_replay: true })
+      expect(sweepMocks.relaySweepAuthorization).not.toHaveBeenCalled()
     })
 
     it('rejects with 403 when the signature does not recover the delegate', async () => {

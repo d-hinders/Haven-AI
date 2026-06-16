@@ -174,6 +174,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockUseDelegateBalance.mockReturnValue({
       balance: null,
       hasStranded: false,
+      hasRecoverableUsdc: false,
       loading: false,
       refetch: vi.fn(),
     })
@@ -214,6 +215,7 @@ describe('AgentDetailClient last-activity metadata', () => {
         usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
       },
       hasStranded: true,
+      hasRecoverableUsdc: true,
       loading: false,
       refetch: vi.fn(),
     })
@@ -225,6 +227,29 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(
       screen.getByRole('link', { name: 'Recover funds to your Haven wallet' }),
     ).toHaveAttribute('href', '/agents/agent-1/sweep')
+  })
+
+  it('hides the recover-funds prompt for an ETH-only delegate (gasless path is USDC-only)', () => {
+    mockUseDelegateBalance.mockReturnValue({
+      balance: {
+        delegate_address: '0x2222222222222222222222222222222222222222',
+        safe_address: SAFE.safe_address,
+        chain_id: 8453,
+        eth: '0.01',
+        eth_atomic: '10000000000000000',
+        usdc: '0',
+        usdc_atomic: '0',
+        usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      },
+      hasStranded: true,
+      hasRecoverableUsdc: false,
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.queryByText('Recoverable funds in agent wallet')).not.toBeInTheDocument()
   })
 
   it('uses the activity row wallet name for historical payment movement', () => {

@@ -265,19 +265,16 @@ export default function AgentDetailClient({ agentId }: Props) {
       .filter((item) => item.payment_attention_reason === 'merchant_retry_rejected_after_payment'),
     [activity],
   )
-  // Gate recovery UI on the delegate EOA actually holding funds right now — not on
-  // a funded-but-unsettled payment record, which can linger after a sweep or never
-  // strand anything. Skip the read for revoked agents (the endpoint 404s anyway).
-  const { balance: delegateBalance, hasStranded: hasStrandedFunds } = useDelegateBalance(
+  // Gate recovery UI on the delegate EOA actually holding *recoverable* funds — not
+  // on a funded-but-unsettled payment record (which can linger after a sweep), and
+  // specifically on USDC, since the gasless recovery path is USDC-only. Skip the
+  // read for revoked agents (the endpoint 404s anyway).
+  const { balance: delegateBalance, hasRecoverableUsdc } = useDelegateBalance(
     agent && agent.status !== 'revoked' ? agentId : null,
   )
-  const strandedSummary = useMemo(() => {
-    if (!delegateBalance) return null
-    const parts: string[] = []
-    if (delegateBalance.usdc_atomic !== '0') parts.push(`${delegateBalance.usdc} USDC`)
-    if (delegateBalance.eth_atomic !== '0') parts.push(`${delegateBalance.eth} ETH`)
-    return parts.length > 0 ? parts.join(' and ') : null
-  }, [delegateBalance])
+  const strandedSummary = delegateBalance && delegateBalance.usdc_atomic !== '0'
+    ? `${delegateBalance.usdc} USDC`
+    : null
   const managedDelegates = useMemo(
     () => (agent?.delegate_address && agent.status !== 'revoked' ? [agent.delegate_address] : []),
     [agent?.delegate_address, agent?.status],
@@ -531,7 +528,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
-      {hasStrandedFunds ? (
+      {hasRecoverableUsdc ? (
         <div className="mt-4">
           <ApprovalRequiredBanner title="Recoverable funds in agent wallet" tone="warning" density="compact">
             <span>

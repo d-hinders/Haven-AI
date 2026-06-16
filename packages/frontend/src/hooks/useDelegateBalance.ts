@@ -17,8 +17,15 @@ export interface DelegateBalance {
 
 export interface UseDelegateBalanceResult {
   balance: DelegateBalance | null
-  /** True only when the delegate EOA actually holds USDC or ETH right now. */
+  /** True when the delegate EOA holds any funds (USDC or ETH) right now. */
   hasStranded: boolean
+  /**
+   * True only when the delegate holds USDC. The gasless `haven_sweep_delegate`
+   * recovery path is USDC-only, so recovery CTAs that point at it must gate on
+   * this — not `hasStranded` — or an ETH-only delegate gets a CTA that recovers
+   * nothing.
+   */
+  hasRecoverableUsdc: boolean
   loading: boolean
   refetch: () => Promise<void>
 }
@@ -55,12 +62,32 @@ export function useDelegateBalance(agentId: string | null): UseDelegateBalanceRe
       setBalance(null)
       return
     }
-    fetchData()
-  }, [agentId, fetchData])
+    // Clear immediately so a stale balance from the previous agent can't briefly
+    // render the wrong recover amount/link during client-side navigation.
+    setBalance(null)
+    setLoading(true)
+    let ignore = false
+    api
+      .get<DelegateBalance>(`/agents/${agentId}/delegate-balance`)
+      .then((data) => {
+        if (!ignore) setBalance(data)
+      })
+      .catch(() => {
+        if (!ignore) setBalance(null)
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      // Ignore a late response from a superseded agentId.
+      ignore = true
+    }
+  }, [agentId])
 
   const hasStranded = Boolean(
     balance && (balance.usdc_atomic !== '0' || balance.eth_atomic !== '0'),
   )
+  const hasRecoverableUsdc = Boolean(balance && balance.usdc_atomic !== '0')
 
-  return { balance, hasStranded, loading, refetch: fetchData }
+  return { balance, hasStranded, hasRecoverableUsdc, loading, refetch: fetchData }
 }

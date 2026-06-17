@@ -56,8 +56,11 @@ Before any payment, confirm the *live remaining* budget with the tools —
 \`agent.json\` shows the configured budget, not what is left after recent
 spending:
 
-- \`haven_get_agent\` — agent identity, Haven wallet address, network.
-- \`haven_get_allowances\` — current per-token budgets and what remains.
+- \`haven_get_agent\` — the recommended first call: identity (wallet, network)
+  plus a readiness signal (\`ready\` / \`needs_approval\` / \`revoked\`) and live
+  remaining per-token allowance, in one shot.
+- \`haven_get_allowances\` — detailed per-token breakdown (configured, spent,
+  reset window) when you need more than the summary.
 
 Budgets reset on a period the user chose. If a payment exceeds the remaining
 budget it is queued for the user to approve in the Haven dashboard — this is

@@ -55,11 +55,13 @@ normal, not an error.
   \`retry_original_x402_request\`.
 - **Paid MCP tool call:** \`haven_pay_mcp_tool\` with the merchant URL, tool
   name, and arguments, then finish in two calls (fast path): \`haven_sign_x402\`
-  on the local signer (pass \`payload_hash\`, the \`x402\` expected context, and
-  \`payment_required\`) returns \`{ signature, payment_header }\`; then
+  on the local signer (pass \`payload_hash\`, the nested \`x402.expected\` object,
+  and \`payment_required\`) returns \`{ signature, payment_header }\`; then
   \`haven_settle_mcp_tool\` (pass \`payment_id\`, \`signature\`, \`payment_header\`,
   \`merchant_url\`, \`tool_name\`, \`arguments\`, \`mcp_transport\`) funds and settles
-  in one step and returns the tool result. Step-by-step alternative:
+  in one step and returns the tool result. If it returns \`settled: false\`,
+  funding is queued for the user's approval — tell them and check status later,
+  do not re-pay. Step-by-step alternative:
   \`haven_sign\` → \`haven_submit\` → \`haven_x402_sign_header\` →
   \`haven_complete_mcp_tool\`. Pass \`payment_required\`, \`arguments\`, and
   \`mcp_transport\` verbatim from the \`haven_pay_mcp_tool\` result. The returned

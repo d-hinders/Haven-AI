@@ -291,3 +291,53 @@ describe('haven_x402_sign_header tool', () => {
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
   })
 })
+
+describe('haven_sign_x402 tool (one-shot funding + header)', () => {
+  it('writes two audit rows — one per signing operation — without key or header material', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-signx402-audit-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+      const handlers = createToolHandlers(signer, {
+        audit: { auditPath, delegateAddress: signer.delegateAddress },
+      })
+
+      const result = ok<{ signature: string; payment_header: string }>(
+        await handlers.haven_sign_x402({
+          payload_hash: HASH,
+          x402_expected: await expectedX402(),
+          payment_required: PAYMENT_REQUIRED,
+        }),
+      )
+
+      const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
+      // Funding-hash signature + merchant-header signature = two entries.
+      expect(rows).toHaveLength(2)
+      expect(JSON.parse(rows[0])).toMatchObject({ tool: 'haven_sign_x402', payload_hash: HASH })
+      expect(JSON.parse(rows[1]).tool).toBe('haven_sign_x402')
+
+      const serialized = await readFile(auditPath, 'utf8')
+      expect(serialized).not.toContain(TEST_KEY)
+      expect(serialized).not.toContain(TEST_KEY.slice(2))
+      expect(serialized).not.toContain(result.data.signature)
+      expect(serialized).not.toContain(result.data.payment_header)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns PAYMENT_WINDOW_EXPIRED on the one-shot path when expires_at has passed', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+
+    const payload = await handlers.haven_sign_x402({
+      payload_hash: HASH,
+      x402_expected: await expectedX402({ expires_at: '2000-01-01T00:00:00.000Z' }),
+      payment_required: PAYMENT_REQUIRED,
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(payload.retry_with_new_quote).toBe(true)
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+  })
+})

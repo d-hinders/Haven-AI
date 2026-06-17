@@ -607,7 +607,14 @@ export function createToolHandlers(
           return { funding_status: funding.status, funding_tx_hash: funding.txHash ?? null, settled: false }
         }
         const merchant = await deliverMerchantPayment(haven, args)
-        return { funding_tx_hash: funding.txHash ?? null, settled: true, ...merchant }
+        // Pick explicit fields — don't spread the raw HTTP status/ok, which would
+        // collide with the funding/payment-status meaning an agent expects here.
+        return {
+          funding_tx_hash: funding.txHash ?? null,
+          settled: true,
+          result: merchant.result,
+          settlement_tx_hash: merchant.settlement_tx_hash,
+        }
       }),
 
     haven_quote_x402: async (input) => {

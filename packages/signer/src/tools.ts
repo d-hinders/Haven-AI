@@ -129,8 +129,9 @@ const X402_SIGN_HEADER_DESCRIPTION = [
 const SIGN_X402_DESCRIPTION = [
   'One-shot x402 signing for the fast 3-call flow: sign the funding hash AND build the EIP-3009',
   'X-PAYMENT header in a single local call (equivalent to haven_sign followed by',
-  'haven_x402_sign_header). The delegate key never leaves this process. Pass payload_hash,',
-  'x402_expected, and payment_required exactly as returned by haven_pay_mcp_tool. Returns',
+  'haven_x402_sign_header). The delegate key never leaves this process. From the haven_pay_mcp_tool',
+  'result pass payload_hash, x402_expected (the nested x402.expected object, not a top-level field),',
+  'and payment_required (verbatim). Returns',
   '{ signature, x402_binding, payment_header, accepted }; hand signature + payment_header to',
   'haven_settle_mcp_tool to fund and settle in one hosted call. The header is built now (before',
   'funding confirms), so its short validity window starts here — call haven_settle_mcp_tool promptly,',
@@ -253,7 +254,11 @@ export function createToolHandlers(
           args.payment_required as X402PaymentRequired,
           funding.x402Binding,
         )
+        // Two audit entries — one per signing operation — matching the
+        // decomposed haven_sign + haven_x402_sign_header trail, so the funding
+        // signature and the merchant header remain distinguishable in the log.
         await auditSigning('haven_sign_x402', args.payload_hash)
+        await auditSigning('haven_sign_x402', hashPayloadForAudit(args.payment_required))
         return {
           signature: funding.signature,
           x402_binding: funding.x402Binding,

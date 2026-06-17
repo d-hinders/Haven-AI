@@ -11,6 +11,11 @@ import {
   buildTransactionSummary,
 } from '@/lib/transaction-scope'
 import type { TransactionFilterState } from '@/types/transactions'
+import {
+  buildCsvFilename,
+  downloadCsv,
+  transactionsToCsv,
+} from '@/lib/transaction-csv'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import { Button } from '@/components/ui/Button'
@@ -118,6 +123,20 @@ export default function TransactionsClient() {
     handleFilterChange({})
   }
 
+  // Export reflects the current filter scope: we export exactly what's loaded
+  // and visible (same client-side direction filter as the table). Name
+  // resolution mirrors the table — address book first, then the user's own
+  // Safes — so the CSV and the on-screen rows agree.
+  const handleExportCsv = () => {
+    const csv = transactionsToCsv(visibleTransactions, {
+      resolveName: (address, chainId) =>
+        resolveAddress(address) ??
+        safeNamesByAddress.get(`${address.toLowerCase()}:${chainId}`) ??
+        null,
+    })
+    downloadCsv(csv, buildCsvFilename(new Date()))
+  }
+
   if (!hasSafes) {
     return (
       <div className="max-w-5xl">
@@ -135,9 +154,23 @@ export default function TransactionsClient() {
     )
   }
 
+  const canExport = !loadingInitial && visibleTransactions.length > 0
+
   return (
     <div className="max-w-6xl">
-      <PageHeader title="Transaction history" subtitle={subtitle} />
+      <PageHeader
+        title="Transaction history"
+        subtitle={subtitle}
+        actions={
+          <Button
+            variant="tertiary"
+            onClick={handleExportCsv}
+            disabled={!canExport}
+          >
+            Export CSV
+          </Button>
+        }
+      />
 
       {partialFailure && (
         <div className="mb-4 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">

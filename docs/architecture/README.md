@@ -15,6 +15,7 @@ exported PNG and SVG alongside.
 | 6 | [Hosted MCP Connect Flow & Edge-Signing Contract](06-hosted-mcp-connect-flow.md) | Designing/reviewing the hosted MCP server — the wire contract, the two-credential split, and the non-custodial rule that the delegate key never reaches Haven. |
 | 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |
 | 8 | [Local vs Hosted MCP](08-local-vs-hosted-mcp.md) | Choosing the deployment model — the default hosted MCP + edge signer vs the advanced fully-local MCP opt-in, with the custody rationale and tool parity. |
+| 9 | [Rail-agnostic Fee Module](09-fee-module.md) | Designing/reviewing the per-transaction fee — the shared policy/accounting module vs. per-rail on-chain settlement, and the surcharge/allowance invariants. |
 
 The detailed Connect Agent 2 contract and its rollout closeout were point-in-time
 artifacts for shipping that feature; they now live in

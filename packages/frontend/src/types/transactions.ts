@@ -25,6 +25,7 @@ export interface Transaction {
   paymentProofStatus?: string | null
   paymentFlowStatus?: 'paid' | 'confirming_merchant' | 'needs_attention' | null
   paymentAttentionReason?: 'merchant_retry_rejected_after_payment' | null
+  activityType?: 'delegate_sweep'
 }
 
 export interface AggregatedTransaction extends Transaction {

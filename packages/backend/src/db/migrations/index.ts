@@ -22,6 +22,7 @@ import * as merchantCatalog from './019_merchant_catalog.js'
 import * as sendIdempotencyKey from './020_send_idempotency_key.js'
 import * as onboardingEvents from './021_onboarding_events.js'
 import * as delegateSweeps from './022_delegate_sweeps.js'
+import * as delegateSweepTxHashIndex from './023_delegate_sweep_tx_hash_index.js'
 
 export interface Migration {
   version: string
@@ -57,4 +58,5 @@ export const migrations: Migration[] = [
   sendIdempotencyKey,
   onboardingEvents,
   delegateSweeps,
+  delegateSweepTxHashIndex,
 ]

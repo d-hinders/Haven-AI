@@ -13,7 +13,7 @@ import {
   hashPayloadForAudit,
   type SigningAuditContext,
 } from './audit.js'
-import type { EdgeSigner } from './core.js'
+import type { EdgeSigner, X402ExpectedPayment } from './core.js'
 
 /**
  * Local signer tool set. These run on the agent's machine, next to the key,
@@ -23,6 +23,7 @@ import type { EdgeSigner } from './core.js'
 export type SignerToolName =
   | 'haven_sign'
   | 'haven_x402_sign_header'
+  | 'haven_sign_x402'
   | 'haven_sign_sweep_delegate'
 
 const sweepAuthorizationSchema = z.object({
@@ -93,6 +94,14 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     // Opaque binding returned by haven_sign when x402_expected was supplied.
     x402_binding: z.string().min(1),
   },
+  haven_sign_x402: {
+    // One-shot x402 signing: funding hash + merchant header in one local call.
+    payload_hash: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string'),
+    x402_expected: x402ExpectedSchema,
+    payment_required: z.record(z.string(), z.unknown()),
+  },
 }
 
 const SIGN_DESCRIPTION = [
@@ -117,6 +126,17 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   'the funding tx has a confirmed status).',
 ].join(' ')
 
+const SIGN_X402_DESCRIPTION = [
+  'One-shot x402 signing for the fast 3-call flow: sign the funding hash AND build the EIP-3009',
+  'X-PAYMENT header in a single local call (equivalent to haven_sign followed by',
+  'haven_x402_sign_header). The delegate key never leaves this process. Pass payload_hash,',
+  'x402_expected, and payment_required exactly as returned by haven_pay_mcp_tool. Returns',
+  '{ signature, x402_binding, payment_header, accepted }; hand signature + payment_header to',
+  'haven_settle_mcp_tool to fund and settle in one hosted call. The header is built now (before',
+  'funding confirms), so its short validity window starts here — call haven_settle_mcp_tool promptly,',
+  'and re-run haven_pay_mcp_tool with the same idempotency_key if a tool returns PAYMENT_WINDOW_EXPIRED.',
+].join(' ')
+
 const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
   'Sign a Haven-prepared gasless USDC sweep that recovers stranded funds from the delegate',
   'wallet back to your Haven wallet. The delegate key never leaves this process and this tool',
@@ -130,7 +150,33 @@ const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
 export const toolDescriptions: Record<SignerToolName, string> = {
   haven_sign: SIGN_DESCRIPTION,
   haven_x402_sign_header: X402_SIGN_HEADER_DESCRIPTION,
+  haven_sign_x402: SIGN_X402_DESCRIPTION,
   haven_sign_sweep_delegate: SIGN_SWEEP_DELEGATE_DESCRIPTION,
+}
+
+/** Map the wire-shaped x402_expected (snake_case) to the EdgeSigner's camelCase context. */
+function toExpectedX402(raw: {
+  payment_id: string
+  payload_hash: string
+  resource_url: string
+  merchant_to: string
+  amount: string
+  asset: string
+  network: string
+  expires_at?: string
+  auth: X402ExpectedPayment['auth']
+}): X402ExpectedPayment {
+  return {
+    paymentId: raw.payment_id,
+    payloadHash: raw.payload_hash,
+    resourceUrl: raw.resource_url,
+    merchantTo: raw.merchant_to,
+    amount: raw.amount,
+    asset: raw.asset,
+    network: raw.network,
+    expiresAt: raw.expires_at,
+    auth: raw.auth,
+  }
 }
 
 export interface ToolSuccess<T> {
@@ -163,19 +209,7 @@ export function createToolHandlers(
     haven_sign: async (input) =>
       runTool(async () => {
         const args = parse('haven_sign', input)
-        const x402Expected = args.x402_expected
-          ? {
-              paymentId: args.x402_expected.payment_id,
-              payloadHash: args.x402_expected.payload_hash,
-              resourceUrl: args.x402_expected.resource_url,
-              merchantTo: args.x402_expected.merchant_to,
-              amount: args.x402_expected.amount,
-              asset: args.x402_expected.asset,
-              network: args.x402_expected.network,
-              expiresAt: args.x402_expected.expires_at,
-              auth: args.x402_expected.auth,
-            }
-          : null
+        const x402Expected = args.x402_expected ? toExpectedX402(args.x402_expected) : null
         const result = x402Expected
           ? signer.signX402FundingHash(args.payload_hash, x402Expected)
           : null
@@ -205,6 +239,27 @@ export function createToolHandlers(
           hashPayloadForAudit(args.payment_required),
         )
         return { payment_header: result.paymentHeader, accepted: result.accepted }
+      }),
+
+    haven_sign_x402: async (input) =>
+      runTool(async () => {
+        // Coerce a stringified payment_required (same transport guard as
+        // haven_x402_sign_header) before validation.
+        const args = parse('haven_sign_x402', coercePaymentRequired(input))
+        // 1. Sign the funding hash (records the binding + checks expiry/context).
+        const funding = signer.signX402FundingHash(args.payload_hash, toExpectedX402(args.x402_expected))
+        // 2. Build the merchant EIP-3009 header against that binding — local, no network.
+        const header = await signer.buildX402PaymentHeader(
+          args.payment_required as X402PaymentRequired,
+          funding.x402Binding,
+        )
+        await auditSigning('haven_sign_x402', args.payload_hash)
+        return {
+          signature: funding.signature,
+          x402_binding: funding.x402Binding,
+          payment_header: header.paymentHeader,
+          accepted: header.accepted,
+        }
       }),
 
     haven_sign_sweep_delegate: async (input) =>

@@ -45,6 +45,7 @@ export type HostedToolName =
   | 'haven_submit'
   | 'haven_pay_mcp_tool'
   | 'haven_complete_mcp_tool'
+  | 'haven_settle_mcp_tool'
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
@@ -124,6 +125,23 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // The X-PAYMENT header built by the local signer (haven_x402_sign_header).
     payment_header: z.string().min(1),
   },
+  haven_settle_mcp_tool: {
+    // Fast-path settle: fund (relay signature) AND deliver the merchant header
+    // in one hosted call. Combines haven_submit + haven_complete_mcp_tool.
+    payment_id: z.string().min(1),
+    signature: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
+    merchant_url: z.string().url(),
+    tool_name: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()).optional(),
+    mcp_transport: z.object({
+      handshake_required: z.boolean(),
+      source: z.enum(['path', 'bazaar']),
+    }).optional(),
+    // The X-PAYMENT header built by the local signer (haven_sign_x402).
+    payment_header: z.string().min(1),
+  },
   haven_quote_x402: {
     url: z.string().url(),
     method: z.string().optional(),
@@ -198,10 +216,10 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. ' +
     'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
-    'Full flow: (1) haven_sign payload_hash with x402 (the x402.expected context, including expires_at) on the local signer → x402_binding; ' +
-    '(2) haven_submit the signature to fund the delegate; ' +
-    '(3) haven_x402_sign_header on the local signer with payment_required + x402_binding → payment_header; ' +
-    '(4) haven_complete_mcp_tool with payment_id, merchant_url, tool_name, arguments, mcp_transport, and payment_header to settle with the merchant and get the tool result. ' +
+    'Finish with two follow-up calls (fast path, recommended): ' +
+    '(1) haven_sign_x402 on the local signer with payload_hash, x402 (the x402.expected context, including expires_at), and payment_required → { signature, payment_header }; ' +
+    '(2) haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
+    'Step-by-step alternative (also key-safe): haven_sign → haven_submit → haven_x402_sign_header → haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. ' +
     'Pass max_amount (atomic units) to reject a quote whose authorized amount exceeds the user\'s cap, before any funding moves. Haven never receives the signing key.',
@@ -220,6 +238,19 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
     'If the funding window expired first, this returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true.',
   nextActionGuidance:
     'If the merchant rejects the payment after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with haven_sweep_delegate.',
+})
+
+const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
+  summary:
+    'Fund and settle an x402 MCP tool payment in one call: relay the funding signature, then deliver the signed X-PAYMENT header to the merchant and return the tool result.',
+  behavior:
+    'The fast-path final step, combining haven_submit + haven_complete_mcp_tool. Pass payment_id, signature, and payment_header from haven_sign_x402, plus merchant_url, tool_name, arguments, and mcp_transport from haven_pay_mcp_tool. ' +
+    'Relays the funding signature to fund the delegate, then (only once funding confirms) re-issues the MCP tools/call to the merchant with the X-PAYMENT header (fresh MCP handshake server-side) and returns the merchant tool result. ' +
+    'Both the signature and the payment_header are signed locally by the edge signer — Haven relays them but never holds the key. ' +
+    'If funding does not confirm (e.g. pending_approval) it returns { settled: false, funding_status } and does not contact the merchant. ' +
+    'If the funding window expired it returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true.',
+  nextActionGuidance:
+    'If the merchant rejects after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with haven_sweep_delegate.',
 })
 
 const QUOTE_X402_DESCRIPTION = composeDescription({
@@ -303,6 +334,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_submit: SUBMIT_DESCRIPTION,
   haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,
   haven_complete_mcp_tool: COMPLETE_MCP_TOOL_DESCRIPTION,
+  haven_settle_mcp_tool: SETTLE_MCP_TOOL_DESCRIPTION,
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
@@ -559,63 +591,23 @@ export function createToolHandlers(
     haven_complete_mcp_tool: async (input) =>
       runTool(async () => {
         const args = parse('haven_complete_mcp_tool', input)
-        // Rebuild the same JSON-RPC tools/call envelope haven_pay_mcp_tool used,
-        // then deliver the signed X-PAYMENT header to the merchant. The header
-        // is a signed authorization the edge signer produced — Haven relays it
-        // but never holds the key.
-        const envelope = {
-          jsonrpc: '2.0',
-          id: `haven-mcp-${randomUUID()}`,
-          method: 'tools/call',
-          params: {
-            name: args.tool_name,
-            arguments: args.arguments ?? {},
-          },
+        return deliverMerchantPayment(haven, args)
+      }),
+
+    haven_settle_mcp_tool: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_settle_mcp_tool', input)
+        // Fast path: fund (relay the signature) then deliver the merchant header
+        // in one hosted call. The signature and X-PAYMENT header are both signed
+        // by the local edge signer — Haven relays them but never holds the key.
+        const funding = await submitSignatureWithExpiryMapping(haven, args.payment_id, args.signature)
+        if (funding.status !== 'confirmed') {
+          // Funding did not confirm (e.g. queued for approval). Do not deliver the
+          // merchant header — return the funding status so the agent can act.
+          return { funding_status: funding.status, funding_tx_hash: funding.txHash ?? null, settled: false }
         }
-        const result = await haven.completeX402MerchantCall({
-          url: args.merchant_url as string,
-          init: {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(envelope),
-          },
-          paymentId: args.payment_id as string,
-          paymentHeader: args.payment_header as string,
-          mcpTransport: parseMcpTransport(args.mcp_transport),
-        })
-        // Funding already confirmed before this step, so a non-2xx merchant
-        // response means the delegate holds stranded funds. Surface a distinct
-        // failure (not a soft ok:false) so the agent reconciles via
-        // haven_sweep_delegate instead of treating it as a transient error.
-        if (!result.ok) {
-          let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null = null
-          try {
-            status = await haven.getPaymentStatus(args.payment_id as string)
-          } catch {
-            // Preserve the merchant rejection even if status lookup is unavailable.
-          }
-          throw new HostedToolError({
-            code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
-            message:
-              `Merchant rejected the payment after funding (HTTP ${result.status}). ` +
-              `The delegate wallet may hold stranded funds — reconcile with haven_sweep_delegate. ` +
-              `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
-            statusCode: result.status,
-            paymentId: args.payment_id as string,
-            status: status?.status ?? 'merchant_rejected_after_funding',
-            phase: status?.phase ?? 'funded_but_unsettled',
-            nextAction: status?.nextAction ?? AgentPaymentNextAction.SweepStrandedFunds,
-            rail: status?.rail ?? 'x402',
-            idempotencyKey: status?.idempotencyKey,
-            suggestedTool: 'haven_sweep_delegate',
-          })
-        }
-        return {
-          status: result.status,
-          ok: result.ok,
-          result: result.body,
-          settlement_tx_hash: result.settlementTxHash ?? null,
-        }
+        const merchant = await deliverMerchantPayment(haven, args)
+        return { funding_tx_hash: funding.txHash ?? null, settled: true, ...merchant }
       }),
 
     haven_quote_x402: async (input) => {
@@ -1070,6 +1062,68 @@ class HostedToolError extends Error {
     this.idempotencyKey = input.idempotencyKey
     this.retryWithNewQuote = input.retryWithNewQuote
     this.suggestedTool = input.suggestedTool
+  }
+}
+
+/**
+ * Deliver the signed X-PAYMENT header to the merchant and shape the result.
+ * Shared by haven_complete_mcp_tool (decomposed flow) and haven_settle_mcp_tool
+ * (fast flow). Funding has already confirmed before this runs, so a non-2xx
+ * merchant response means the delegate holds stranded funds — surface a typed
+ * MERCHANT_REJECTED_AFTER_FUNDING (not a soft ok:false) so the agent reconciles
+ * via haven_sweep_delegate. The X-PAYMENT header is a signed authorization the
+ * edge signer produced — Haven relays it but never holds the key.
+ */
+async function deliverMerchantPayment(
+  haven: HavenClient,
+  // Parsed haven_complete_mcp_tool / haven_settle_mcp_tool args (Zod-validated).
+  args: Record<string, any>,
+): Promise<{ status: number; ok: boolean; result: unknown; settlement_tx_hash: string | null }> {
+  const envelope = {
+    jsonrpc: '2.0',
+    id: `haven-mcp-${randomUUID()}`,
+    method: 'tools/call',
+    params: { name: args.tool_name, arguments: args.arguments ?? {} },
+  }
+  const result = await haven.completeX402MerchantCall({
+    url: args.merchant_url,
+    init: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(envelope),
+    },
+    paymentId: args.payment_id,
+    paymentHeader: args.payment_header,
+    mcpTransport: parseMcpTransport(args.mcp_transport),
+  })
+  if (!result.ok) {
+    let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null = null
+    try {
+      status = await haven.getPaymentStatus(args.payment_id)
+    } catch {
+      // Preserve the merchant rejection even if status lookup is unavailable.
+    }
+    throw new HostedToolError({
+      code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
+      message:
+        `Merchant rejected the payment after funding (HTTP ${result.status}). ` +
+        `The delegate wallet may hold stranded funds — reconcile with haven_sweep_delegate. ` +
+        `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
+      statusCode: result.status,
+      paymentId: args.payment_id,
+      status: status?.status ?? 'merchant_rejected_after_funding',
+      phase: status?.phase ?? 'funded_but_unsettled',
+      nextAction: status?.nextAction ?? AgentPaymentNextAction.SweepStrandedFunds,
+      rail: status?.rail ?? 'x402',
+      idempotencyKey: status?.idempotencyKey,
+      suggestedTool: 'haven_sweep_delegate',
+    })
+  }
+  return {
+    status: result.status,
+    ok: result.ok,
+    result: result.body,
+    settlement_tx_hash: result.settlementTxHash ?? null,
   }
 }
 

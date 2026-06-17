@@ -40,6 +40,7 @@ describe('buildHostedMcpServer', () => {
         'haven_get_resume_state',
         'haven_list_receipts',
         'haven_complete_mcp_tool',
+        'haven_settle_mcp_tool',
         'haven_pay',
         'haven_pay_mcp_tool',
         'haven_pay_mpp_challenge',

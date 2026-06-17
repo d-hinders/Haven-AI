@@ -2390,6 +2390,7 @@ export const openapiSpec = {
             type: ['string', 'null'],
             enum: ['merchant_retry_rejected_after_payment', null],
           },
+          activityType: { type: 'string', enum: ['delegate_sweep'] },
           chainId: { type: 'integer' },
           safeId: uuid,
           safeAddress: address,

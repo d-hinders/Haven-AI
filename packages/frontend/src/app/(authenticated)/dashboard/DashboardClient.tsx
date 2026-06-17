@@ -15,8 +15,12 @@ import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { RESET_PERIODS } from '@/lib/allowance-module'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
-import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
-import { truncate, timeAgo } from '@/lib/format'
+import { timeAgo } from '@/lib/format'
+import {
+  transactionMovement,
+  transactionStatus,
+  transactionTitle,
+} from '@/lib/transaction-presentation'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
@@ -36,7 +40,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/Toast'
-import { TransactionActivityRow, TransactionMovement } from '@/components/haven'
+import { TransactionActivityRow } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -512,26 +516,6 @@ function AttentionSection({
   )
 }
 
-function transactionTitle(tx: AggregatedTransaction): string {
-  if (tx.direction === 'in') return 'Received payment'
-  const sourceTitle = paymentSourceTitle(tx.source)
-  if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
-  if (sourceTitle) return sourceTitle
-  if (tx.agentName) return `Agent payment by ${tx.agentName}`
-  return 'Payment sent by you'
-}
-
-function transactionMovement(tx: AggregatedTransaction, resolveAddress: (address: string) => string | null) {
-  const counterparty = tx.direction === 'in' ? tx.from : tx.to
-  const label = isMachinePaymentSource(tx.source)
-    ? parseX402Hostname(tx.x402ResourceUrl) ?? truncate(counterparty)
-    : resolveAddress(counterparty) ?? truncate(counterparty)
-  const from = tx.direction === 'in' ? label : tx.safeName
-  const to = tx.direction === 'in' ? tx.safeName : label
-
-  return <TransactionMovement from={from} to={to} />
-}
-
 function TransactionsSection({
   transactions,
   hasAccounts,
@@ -605,6 +589,7 @@ function TransactionsSection({
         <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
           {transactions.slice(0, 5).map((tx) => {
             const lifecycle = machinePaymentLifecyclePresentation(tx)
+            const recovery = transactionStatus(tx)
             return (
               <Link
                 key={`${tx.hash}-${tx.type}-${tx.safeId}`}
@@ -618,8 +603,8 @@ function TransactionsSection({
                   amountTone={
                     tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
                   }
-                  status={lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
-                  statusTone={lifecycle?.tone ?? (
+                  status={recovery?.label ?? lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
+                  statusTone={recovery?.tone ?? lifecycle?.tone ?? (
                     tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
                   )}
                   timestamp={timeAgo(tx.timestamp * 1000)}

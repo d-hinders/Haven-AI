@@ -759,6 +759,7 @@ describe('enrichTransactionsWithAgents', () => {
         ],
       } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const result = await enrichTransactionsWithAgents('user-id', [
       explorerTransfer(),
@@ -820,6 +821,7 @@ describe('enrichTransactionsWithAgents', () => {
           },
         ],
       } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const result = await enrichTransactionsWithAgents('user-id', [
       explorerTransfer(),
@@ -855,6 +857,71 @@ describe('enrichTransactionsWithAgents', () => {
     expect(approvalRequestSql).toContain('us.chain_id = ar.chain_id')
     expect(approvalRequestSql).not.toContain('us.id = a.safe_id')
     expect(queryMock.mock.calls[1][1]).toEqual([
+      [TX_HASH.toLowerCase()],
+      'user-id',
+      ['safe-base', 'safe-gnosis'],
+    ])
+  })
+
+  it('labels submitted delegate sweeps with agent context by Safe and chain', async () => {
+    const queryMock = vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'sweep-id',
+            tx_hash: TX_HASH.toLowerCase(),
+            safe_id: 'safe-base',
+            chain_id: 8453,
+            agent_id: 'agent-id',
+            agent_name: 'Research assistant',
+            from_address: '0xA87300000000000000000000000000000000DD35',
+            to_address: SAFE_ADDRESS,
+          },
+        ],
+      } as never)
+
+    const result = await enrichTransactionsWithAgents('user-id', [
+      explorerTransfer({
+        from: '0xA87300000000000000000000000000000000DD35',
+        to: SAFE_ADDRESS,
+        direction: 'in',
+      }),
+      explorerTransfer({
+        safeId: 'safe-gnosis',
+        chainId: 100,
+        safeName: 'Gnosis',
+        from: '0xA87300000000000000000000000000000000DD35',
+        to: SAFE_ADDRESS,
+        direction: 'in',
+      }),
+    ])
+
+    expect(result[0]).toMatchObject({
+      hash: TX_HASH,
+      direction: 'in',
+      agentId: 'agent-id',
+      agentName: 'Research assistant',
+      paymentId: 'sweep-id',
+      activityType: 'delegate_sweep',
+    })
+    expect(result[0].source).toBeUndefined()
+    expect(result[0].paymentFlowStatus).toBeUndefined()
+    expect(result[1]).toMatchObject({
+      hash: TX_HASH,
+      safeId: 'safe-gnosis',
+      chainId: 100,
+    })
+    expect(result[1].activityType).toBeUndefined()
+    expect(result[1].agentId).toBeUndefined()
+
+    const sweepSql = String(queryMock.mock.calls[2][0])
+    expect(sweepSql).toContain('FROM delegate_sweeps ds')
+    expect(sweepSql).toContain('LOWER(us.safe_address) = LOWER(ds.to_address)')
+    expect(sweepSql).toContain('us.chain_id = ds.chain_id')
+    expect(sweepSql).toContain("ds.status = 'submitted'")
+    expect(queryMock.mock.calls[2][1]).toEqual([
       [TX_HASH.toLowerCase()],
       'user-id',
       ['safe-base', 'safe-gnosis'],

@@ -256,7 +256,9 @@ const AGENT_ALLOWANCES_RESPONSE = {
   chain_id: 8453,
   allowances: [{
     id: 'allowance-1',
-    token_address: '0xToken',
+    // Real Base USDC address (6 decimals) so remainingDisplay exercises the
+    // decimals lookup rather than the unknown-token atomic fallback.
+    token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
     token_symbol: 'USDC',
     configured_amount: '10000',
     reset_period_min: 60,

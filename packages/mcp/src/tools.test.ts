@@ -951,14 +951,20 @@ describe('Haven MCP tool handlers', () => {
         body: String(init?.body ?? ''),
         headers: JSON.stringify(init?.headers ?? {}),
       })
-      if (String(url).endsWith('/agents/me')) {
+      // haven_get_agent now folds in getAllowances (getAgentSummary), so stub
+      // BOTH endpoints with valid bodies — otherwise the tool errors out and the
+      // test would assert key-isolation on a request that never really happened.
+      if (String(url).endsWith('/machine-payments/agent')) {
         return jsonResponse({
           id: 'agt_1', name: 'Test', delegate_address: delegateAddress,
           safe_address: safeAddress, chain_id: 8453, status: 'active',
         })
       }
       if (String(url).includes('/allowances')) {
-        return jsonResponse({ on_chain: [], configured: [] })
+        return jsonResponse({
+          agent_id: 'agt_1', safe_address: safeAddress, delegate_address: delegateAddress,
+          chain_id: 8453, allowances: [],
+        })
       }
       return jsonResponse({})
     })
@@ -966,8 +972,12 @@ describe('Haven MCP tool handlers', () => {
     const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
     const handlers = createToolHandlers(haven)
 
-    await handlers.haven_get_agent({})
-    await handlers.haven_get_allowances({})
+    const agentResult = await handlers.haven_get_agent({})
+    const allowancesResult = await handlers.haven_get_allowances({})
+    // Both tools must actually succeed now, so the key-isolation check below runs
+    // against real requests rather than a swallowed error path.
+    expect(agentResult.success).toBe(true)
+    expect(allowancesResult.success).toBe(true)
 
     expect(requests.length).toBeGreaterThan(0)
     for (const req of requests) {
@@ -975,6 +985,46 @@ describe('Haven MCP tool handlers', () => {
       expect(all, `read-only tool: delegate key must not appear in request to ${req.url}`)
         .not.toContain(delegateKey)
     }
+  })
+
+  it('haven_get_agent returns the enriched bootstrap summary (identity + readiness + remaining)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) {
+        return jsonResponse({
+          id: 'agt_1', name: 'Test', status: 'active',
+          safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+        })
+      }
+      if (u.includes('/allowances')) {
+        return jsonResponse({
+          agent_id: 'agt_1', safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+          allowances: [{
+            id: 'a1', token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+            token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60,
+            onchain: {
+              amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500',
+              reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
+            },
+          }],
+        })
+      }
+      return jsonResponse({})
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    const result = await createToolHandlers(haven).haven_get_agent({})
+
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    const data = result.data as { id: string; readiness: string; allowances: Array<Record<string, unknown>> }
+    expect(data.id).toBe('agt_1')
+    expect(data.readiness).toBe('ready')
+    expect(data.allowances[0]).toMatchObject({
+      tokenSymbol: 'USDC',
+      remainingAtomic: '7500',
+      remainingDisplay: '0.0075 USDC',
+    })
   })
 
   it('negative control: assertNoDelegateKeyLeak fails when the key is present', () => {

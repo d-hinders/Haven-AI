@@ -109,6 +109,9 @@ const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
 function formatAtomicAmount(atomic: bigint, decimals: number): string {
+  // Defensive: negative atomics can't occur today (remaining is floored at 0n)
+  // but would otherwise produce corrupt output like "0.000...-5".
+  if (atomic < 0n) return '0.0'
   const s = atomic.toString().padStart(decimals + 1, '0')
   const intPart = s.slice(0, s.length - decimals) || '0'
   const fracPart = s.slice(s.length - decimals).replace(/0+$/, '') || '0'
@@ -637,11 +640,18 @@ export class HavenClient {
     ])
 
     const allowances: HavenAgentAllowanceSummary[] = allowanceSummary.allowances.map((a) => {
-      const decimals = resolveTokenFromAddress(a.tokenAddress)?.decimals ?? 6
+      // Only format a human amount when we KNOW the token's decimals. Guessing a
+      // default (e.g. 6) for an unregistered token would misformat an 18-decimal
+      // balance by 12 orders of magnitude and mislead the agent about what it can
+      // spend — so for unknown tokens we surface the exact atomic value, flagged.
+      const token = resolveTokenFromAddress(a.tokenAddress)
+      const remainingDisplay = token
+        ? `${formatAtomicAmount(safeBigInt(a.onchain.remaining), token.decimals)} ${a.tokenSymbol}`
+        : `${a.onchain.remaining} ${a.tokenSymbol} (atomic; unknown decimals)`
       return {
         tokenSymbol: a.tokenSymbol,
         remainingAtomic: a.onchain.remaining,
-        remainingDisplay: `${formatAtomicAmount(safeBigInt(a.onchain.remaining), decimals)} ${a.tokenSymbol}`,
+        remainingDisplay,
         configuredAmount: a.configuredAmount,
         resetPeriodMin: a.resetPeriodMin,
         isResetPending: a.onchain.isResetPending,

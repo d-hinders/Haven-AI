@@ -506,7 +506,11 @@ export interface HavenAllowanceSummary {
  * - `ready`         — active and at least one token has remaining on-chain allowance.
  * - `needs_approval`— active but no remaining allowance to auto-spend; payments
  *                     will be queued for the wallet owner to approve in Haven.
- * - `revoked`       — the credential is not active (revoked/paused); nothing executes.
+ * - `revoked`       — the agent's status is not `active`; nothing auto-executes.
+ *
+ * Note: a hard-paused/disabled credential is rejected by the API before this
+ * call returns, so it surfaces as an API error rather than `revoked`. `revoked`
+ * is reached when the request authenticates but the agent status is non-active.
  *
  * Wallet token balance is intentionally NOT folded in here: the on-chain
  * remaining allowance is the gate Haven enforces, and insufficient wallet

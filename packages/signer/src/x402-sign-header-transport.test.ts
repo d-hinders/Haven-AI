@@ -18,6 +18,9 @@ const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 const FUNDING_HASH = '0x' + 'cd'.repeat(32)
+// expires_at is part of the signed binding and required by the tool schema, so
+// every x402_expected fixture carries it (matching the hosted server's output).
+const EXPIRES_AT = '2099-01-01T00:00:00.000Z'
 
 const PAYMENT_REQUIRED = {
   x402Version: 2,
@@ -43,6 +46,7 @@ async function expectedX402() {
     amount: PAYMENT_REQUIRED.accepts[0].amount,
     asset: PAYMENT_REQUIRED.accepts[0].asset,
     network: PAYMENT_REQUIRED.accepts[0].network,
+    expiresAt: EXPIRES_AT,
   }
   const message = buildX402ExpectedMessage(context)
   const account = privateKeyToAccount(BINDING_KEY)
@@ -67,6 +71,7 @@ describe('haven_x402_sign_header transport robustness', () => {
           amount: PAYMENT_REQUIRED.accepts[0].amount,
           asset: PAYMENT_REQUIRED.accepts[0].asset,
           network: PAYMENT_REQUIRED.accepts[0].network,
+          expires_at: EXPIRES_AT,
           auth: (await expectedX402()).auth,
         },
       }),
@@ -121,6 +126,7 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
           amount: PAYMENT_REQUIRED.accepts[0].amount,
           asset: PAYMENT_REQUIRED.accepts[0].asset,
           network: PAYMENT_REQUIRED.accepts[0].network,
+          expires_at: EXPIRES_AT,
           auth: (await expectedX402()).auth,
         },
         payment_required: PAYMENT_REQUIRED,
@@ -155,6 +161,7 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
           amount: PAYMENT_REQUIRED.accepts[0].amount,
           asset: PAYMENT_REQUIRED.accepts[0].asset,
           network: PAYMENT_REQUIRED.accepts[0].network,
+          expires_at: EXPIRES_AT,
           auth: (await expectedX402()).auth,
         },
         payment_required: JSON.stringify(PAYMENT_REQUIRED),

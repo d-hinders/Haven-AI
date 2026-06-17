@@ -3,10 +3,12 @@
  *
  * This SDK file is the single source of truth for the generic, secret-free
  * skill content: no wallet address, no budget numbers, no per-agent values.
- * The agent learns its identity and live budget at runtime via the
- * `haven_get_agent` / `haven_get_allowances` MCP tools, so the same file works
- * for every user. `packages/connect` imports this directly to auto-install the
- * skill into runtime skills folders.
+ * The agent learns its live budget at runtime via the `haven_get_agent` /
+ * `haven_get_allowances` MCP tools, and can read identity + configured budget
+ * for fast first-turn orientation from the non-secret `agent.json` the
+ * connector writes (see `packages/connect/src/storage.ts`), so the same file
+ * works for every user. `packages/connect` imports this directly to
+ * auto-install the skill into runtime skills folders.
  *
  * `packages/frontend/src/lib/agent-skill-bundle.ts` keeps a deliberately
  * decoupled inline copy (the download fallback): frontend has zero
@@ -37,9 +39,22 @@ the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
 - A request returns HTTP 402 (x402): use the Haven pay tools to settle it,
   then retry the original request.
 
-## Identity and budget come from the tools — never assume them
+## Identity and budget
 
-Do not guess the wallet address, network, or budget. Read them live:
+Do not guess the wallet address, network, or budget.
+
+For instant orientation at the start of a session, read the non-secret
+\`agent.json\` the connector wrote to your Haven credential directory (typically
+\`~/.haven/agents/<agent-id>/agent.json\` — if you don't know the agent id, list
+\`~/.haven/agents/\` to find the folder). It
+holds your agent id, Haven wallet address, network, and *configured* per-token
+budget, and contains no keys — the fastest way to answer "who am I and what may
+I spend" with no round trip. If that file is absent (some setups don't write
+it), use the tools below instead.
+
+Before any payment, confirm the *live remaining* budget with the tools —
+\`agent.json\` shows the configured budget, not what is left after recent
+spending:
 
 - \`haven_get_agent\` — agent identity, Haven wallet address, network.
 - \`haven_get_allowances\` — current per-token budgets and what remains.

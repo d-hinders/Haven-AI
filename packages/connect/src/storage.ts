@@ -7,6 +7,8 @@ export interface StoredCredentialPaths {
   directory: string
   identityPath: string
   signerPath: string
+  /** Non-secret orientation file (identity + configured budget, no keys). */
+  agentPath: string
 }
 
 export interface WriteCredentialInput {
@@ -58,9 +60,11 @@ export async function writeCredentialFiles(input: WriteCredentialInput): Promise
 
   const identityPath = join(directory, 'identity.json')
   const signerPath = join(directory, 'signer.json')
+  const agentPath = join(directory, 'agent.json')
 
   await assertDoesNotExist(identityPath)
   await assertDoesNotExist(signerPath)
+  await assertDoesNotExist(agentPath)
 
   await writeOwnerOnlyJson(
     signerPath,
@@ -98,7 +102,35 @@ export async function writeCredentialFiles(input: WriteCredentialInput): Promise
     throw err
   }
 
-  return { directory, identityPath, signerPath }
+  // Non-secret orientation file. Lets the agent answer "who am I and what may I
+  // spend" on its first turn by reading one local file — no MCP round trip and
+  // no exposure of the API key (identity.json) or delegate key (signer.json) in
+  // the agent's transcript. Holds the *configured* budget; live remaining budget
+  // still comes from haven_get_allowances before a payment.
+  try {
+    await writeOwnerOnlyJson(
+      agentPath,
+      {
+        agent_id: input.agentId,
+        safe_address: input.safeAddress,
+        chain_id: input.chainId,
+        network: input.network,
+        agent_budget: input.agentBudget,
+        note: 'Non-secret orientation for the agent: identity + configured budget. Contains no API key or signing key. For the live remaining budget, call haven_get_allowances.',
+      },
+      input.warn,
+    )
+  } catch (err) {
+    // Roll back every file so a partial write (e.g. writeFile succeeds but chmod
+    // fails) can't leave agent.json behind and block reconnection via
+    // assertDoesNotExist on the next run.
+    await rm(signerPath, { force: true }).catch(() => undefined)
+    await rm(identityPath, { force: true }).catch(() => undefined)
+    await rm(agentPath, { force: true }).catch(() => undefined)
+    throw err
+  }
+
+  return { directory, identityPath, signerPath, agentPath }
 }
 
 export function defaultAgentDirectory(agentId: string, baseDir = join(homedir(), '.haven', 'agents')): string {

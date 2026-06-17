@@ -130,6 +130,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   })
   log(`Stored Haven identity credential locally: ${credentialPaths.identityPath}`)
   log(`Stored local signer credential locally: ${credentialPaths.signerPath}`)
+  log(`Stored non-secret agent orientation locally: ${credentialPaths.agentPath}`)
   if (setup.x402_binding_signer) {
     log('Configured x402 binding signer for the local signer.')
   } else {

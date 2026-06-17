@@ -66,6 +66,9 @@ async function makeX402ExpectedAuth() {
     amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
     asset: PAYMENT_REQUIRED.accepts[0].asset,
     network: PAYMENT_REQUIRED.accepts[0].network,
+    // expires_at is folded into the signed binding and now required by the
+    // signer tool schema, mirroring the hosted server's x402.expected output.
+    expiresAt: '2099-01-01T00:00:00.000Z',
   }
   const message = buildX402ExpectedMessage(context)
   const account = privateKeyToAccount(BINDING_KEY)
@@ -87,6 +90,7 @@ async function makeX402ExpectedAuth() {
       amount: context.amount,
       asset: context.asset,
       network: context.network,
+      expires_at: context.expiresAt,
       auth,
     },
     // camelCase for createEdgeSigner.signX402FundingHash
@@ -98,6 +102,7 @@ async function makeX402ExpectedAuth() {
       amount: context.amount,
       asset: context.asset,
       network: context.network,
+      expiresAt: context.expiresAt,
       auth,
     },
   }

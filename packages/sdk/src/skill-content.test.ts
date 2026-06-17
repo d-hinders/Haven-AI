@@ -34,6 +34,13 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).not.toContain('Haven signs')
   })
 
+  it('points the agent at the non-secret agent.json for fast first-turn orientation', () => {
+    expect(HAVEN_SKILL_MD).toContain('agent.json')
+    // The orientation note must steer the agent to the live tool before paying,
+    // since the file only carries the configured (not remaining) budget.
+    expect(HAVEN_SKILL_MD).toContain('live remaining')
+  })
+
   it('has valid skill frontmatter and the expected folder name', () => {
     expect(HAVEN_SKILL_MD.startsWith('---\nname: haven-pay\n')).toBe(true)
     expect(SKILL_FOLDER_NAME).toBe('haven-pay')

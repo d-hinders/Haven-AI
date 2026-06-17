@@ -414,6 +414,14 @@ function stableStringify(value: unknown): string {
     const primitive = JSON.stringify(value)
     return primitive === undefined ? 'undefined' : primitive
   }
+  // Match JSON.stringify's Date handling: serialize to the ISO string, not the
+  // empty object the generic-object branch would produce (Object.keys(date) is
+  // []). The backend builds the x402 expected-context message from a Postgres
+  // TIMESTAMPTZ (a Date at runtime), so without this the signed message carried
+  // "expiresAt":{} while the edge signer recomputed "expiresAt":"<ISO>" — a
+  // mismatch that broke x402 signature verification once expires_at entered the
+  // signed context.
+  if (value instanceof Date) return JSON.stringify(value.toISOString())
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`
   const object = value as Record<string, unknown>
   return `{${Object.keys(object)

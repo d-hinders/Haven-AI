@@ -34,9 +34,24 @@ describe('writeCredentialFiles', () => {
     expect(signer).not.toContain('sk_agent_testsecret')
     expect(identity).toContain('agent_budget')
 
+    // Non-secret orientation file: identity + configured budget, no keys.
+    const agent = await readFile(paths.agentPath, 'utf8')
+    const agentJson = JSON.parse(agent)
+    expect(agentJson.agent_id).toBe('agent-1')
+    expect(agentJson.safe_address).toBe('0x2222222222222222222222222222222222222222')
+    expect(agentJson.network).toBe('Gnosis')
+    expect(agentJson.agent_budget).toEqual([
+      { token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440 },
+    ])
+    // Must NOT carry the API key or the delegate private key.
+    expect(agent).not.toContain('sk_agent_testsecret')
+    expect(agent).not.toContain('delegate_key')
+    expect(agent).not.toContain('1111111111111111111111111111111111111111111111111111111111111111')
+
     if (process.platform !== 'win32') {
       expect((await stat(paths.identityPath)).mode & 0o777).toBe(0o600)
       expect((await stat(paths.signerPath)).mode & 0o777).toBe(0o600)
+      expect((await stat(paths.agentPath)).mode & 0o777).toBe(0o600)
     }
   })
 

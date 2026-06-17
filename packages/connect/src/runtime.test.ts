@@ -90,6 +90,7 @@ describe('runConnect', () => {
           directory: '/tmp/haven-connect-test/agent-1',
           identityPath: '/tmp/haven-connect-test/agent-1/identity.json',
           signerPath: '/tmp/haven-connect-test/agent-1/signer.json',
+          agentPath: '/tmp/haven-connect-test/agent-1/agent.json',
         }
       }),
       installRuntime,
@@ -209,6 +210,7 @@ describe('runConnect', () => {
         directory: '/tmp/haven-connect-test-desktop/agent-2',
         identityPath: '/tmp/haven-connect-test-desktop/agent-2/identity.json',
         signerPath: '/tmp/haven-connect-test-desktop/agent-2/signer.json',
+        agentPath: '/tmp/haven-connect-test-desktop/agent-2/agent.json',
       })),
       installRuntime,
       log: (message) => logs.push(message),

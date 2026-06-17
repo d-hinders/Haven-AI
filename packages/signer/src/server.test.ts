@@ -314,6 +314,31 @@ describe('haven_x402_sign_header tool', () => {
     expect(payload.retry_with_new_quote).toBe(true)
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
   })
+
+  it('unwraps the whole x402 object passed as x402_expected, and the binding round-trips', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+
+    // Same handoff mistake as the one-shot path, but on the decomposed
+    // haven_sign → haven_x402_sign_header flow: pass the whole `x402` wrapper.
+    const wrapper = {
+      accepted: PAYMENT_REQUIRED.accepts[0],
+      resource_url: PAYMENT_REQUIRED.resource.url,
+      merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+      funding_to: '0x000000000000000000000000000000000000bEEf',
+      expected: await expectedX402(),
+    }
+
+    const signed = ok<{ x402_binding: string }>(
+      await handlers.haven_sign({ payload_hash: HASH, x402_expected: wrapper }),
+    )
+    const result = ok<{ payment_header: string }>(
+      await handlers.haven_x402_sign_header({
+        payment_required: PAYMENT_REQUIRED,
+        x402_binding: signed.data.x402_binding,
+      }),
+    )
+    expect(result.data.payment_header.length).toBeGreaterThan(0)
+  })
 })
 
 describe('haven_sign_x402 tool (one-shot funding + header)', () => {
@@ -363,5 +388,44 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
     expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
     expect(payload.retry_with_new_quote).toBe(true)
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+  })
+
+  it('unwraps the whole x402 object when passed as x402_expected (common handoff mistake)', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+
+    // The agent passes the entire `x402` object from haven_pay_mcp_tool instead
+    // of the nested `x402.expected` — the signer should unwrap and sign it.
+    const wrapper = {
+      accepted: PAYMENT_REQUIRED.accepts[0],
+      resource_url: PAYMENT_REQUIRED.resource.url,
+      merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+      funding_to: '0x000000000000000000000000000000000000bEEf',
+      expected: await expectedX402(),
+    }
+
+    const result = ok<{ signature: string; payment_header: string }>(
+      await handlers.haven_sign_x402({
+        payload_hash: HASH,
+        x402_expected: wrapper,
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+    expect(result.data.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    expect(result.data.payment_header).toBeTruthy()
+  })
+
+  it('rejects with a clear INVALID_INPUT when x402_expected omits expires_at', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+
+    const { expires_at: _omit, ...withoutExpiry } = await expectedX402()
+    const payload = await handlers.haven_sign_x402({
+      payload_hash: HASH,
+      x402_expected: withoutExpiry,
+      payment_required: PAYMENT_REQUIRED,
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toContain('expires_at')
   })
 })

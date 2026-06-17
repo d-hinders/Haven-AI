@@ -902,7 +902,7 @@ describe('haven_settle_mcp_tool', () => {
       settlementTxHash: '0xsettle',
     })
 
-    const result = ok<{ funding_tx_hash: string; settled: boolean; settlement_tx_hash: string | null }>(
+    const result = ok<{ payment_id: string; funding_tx_hash: string; settled: boolean; settlement_tx_hash: string | null }>(
       await createToolHandlers(haven).haven_settle_mcp_tool({
         payment_id: 'pay_x402',
         signature: SIG,
@@ -919,6 +919,8 @@ describe('haven_settle_mcp_tool', () => {
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0][0].paymentId).toBe('pay_x402')
     expect(spy.mock.calls[0][0].paymentHeader).toBe('eyJ4IjoxfQ==')
+    // payment_id is echoed so the agent can reconcile without retaining it.
+    expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.funding_tx_hash).toBe('0xfund')
     expect(result.data.settled).toBe(true)
     expect(result.data.settlement_tx_hash).toBe('0xsettle')
@@ -932,7 +934,7 @@ describe('haven_settle_mcp_tool', () => {
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const spy = vi.spyOn(haven, 'completeX402MerchantCall')
 
-    const result = ok<{ settled: boolean; funding_status: string }>(
+    const result = ok<{ payment_id: string; settled: boolean; funding_status: string }>(
       await createToolHandlers(haven).haven_settle_mcp_tool({
         payment_id: 'pay_pending',
         signature: SIG,
@@ -944,6 +946,8 @@ describe('haven_settle_mcp_tool', () => {
 
     expect(result.data.settled).toBe(false)
     expect(result.data.funding_status).toBe('pending_approval')
+    // payment_id is echoed on the not-settled path too, for status follow-up.
+    expect(result.data.payment_id).toBe('pay_pending')
     expect(spy).not.toHaveBeenCalled()
   })
 

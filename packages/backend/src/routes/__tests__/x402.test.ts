@@ -131,7 +131,11 @@ describe('x402 routes', () => {
       .mockResolvedValueOnce({
         rows: [{
           id: '33333333-3333-3333-3333-333333333333',
-          expires_at: '2026-05-10T20:00:00.000Z',
+          // The pg driver returns TIMESTAMPTZ columns as Date objects — use a
+          // Date here (not an ISO string) so this covers the real runtime type.
+          // Regression guard: stableStringify must serialize it to the ISO
+          // string in the signed message, not the empty object {}.
+          expires_at: new Date('2026-05-10T20:00:00.000Z'),
         }],
       })
 

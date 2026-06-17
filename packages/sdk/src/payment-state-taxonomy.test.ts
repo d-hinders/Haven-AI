@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   AgentPaymentNextAction,
   AgentPaymentNextActionSchema,
+  AgentPaymentFailureCode,
+  AgentPaymentFailureCodeSchema,
   AgentPaymentPhase,
   AgentPaymentPhaseSchema,
   AgentPaymentRail,
@@ -15,8 +17,19 @@ describe('agent payment state taxonomy', () => {
       .toContain('merchant/protocol leg')
 
     expect(AgentPaymentNextActionSchema.enum).toContain(AgentPaymentNextAction.RetryOriginalX402Request)
+    expect(AgentPaymentNextActionSchema.enum).toContain(AgentPaymentNextAction.PaymentWindowExpired)
     expect(AgentPaymentNextActionSchema['x-enumDescriptions'][AgentPaymentNextAction.WaitForUserApproval])
       .toContain('wallet owner')
+    expect(AgentPaymentNextActionSchema['x-enumDescriptions'][AgentPaymentNextAction.PaymentWindowExpired])
+      .toContain('same idempotency key')
+
+    expect(AgentPaymentFailureCodeSchema.enum).toContain(AgentPaymentFailureCode.PriceExceedsMax)
+    expect(AgentPaymentFailureCodeSchema.enum).toContain(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(AgentPaymentFailureCodeSchema.enum).toContain(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    expect(AgentPaymentFailureCodeSchema['x-enumDescriptions'][AgentPaymentFailureCode.PriceExceedsMax])
+      .toContain('max_amount')
+    expect(AgentPaymentFailureCodeSchema['x-enumDescriptions'][AgentPaymentFailureCode.MerchantRejectedAfterFunding])
+      .toContain('haven_sweep_delegate')
 
     expect(AgentPaymentRailSchema.enum).toContain(AgentPaymentRail.Direct)
     expect(AgentPaymentRailSchema.enum).toContain(AgentPaymentRail.X402)

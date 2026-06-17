@@ -151,7 +151,8 @@ describe('x402 routes', () => {
     })
 
     expect(response.statusCode).toBe(201)
-    expect(response.json()).toMatchObject({
+    const body = response.json()
+    expect(body).toMatchObject({
       payment_id: '33333333-3333-3333-3333-333333333333',
       status: 'pending_signature',
       chain_id: 8453,
@@ -174,6 +175,7 @@ describe('x402 routes', () => {
         },
       },
     })
+    expect(body.x402_expected_auth.message).toContain('"expiresAt":"2026-05-10T20:00:00.000Z"')
 
     expect(allowanceMocks.generateTransferHash).toHaveBeenCalledWith(
       8453,
@@ -482,6 +484,7 @@ describe('x402 routes', () => {
           allowance_nonce: 7,
         }],
       })
+      .mockResolvedValueOnce({ rows: [] })
 
     const response = await app.inject({
       method: 'POST',
@@ -510,6 +513,65 @@ describe('x402 routes', () => {
     expect(mockQuery.mock.calls[1][0]).toContain("COALESCE(payment_rail, source) = 'x402'")
   })
 
+  it('refreshes an expired duplicate pending x402 intent for the same idempotency key', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({
+        rows: [pendingX402Intent({
+          status: 'expired',
+          expires_at: '2026-05-10T20:00:00.000Z',
+          machine_metadata: JSON.stringify({
+            protocol: 'x402',
+            network: 'base',
+            category: null,
+            description: null,
+          }),
+        })],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: '33333333-3333-3333-3333-333333333333',
+          status: 'pending_signature',
+          sign_hash: SIGN_HASH,
+          allowance_nonce: 7,
+          expires_at: '2026-05-10T20:10:00.000Z',
+        }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:test',
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.status).toBe('pending_signature')
+    expect(body.expires_at).toBe('2026-05-10T20:10:00.000Z')
+    expect(body.x402_expected_auth.message).toContain('"expiresAt":"2026-05-10T20:10:00.000Z"')
+    expect(body.sign_data).toMatchObject({
+      hash: SIGN_HASH,
+      components: { nonce: 7 },
+    })
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+
+    const refreshCall = mockQuery.mock.calls[2]
+    expect(refreshCall[0]).toContain('expires_at <= NOW()')
+    expect(refreshCall[0]).toContain("status IN ('pending_signature', 'expired')")
+    expect(refreshCall[0]).toContain('signature IS NULL')
+  })
+
   it('refreshes stale sign data when a duplicate pending intent has an old allowance nonce', async () => {
     const refreshedHash = `0x${'22'.repeat(32)}`
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 8 })
@@ -535,7 +597,15 @@ describe('x402 routes', () => {
           allowance_nonce: 7,
         }],
       })
-      .mockResolvedValueOnce({ rows: [{ id: '33333333-3333-3333-3333-333333333333' }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: '33333333-3333-3333-3333-333333333333',
+          status: 'pending_signature',
+          sign_hash: refreshedHash,
+          allowance_nonce: 8,
+          expires_at: '2026-05-10T20:10:00.000Z',
+        }],
+      })
 
     const response = await app.inject({
       method: 'POST',
@@ -553,7 +623,10 @@ describe('x402 routes', () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json().sign_data).toMatchObject({
+    const body = response.json()
+    expect(body.expires_at).toBe('2026-05-10T20:10:00.000Z')
+    expect(body.x402_expected_auth.message).toContain('"expiresAt":"2026-05-10T20:10:00.000Z"')
+    expect(body.sign_data).toMatchObject({
       hash: refreshedHash,
       components: { nonce: 8 },
     })
@@ -571,8 +644,9 @@ describe('x402 routes', () => {
     expect(refreshCall[0]).toContain('UPDATE payment_intents')
     expect(refreshCall[0]).toContain('agent_id = $4')
     expect(refreshCall[0]).toContain("COALESCE(payment_rail, source) = 'x402'")
-    expect(refreshCall[0]).toContain("status = 'pending_signature'")
+    expect(refreshCall[0]).toContain("status IN ('pending_signature', 'expired')")
     expect(refreshCall[0]).toContain('tx_hash IS NULL')
+    expect(refreshCall[0]).toContain('signature IS NULL')
     expect(refreshCall[1]).toEqual([
       8,
       refreshedHash,

@@ -94,6 +94,12 @@ describe('generic skill', () => {
     expect(skill).toContain('haven_get_payment_status')
     expect(skill).toContain('retry_original_x402_request')
     expect(skill).toContain('pending_approval')
+    expect(skill).toContain('expires_at')
+    expect(skill).toContain('PAYMENT_WINDOW_EXPIRED')
+    expect(skill).toContain('MERCHANT_REJECTED_AFTER_FUNDING')
+    expect(skill).toContain('PRICE_EXCEEDS_MAX')
+    expect(skill).toContain('local Haven signer')
+    expect(skill).not.toContain('Haven signs')
     expect(skill).toMatch(/never.*private keys|private keys.*never/i)
   })
 

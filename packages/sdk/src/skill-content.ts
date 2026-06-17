@@ -59,7 +59,9 @@ normal, not an error.
   build the payment header, and finally \`haven_complete_mcp_tool\` to settle
   with the merchant and get the tool result. Pass \`payment_id\`,
   \`payment_required\`, \`mcp_transport\`, and \`arguments\` through verbatim from the
-  \`haven_pay_mcp_tool\` result. Do not call the merchant yourself — Haven
+  \`haven_pay_mcp_tool\` result. The returned \`expires_at\` is the signing window;
+  if a tool returns \`PAYMENT_WINDOW_EXPIRED\`, re-run \`haven_pay_mcp_tool\`
+  with the same \`idempotency_key\`. Do not call the merchant yourself — Haven
   completes the merchant leg for you.
 - **Prices:** show the user the live price from the pay-tool result, never a
   catalog price. \`haven_discover_tools\` prices are indicative
@@ -77,18 +79,26 @@ normal, not an error.
 - A result with \`pending_approval\` means the payment exceeded the remaining
   budget and is waiting for the user in Haven. Tell the user, then check
   status later.
-- Never ask the user for private keys and never try to sign anything
-  yourself — Haven signs. If a tool reports a missing or invalid credential,
-  tell the user to re-run the Haven setup command.
+- Never ask the user for private keys. Signing happens only in the local Haven
+  signer; the hosted Haven tools never receive the signing key. If a tool
+  reports a missing or invalid credential, tell the user to re-run the Haven
+  setup command.
 
 ## Failure handling
 
-Haven errors are shaped \`{ error, status, details? }\` and written for
-humans — surface the message verbatim. Common cases:
+Haven tool failures are shaped like \`{ success: false, code, message, ... }\`
+or older \`{ error, status, details? }\` responses. Branch on \`code\` when
+present and surface \`message\` or \`error\` verbatim. Common cases:
 
 - \`pending_approval\`: queued for the user's approval (see above).
 - \`insufficient_funds\`: the Haven wallet doesn't hold enough of that token.
   Suggest the user add funds in the Haven dashboard.
+- \`PRICE_EXCEEDS_MAX\`: the live merchant price exceeded your \`max_amount\`.
+  No funds moved; ask the user before retrying with a higher cap.
+- \`PAYMENT_WINDOW_EXPIRED\`: re-run \`haven_pay_mcp_tool\` with the same
+  \`idempotency_key\`, then sign the fresh \`payload_hash\`.
+- \`MERCHANT_REJECTED_AFTER_FUNDING\`: stop retrying the merchant and use
+  \`haven_sweep_delegate\` to recover stranded delegate funds.
 - Budget exceeded: tell the user how much remains (from
   \`haven_get_allowances\`) and that they can raise the budget in Haven.
 

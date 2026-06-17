@@ -61,6 +61,7 @@ interface X402ExpectedContext {
   amount: string
   asset: string
   network: string
+  expiresAt?: string
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -122,6 +123,55 @@ async function currentPaymentIntentStatus(id: string, agent: AgentContext): Prom
     [id, agent.id],
   )
   return current.rows[0]?.status ?? 'unknown'
+}
+
+function x402MetadataNetwork(metadata: unknown): string | null {
+  if (!metadata) return null
+  const parsed = typeof metadata === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(metadata) as unknown
+        } catch {
+          return null
+        }
+      })()
+    : metadata
+  if (!parsed || typeof parsed !== 'object') return null
+  const network = (parsed as { network?: unknown }).network
+  return typeof network === 'string' ? network : null
+}
+
+function existingX402IntentMismatch(
+  existing: Record<string, unknown>,
+  requested: {
+    resourceUrl: string
+    fundingTo: string
+    merchantTo: string
+    amountRaw: string
+    tokenAddress: string
+    network: string
+  },
+): string | null {
+  const existingResource = existing.x402_resource_url ?? existing.payment_resource_url
+  if (existingResource && existingResource !== requested.resourceUrl) return 'resource_url'
+
+  const existingFundingTo = typeof existing.to_address === 'string' ? existing.to_address.toLowerCase() : null
+  if (existingFundingTo && existingFundingTo !== requested.fundingTo.toLowerCase()) return 'funding_to'
+
+  const existingMerchant = existing.x402_merchant_address ?? existing.merchant_address
+  if (typeof existingMerchant === 'string' && existingMerchant.toLowerCase() !== requested.merchantTo.toLowerCase()) {
+    return 'merchant_to'
+  }
+
+  if (existing.amount_raw && existing.amount_raw !== requested.amountRaw) return 'amount'
+
+  const existingToken = typeof existing.token_address === 'string' ? existing.token_address.toLowerCase() : null
+  if (existingToken && existingToken !== requested.tokenAddress.toLowerCase()) return 'asset'
+
+  const existingNetwork = x402MetadataNetwork(existing.machine_metadata)
+  if (existingNetwork && existingNetwork !== requested.network) return 'network'
+
+  return null
 }
 
 /** Resolve a token from its contract address for a specific chain. */
@@ -289,7 +339,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
          WHERE agent_id = $1
            AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
            AND COALESCE(payment_rail, source) = 'x402'
-           AND status NOT IN ('failed', 'expired')
+           AND status <> 'failed'
          ORDER BY created_at DESC
          LIMIT 1`,
         [agent.id, idempotencyKey],
@@ -312,9 +362,26 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           explorer_url: getExplorerUrl(existing.chain_id ?? agent.chain_id, 'tx', existing.tx_hash),
         })
       }
-      if (existing?.status === 'pending_signature') {
+      if (existing?.status === 'pending_signature' || existing?.status === 'expired') {
+        const mismatch = existingX402IntentMismatch(existing, {
+          resourceUrl: url,
+          fundingTo: payTo,
+          merchantTo: merchantPayTo?.toLowerCase() ?? payTo.toLowerCase(),
+          amountRaw: amountRaw.toString(),
+          tokenAddress,
+          network,
+        })
+        if (mismatch) {
+          return reply.code(409).send({
+            payment_id: existing.id,
+            status: existing.status,
+            error: `idempotencyKey already belongs to a different x402 ${mismatch}`,
+          })
+        }
         let existingHash = existing.sign_hash
         let existingNonce = existing.allowance_nonce
+        let existingExpiresAt = existing.expires_at
+        let existingStatus = existing.status
         const refreshedAllowance = await getTokenAllowance(
           agent.chain_id,
           agent.safe_address,
@@ -335,27 +402,48 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
             refreshedAllowance.nonce,
           )
 
-          const refreshedResult = await pool.query<{ id: string }>(
-            `UPDATE payment_intents
-             SET allowance_nonce = $1,
-                 sign_hash = $2,
-                 expires_at = NOW() + interval '10 minutes'
-             WHERE id = $3
-               AND agent_id = $4
-               AND COALESCE(payment_rail, source) = 'x402'
-               AND status = 'pending_signature'
-               AND tx_hash IS NULL
-             RETURNING id`,
-            [existingNonce, existingHash, existing.id, agent.id],
-          )
-          if (refreshedResult.rows.length === 0) {
-            const status = await currentPaymentIntentStatus(existing.id, agent)
-            return reply.code(409).send({
-              payment_id: existing.id,
-              status,
-              error: `x402 payment is ${status}, expected pending_signature`,
-            })
-          }
+        }
+
+        const refreshedResult = await pool.query<{
+          id: string
+          status: string
+          sign_hash: string
+          allowance_nonce: number
+          expires_at: string
+        }>(
+          `UPDATE payment_intents
+           SET allowance_nonce = $1,
+               sign_hash = $2,
+               status = 'pending_signature',
+               expires_at = NOW() + interval '10 minutes',
+               error_message = NULL
+           WHERE id = $3
+             AND agent_id = $4
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND status IN ('pending_signature', 'expired')
+             AND tx_hash IS NULL
+             AND signature IS NULL
+             AND (
+               status = 'expired'
+               OR expires_at <= NOW()
+               OR allowance_nonce <> $1
+               OR sign_hash <> $2
+             )
+           RETURNING id, status, sign_hash, allowance_nonce, expires_at`,
+          [existingNonce, existingHash, existing.id, agent.id],
+        )
+        if (refreshedResult.rows.length > 0) {
+          existingHash = refreshedResult.rows[0].sign_hash
+          existingNonce = refreshedResult.rows[0].allowance_nonce
+          existingExpiresAt = refreshedResult.rows[0].expires_at
+          existingStatus = refreshedResult.rows[0].status
+        } else if (existing.status === 'expired' || BigInt(refreshedAllowance.nonce) !== BigInt(existing.allowance_nonce)) {
+          const status = await currentPaymentIntentStatus(existing.id, agent)
+          return reply.code(409).send({
+            payment_id: existing.id,
+            status,
+            error: `x402 payment is ${status}, expected pending_signature`,
+          })
         }
 
         const x402ExpectedAuth = await signX402ExpectedContext({
@@ -366,12 +454,13 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           amount: existing.amount_raw,
           asset: existing.token_address,
           network,
+          expiresAt: existingExpiresAt,
         })
 
         return reply.code(200).send({
           payment_id: existing.id,
-          status: existing.status,
-          expires_at: existing.expires_at,
+          status: existingStatus,
+          expires_at: existingExpiresAt,
           chain_id: existing.chain_id ?? agent.chain_id,
           safe_address: existing.safe_address,
           payer: existing.safe_address,
@@ -837,6 +926,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       amount: amountRaw.toString(),
       asset: tokenAddress,
       network,
+      expiresAt: intent.expires_at,
     })
 
     // 12. No signature — return intent for client-side signing

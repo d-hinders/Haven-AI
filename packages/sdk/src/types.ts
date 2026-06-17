@@ -221,6 +221,8 @@ export interface X402AuthorizationOptions {
 export interface X402Intent {
   /** Haven payment id for the funding transfer. */
   paymentId: string
+  /** Stable key used to create or refresh this x402 funding intent. */
+  idempotencyKey: string
   status: 'pending_signature'
   /** ISO 8601 expiry of the funding intent, if returned. */
   expiresAt?: string
@@ -252,6 +254,8 @@ export interface X402ExpectedContext {
   amount: string
   asset: string
   network: string
+  /** Optional ISO expiry for the funding/quote window. When present, it is bound into the Haven-authenticated context. */
+  expiresAt?: string
 }
 
 export interface X402ExpectedAuth {
@@ -623,6 +627,11 @@ export const AgentPaymentNextAction = {
   /** Ask again only if the user still wants the payment after expiry. */
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
   /**
+   * The x402 funding/quote window expired. Re-quote the same logical merchant
+   * operation with the same idempotency key to stay double-charge-safe.
+   */
+  PaymentWindowExpired: 'payment_window_expired',
+  /**
    * Stop and tell the user that the originating Safe needs to be funded or
    * the agent's per-token allowance needs to be raised before the payment
    * can succeed. A user approval will not fix this state on its own.
@@ -637,6 +646,17 @@ export const AgentPaymentNextAction = {
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
+
+export const AgentPaymentFailureCode = {
+  /** A merchant-authoritative x402 price exceeds the caller's pre-funding max_amount cap. */
+  PriceExceedsMax: 'PRICE_EXCEEDS_MAX',
+  /** The x402 funding/quote window expired before the signer or hosted settle step could finish. */
+  PaymentWindowExpired: 'PAYMENT_WINDOW_EXPIRED',
+  /** The Haven funding leg succeeded, but the merchant rejected the paid retry. */
+  MerchantRejectedAfterFunding: 'MERCHANT_REJECTED_AFTER_FUNDING',
+} as const
+
+export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
 
 /**
  * Stable rail identifier carried on Haven agent payment responses and resume
@@ -683,6 +703,8 @@ export const AGENT_PAYMENT_PHASE_VALUES = Object.values(AgentPaymentPhase)
 
 export const AGENT_PAYMENT_NEXT_ACTION_VALUES = Object.values(AgentPaymentNextAction)
 
+export const AGENT_PAYMENT_FAILURE_CODE_VALUES = Object.values(AgentPaymentFailureCode)
+
 export const AGENT_PAYMENT_RAIL_VALUES = Object.values(AgentPaymentRail)
 
 export const AgentPaymentPhaseDescriptions: Record<AgentPaymentPhase, string> = {
@@ -711,10 +733,21 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
   [AgentPaymentNextAction.RetryOriginalX402Request]: 'Resume this payment id and retry the original x402 request with the merchant payment header.',
   [AgentPaymentNextAction.StopAndTellUser]: 'Stop retrying this payment and tell the user what happened.',
   [AgentPaymentNextAction.RequestAgainIfUserStillWantsIt]: 'Ask again only if the user still wants the payment after expiry.',
+  [AgentPaymentNextAction.PaymentWindowExpired]:
+    'The x402 funding/quote window expired. Re-quote with the same idempotency key before asking the signer to build a merchant payment header again.',
   [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
     'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating Safe.',
+}
+
+export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode, string> = {
+  [AgentPaymentFailureCode.PriceExceedsMax]:
+    "The merchant-authoritative x402 amount exceeds the caller's max_amount cap. No funding transfer was created; ask the user before retrying with a larger cap.",
+  [AgentPaymentFailureCode.PaymentWindowExpired]:
+    'The x402 funding/quote window expired before the signer or hosted settle step could finish. Re-quote via haven_pay_mcp_tool with the same idempotency key to avoid duplicate funding.',
+  [AgentPaymentFailureCode.MerchantRejectedAfterFunding]:
+    'The Haven funding leg succeeded, but the merchant rejected the paid retry. Stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate.',
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
@@ -739,6 +772,13 @@ export const AgentPaymentNextActionSchema: AgentPaymentEnumSchema = {
   enum: AGENT_PAYMENT_NEXT_ACTION_VALUES,
   description: 'Stable next action an agent should take for a Haven payment state.',
   'x-enumDescriptions': AgentPaymentNextActionDescriptions,
+}
+
+export const AgentPaymentFailureCodeSchema: AgentPaymentEnumSchema = {
+  type: 'string',
+  enum: AGENT_PAYMENT_FAILURE_CODE_VALUES,
+  description: 'Stable machine-readable failure codes for Haven agent payment recovery paths.',
+  'x-enumDescriptions': AgentPaymentFailureCodeDescriptions,
 }
 
 export const AgentPaymentRailSchema: AgentPaymentEnumSchema = {

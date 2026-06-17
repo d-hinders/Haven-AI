@@ -5,7 +5,12 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { privateKeyToAccount } from 'viem/accounts'
-import { buildX402ExpectedMessage, verifySignature } from '@haven_ai/sdk'
+import {
+  AgentPaymentFailureCode,
+  AgentPaymentNextAction,
+  buildX402ExpectedMessage,
+  verifySignature,
+} from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
 import { buildSignerMcpServer, resolveEdgeSigner, runSignerConsentGate } from './server.js'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
@@ -37,6 +42,7 @@ const EXPECTED_X402_BASE = {
   amount: PAYMENT_REQUIRED.accepts[0].amount,
   asset: PAYMENT_REQUIRED.accepts[0].asset,
   network: PAYMENT_REQUIRED.accepts[0].network,
+  expires_at: '2099-01-01T00:00:00.000Z',
 }
 
 async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) {
@@ -49,6 +55,7 @@ async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) 
     amount: expected.amount,
     asset: expected.asset,
     network: expected.network,
+    expiresAt: expected.expires_at,
   })
   const account = privateKeyToAccount(BINDING_KEY)
   return {
@@ -256,5 +263,30 @@ describe('haven_x402_sign_header tool', () => {
     })
     expect(mismatched.success).toBe(false)
     expect(JSON.stringify(mismatched)).toContain('amount')
+  })
+
+  it('returns PAYMENT_WINDOW_EXPIRED when x402_expected.expires_at has passed', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+    const signed = ok<{ x402_binding: string }>(
+      await handlers.haven_sign({
+        payload_hash: HASH,
+        x402_expected: await expectedX402({
+          expires_at: '2000-01-01T00:00:00.000Z',
+        }),
+      }),
+    )
+
+    const payload = await handlers.haven_x402_sign_header({
+      payment_required: PAYMENT_REQUIRED,
+      x402_binding: signed.data.x402_binding,
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(payload.statusCode).toBe(410)
+    expect(payload.paymentId).toBe('pay_x402')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.PaymentWindowExpired)
+    expect(payload.retry_with_new_quote).toBe(true)
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
   })
 })

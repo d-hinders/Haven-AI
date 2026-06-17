@@ -288,7 +288,7 @@ export function x402AuthorizationAmount(option: X402PaymentOption): string {
 }
 
 export function buildX402ExpectedMessage(context: X402ExpectedContext): string {
-  return `Haven x402 expected context v1\n${stableStringify({
+  const payload: Record<string, unknown> = {
     version: 1,
     kind: 'haven.x402.expected',
     paymentId: context.paymentId,
@@ -298,7 +298,11 @@ export function buildX402ExpectedMessage(context: X402ExpectedContext): string {
     amount: context.amount,
     asset: context.asset.toLowerCase(),
     network: context.network,
-  })}`
+  }
+  if (context.expiresAt) {
+    payload.expiresAt = context.expiresAt
+  }
+  return `Haven x402 expected context v1\n${stableStringify(payload)}`
 }
 
 export function toStandardPaymentRequirements(

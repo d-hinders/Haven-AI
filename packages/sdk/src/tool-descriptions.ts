@@ -121,9 +121,11 @@ export const toolDescriptions = {
   },
   getAgent: {
     summary:
-      'Return the authenticated agent identity, Haven wallet, delegate address, chain, and status.',
+      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, a readiness signal, and per-token remaining allowance (atomic + human-readable). The recommended first call in a new session to confirm who you are and whether you can pay right now.',
+    selectionGuidance:
+      'Use this as the one-shot orientation/bootstrap at the start of a session, or whenever you need to confirm identity together with whether the agent can spend right now. For a detailed per-token breakdown (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:
-      'Read-only identity lookup. Useful for verifying which on-chain Safe and delegate the credential is bound to.',
+      'Reads identity plus the on-chain AllowanceModule snapshot in one shot. readiness is "ready" when at least one token has remaining on-chain allowance, "needs_approval" when the agent is active but has no remaining allowance to auto-spend (payments will be queued for the wallet owner to approve in Haven), and "revoked" when the credential is not active. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields (id, name, status, safeAddress, delegateAddress, chainId) are unchanged from before.',
     nextActionGuidance: '',
   },
   getAllowances: {

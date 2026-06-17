@@ -41,6 +41,11 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('live remaining')
   })
 
+  it('names haven_get_agent as the one-shot bootstrap with a readiness signal', () => {
+    expect(HAVEN_SKILL_MD).toContain('recommended first call')
+    expect(HAVEN_SKILL_MD).toContain('needs_approval')
+  })
+
   it('has valid skill frontmatter and the expected folder name', () => {
     expect(HAVEN_SKILL_MD.startsWith('---\nname: haven-pay\n')).toBe(true)
     expect(SKILL_FOLDER_NAME).toBe('haven-pay')

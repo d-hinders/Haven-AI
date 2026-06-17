@@ -500,6 +500,43 @@ export interface HavenAllowanceSummary {
   allowances: HavenAllowance[]
 }
 
+/**
+ * Affirmative spend-readiness for the authenticated agent, derived from the raw
+ * agent status plus the on-chain remaining allowance:
+ * - `ready`         — active and at least one token has remaining on-chain allowance.
+ * - `needs_approval`— active but no remaining allowance to auto-spend; payments
+ *                     will be queued for the wallet owner to approve in Haven.
+ * - `revoked`       — the credential is not active (revoked/paused); nothing executes.
+ *
+ * Wallet token balance is intentionally NOT folded in here: the on-chain
+ * remaining allowance is the gate Haven enforces, and insufficient wallet
+ * funding surfaces at pay time as INSUFFICIENT_FUNDS.
+ */
+export type HavenAgentReadiness = 'ready' | 'needs_approval' | 'revoked'
+
+/** Compact, agent-facing per-token spend authority for the bootstrap summary. */
+export interface HavenAgentAllowanceSummary {
+  tokenSymbol: string
+  /** Live on-chain remaining allowance in atomic units. */
+  remainingAtomic: string
+  /** Human-readable remaining, e.g. "4.96 USDC". */
+  remainingDisplay: string
+  /** Configured allowance amount (atomic) the owner granted. */
+  configuredAmount: string
+  resetPeriodMin: number
+  isResetPending: boolean
+}
+
+/**
+ * One-shot "am I ready?" bootstrap: identity + live spend authority + a
+ * readiness signal, so an agent can answer "who am I and can I pay right now"
+ * from a single call at session start. Superset of {@link HavenAgent}.
+ */
+export interface HavenAgentSummary extends HavenAgent {
+  readiness: HavenAgentReadiness
+  allowances: HavenAgentAllowanceSummary[]
+}
+
 export interface HavenPaymentReceipt {
   id: string
   paymentId: string

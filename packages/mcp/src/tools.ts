@@ -371,7 +371,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       return runTool(async () => haven.getResumeState(args.payment_id))
     },
 
-    haven_get_agent: async () => runTool(async () => haven.getAgent()),
+    haven_get_agent: async () => runTool(async () => haven.getAgentSummary()),
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
     haven_sweep_delegate: async () => runTool(async () => haven.sweepDelegate()),
     haven_discover_tools: async (input) => {

@@ -77,11 +77,11 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     expected_auth: sweepExpectedAuthSchema,
   },
   haven_sign: {
-    // The unsigned hash from haven_pay / haven_x402_authorize (payload_hash).
+    // The unsigned hash from haven_pay / haven_pay_x402_quote (payload_hash).
     payload_hash: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string'),
-    // Pass x402.expected from hosted haven_x402_authorize when this hash funds
+    // Pass x402.expected from hosted haven_pay_x402_quote when this hash funds
     // a standard x402 merchant retry. The signer records it locally and returns
     // an opaque x402_binding for the later header-signing step.
     x402_expected: x402ExpectedSchema.optional(),
@@ -109,9 +109,9 @@ const SIGN_DESCRIPTION = [
   'this process. Pass the payload_hash returned by haven_pay or haven_pay_x402_quote.',
   'For x402, also pass x402_expected from haven_pay_x402_quote; the signer records it locally',
   'and returns { signature, x402_binding }. x402_expected includes expires_at; sign before that',
-  'window closes. Hand signature to haven_submit, then pass x402_binding',
-  'to haven_x402_sign_header. For plain SafeTransfer payments, just pass payload_hash and',
-  'relay the returned signature via haven_submit.',
+  'window closes. Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
+  'to mcp__haven-signer__haven_x402_sign_header. For plain SafeTransfer payments, just pass payload_hash and',
+  'relay the returned signature via mcp__haven__haven_submit.',
 ].join(' ')
 
 const X402_SIGN_HEADER_DESCRIPTION = [
@@ -123,7 +123,7 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   'and rejects mismatches or expired payment windows.',
   'Returns { payment_header, accepted }. Set X-PAYMENT: <payment_header> on your retry to the',
   'merchant. Only call after haven_submit has confirmed the funding step (nextAction=none or',
-  'the funding tx has a confirmed status).',
+  'the funding tx has a confirmed status). Next for paid MCP tools: call mcp__haven__haven_complete_mcp_tool.',
 ].join(' ')
 
 const SIGN_X402_DESCRIPTION = [
@@ -133,9 +133,10 @@ const SIGN_X402_DESCRIPTION = [
   'result pass payload_hash, x402_expected (the nested x402.expected object, not a top-level field),',
   'and payment_required (verbatim). Returns',
   '{ signature, x402_binding, payment_header, accepted }; hand signature + payment_header to',
-  'haven_settle_mcp_tool to fund and settle in one hosted call. The header is built now (before',
-  'funding confirms), so its short validity window starts here — call haven_settle_mcp_tool promptly,',
-  'and re-run haven_pay_mcp_tool with the same idempotency_key if a tool returns PAYMENT_WINDOW_EXPIRED.',
+  'mcp__haven__haven_settle_mcp_tool to fund and settle in one hosted call. The header is built now (before',
+  'funding confirms), so its short validity window starts here — call mcp__haven__haven_settle_mcp_tool promptly,',
+  'and re-run mcp__haven__haven_pay_mcp_tool with the same idempotency_key if a tool returns PAYMENT_WINDOW_EXPIRED.',
+  'Next: call mcp__haven__haven_settle_mcp_tool.',
 ].join(' ')
 
 const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
@@ -145,7 +146,7 @@ const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
   'pays gas for. Pass the authorization and expected_auth returned by the hosted',
   'haven_sweep_delegate tool. The signer verifies Haven authored the authorization and that it',
   'pays out to your own Safe before signing, then returns { signature } to hand back to',
-  'haven_sweep_delegate to complete recovery.',
+  'mcp__haven__haven_sweep_delegate to complete recovery.',
 ].join(' ')
 
 export const toolDescriptions: Record<SignerToolName, string> = {

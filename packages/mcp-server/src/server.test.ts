@@ -83,4 +83,42 @@ describe('buildHostedMcpServer', () => {
     await client.close()
     await server.close()
   })
+
+  it('publishes x402 next-tool guidance with explicit MCP namespaces', async () => {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const server = buildHostedMcpServer(haven)
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const { tools } = await client.listTools()
+    const byName = new Map(tools.map((tool) => [tool.name, tool.description ?? '']))
+
+    expect(byName.get('haven_quote_x402')).toContain('Next: call mcp__haven__haven_pay_x402_quote')
+    expect(byName.get('haven_pay_x402_quote')).toContain(
+      'Next: call mcp__haven-signer__haven_sign',
+    )
+    expect(byName.get('haven_pay_x402_quote')).toContain('expires_at')
+    expect(byName.get('haven_pay_mcp_tool')).toContain(
+      'Next: call mcp__haven-signer__haven_sign_x402',
+    )
+    expect(byName.get('haven_pay_mcp_tool')).toContain('mcp__haven__haven_settle_mcp_tool')
+    expect(byName.get('haven_pay_mcp_tool')).toContain('expires_at')
+    expect(byName.get('haven_pay_mcp_tool')).toContain('x402_expected')
+    expect(byName.get('haven_submit')).toContain('mcp__haven-signer__haven_x402_sign_header')
+    expect(byName.get('haven_resume_x402_payment')).toContain(
+      'Next: call mcp__haven-signer__haven_x402_sign_header',
+    )
+    expect(byName.get('haven_settle_mcp_tool')).toContain(
+      'Next: no further Haven tool is needed on success',
+    )
+    expect(byName.get('haven_complete_mcp_tool')).toContain(
+      'Next: no further Haven tool is needed on success',
+    )
+
+    await client.close()
+    await server.close()
+  })
 })

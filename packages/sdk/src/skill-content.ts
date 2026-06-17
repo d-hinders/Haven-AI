@@ -28,6 +28,9 @@ the Haven MCP tools. Every payment is checked against the agent's on-chain
 budget before money moves; payments above the remaining budget wait for the
 user's approval in Haven.
 
+Hosted tools run in the \`mcp__haven__\` namespace. Local signing tools run in
+the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
+
 ## When to use this skill
 
 - The user asks to send money, pay someone, tip, donate, or transfer tokens.
@@ -53,20 +56,23 @@ normal, not an error.
   the local Haven signer; follow the tool results — they tell you the next
   action at every step. Retry the original request only when the result says
   \`retry_original_x402_request\`.
-- **Paid MCP tool call:** \`haven_pay_mcp_tool\` with the merchant URL, tool
-  name, and arguments, then finish in two calls (fast path): \`haven_sign_x402\`
-  on the local signer (pass \`payload_hash\`, the nested \`x402.expected\` object,
-  and \`payment_required\`) returns \`{ signature, payment_header }\`; then
-  \`haven_settle_mcp_tool\` (pass \`payment_id\`, \`signature\`, \`payment_header\`,
-  \`merchant_url\`, \`tool_name\`, \`arguments\`, \`mcp_transport\`) funds and settles
-  in one step and returns the tool result. If it returns \`settled: false\`,
-  funding is queued for the user's approval — tell them and check status later,
-  do not re-pay. Step-by-step alternative:
-  \`haven_sign\` → \`haven_submit\` → \`haven_x402_sign_header\` →
-  \`haven_complete_mcp_tool\`. Pass \`payment_required\`, \`arguments\`, and
-  \`mcp_transport\` verbatim from the \`haven_pay_mcp_tool\` result. The returned
-  \`expires_at\` is the signing window; if a tool returns
-  \`PAYMENT_WINDOW_EXPIRED\`, re-run \`haven_pay_mcp_tool\` with the same
+- **Paid MCP tool call:** \`mcp__haven__haven_pay_mcp_tool\` with the merchant
+  URL, tool name, and arguments, then finish in two calls (fast path):
+  \`mcp__haven-signer__haven_sign_x402\` on the local signer (pass
+  \`payload_hash\`, \`x402_expected\` as the nested \`x402.expected\` object, and
+  \`payment_required\`) returns \`{ signature, payment_header }\`; then
+  \`mcp__haven__haven_settle_mcp_tool\` (pass \`payment_id\`, \`signature\`,
+  \`payment_header\`, \`merchant_url\`, \`tool_name\`, \`arguments\`,
+  \`mcp_transport\`) funds and settles in one step and returns the tool result.
+  If it returns \`settled: false\`, funding is queued for the user's approval —
+  tell them and check status later, do not re-pay. Step-by-step alternative:
+  \`mcp__haven-signer__haven_sign\` → \`mcp__haven__haven_submit\` →
+  \`mcp__haven-signer__haven_x402_sign_header\` →
+  \`mcp__haven__haven_complete_mcp_tool\`. Pass \`payment_required\`,
+  \`arguments\`, and \`mcp_transport\` verbatim from the
+  \`mcp__haven__haven_pay_mcp_tool\` result. The returned \`expires_at\` is the
+  signing window; if a tool returns \`PAYMENT_WINDOW_EXPIRED\`, re-run
+  \`mcp__haven__haven_pay_mcp_tool\` with the same
   \`idempotency_key\`. Do not call the merchant yourself — Haven completes the
   merchant leg for you.
 - **Prices:** show the user the live price from the pay-tool result, never a
@@ -101,10 +107,10 @@ present and surface \`message\` or \`error\` verbatim. Common cases:
   Suggest the user add funds in the Haven dashboard.
 - \`PRICE_EXCEEDS_MAX\`: the live merchant price exceeded your \`max_amount\`.
   No funds moved; ask the user before retrying with a higher cap.
-- \`PAYMENT_WINDOW_EXPIRED\`: re-run \`haven_pay_mcp_tool\` with the same
+- \`PAYMENT_WINDOW_EXPIRED\`: re-run \`mcp__haven__haven_pay_mcp_tool\` with the same
   \`idempotency_key\`, then sign the fresh \`payload_hash\`.
 - \`MERCHANT_REJECTED_AFTER_FUNDING\`: stop retrying the merchant and use
-  \`haven_sweep_delegate\` to recover stranded delegate funds.
+  \`mcp__haven__haven_sweep_delegate\` to recover stranded delegate funds.
 - Budget exceeded: tell the user how much remains (from
   \`haven_get_allowances\`) and that they can raise the budget in Haven.
 

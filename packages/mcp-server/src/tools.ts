@@ -208,6 +208,7 @@ const SUBMIT_DESCRIPTION = [
   'payment. Pass the payment_id from haven_pay, haven_pay_x402_quote, haven_pay_mpp_challenge,',
   'or a resume tool, and the signature over its payload_hash. Funding relay sends',
   '{ payment_id, signature } to Haven — never the signing key. Returns { status, tx_hash }.',
+  'For decomposed x402 flows, next after confirmed funding: call mcp__haven-signer__haven_x402_sign_header.',
 ].join(' ')
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -217,12 +218,13 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
-    '(1) haven_sign_x402 on the local signer with payload_hash, x402 (the x402.expected context, including expires_at), and payment_required → { signature, payment_header }; ' +
-    '(2) haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
-    'Step-by-step alternative (also key-safe): haven_sign → haven_submit → haven_x402_sign_header → haven_complete_mcp_tool. ' +
+    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }; ' +
+    '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
+    'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. ' +
-    'Pass max_amount (atomic units) to reject a quote whose authorized amount exceeds the user\'s cap, before any funding moves. Haven never receives the signing key.',
+    'Pass max_amount (atomic units) to reject a quote whose authorized amount exceeds the user\'s cap, before any funding moves. Haven never receives the signing key. ' +
+    'Next: call mcp__haven-signer__haven_sign_x402.',
 })
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -235,9 +237,10 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
     'haven_x402_sign_header. The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; ' +
     'Haven relays it but never holds signing authority. Call only after haven_submit has confirmed the funding transfer. ' +
     'The payment_id is used to attach merchant evidence or reconciliation context to the already-funded payment. ' +
-    'If the funding window expired first, this returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true.',
+    'If the funding window expired first, this returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true. ' +
+    'Next: no further Haven tool is needed on success; return the merchant tool result to the user.',
   nextActionGuidance:
-    'If the merchant rejects the payment after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with haven_sweep_delegate.',
+    'If the merchant rejects the payment after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with mcp__haven__haven_sweep_delegate.',
 })
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -248,9 +251,10 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Relays the funding signature to fund the delegate, then (only once funding confirms) re-issues the MCP tools/call to the merchant with the X-PAYMENT header (fresh MCP handshake server-side) and returns the merchant tool result. ' +
     'Both the signature and the payment_header are signed locally by the edge signer — Haven relays them but never holds the key. ' +
     'If funding does not confirm (e.g. pending_approval) it returns { settled: false, funding_status } and does not contact the merchant. ' +
-    'If the funding window expired it returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true.',
+    'If the funding window expired it returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true. ' +
+    'Next: no further Haven tool is needed on success; return the merchant tool result to the user.',
   nextActionGuidance:
-    'If the merchant rejects after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with haven_sweep_delegate.',
+    'If the merchant rejects after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with mcp__haven__haven_sweep_delegate.',
 })
 
 const QUOTE_X402_DESCRIPTION = composeDescription({
@@ -258,7 +262,7 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
   behavior:
     'Probes the merchant directly from the hosted MCP server and parses the 402 response. ' +
     'Haven is not contacted. Returns the full quote object including payment_required for ' +
-    'haven_pay_x402_quote.',
+    'mcp__haven__haven_pay_x402_quote. Next: call mcp__haven__haven_pay_x402_quote.',
 })
 
 const PAY_X402_QUOTE_DESCRIPTION = [
@@ -270,10 +274,11 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'Returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
   'If expires_at passes before signing, re-quote with the same idempotency_key before signing again.',
-  'Sign payload_hash via haven_sign (passing x402.expected) on the local signer, then relay',
-  'with haven_submit to fund the delegate wallet. After submission confirms, call',
-  'haven_x402_sign_header on the local signer to build the EIP-3009 X-PAYMENT header, then',
+  'Sign payload_hash via mcp__haven-signer__haven_sign (passing x402.expected) on the local signer, then relay',
+  'with mcp__haven__haven_submit to fund the delegate wallet. After submission confirms, call',
+  'mcp__haven-signer__haven_x402_sign_header on the local signer to build the EIP-3009 X-PAYMENT header, then',
   'retry the merchant yourself.',
+  'Next: call mcp__haven-signer__haven_sign.',
   'Returns { status: "pending_approval", payload_hash: null } when the amount exceeds the',
   'budget. Haven never receives the signing key and never talks to the merchant.',
 ].join(' ')
@@ -286,6 +291,7 @@ const RESUME_X402_DESCRIPTION = [
   'Returns { payment_id, payment_required, x402 } with the same signing context shape as',
   'haven_pay_x402_quote so the signer can call haven_x402_sign_header with the x402_binding',
   '(or re-derive it via haven_sign if the binding was lost across a signer restart).',
+  'Next: call mcp__haven-signer__haven_x402_sign_header when you have the x402_binding, or mcp__haven-signer__haven_sign first to re-derive it.',
 ].join(' ')
 
 const QUOTE_MPP_DESCRIPTION = composeDescription({

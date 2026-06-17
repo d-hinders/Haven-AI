@@ -140,6 +140,30 @@ describe('buildSignerMcpServer', () => {
     await client.close()
     await server.close()
   })
+
+  it('publishes cross-namespace next-tool guidance for x402 flows', async () => {
+    const server = buildSignerMcpServer(createEdgeSigner(TEST_KEY))
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const { tools } = await client.listTools()
+    const byName = new Map(tools.map((tool) => [tool.name, tool.description ?? '']))
+
+    expect(byName.get('haven_sign')).toContain('Next: call mcp__haven__haven_submit')
+    expect(byName.get('haven_sign')).toContain('expires_at')
+    expect(byName.get('haven_x402_sign_header')).toContain(
+      'Next for paid MCP tools: call mcp__haven__haven_complete_mcp_tool',
+    )
+    expect(byName.get('haven_sign_x402')).toContain(
+      'Next: call mcp__haven__haven_settle_mcp_tool',
+    )
+    expect(byName.get('haven_sign_x402')).toContain('PAYMENT_WINDOW_EXPIRED')
+    expect(byName.get('haven_sign_sweep_delegate')).toContain('mcp__haven__haven_sweep_delegate')
+
+    await client.close()
+    await server.close()
+  })
 })
 
 describe('haven_sign tool', () => {

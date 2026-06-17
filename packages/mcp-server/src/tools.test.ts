@@ -885,6 +885,93 @@ describe('haven_pay_mcp_tool', () => {
   })
 })
 
+// ── haven_settle_mcp_tool (fast-path: fund + settle in one call) ──────────────
+
+describe('haven_settle_mcp_tool', () => {
+  const SIG = '0x' + '11'.repeat(65)
+
+  it('funds (relays signature) then delivers the merchant header in one call', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'a joke' }] } },
+      settlementTxHash: '0xsettle',
+    })
+
+    const result = ok<{ funding_tx_hash: string; settled: boolean; settlement_tx_hash: string | null }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    // Funding signature was relayed (no key in the wire), then the merchant call ran.
+    const signCall = calls.find((c) => c.url.includes('/sign'))
+    expect(signCall?.body).toEqual({ signature: SIG })
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].paymentId).toBe('pay_x402')
+    expect(spy.mock.calls[0][0].paymentHeader).toBe('eyJ4IjoxfQ==')
+    expect(result.data.funding_tx_hash).toBe('0xfund')
+    expect(result.data.settled).toBe(true)
+    expect(result.data.settlement_tx_hash).toBe('0xsettle')
+    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+  })
+
+  it('does NOT contact the merchant when funding does not confirm', async () => {
+    stubFetch({
+      'POST /payments/pay_pending/sign': { status: 202, body: { status: 'pending_approval' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const result = ok<{ settled: boolean; funding_status: string }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_pending',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(result.data.settled).toBe(false)
+    expect(result.data.funding_status).toBe('pending_approval')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('fails with MERCHANT_REJECTED_AFTER_FUNDING when the merchant rejects post-funding', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 402,
+      ok: false,
+      body: { error: 'payment verification failed' },
+    })
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    expect(payload.suggested_tool).toBe('haven_sweep_delegate')
+  })
+})
+
 // ── custody invariant (all tools) ────────────────────────────────────────────
 
 describe('custody invariant', () => {
@@ -917,6 +1004,14 @@ describe('custody invariant', () => {
     await h.haven_pay_mcp_tool({ merchant_url: 'http://merchant.test/mcp', tool_name: 'probe_tool' })
     await h.haven_complete_mcp_tool({
       payment_id: 'pay_x402',
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'probe_tool',
+      arguments: {},
+      payment_header: 'eyJwYXltZW50X29wYXF1ZSI6dHJ1ZX0=',
+    })
+    await h.haven_settle_mcp_tool({
+      payment_id: 'p1',
+      signature: '0x' + '11'.repeat(65),
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'probe_tool',
       arguments: {},

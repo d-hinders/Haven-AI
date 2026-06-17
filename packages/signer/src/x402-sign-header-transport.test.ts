@@ -104,3 +104,62 @@ describe('haven_x402_sign_header transport robustness', () => {
     expect((result.data as { payment_header: string }).payment_header.length).toBeGreaterThan(0)
   })
 })
+
+describe('haven_sign_x402 (one-shot funding + header signing)', () => {
+  it('signs the funding hash AND builds the merchant header in one call', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const handlers = createToolHandlers(signer)
+
+    const result = ok(
+      await handlers.haven_sign_x402({
+        payload_hash: FUNDING_HASH,
+        x402_expected: {
+          payment_id: 'pay_x402',
+          payload_hash: FUNDING_HASH,
+          resource_url: PAYMENT_REQUIRED.resource.url,
+          merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+          amount: PAYMENT_REQUIRED.accepts[0].amount,
+          asset: PAYMENT_REQUIRED.accepts[0].asset,
+          network: PAYMENT_REQUIRED.accepts[0].network,
+          auth: (await expectedX402()).auth,
+        },
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+
+    const data = result.data as {
+      signature: string
+      x402_binding: string
+      payment_header: string
+      accepted: unknown
+    }
+    expect(data.signature).toMatch(/^0x[0-9a-f]+$/i)
+    expect(data.x402_binding.length).toBeGreaterThan(0)
+    expect(typeof data.payment_header).toBe('string')
+    expect(data.payment_header.length).toBeGreaterThan(0)
+    expect(data.accepted).toBeDefined()
+  })
+
+  it('coerces a stringified payment_required in the one-shot path too', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const handlers = createToolHandlers(signer)
+
+    const result = ok(
+      await handlers.haven_sign_x402({
+        payload_hash: FUNDING_HASH,
+        x402_expected: {
+          payment_id: 'pay_x402',
+          payload_hash: FUNDING_HASH,
+          resource_url: PAYMENT_REQUIRED.resource.url,
+          merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+          amount: PAYMENT_REQUIRED.accepts[0].amount,
+          asset: PAYMENT_REQUIRED.accepts[0].asset,
+          network: PAYMENT_REQUIRED.accepts[0].network,
+          auth: (await expectedX402()).auth,
+        },
+        payment_required: JSON.stringify(PAYMENT_REQUIRED),
+      }),
+    )
+    expect((result.data as { payment_header: string }).payment_header.length).toBeGreaterThan(0)
+  })
+})

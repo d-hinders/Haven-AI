@@ -67,15 +67,21 @@ normal, not an error.
   action at every step. Retry the original request only when the result says
   \`retry_original_x402_request\`.
 - **Paid MCP tool call:** \`haven_pay_mcp_tool\` with the merchant URL, tool
-  name, and arguments. Then follow the returned steps: \`haven_sign\` the
-  funding hash, \`haven_submit\` the signature, \`haven_x402_sign_header\` to
-  build the payment header, and finally \`haven_complete_mcp_tool\` to settle
-  with the merchant and get the tool result. Pass \`payment_id\`,
-  \`payment_required\`, \`mcp_transport\`, and \`arguments\` through verbatim from the
-  \`haven_pay_mcp_tool\` result. The returned \`expires_at\` is the signing window;
-  if a tool returns \`PAYMENT_WINDOW_EXPIRED\`, re-run \`haven_pay_mcp_tool\`
-  with the same \`idempotency_key\`. Do not call the merchant yourself — Haven
-  completes the merchant leg for you.
+  name, and arguments, then finish in two calls (fast path): \`haven_sign_x402\`
+  on the local signer (pass \`payload_hash\`, the nested \`x402.expected\` object,
+  and \`payment_required\`) returns \`{ signature, payment_header }\`; then
+  \`haven_settle_mcp_tool\` (pass \`payment_id\`, \`signature\`, \`payment_header\`,
+  \`merchant_url\`, \`tool_name\`, \`arguments\`, \`mcp_transport\`) funds and settles
+  in one step and returns the tool result. If it returns \`settled: false\`,
+  funding is queued for the user's approval — tell them and check status later,
+  do not re-pay. Step-by-step alternative:
+  \`haven_sign\` → \`haven_submit\` → \`haven_x402_sign_header\` →
+  \`haven_complete_mcp_tool\`. Pass \`payment_required\`, \`arguments\`, and
+  \`mcp_transport\` verbatim from the \`haven_pay_mcp_tool\` result. The returned
+  \`expires_at\` is the signing window; if a tool returns
+  \`PAYMENT_WINDOW_EXPIRED\`, re-run \`haven_pay_mcp_tool\` with the same
+  \`idempotency_key\`. Do not call the merchant yourself — Haven completes the
+  merchant leg for you.
 - **Prices:** show the user the live price from the pay-tool result, never a
   catalog price. \`haven_discover_tools\` prices are indicative
   (\`price_is_indicative\`) and can be stale. The pay-tool result's \`amount\` /

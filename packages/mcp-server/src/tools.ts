@@ -250,8 +250,9 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
     'The fast-path final step, combining haven_submit + haven_complete_mcp_tool. Pass payment_id, signature, and payment_header from haven_sign_x402, plus merchant_url, tool_name, arguments, and mcp_transport from haven_pay_mcp_tool. ' +
     'Relays the funding signature to fund the delegate, then (only once funding confirms) re-issues the MCP tools/call to the merchant with the X-PAYMENT header (fresh MCP handshake server-side) and returns the merchant tool result. ' +
     'Both the signature and the payment_header are signed locally by the edge signer — Haven relays them but never holds the key. ' +
-    'If funding does not confirm (e.g. pending_approval) it returns { settled: false, funding_status } and does not contact the merchant. ' +
+    'If funding does not confirm (e.g. pending_approval) it returns { payment_id, settled: false, funding_status } and does not contact the merchant. ' +
     'If the funding window expired it returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true. ' +
+    'Echoes payment_id on both the settled and not-settled responses so you can reconcile against haven_list_receipts / haven_get_payment_status without retaining it from haven_pay_mcp_tool. ' +
     'Next: no further Haven tool is needed on success; return the merchant tool result to the user.',
   nextActionGuidance:
     'If the merchant rejects after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with mcp__haven__haven_sweep_delegate.',
@@ -610,12 +611,23 @@ export function createToolHandlers(
         if (funding.status !== 'confirmed') {
           // Funding did not confirm (e.g. queued for approval). Do not deliver the
           // merchant header — return the funding status so the agent can act.
-          return { funding_status: funding.status, funding_tx_hash: funding.txHash ?? null, settled: false }
+          // Echo payment_id so the agent can cross-reference the queued payment
+          // (haven_get_payment_status / haven_list_receipts) without re-deriving it.
+          return {
+            payment_id: args.payment_id,
+            funding_status: funding.status,
+            funding_tx_hash: funding.txHash ?? null,
+            settled: false,
+          }
         }
         const merchant = await deliverMerchantPayment(haven, args, funding.txHash)
         // Pick explicit fields — don't spread the raw HTTP status/ok, which would
         // collide with the funding/payment-status meaning an agent expects here.
+        // Echo payment_id so the agent can reconcile this settled payment against
+        // haven_list_receipts / haven_get_payment_status without retaining it from
+        // the haven_pay_mcp_tool step.
         return {
+          payment_id: args.payment_id,
           funding_tx_hash: funding.txHash ?? null,
           settled: true,
           result: merchant.result,

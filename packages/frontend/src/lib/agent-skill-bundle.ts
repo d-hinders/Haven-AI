@@ -5,8 +5,10 @@
  *
  * 1. **The skill** (`buildGenericSkillMd` / `buildSkillBundle`) — a single
  *    generic, secret-free SKILL.md, byte-for-byte identical for every agent.
- *    Identity and live budget come from the `haven_get_agent` /
- *    `haven_get_allowances` runtime tools, never from the file. This is the
+ *    Live budget comes from the `haven_get_agent` / `haven_get_allowances`
+ *    runtime tools; identity + configured budget can also be read for fast
+ *    first-turn orientation from the non-secret `agent.json` the connector
+ *    writes. The SKILL.md itself never embeds per-agent values. This is the
  *    download fallback for runtimes the connector cannot write to; the
  *    connector auto-installs the same content where supported.
  *
@@ -50,9 +52,22 @@ the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
 - A request returns HTTP 402 (x402): use the Haven pay tools to settle it,
   then retry the original request.
 
-## Identity and budget come from the tools — never assume them
+## Identity and budget
 
-Do not guess the wallet address, network, or budget. Read them live:
+Do not guess the wallet address, network, or budget.
+
+For instant orientation at the start of a session, read the non-secret
+\`agent.json\` the connector wrote to your Haven credential directory (typically
+\`~/.haven/agents/<agent-id>/agent.json\` — if you don't know the agent id, list
+\`~/.haven/agents/\` to find the folder). It
+holds your agent id, Haven wallet address, network, and *configured* per-token
+budget, and contains no keys — the fastest way to answer "who am I and what may
+I spend" with no round trip. If that file is absent (some setups don't write
+it), use the tools below instead.
+
+Before any payment, confirm the *live remaining* budget with the tools —
+\`agent.json\` shows the configured budget, not what is left after recent
+spending:
 
 - \`haven_get_agent\` — agent identity, Haven wallet address, network.
 - \`haven_get_allowances\` — current per-token budgets and what remains.

@@ -56,7 +56,11 @@ const x402ExpectedSchema = z.object({
   amount: z.string().min(1),
   asset: z.string().min(1),
   network: z.string().min(1),
-  expires_at: z.string().min(1).optional(),
+  // Required: expires_at is folded into the Haven-signed binding message, so the
+  // signer must receive the exact same value to reconstruct a matching message.
+  // Omitting it used to fail downstream with a cryptic "authentication message is
+  // invalid" — making it required surfaces a clear INVALID_INPUT at the boundary.
+  expires_at: z.string().min(1),
   auth: z.object({
     version: z.literal(1),
     message: z.string().min(1),
@@ -130,8 +134,8 @@ const SIGN_X402_DESCRIPTION = [
   'One-shot x402 signing for the fast 3-call flow: sign the funding hash AND build the EIP-3009',
   'X-PAYMENT header in a single local call (equivalent to haven_sign followed by',
   'haven_x402_sign_header). The delegate key never leaves this process. From the haven_pay_mcp_tool',
-  'result pass payload_hash, x402_expected (the nested x402.expected object, not a top-level field),',
-  'and payment_required (verbatim). Returns',
+  'result pass payload_hash, x402_expected (the nested x402.expected object — passing the whole x402',
+  'object is also accepted and unwrapped for you), and payment_required (verbatim). Returns',
   '{ signature, x402_binding, payment_header, accepted }; hand signature + payment_header to',
   'mcp__haven__haven_settle_mcp_tool to fund and settle in one hosted call. The header is built now (before',
   'funding confirms), so its short validity window starts here — call mcp__haven__haven_settle_mcp_tool promptly,',
@@ -165,7 +169,10 @@ function toExpectedX402(raw: {
   amount: string
   asset: string
   network: string
-  expires_at?: string
+  // Required at the tool boundary (see x402ExpectedSchema): it's folded into the
+  // Haven-signed binding message. The EdgeSigner's internal type keeps it
+  // optional because it skips the window check when absent.
+  expires_at: string
   auth: X402ExpectedPayment['auth']
 }): X402ExpectedPayment {
   return {
@@ -210,7 +217,7 @@ export function createToolHandlers(
   return {
     haven_sign: async (input) =>
       runTool(async () => {
-        const args = parse('haven_sign', input)
+        const args = parse('haven_sign', coerceX402Expected(input))
         const x402Expected = args.x402_expected ? toExpectedX402(args.x402_expected) : null
         const result = x402Expected
           ? signer.signX402FundingHash(args.payload_hash, x402Expected)
@@ -246,8 +253,9 @@ export function createToolHandlers(
     haven_sign_x402: async (input) =>
       runTool(async () => {
         // Coerce a stringified payment_required (same transport guard as
-        // haven_x402_sign_header) before validation.
-        const args = parse('haven_sign_x402', coercePaymentRequired(input))
+        // haven_x402_sign_header) and unwrap a whole-`x402`-object x402_expected
+        // before validation.
+        const args = parse('haven_sign_x402', coerceX402Expected(coercePaymentRequired(input)))
         // 1. Sign the funding hash (records the binding + checks expiry/context).
         const funding = signer.signX402FundingHash(args.payload_hash, toExpectedX402(args.x402_expected))
         // 2. Build the merchant EIP-3009 header against that binding — local, no network.
@@ -300,6 +308,38 @@ export function createToolHandlers(
 
 function parse<TName extends SignerToolName>(name: TName, input: unknown): Record<string, any> {
   return z.object(toolSchemas[name]).parse(input ?? {})
+}
+
+/**
+ * Tolerate the agent passing the whole `x402` object from haven_pay_mcp_tool /
+ * haven_pay_x402_quote where only the nested `x402.expected` signing context is
+ * wanted. The wrapper looks like `{ accepted, resource_url, merchant_to,
+ * funding_to, expected: {...} }` and lacks the top-level `auth` binding the
+ * schema requires — so when `x402_expected.auth` is absent but
+ * `x402_expected.expected` is an object, unwrap to `.expected`. Also parses a
+ * JSON-stringified value back to an object first (some transports stringify
+ * object args). This removes the easiest-to-make handoff mistake without a
+ * breaking parameter rename.
+ */
+function coerceX402Expected(input: unknown): unknown {
+  if (!input || typeof input !== 'object') return input
+  const record = input as Record<string, unknown>
+  let value: unknown = record.x402_expected
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return input
+    }
+  }
+  if (!value || typeof value !== 'object') return input
+  const obj = value as Record<string, unknown>
+  if (obj.auth === undefined && obj.expected && typeof obj.expected === 'object') {
+    return { ...record, x402_expected: obj.expected }
+  }
+  // Parsed-from-string but already the right shape: keep the parsed object.
+  if (value !== record.x402_expected) return { ...record, x402_expected: value }
+  return input
 }
 
 /**

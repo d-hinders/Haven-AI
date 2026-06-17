@@ -38,6 +38,7 @@ export interface Transaction {
   paymentProofStatus?: string | null
   paymentFlowStatus?: string | null
   paymentAttentionReason?: string | null
+  activityType?: 'delegate_sweep'
 }
 
 interface UserSafeRow {
@@ -82,6 +83,17 @@ interface ApprovalRequestAgentRow {
   merchant_address: string | null
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
+}
+
+interface DelegateSweepAgentRow {
+  id: string
+  tx_hash: string
+  safe_id: string
+  chain_id: number
+  agent_id: string
+  agent_name: string
+  from_address: string
+  to_address: string
 }
 
 interface X402PaymentIntentRow {
@@ -526,6 +538,7 @@ export async function enrichTransactionsWithAgents(
         paymentProofStatus: string | null
         paymentFlowStatus: string | null
         paymentAttentionReason: string | null
+        activityType?: 'delegate_sweep'
       }
     >()
     for (const row of piResult.rows) {
@@ -608,6 +621,47 @@ export async function enrichTransactionsWithAgents(
       })
     }
 
+    const sweepResult = await pool.query<DelegateSweepAgentRow>(
+      `SELECT ds.id,
+              LOWER(ds.tx_hash) AS tx_hash,
+              us.id AS safe_id,
+              us.chain_id AS chain_id,
+              ds.agent_id,
+              a.name AS agent_name,
+              ds.from_address,
+              ds.to_address
+       FROM delegate_sweeps ds
+       JOIN agents a ON a.id = ds.agent_id
+       JOIN user_safes us
+         ON us.user_id = ds.user_id
+        AND us.id = ANY($3)
+        AND LOWER(us.safe_address) = LOWER(ds.to_address)
+        AND us.chain_id = ds.chain_id
+       WHERE LOWER(ds.tx_hash) = ANY($1)
+         AND ds.user_id = $2
+         AND ds.status = 'submitted'
+         AND ds.tx_hash IS NOT NULL`,
+      [txHashes, userId, safeIds],
+    )
+
+    for (const row of sweepResult.rows) {
+      agentByTransactionIdentity.set(
+        paymentAgentIdentityKey(row.tx_hash, row.safe_id, row.chain_id),
+        {
+          id: row.agent_id,
+          name: row.agent_name,
+          source: null,
+          resourceUrl: null,
+          merchantAddress: null,
+          paymentId: row.id,
+          paymentProofStatus: null,
+          paymentFlowStatus: null,
+          paymentAttentionReason: null,
+          activityType: 'delegate_sweep',
+        },
+      )
+    }
+
     return transactions.map((tx) => {
       const agent = agentByTransactionIdentity.get(
         paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId),
@@ -623,6 +677,7 @@ export async function enrichTransactionsWithAgents(
         paymentProofStatus: agent?.paymentProofStatus ?? tx.paymentProofStatus,
         paymentFlowStatus: agent?.paymentFlowStatus ?? tx.paymentFlowStatus,
         paymentAttentionReason: agent?.paymentAttentionReason ?? tx.paymentAttentionReason,
+        activityType: agent?.activityType ?? tx.activityType,
       }
     })
   } catch {

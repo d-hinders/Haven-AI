@@ -2,14 +2,19 @@
 
 import { useState, useMemo, type ReactNode } from 'react'
 import { getExplorerUrl } from '@/lib/chains'
-import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
-import { timeAgo, truncate } from '@/lib/format'
+import { timeAgo } from '@/lib/format'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
+import {
+  transactionInitiator,
+  transactionMovement,
+  transactionStatus,
+  transactionTitle,
+} from '@/lib/transaction-presentation'
 import type { AggregatedTransaction } from '@/types/transactions'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { DirectionMark, ExternalDetailsLink, TransactionMovement } from '@/components/haven'
+import { DirectionMark, ExternalDetailsLink } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 
@@ -402,11 +407,9 @@ export default function TransactionsTable({
                 ? 'success'
                 : 'neutral'
             const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
-            // Incoming transactions: leave initiator blank (no meaningful "who" — the originator is the sending wallet).
-            // Outgoing without an agent: surface as "You".
-            const initiator = tx.agentName ?? (tx.direction === 'in' ? '' : 'You')
+            const initiator = transactionInitiator(tx)
             const lifecycleBadge = machinePaymentLifecyclePresentation(tx)
-            const statusBadge = lifecycleBadge ?? tx.statusBadge
+            const statusBadge = transactionStatus(tx) ?? lifecycleBadge ?? tx.statusBadge
 
             return (
               <tr
@@ -487,49 +490,7 @@ export default function TransactionsTable({
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
 
-function transactionTitle(tx: AggregatedTransaction): string {
-  if (tx.titleOverride) return tx.titleOverride
-  if (tx.direction === 'in') return 'Received payment'
-  const sourceTitle = paymentSourceTitle(tx.source)
-  if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
-  if (sourceTitle) return sourceTitle
-  if (tx.agentName) return `Agent payment by ${tx.agentName}`
-  return 'Payment sent by you'
-}
-
 function transactionAmount(tx: AggregatedTransaction): string {
   const sign = tx.direction === 'in' ? '+' : '-'
   return `${sign}${tx.valueFormatted} ${tx.asset}`
-}
-
-function transactionMovement(
-  tx: AggregatedTransaction,
-  resolveAddress?: (address: string) => string | null,
-  safeNamesByAddress?: Map<string, string>,
-): ReactNode {
-  if (tx.movementOverride) return tx.movementOverride
-  const counterparty = counterpartyLabel(tx, resolveAddress, safeNamesByAddress)
-  const from = tx.direction === 'in' ? counterparty : tx.safeName
-  const to = tx.direction === 'in' ? tx.safeName : counterparty
-
-  return <TransactionMovement from={from} to={to} />
-}
-
-function counterpartyLabel(
-  tx: AggregatedTransaction,
-  resolveAddress?: (address: string) => string | null,
-  safeNamesByAddress?: Map<string, string>,
-): string {
-  if (isMachinePaymentSource(tx.source)) {
-    return parseX402Hostname(tx.x402ResourceUrl) ?? truncate(tx.to)
-  }
-
-  const address = tx.direction === 'in' ? tx.from : tx.to
-  const addressKey = address.toLowerCase()
-  const safeName =
-    safeNamesByAddress?.get(`${addressKey}:${tx.chainId}`) ??
-    safeNamesByAddress?.get(addressKey)
-  const contactName = resolveAddress?.(address)
-
-  return safeName ?? contactName ?? truncate(address)
 }

@@ -30,9 +30,17 @@ export interface HostedClientOptions {
  * future refactor can't silently make the hosted server custodial.
  */
 export function createHostedHavenClient(options: HostedClientOptions): HavenClient {
+  // Base mainnet RPC, so the server can wait for ≥1 on-chain confirmation of
+  // the Safe→delegate funding tx before delivering the X-PAYMENT header to the
+  // merchant (ensureFundingConfirmed). Read-only RPC — no signing capability.
+  const chainRpcs: Record<number, string> = {}
+  const baseRpc = process.env.BASE_RPC_URL?.trim()
+  if (baseRpc) chainRpcs[8453] = baseRpc
+
   const client = new HavenClient({
     apiKey: options.apiKey,
     baseUrl: options.baseUrl,
+    chainRpcs,
     // Intentionally NO delegateKey. See custody invariant in
     // docs/architecture/06-hosted-mcp-connect-flow.md.
   })

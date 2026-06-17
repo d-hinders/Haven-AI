@@ -612,7 +612,7 @@ export function createToolHandlers(
           // merchant header — return the funding status so the agent can act.
           return { funding_status: funding.status, funding_tx_hash: funding.txHash ?? null, settled: false }
         }
-        const merchant = await deliverMerchantPayment(haven, args)
+        const merchant = await deliverMerchantPayment(haven, args, funding.txHash)
         // Pick explicit fields — don't spread the raw HTTP status/ok, which would
         // collide with the funding/payment-status meaning an agent expects here.
         return {
@@ -1091,7 +1091,16 @@ async function deliverMerchantPayment(
   haven: HavenClient,
   // Parsed haven_complete_mcp_tool / haven_settle_mcp_tool args (Zod-validated).
   args: Record<string, any>,
+  // Funding tx hash from haven_submit when known (settle path); the wait falls
+  // back to the payment status when omitted (complete path).
+  fundingTxHash?: string,
 ): Promise<{ status: number; ok: boolean; result: unknown; settlement_tx_hash: string | null }> {
+  // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
+  // verifies the X-PAYMENT header — otherwise its balanceOf(delegate) check
+  // races the not-yet-mined funding tx and returns "Payment verification
+  // failed". No-op if BASE_RPC_URL isn't configured (chainRpcs unset).
+  await haven.ensureFundingConfirmed(args.payment_id, fundingTxHash)
+
   const envelope = {
     jsonrpc: '2.0',
     id: `haven-mcp-${randomUUID()}`,

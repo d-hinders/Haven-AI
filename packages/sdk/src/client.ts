@@ -1459,6 +1459,22 @@ export class HavenClient {
    * accepted), threads the session + wallet headers, sets `X-PAYMENT`, and
    * collapses an SSE JSON-RPC response to its `result`.
    */
+  /**
+   * Wait for a payment's Safe→delegate funding tx to reach ≥1 on-chain
+   * confirmation. The hosted x402 completion path MUST call this after funding
+   * and before delivering the X-PAYMENT header, so the merchant's
+   * balanceOf(delegate) / transferWithAuthorization verification sees the funded
+   * balance — otherwise it rejects with "Payment verification failed". The
+   * SDK's local path already does this (see authorizeStandardX402); the hosted
+   * split flow regressed when the 5→3 collapse removed the incidental
+   * inter-call latency that used to mask it. No-op when the funding tx hash or
+   * a chain RPC (chainRpcs[chainId]) is unavailable.
+   */
+  async ensureFundingConfirmed(paymentId: string, fundingTxHash?: string): Promise<void> {
+    const status = await this.getPaymentStatus(paymentId)
+    await this.waitForFundingTx(fundingTxHash ?? status.txHash ?? undefined, status.chainId)
+  }
+
   async completeX402MerchantCall(input: {
     url: string
     init?: RequestInit

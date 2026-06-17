@@ -196,3 +196,57 @@ describe('x402 funding tx confirmation wait (#321)', () => {
     expect(mockCreateJsonRpcProvider).not.toHaveBeenCalled()
   })
 })
+
+describe('ensureFundingConfirmed (hosted x402 completion path)', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function statusResponse() {
+    return new Response(JSON.stringify({
+      payment_id: 'pay_321',
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: 'confirmed',
+      phase: 'funded',
+      next_action: 'none',
+      amount: '0.02',
+      token: 'USDC',
+      resource_url: paymentRequired.resource.url,
+      merchant_address: paymentRequired.accepts[0].payTo,
+      tx_hash: txHash,
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chain_id: 8453,
+      message: 'Funded.',
+    }), { status: 200 })
+  }
+
+  it('waits for ≥1 on-chain confirmation of the funding tx via the chain RPC', async () => {
+    mockWaitForTransaction.mockResolvedValue({ status: 1 })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse())
+
+    await makeHaven().ensureFundingConfirmed('pay_321')
+
+    expect(mockCreateJsonRpcProvider).toHaveBeenCalledWith(rpcUrl)
+    expect(mockWaitForTransaction).toHaveBeenCalledWith(txHash, 1, 30_000)
+  })
+
+  it('prefers an explicitly-passed funding tx hash over the payment status', async () => {
+    const explicit = `0x${'cd'.repeat(32)}`
+    mockWaitForTransaction.mockResolvedValue({ status: 1 })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse())
+
+    await makeHaven().ensureFundingConfirmed('pay_321', explicit)
+
+    expect(mockWaitForTransaction).toHaveBeenCalledWith(explicit, 1, 30_000)
+  })
+
+  it('throws when the funding tx never confirms (so the merchant is never contacted)', async () => {
+    mockWaitForTransaction.mockResolvedValue(null)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse())
+
+    await expect(makeHaven().ensureFundingConfirmed('pay_321')).rejects.toMatchObject({
+      message: 'Funding tx did not confirm on-chain within the timeout window.',
+    })
+  })
+})

@@ -947,6 +947,54 @@ describe('haven_settle_mcp_tool', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
+  it('waits for on-chain funding confirmation BEFORE delivering to the merchant', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const ensureSpy = vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: {}, settlementTxHash: '0xsettle',
+    })
+
+    ok(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    // Confirmation is awaited with the funding tx hash, before the merchant call.
+    expect(ensureSpy).toHaveBeenCalledWith('pay_x402', '0xfund')
+    expect(ensureSpy.mock.invocationCallOrder[0]).toBeLessThan(completeSpy.mock.invocationCallOrder[0])
+  })
+
+  it('does NOT deliver to the merchant if funding never confirms on-chain', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockRejectedValue(
+      new Error('Funding tx did not confirm on-chain within the timeout window.'),
+    )
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    // The header is never delivered to a merchant that would reject an unfunded delegate.
+    expect(completeSpy).not.toHaveBeenCalled()
+  })
+
   it('fails with MERCHANT_REJECTED_AFTER_FUNDING when the merchant rejects post-funding', async () => {
     stubFetch({
       'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },

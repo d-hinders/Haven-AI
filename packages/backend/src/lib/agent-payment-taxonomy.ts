@@ -34,6 +34,7 @@ export const AgentPaymentNextAction = {
   RetryOriginalX402Request: 'retry_original_x402_request',
   StopAndTellUser: 'stop_and_tell_user',
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
+  PaymentWindowExpired: 'payment_window_expired',
   FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
   SweepStrandedFunds: 'sweep_stranded_funds',
 } as const

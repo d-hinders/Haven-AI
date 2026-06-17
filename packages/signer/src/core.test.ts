@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
+  AgentPaymentFailureCode,
   addressFromKey,
   buildX402ExpectedMessage,
   verifySignature,
@@ -38,6 +39,7 @@ const EXPECTED_X402_BASE = {
   amount: PAYMENT_REQUIRED.accepts[0].amount,
   asset: PAYMENT_REQUIRED.accepts[0].asset,
   network: PAYMENT_REQUIRED.accepts[0].network,
+  expiresAt: '2099-01-01T00:00:00.000Z',
 }
 
 async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) {
@@ -237,6 +239,21 @@ describe('buildX402PaymentHeader', () => {
     await expect(signer.buildX402PaymentHeader(paymentRequired, mismatch.x402Binding)).rejects.toThrow(
       'amount',
     )
+  })
+
+  it('rejects an expired x402 payment window before signing a merchant header', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    }))
+
+    await expect(
+      signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
+    ).rejects.toMatchObject({
+      code: AgentPaymentFailureCode.PaymentWindowExpired,
+      statusCode: 410,
+      paymentId: 'pay_x402',
+    })
   })
 
   it('wire-format regression: v2 payment_header decodes to spec-compliant {x402Version, accepted, payload}', async () => {

@@ -14,6 +14,8 @@ import {
   x402AuthorizationAmount,
   decodeBase64Json,
   encodeBase64Json,
+  AgentPaymentFailureCode,
+  HavenError,
   HavenSigningError,
   HavenApiError,
   type SweepAuthorization,
@@ -81,6 +83,8 @@ export interface X402ExpectedPayment {
   asset: string
   /** x402 network funded for the merchant header. */
   network: string
+  /** ISO expiry for the funding/quote window. When present, the signer refuses stale merchant headers. */
+  expiresAt?: string
   /** Haven signature over the expected funding context. */
   auth: X402ExpectedAuth
 }
@@ -153,6 +157,12 @@ export function createEdgeSigner(
         throw new HavenSigningError(
           'x402 funding binding is required before signing a merchant header. Sign the hosted funding hash with x402_expected first.',
         )
+      }
+      try {
+        assertX402PaymentWindowOpen(expected)
+      } catch (err) {
+        x402Bindings.delete(x402Binding)
+        throw err
       }
       const option = selectStandardPaymentOption(paymentRequired.accepts)
       if (!option) {
@@ -330,6 +340,7 @@ function assertExpectedBinding(
     amount: expected.amount,
     asset: expected.asset,
     network: expected.network,
+    expiresAt: expected.expiresAt,
   })
   if (expected.auth?.version !== 1 || expected.auth.message !== message) {
     throw new HavenSigningError('x402 expected context authentication message is invalid.')
@@ -342,7 +353,22 @@ function assertExpectedBinding(
   }
 }
 
+function assertX402PaymentWindowOpen(expected: X402ExpectedPayment): void {
+  if (!expected.expiresAt) return
+  const expiresAtMs = Date.parse(expected.expiresAt)
+  if (Number.isNaN(expiresAtMs)) {
+    throw new HavenSigningError('x402 expected context expiresAt is not a valid ISO timestamp.')
+  }
+  if (expiresAtMs <= Date.now()) {
+    throw new HavenError(
+      'The x402 payment window expired before the merchant header could be signed. Re-quote with haven_pay_mcp_tool using the same idempotency_key before trying again.',
+      AgentPaymentFailureCode.PaymentWindowExpired,
+      410,
+      expected.paymentId,
+    )
+  }
+}
+
 function sameAddress(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase()
 }
-

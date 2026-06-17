@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { HavenClient } from '@haven_ai/sdk'
+import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenClient } from '@haven_ai/sdk'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
@@ -235,6 +235,7 @@ describe('haven_discover_tools', () => {
 const X402_INTENT_RESPONSE = {
   payment_id: 'pay_x402',
   status: 'pending_signature',
+  expires_at: '2099-01-01T00:00:00.000Z',
   merchant_to: '0xMerchant',
   x402_expected_auth: X402_EXPECTED_AUTH,
   sign_data: { hash: '0xfunding' },
@@ -264,7 +265,7 @@ describe('haven_pay_x402_quote', () => {
 
     expect(payload.success).toBe(false)
     if (payload.success) throw new Error('expected failure')
-    expect(payload.code).toBe('PRICE_EXCEEDS_MAX')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
     // Guard is pure + pre-funding: neither the agent fetch nor the intent ran.
     expect(calls.find((c) => c.url.includes('/agent'))).toBeUndefined()
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
@@ -278,11 +279,13 @@ describe('haven_pay_x402_quote', () => {
 
     const result = ok<{
       payment_id: string
+      idempotency_key: string
       payload_hash: string
       x402: Record<string, unknown>
     }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
 
     expect(result.data.payment_id).toBe('pay_x402')
+    expect(result.data.idempotency_key).toMatch(/^x402:/)
     expect(result.data.payload_hash).toBe('0xfunding')
     expect(result.data.x402.funding_to).toBe('0xDelegate')
     expect(result.data.x402.merchant_to).toBe('0xMerchant')
@@ -296,6 +299,7 @@ describe('haven_pay_x402_quote', () => {
       amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
       asset: PAYMENT_REQUIRED.accepts[0].asset,
       network: PAYMENT_REQUIRED.accepts[0].network,
+      expires_at: X402_INTENT_RESPONSE.expires_at,
       auth: X402_EXPECTED_AUTH,
     })
 
@@ -527,7 +531,9 @@ describe('haven_pay_mcp_tool', () => {
 
     const result = ok<{
       payment_id: string
+      idempotency_key: string
       payload_hash: string
+      expires_at: string
       merchant_url: string
       tool_name: string
       arguments: Record<string, unknown>
@@ -543,7 +549,9 @@ describe('haven_pay_mcp_tool', () => {
     )
 
     expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+    expect(result.data.idempotency_key).toMatch(/^x402:/)
     expect(result.data.payload_hash).toBe(X402_INTENT_RESPONSE.sign_data.hash)
+    expect(result.data.expires_at).toBe(X402_INTENT_RESPONSE.expires_at)
     // Merchant context + payment_required threaded through so the agent can
     // complete the flow (haven_x402_sign_header then haven_complete_mcp_tool).
     expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
@@ -575,7 +583,7 @@ describe('haven_pay_mcp_tool', () => {
 
     expect(payload.success).toBe(false)
     if (payload.success) throw new Error('expected failure')
-    expect(payload.code).toBe('PRICE_EXCEEDS_MAX')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
     expect(payload.message).toContain('1500000')
     expect(payload.message).toContain('1000000')
     // No funding intent was created — the guard fired before createX402Intent
@@ -696,13 +704,30 @@ describe('haven_pay_mcp_tool', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it('haven_complete_mcp_tool fails with a sweep hint when the merchant rejects after funding', async () => {
+  it('haven_complete_mcp_tool fails with a typed sweep hint when the merchant rejects after funding', async () => {
     stubFetch({})
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 402,
       ok: false,
       body: { error: 'payment verification failed' },
+    })
+    vi.spyOn(haven, 'getPaymentStatus').mockResolvedValue({
+      paymentId: 'pay_x402',
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: 'funded_but_unsettled',
+      phase: 'funded_but_unsettled',
+      nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+      message: 'The merchant rejected the funded payment.',
+      amount: '1.50',
+      token: 'USDC',
+      txHash: null,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      chainId: 8453,
+      resourceUrl: 'http://merchant.test/mcp',
+      merchantAddress: '0xMerchant',
+      idempotencyKey: 'idem-rejected',
     })
 
     const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
@@ -716,8 +741,112 @@ describe('haven_pay_mcp_tool', () => {
     // Funding already happened, so a merchant rejection is a hard failure that
     // points the agent at reconciliation — not a soft ok:false the agent ignores.
     if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    expect(payload.statusCode).toBe(402)
+    expect(payload.paymentId).toBe('pay_x402')
+    expect(payload.status).toBe('funded_but_unsettled')
+    expect(payload.phase).toBe('funded_but_unsettled')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.SweepStrandedFunds)
+    expect(payload.rail).toBe('x402')
+    expect(payload.idempotency_key).toBe('idem-rejected')
+    expect(payload.suggested_tool).toBe('haven_sweep_delegate')
     expect(payload.message).toContain('haven_sweep_delegate')
     expect(payload.message).toContain('402')
+  })
+
+  it('haven_complete_mcp_tool maps expired funding windows to a typed re-quote payload', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_expired/status': {
+        status: 200,
+        body: {
+          payment_id: 'pay_expired',
+          kind: 'payment_intent',
+          rail: 'x402',
+          status: 'expired',
+          phase: 'expired',
+          next_action: 'request_again_if_user_still_wants_it',
+          amount: '1.50',
+          token: 'USDC',
+          resource_url: 'http://merchant.test/mcp',
+          merchant_address: '0xMerchant',
+          tx_hash: null,
+          expires_at: '2000-01-01T00:00:00.000Z',
+          chain_id: 8453,
+          message: 'The payment expired before it was completed.',
+          x402: {
+            amount_atomic: '1500000',
+            asset: PAYMENT_REQUIRED.accepts[0].asset,
+            network: PAYMENT_REQUIRED.accepts[0].network,
+            resource_url: 'http://merchant.test/mcp',
+            merchant_address: '0xMerchant',
+            description: null,
+            idempotency_key: 'idem-paid-tool',
+          },
+        },
+      },
+    })
+
+    const payload = await handlers().haven_complete_mcp_tool({
+      payment_id: 'pay_expired',
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: {},
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(payload.statusCode).toBe(410)
+    expect(payload.paymentId).toBe('pay_expired')
+    expect(payload.status).toBe('expired')
+    expect(payload.phase).toBe('expired')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.PaymentWindowExpired)
+    expect(payload.rail).toBe('x402')
+    expect(payload.idempotency_key).toBe('idem-paid-tool')
+    expect(payload.retry_with_new_quote).toBe(true)
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+  })
+
+  it('haven_submit maps expired x402 funding windows after backend rejection', async () => {
+    stubFetch({
+      'POST /payments/pay_expired/sign': {
+        status: 410,
+        body: { error: 'Payment expired before it could be completed' },
+      },
+      'GET /machine-payments/pay_expired/status': {
+        status: 200,
+        body: {
+          payment_id: 'pay_expired',
+          kind: 'payment_intent',
+          rail: 'x402',
+          status: 'expired',
+          phase: 'expired',
+          next_action: 'request_again_if_user_still_wants_it',
+          amount: '1.50',
+          token: 'USDC',
+          resource_url: 'http://merchant.test/mcp',
+          merchant_address: '0xMerchant',
+          tx_hash: null,
+          expires_at: '2000-01-01T00:00:00.000Z',
+          chain_id: 8453,
+          message: 'The payment expired before it was completed.',
+          idempotency_key: 'idem-submit',
+        },
+      },
+    })
+
+    const payload = await handlers().haven_submit({
+      payment_id: 'pay_expired',
+      signature: '0x' + '11'.repeat(65),
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(payload.statusCode).toBe(410)
+    expect(payload.paymentId).toBe('pay_expired')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.PaymentWindowExpired)
+    expect(payload.idempotency_key).toBe('idem-submit')
+    expect(payload.retry_with_new_quote).toBe(true)
   })
 
   it('returns pending_approval when over allowance', async () => {

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import {
+  AgentPaymentFailureCode,
+  AgentPaymentNextAction,
   HavenApiError,
   HavenClient,
   HavenError,
@@ -194,8 +196,9 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
   ...sharedDescriptions.payMcpTool,
   behavior:
     'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. ' +
-    'Creates a funding intent and returns { payment_id, payload_hash, payment_required, x402, merchant_url, tool_name, arguments, mcp_transport }. ' +
-    'Full flow: (1) haven_sign payload_hash with x402 (the x402.expected context) on the local signer → x402_binding; ' +
+    'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, merchant_url, tool_name, arguments, mcp_transport }. ' +
+    'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
+    'Full flow: (1) haven_sign payload_hash with x402 (the x402.expected context, including expires_at) on the local signer → x402_binding; ' +
     '(2) haven_submit the signature to fund the delegate; ' +
     '(3) haven_x402_sign_header on the local signer with payment_required + x402_binding → payment_header; ' +
     '(4) haven_complete_mcp_tool with payment_id, merchant_url, tool_name, arguments, mcp_transport, and payment_header to settle with the merchant and get the tool result. ' +
@@ -213,9 +216,10 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Pass payment_id, merchant_url, tool_name, arguments, and mcp_transport exactly as returned by haven_pay_mcp_tool, plus the payment_header from ' +
     'haven_x402_sign_header. The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; ' +
     'Haven relays it but never holds signing authority. Call only after haven_submit has confirmed the funding transfer. ' +
-    'The payment_id is used to attach merchant evidence or reconciliation context to the already-funded payment.',
+    'The payment_id is used to attach merchant evidence or reconciliation context to the already-funded payment. ' +
+    'If the funding window expired first, this returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true.',
   nextActionGuidance:
-    'If the merchant rejects the payment after funding, the delegate holds stranded funds — reconcile with haven_sweep_delegate.',
+    'If the merchant rejects the payment after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with haven_sweep_delegate.',
 })
 
 const QUOTE_X402_DESCRIPTION = composeDescription({
@@ -232,8 +236,9 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'reset-period questions, call haven_get_allowances instead of calling this tool.',
   'Pass the payment_required from haven_quote_x402 or directly from the merchant 402 response.',
   'Pass max_amount (atomic units) to reject a quote above the user\'s cap before any funding moves.',
-  'Returns { payment_id, payload_hash, x402 } where x402 carries the accepted option,',
-  'resource_url, merchant_to, funding_to, and x402.expected signing context.',
+  'Returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
+  'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
+  'If expires_at passes before signing, re-quote with the same idempotency_key before signing again.',
   'Sign payload_hash via haven_sign (passing x402.expected) on the local signer, then relay',
   'with haven_submit to fund the delegate wallet. After submission confirms, call',
   'haven_x402_sign_header on the local signer to build the EIP-3009 X-PAYMENT header, then',
@@ -323,6 +328,11 @@ export interface ToolFailure {
   statusCode?: number
   paymentId?: string
   status?: string
+  phase?: string
+  next_action?: string
+  rail?: string
+  idempotency_key?: string | null
+  retry_with_new_quote?: boolean
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
@@ -485,7 +495,11 @@ export function createToolHandlers(
     haven_submit: async (input) =>
       runTool(async () => {
         const args = parse('haven_submit', input)
-        const result = await haven.submitSignature(args.payment_id, args.signature)
+        const result = await submitSignatureWithExpiryMapping(
+          haven,
+          args.payment_id,
+          args.signature,
+        )
         return { status: result.status, tx_hash: result.txHash ?? null }
       }),
 
@@ -574,11 +588,27 @@ export function createToolHandlers(
         // failure (not a soft ok:false) so the agent reconciles via
         // haven_sweep_delegate instead of treating it as a transient error.
         if (!result.ok) {
-          throw new Error(
-            `Merchant rejected the payment after funding (HTTP ${result.status}). ` +
-              `The delegate wallet holds stranded funds — reconcile with haven_sweep_delegate. ` +
+          let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null = null
+          try {
+            status = await haven.getPaymentStatus(args.payment_id as string)
+          } catch {
+            // Preserve the merchant rejection even if status lookup is unavailable.
+          }
+          throw new HostedToolError({
+            code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
+            message:
+              `Merchant rejected the payment after funding (HTTP ${result.status}). ` +
+              `The delegate wallet may hold stranded funds — reconcile with haven_sweep_delegate. ` +
               `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
-          )
+            statusCode: result.status,
+            paymentId: args.payment_id as string,
+            status: status?.status ?? 'merchant_rejected_after_funding',
+            phase: status?.phase ?? 'funded_but_unsettled',
+            nextAction: status?.nextAction ?? AgentPaymentNextAction.SweepStrandedFunds,
+            rail: status?.rail ?? 'x402',
+            idempotencyKey: status?.idempotencyKey,
+            suggestedTool: 'haven_sweep_delegate',
+          })
         }
         return {
           status: result.status,
@@ -888,6 +918,7 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
   return {
     payment_id: intent.paymentId,
     status: intent.status,
+    idempotency_key: intent.idempotencyKey,
     payload_hash: intent.signData.hash,
     expires_at: intent.expiresAt,
     // The edge signer needs these to build + sign the EIP-3009 merchant header
@@ -905,6 +936,7 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
         amount: intent.amountAtomic,
         asset: intent.asset,
         network: intent.network,
+        expires_at: intent.expiresAt,
         auth: intent.expectedAuth,
       },
     },
@@ -991,7 +1023,7 @@ function assertWithinMaxAmount(
       `Authorized amount ${authorizedAtomic} exceeds max_amount ${maxAmount} (${unit}); ` +
         `this is the ceiling the merchant can settle at. No funds were moved. ` +
         `Confirm the higher amount with the user before retrying with a larger max_amount.`,
-      'PRICE_EXCEEDS_MAX',
+      AgentPaymentFailureCode.PriceExceedsMax,
       400,
     )
   }
@@ -999,6 +1031,114 @@ function assertWithinMaxAmount(
 
 function parse<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {
   return z.object(toolSchemas[name]).parse(input ?? {})
+}
+
+class HostedToolError extends Error {
+  readonly code: string
+  readonly statusCode?: number
+  readonly paymentId?: string
+  readonly status?: string
+  readonly phase?: string
+  readonly nextAction?: string
+  readonly rail?: string
+  readonly idempotencyKey?: string | null
+  readonly retryWithNewQuote?: boolean
+  readonly suggestedTool?: string
+
+  constructor(input: {
+    code: string
+    message: string
+    statusCode?: number
+    paymentId?: string
+    status?: string
+    phase?: string
+    nextAction?: string
+    rail?: string
+    idempotencyKey?: string | null
+    retryWithNewQuote?: boolean
+    suggestedTool?: string
+  }) {
+    super(input.message)
+    this.name = 'HostedToolError'
+    this.code = input.code
+    this.statusCode = input.statusCode
+    this.paymentId = input.paymentId
+    this.status = input.status
+    this.phase = input.phase
+    this.nextAction = input.nextAction
+    this.rail = input.rail
+    this.idempotencyKey = input.idempotencyKey
+    this.retryWithNewQuote = input.retryWithNewQuote
+    this.suggestedTool = input.suggestedTool
+  }
+}
+
+async function submitSignatureWithExpiryMapping(
+  haven: HavenClient,
+  paymentId: string,
+  signature: string,
+): ReturnType<HavenClient['submitSignature']> {
+  try {
+    return await haven.submitSignature(paymentId, signature)
+  } catch (err) {
+    const mapped = await paymentWindowExpiredErrorFor(haven, paymentId, err)
+    if (mapped) throw mapped
+    throw err
+  }
+}
+
+async function paymentWindowExpiredErrorFor(
+  haven: HavenClient,
+  paymentId: string,
+  err: unknown,
+): Promise<HostedToolError | null> {
+  if (err instanceof HavenPaymentStateError && isX402PaymentWindowExpired(err.state)) {
+    return paymentWindowExpiredError(err.state)
+  }
+  if (!(err instanceof HavenApiError) || err.statusCode !== 410) return null
+  try {
+    const status = await haven.getPaymentStatus(paymentId)
+    if (isX402PaymentWindowExpired(status)) return paymentWindowExpiredError(status)
+  } catch {
+    // Preserve the original API error if the status lookup cannot confirm this
+    // was an x402 funding-window expiry.
+  }
+  return null
+}
+
+function isX402PaymentWindowExpired(state: {
+  rail?: string
+  status?: string
+  phase?: string
+  nextAction?: string
+}): boolean {
+  return state.rail === 'x402' && (state.status === 'expired' || state.phase === 'expired')
+}
+
+function paymentWindowExpiredError(state: {
+  paymentId: string
+  status: string
+  phase: string
+  nextAction: string
+  rail: string
+  idempotencyKey?: string | null
+}): HostedToolError {
+  const idempotencyGuidance = state.idempotencyKey
+    ? ` Re-quote with haven_pay_mcp_tool using the same idempotency_key (${state.idempotencyKey}).`
+    : ' Re-quote with haven_pay_mcp_tool using the same idempotency_key from the original call.'
+  return new HostedToolError({
+    code: AgentPaymentFailureCode.PaymentWindowExpired,
+    message: `The x402 payment window expired before completion.${idempotencyGuidance}`,
+    statusCode: 410,
+    paymentId: state.paymentId,
+    status: state.status,
+    phase: state.phase,
+    nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+    rail: state.rail,
+    idempotencyKey: state.idempotencyKey,
+    retryWithNewQuote: true,
+    suggestedTool: 'haven_pay_mcp_tool',
+  })
 }
 
 /**
@@ -1026,6 +1166,22 @@ async function runTool<T>(fn: () => Promise<T>): Promise<ToolPayload<T>> {
 }
 
 function normalizeError(err: unknown): ToolFailure {
+  if (err instanceof HostedToolError) {
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      suggested_tool: err.suggestedTool,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      status: err.status,
+      phase: err.phase,
+      next_action: err.nextAction,
+      rail: err.rail,
+      idempotency_key: err.idempotencyKey,
+      retry_with_new_quote: err.retryWithNewQuote,
+    }
+  }
   if (err instanceof z.ZodError) {
     return {
       success: false,
@@ -1035,6 +1191,9 @@ function normalizeError(err: unknown): ToolFailure {
     }
   }
   if (err instanceof HavenPaymentStateError) {
+    if (isX402PaymentWindowExpired(err.state)) {
+      return normalizeError(paymentWindowExpiredError(err.state))
+    }
     return {
       success: false,
       code: err.code,
@@ -1042,6 +1201,10 @@ function normalizeError(err: unknown): ToolFailure {
       statusCode: err.statusCode,
       paymentId: err.paymentId,
       status: err.status,
+      phase: err.phase,
+      next_action: err.nextAction,
+      rail: err.state.rail,
+      idempotency_key: err.state.idempotencyKey,
     }
   }
   if (err instanceof HavenApiError) {

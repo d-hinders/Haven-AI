@@ -229,6 +229,8 @@ The enum values and JSON Schema fragments are exported from `@haven_ai/sdk`:
 import {
   AgentPaymentNextAction,
   AgentPaymentNextActionSchema,
+  AgentPaymentFailureCode,
+  AgentPaymentFailureCodeSchema,
   AgentPaymentPhase,
   AgentPaymentPhaseSchema,
   AgentPaymentRail,
@@ -277,6 +279,10 @@ Terminal from any non-confirmed phase:
    rejected → stop_and_tell_user
    failed   → stop_and_tell_user
    expired  → request_again_if_user_still_wants_it
+
+x402 tool-window failures:
+   expired funding/quote window → PAYMENT_WINDOW_EXPIRED → re-quote with same idempotency_key
+   merchant rejection after funding → MERCHANT_REJECTED_AFTER_FUNDING → haven_sweep_delegate
 ```
 
 ### `phase` reference
@@ -308,6 +314,18 @@ The merchant settlement leg of x402 (and the MPP retry) is the agent's own reque
 | `retry_original_x402_request` | Resume this payment id and retry the original x402 request with the merchant payment header. Do not start a new merchant session. |
 | `stop_and_tell_user` | Stop retrying and tell the user the payment failed or was rejected. |
 | `request_again_if_user_still_wants_it` | The request expired; ask again only if the user still wants the payment. |
+| `payment_window_expired` | The x402 funding/quote window expired. Re-quote the same paid MCP tool call with the same `idempotency_key`, then sign the fresh `payload_hash`. |
+| `sweep_stranded_funds` | A funding leg succeeded but the merchant/protocol leg did not settle. Stop retrying and use `haven_sweep_delegate` to recover stranded delegate funds. |
+
+### Machine-readable recovery codes
+
+Hosted MCP and signer tools also return stable `code` values on recoverable x402 failures:
+
+| `code` | Meaning | Agent recovery |
+|--------|---------|----------------|
+| `PRICE_EXCEEDS_MAX` | The merchant-authoritative x402 price is above the caller's `max_amount` cap. No funding transfer was created. | Tell the user the live price exceeded the cap and retry only after they confirm a higher `max_amount`. |
+| `PAYMENT_WINDOW_EXPIRED` | The funding/quote window closed before `haven_x402_sign_header`, `haven_submit`, or `haven_complete_mcp_tool` could finish. | Re-run `haven_pay_mcp_tool` with the same `idempotency_key`, then sign and complete the fresh quote. Payloads include `retry_with_new_quote: true`. |
+| `MERCHANT_REJECTED_AFTER_FUNDING` | Haven's funding leg succeeded, but the merchant rejected the paid retry. | Stop retrying the merchant and call `haven_sweep_delegate` so the user can recover stranded delegate USDC. |
 
 ## Payments above the on-chain allowance
 

@@ -18,6 +18,12 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('haven_get_payment_status')
     expect(HAVEN_SKILL_MD).toContain('retry_original_x402_request')
     expect(HAVEN_SKILL_MD).toContain('mcp_transport')
+    expect(HAVEN_SKILL_MD).toContain('expires_at')
+    expect(HAVEN_SKILL_MD).toContain('PAYMENT_WINDOW_EXPIRED')
+    expect(HAVEN_SKILL_MD).toContain('MERCHANT_REJECTED_AFTER_FUNDING')
+    expect(HAVEN_SKILL_MD).toContain('PRICE_EXCEEDS_MAX')
+    expect(HAVEN_SKILL_MD).toContain('local Haven signer')
+    expect(HAVEN_SKILL_MD).not.toContain('Haven signs')
   })
 
   it('has valid skill frontmatter and the expected folder name', () => {

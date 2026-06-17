@@ -10,15 +10,19 @@ export { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 export {
   AgentPaymentPhase,
   AgentPaymentNextAction,
+  AgentPaymentFailureCode,
   AgentPaymentRail,
   AGENT_PAYMENT_PHASE_VALUES,
   AGENT_PAYMENT_NEXT_ACTION_VALUES,
+  AGENT_PAYMENT_FAILURE_CODE_VALUES,
   AGENT_PAYMENT_RAIL_VALUES,
   AgentPaymentPhaseDescriptions,
   AgentPaymentNextActionDescriptions,
+  AgentPaymentFailureCodeDescriptions,
   AgentPaymentRailDescriptions,
   AgentPaymentPhaseSchema,
   AgentPaymentNextActionSchema,
+  AgentPaymentFailureCodeSchema,
   AgentPaymentRailSchema,
 } from './types.js'
 

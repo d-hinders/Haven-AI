@@ -1960,6 +1960,7 @@ export const openapiSpec = {
           { $ref: '#/components/schemas/SignablePaymentIntent' },
           {
             type: 'object',
+            required: ['x402_expected_auth'],
             properties: {
               chain_id: { type: 'integer' },
               safe_address: address,
@@ -1969,6 +1970,20 @@ export const openapiSpec = {
               to: address,
               merchant_to: { anyOf: [address, { type: 'null' }] },
               resource_url: { type: 'string', format: 'uri' },
+              x402_expected_auth: {
+                type: 'object',
+                required: ['version', 'message', 'signature', 'signer'],
+                properties: {
+                  version: { type: 'integer', enum: [1] },
+                  message: {
+                    type: 'string',
+                    description: 'Haven-signed expected x402 context. Includes expiresAt when the funding window is time-bound.',
+                  },
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+                  signer: address,
+                },
+                additionalProperties: false,
+              },
             },
           },
         ],

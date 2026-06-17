@@ -1,4 +1,6 @@
 import {
+  AgentPaymentFailureCode,
+  AgentPaymentNextAction,
   HavenApiError,
   HavenError,
   HavenSigningError,
@@ -53,6 +55,7 @@ const x402ExpectedSchema = z.object({
   amount: z.string().min(1),
   asset: z.string().min(1),
   network: z.string().min(1),
+  expires_at: z.string().min(1).optional(),
   auth: z.object({
     version: z.literal(1),
     message: z.string().min(1),
@@ -96,7 +99,8 @@ const SIGN_DESCRIPTION = [
   'Sign an unsigned Haven payment hash with the local delegate key. The delegate key never leaves',
   'this process. Pass the payload_hash returned by haven_pay or haven_pay_x402_quote.',
   'For x402, also pass x402_expected from haven_pay_x402_quote; the signer records it locally',
-  'and returns { signature, x402_binding }. Hand signature to haven_submit, then pass x402_binding',
+  'and returns { signature, x402_binding }. x402_expected includes expires_at; sign before that',
+  'window closes. Hand signature to haven_submit, then pass x402_binding',
   'to haven_x402_sign_header. For plain SafeTransfer payments, just pass payload_hash and',
   'relay the returned signature via haven_submit.',
 ].join(' ')
@@ -106,7 +110,8 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   'The delegate key stays local — only the signed header crosses any boundary.',
   'Pass the payment_required from the original merchant 402 response and the x402_binding',
   'returned by haven_sign. The signer validates the merchant, amount, resource, asset, and',
-  'network against the recorded funding context before signing, and rejects mismatches.',
+  'network against the recorded funding context before signing, checks expires_at when present,',
+  'and rejects mismatches or expired payment windows.',
   'Returns { payment_header, accepted }. Set X-PAYMENT: <payment_header> on your retry to the',
   'merchant. Only call after haven_submit has confirmed the funding step (nextAction=none or',
   'the funding tx has a confirmed status).',
@@ -138,6 +143,10 @@ export interface ToolFailure {
   code: string
   message: string
   statusCode?: number
+  paymentId?: string
+  next_action?: string
+  retry_with_new_quote?: boolean
+  suggested_tool?: string
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
@@ -163,6 +172,7 @@ export function createToolHandlers(
               amount: args.x402_expected.amount,
               asset: args.x402_expected.asset,
               network: args.x402_expected.network,
+              expiresAt: args.x402_expected.expires_at,
               auth: args.x402_expected.auth,
             }
           : null
@@ -271,7 +281,20 @@ function normalizeError(err: unknown): ToolFailure {
     return { success: false, code: err.code, message: err.message, statusCode: err.statusCode }
   }
   if (err instanceof HavenError) {
-    return { success: false, code: err.code, message: err.message, statusCode: err.statusCode }
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      ...(err.code === AgentPaymentFailureCode.PaymentWindowExpired
+        ? {
+            next_action: AgentPaymentNextAction.PaymentWindowExpired,
+            retry_with_new_quote: true,
+            suggested_tool: 'haven_pay_mcp_tool',
+          }
+        : {}),
+    }
   }
   return {
     success: false,

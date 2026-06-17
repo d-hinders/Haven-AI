@@ -504,6 +504,7 @@ export class HavenClient {
 
     return {
       paymentId: raw.payment_id,
+      idempotencyKey,
       status: 'pending_signature',
       expiresAt: raw.expires_at,
       signData: raw.sign_data,

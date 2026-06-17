@@ -10,7 +10,7 @@ import {
   buildTransactionScopeSubtitle,
   buildTransactionSummary,
 } from '@/lib/transaction-scope'
-import type { TransactionFilterState } from '@/types/transactions'
+import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
 import {
   buildCsvFilename,
   downloadCsv,
@@ -18,6 +18,7 @@ import {
 } from '@/lib/transaction-csv'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
+import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -28,6 +29,7 @@ export default function TransactionsClient() {
   const searchParams = useSearchParams()
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
+  const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   const [filters, setFilters] = useState<TransactionFilterState>(() => {
     const direction = searchParams.get('direction')
     return {
@@ -246,8 +248,17 @@ export default function TransactionsClient() {
           hasActiveFilters={hasActiveFilters}
           onClearFilters={handleClearFilters}
           variant="page"
+          onSelect={setSelectedTx}
         />
       </Card>
+
+      <TransactionDetailPanel
+        transaction={selectedTx}
+        open={selectedTx !== null}
+        onClose={() => setSelectedTx(null)}
+        resolveAddress={resolveAddress}
+        safeNamesByAddress={safeNamesByAddress}
+      />
 
       {visibleTransactions.length > 0 && (
         <div className="mt-5 flex items-center justify-center">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, type ReactNode } from 'react'
+import { useState, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { getExplorerUrl } from '@/lib/chains'
 import { timeAgo } from '@/lib/format'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
@@ -91,6 +91,12 @@ interface TransactionsTableProps {
    * table since only it knows the filter context.
    */
   emptyState?: EmptyStateOverride
+  /**
+   * When provided, rows become clickable and invoke this with the selected
+   * transaction (e.g. to open a detail panel). Omitted on read-only contexts
+   * like dashboard previews, where rows stay non-interactive.
+   */
+  onSelect?: (tx: AggregatedTransaction) => void
 }
 
 // ─── Amount tone map ──────────────────────────────────────────────────────────
@@ -255,6 +261,7 @@ export default function TransactionsTable({
   density = 'comfortable',
   columns = ALL_COLUMNS,
   emptyState,
+  onSelect,
 }: TransactionsTableProps) {
   const [sort, setSort] = useState<SortState>({ column: 'date', direction: 'desc' })
   const isSticky = variant === 'page'
@@ -411,10 +418,26 @@ export default function TransactionsTable({
             const lifecycleBadge = machinePaymentLifecyclePresentation(tx)
             const statusBadge = transactionStatus(tx) ?? lifecycleBadge ?? tx.statusBadge
 
+            const selectable = Boolean(onSelect)
+
             return (
               <tr
                 key={`${tx.safeId}:${tx.hash}:${tx.type}:${index}`}
-                className="hover:bg-[var(--v2-table-row-hover)] transition-colors"
+                className={`transition-colors hover:bg-[var(--v2-table-row-hover)]${selectable ? ' cursor-pointer' : ''}`}
+                {...(selectable
+                  ? {
+                      role: 'button' as const,
+                      tabIndex: 0,
+                      'aria-label': `View details for ${transactionTitle(tx)}`,
+                      onClick: () => onSelect?.(tx),
+                      onKeyDown: (e: ReactKeyboardEvent<HTMLTableRowElement>) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onSelect?.(tx)
+                        }
+                      },
+                    }
+                  : {})}
               >
                 {showCol('direction') ? (
                   <td className={`w-9 px-4 ${padY} text-center`}>
@@ -473,7 +496,10 @@ export default function TransactionsTable({
                 ) : null}
 
                 {showCol('link') ? (
-                  <td className={`w-8 px-4 ${padY} text-center`}>
+                  <td
+                    className={`w-8 px-4 ${padY} text-center`}
+                    onClick={selectable ? (e) => e.stopPropagation() : undefined}
+                  >
                     {tx.explorerUrl !== null ? (
                       <ExternalDetailsLink href={tx.explorerUrl ?? getExplorerUrl(tx.chainId, 'tx', tx.hash)} />
                     ) : null}

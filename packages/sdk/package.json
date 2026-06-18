@@ -40,6 +40,11 @@
     "ai-agent"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d-hinders/Haven-AI.git",
+    "directory": "packages/sdk"
+  },
   "dependencies": {
     "ethers": "^6.13.0",
     "viem": "^2.51.0",

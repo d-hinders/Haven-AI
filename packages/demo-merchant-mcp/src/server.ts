@@ -1,19 +1,22 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { z } from 'zod'
 import { PRODUCTS, formatUsdc, type ProductId } from './products.js'
 import { generateInvoice, nextInvoiceNumber } from './invoice.js'
-import { verifyXPayment, buildPaymentRequired, PaymentError, type VerifiedPayment } from './x402.js'
+import { buildPaymentRequired, type SettledPayment } from './x402.js'
 import type { Address } from 'viem'
+
+const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
 
 export interface MerchantConfig {
   merchantAddress: Address
   baseUrl: string
-  /**
-   * Payment already verified by the HTTP-layer x402 middleware.
-   * When set, tool handlers skip their own `verifyXPayment` call —
-   * the nonce was already consumed and a second call would fail as replay.
-   */
-  preVerifiedPayment?: VerifiedPayment & { productId: ProductId }
+}
+
+const completedPurchases = new WeakMap<SettledPayment, string>()
+
+export function runWithSettledPayment<T>(payment: SettledPayment | undefined, fn: () => T): T {
+  return paymentStorage.run(payment, fn)
 }
 
 /** Build the demo merchant MCP server. */
@@ -59,90 +62,13 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   server.tool(
     'buy_vpn',
     'Köp ett NordShield VPN-abonnemang. Betalning via x402 (USDC på Base). ' +
-      'Kräver giltig X-PAYMENT header med EIP-3009 auktorisering.',
+      'Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header med EIP-3009 auktorisering.',
     {
       plan: z.enum(['basic', 'pro', 'ultra']).describe('VPN-plan att köpa'),
-      x_payment: z
-        .string()
-        .optional()
-        .describe(
-          'Base64-kodad X-PAYMENT header (x402 EIP-3009). Utelämna för att se prisinformation.',
-        ),
     },
-    async ({ plan, x_payment }) => {
+    async ({ plan }) => {
       const productId = `vpn_${plan}` as ProductId
-      const product = PRODUCTS[productId]
-      const resource = `${config.baseUrl}/mcp`
-
-      // Resolve payment: prefer HTTP-layer pre-verified result (nonce already consumed),
-      // fall back to tool-argument verification for clients that don't support HTTP 402.
-      let payment: VerifiedPayment | undefined =
-        config.preVerifiedPayment?.productId === productId
-          ? config.preVerifiedPayment
-          : undefined
-
-      if (!payment) {
-        if (!x_payment) {
-          const requirements = buildPaymentRequired({
-            merchantAddress: config.merchantAddress,
-            amountUsdc: product.price_usdc,
-            resource,
-            description: `${product.name} — 1 månads abonnemang`,
-          })
-          return {
-            content: [
-              {
-                type: 'text',
-                text:
-                  `Betalning krävs för ${product.name}.\n\n` +
-                  `Pris: $${formatUsdc(product.price_usdc)} USDC (inkl. 25% moms)\n` +
-                  `Betalningsadress: ${config.merchantAddress}\n` +
-                  `Nätverk: Base (chain ID 8453)\n\n` +
-                  `x402 betalningskrav:\n${JSON.stringify(requirements, null, 2)}\n\n` +
-                  `Skicka om anropet med x_payment-parametern ifylld med din X-PAYMENT header.`,
-              },
-            ],
-          }
-        }
-
-        try {
-          payment = await verifyXPayment(x_payment, config.merchantAddress, product.price_usdc)
-        } catch (err) {
-          const msg = err instanceof PaymentError ? err.message : 'Betalningsfel'
-          return {
-            isError: true,
-            content: [{ type: 'text', text: `Betalningsfel: ${msg}` }],
-          }
-        }
-      }
-
-      // Generate invoice
-      const invoiceNumber = nextInvoiceNumber()
-      const invoice = generateInvoice({
-        invoiceNumber,
-        productId,
-        buyerAddress: payment.from,
-        authorizationNonce: payment.nonce,
-      })
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text:
-              `✅ Köp bekräftat!\n\n` +
-              `Produkt:  ${product.name}\n` +
-              `Betalat:  $${formatUsdc(payment.value)} USDC\n` +
-              `Från:     ${payment.from}\n` +
-              `Nonce:    ${payment.nonce}\n\n` +
-              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              invoice.text +
-              `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-              `Fakturadetaljerna som JSON (för bokföring):\n` +
-              JSON.stringify(invoice.json, null, 2),
-          },
-        ],
-      }
+      return completePurchase(config, productId, `${PRODUCTS[productId].name} — 1 månads abonnemang`)
     },
   )
 
@@ -150,91 +76,75 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   server.tool(
     'buy_cloud_storage',
     'Köp CloudNest molnlagring. Betalning via x402 (USDC på Base). ' +
-      'Kräver giltig X-PAYMENT header med EIP-3009 auktorisering.',
+      'Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header med EIP-3009 auktorisering.',
     {
       tier: z.enum(['50gb', '200gb', '1tb']).describe('Lagringskapacitet att köpa'),
-      x_payment: z
-        .string()
-        .optional()
-        .describe(
-          'Base64-kodad X-PAYMENT header (x402 EIP-3009). Utelämna för att se prisinformation.',
-        ),
     },
-    async ({ tier, x_payment }) => {
+    async ({ tier }) => {
       const productId = `storage_${tier}` as ProductId
-      const product = PRODUCTS[productId]
-      const resource = `${config.baseUrl}/mcp`
-
-      // Resolve payment: prefer HTTP-layer pre-verified result, fall back to tool-argument path.
-      let payment: VerifiedPayment | undefined =
-        config.preVerifiedPayment?.productId === productId
-          ? config.preVerifiedPayment
-          : undefined
-
-      if (!payment) {
-        if (!x_payment) {
-          const requirements = buildPaymentRequired({
-            merchantAddress: config.merchantAddress,
-            amountUsdc: product.price_usdc,
-            resource,
-            description: `${product.name} — 1 månads lagring`,
-          })
-          return {
-            content: [
-              {
-                type: 'text',
-                text:
-                  `Betalning krävs för ${product.name}.\n\n` +
-                  `Pris: $${formatUsdc(product.price_usdc)} USDC (inkl. 25% moms)\n` +
-                  `Betalningsadress: ${config.merchantAddress}\n` +
-                  `Nätverk: Base (chain ID 8453)\n\n` +
-                  `x402 betalningskrav:\n${JSON.stringify(requirements, null, 2)}\n\n` +
-                  `Skicka om anropet med x_payment-parametern ifylld med din X-PAYMENT header.`,
-              },
-            ],
-          }
-        }
-
-        try {
-          payment = await verifyXPayment(x_payment, config.merchantAddress, product.price_usdc)
-        } catch (err) {
-          const msg = err instanceof PaymentError ? err.message : 'Betalningsfel'
-          return {
-            isError: true,
-            content: [{ type: 'text', text: `Betalningsfel: ${msg}` }],
-          }
-        }
-      }
-
-      // Generate invoice
-      const invoiceNumber = nextInvoiceNumber()
-      const invoice = generateInvoice({
-        invoiceNumber,
-        productId,
-        buyerAddress: payment.from,
-        authorizationNonce: payment.nonce,
-      })
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text:
-              `✅ Köp bekräftat!\n\n` +
-              `Produkt:  ${product.name}\n` +
-              `Betalat:  $${formatUsdc(payment.value)} USDC\n` +
-              `Från:     ${payment.from}\n` +
-              `Nonce:    ${payment.nonce}\n\n` +
-              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              invoice.text +
-              `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-              `Fakturadetaljerna som JSON (för bokföring):\n` +
-              JSON.stringify(invoice.json, null, 2),
-          },
-        ],
-      }
+      return completePurchase(config, productId, `${PRODUCTS[productId].name} — 1 månads lagring`)
     },
   )
 
   return server
+}
+
+function completePurchase(config: MerchantConfig, productId: ProductId, description: string) {
+  const product = PRODUCTS[productId]
+  const resource = `${config.baseUrl}/mcp`
+  const payment = paymentStorage.getStore()
+
+  if (!payment || payment.productId !== productId) {
+    const requirements = buildPaymentRequired({
+      merchantAddress: config.merchantAddress,
+      amountUsdc: product.price_usdc,
+      resource,
+      description,
+    })
+    return {
+      isError: true,
+      content: [
+        {
+          type: 'text' as const,
+          text:
+            `Betalning krävs för ${product.name}.\n\n` +
+            `Pris: $${formatUsdc(product.price_usdc)} USDC (inkl. 25% moms)\n` +
+            `Betalningsadress: ${config.merchantAddress}\n` +
+            `Nätverk: Base (chain ID 8453)\n\n` +
+            `x402 betalningskrav:\n${JSON.stringify(requirements, null, 2)}\n\n` +
+            `Skicka om samma HTTP-anrop med PAYMENT-SIGNATURE eller X-PAYMENT header.`,
+        },
+      ],
+    }
+  }
+
+  const cachedText = completedPurchases.get(payment)
+  if (cachedText) {
+    return { content: [{ type: 'text' as const, text: cachedText }] }
+  }
+
+  const invoiceNumber = nextInvoiceNumber()
+  const invoice = generateInvoice({
+    invoiceNumber,
+    productId,
+    buyerAddress: payment.from,
+    authorizationNonce: payment.nonce,
+    txHash: payment.txHash,
+  })
+
+  const text =
+    `✅ Köp bekräftat!\n\n` +
+    `Produkt:  ${product.name}\n` +
+    `Betalat:  $${formatUsdc(payment.value)} USDC\n` +
+    `Från:     ${payment.from}\n` +
+    `Tx:       ${payment.txHash}\n` +
+    `Nonce:    ${payment.nonce}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    invoice.text +
+    `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `Fakturadetaljerna som JSON (för bokföring):\n` +
+    JSON.stringify(invoice.json, null, 2)
+
+  completedPurchases.set(payment, text)
+  return { content: [{ type: 'text' as const, text }] }
 }

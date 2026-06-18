@@ -3,8 +3,17 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isSupportedChain } from '../lib/chains.js'
 import { relaySafeDeploy } from '../lib/safe-deployer.js'
+import { getSafeDetails } from '../lib/safe-details.js'
+import {
+  buildAddOwnerTx,
+  buildRemoveOwnerTx,
+  LastOwnerError,
+  OwnerExistsError,
+  OwnerNotFoundError,
+} from '../lib/safe-owner-tx.js'
 
 const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+const APPROVER_TYPES = new Set(['eoa', 'passkey'])
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -32,6 +41,23 @@ interface DeploySafeBody {
 
 interface RenameSafeBody {
   name: string
+}
+
+interface ApproverTxBody {
+  action: 'add' | 'remove'
+  address: string
+}
+
+interface UpsertApproverBody {
+  address: string
+  type?: 'eoa' | 'passkey'
+  label?: string
+}
+
+interface ApproverMetadataRow {
+  address: string
+  type: 'eoa' | 'passkey'
+  label: string | null
 }
 
 // ── Routes ────────────────────────────────────────────────────────
@@ -283,4 +309,156 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
       return { success: true }
     },
   )
+
+  // ── Approvers (Safe owners) ─────────────────────────────────────
+  //
+  // Membership truth is on-chain (`getOwners()`); this metadata table only
+  // decorates owners with a label + type. Owner changes are Safe self-calls
+  // the *user* signs and relays via /safe-exec — Haven never signs them, so
+  // these endpoints construct + guard but never execute.
+
+  // GET /user/safes/:safeId/approvers — on-chain owners + stored metadata
+  app.get<{ Params: { safeId: string } }>(
+    '/:safeId/approvers',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const safe = await loadOwnedSafe(safeId(request), sub)
+      if (!safe) return reply.code(404).send({ error: 'Account not found' })
+
+      let details
+      try {
+        details = await getSafeDetails(safe.safe_address, safe.chain_id)
+      } catch {
+        return reply.code(502).send({ error: 'Could not read owners from the network. Try again.' })
+      }
+
+      const metadata = await pool.query<ApproverMetadataRow>(
+        `SELECT address, type, label FROM safe_approver_metadata WHERE safe_id = $1`,
+        [safe.id],
+      )
+      const byAddress = new Map(
+        metadata.rows.map((row) => [row.address.toLowerCase(), row]),
+      )
+
+      const approvers = details.owners.map((address) => {
+        const meta = byAddress.get(address.toLowerCase())
+        return {
+          address,
+          type: meta?.type ?? 'eoa',
+          label: meta?.label ?? null,
+        }
+      })
+
+      return { threshold: details.threshold, approvers }
+    },
+  )
+
+  // POST /user/safes/:safeId/approvers/tx — build the unsigned owner-change
+  // Safe self-call for the client to sign + relay. The last-owner guard lives
+  // here: a removal of the final owner is rejected before any tx is produced.
+  app.post<{ Params: { safeId: string }; Body: ApproverTxBody }>(
+    '/:safeId/approvers/tx',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const safe = await loadOwnedSafe(safeId(request), sub)
+      if (!safe) return reply.code(404).send({ error: 'Account not found' })
+
+      const action = request.body?.action
+      const address = typeof request.body?.address === 'string' ? request.body.address.trim() : ''
+      if (action !== 'add' && action !== 'remove') {
+        return reply.code(400).send({ error: 'action must be "add" or "remove"' })
+      }
+      if (!ETH_ADDRESS_RE.test(address)) {
+        return reply.code(400).send({ error: 'A valid approver address is required' })
+      }
+
+      let owners: string[]
+      try {
+        ;({ owners } = await getSafeDetails(safe.safe_address, safe.chain_id))
+      } catch {
+        return reply.code(502).send({ error: 'Could not read owners from the network. Try again.' })
+      }
+
+      try {
+        const tx =
+          action === 'add'
+            ? buildAddOwnerTx(safe.safe_address, owners, address)
+            : buildRemoveOwnerTx(safe.safe_address, owners, address)
+        return { chain_id: safe.chain_id, safe_address: safe.safe_address, tx }
+      } catch (err) {
+        if (err instanceof LastOwnerError) return reply.code(409).send({ error: err.message })
+        if (err instanceof OwnerExistsError) return reply.code(409).send({ error: err.message })
+        if (err instanceof OwnerNotFoundError) return reply.code(404).send({ error: err.message })
+        throw err
+      }
+    },
+  )
+
+  // POST /user/safes/:safeId/approvers — upsert approver metadata (label +
+  // type). Called after the client relays the on-chain add. Idempotent.
+  app.post<{ Params: { safeId: string }; Body: UpsertApproverBody }>(
+    '/:safeId/approvers',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const safe = await loadOwnedSafe(safeId(request), sub)
+      if (!safe) return reply.code(404).send({ error: 'Account not found' })
+
+      const address = typeof request.body?.address === 'string' ? request.body.address.trim() : ''
+      if (!ETH_ADDRESS_RE.test(address)) {
+        return reply.code(400).send({ error: 'A valid approver address is required' })
+      }
+      const type = request.body?.type ?? 'eoa'
+      if (!APPROVER_TYPES.has(type)) {
+        return reply.code(400).send({ error: 'type must be "eoa" or "passkey"' })
+      }
+      const label =
+        typeof request.body?.label === 'string' && request.body.label.trim()
+          ? request.body.label.trim().slice(0, 120)
+          : null
+
+      await pool.query(
+        `INSERT INTO safe_approver_metadata (safe_id, address, type, label)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (safe_id, LOWER(address))
+         DO UPDATE SET type = EXCLUDED.type, label = EXCLUDED.label, updated_at = NOW()`,
+        [safe.id, address, type, label],
+      )
+
+      return { success: true }
+    },
+  )
+
+  // DELETE /user/safes/:safeId/approvers/:address — drop metadata after the
+  // client relays the on-chain removal. The on-chain last-owner guard is
+  // enforced by /approvers/tx; this only cleans up the decoration row.
+  app.delete<{ Params: { safeId: string; address: string } }>(
+    '/:safeId/approvers/:address',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const safe = await loadOwnedSafe(safeId(request), sub)
+      if (!safe) return reply.code(404).send({ error: 'Account not found' })
+
+      await pool.query(
+        `DELETE FROM safe_approver_metadata WHERE safe_id = $1 AND LOWER(address) = LOWER($2)`,
+        [safe.id, request.params.address],
+      )
+
+      return { success: true }
+    },
+  )
+}
+
+function safeId(request: { params: unknown }): string {
+  return (request.params as { safeId: string }).safeId
+}
+
+async function loadOwnedSafe(
+  id: string,
+  userId: string,
+): Promise<{ id: string; safe_address: string; chain_id: number } | null> {
+  const result = await pool.query<{ id: string; safe_address: string; chain_id: number }>(
+    `SELECT id, safe_address, chain_id FROM user_safes WHERE id = $1 AND user_id = $2`,
+    [id, userId],
+  )
+  return result.rows[0] ?? null
 }

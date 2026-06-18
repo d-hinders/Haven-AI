@@ -209,6 +209,14 @@ Multiple independent layers, all need to be compromised for funds to be at risk:
 - Use conventional commit messages
 - Document public API endpoints with JSDoc or OpenAPI
 
+## Releasing & publishing packages
+
+Four packages are published to npm: `@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect` (the connector the dashboard hands out via `npx @haven_ai/connect@alpha`). `mcp-server`, `backend`, and `frontend` are NOT on npm — they deploy from `main` (Railway/Vercel).
+
+- **Never run `npm publish` by hand.** To cut a release, run `npm run release:bump -- <version>` (e.g. `0.1.17-alpha.0`), commit on a release branch, open a PR, and merge. The **Publish packages** workflow (`.github/workflows/publish.yml`) publishes on merge to `main`, choosing the dist-tag from the version (prerelease → `alpha`, stable → `latest`) and skipping any version already on npm.
+- **Never hand-edit the version fields or cross-package dep pins.** `release-bump.mjs` is the single source of truth — it updates all four `package.json` versions, the internal dep pins, and the source version constants (`MCP_VERSION`, `SIGNER_VERSION`, `HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION`, connect's `runtime-manifest`) atomically, then verifies the connect bundle. Pinning an internal `@haven_ai/*` dep to a wildcard (`*`, `latest`, `workspace:*`) is forbidden — it ships green in-repo but resolves to the wrong version on a user's machine.
+- Full procedure: [`scripts/README.md`](scripts/README.md). Runtime-compatibility checklist: [`docs/operations/mcp-runtime-compatibility.md`](docs/operations/mcp-runtime-compatibility.md).
+
 ## UI surface hierarchy
 
 No nested filled cards. To group content inside a `Card`, use `Card.Section` (white-on-white hairline) or `Card.Section divided` (row list); for list items use the `Row` primitive. Tinted surfaces (`--v2-surface`, `--v2-surface-2`) are reserved for callouts/banners, table headers (`--v2-table-header-bg`), the `anchor` Card elevation, chips and code blocks, and overlay surfaces (tooltips, popovers, dropdowns, modal subgrids). Don't reach for a grey inner wrapper to "group" siblings — it creates a phantom surface tier and fights the parent Card's lift. See `/design-system` → "Surface hierarchy" for the ❌/✅ comparison.

@@ -23,6 +23,11 @@ artifacts for shipping that feature; they now live in
 The current connect mechanism is covered by docs 6 (hosted MCP connect flow) and
 7 (edge signer).
 
+Forward-looking investigations (not current architecture) live in
+[`docs/research/`](../research/) — e.g.
+[smart-account-native x402 settlement](../research/x402-smart-account-settlement.md),
+the spike to remove the delegate funding leg.
+
 ## Regenerating exports
 
 Mermaid is the source of truth. Regenerate PNG/SVG after editing when the

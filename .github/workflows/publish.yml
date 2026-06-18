@@ -1,0 +1,104 @@
+name: Publish packages
+
+# Merge-triggered npm publish for the four npx-installed packages.
+#
+# Fires on push to main when any published package changes. For each package it
+# compares the package.json version against what is live on npm and publishes
+# only the ones whose version is not yet on the registry. The version bump
+# itself (produced by `npm run release:bump` and merged via a reviewed PR) is
+# the gate — npm rejects republishing an existing version, so a normal commit
+# that does not bump a version is a no-op here.
+#
+# Requires an NPM_TOKEN repo secret (an npm automation/publish token with
+# write access to the @haven_ai scope).
+#
+# mcp-server, backend, and frontend are intentionally excluded: they are not
+# published to npm (mcp-server is Docker-deployed; backend/frontend deploy to
+# Railway/Vercel from main).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/sdk/**'
+      - 'packages/signer/**'
+      - 'packages/mcp/**'
+      - 'packages/connect/**'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish changed packages to npm
+    # Never run from a fork — publishing requires the upstream secret.
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build published packages in dependency order
+        # dist is not committed (it ships via the `files` field) and there are
+        # no prepublishOnly hooks, so the tarball is only correct if we build
+        # here. The dist-wipe + ordered build mirrors release-bump.mjs and
+        # avoids the build-order bug where connect's tsup inlines a stale
+        # MCP_VERSION from a leftover dist (connect's build also runs
+        # verify-connect-bundle.mjs, which fails the job if that happens).
+        run: |
+          rm -rf packages/sdk/dist packages/signer/dist packages/mcp/dist packages/connect/dist
+          npm run build -w packages/sdk
+          npm run build -w packages/signer
+          npm run build -w packages/mcp
+          npm run build -w packages/connect
+
+      - name: Publish packages whose version is not yet on npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          published_any=false
+
+          for pkg in sdk signer mcp connect; do
+            name=$(node -p "require('./packages/$pkg/package.json').name")
+            version=$(node -p "require('./packages/$pkg/package.json').version")
+
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "✓ $name@$version already on npm — skipping"
+              continue
+            fi
+
+            # Derive the dist-tag from the version: a prerelease such as
+            # 0.1.16-alpha.0 publishes under its prerelease label (alpha),
+            # a stable 0.2.0 publishes under latest.
+            case "$version" in
+              *-*)
+                tag="${version#*-}"   # alpha.0
+                tag="${tag%%.*}"      # alpha
+                ;;
+              *)
+                tag="latest"
+                ;;
+            esac
+
+            echo "→ Publishing $name@$version with --tag $tag"
+            npm publish -w "packages/$pkg" --tag "$tag" --access public
+            published_any=true
+          done
+
+          if [ "$published_any" = "false" ]; then
+            echo "No package versions to publish — all up to date on npm."
+          fi

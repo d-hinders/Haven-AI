@@ -77,7 +77,7 @@ export async function createHavenMcpServer(options: HavenMcpServerOptions = {}):
  * `agent_tool_invocations` rows are always attributed to the right tool.
  */
 export const MCP_NAME = '@haven_ai/mcp'
-export const MCP_VERSION = '0.1.15-alpha.0'
+export const MCP_VERSION = '0.1.16-alpha.0'
 
 export function buildMcpServer(haven: HavenClient): McpServer {
   const server = new McpServer({

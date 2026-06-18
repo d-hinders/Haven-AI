@@ -1,21 +1,29 @@
 # @haven_ai/demo-merchant-mcp
 
 Internal x402 demo merchant MCP server for Haven. It exposes a small fake
-merchant catalog, gates purchases with standard x402 `X-PAYMENT`, verifies
-Base USDC EIP-3009 payments, and returns Swedish invoice-style output.
+merchant catalog, gates purchases with standard x402 `PAYMENT-SIGNATURE`,
+self-settles Base USDC EIP-3009 authorizations to the configured merchant
+wallet, and returns Swedish invoice-style output.
 
-This package is a technical demo, not a production merchant settlement,
-facilitator, acquiring, fiat/card, or merchant-of-record product. Funds do not
-flow through Haven.
+This package is a technical demo for a merchant-controlled wallet, not a Haven
+custody, facilitator, acquiring, fiat/card, third-party merchant settlement, or
+merchant-of-record product. Funds do not flow through Haven.
 
 ## What It Demonstrates
 
 - MCP tools that return x402 payment requirements when no valid payment header
   is present.
 - Base USDC x402 `exact` payments using EIP-3009 authorization.
+- Standard x402 headers: `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, and
+  `PAYMENT-RESPONSE`.
+- Haven compatibility: `X-PAYMENT` is accepted as an alias for
+  `PAYMENT-SIGNATURE` while Haven SDK clients transition.
+- Merchant self-settlement with `transferWithAuthorization`; the submitter key
+  only pays gas and does not need to be the receiving wallet.
 - Tiny test prices for repeatable agent-payment demos.
-- Duplicate/nonce handling and payment verification before tool handlers run.
-- Swedish invoice text and JSON output after a verified purchase.
+- In-process duplicate/nonce handling and payment verification before tool
+  handlers run.
+- Swedish invoice text and JSON output after a settled purchase.
 
 ## Products
 
@@ -32,6 +40,8 @@ flow through Haven.
 
 ```sh
 MERCHANT_ADDRESS=0xYourBaseUsdcReceivingWallet \
+BASE_RPC_URL=https://base-mainnet.example/rpc \
+SETTLEMENT_PRIVATE_KEY=0xGasFundedSubmitterPrivateKey \
 BASE_URL=http://localhost:3456 \
 PORT=3456 \
 npm run dev -w packages/demo-merchant-mcp
@@ -43,6 +53,9 @@ Endpoints:
 - `GET /healthz` - liveness
 
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
+`BASE_RPC_URL` must point to Base mainnet. `SETTLEMENT_PRIVATE_KEY` is the
+gas-funded key that submits USDC `transferWithAuthorization`; it does not need
+to be the receiving wallet and should not hold user or agent funds.
 
 ## Test With Haven
 
@@ -51,8 +64,12 @@ Endpoints:
 3. Ask the agent to list products, inspect the price, and buy one product.
 4. The merchant returns an x402 challenge.
 5. Haven funds and tracks the budget-constrained leg when needed.
-6. The agent signs the merchant `X-PAYMENT` header and retries the same request.
+6. The agent signs the merchant payment header and retries the same request
+   with `PAYMENT-SIGNATURE` or Haven's compatible `X-PAYMENT` alias.
+7. The merchant submits `transferWithAuthorization`, waits for confirmation,
+   returns `PAYMENT-RESPONSE`, and includes the settlement tx in the invoice.
 
-Keep the amount tiny and demo-only. Do not use this package as a real merchant
-acceptance or settlement surface without separate product, legal, and security
-review under [`docs/regulatory/casp-risk-guardrails.md`](../../docs/regulatory/casp-risk-guardrails.md).
+Keep the amount tiny and demo-only. Do not use this package for third-party
+merchant acceptance, merchant dashboards, fees, fiat/card, swaps, refunds, or
+production settlement without separate product, legal, and security review
+under [`docs/regulatory/casp-risk-guardrails.md`](../../docs/regulatory/casp-risk-guardrails.md).

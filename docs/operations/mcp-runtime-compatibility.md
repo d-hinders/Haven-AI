@@ -30,6 +30,15 @@ Keep this table in sync with that file.
 
 ## Release Checklist
 
+> Publishing itself is automated: `npm run release:bump -- <version>` produces
+> the bump, and merging that to `main` triggers the **Publish packages**
+> workflow (`.github/workflows/publish.yml`), which builds and publishes the
+> changed packages. Do not run `npm publish` by hand. See
+> [`scripts/README.md`](../../scripts/README.md) and the README's
+> [Releasing npm packages](../../README.md#releasing-npm-packages) section. The
+> checks below still matter — they are what CI enforces on the release PR
+> before merge.
+
 - Update `packages/connect/src/runtime-manifest.ts` whenever `connect`, `mcp`,
   `sdk`, or `signer` compatibility changes.
 - Keep `packages/connect/package.json` and `packages/mcp/package.json` pinned

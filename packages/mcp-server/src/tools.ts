@@ -380,7 +380,7 @@ export function createToolHandlers(
   haven: HavenClient,
 ): Record<HostedToolName, (input: unknown) => Promise<ToolPayload>> {
   return {
-    haven_get_agent: async () => runTool(async () => haven.getAgent()),
+    haven_get_agent: async () => runTool(async () => haven.getAgentSummary()),
 
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
 

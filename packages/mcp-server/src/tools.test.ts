@@ -249,6 +249,52 @@ const AGENT_RESPONSE = {
   chain_id: 8453,
 }
 
+const AGENT_ALLOWANCES_RESPONSE = {
+  agent_id: 'agt_1',
+  safe_address: '0xSafe',
+  delegate_address: '0xDelegate',
+  chain_id: 8453,
+  allowances: [{
+    id: 'allowance-1',
+    // Real Base USDC address (6 decimals) so remainingDisplay exercises the
+    // decimals lookup rather than the unknown-token atomic fallback.
+    token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    token_symbol: 'USDC',
+    configured_amount: '10000',
+    reset_period_min: 60,
+    onchain: {
+      amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500',
+      reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
+    },
+  }],
+}
+
+// ── haven_get_agent (one-shot bootstrap) ──────────────────────────────────────
+
+describe('haven_get_agent', () => {
+  it('returns identity + readiness + live remaining allowance in one call', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: AGENT_ALLOWANCES_RESPONSE },
+    })
+
+    const result = ok<{
+      id: string
+      status: string
+      readiness: string
+      allowances: Array<Record<string, unknown>>
+    }>(await handlers().haven_get_agent({}))
+
+    expect(result.data.id).toBe('agt_1')
+    expect(result.data.readiness).toBe('ready')
+    expect(result.data.allowances[0]).toMatchObject({
+      tokenSymbol: 'USDC',
+      remainingAtomic: '7500',
+      remainingDisplay: '0.0075 USDC',
+    })
+  })
+})
+
 // ── haven_pay_x402_quote ──────────────────────────────────────────────────────
 
 describe('haven_pay_x402_quote', () => {

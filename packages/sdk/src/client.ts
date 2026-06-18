@@ -39,6 +39,9 @@ import type {
   MachinePaymentReceipt,
   RawMachinePaymentAuthorizeResponse,
   HavenAgent,
+  HavenAgentSummary,
+  HavenAgentAllowanceSummary,
+  HavenAgentReadiness,
   HavenAllowanceSummary,
   HavenPaymentReceipt,
   RawHavenAgent,
@@ -106,10 +109,35 @@ const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
 function formatAtomicAmount(atomic: bigint, decimals: number): string {
+  // Defensive: negative atomics can't occur today (remaining is floored at 0n)
+  // but would otherwise produce corrupt output like "0.000...-5".
+  if (atomic < 0n) return '0.0'
   const s = atomic.toString().padStart(decimals + 1, '0')
   const intPart = s.slice(0, s.length - decimals) || '0'
   const fracPart = s.slice(s.length - decimals).replace(/0+$/, '') || '0'
   return `${intPart}.${fracPart}`
+}
+
+/** Parse an atomic-amount string, defaulting to 0n on malformed input. */
+function safeBigInt(value: string): bigint {
+  try {
+    return BigInt(value)
+  } catch {
+    return 0n
+  }
+}
+
+/**
+ * Derive the agent's spend-readiness from its raw status and per-token remaining
+ * allowance. See {@link HavenAgentReadiness} for the contract.
+ */
+function deriveReadiness(
+  status: string,
+  allowances: ReadonlyArray<{ remainingAtomic: string }>,
+): HavenAgentReadiness {
+  if (status !== 'active') return 'revoked'
+  const hasSpendable = allowances.some((a) => safeBigInt(a.remainingAtomic) > 0n)
+  return hasSpendable ? 'ready' : 'needs_approval'
 }
 
 // ── MCP-over-x402 transport (issue #315) ──────────────────────────
@@ -596,6 +624,41 @@ export class HavenClient {
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
     }
+  }
+
+  /**
+   * One-shot "am I ready?" bootstrap: identity + live spend authority + a
+   * readiness signal, in a single call. Folds {@link getAgent} and
+   * {@link getAllowances} together and derives a {@link HavenAgentReadiness}
+   * so an agent can answer "who am I and can I pay right now" at session start
+   * without two round trips and manual assembly.
+   */
+  async getAgentSummary(): Promise<HavenAgentSummary> {
+    const [agent, allowanceSummary] = await Promise.all([
+      this.getAgent(),
+      this.getAllowances(),
+    ])
+
+    const allowances: HavenAgentAllowanceSummary[] = allowanceSummary.allowances.map((a) => {
+      // Only format a human amount when we KNOW the token's decimals. Guessing a
+      // default (e.g. 6) for an unregistered token would misformat an 18-decimal
+      // balance by 12 orders of magnitude and mislead the agent about what it can
+      // spend — so for unknown tokens we surface the exact atomic value, flagged.
+      const token = resolveTokenFromAddress(a.tokenAddress)
+      const remainingDisplay = token
+        ? `${formatAtomicAmount(safeBigInt(a.onchain.remaining), token.decimals)} ${a.tokenSymbol}`
+        : `${a.onchain.remaining} ${a.tokenSymbol} (atomic; unknown decimals)`
+      return {
+        tokenSymbol: a.tokenSymbol,
+        remainingAtomic: a.onchain.remaining,
+        remainingDisplay,
+        configuredAmount: a.configuredAmount,
+        resetPeriodMin: a.resetPeriodMin,
+        isResetPending: a.onchain.isResetPending,
+      }
+    })
+
+    return { ...agent, readiness: deriveReadiness(agent.status, allowances), allowances }
   }
 
   /**

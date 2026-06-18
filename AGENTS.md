@@ -76,6 +76,10 @@ When opening or reviewing a non-trivial PR, report merge readiness explicitly in
 
 Green CI is necessary but not sufficient for changes that touch money movement, agent authority, generated credential artifacts, SDK payment APIs, x402/MPP flows, or shared contracts.
 
+## Releasing npm Packages
+
+`@haven_ai/sdk`, `signer`, `mcp`, and `connect` publish to npm automatically when a version bump lands on `main` (the **Publish packages** workflow). Never run `npm publish` by hand, and never hand-edit package versions or cross-package dep pins — run `npm run release:bump -- <version>`, which updates them atomically and verifies the connect bundle, then open a PR and merge. `mcp-server`/`backend`/`frontend` are not npm-published. Details: `scripts/README.md` and the README's "Releasing npm packages" section.
+
 ## Agentic Workflow
 
 When a user asks to build a feature, improve a UX flow from feedback, or fix a bug from a report, use `docs/contributing/ai-agent-workflow.md`.

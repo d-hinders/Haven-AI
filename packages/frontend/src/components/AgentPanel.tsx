@@ -707,6 +707,9 @@ export default function AgentPanel() {
 
   const [connect2Open, setConnect2Open] = useState(false)
   const [firstAgentSetup, setFirstAgentSetup] = useState(false)
+  // True while the post-approval poll waits for a freshly-signed agent to flip
+  // active — drives the "finalizing" placeholder. See `pollForNewAgent`.
+  const [finalizingAgent, setFinalizingAgent] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
@@ -731,9 +734,17 @@ export default function AgentPanel() {
   // ref so they can be cancelled on unmount, preventing spurious API calls and
   // setState on an unmounted component when the user navigates away within 2s.
   const onChainRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Cancellation token for the post-setup poll (see `pollForNewAgent`). Held in
+  // a ref so an in-flight poll is cancelled on unmount or when superseded.
+  const newAgentPollRef = useRef<{ cancelled: boolean } | null>(null)
   useEffect(() => {
     return () => {
       if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
+      if (newAgentPollRef.current) newAgentPollRef.current.cancelled = true
+      // Null the ref so a still-resolving poll's `finally` guard
+      // (`newAgentPollRef.current === token`) fails and skips setState on the
+      // unmounted component.
+      newAgentPollRef.current = null
     }
   }, [])
 
@@ -776,6 +787,52 @@ export default function AgentPanel() {
     }, 30_000)
     timers.set(key, timer)
   }, [])
+  // After the user signs an agent's rules, the on-chain allowance lands a moment
+  // before the backend flips the agent `pending_approval` → `active` and the
+  // `/agents` GET starts returning it. A single refetch races that flip and
+  // usually loses, leaving the new agent invisible until a manual reload. Poll
+  // `/agents` silently until the delegate shows up (or the same 30s window the
+  // delegate suppression uses) so the agent appears on its own — no reload, and
+  // never a pending-looking row. While we wait, `finalizingAgent` surfaces a
+  // placeholder in place of the empty state so the first-agent setup doesn't
+  // look like nothing happened.
+  const pollForNewAgent = useCallback(
+    async (delegateAddress: string | null | undefined) => {
+      // Supersede any in-flight poll from an earlier setup.
+      if (newAgentPollRef.current) newAgentPollRef.current.cancelled = true
+      const token = { cancelled: false }
+      newAgentPollRef.current = token
+
+      const key = delegateAddress?.toLowerCase()
+      // Without a delegate (setup created/cancelled, manual fallback) there's
+      // nothing specific to wait for — a single refresh is all we can do, and
+      // we never show the "finalizing" placeholder.
+      if (!key) {
+        await refetch({ silent: true })
+        return
+      }
+      setFinalizingAgent(true)
+      try {
+        let latest = (await refetch({ silent: true })) ?? []
+        const hasAgent = (list: Agent[]) =>
+          list.some(
+            (agent) =>
+              agent.status !== 'revoked' && agent.delegate_address?.toLowerCase() === key,
+          )
+        const deadline = Date.now() + 30_000
+        while (!token.cancelled && !hasAgent(latest) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+          if (token.cancelled) return
+          latest = (await refetch({ silent: true })) ?? []
+        }
+      } finally {
+        // Only the current poll clears the flag — a superseding poll has already
+        // re-armed it for the agent it's now waiting on.
+        if (newAgentPollRef.current === token) setFinalizingAgent(false)
+      }
+    },
+    [refetch],
+  )
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
     [agents],
@@ -1043,8 +1100,35 @@ export default function AgentPanel() {
         </div>
       )}
 
+      {/* Finalizing placeholder — shown while the post-approval poll waits for a
+          freshly-signed agent to flip active, so the empty state doesn't flash
+          back as if nothing happened. `finalizingAgent` is set for every setup,
+          but this only renders when the list is empty (first agent); for
+          subsequent agents the existing list stays visible and the new one just
+          appends. */}
+      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && finalizingAgent && (
+        <EmptyState
+          tone="neutral"
+          icon={
+            <svg
+              className="animate-spin"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          }
+          title="Finalizing your agent…"
+          body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
+        />
+      )}
+
       {/* Empty state */}
-      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
+      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && !finalizingAgent && (
         <EmptyState
           icon={<BotIcon size={24} />}
           title="No agents yet"
@@ -1166,7 +1250,9 @@ export default function AgentPanel() {
           // Suppress the brief "Unmanaged Delegate" race window before
           // refreshing — see comment on `unmanagedDelegates`.
           markDelegateRecent(info?.delegateAddress)
-          refetch()
+          // Poll until the new agent lands so it appears without a manual
+          // reload — see comment on `pollForNewAgent`.
+          void pollForNewAgent(info?.delegateAddress)
         }}
       />
 

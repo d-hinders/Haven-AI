@@ -322,4 +322,106 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
     render(<AgentPanelFresh />)
     expect(screen.getByText('Unmanaged Delegate')).toBeInTheDocument()
   })
+
+  it('keeps polling /agents after approval until the new agent lands', async () => {
+    // Regression: a single refetch races the backend flipping the agent
+    // `pending_approval` → `active`, so the agent stayed invisible until a
+    // manual reload. The poll must retry until the delegate shows up.
+    const agent = baseAgent({
+      id: 'agent-new',
+      name: 'Fresh agent',
+      delegate_address: NEW_DELEGATE,
+    })
+    const refetch = vi
+      .fn()
+      .mockResolvedValueOnce([]) // immediate refetch — backend hasn't flipped yet
+      .mockResolvedValueOnce([]) // poll #1 — still pending_approval
+      .mockResolvedValue([agent]) // poll #2 — agent is now active
+    mockUseAgents.mockReturnValue({
+      agents: [],
+      loading: false,
+      revokeAgent: vi.fn(),
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      refetch,
+    })
+
+    vi.doMock('../ConnectAgent2Modal', () => ({
+      default: (props: { onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void }) => (
+        <button
+          type="button"
+          data-testid="fake-setup-updated"
+          onClick={() => props.onSetupUpdated?.({ delegateAddress: NEW_DELEGATE })}
+        >
+          fire onSetupUpdated
+        </button>
+      ),
+    }))
+    const { default: AgentPanelFresh } = await import('../AgentPanel')
+    render(<AgentPanelFresh />)
+
+    fireEvent.click(screen.getByTestId('fake-setup-updated'))
+
+    // Immediate refetch fires synchronously as the poll starts, and the
+    // finalizing placeholder takes over from the empty/unmanaged state.
+    await vi.advanceTimersByTimeAsync(1)
+    expect(refetch).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Finalizing your agent…')).toBeInTheDocument()
+
+    // Poll #1 (2s later): list still empty, so the poll continues.
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(refetch).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('Finalizing your agent…')).toBeInTheDocument()
+
+    // Poll #2 (2s later): the agent has landed, so the poll stops.
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(refetch).toHaveBeenCalledTimes(3)
+
+    // Once the agent is present there is nothing left to wait for, and the
+    // finalizing placeholder has cleared.
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(refetch).toHaveBeenCalledTimes(3)
+    expect(screen.queryByText('Finalizing your agent…')).not.toBeInTheDocument()
+  })
+
+  it('shows a finalizing placeholder while waiting for the first agent to land', async () => {
+    // Backend never flips within the window here — we only care that the
+    // placeholder appears in place of the empty state and clears when the poll
+    // gives up, so the first-agent setup never looks like nothing happened.
+    const refetch = vi.fn().mockResolvedValue([])
+    mockUseAgents.mockReturnValue({
+      agents: [],
+      loading: false,
+      revokeAgent: vi.fn(),
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      refetch,
+    })
+
+    vi.doMock('../ConnectAgent2Modal', () => ({
+      default: (props: { onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void }) => (
+        <button
+          type="button"
+          data-testid="fake-setup-updated"
+          onClick={() => props.onSetupUpdated?.({ delegateAddress: NEW_DELEGATE })}
+        >
+          fire onSetupUpdated
+        </button>
+      ),
+    }))
+    const { default: AgentPanelFresh } = await import('../AgentPanel')
+    render(<AgentPanelFresh />)
+
+    fireEvent.click(screen.getByTestId('fake-setup-updated'))
+    await vi.advanceTimersByTimeAsync(1)
+    expect(screen.getByText('Finalizing your agent…')).toBeInTheDocument()
+    expect(screen.queryByText('No agents yet')).not.toBeInTheDocument()
+
+    // The poll gives up after 30s; the placeholder must clear so the panel
+    // doesn't get stuck showing "finalizing" forever.
+    await vi.advanceTimersByTimeAsync(31_000)
+    expect(screen.queryByText('Finalizing your agent…')).not.toBeInTheDocument()
+  })
 })

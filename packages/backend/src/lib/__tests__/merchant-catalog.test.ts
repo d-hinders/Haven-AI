@@ -127,39 +127,73 @@ describe('refreshCatalog', () => {
       resource_url: 'https://api.merchant.example/paid',
       rail: 'x402', protocol: 'http', tool_name: null,
       price_display: null, price_atomic: null, asset: null, network: null,
-      status: 'active', verified_at: null,
+      status: 'active', verified_at: null, consecutive_failures: 0,
       created_at: '', updated_at: '',
       ...overrides,
     }
   }
 
-  it('marks reachable entries active with fresh prices and dead ones degraded', async () => {
+  it('refreshes reachable entries and clears their failure streak', async () => {
     const queries: Array<[string, unknown[] | undefined]> = []
     const db = {
       query: async (sql: string, values?: unknown[]) => {
         queries.push([sql, values])
         if (sql.startsWith('SELECT')) {
-          return { rows: [
-            rowFor({ id: 'cat-live' }),
-            rowFor({ id: 'cat-dead', resource_url: 'https://dead.example/x' }),
-          ] }
+          return { rows: [rowFor({ id: 'cat-live', consecutive_failures: 2 })] }
         }
         return { rows: [] }
       },
     }
-    const fetchMock = vi.fn().mockImplementation(async (url: string) =>
-      String(url).includes('dead')
-        ? new Response('gone', { status: 404 })
-        : new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) } }),
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) } }),
     )
 
     const result = await refreshCatalog(db, fetchMock as typeof fetch)
-    expect(result).toEqual({ verified: 1, degraded: 1 })
+    expect(result).toEqual({ verified: 1, degraded: 0 })
 
     const liveUpdate = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-live')
+    expect(liveUpdate?.[0]).toContain('consecutive_failures = 0')
     expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '$0.02 USDC', 'USDC', 'eip155:8453'])
-    const deadUpdate = queries.find(([sql, v]) => sql.includes(`'degraded'`) && v?.[0] === 'cat-dead')
-    expect(deadUpdate).toBeDefined()
+  })
+
+  it('does not degrade an entry on a single transient miss (hysteresis)', async () => {
+    const queries: Array<[string, unknown[] | undefined]> = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        queries.push([sql, values])
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-dead', resource_url: 'https://dead.example/x' })] }
+        }
+        return { rows: [] }
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response('gone', { status: 404 }))
+
+    const result = await refreshCatalog(db, fetchMock as typeof fetch)
+    // First miss: counted but still active — no spurious warning.
+    expect(result).toEqual({ verified: 0, degraded: 0 })
+    const update = queries.find(([sql, v]) => v?.[0] === 'cat-dead')
+    expect(update?.[1]).toEqual(['cat-dead', 1, 'active'])
+  })
+
+  it('degrades only after the failure streak crosses the threshold', async () => {
+    const queries: Array<[string, unknown[] | undefined]> = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        queries.push([sql, values])
+        if (sql.startsWith('SELECT')) {
+          // Already missed twice; this run is the third consecutive miss.
+          return { rows: [rowFor({ id: 'cat-dead', resource_url: 'https://dead.example/x', consecutive_failures: 2 })] }
+        }
+        return { rows: [] }
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response('gone', { status: 404 }))
+
+    const result = await refreshCatalog(db, fetchMock as typeof fetch)
+    expect(result).toEqual({ verified: 0, degraded: 1 })
+    const update = queries.find(([sql, v]) => v?.[0] === 'cat-dead')
+    expect(update?.[1]).toEqual(['cat-dead', 3, 'degraded'])
   })
 
   it('skips delisted entries entirely', async () => {

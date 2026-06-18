@@ -84,24 +84,54 @@ The dist-wipe ensures tsup starts from a clean slate and picks up the freshly-bu
 
 ### What the script does NOT do
 
-- **Publish** — publishing to npm is a separate explicit step (see *After the bump*, below). Bumping creates a reviewable diff; publishing is the dangerous irreversible action.
+- **Publish** — publishing is decoupled from the bump. Bumping only produces a reviewable version diff; the actual `npm publish` happens automatically when that diff lands on `main` (see *After the bump*, below).
 - Bump `mcp-server`, `backend`, or `frontend` — those are not published to npm.
 - Update the dashboard's `npx` install command — that's handled by the `@alpha` dist-tag (#311).
 
 ### After the bump
 
+Publishing is automated by the **Publish packages** workflow
+(`.github/workflows/publish.yml`). You do not run `npm publish` by hand.
+
 ```sh
 # 1. Review the diff.
 git diff --stat
 
-# 2. Commit.
+# 2. Commit on a branch and open a PR.
+git checkout -b release/<new-version>
 git add packages/sdk/package.json packages/signer/package.json \
         packages/mcp/package.json packages/mcp/src/server.ts \
         packages/connect/package.json packages/connect/src/runtime-manifest.ts \
         package-lock.json
-git commit -m "chore: bump to <new-version>"
+git commit -m "chore(release): bump all published packages to <new-version>"
+git push -u origin release/<new-version>
+gh pr create --base main --fill
 
-# 3. Publish (separate step — review the diff above first).
+# 3. Merge the PR. On push to main, the Publish packages workflow rebuilds
+#    dist in dependency order and publishes only the packages whose
+#    package.json version is not yet on npm. The dist-tag is derived from the
+#    version: a prerelease (x.y.z-alpha.N) -> --tag alpha, a stable x.y.z ->
+#    --tag latest. A commit that does not change a version is a no-op.
+```
+
+The workflow authenticates with the `NPM_TOKEN` repo secret (a granular npm
+token scoped to the `@haven_ai` scope with read+write). When it expires,
+publishes fail at the publish step — regenerate the token and update the
+secret under **Settings → Secrets and variables → Actions**.
+
+#### Manual fallback
+
+Only if the workflow is unavailable (e.g. expired token mid-incident) and a
+release is urgent, publish by hand from a clean checkout of the merged commit —
+the same versions the workflow would have published:
+
+```sh
+npm ci
+rm -rf packages/{sdk,signer,mcp,connect}/dist
+npm run build -w packages/sdk
+npm run build -w packages/signer
+npm run build -w packages/mcp
+npm run build -w packages/connect   # runs verify-connect-bundle.mjs
 npm publish -w packages/sdk     --tag alpha
 npm publish -w packages/signer  --tag alpha
 npm publish -w packages/mcp     --tag alpha

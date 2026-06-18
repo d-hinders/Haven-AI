@@ -73,6 +73,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     }
   }
 
+  log('Warming up your connection to Haven…')
   const setup = await api.resolveSetup({
     setupToken: options.setupToken,
     connectorVersion,
@@ -81,14 +82,14 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   printSetupSummary(setup, log)
 
   await preflightStorage({ baseDir: options.credentialsDir, warn: log })
-  log('Checked local credential storage.')
+  log('Checked local credential storage — all clear.')
 
   const localKey = generateKey()
   const localApiKey = generateLocalApiKey()
-  log('Generated local signing key.')
-  log('Generated local Haven API key.')
+  log('Minting a fresh signing key and API key — both stay on this machine.')
   const proofSignature = await localKey.signChallenge(setup.challenge.message)
 
+  log('Introducing your agent to Haven…')
   const registration = await api.registerSetup({
     setupToken: options.setupToken,
     connectorVersion,
@@ -109,6 +110,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
 
   log(`Registered signing address with Haven: ${shortAddress(registration.delegate_address)}.`)
 
+  log('Tucking your credentials away safely on disk…')
   const credentialPaths = await writeCredentials({
     baseDir: options.credentialsDir,
     agentId: registration.agent_id,
@@ -153,8 +155,21 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     ackSigner: options.ackSigner,
     ackLocalTools: options.ackLocalTools,
     localMcp: options.localMcp,
-  })
+  }, { onProgress: log })
   printRuntimeInstall(runtimeInstall, log)
+
+  // Tell the user they're done and what to do next BEFORE the telemetry call —
+  // the install-status report is best-effort and must not sit between them and
+  // the "you're finished" signal. The agent who reported the setup couldn't tell
+  // whether the connector had finished; this affirms it explicitly. Only claim
+  // completion when the runtime install actually succeeded — an errorCode means
+  // manual steps remain (e.g. an unrecognized runtime), so don't overstate it.
+  if (runtimeInstall.errorCode) {
+    log('Haven setup needs a couple more steps on this machine — see the notes above.')
+  } else {
+    log('Haven setup on this machine is complete.')
+  }
+  printNextSteps(runtimeInstall, log)
 
   try {
     await api.updateInstallStatus(registration.setup_id, localApiKey, {
@@ -177,20 +192,6 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     })
   } catch (err) {
     log(`Could not report install status to Haven: ${err instanceof Error ? err.message : String(err)}`)
-  }
-
-  log('Return to Haven to approve the agent rules.')
-  if (runtimeInstall.restartRequired) {
-    // Desktop GUI runtimes really do need a restart — the MCP server only
-    // loads at app launch. For CLI / session runtimes (Claude Code, Codex
-    // CLI) the new MCP often appears in-session via the deferred-tool
-    // mechanism, so soften the instruction there to avoid training users to
-    // restart unnecessarily.
-    if (runtimeRequiresHardRestart(runtimeInstall.runtime)) {
-      log('After approval, restart this agent so it can load Haven tools.')
-    } else {
-      log('After approval, Haven tools should appear in your next message. If they don\'t, restart this agent to load them.')
-    }
   }
 
   return {
@@ -231,5 +232,34 @@ function printRuntimeInstall(result: RuntimeInstallResult, log: (message: string
     log('Configured local Haven signer.')
   } else {
     log('Local Haven signer still needs runtime setup.')
+  }
+}
+
+/**
+ * The two remaining gates after the local connector finishes: approve the rules
+ * in Haven, then (for most runtimes) restart so the freshly-written MCP config
+ * is loaded. The approval line states the dependency explicitly — tools never
+ * appear before approval, restart or not — because an agent that had already
+ * approved still couldn't tell whether missing tools meant "not approved" or
+ * "needs restart."
+ */
+function printNextSteps(result: RuntimeInstallResult, log: (message: string) => void): void {
+  log('Next: approve the agent rules in Haven. No Haven tools appear until you approve — restart or not.')
+  if (result.restartRequired) {
+    if (runtimeRequiresHardRestart(result.runtime)) {
+      // Desktop GUI runtimes: the MCP server is bound to app launch.
+      log('After you approve, restart this agent so it can load Haven tools.')
+    } else {
+      // CLI / session runtimes (Claude Code, Codex CLI). The MCP config is
+      // written after the session starts and these runtimes only load MCP
+      // servers at startup, so a restart is required — not optional. An earlier
+      // softened "should appear in your next message" hint was misleading: a
+      // user who had already approved still saw no tools until they restarted.
+      log('After you approve, restart this agent — your current session won\'t load the Haven tools until you do.')
+    }
+  } else {
+    // Hot-reload runtimes (Cursor, VS Code) genuinely pick up new MCP servers
+    // without a restart.
+    log('After you approve, the Haven tools should appear in this runtime shortly.')
   }
 }

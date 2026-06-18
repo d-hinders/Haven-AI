@@ -56,6 +56,10 @@ describe('installRuntime', () => {
     expect(codexConfig).not.toContain(API_KEY)
     expect(codexConfig).not.toContain(PRIVATE_KEY)
     expect(ack).toContain('"ack"')
+    // Restart guidance lives only in runConnect's printNextSteps now — the Codex
+    // writer must not re-inject it (it previously did, contradicting that copy).
+    expect(result.messages.join('\n')).not.toContain('should appear')
+    expect(result.messages.join('\n')).not.toMatch(/restart/i)
     expect(result.messages.join('\n')).not.toContain(API_KEY)
     expect(result.messages.join('\n')).not.toContain(PRIVATE_KEY)
   })
@@ -178,6 +182,10 @@ describe('installRuntime', () => {
       args: ['mcp', 'get', 'haven'],
     })
     expect(result.messages.join('\n')).toContain('Verified Claude Code MCP entry.')
+    // Restart/approval guidance is owned solely by runConnect's printNextSteps.
+    // The config writer must not inject its own (previously contradicting) copy.
+    expect(result.messages.join('\n')).not.toContain('should appear')
+    expect(result.messages.join('\n')).not.toMatch(/restart/i)
     expect(JSON.stringify(commands)).not.toContain('Authorization')
     expect(JSON.stringify(commands)).not.toContain(API_KEY)
     expect(JSON.stringify(commands)).not.toContain(PRIVATE_KEY)

@@ -116,23 +116,33 @@ describe('runConnect', () => {
       probeResult: 'local_stdio_mcp_ready',
       nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
     })
-    expect(installRuntime).toHaveBeenCalledWith(expect.objectContaining({
-      apiKey: 'sk_agent_supersecret',
-      hostedMcpUrl: 'https://mcp.haven.example/v1',
-      identityPath: '/tmp/haven-connect-test/agent-1/identity.json',
-      signerPath: '/tmp/haven-connect-test/agent-1/signer.json',
-    }))
+    expect(installRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'sk_agent_supersecret',
+        hostedMcpUrl: 'https://mcp.haven.example/v1',
+        identityPath: '/tmp/haven-connect-test/agent-1/identity.json',
+        signerPath: '/tmp/haven-connect-test/agent-1/signer.json',
+      }),
+      // Progress callback is threaded through so the long install/probe steps
+      // emit live heartbeats instead of going silent.
+      expect.objectContaining({ onProgress: expect.any(Function) }),
+    )
 
     const output = logs.join('\n')
     expect(output).toContain('Fetched Haven setup for Research Agent')
     expect(output).toContain('Registered signing address with Haven')
     expect(output).not.toContain(PRIVATE_KEY)
     expect(output).not.toContain('sk_agent_supersecret')
-    // CLI / session runtimes (Claude Code here) get the softened copy —
-    // restart is presented as a fallback because the new MCP often appears
-    // in-session via the deferred-tool mechanism.
-    expect(output).toContain('Haven tools should appear in your next message')
-    expect(output).not.toMatch(/restart this agent so it can load Haven tools/)
+    // The connector affirms completion so the agent knows it finished, then
+    // states the approval gate explicitly before any restart instruction.
+    expect(output).toContain('Haven setup on this machine is complete')
+    expect(output).toContain('No Haven tools appear until you approve')
+    // CLI / session runtimes (Claude Code here) require a restart — the MCP
+    // config is written after the session starts. The old softened "should
+    // appear in your next message" copy misled an already-approved agent.
+    expect(output).toContain('restart this agent')
+    expect(output).toContain('won\'t load the Haven tools until you do')
+    expect(output).not.toContain('should appear in your next message')
   })
 
   it('rejects --local on runtimes that do not support local MCP', async () => {
@@ -219,5 +229,87 @@ describe('runConnect', () => {
     const output = logs.join('\n')
     expect(output).toContain('restart this agent so it can load Haven tools')
     expect(output).not.toContain('should appear in your next message')
+  })
+
+  it('still reports completion when the install-status telemetry call fails', async () => {
+    // The status report is best-effort and must not gate the user-facing
+    // "you're done + next steps" output, nor make runConnect reject.
+    const logs: string[] = []
+    const installRuntime = vi.fn(async () => ({
+      runtime: 'claude-code' as const,
+      runtimeMcpMode: 'local_stdio' as const,
+      hostedMcpConfigured: false,
+      localSignerConfigured: true,
+      localMcpConfigured: true,
+      localMcpAcknowledged: true,
+      probeResult: 'local_stdio_mcp_ready',
+      restartRequired: true,
+      nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+      configTarget: 'Claude Code MCP config',
+      messages: ['Updated local Haven MCP entry with Claude Code.'],
+    }))
+    const api: ConnectApiClient = {
+      resolveSetup: vi.fn(async () => ({
+        setup_id: 'setup-3',
+        status: 'awaiting_connection',
+        agent: { name: 'Telemetry Agent', description: 'Pays for APIs' },
+        haven_wallet: {
+          id: 'safe-1',
+          name: 'Main Haven wallet',
+          address: '0x2222222222222222222222222222222222222222',
+          chain_id: 100,
+          network: 'Gnosis',
+        },
+        agent_budget: [],
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        challenge: {
+          id: 'challenge-3',
+          message: 'Haven Connect Agent 2\nsetup_id: setup-3\nchallenge: ghi',
+          expires_at: '2099-01-01T00:00:00.000Z',
+        },
+      })),
+      registerSetup: vi.fn(async (input) => ({
+        setup_id: 'setup-3',
+        agent_id: 'agent-3',
+        status: 'connected_local',
+        agent_status: 'pending_approval',
+        api_key_prefix: input.apiKeyPrefix,
+        api_key_scope: 'setup_pending',
+        delegate_address: input.delegateAddress.toLowerCase(),
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        next_action: 'return_to_haven_for_wallet_approval',
+      })),
+      updateInstallStatus: vi.fn(async () => {
+        throw new Error('network down')
+      }),
+    }
+
+    const result = await runConnect({
+      setupToken: 'hv_setup_test_telemetry',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-telemetry',
+    }, {
+      api,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_telemetry',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-telemetry'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-telemetry/agent-3',
+        identityPath: '/tmp/haven-connect-test-telemetry/agent-3/identity.json',
+        signerPath: '/tmp/haven-connect-test-telemetry/agent-3/signer.json',
+        agentPath: '/tmp/haven-connect-test-telemetry/agent-3/agent.json',
+      })),
+      installRuntime,
+      log: (message) => logs.push(message),
+    })
+
+    expect(result.agentId).toBe('agent-3')
+    const output = logs.join('\n')
+    // Completion + next-steps still printed despite the telemetry failure…
+    expect(output).toContain('Haven setup on this machine is complete')
+    expect(output).toContain('No Haven tools appear until you approve')
+    // …and the failure is surfaced quietly rather than thrown.
+    expect(output).toContain('Could not report install status to Haven')
   })
 })

@@ -1,18 +1,12 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { usePreferences } from '@/hooks/usePreferences'
-import { type OwnerAlias } from '@/lib/api'
-import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { truncate } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { PageHeader } from '@/components/ui/PageHeader'
+import ManageApprovers from '@/components/settings/ManageApprovers'
 
-const MAX_NAME_LENGTH = 80
-const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 
 function Section({
   title,
@@ -102,177 +96,11 @@ function ComingSoonToggle({ label }: { label: string }) {
   )
 }
 
-function CopyAddressButton({ address }: { address: string }) {
-  const [copied, setCopied] = useState(false)
-
-  async function copyAddress() {
-    try {
-      await navigator.clipboard.writeText(address)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* ignore */
-    }
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => void copyAddress()}
-      className="text-xs font-medium text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]"
-    >
-      {copied ? 'Copied' : 'Copy'}
-    </button>
-  )
-}
-
-function OwnerRow({
-  owner,
-  type,
-  onRename,
-}: {
-  owner: OwnerAlias
-  type: 'Passkey' | 'Connected wallet' | 'Wallet'
-  onRename: (ownerAddress: string, name: string) => Promise<void>
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(owner.name ?? '')
-  const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    if (!editing) {
-      setDraft(owner.name ?? '')
-    }
-  }, [editing, owner.name])
-
-  async function saveAlias() {
-    const normalized = validateOwnerName(draft)
-    if (!normalized) {
-      setError('Enter a name using 80 characters or fewer.')
-      return
-    }
-
-    setSaving(true)
-    setError('')
-    try {
-      await onRename(owner.owner_address, normalized)
-      setEditing(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not save this approver name.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="px-6 py-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-            {editing ? (
-              <div className="w-full max-w-sm">
-                <Input
-                  value={draft}
-                  onChange={(event) => {
-                    setDraft(event.target.value)
-                    setError('')
-                  }}
-                  aria-label={`Name for ${truncate(owner.owner_address)}`}
-                  aria-invalid={Boolean(error)}
-                />
-                {error ? (
-                  <p className="mt-1.5 text-xs text-[var(--v2-danger)]">{error}</p>
-                ) : null}
-              </div>
-            ) : (
-              <p className="text-sm font-medium text-[var(--v2-ink)]">
-                {owner.name ?? truncate(owner.owner_address)}
-              </p>
-            )}
-            <StatusPill tone={type === 'Wallet' ? 'neutral' : 'brand'}>{type}</StatusPill>
-            {!editing && owner.accounts.map((account) => {
-              const chain = getChainConfig(account.chain_id ?? DEFAULT_CHAIN_ID)
-              return (
-                <span
-                  key={`${account.id}-${owner.owner_address}`}
-                  className="rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-0.5 text-xs text-[var(--v2-ink-2)]"
-                >
-                  {account.name} · {chain.name}
-                </span>
-              )
-            })}
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            {!editing && owner.name ? (
-              <span className="font-mono text-xs text-[var(--v2-ink-3)]">
-                {truncate(owner.owner_address)}
-              </span>
-            ) : null}
-            <CopyAddressButton address={owner.owner_address} />
-            <a
-              href={getExplorerUrl(owner.accounts[0]?.chain_id ?? DEFAULT_CHAIN_ID, 'address', owner.owner_address)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
-            >
-              View on explorer
-            </a>
-          </div>
-        </div>
-        {editing ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="tertiary"
-              size="sm"
-              disabled={saving}
-              onClick={() => {
-                setEditing(false)
-                setDraft(owner.name ?? '')
-                setError('')
-              }}
-            >
-              Cancel
-            </Button>
-            <Button size="sm" disabled={saving} onClick={() => void saveAlias()}>
-              {saving ? 'Saving...' : 'Save'}
-            </Button>
-          </div>
-        ) : (
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-              {owner.name ? 'Edit' : 'Name'}
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function validateOwnerName(value: string): string | null {
-  const normalized = value.trim().replace(/\s+/g, ' ')
-
-  if (!normalized) return null
-  if (normalized.length > MAX_NAME_LENGTH || CONTROL_CHAR_RE.test(value)) return null
-
-  return normalized
-}
-
 export default function SettingsClient() {
-  const { user, passkeys = [] } = useAuth()
-  const {
-    owners,
-    loading: ownersLoading,
-    error: ownersError,
-    partialFailure: ownersPartialFailure,
-    renameOwner,
-  } = useOwnerDirectory()
+  const { passkeys = [] } = useAuth()
   const { currency, setCurrency, saving } = usePreferences()
 
   const hasPasskey = passkeys.length > 0
-  const passkeyAddresses = new Set(passkeys.map((passkey) => passkey.signer_address.toLowerCase()))
-  const walletAddress = user?.wallet_address?.toLowerCase()
 
   return (
     <div className="max-w-4xl">
@@ -343,59 +171,9 @@ export default function SettingsClient() {
 
         <Section
           title="Approvers"
-          description="Wallets and passkeys that can approve actions on your linked Haven accounts."
+          description="Wallets and passkeys that can approve actions, managed per account. Threshold stays at 1."
         >
-          {ownersLoading ? (
-            <div className="px-6 py-4">
-              <p className="text-sm text-[var(--v2-ink-3)]">Loading approvers...</p>
-            </div>
-          ) : owners.length > 0 ? (
-            <>
-              {ownersPartialFailure ? (
-                <div className="px-6 py-3">
-                  <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
-                    Some approvers could not be refreshed. Showing the wallets and passkeys Haven could verify.
-                  </div>
-                </div>
-              ) : null}
-              {ownersError ? (
-                <div className="px-6 py-3">
-                  <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-                    {ownersError}
-                  </div>
-                </div>
-              ) : null}
-              {owners.map((owner) => {
-                const normalizedOwner = owner.owner_address.toLowerCase()
-                const type = passkeyAddresses.has(normalizedOwner)
-                  ? 'Passkey'
-                  : walletAddress === normalizedOwner
-                    ? 'Connected wallet'
-                    : 'Wallet'
-
-                return (
-                  <OwnerRow
-                    key={owner.owner_address}
-                    owner={owner}
-                    type={type}
-                    onRename={renameOwner}
-                  />
-                )
-              })}
-            </>
-          ) : ownersError ? (
-            <div className="px-6 py-3">
-              <div className="rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-                {ownersError}
-              </div>
-            </div>
-          ) : (
-            <div className="px-6 py-4">
-              <p className="text-sm text-[var(--v2-ink-3)]">
-                Link a Haven account to review and name its approvers.
-              </p>
-            </div>
-          )}
+          <ManageApprovers />
         </Section>
 
         <Section

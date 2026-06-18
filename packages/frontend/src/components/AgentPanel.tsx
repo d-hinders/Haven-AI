@@ -618,33 +618,56 @@ function UnmanagedDelegateCard({
   allowances,
   chainTimeSec,
   chainId = DEFAULT_CHAIN_ID,
+  pendingHavenSetup = false,
 }: {
   delegate: string
   allowances: AllowanceInfo[]
   chainTimeSec: number | null
   chainId?: number
+  /**
+   * True when this delegate was set up through Haven in this session but its
+   * agent hasn't flipped active yet (slow backend confirmation). It isn't
+   * "unmanaged" — it's mid-setup — so we reword and de-escalate the tone rather
+   * than implying it was created outside Haven.
+   */
+  pendingHavenSetup?: boolean
 }) {
+  // Neutral tone while a Haven setup is still confirming; warning tone for a
+  // genuinely external delegate that needs the user's attention.
+  const accentText = pendingHavenSetup ? 'text-[var(--v2-ink-2)]' : 'text-[var(--v2-warning)]'
+  const containerCls = pendingHavenSetup
+    ? 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
+    : 'border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)]'
   return (
-    <div className="rounded-[10px] border border-dashed border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-5">
+    <div className={`rounded-[10px] border border-dashed p-5 ${containerCls}`}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-white text-[var(--v2-warning)] flex items-center justify-center">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 9v4M12 17h.01" />
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-            </svg>
+          <div className={`w-9 h-9 rounded-xl bg-white flex items-center justify-center ${accentText}`}>
+            {pendingHavenSetup ? (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+            ) : (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 9v4M12 17h.01" />
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              </svg>
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-                Unmanaged Delegate
+                {pendingHavenSetup ? 'Finishing agent setup' : 'Unmanaged Delegate'}
               </h3>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-white text-[var(--v2-warning)]">
-                network only
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-white ${accentText}`}>
+                {pendingHavenSetup ? 'confirming' : 'network only'}
               </span>
             </div>
-            <p className="text-xs text-[var(--v2-warning)] mt-0.5">
-              This delegate was set up outside Haven
+            <p className={`text-xs mt-0.5 ${accentText}`}>
+              {pendingHavenSetup
+                ? 'Haven is still confirming these rules on-chain — this agent will appear here shortly.'
+                : 'This delegate was set up outside Haven'}
             </p>
           </div>
         </div>
@@ -652,14 +675,14 @@ function UnmanagedDelegateCard({
 
       {/* Delegate address */}
       <div className="mb-4">
-        <p className="mb-1 text-xs font-medium text-[var(--v2-warning)]">
+        <p className={`mb-1 text-xs font-medium ${accentText}`}>
           Signing address
         </p>
         <p className="text-xs font-mono text-[var(--v2-ink-2)]">
           {truncate(delegate)}
           <button
             onClick={() => navigator.clipboard.writeText(delegate)}
-            className="ml-2 text-[var(--v2-warning)] hover:text-[var(--v2-ink)] transition-colors"
+            className={`ml-2 transition-colors hover:text-[var(--v2-ink)] ${accentText}`}
             title="Copy address"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -673,7 +696,7 @@ function UnmanagedDelegateCard({
       {/* On-chain allowances */}
       {allowances.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-medium text-[var(--v2-warning)]">Agent budget</p>
+          <p className={`text-xs font-medium ${accentText}`}>Agent budget</p>
           {allowances.map((info) => (
             <AllowanceBar key={info.token} info={info} chainTimeSec={chainTimeSec} chainId={chainId} />
           ))}
@@ -707,6 +730,13 @@ export default function AgentPanel() {
 
   const [connect2Open, setConnect2Open] = useState(false)
   const [firstAgentSetup, setFirstAgentSetup] = useState(false)
+  // True while the post-approval poll waits for a freshly-signed agent to flip
+  // active — drives the "finalizing" placeholder. See `pollForNewAgent`.
+  const [finalizingAgent, setFinalizingAgent] = useState(false)
+  // True when the poll exhausted its deadline without the agent appearing —
+  // drives the "taking longer than expected" fallback so the user isn't left
+  // staring at a bare empty state with no explanation. See `pollForNewAgent`.
+  const [finalizeTimedOut, setFinalizeTimedOut] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
@@ -731,9 +761,24 @@ export default function AgentPanel() {
   // ref so they can be cancelled on unmount, preventing spurious API calls and
   // setState on an unmounted component when the user navigates away within 2s.
   const onChainRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Cancellation token for the post-setup poll (see `pollForNewAgent`). Held in
+  // a ref so an in-flight poll is cancelled on unmount or when superseded.
+  const newAgentPollRef = useRef<{ cancelled: boolean } | null>(null)
+  // Delegate of the most recent poll, so the timeout fallback's "Check again"
+  // can re-poll the same agent without needing the user to redo setup.
+  const lastPollDelegateRef = useRef<string | null>(null)
+  // Delegates the user set up through Haven this session. If the backend is slow
+  // enough that one reappears on-chain before its agent flips active, this lets
+  // us label it "finishing setup" rather than "unmanaged / set up outside Haven".
+  const havenSetupDelegatesRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     return () => {
       if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
+      if (newAgentPollRef.current) newAgentPollRef.current.cancelled = true
+      // Null the ref so a still-resolving poll's `finally` guard
+      // (`newAgentPollRef.current === token`) fails and skips setState on the
+      // unmounted component.
+      newAgentPollRef.current = null
     }
   }, [])
 
@@ -776,6 +821,65 @@ export default function AgentPanel() {
     }, 30_000)
     timers.set(key, timer)
   }, [])
+  // After the user signs an agent's rules, the on-chain allowance lands a moment
+  // before the backend flips the agent `pending_approval` → `active` and the
+  // `/agents` GET starts returning it. A single refetch races that flip and
+  // usually loses, leaving the new agent invisible until a manual reload. Poll
+  // `/agents` silently until the delegate shows up (or the same 30s window the
+  // delegate suppression uses) so the agent appears on its own — no reload, and
+  // never a pending-looking row. While we wait, `finalizingAgent` surfaces a
+  // placeholder in place of the empty state so the first-agent setup doesn't
+  // look like nothing happened.
+  const pollForNewAgent = useCallback(
+    async (delegateAddress: string | null | undefined) => {
+      // Supersede any in-flight poll from an earlier setup.
+      if (newAgentPollRef.current) newAgentPollRef.current.cancelled = true
+      const token = { cancelled: false }
+      newAgentPollRef.current = token
+
+      const key = delegateAddress?.toLowerCase()
+      // Without a delegate (setup created/cancelled, manual fallback) there's
+      // nothing specific to wait for — a single refresh is all we can do, and
+      // we never show the "finalizing" placeholder.
+      if (!key) {
+        await refetch({ silent: true })
+        return
+      }
+      lastPollDelegateRef.current = delegateAddress ?? null
+      havenSetupDelegatesRef.current.add(key)
+      setFinalizingAgent(true)
+      setFinalizeTimedOut(false)
+      try {
+        let latest = (await refetch({ silent: true })) ?? []
+        const hasAgent = (list: Agent[]) =>
+          list.some(
+            (agent) =>
+              agent.status !== 'revoked' && agent.delegate_address?.toLowerCase() === key,
+          )
+        const deadline = Date.now() + 30_000
+        while (!token.cancelled && !hasAgent(latest) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+          if (token.cancelled) return
+          latest = (await refetch({ silent: true })) ?? []
+        }
+        // Exhausted the window without the agent landing (not cancelled/found):
+        // surface the fallback so the user knows it may still be confirming.
+        if (!token.cancelled && !hasAgent(latest)) {
+          setFinalizeTimedOut(true)
+        }
+      } finally {
+        // Only the current poll clears the flag — a superseding poll has already
+        // re-armed it for the agent it's now waiting on.
+        if (newAgentPollRef.current === token) setFinalizingAgent(false)
+      }
+    },
+    [refetch],
+  )
+  // Clear a stale timeout fallback once any agent is present — e.g. the agent
+  // landed on a later refresh, or another agent was added in the meantime.
+  useEffect(() => {
+    if (finalizeTimedOut && agents.length > 0) setFinalizeTimedOut(false)
+  }, [agents.length, finalizeTimedOut])
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
     [agents],
@@ -1043,8 +1147,77 @@ export default function AgentPanel() {
         </div>
       )}
 
+      {/* Finalizing placeholder — shown while the post-approval poll waits for a
+          freshly-signed agent to flip active, so the empty state doesn't flash
+          back as if nothing happened. `finalizingAgent` is set for every setup,
+          but this only renders when the list is empty (first agent); for
+          subsequent agents the existing list stays visible and the new one just
+          appends. */}
+      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && finalizingAgent && (
+        <EmptyState
+          tone="neutral"
+          icon={
+            <svg
+              className="animate-spin"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          }
+          title="Finalizing your agent…"
+          body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
+        />
+      )}
+
+      {/* Timeout fallback — the poll exhausted its window without the agent
+          appearing. Rather than dropping silently to the empty state, tell the
+          user it may still be confirming and let them re-check. */}
+      {!loading &&
+        agents.length === 0 &&
+        unmanagedDelegates.length === 0 &&
+        !finalizingAgent &&
+        finalizeTimedOut && (
+          <EmptyState
+            tone="warning"
+            icon={
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+            }
+            title="Your agent is taking longer than expected"
+            body="Haven is still confirming the new rules on-chain. This can take a little longer under load — check again in a moment."
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button onClick={() => pollForNewAgent(lastPollDelegateRef.current)}>
+                  Check again
+                </Button>
+              </div>
+            }
+          />
+        )}
+
       {/* Empty state */}
-      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && (
+      {!loading &&
+        agents.length === 0 &&
+        unmanagedDelegates.length === 0 &&
+        !finalizingAgent &&
+        !finalizeTimedOut && (
         <EmptyState
           icon={<BotIcon size={24} />}
           title="No agents yet"
@@ -1151,6 +1324,7 @@ export default function AgentPanel() {
               allowances={d.allowances}
               chainTimeSec={chainTimeSec}
               chainId={chainId}
+              pendingHavenSetup={havenSetupDelegatesRef.current.has(d.address.toLowerCase())}
             />
           ))}
         </div>
@@ -1166,7 +1340,9 @@ export default function AgentPanel() {
           // Suppress the brief "Unmanaged Delegate" race window before
           // refreshing — see comment on `unmanagedDelegates`.
           markDelegateRecent(info?.delegateAddress)
-          refetch()
+          // Poll until the new agent lands so it appears without a manual
+          // reload — see comment on `pollForNewAgent`.
+          void pollForNewAgent(info?.delegateAddress)
         }}
       />
 

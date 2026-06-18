@@ -23,6 +23,14 @@ vi.mock('wagmi', () => ({ usePublicClient: (...a: unknown[]) => mockUsePublicCli
 vi.mock('@/lib/approver-tx', () => ({
   applyApproverChange: (...a: unknown[]) => mockApplyApproverChange(...a),
 }))
+const mockProvisionPasskeyApprover = vi.fn()
+vi.mock('@/lib/passkey-approver', () => ({
+  provisionPasskeyApprover: (...a: unknown[]) => mockProvisionPasskeyApprover(...a),
+}))
+vi.mock('@/lib/passkey', () => ({
+  PasskeyCancelledError: class PasskeyCancelledError extends Error {},
+  PasskeyUnsupportedError: class PasskeyUnsupportedError extends Error {},
+}))
 
 import ManageApprovers from '@/components/settings/ManageApprovers'
 
@@ -50,7 +58,8 @@ function setApprovers(approvers: unknown[], over: Record<string, unknown> = {}) 
 describe('ManageApprovers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockUseAuth.mockReturnValue({ user: { safes: [SAFE] } })
+    mockUseAuth.mockReturnValue({ user: { id: 'u1', email: 'ada@example.com', name: 'Ada', safes: [SAFE] } })
+    mockProvisionPasskeyApprover.mockResolvedValue({ signerAddress: '0xdddddddddddddddddddddddddddddddddddddddd' })
     mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
     mockUseActiveSigner.mockReturnValue({ type: 'eoa', address: A })
     mockUsePublicClient.mockReturnValue({})
@@ -102,7 +111,7 @@ describe('ManageApprovers', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add approver' }))
     await user.type(screen.getByLabelText('Approver address'), 'not-an-address')
-    await user.click(screen.getByRole('button', { name: 'Add approver' }))
+    await user.click(screen.getByRole('button', { name: 'Add address' }))
 
     expect(await screen.findByText(/valid wallet address/i)).toBeInTheDocument()
     expect(mockApplyApproverChange).not.toHaveBeenCalled()
@@ -116,13 +125,31 @@ describe('ManageApprovers', () => {
     await user.click(screen.getByRole('button', { name: 'Add approver' }))
     await user.type(screen.getByLabelText('Approver address'), B)
     await user.type(screen.getByLabelText('Approver label'), 'Co-founder')
-    // The form's own submit button (second "Add approver")
-    const submits = screen.getAllByRole('button', { name: 'Add approver' })
-    await user.click(submits[submits.length - 1])
+    await user.click(screen.getByRole('button', { name: 'Add address' }))
 
     await waitFor(() =>
       expect(mockApplyApproverChange).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'add', address: B, label: 'Co-founder', type: 'eoa' }),
+      ),
+    )
+  })
+
+  it('provisions a passkey and adds it as a passkey-type approver', async () => {
+    const user = userEvent.setup()
+    setApprovers([{ address: A, type: 'eoa', label: 'Wallet A' }])
+    render(<ManageApprovers />)
+
+    await user.click(screen.getByRole('button', { name: 'Add approver' }))
+    await user.click(screen.getByRole('button', { name: 'Add a passkey' }))
+
+    await waitFor(() => expect(mockProvisionPasskeyApprover).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mockApplyApproverChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'add',
+          address: '0xdddddddddddddddddddddddddddddddddddddddd',
+          type: 'passkey',
+        }),
       ),
     )
   })

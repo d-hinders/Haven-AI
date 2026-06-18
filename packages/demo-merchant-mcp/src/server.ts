@@ -1,21 +1,23 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { z } from 'zod'
 import { PRODUCTS, formatUsdc, type ProductId } from './products.js'
 import { generateInvoice, nextInvoiceNumber } from './invoice.js'
 import { buildPaymentRequired, type SettledPayment } from './x402.js'
 import type { Address } from 'viem'
 
-export interface PaymentContext {
-  currentPayment?: SettledPayment
-}
+const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
 
 export interface MerchantConfig {
   merchantAddress: Address
   baseUrl: string
-  paymentContext: PaymentContext
 }
 
 const completedPurchases = new WeakMap<SettledPayment, string>()
+
+export function runWithSettledPayment<T>(payment: SettledPayment | undefined, fn: () => T): T {
+  return paymentStorage.run(payment, fn)
+}
 
 /** Build the demo merchant MCP server. */
 export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
@@ -90,7 +92,7 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
 function completePurchase(config: MerchantConfig, productId: ProductId, description: string) {
   const product = PRODUCTS[productId]
   const resource = `${config.baseUrl}/mcp`
-  const payment = config.paymentContext.currentPayment
+  const payment = paymentStorage.getStore()
 
   if (!payment || payment.productId !== productId) {
     const requirements = buildPaymentRequired({

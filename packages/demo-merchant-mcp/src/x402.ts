@@ -91,7 +91,8 @@ export interface SettledPayment {
 }
 
 export interface SettlementClient {
-  settle(authorization: Eip3009Authorization, signature: Hex): Promise<Hex>
+  submit(authorization: Eip3009Authorization, signature: Hex): Promise<Hex>
+  waitForReceipt(txHash: Hex): Promise<void>
 }
 
 export interface X402PaymentProcessor {
@@ -117,8 +118,14 @@ interface SettledCacheEntry {
   payment: SettledPayment
 }
 
+interface SettlementAttempt {
+  productId: ProductId
+  txHash?: Hex
+  promise?: Promise<SettledCacheEntry>
+}
+
 export function createX402PaymentProcessor(settlementClient: SettlementClient): X402PaymentProcessor {
-  const pending = new Map<string, Promise<SettledCacheEntry>>()
+  const attempts = new Map<string, SettlementAttempt>()
   const settled = new Map<string, SettledCacheEntry>()
 
   async function settleOnce(params: {
@@ -139,45 +146,74 @@ export function createX402PaymentProcessor(settlementClient: SettlementClient): 
       throw new PaymentError('Payment authorization nonce has already settled a different product')
     }
 
-    const running = pending.get(paymentKey)
-    if (running) {
-      const entry = await running
-      if (entry.productId !== params.productId) {
+    const attempt = attempts.get(paymentKey)
+    if (attempt) {
+      if (attempt.productId !== params.productId) {
         throw new PaymentError('Payment authorization nonce is already settling a different product')
       }
-      return entry.payment
+      if (attempt.promise) {
+        return (await attempt.promise).payment
+      }
+      if (attempt.txHash) {
+        const retry = confirmSubmittedPayment(params, productKey, attempt.txHash)
+        attempt.promise = retry
+        try {
+          return (await retry).payment
+        } finally {
+          attempt.promise = undefined
+        }
+      }
     }
 
+    const nextAttempt: SettlementAttempt = { productId: params.productId }
+    attempts.set(paymentKey, nextAttempt)
     const promise = (async (): Promise<SettledCacheEntry> => {
-      const txHash = await settlementClient.settle(params.authorization, params.signature)
-      const response: SettleResponse = {
-        success: true,
-        payer: getAddress(params.authorization.from),
-        transaction: txHash,
-        network: NETWORK,
-        amount: params.expectedAmount.toString(),
-      }
-      const payment: SettledPayment = {
-        productId: params.productId,
-        from: getAddress(params.authorization.from),
-        to: getAddress(params.authorization.to),
-        value: params.expectedAmount,
-        nonce: params.authorization.nonce as Hex,
-        txHash,
-        paymentResponse: response,
-        paymentResponseHeader: encodePaymentResponseHeader(response),
-      }
-      const entry = { productId: params.productId, payment }
-      settled.set(productKey, entry)
-      return entry
+      const txHash = await settlementClient.submit(params.authorization, params.signature)
+      nextAttempt.txHash = txHash
+      return confirmSubmittedPayment(params, productKey, txHash)
     })()
 
-    pending.set(paymentKey, promise)
+    nextAttempt.promise = promise
     try {
       return (await promise).payment
     } finally {
-      pending.delete(paymentKey)
+      nextAttempt.promise = undefined
+      if (!nextAttempt.txHash && !settled.has(productKey)) {
+        attempts.delete(paymentKey)
+      }
     }
+  }
+
+  async function confirmSubmittedPayment(
+    params: {
+      productId: ProductId
+      authorization: Eip3009Authorization
+      expectedAmount: bigint
+    },
+    productKey: string,
+    txHash: Hex,
+  ): Promise<SettledCacheEntry> {
+    await settlementClient.waitForReceipt(txHash)
+    const response: SettleResponse = {
+      success: true,
+      payer: getAddress(params.authorization.from),
+      transaction: txHash,
+      network: NETWORK,
+      amount: params.expectedAmount.toString(),
+    }
+    const payment: SettledPayment = {
+      productId: params.productId,
+      from: getAddress(params.authorization.from),
+      to: getAddress(params.authorization.to),
+      value: params.expectedAmount,
+      nonce: params.authorization.nonce as Hex,
+      txHash,
+      paymentResponse: response,
+      paymentResponseHeader: encodePaymentResponseHeader(response),
+    }
+    const entry = { productId: params.productId, payment }
+    settled.set(productKey, entry)
+    return entry
   }
 
   return {
@@ -218,12 +254,12 @@ export function createViemSettlementClient(params: {
   const walletClient = createWalletClient({ account, chain: base, transport })
 
   return {
-    async settle(authorization, signature) {
+    async submit(authorization, signature) {
       const parsed = parseSignature(signature)
       if (parsed.v === undefined) {
         throw new PaymentError('Payment signature is missing v value')
       }
-      const txHash = await walletClient.writeContract({
+      return walletClient.writeContract({
         address: USDC_ADDRESS,
         abi: USDC_TRANSFER_WITH_AUTHORIZATION_ABI,
         functionName: 'transferWithAuthorization',
@@ -239,6 +275,9 @@ export function createViemSettlementClient(params: {
           parsed.s,
         ],
       })
+    },
+
+    async waitForReceipt(txHash) {
       const receipt = await publicClient.waitForTransactionReceipt({
         hash: txHash,
         confirmations: 1,
@@ -246,7 +285,6 @@ export function createViemSettlementClient(params: {
       if (receipt.status !== 'success') {
         throw new PaymentError(`USDC settlement transaction failed: ${txHash}`)
       }
-      return txHash
     },
   }
 }

@@ -17,15 +17,27 @@ const OTHER = '0x2222222222222222222222222222222222222222' as const
 const PAYER_KEY = `0x${'01'.repeat(32)}` as const
 const TX_HASH = `0x${'cd'.repeat(32)}` as const
 
-function makeProcessor(settle = vi.fn<SettlementClient['settle']>().mockResolvedValue(TX_HASH)) {
+function makeProcessor(client: Partial<SettlementClient> = {}) {
+  const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
+  const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
+  const settlementClient: SettlementClient = {
+    submit,
+    waitForReceipt,
+    ...client,
+  }
   return {
-    settle,
-    processor: createX402PaymentProcessor({ settle }),
+    settlementClient,
+    submit: (client.submit ?? submit) as typeof submit,
+    waitForReceipt: (client.waitForReceipt ?? waitForReceipt) as typeof waitForReceipt,
+    processor: createX402PaymentProcessor(settlementClient),
   }
 }
 
 function paymentRequired(): PaymentRequired {
-  return createX402PaymentProcessor({ settle: vi.fn() }).buildPaymentRequired({
+  return createX402PaymentProcessor({
+    submit: vi.fn(),
+    waitForReceipt: vi.fn(),
+  }).buildPaymentRequired({
     merchantAddress: MERCHANT,
     amountUsdc: 1_000n,
     resource: 'https://merchant.test/mcp',
@@ -116,7 +128,7 @@ describe('x402 payment requirements', () => {
 
 describe('x402 payment verification and settlement', () => {
   it('settles a valid payment and returns a standard payment response header', async () => {
-    const { processor, settle } = makeProcessor()
+    const { processor, submit, waitForReceipt } = makeProcessor()
     const pr = paymentRequired()
     const header = await signedHeader(pr)
 
@@ -128,8 +140,9 @@ describe('x402 payment verification and settlement', () => {
       paymentRequired: pr,
     })
 
-    expect(settle).toHaveBeenCalledTimes(1)
-    expect(settle.mock.calls[0][0]).toMatchObject({ to: MERCHANT, value: '1000' })
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(submit.mock.calls[0][0]).toMatchObject({ to: MERCHANT, value: '1000' })
+    expect(waitForReceipt).toHaveBeenCalledWith(TX_HASH)
     expect(payment.txHash).toBe(TX_HASH)
     expect(payment.paymentResponse).toMatchObject({
       success: true,
@@ -141,7 +154,7 @@ describe('x402 payment verification and settlement', () => {
   })
 
   it('dedupes a repeated payment for the same product in process memory', async () => {
-    const { processor, settle } = makeProcessor()
+    const { processor, submit } = makeProcessor()
     const pr = paymentRequired()
     const header = await signedHeader(pr)
     const input = {
@@ -156,7 +169,31 @@ describe('x402 payment verification and settlement', () => {
     const second = await processor.verifyAndSettle(input)
 
     expect(first).toBe(second)
-    expect(settle).toHaveBeenCalledTimes(1)
+    expect(submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries receipt confirmation without resubmitting after a submitted tx times out', async () => {
+    const waitForReceipt = vi
+      .fn<SettlementClient['waitForReceipt']>()
+      .mockRejectedValueOnce(new Error('receipt timeout'))
+      .mockResolvedValueOnce(undefined)
+    const { processor, submit } = makeProcessor({ waitForReceipt })
+    const pr = paymentRequired()
+    const header = await signedHeader(pr)
+    const input = {
+      productId: 'vpn_basic' as const,
+      paymentHeader: header,
+      merchantAddress: MERCHANT,
+      expectedAmount: 1_000n,
+      paymentRequired: pr,
+    }
+
+    await expect(processor.verifyAndSettle(input)).rejects.toThrow('receipt timeout')
+    const retry = await processor.verifyAndSettle(input)
+
+    expect(retry.txHash).toBe(TX_HASH)
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(waitForReceipt).toHaveBeenCalledTimes(2)
   })
 
   it.each([

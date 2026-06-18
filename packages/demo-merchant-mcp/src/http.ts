@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { buildMerchantMcpServer, type PaymentContext } from './server.js'
+import { buildMerchantMcpServer, runWithSettledPayment } from './server.js'
 import {
   LEGACY_PAYMENT_SIGNATURE_HEADER,
   PAYMENT_REQUIRED_HEADER,
@@ -24,7 +24,6 @@ export interface DemoMerchantServerOptions {
 interface MerchantSession {
   server: ReturnType<typeof buildMerchantMcpServer>
   transport: StreamableHTTPServerTransport
-  paymentContext: PaymentContext
 }
 
 const MAX_BODY_BYTES = 500_000
@@ -86,18 +85,23 @@ async function handle(
   const paymentToolInfo = extractPaymentToolInfo(body)
   const session = await getSession(req, body, options, sessions)
 
+  let settled: SettledPayment | undefined
   if (paymentToolInfo) {
-    const settled = await handlePaymentGate(req, res, options, paymentToolInfo)
-    if (!settled) return
+    const payment = await handlePaymentGate(req, res, options, paymentToolInfo)
+    if (!payment) return
+    settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
-    session.paymentContext.currentPayment = settled
-  } else {
-    session.paymentContext.currentPayment = undefined
   }
 
-  await session.transport.handleRequest(req, res, body)
-  if (session.transport.sessionId && !sessions.has(session.transport.sessionId)) {
-    sessions.set(session.transport.sessionId, session)
+  try {
+    await runWithSettledPayment(settled, () => session.transport.handleRequest(req, res, body))
+    if (session.transport.sessionId && !sessions.has(session.transport.sessionId)) {
+      sessions.set(session.transport.sessionId, session)
+    }
+  } finally {
+    if (!session.transport.sessionId) {
+      await closeSession(session, sessions)
+    }
   }
 }
 
@@ -152,24 +156,30 @@ async function getSession(
   }
 
   const stateful = isInitializeRequest(body)
-  const paymentContext: PaymentContext = {}
   const server = buildMerchantMcpServer({
     merchantAddress: options.merchantAddress,
     baseUrl: options.baseUrl,
-    paymentContext,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,
   })
-  const session: MerchantSession = { server, transport, paymentContext }
+  const session: MerchantSession = { server, transport }
 
   transport.onclose = () => {
+    transport.onclose = undefined
     if (transport.sessionId) sessions.delete(transport.sessionId)
     void server.close()
   }
   await server.connect(transport)
 
   return session
+}
+
+async function closeSession(session: MerchantSession, sessions: Map<string, MerchantSession>): Promise<void> {
+  if (session.transport.sessionId) sessions.delete(session.transport.sessionId)
+  session.transport.onclose = undefined
+  await session.transport.close()
+  await session.server.close()
 }
 
 function getPaymentHeader(req: IncomingMessage): string | undefined {

@@ -1,7 +1,36 @@
-import { verifyTypedData, type Address } from 'viem'
+import {
+  createPublicClient,
+  createWalletClient,
+  getAddress,
+  http,
+  isAddress,
+  parseSignature,
+  verifyTypedData,
+  type Address,
+  type Hex,
+  type PrivateKeyAccount,
+} from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import { base } from 'viem/chains'
+import {
+  decodePaymentSignatureHeader,
+  encodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
+} from '@x402/core/http'
+import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse } from '@x402/core/types'
 import { USDC_ADDRESS, CHAIN_ID } from './products.js'
+import type { ProductId } from './products.js'
 
-// ── EIP-3009 typed data ───────────────────────────────────────────────────────
+export { USDC_ADDRESS }
+
+const NETWORK = 'eip155:8453'
+const MAX_TIMEOUT_SECONDS = 300
+const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
+
+export const PAYMENT_REQUIRED_HEADER = 'PAYMENT-REQUIRED'
+export const PAYMENT_SIGNATURE_HEADER = 'PAYMENT-SIGNATURE'
+export const LEGACY_PAYMENT_SIGNATURE_HEADER = 'X-PAYMENT'
+export const PAYMENT_RESPONSE_HEADER = 'PAYMENT-RESPONSE'
 
 const TRANSFER_WITH_AUTH_TYPES = {
   TransferWithAuthorization: [
@@ -21,7 +50,25 @@ const USDC_DOMAIN = {
   verifyingContract: USDC_ADDRESS,
 } as const
 
-// ── X-PAYMENT header types ───────────────────────────────────────────────────
+const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [
+  {
+    type: 'function',
+    name: 'transferWithAuthorization',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'from', type: 'address' },
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'validAfter', type: 'uint256' },
+      { name: 'validBefore', type: 'uint256' },
+      { name: 'nonce', type: 'bytes32' },
+      { name: 'v', type: 'uint8' },
+      { name: 'r', type: 'bytes32' },
+      { name: 's', type: 'bytes32' },
+    ],
+    outputs: [],
+  },
+] as const
 
 export interface Eip3009Authorization {
   from: string
@@ -32,178 +79,329 @@ export interface Eip3009Authorization {
   nonce: string
 }
 
-export interface XPaymentPayload {
-  x402Version: number
-  scheme: string
-  network: string
-  payload: {
-    signature: string
-    authorization: Eip3009Authorization
-  }
-}
-
-export interface VerifiedPayment {
+export interface SettledPayment {
+  productId: ProductId
   from: Address
   to: Address
   value: bigint
-  nonce: string
+  nonce: Hex
+  txHash: Hex
+  paymentResponse: SettleResponse
+  paymentResponseHeader: string
 }
 
-// In-memory nonce registry — prevents replay within a server lifetime.
-// NOTE: resets on process restart; use persistent storage for production.
-const usedNonces = new Set<string>()
+export interface SettlementClient {
+  settle(authorization: Eip3009Authorization, signature: Hex): Promise<Hex>
+}
 
-/** Safely parse a bigint field from untrusted JSON, throwing PaymentError on bad input. */
-function parseBigInt(value: unknown, field: string): bigint {
-  try {
-    if (value === null || value === undefined || value === '') {
-      throw new Error('empty')
+export interface X402PaymentProcessor {
+  buildPaymentRequired(params: {
+    merchantAddress: Address
+    amountUsdc: bigint
+    resource: string
+    description: string
+  }): PaymentRequired
+  paymentRequiredHeader(paymentRequired: PaymentRequired): string
+  paymentResponseHeader(response: SettleResponse): string
+  verifyAndSettle(params: {
+    productId: ProductId
+    paymentHeader: string
+    merchantAddress: Address
+    expectedAmount: bigint
+    paymentRequired: PaymentRequired
+  }): Promise<SettledPayment>
+}
+
+interface SettledCacheEntry {
+  productId: ProductId
+  payment: SettledPayment
+}
+
+export function createX402PaymentProcessor(settlementClient: SettlementClient): X402PaymentProcessor {
+  const pending = new Map<string, Promise<SettledCacheEntry>>()
+  const settled = new Map<string, SettledCacheEntry>()
+
+  async function settleOnce(params: {
+    productId: ProductId
+    payload: PaymentPayload
+    authorization: Eip3009Authorization
+    signature: Hex
+    expectedAmount: bigint
+    merchantAddress: Address
+    paymentRequired: PaymentRequired
+  }): Promise<SettledPayment> {
+    const paymentKey = `${getAddress(params.authorization.from).toLowerCase()}:${params.authorization.nonce.toLowerCase()}`
+    const productKey = `${paymentKey}:${params.productId}`
+
+    const existing = settled.get(productKey)
+    if (existing) return existing.payment
+    if ([...settled.keys()].some((key) => key.startsWith(`${paymentKey}:`))) {
+      throw new PaymentError('Payment authorization nonce has already settled a different product')
     }
-    return BigInt(String(value))
-  } catch {
-    throw new PaymentError(`Ogiltigt betalningsfält '${field}': ${JSON.stringify(value)}`)
+
+    const running = pending.get(paymentKey)
+    if (running) {
+      const entry = await running
+      if (entry.productId !== params.productId) {
+        throw new PaymentError('Payment authorization nonce is already settling a different product')
+      }
+      return entry.payment
+    }
+
+    const promise = (async (): Promise<SettledCacheEntry> => {
+      const txHash = await settlementClient.settle(params.authorization, params.signature)
+      const response: SettleResponse = {
+        success: true,
+        payer: getAddress(params.authorization.from),
+        transaction: txHash,
+        network: NETWORK,
+        amount: params.expectedAmount.toString(),
+      }
+      const payment: SettledPayment = {
+        productId: params.productId,
+        from: getAddress(params.authorization.from),
+        to: getAddress(params.authorization.to),
+        value: params.expectedAmount,
+        nonce: params.authorization.nonce as Hex,
+        txHash,
+        paymentResponse: response,
+        paymentResponseHeader: encodePaymentResponseHeader(response),
+      }
+      const entry = { productId: params.productId, payment }
+      settled.set(productKey, entry)
+      return entry
+    })()
+
+    pending.set(paymentKey, promise)
+    try {
+      return (await promise).payment
+    } finally {
+      pending.delete(paymentKey)
+    }
+  }
+
+  return {
+    buildPaymentRequired,
+    paymentRequiredHeader: encodePaymentRequiredHeader,
+    paymentResponseHeader: encodePaymentResponseHeader,
+
+    async verifyAndSettle(params) {
+      const payload = decodePayment(params.paymentHeader)
+      const accepted = payload.accepted
+      const paymentOption = params.paymentRequired.accepts[0]
+      const { authorization, signature } = parseExactEvmPayload(payload.payload)
+
+      assertPaymentOptionMatches(accepted, paymentOption, params.merchantAddress, params.expectedAmount)
+      assertResourceMatches(payload, params.paymentRequired)
+      await verifyAuthorization(authorization, signature, params.merchantAddress, params.expectedAmount)
+
+      return settleOnce({
+        productId: params.productId,
+        payload,
+        authorization,
+        signature,
+        expectedAmount: params.expectedAmount,
+        merchantAddress: params.merchantAddress,
+        paymentRequired: params.paymentRequired,
+      })
+    },
   }
 }
 
-/**
- * Parse and verify an X-PAYMENT header value.
- *
- * Validates:
- *  1. Base64 decode + JSON parse
- *  2. EIP-3009 signature over the authorization struct
- *  3. `to` matches our merchant address
- *  4. `value` matches the expected price
- *  5. Nonce not previously used
- *  6. validBefore not expired
- */
-export async function verifyXPayment(
-  xPaymentHeader: string,
+export function createViemSettlementClient(params: {
+  baseRpcUrl: string
+  settlementPrivateKey: Hex
+}): SettlementClient {
+  const account = privateKeyToAccount(params.settlementPrivateKey) as PrivateKeyAccount
+  const transport = http(params.baseRpcUrl)
+  const publicClient = createPublicClient({ chain: base, transport })
+  const walletClient = createWalletClient({ account, chain: base, transport })
+
+  return {
+    async settle(authorization, signature) {
+      const parsed = parseSignature(signature)
+      if (parsed.v === undefined) {
+        throw new PaymentError('Payment signature is missing v value')
+      }
+      const txHash = await walletClient.writeContract({
+        address: USDC_ADDRESS,
+        abi: USDC_TRANSFER_WITH_AUTHORIZATION_ABI,
+        functionName: 'transferWithAuthorization',
+        args: [
+          getAddress(authorization.from),
+          getAddress(authorization.to),
+          BigInt(authorization.value),
+          BigInt(authorization.validAfter),
+          BigInt(authorization.validBefore),
+          authorization.nonce as Hex,
+          Number(parsed.v),
+          parsed.r,
+          parsed.s,
+        ],
+      })
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash: txHash,
+        confirmations: 1,
+      })
+      if (receipt.status !== 'success') {
+        throw new PaymentError(`USDC settlement transaction failed: ${txHash}`)
+      }
+      return txHash
+    },
+  }
+}
+
+export function buildPaymentRequired(params: {
+  merchantAddress: Address
+  amountUsdc: bigint
+  resource: string
+  description: string
+}): PaymentRequired {
+  return {
+    x402Version: 2,
+    resource: {
+      url: params.resource,
+      description: params.description,
+      mimeType: 'application/json',
+      serviceName: 'Haven Demo Merchant',
+    },
+    accepts: [
+      {
+        scheme: 'exact',
+        network: NETWORK,
+        amount: params.amountUsdc.toString(),
+        payTo: params.merchantAddress,
+        maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
+        asset: USDC_ADDRESS,
+        extra: { name: 'USD Coin', version: '2' },
+      },
+    ],
+    error: 'Payment required',
+  }
+}
+
+function decodePayment(header: string): PaymentPayload {
+  try {
+    return decodePaymentSignatureHeader(header)
+  } catch {
+    throw new PaymentError('Invalid payment header: could not decode base64/JSON x402 payload')
+  }
+}
+
+function parseExactEvmPayload(payload: Record<string, unknown>): {
+  authorization: Eip3009Authorization
+  signature: Hex
+} {
+  const authorization = payload.authorization as Partial<Eip3009Authorization> | undefined
+  const signature = payload.signature
+  if (!authorization || typeof authorization !== 'object') {
+    throw new PaymentError('Invalid payment header: missing EIP-3009 authorization')
+  }
+  if (typeof signature !== 'string' || !signature.startsWith('0x')) {
+    throw new PaymentError('Invalid payment header: missing EIP-3009 signature')
+  }
+  for (const field of ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce'] as const) {
+    if (typeof authorization[field] !== 'string' || authorization[field] === '') {
+      throw new PaymentError(`Invalid payment authorization field: ${field}`)
+    }
+  }
+  return { authorization: authorization as Eip3009Authorization, signature: signature as Hex }
+}
+
+function assertPaymentOptionMatches(
+  accepted: PaymentRequirements,
+  expected: PaymentRequirements,
   merchantAddress: Address,
   expectedAmount: bigint,
-): Promise<VerifiedPayment> {
-  // Decode
-  let payment: XPaymentPayload
-  try {
-    const json = Buffer.from(xPaymentHeader, 'base64').toString('utf8')
-    payment = JSON.parse(json) as XPaymentPayload
-  } catch {
-    throw new PaymentError('Ogiltig X-PAYMENT header: kunde inte avkoda base64/JSON')
+): void {
+  if (accepted.scheme !== 'exact') throw new PaymentError(`Unsupported x402 scheme: ${accepted.scheme}`)
+  if (accepted.network !== NETWORK) throw new PaymentError(`Unsupported x402 network: ${accepted.network}`)
+  if (accepted.amount !== expectedAmount.toString()) {
+    throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${accepted.amount}`)
   }
+  if (accepted.amount !== expected.amount) {
+    throw new PaymentError('Payment accepted option does not match the quoted amount')
+  }
+  if (!sameAddress(accepted.payTo, merchantAddress) || !sameAddress(accepted.payTo, expected.payTo)) {
+    throw new PaymentError('Payment accepted option does not match merchant recipient')
+  }
+  if (!sameAddress(accepted.asset, USDC_ADDRESS) || !sameAddress(accepted.asset, expected.asset)) {
+    throw new PaymentError('Payment accepted option does not match Base USDC')
+  }
+  if (accepted.maxTimeoutSeconds !== expected.maxTimeoutSeconds) {
+    throw new PaymentError('Payment accepted option does not match timeout')
+  }
+  if ((accepted.extra?.name ?? null) !== 'USD Coin' || (accepted.extra?.version ?? null) !== '2') {
+    throw new PaymentError('Payment accepted option is missing Base USDC domain metadata')
+  }
+}
 
-  const { authorization, signature } = payment.payload
+function assertResourceMatches(payload: PaymentPayload, paymentRequired: PaymentRequired): void {
+  if (!payload.resource) return
+  if (payload.resource.url !== paymentRequired.resource.url) {
+    throw new PaymentError('Payment resource does not match quoted resource')
+  }
+}
+
+async function verifyAuthorization(
+  authorization: Eip3009Authorization,
+  signature: Hex,
+  merchantAddress: Address,
+  expectedAmount: bigint,
+): Promise<void> {
   const nowSec = BigInt(Math.floor(Date.now() / 1000))
+  const validBefore = parseBigIntField(authorization.validBefore, 'validBefore')
+  const validAfter = parseBigIntField(authorization.validAfter, 'validAfter')
+  const value = parseBigIntField(authorization.value, 'value')
 
-  // Parse numeric fields early — throws PaymentError (not SyntaxError) on bad input.
-  const validBefore = parseBigInt(authorization.validBefore, 'validBefore')
-  const validAfter  = parseBigInt(authorization.validAfter,  'validAfter')
-  const value       = parseBigInt(authorization.value,       'value')
-
-  // Expiry check
-  if (validBefore > 0n && nowSec >= validBefore) {
-    throw new PaymentError('Betalningsauktoriseringen har löpt ut')
+  if (!isAddress(authorization.from)) throw new PaymentError('Payment payer address is invalid')
+  if (!isAddress(authorization.to)) throw new PaymentError('Payment recipient address is invalid')
+  if (!NONCE_RE.test(authorization.nonce)) throw new PaymentError('Payment nonce must be 32 bytes')
+  if (validBefore > 0n && nowSec >= validBefore) throw new PaymentError('Payment authorization has expired')
+  if (nowSec < validAfter) throw new PaymentError('Payment authorization is not valid yet')
+  if (!sameAddress(authorization.to, merchantAddress)) throw new PaymentError('Payment is not addressed to this merchant')
+  if (value !== expectedAmount) {
+    throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${value}`)
   }
 
-  // validAfter check
-  if (nowSec < validAfter) {
-    throw new PaymentError('Betalningsauktoriseringen är inte giltig ännu')
-  }
-
-  // Recipient check
-  const toAddr = authorization.to.toLowerCase() as Address
-  if (toAddr !== merchantAddress.toLowerCase()) {
-    throw new PaymentError(
-      `Betalning är inte adresserad till handlaren: förväntade ${merchantAddress}, fick ${authorization.to}`,
-    )
-  }
-
-  // Amount check
-  if (value < expectedAmount) {
-    throw new PaymentError(
-      `Otillräckligt belopp: förväntade ${expectedAmount}, fick ${value}`,
-    )
-  }
-
-  // Nonce replay check — claim the nonce atomically (before the async verify) so
-  // two concurrent requests with the same nonce cannot both pass this check.
-  // If signature verification fails below, we remove it again so a legitimate
-  // retry with a valid signature still works.
-  const nonceKey = authorization.nonce.toLowerCase()
-  if (usedNonces.has(nonceKey)) {
-    throw new PaymentError('Betalningsnonce har redan använts (replay attack)')
-  }
-  usedNonces.add(nonceKey)
-
-  // EIP-712 signature verification
-  let valid: boolean
+  let valid = false
   try {
     valid = await verifyTypedData({
-      address: authorization.from as Address,
+      address: getAddress(authorization.from),
       domain: USDC_DOMAIN,
       types: TRANSFER_WITH_AUTH_TYPES,
       primaryType: 'TransferWithAuthorization',
       message: {
-        from: authorization.from as Address,
-        to: authorization.to as Address,
+        from: getAddress(authorization.from),
+        to: getAddress(authorization.to),
         value,
         validAfter,
         validBefore,
-        nonce: authorization.nonce as `0x${string}`,
+        nonce: authorization.nonce as Hex,
       },
-      signature: signature as `0x${string}`,
+      signature,
     })
-  } catch (err) {
-    // Unexpected verification error — release the nonce so a valid retry can succeed.
-    usedNonces.delete(nonceKey)
-    throw err
+  } catch {
+    valid = false
   }
+  if (!valid) throw new PaymentError('Invalid EIP-3009 signature')
+}
 
-  if (!valid) {
-    // Signature is genuinely bad — release the nonce so the payer can correct and retry.
-    usedNonces.delete(nonceKey)
-    throw new PaymentError('Ogiltig EIP-3009 signatur')
+function parseBigIntField(value: string, field: string): bigint {
+  try {
+    return BigInt(value)
+  } catch {
+    throw new PaymentError(`Invalid payment authorization field: ${field}`)
   }
+}
 
-  return {
-    from: authorization.from as Address,
-    to: toAddr,
-    value,
-    nonce: authorization.nonce,
-  }
+function sameAddress(a: string, b: string): boolean {
+  return isAddress(a) && isAddress(b) && getAddress(a).toLowerCase() === getAddress(b).toLowerCase()
 }
 
 export class PaymentError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'PaymentError'
-  }
-}
-
-/**
- * Build the HTTP 402 response body following the x402 v2 spec.
- */
-export function buildPaymentRequired(params: {
-  merchantAddress: Address
-  amountUsdc: bigint
-  resource: string
-  description: string
-}): object {
-  return {
-    x402Version: 2,
-    accepts: [
-      {
-        scheme: 'exact',
-        network: 'base',
-        maxAmountRequired: params.amountUsdc.toString(),
-        resource: params.resource,
-        description: params.description,
-        mimeType: 'application/json',
-        payTo: params.merchantAddress,
-        maxTimeoutSeconds: 300,
-        asset: USDC_ADDRESS,
-        outputSchema: null,
-        extra: null,
-      },
-    ],
-    error: 'Betalning krävs',
   }
 }

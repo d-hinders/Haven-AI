@@ -451,7 +451,7 @@ Haven-AI/
 
 ## Contributing — Hosted Setup & Dev Workflow
 
-Haven runs in production on **Vercel** (frontend) and **Railway** (backend + Postgres). The `main` branch auto-deploys to both.
+Haven runs in production on **Vercel** (frontend) and **Railway** (backend + Postgres). The `main` branch auto-deploys to both. The four published npm packages (`@haven_ai/sdk`, `signer`, `mcp`, `connect`) are also published automatically from `main` on a version bump — see [Releasing npm packages](#releasing-npm-packages).
 
 ### Repository workflow
 
@@ -495,6 +495,25 @@ Collaborators have **Viewer** access to the Railway project — you can see serv
 - **Vercel previews** — every PR has a preview URL with its own build logs (linked from the PR comment)
 
 If you need an env var changed in Railway or a secret rotated, ping the project owner.
+
+### Releasing npm packages
+
+The four npx-installed packages — `@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect` — are published to npm automatically. **You never run `npm publish` by hand.**
+
+```bash
+# 1. Bump all published packages atomically (versions, cross-package pins,
+#    and source version constants) and verify the connect bundle.
+npm run release:bump -- <new-version>   # e.g. 0.1.17-alpha.0
+
+# 2. Commit on a release branch, open a PR, get it green, merge to main.
+```
+
+On merge, the **Publish packages** workflow (`.github/workflows/publish.yml`) rebuilds `dist` in dependency order and publishes only the packages whose `package.json` version is not yet on npm. The dist-tag is derived from the version: a prerelease like `0.1.17-alpha.0` publishes under `--tag alpha`, a stable `0.2.0` under `latest`. The connector install command the dashboard hands out is pinned to `@alpha`, so the prerelease line is what real users get.
+
+- **Trigger model:** version bump = the gate. npm rejects republishing an existing version, so a normal (non-bump) commit is a no-op.
+- **Auth:** the workflow uses the `NPM_TOKEN` repo secret — a granular npm token scoped to `@haven_ai`, read+write. It has an expiry; when it lapses, publishes fail and the token must be regenerated and the secret updated.
+- **Not published this way:** `mcp-server` (Docker → Railway), `backend`, and `frontend` (Vercel/Railway) deploy from `main` directly.
+- Full details, the dist-wipe rationale, and a manual fallback live in [`scripts/README.md`](scripts/README.md).
 
 ## License
 

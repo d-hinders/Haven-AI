@@ -38,6 +38,11 @@
     "x402"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d-hinders/Haven-AI.git",
+    "directory": "packages/signer"
+  },
   "dependencies": {
     "@haven_ai/sdk": "0.1.17-alpha.0",
     "@modelcontextprotocol/sdk": "^1.29.0",

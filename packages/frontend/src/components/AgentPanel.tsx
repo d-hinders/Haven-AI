@@ -710,6 +710,10 @@ export default function AgentPanel() {
   // True while the post-approval poll waits for a freshly-signed agent to flip
   // active — drives the "finalizing" placeholder. See `pollForNewAgent`.
   const [finalizingAgent, setFinalizingAgent] = useState(false)
+  // True when the poll exhausted its deadline without the agent appearing —
+  // drives the "taking longer than expected" fallback so the user isn't left
+  // staring at a bare empty state with no explanation. See `pollForNewAgent`.
+  const [finalizeTimedOut, setFinalizeTimedOut] = useState(false)
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | 'revoke' | 'delete' | null>(null)
@@ -737,6 +741,9 @@ export default function AgentPanel() {
   // Cancellation token for the post-setup poll (see `pollForNewAgent`). Held in
   // a ref so an in-flight poll is cancelled on unmount or when superseded.
   const newAgentPollRef = useRef<{ cancelled: boolean } | null>(null)
+  // Delegate of the most recent poll, so the timeout fallback's "Refresh" can
+  // re-poll the same agent without needing the user to redo setup.
+  const lastPollDelegateRef = useRef<string | null>(null)
   useEffect(() => {
     return () => {
       if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
@@ -811,7 +818,9 @@ export default function AgentPanel() {
         await refetch({ silent: true })
         return
       }
+      lastPollDelegateRef.current = delegateAddress ?? null
       setFinalizingAgent(true)
+      setFinalizeTimedOut(false)
       try {
         let latest = (await refetch({ silent: true })) ?? []
         const hasAgent = (list: Agent[]) =>
@@ -825,6 +834,11 @@ export default function AgentPanel() {
           if (token.cancelled) return
           latest = (await refetch({ silent: true })) ?? []
         }
+        // Exhausted the window without the agent landing (not cancelled/found):
+        // surface the fallback so the user knows it may still be confirming.
+        if (!token.cancelled && !hasAgent(latest)) {
+          setFinalizeTimedOut(true)
+        }
       } finally {
         // Only the current poll clears the flag — a superseding poll has already
         // re-armed it for the agent it's now waiting on.
@@ -833,6 +847,11 @@ export default function AgentPanel() {
     },
     [refetch],
   )
+  // Clear a stale timeout fallback once any agent is present — e.g. the agent
+  // landed on a later refresh, or another agent was added in the meantime.
+  useEffect(() => {
+    if (finalizeTimedOut && agents.length > 0) setFinalizeTimedOut(false)
+  }, [agents.length, finalizeTimedOut])
   const visibleAgents = useMemo(
     () => agents.filter((agent) => agent.status !== 'revoked'),
     [agents],
@@ -1127,8 +1146,50 @@ export default function AgentPanel() {
         />
       )}
 
+      {/* Timeout fallback — the poll exhausted its window without the agent
+          appearing. Rather than dropping silently to the empty state, tell the
+          user it may still be confirming and let them re-check. */}
+      {!loading &&
+        agents.length === 0 &&
+        unmanagedDelegates.length === 0 &&
+        !finalizingAgent &&
+        finalizeTimedOut && (
+          <EmptyState
+            tone="warning"
+            icon={
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+            }
+            title="Your agent is taking longer than expected"
+            body="Haven is still confirming the new rules on-chain. This can take a little longer under load — check again in a moment."
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button onClick={() => pollForNewAgent(lastPollDelegateRef.current)}>
+                  Check again
+                </Button>
+              </div>
+            }
+          />
+        )}
+
       {/* Empty state */}
-      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && !finalizingAgent && (
+      {!loading &&
+        agents.length === 0 &&
+        unmanagedDelegates.length === 0 &&
+        !finalizingAgent &&
+        !finalizeTimedOut && (
         <EmptyState
           icon={<BotIcon size={24} />}
           title="No agents yet"

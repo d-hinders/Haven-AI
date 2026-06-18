@@ -399,6 +399,17 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
       deleteAgent: vi.fn(),
       refetch,
     })
+    // The genuine timeout scenario: nothing is visible on-chain yet either (the
+    // frontend's allowance read also lags), so the list is truly empty. When the
+    // delegate IS on-chain, the "Unmanaged Delegate" card is the fallback
+    // instead — that path is covered by the suppression tests.
+    mockUseOnChainAllowances.mockReturnValue({
+      data: new Map(),
+      chainTimeSec: null,
+      loading: false,
+      onChainDelegates: [],
+      refetch: vi.fn(),
+    })
 
     vi.doMock('../ConnectAgent2Modal', () => ({
       default: (props: { onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void }) => (
@@ -419,9 +430,18 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
     expect(screen.getByText('Finalizing your agent…')).toBeInTheDocument()
     expect(screen.queryByText('No agents yet')).not.toBeInTheDocument()
 
-    // The poll gives up after 30s; the placeholder must clear so the panel
-    // doesn't get stuck showing "finalizing" forever.
+    // The poll gives up after 30s; the placeholder clears and the timeout
+    // fallback (not the bare empty state) explains it may still be confirming.
     await vi.advanceTimersByTimeAsync(31_000)
     expect(screen.queryByText('Finalizing your agent…')).not.toBeInTheDocument()
+    expect(screen.getByText('Your agent is taking longer than expected')).toBeInTheDocument()
+    expect(screen.queryByText('No agents yet')).not.toBeInTheDocument()
+
+    // "Check again" re-polls the same delegate, re-arming the placeholder
+    // without the user having to redo setup.
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await vi.advanceTimersByTimeAsync(1)
+    expect(screen.getByText('Finalizing your agent…')).toBeInTheDocument()
+    expect(screen.queryByText('Your agent is taking longer than expected')).not.toBeInTheDocument()
   })
 })

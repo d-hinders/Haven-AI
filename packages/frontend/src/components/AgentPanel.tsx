@@ -618,33 +618,56 @@ function UnmanagedDelegateCard({
   allowances,
   chainTimeSec,
   chainId = DEFAULT_CHAIN_ID,
+  pendingHavenSetup = false,
 }: {
   delegate: string
   allowances: AllowanceInfo[]
   chainTimeSec: number | null
   chainId?: number
+  /**
+   * True when this delegate was set up through Haven in this session but its
+   * agent hasn't flipped active yet (slow backend confirmation). It isn't
+   * "unmanaged" — it's mid-setup — so we reword and de-escalate the tone rather
+   * than implying it was created outside Haven.
+   */
+  pendingHavenSetup?: boolean
 }) {
+  // Neutral tone while a Haven setup is still confirming; warning tone for a
+  // genuinely external delegate that needs the user's attention.
+  const accentText = pendingHavenSetup ? 'text-[var(--v2-ink-2)]' : 'text-[var(--v2-warning)]'
+  const containerCls = pendingHavenSetup
+    ? 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
+    : 'border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)]'
   return (
-    <div className="rounded-[10px] border border-dashed border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-5">
+    <div className={`rounded-[10px] border border-dashed p-5 ${containerCls}`}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-white text-[var(--v2-warning)] flex items-center justify-center">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 9v4M12 17h.01" />
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-            </svg>
+          <div className={`w-9 h-9 rounded-xl bg-white flex items-center justify-center ${accentText}`}>
+            {pendingHavenSetup ? (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+            ) : (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 9v4M12 17h.01" />
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              </svg>
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-                Unmanaged Delegate
+                {pendingHavenSetup ? 'Finishing agent setup' : 'Unmanaged Delegate'}
               </h3>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-white text-[var(--v2-warning)]">
-                network only
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-white ${accentText}`}>
+                {pendingHavenSetup ? 'confirming' : 'network only'}
               </span>
             </div>
-            <p className="text-xs text-[var(--v2-warning)] mt-0.5">
-              This delegate was set up outside Haven
+            <p className={`text-xs mt-0.5 ${accentText}`}>
+              {pendingHavenSetup
+                ? 'Haven is still confirming these rules on-chain — this agent will appear here shortly.'
+                : 'This delegate was set up outside Haven'}
             </p>
           </div>
         </div>
@@ -652,14 +675,14 @@ function UnmanagedDelegateCard({
 
       {/* Delegate address */}
       <div className="mb-4">
-        <p className="mb-1 text-xs font-medium text-[var(--v2-warning)]">
+        <p className={`mb-1 text-xs font-medium ${accentText}`}>
           Signing address
         </p>
         <p className="text-xs font-mono text-[var(--v2-ink-2)]">
           {truncate(delegate)}
           <button
             onClick={() => navigator.clipboard.writeText(delegate)}
-            className="ml-2 text-[var(--v2-warning)] hover:text-[var(--v2-ink)] transition-colors"
+            className={`ml-2 transition-colors hover:text-[var(--v2-ink)] ${accentText}`}
             title="Copy address"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -673,7 +696,7 @@ function UnmanagedDelegateCard({
       {/* On-chain allowances */}
       {allowances.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-medium text-[var(--v2-warning)]">Agent budget</p>
+          <p className={`text-xs font-medium ${accentText}`}>Agent budget</p>
           {allowances.map((info) => (
             <AllowanceBar key={info.token} info={info} chainTimeSec={chainTimeSec} chainId={chainId} />
           ))}
@@ -741,9 +764,13 @@ export default function AgentPanel() {
   // Cancellation token for the post-setup poll (see `pollForNewAgent`). Held in
   // a ref so an in-flight poll is cancelled on unmount or when superseded.
   const newAgentPollRef = useRef<{ cancelled: boolean } | null>(null)
-  // Delegate of the most recent poll, so the timeout fallback's "Refresh" can
-  // re-poll the same agent without needing the user to redo setup.
+  // Delegate of the most recent poll, so the timeout fallback's "Check again"
+  // can re-poll the same agent without needing the user to redo setup.
   const lastPollDelegateRef = useRef<string | null>(null)
+  // Delegates the user set up through Haven this session. If the backend is slow
+  // enough that one reappears on-chain before its agent flips active, this lets
+  // us label it "finishing setup" rather than "unmanaged / set up outside Haven".
+  const havenSetupDelegatesRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     return () => {
       if (onChainRefetchTimerRef.current !== null) clearTimeout(onChainRefetchTimerRef.current)
@@ -819,6 +846,7 @@ export default function AgentPanel() {
         return
       }
       lastPollDelegateRef.current = delegateAddress ?? null
+      havenSetupDelegatesRef.current.add(key)
       setFinalizingAgent(true)
       setFinalizeTimedOut(false)
       try {
@@ -1296,6 +1324,7 @@ export default function AgentPanel() {
               allowances={d.allowances}
               chainTimeSec={chainTimeSec}
               chainId={chainId}
+              pendingHavenSetup={havenSetupDelegatesRef.current.has(d.address.toLowerCase())}
             />
           ))}
         </div>

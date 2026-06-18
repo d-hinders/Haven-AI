@@ -28,6 +28,47 @@ interface UseSafeApprovers {
  * Live approver (Safe owner) set for one Safe. Membership comes from on-chain
  * `getOwners()` on the backend, merged with stored label/type metadata.
  */
+export interface KnownApprover {
+  address: string
+  type: ApproverType
+  label: string | null
+  /** Safe ids (as strings) this approver already has metadata on. */
+  safe_ids: string[]
+}
+
+interface UseKnownApprovers {
+  known: KnownApprover[]
+  loading: boolean
+  refetch: () => Promise<void>
+}
+
+/**
+ * The user's approver registry across all their Safes — the source for
+ * reusing an existing approver on another account (#417).
+ */
+export function useKnownApprovers(): UseKnownApprovers {
+  const [known, setKnown] = useState<KnownApprover[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchKnown = useCallback(async () => {
+    setLoading(true)
+    try {
+      const result = await api.get<{ approvers: KnownApprover[] }>('/user/safes/known-approvers')
+      setKnown(result.approvers)
+    } catch {
+      setKnown([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchKnown()
+  }, [fetchKnown])
+
+  return { known, loading, refetch: fetchKnown }
+}
+
 export function useSafeApprovers(safeId: string | null): UseSafeApprovers {
   const [approvers, setApprovers] = useState<Approver[]>([])
   const [threshold, setThreshold] = useState(1)

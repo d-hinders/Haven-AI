@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.fn()
 const mockUseSafeApprovers = vi.fn()
+const mockUseKnownApprovers = vi.fn()
 const mockUseSafeOperationGate = vi.fn()
 const mockUseActiveSigner = vi.fn()
 const mockUsePublicClient = vi.fn()
@@ -12,6 +13,7 @@ const mockApplyApproverChange = vi.fn()
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
 vi.mock('@/hooks/useSafeApprovers', () => ({
   useSafeApprovers: (...args: unknown[]) => mockUseSafeApprovers(...args),
+  useKnownApprovers: (...args: unknown[]) => mockUseKnownApprovers(...args),
 }))
 vi.mock('@/hooks/useSafeOperationGate', () => ({
   useSafeOperationGate: (...args: unknown[]) => mockUseSafeOperationGate(...args),
@@ -53,6 +55,7 @@ describe('ManageApprovers', () => {
     mockUseActiveSigner.mockReturnValue({ type: 'eoa', address: A })
     mockUsePublicClient.mockReturnValue({})
     mockApplyApproverChange.mockResolvedValue({ txHash: '0xtx' })
+    mockUseKnownApprovers.mockReturnValue({ known: [], loading: false, refetch: vi.fn() })
   })
 
   it('prompts to link an account when there are no safes', () => {
@@ -120,6 +123,38 @@ describe('ManageApprovers', () => {
     await waitFor(() =>
       expect(mockApplyApproverChange).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'add', address: B, label: 'Co-founder', type: 'eoa' }),
+      ),
+    )
+  })
+
+  it('offers known approvers from other Safes for reuse, excluding current owners', async () => {
+    const user = userEvent.setup()
+    setApprovers([{ address: A, type: 'eoa', label: 'Wallet A' }, { address: B, type: 'eoa', label: null }])
+    // C is known from another Safe; A is already an owner here and must be excluded.
+    const C = '0xcccccccccccccccccccccccccccccccccccccccc'
+    mockUseKnownApprovers.mockReturnValue({
+      known: [
+        { address: A, type: 'eoa', label: 'Wallet A', safe_ids: ['safe-1'] },
+        { address: C, type: 'passkey', label: 'Shared passkey', safe_ids: ['safe-2'] },
+      ],
+      loading: false,
+      refetch: vi.fn(),
+    })
+    render(<ManageApprovers />)
+
+    await user.click(screen.getByRole('button', { name: 'Add approver' }))
+
+    expect(screen.getByText('Shared passkey')).toBeInTheDocument()
+    expect(screen.queryByText('Wallet A')).toBeInTheDocument() // present in the owner list…
+    // …but A is not offered for reuse (no second "Add to" button for it)
+    const reuseButtons = screen.getAllByRole('button', { name: /Add to/i })
+    expect(reuseButtons).toHaveLength(1)
+
+    await user.click(reuseButtons[0])
+
+    await waitFor(() =>
+      expect(mockApplyApproverChange).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'add', address: C, type: 'passkey', label: 'Shared passkey' }),
       ),
     )
   })

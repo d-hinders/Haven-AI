@@ -150,6 +150,28 @@ describe('approver routes on /user/safes/:safeId/approvers', () => {
     ])
   })
 
+  it('lists the user\'s known approvers across Safes for reuse', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [
+        { address: A, type: 'eoa', label: 'Co-founder', safe_ids: [SAFE_ID] },
+        { address: B, type: 'passkey', label: 'My passkey', safe_ids: [SAFE_ID, 'safe-2'] },
+      ],
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/user/safes/known-approvers',
+      headers: auth(),
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.approvers).toHaveLength(2)
+    expect(body.approvers[0]).toEqual({ address: A, type: 'eoa', label: 'Co-founder', safe_ids: [SAFE_ID] })
+    // The query is scoped to the authenticated user.
+    expect(mockPoolQuery.mock.calls[0][1]).toEqual(['user-1'])
+  })
+
   it('validates the address before doing any network read', async () => {
     mockPoolQuery.mockResolvedValueOnce({ rows: [ownedSafeRow] })
 

@@ -317,6 +317,35 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   // the *user* signs and relays via /safe-exec — Haven never signs them, so
   // these endpoints construct + guard but never execute.
 
+  // GET /user/safes/known-approvers — the user's approver registry across all
+  // their Safes, for reusing an approver on another account (#417). Distinct
+  // by address; carries the most recent label/type and the safe_ids it is
+  // known on so the picker can exclude Safes it is already on.
+  app.get('/known-approvers', async (request) => {
+    const { sub } = request.user as { sub: string }
+    const result = await pool.query<{
+      address: string
+      type: 'eoa' | 'passkey'
+      label: string | null
+      safe_ids: string[]
+    }>(
+      `SELECT DISTINCT ON (LOWER(m.address))
+              m.address,
+              m.type,
+              m.label,
+              (SELECT array_agg(m2.safe_id::text)
+                 FROM safe_approver_metadata m2
+                 JOIN user_safes s2 ON s2.id = m2.safe_id
+                WHERE s2.user_id = $1 AND LOWER(m2.address) = LOWER(m.address)) AS safe_ids
+         FROM safe_approver_metadata m
+         JOIN user_safes s ON s.id = m.safe_id
+        WHERE s.user_id = $1
+        ORDER BY LOWER(m.address), m.updated_at DESC`,
+      [sub],
+    )
+    return { approvers: result.rows }
+  })
+
   // GET /user/safes/:safeId/approvers — on-chain owners + stored metadata
   app.get<{ Params: { safeId: string } }>(
     '/:safeId/approvers',

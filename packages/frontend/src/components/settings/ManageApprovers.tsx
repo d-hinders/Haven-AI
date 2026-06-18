@@ -4,7 +4,12 @@ import { useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import type { Address } from 'viem'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
-import { useSafeApprovers, type Approver } from '@/hooks/useSafeApprovers'
+import {
+  useKnownApprovers,
+  useSafeApprovers,
+  type Approver,
+  type ApproverType,
+} from '@/hooks/useSafeApprovers'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useActiveSigner } from '@/lib/signer'
 import { applyApproverChange } from '@/lib/approver-tx'
@@ -42,6 +47,7 @@ function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boole
   const safeAddress = safe.safe_address as Address
   const chain = getChainConfig(safe.chain_id)
   const { approvers, loading, error, refetch } = useSafeApprovers(safe.id)
+  const { known, refetch: refetchKnown } = useKnownApprovers()
   const publicClient = usePublicClient({ chainId: safe.chain_id })
   const signer = useActiveSigner({ safeAddress, chainId: safe.chain_id })
   const gate = useSafeOperationGate({ safeAddress, chainId: safe.chain_id })
@@ -62,18 +68,12 @@ function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boole
     return null
   }
 
-  async function handleAdd() {
-    const address = newAddress.trim()
-    if (!isValidAddress(address)) {
-      setActionError('Enter a valid wallet address (0x…).')
-      return
-    }
+  async function runAdd(address: string, label: string | undefined, type: ApproverType) {
+    if (!signer || !publicClient) return
     if (approvers.some((a) => a.address.toLowerCase() === address.toLowerCase())) {
       setActionError('That address is already an approver on this account.')
       return
     }
-    if (!signer || !publicClient) return
-
     setBusy(true)
     setActionError(null)
     try {
@@ -85,19 +85,33 @@ function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boole
         address,
         signer,
         publicClient,
-        label: newLabel.trim() || undefined,
-        type: 'eoa',
+        label: label?.trim() || undefined,
+        type,
       })
       setAdding(false)
       setNewAddress('')
       setNewLabel('')
-      await refetch()
+      await Promise.all([refetch(), refetchKnown()])
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Could not add the approver.')
     } finally {
       setBusy(false)
     }
   }
+
+  async function handleAdd() {
+    const address = newAddress.trim()
+    if (!isValidAddress(address)) {
+      setActionError('Enter a valid wallet address (0x…).')
+      return
+    }
+    await runAdd(address, newLabel, 'eoa')
+  }
+
+  // Known approvers (from the user's other Safes) not already on this one.
+  const reusable = known.filter(
+    (k) => !approvers.some((a) => a.address.toLowerCase() === k.address.toLowerCase()),
+  )
 
   async function handleRemove(approver: Approver) {
     if (!signer || !publicClient) return
@@ -209,6 +223,42 @@ function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boole
 
       {adding ? (
         <div className="mt-4 space-y-3 rounded-lg border border-dashed border-[var(--v2-border)] p-4">
+          {reusable.length > 0 ? (
+            <div>
+              <label className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                Reuse an existing approver
+              </label>
+              <ul className="space-y-1.5">
+                {reusable.map((k) => (
+                  <li
+                    key={k.address}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-[var(--v2-ink)]">{k.label ?? truncate(k.address)}</span>
+                        <StatusBadge tone={k.type === 'passkey' ? 'brand' : 'neutral'}>
+                          {k.type === 'passkey' ? 'Passkey' : 'Wallet'}
+                        </StatusBadge>
+                      </div>
+                      {k.label ? (
+                        <span className="font-mono text-xs text-[var(--v2-ink-3)]">{truncate(k.address)}</span>
+                      ) : null}
+                    </div>
+                    <Button
+                      variant="tertiary"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => void runAdd(k.address, k.label ?? undefined, k.type)}
+                    >
+                      Add to {multiple ? safe.name : 'this account'}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-[var(--v2-ink-3)]">Or add a new address below.</p>
+            </div>
+          ) : null}
           <div>
             <label className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
               Approver address

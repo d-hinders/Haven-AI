@@ -23,6 +23,7 @@ import * as sendIdempotencyKey from './020_send_idempotency_key.js'
 import * as onboardingEvents from './021_onboarding_events.js'
 import * as delegateSweeps from './022_delegate_sweeps.js'
 import * as delegateSweepTxHashIndex from './023_delegate_sweep_tx_hash_index.js'
+import * as safeApproverMetadata from './024_safe_approver_metadata.js'
 
 export interface Migration {
   version: string
@@ -59,4 +60,5 @@ export const migrations: Migration[] = [
   onboardingEvents,
   delegateSweeps,
   delegateSweepTxHashIndex,
+  safeApproverMetadata,
 ]

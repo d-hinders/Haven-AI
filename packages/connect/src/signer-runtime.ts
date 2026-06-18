@@ -100,25 +100,42 @@ async function installRuntimePackages(
   npmCacheDirectory: string,
   runCommand: ((command: string, args: string[]) => Promise<void>) | undefined,
 ): Promise<void> {
-  const args = [
+  // Fast path: install against the user's default npm cache with
+  // `--prefer-offline`. `npx @haven_ai/connect` just downloaded the signer + sdk
+  // tarballs (plus their closure) into that cache moments earlier, so this
+  // resolves from disk instead of re-fetching over the network — the single
+  // biggest avoidable cost in cold setup.
+  const baseArgs = [
     'install',
     '--prefix',
     runtimeDirectory,
-    '--cache',
-    npmCacheDirectory,
     '--no-audit',
     '--no-fund',
     '--omit=dev',
+    '--prefer-offline',
     signerPackageSpec(),
     sdkPackageSpec(),
   ]
-  try {
+  const run = async (args: string[]): Promise<void> => {
     if (runCommand) await runCommand('npm', args)
     else await execFileAsync('npm', args, { timeout: 120_000, maxBuffer: 1024 * 1024 })
-  } catch (err) {
-    throw new Error(
-      `Could not install local Haven signer runtime ${signerPackageSpec()}: ${err instanceof Error ? err.message : String(err)}`,
-    )
+  }
+
+  try {
+    await run(baseArgs)
+  } catch {
+    // Fallback: the default `~/.npm` can be corrupted or root-owned (a real,
+    // documented failure mode — see docs/operations/mcp-runtime-compatibility.md).
+    // Retry against the isolated Haven-owned cache so a broken global cache can't
+    // break agent setup. This path may hit the network; that is the acceptable
+    // cost of recovering from an unusable default cache.
+    try {
+      await run([...baseArgs, '--cache', npmCacheDirectory])
+    } catch (err) {
+      throw new Error(
+        `Could not install local Haven signer runtime ${signerPackageSpec()}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
   }
 }
 

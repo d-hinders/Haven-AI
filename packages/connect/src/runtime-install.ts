@@ -86,6 +86,14 @@ export interface RuntimeInstallDeps {
   env?: NodeJS.ProcessEnv
   homeDir?: string
   fetch?: typeof fetch
+  /**
+   * Optional live progress callback. installRuntime's slowest steps (signer
+   * pre-install, runtime config write, MCP handshake probes) otherwise emit
+   * nothing until the caller flushes the collected `messages` after this
+   * returns — leaving the console silent through the longest part of setup.
+   * When provided, a few lightweight heartbeat lines are emitted as they run.
+   */
+  onProgress?: (message: string) => void
   runCommand?: (command: string, args: string[]) => Promise<void>
   prepareLocalMcpRuntime?: (input: PrepareLocalMcpRuntimeInput) => Promise<PreparedLocalMcpRuntime>
   prepareSignerRuntime?: (input: PrepareSignerRuntimeInput) => Promise<PreparedSignerRuntime>
@@ -102,6 +110,7 @@ export async function installRuntime(
 ): Promise<RuntimeInstallResult> {
   const runtime = normalizeRuntime(input.runtime, deps.env)
   const profile = runtimeProfile(runtime, deps.env)
+  const progress = deps.onProgress ?? (() => undefined)
   const localRuntime = input.localMcp === true && supportsLocalMcp(runtime)
   const consentMessages: string[] = []
   const localMcpConsent = localRuntime
@@ -177,6 +186,7 @@ export async function installRuntime(
   // environment. Prep failure is non-fatal: fall back to the npx command.
   let signerCommand: { command: string; args: string[] } | undefined
   if (!localRuntime) {
+    progress('Getting the signer ready…')
     try {
       const signerRuntime = await prepareSignerForRuntime(input, deps)
       signerCommand = { command: signerRuntime.command, args: signerRuntime.args }
@@ -189,6 +199,7 @@ export async function installRuntime(
   }
   const signerRuntimePrepared = localRuntime ? undefined : signerCommand !== undefined
 
+  progress('Setting up your Haven tools…')
   const configResult = runtime === 'claude-code'
     ? localRuntime
       ? await configureClaudeCode(deps, localRuntimeInstall?.command ?? '')
@@ -206,6 +217,7 @@ export async function installRuntime(
         mode: localRuntime ? 'local' : 'hosted',
       })
 
+  progress('Almost there — just confirming everything connects…')
   const localProbePromise = configResult.runtimeMcpMode === 'local_stdio' && localRuntimeInstall
     ? runLocalMcpProbe(localRuntimeInstall, deps)
     : Promise.resolve(undefined)
@@ -317,7 +329,6 @@ async function configureClaudeCode(
       messages: [
         'Updated local Haven MCP entry with Claude Code.',
         ...(verified ? ['Verified Claude Code MCP entry.'] : []),
-        'After Haven approval, Haven tools should appear in your next Claude Code message. If they don\'t, restart the session to load them.',
       ],
     }
   } catch (err) {
@@ -387,7 +398,6 @@ async function configureClaudeCodeHosted(
       messages: [
         'Updated hosted Haven MCP and local signer entries with Claude Code.',
         ...(verified ? ['Verified Claude Code MCP entry.'] : []),
-        'After Haven approval, Haven tools should appear in your next Claude Code message. If they don\'t, restart the session to load them.',
       ],
     }
   } catch (err) {

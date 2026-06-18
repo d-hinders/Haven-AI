@@ -57,17 +57,21 @@ Keep this table in sync with that file.
 
 ## Troubleshooting
 
-- **Broken or root-owned `~/.npm`:** setup uses `~/.haven/npm-cache` for the MCP
-  runtime install, so a corrupted global npm cache should not break normal
-  agent startup.
+- **Broken or root-owned `~/.npm`:** the MCP runtime install first tries the
+  user's default npm cache with `--prefer-offline` (which `npx` just warmed, so
+  the signer/sdk tarballs are reused instead of re-downloaded). If that fails —
+  e.g. a corrupted or root-owned global cache — it automatically retries against
+  the isolated `~/.haven/npm-cache`, so a broken global cache still cannot break
+  normal agent startup.
 - **Invalid Codex TOML:** the connector writes Codex config with a TOML string
   serializer and validates the generated Haven block before writing. The
   expected shape is `command = ".../bin/haven-mcp"` and `args = []`.
 - **Unsupported Node.js:** local MCP setup requires Node.js `>=20.0.0`. Upgrade
   Node and rerun the setup command.
 - **Local MCP runtime install failed:** rerun the setup command. It will reuse
-  local credentials, install the pinned runtime into `~/.haven/mcp-runtime`, and
-  use `~/.haven/npm-cache` rather than the user's global npm cache.
+  local credentials and install the pinned runtime into `~/.haven/mcp-runtime`,
+  falling back from the user's default npm cache to `~/.haven/npm-cache` if the
+  global cache is unusable.
 - **Claude Code does not show Haven:** run `claude mcp get haven` and confirm
   it points at the wrapper path. If `add-json` is unavailable, the connector
   falls back to `claude mcp add --scope user -- <wrapper>`.

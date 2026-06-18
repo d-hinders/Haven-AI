@@ -29,7 +29,7 @@ describe('prepareSignerRuntime', () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'haven-signer-runtime-home-'))
     const credentialDirectory = join(homeDir, '.haven', 'agents', 'agent-1')
     const signerPath = join(credentialDirectory, 'signer.json')
-    const runCommand = vi.fn(async () => {
+    const runCommand = vi.fn(async (_command: string, _args: string[]) => {
       const cliPath = signerNodeModule(homeDir, 'signer', 'dist', 'cli.js')
       await mkdir(join(cliPath, '..'), { recursive: true })
       await writeFile(cliPath, 'console.log("signer")\n', 'utf8')
@@ -43,13 +43,18 @@ describe('prepareSignerRuntime', () => {
 
     const result = await prepareSignerRuntime({ credentialDirectory, signerPath, homeDir }, { runCommand })
 
-    expect(runCommand).toHaveBeenCalledWith('npm', expect.arrayContaining([
+    // Fast path: install against the default npm cache (warmed by npx) with
+    // --prefer-offline so the tarballs are reused, not re-downloaded.
+    expect(runCommand).toHaveBeenCalledTimes(1)
+    const installArgs = runCommand.mock.calls[0]![1]
+    expect(installArgs).toEqual(expect.arrayContaining([
       'install',
-      '--cache',
-      join(homeDir, '.haven', 'npm-cache'),
+      '--prefer-offline',
       signerPackageSpec(),
       sdkPackageSpec(),
     ]))
+    // Common path must not pin the isolated Haven cache — that's the fallback only.
+    expect(installArgs).not.toContain('--cache')
     // Registered command is the absolute wrapper, not a runtime npx invocation.
     expect(result.command).toBe(join(credentialDirectory, 'bin', 'haven-signer.mjs'))
     expect(result.args).toEqual([])
@@ -110,5 +115,36 @@ describe('prepareSignerRuntime', () => {
 
     expect(runCommand).not.toHaveBeenCalled()
     expect(result.messages.join('\n')).toContain('Using existing local Haven signer runtime')
+  })
+
+  it('falls back to the isolated Haven npm cache when the default cache install fails', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-signer-runtime-fallback-'))
+    const credentialDirectory = join(homeDir, '.haven', 'agents', 'agent-1')
+    const signerPath = join(credentialDirectory, 'signer.json')
+    await mkdir(credentialDirectory, { recursive: true })
+    await writeFile(signerPath, JSON.stringify({ delegate_key: PRIVATE_KEY }), 'utf8')
+
+    // First attempt (default cache, no --cache) fails as if ~/.npm were broken or
+    // root-owned; the fallback attempt against ~/.haven/npm-cache succeeds and
+    // lays down the runtime.
+    const runCommand = vi.fn(async (_cmd: string, args: string[]) => {
+      if (!args.includes('--cache')) {
+        throw new Error('EACCES: permission denied, mkdir \'/root/.npm\'')
+      }
+      const cliPath = signerNodeModule(homeDir, 'signer', 'dist', 'cli.js')
+      await mkdir(join(cliPath, '..'), { recursive: true })
+      await writeFile(cliPath, 'console.log("signer")\n', 'utf8')
+      await writePackage(signerNodeModule(homeDir, 'signer', 'package.json'), PINNED_SIGNER_VERSION)
+      await writePackage(signerNodeModule(homeDir, 'sdk', 'package.json'), PINNED_SDK_VERSION)
+    })
+
+    const result = await prepareSignerRuntime({ credentialDirectory, signerPath, homeDir }, { runCommand })
+
+    expect(runCommand).toHaveBeenCalledTimes(2)
+    expect(runCommand.mock.calls[1]![1]).toEqual(expect.arrayContaining([
+      '--cache',
+      join(homeDir, '.haven', 'npm-cache'),
+    ]))
+    expect(result.command).toBe(join(credentialDirectory, 'bin', 'haven-signer.mjs'))
   })
 })

@@ -13,6 +13,8 @@ import {
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useActiveSigner } from '@/lib/signer'
 import { applyApproverChange } from '@/lib/approver-tx'
+import { provisionPasskeyApprover } from '@/lib/passkey-approver'
+import { PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { truncate, isValidAddress } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
@@ -46,6 +48,7 @@ export default function ManageApprovers() {
 function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boolean }) {
   const safeAddress = safe.safe_address as Address
   const chain = getChainConfig(safe.chain_id)
+  const { user } = useAuth()
   const { approvers, loading, error, refetch } = useSafeApprovers(safe.id)
   const { known, refetch: refetchKnown } = useKnownApprovers()
   const publicClient = usePublicClient({ chainId: safe.chain_id })
@@ -106,6 +109,28 @@ function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boole
       return
     }
     await runAdd(address, newLabel, 'eoa')
+  }
+
+  async function handleAddPasskey() {
+    if (!user || !signer || !publicClient) return
+    setBusy(true)
+    setActionError(null)
+    try {
+      // Create + enrol a fresh passkey, then add its signer address as an
+      // owner via the same signed owner-change flow as an EOA.
+      const { signerAddress } = await provisionPasskeyApprover({ user, chainId: safe.chain_id })
+      await runAdd(signerAddress, newLabel.trim() || 'Passkey', 'passkey')
+    } catch (err) {
+      if (err instanceof PasskeyCancelledError) {
+        setActionError('Passkey creation was cancelled.')
+      } else if (err instanceof PasskeyUnsupportedError) {
+        setActionError('This device or browser does not support passkeys.')
+      } else {
+        setActionError(err instanceof Error ? err.message : 'Could not add the passkey approver.')
+      }
+    } finally {
+      setBusy(false)
+    }
   }
 
   // Known approvers (from the user's other Safes) not already on this one.
@@ -287,12 +312,20 @@ function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boole
           {actionError ? (
             <p className="text-xs text-[var(--v2-danger)]">{actionError}</p>
           ) : null}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="tertiary" size="sm" disabled={busy} onClick={() => { setAdding(false); setNewAddress(''); setNewLabel(''); setActionError(null) }}>
               Cancel
             </Button>
             <Button size="sm" disabled={busy || !newAddress.trim()} onClick={() => void handleAdd()}>
-              {busy ? 'Adding…' : 'Add approver'}
+              {busy ? 'Adding…' : 'Add address'}
+            </Button>
+          </div>
+          <div className="border-t border-[var(--v2-border)] pt-3">
+            <p className="mb-2 text-xs text-[var(--v2-ink-3)]">
+              No address to add? Create a passkey on this device and add it as an approver.
+            </p>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void handleAddPasskey()}>
+              {busy ? 'Working…' : 'Add a passkey'}
             </Button>
           </div>
         </div>

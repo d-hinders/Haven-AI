@@ -123,7 +123,7 @@ describe('CatalogPanel', () => {
     expect(screen.getByText('Media thing')).toBeDefined()
   })
 
-  it('greys degraded entries with an explanation instead of hiding them', () => {
+  it('keeps degraded entries usable with a calm availability note', () => {
     mockUseCatalog.mockReturnValue({
       entries: [entry({ status: 'degraded' })],
       loading: false,
@@ -132,9 +132,11 @@ describe('CatalogPanel', () => {
     render(<CatalogPanel />)
 
     expect(screen.getByText('Text generation')).toBeDefined()
-    expect(screen.getByText(/did not answer its last availability check/)).toBeDefined()
-    // degraded entries get no copy affordance
-    expect(screen.queryByLabelText(/Copy agent instruction/)).toBeNull()
+    // Calm chip + one-liner instead of a scary dimmed card…
+    expect(screen.getByText('Limited availability')).toBeDefined()
+    expect(screen.getByText(/Recently unreachable/)).toBeDefined()
+    // …and the offer stays fully usable (price + copy instruction).
+    expect(screen.getByLabelText(/Copy agent instruction/)).toBeDefined()
   })
 
   it('shows the over-budget warning when no allowance covers the price', () => {

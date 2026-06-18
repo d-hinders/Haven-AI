@@ -28,9 +28,18 @@ export interface CatalogRow {
   network: string | null
   status: 'active' | 'degraded' | 'delisted'
   verified_at: string | null
+  consecutive_failures: number
   created_at: string
   updated_at: string
 }
+
+/**
+ * Consecutive failed probes before an entry is shown as degraded. A single
+ * transient miss (cold start, network blip, MCP servers that want an
+ * `initialize` before `tools/call`) should not alarm users — only a sustained
+ * outage should.
+ */
+export const DEGRADE_AFTER_FAILURES = 3
 
 export interface ProbeResult {
   ok: boolean
@@ -177,21 +186,27 @@ export async function refreshCatalog(
     const result = await probeCatalogEntry(entry, fetchImpl)
     if (result.ok) {
       verified++
+      // Success always recovers the entry and clears the failure streak.
       await db.query(
         `UPDATE merchant_catalog
          SET price_atomic = $2, price_display = $3, asset = $4,
              network = COALESCE($5, network),
-             status = 'active', verified_at = now(), updated_at = now()
+             status = 'active', verified_at = now(),
+             consecutive_failures = 0, updated_at = now()
          WHERE id = $1`,
         [entry.id, result.priceAtomic, result.priceDisplay, result.asset, result.network ?? null],
       )
     } else {
-      degraded++
+      // Hysteresis: count the miss, but only degrade after a sustained streak
+      // so one flaky probe doesn't light up the whole catalog.
+      const failures = (entry.consecutive_failures ?? 0) + 1
+      const nextStatus = failures >= DEGRADE_AFTER_FAILURES ? 'degraded' : entry.status
+      if (nextStatus === 'degraded') degraded++
       await db.query(
         `UPDATE merchant_catalog
-         SET status = 'degraded', updated_at = now()
+         SET consecutive_failures = $2, status = $3, updated_at = now()
          WHERE id = $1`,
-        [entry.id],
+        [entry.id, failures, nextStatus],
       )
     }
   }

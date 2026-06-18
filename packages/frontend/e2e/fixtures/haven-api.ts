@@ -326,6 +326,37 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // Transaction history page filter options. Must be checked before the
+    // `/transactions/` catch-all below, which it would otherwise match.
+    if (method === 'GET' && path === '/transactions/filters') {
+      await fulfillJson(route, {
+        safes: [
+          { id: testSafe.id, name: testSafe.name, address: testSafeAddress, chainId: 8453 },
+        ],
+        agents: [{ id: testAgent.id, name: testAgent.name, status: testAgent.status }],
+        tokens: [
+          { key: '8453:0xddafbb505ad214d7b80b1f830fccc89b60fb7a83', symbol: 'USDC', address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83', chainId: 8453, isNative: false },
+        ],
+      })
+      return
+    }
+
+    // Transaction history feed (TransactionsClient). Exact `/transactions`
+    // path with a query string — distinct from the dashboard's per-safe
+    // `/transactions/{id}` reads handled by the catch-all below.
+    if (method === 'GET' && path === '/transactions') {
+      await fulfillJson(route, {
+        transactions: [dashboardTransaction],
+        total: 1,
+        offset: 0,
+        limit: 25,
+        hasMore: false,
+        partialFailure: false,
+        failedSafeIds: [],
+      })
+      return
+    }
+
     if (method === 'GET' && path.startsWith('/transactions/')) {
       await fulfillJson(route, {
         transactions: [dashboardTransaction],

@@ -10,3 +10,7 @@ dist/
 output/playwright/
 packages/frontend/playwright-report/
 packages/frontend/test-results/
+
+# Agent worktrees — transient per-agent checkouts, never committed
+# (tracked .claude config like agents/ and skills/ is intentionally NOT ignored)
+.claude/worktrees/

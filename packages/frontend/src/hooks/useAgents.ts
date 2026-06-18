@@ -51,18 +51,31 @@ export function useAgents() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchAgents = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const res = await api.get<{ agents: Agent[] }>('/agents')
-      setAgents(res.agents)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not load connected agents.')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const fetchAgents = useCallback(
+    async (options?: { silent?: boolean }): Promise<Agent[]> => {
+      // `silent` refetches (used by the post-setup poll) skip the loading/error
+      // flags so the list doesn't flicker its skeleton or surface a transient
+      // error every couple of seconds while we wait for a new agent to land.
+      const silent = options?.silent ?? false
+      try {
+        if (!silent) {
+          setLoading(true)
+          setError(null)
+        }
+        const res = await api.get<{ agents: Agent[] }>('/agents')
+        setAgents(res.agents)
+        return res.agents
+      } catch (err) {
+        if (!silent) {
+          setError(err instanceof Error ? err.message : 'We could not load connected agents.')
+        }
+        return []
+      } finally {
+        if (!silent) setLoading(false)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     fetchAgents()

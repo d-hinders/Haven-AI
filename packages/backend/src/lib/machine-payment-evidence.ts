@@ -1,5 +1,6 @@
 import pool from '../db.js'
 import { getBookTimeSekValue } from './fiat-values.js'
+import { quoteFee, recordSettledFee } from './fee/fee-module.js'
 
 const PROTOCOL_RAILS = new Set(['x402', 'mpp_demo', 'mpp_crypto', 'spt'])
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -253,6 +254,25 @@ export async function recordMachinePaymentEvidenceBase(
       fxAt,
     ],
   )
+
+  // Record the (currently zero) platform fee for this payment so the fee ledger
+  // and the bookkeeping export have a complete, reconcilable history (#386
+  // scaffold). Best-effort and idempotent — must never block settlement, and
+  // moves no funds while the fee module is dark.
+  try {
+    let grossAtomic = 0n
+    try { grossAtomic = BigInt(intent.amount_raw) } catch { grossAtomic = 0n }
+    const quote = quoteFee({
+      paymentId: intent.id,
+      rail: rail ?? 'unknown',
+      grossAtomic,
+      token: intent.token_symbol,
+      userId: intent.user_id,
+    })
+    await recordSettledFee(quote)
+  } catch {
+    // swallow — fee recording is non-critical to settlement
+  }
 }
 
 export async function recordMachinePaymentEvidenceBaseById(

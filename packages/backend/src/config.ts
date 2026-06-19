@@ -57,6 +57,10 @@ export const config = {
   fortnoxClientSecret: process.env.FORTNOX_CLIENT_SECRET ?? '',
   fortnoxRedirectUri: process.env.FORTNOX_REDIRECT_URI ?? '',
 
+  // Platform fee module (#386). Dark by default — when false the fee is always
+  // zero and no funds move. Real pricing + on-chain collection are deferred.
+  feeEnabled: process.env.HAVEN_FEE_ENABLED === 'true',
+
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,

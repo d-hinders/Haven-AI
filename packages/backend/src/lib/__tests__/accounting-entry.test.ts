@@ -23,6 +23,7 @@ function row(over: Partial<AccountingEntrySourceRow> = {}): AccountingEntrySourc
     created_at: '2026-06-19T09:59:00.000Z',
     category: 'media',
     override_account: null,
+    fee_sek: null,
     ...over,
   }
 }
@@ -73,10 +74,10 @@ describe('toAccountingEntry', () => {
     expect(e.paymentId).toBe('ar9')
   })
 
-  it('populates category from the catalog and leaves fee null (no #386 yet)', () => {
-    const e = toAccountingEntry(row())
-    expect(e.feeSek).toBeNull()
-    expect(e.category).toBe('media')
+  it('populates category from the catalog and fee from the ledger', () => {
+    expect(toAccountingEntry(row()).feeSek).toBeNull()
+    expect(toAccountingEntry(row()).category).toBe('media')
+    expect(toAccountingEntry(row({ fee_sek: '1.25' })).feeSek).toBe('1.25')
   })
 
   it('carries a per-merchant account override when present, else null', () => {

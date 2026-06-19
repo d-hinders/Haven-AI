@@ -164,6 +164,22 @@ class ApiClient {
     return this.request<T>(path)
   }
 
+  /** GET a non-JSON body (e.g. an export file) as raw text, with auth. */
+  async getText(path: string): Promise<string> {
+    const token = this.getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const response = await fetch(`${this.resolveBaseUrl()}${path}`, { headers })
+    if (!response.ok) {
+      const body: ApiError = await response.json().catch(() => ({
+        error: 'An unexpected error occurred',
+      }))
+      throw new ApiRequestError(body.error, response.status)
+    }
+    return response.text()
+  }
+
   post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>(path, {
       method: 'POST',

@@ -450,9 +450,10 @@ export function buildHostedConnectSnippet(
           `#   ${agentDir}/signer.json    → delegate_key (local signing authority)`,
           `#   ${agentDir}/agent.json     → non-secret identity + budget (safe to read into context)`,
           ``,
-          `# Option A — Hosted MCP (identity) + local signer (authority).`,
+          `# Option A (recommended) — Hosted MCP (identity) + local signer (authority).`,
           `HAVEN_MCP_URL=${hostedUrl}`,
-          `# Load the Bearer from disk at runtime instead of hard-coding it:`,
+          `# The Bearer is the "api_key" field of identity.json. Read it at runtime;`,
+          `# don't hard-code it. (jq shown — any JSON reader on your platform works.)`,
           `HAVEN_API_KEY="$(jq -r .api_key ${agentDir}/identity.json)"`,
           `curl -X POST "$HAVEN_MCP_URL" \\`,
           `  -H "Authorization: Bearer $HAVEN_API_KEY" \\`,
@@ -463,7 +464,8 @@ export function buildHostedConnectSnippet(
           `# keeping it off the hosted server and out of the agent's context:`,
           `npx -y @haven_ai/signer --credentials ${agentDir}/signer.json`,
           ``,
-          `# Option B — Fully local MCP (no hosted dependency); reads both files:`,
+          `# Option B — Fully local MCP, if you'd rather not depend on Haven's hosted`,
+          `# server. One stdio process, reads both files, no hosted URL:`,
           `npx -y @haven_ai/mcp --identity ${agentDir}/identity.json --signer ${agentDir}/signer.json`,
         ].join('\n'),
       }
@@ -639,6 +641,16 @@ export function buildHostedSetupPrompt(
         ]
       : ['', 'Signing key', credential.delegate_key]
 
+  // The first key-handling rule must match where the key actually lives for
+  // this runtime. For 'other' it sits in signer.json on disk (read at signing
+  // time); telling that agent to keep the key "in memory only" would directly
+  // contradict the signing-key section above. First-class runtimes paste the
+  // key into chat, so "in memory only" is the right instruction for them.
+  const keyHandlingRule =
+    client === 'other'
+      ? '- The signing key stays in signer.json on disk; have the runtime read it only at signing time, and keep it out of your context, memory, and logs.'
+      : '- Keep the signing key in memory or in the agent runtime\'s local secret store only.'
+
   return [
     `Please connect this agent to Haven in ${runtimeLabel}.`,
     '',
@@ -666,7 +678,7 @@ export function buildHostedSetupPrompt(
     ...signingKeySection,
     '',
     'Rules for this key',
-    '- Keep the signing key in memory or in the agent runtime\'s local secret store only.',
+    keyHandlingRule,
     '- Do not commit it, upload it, paste it into shared logs, or send it to Haven.',
     '- Before attempting a payment, check the active agent budget and ask me to approve actions in Haven when a request is outside the rules.',
     `- If this credential may have leaked, tell me to pause or revoke the agent in Haven: ${credential.revoke_url}`,

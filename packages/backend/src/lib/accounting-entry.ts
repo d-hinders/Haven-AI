@@ -66,6 +66,8 @@ export interface AccountingEntrySourceRow {
   category: string | null
   /** From the user's per-merchant account overrides (LEFT JOIN). */
   override_account: string | null
+  /** Haven fee in SEK from the fee ledger (LEFT JOIN); null while fees are dark. */
+  fee_sek: string | null
 }
 
 /**
@@ -91,7 +93,7 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     fxRate: row.fx_rate_sek,
     fxSource: row.fx_source,
     fxAt: row.fx_at,
-    feeSek: null,
+    feeSek: row.fee_sek ?? null,
     category: row.category ?? null,
     account: row.override_account ?? null,
     vatTreatment: 'reverse_charge',
@@ -131,7 +133,8 @@ export async function buildAccountingEntries(
             mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at,
             mpe.resource_url, mpe.confirmed_at, mpe.created_at,
             mc.category AS category,
-            mao.bas_account AS override_account
+            mao.bas_account AS override_account,
+            pf.fee_sek AS fee_sek
      FROM machine_payment_evidence mpe
      LEFT JOIN LATERAL (
        SELECT category FROM merchant_catalog
@@ -140,6 +143,8 @@ export async function buildAccountingEntries(
      ) mc ON TRUE
      LEFT JOIN merchant_account_overrides mao
        ON mao.user_id = mpe.user_id AND mao.resource_url = mpe.resource_url
+     LEFT JOIN payment_fees pf
+       ON pf.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
      WHERE ${where}
      ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
      LIMIT ${limitParam}`,

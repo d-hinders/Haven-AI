@@ -25,6 +25,7 @@ import * as delegateSweeps from './022_delegate_sweeps.js'
 import * as delegateSweepTxHashIndex from './023_delegate_sweep_tx_hash_index.js'
 import * as safeApproverMetadata from './024_safe_approver_metadata.js'
 import * as catalogConsecutiveFailures from './025_catalog_consecutive_failures.js'
+import * as machinePaymentBookTimeFx from './026_machine_payment_book_time_fx.js'
 
 export interface Migration {
   version: string
@@ -63,4 +64,5 @@ export const migrations: Migration[] = [
   delegateSweepTxHashIndex,
   safeApproverMetadata,
   catalogConsecutiveFailures,
+  machinePaymentBookTimeFx,
 ]

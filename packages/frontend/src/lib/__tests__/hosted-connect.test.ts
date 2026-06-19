@@ -47,12 +47,20 @@ describe('buildHostedConnectSnippet', () => {
   const HOST = 'https://mcp.test.example/v1'
 
   // Custody invariant: every registered runtime — including any new ones
-  // added in the future — must carry the bearer (identity) but never the
+  // added in the future — must point at the hosted URL but never inline the
   // delegate private key (authority). The loop is the regression net.
   for (const option of HOSTED_CLIENT_REGISTRY) {
-    it(`includes the api key + URL but never the delegate key for ${option.id}`, () => {
+    it(`points at the hosted URL but never the delegate key for ${option.id}`, () => {
       const snippet = buildHostedConnectSnippet(option.id, credential(), HOST)
-      expect(snippet.code).toContain(API_KEY)
+      if (option.id === 'other') {
+        // 'other' is the secret-free, file-referenced handoff for custom/SDK
+        // runtimes: it references ~/.haven credential files by path so the raw
+        // api_key (and delegate key) never appear, keeping secrets out of the
+        // custom agent's context. The hosted URL must still be present.
+        expect(snippet.code).not.toContain(API_KEY)
+      } else {
+        expect(snippet.code).toContain(API_KEY)
+      }
       // Most runtimes inline the URL. Codex CLI uses an env-var pattern that
       // moves the actual bearer into the shell — that's fine, but the
       // hosted URL must still appear in the snippet so the user knows where
@@ -61,6 +69,21 @@ describe('buildHostedConnectSnippet', () => {
       expect(snippet.code).not.toContain(DELEGATE_KEY)
     })
   }
+
+  it('hands "other" a secret-free, file-referenced snippet (no key in context)', () => {
+    // The custom/SDK escape hatch must never inline a secret: custom agents
+    // have many memory sinks (context, transcript, memory files, logs) and a
+    // key in any of them is a leak. It references the on-disk credential files
+    // the connector always writes, plus the hosted URL and the local signer.
+    const s = buildHostedConnectSnippet('other', credential(), HOST)
+    expect(s.code).not.toContain(API_KEY)
+    expect(s.code).not.toContain(DELEGATE_KEY)
+    expect(s.code).toContain(HOST)
+    expect(s.code).toContain('~/.haven/agents/agt_test/identity.json')
+    expect(s.code).toContain('~/.haven/agents/agt_test/signer.json')
+    // Names the local signer so authority wiring isn't left as an exercise.
+    expect(s.code).toMatch(/@haven_ai\/signer/)
+  })
 
   it('emits a `claude mcp add` shell command for Claude Code', () => {
     const s = buildHostedConnectSnippet('claude-code', credential(), HOST)
@@ -298,6 +321,18 @@ describe('buildHostedSetupPrompt', () => {
     const occurrences = prompt.split(DELEGATE_KEY).length - 1
 
     expect(occurrences).toBe(1)
+  })
+
+  it('hands "other" a fully secret-free prompt that references the signer file', () => {
+    // Custom/SDK runtimes get a prompt with NO secret material at all — the
+    // signing key is referenced by its on-disk path instead of pasted into
+    // chat, so nothing sensitive lands in the custom agent's context/memory.
+    const prompt = buildHostedSetupPrompt('other', credential(), HOST)
+
+    expect(prompt).not.toContain(DELEGATE_KEY)
+    expect(prompt).not.toContain(API_KEY)
+    expect(prompt).toContain('~/.haven/agents/agt_test/signer.json')
+    expect(prompt).toMatch(/do not paste the signing key/i)
   })
 })
 

@@ -424,25 +424,50 @@ export function buildHostedConnectSnippet(
         postNote: 'Reload the Amp panel (editor) or restart the `amp` CLI session.',
       }
 
-    // ── Generic SDK / curl escape hatch ───────────────────────────────────
-    case 'other':
+    // ── Generic SDK / custom MCP client (secret-free, file-referenced) ─────
+    //
+    // The escape hatch for SDK and custom runtimes (e.g. a bespoke agent
+    // framework). Unlike the first-class runtimes, the connector cannot write
+    // this runtime's config, so historically this snippet inlined the raw
+    // api_key — which then ended up pasted into the agent's prompt/context.
+    // Custom agents have many memory sinks (context window, transcript, memory
+    // files, vector store, debug logs) and a key in any of them is a leak.
+    //
+    // Instead, reference the credential files the connector always writes to
+    // ~/.haven/agents/<id>/ (chmod 600) and have the runtime read them at
+    // execution time. No secret value appears in this snippet, so nothing
+    // sensitive lands in the model's context.
+    case 'other': {
+      const agentDir = `~/.haven/agents/${credential.agent_id}`
       return {
         client,
         language: 'bash',
         guidance:
-          'For SDK or custom agents — point your MCP client at the URL and send the Bearer header on every call.',
+          'For SDK or custom agents. Your credentials are already on disk (chmod 600) — read them at runtime; never paste a key into the agent\'s prompt, memory, or logs. Point your MCP client at the hosted URL using the api_key from identity.json (identity), and sign locally with the delegate key from signer.json (authority).',
         code: [
-          `HAVEN_MCP_URL=${hostedUrl}`,
-          `HAVEN_API_KEY=${credential.api_key}`,
+          `# Credentials the Haven connector wrote (do not commit, do not paste into chat):`,
+          `#   ${agentDir}/identity.json  → api_key + hosted_mcp_url (identity)`,
+          `#   ${agentDir}/signer.json    → delegate_key (local signing authority)`,
+          `#   ${agentDir}/agent.json     → non-secret identity + budget (safe to read into context)`,
           ``,
-          `# Example: curl an MCP tools/list against the hosted endpoint`,
+          `# Option A — Hosted MCP (identity) + local signer (authority).`,
+          `HAVEN_MCP_URL=${hostedUrl}`,
+          `# Load the Bearer from disk at runtime instead of hard-coding it:`,
+          `HAVEN_API_KEY="$(jq -r .api_key ${agentDir}/identity.json)"`,
           `curl -X POST "$HAVEN_MCP_URL" \\`,
           `  -H "Authorization: Bearer $HAVEN_API_KEY" \\`,
           `  -H "Content-Type: application/json" \\`,
           `  -H "Accept: application/json, text/event-stream" \\`,
           `  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`,
+          `# Run the local signer; it reads the delegate key from signer.json itself,`,
+          `# keeping it off the hosted server and out of the agent's context:`,
+          `npx -y @haven_ai/signer --credentials ${agentDir}/signer.json`,
+          ``,
+          `# Option B — Fully local MCP (no hosted dependency); reads both files:`,
+          `npx -y @haven_ai/mcp --identity ${agentDir}/identity.json --signer ${agentDir}/signer.json`,
         ].join('\n'),
       }
+    }
   }
 }
 
@@ -598,6 +623,22 @@ export function buildHostedSetupPrompt(
         ]
       : []
 
+  // Custom/SDK runtimes ('other') get a secret-free handoff: the signing key
+  // is referenced by its on-disk path rather than pasted into the chat. The
+  // connect snippet for 'other' is already file-referenced, so this keeps the
+  // entire prompt free of secret material — nothing sensitive lands in the
+  // custom agent's context, memory, or transcript. First-class runtimes keep
+  // the inline key, framed by the bounded-spend control model above (see the
+  // buildAgentStarterPrompt note on why safety-tuned agents need that framing).
+  const signingKeySection =
+    client === 'other'
+      ? [
+          '',
+          'Signing key',
+          `Do not paste the signing key into this chat. It is on disk at ~/.haven/agents/${credential.agent_id}/signer.json (chmod 600). Have the runtime read it only at signing time and keep it out of your context, memory, and logs.`,
+        ]
+      : ['', 'Signing key', credential.delegate_key]
+
   return [
     `Please connect this agent to Haven in ${runtimeLabel}.`,
     '',
@@ -622,9 +663,7 @@ export function buildHostedSetupPrompt(
     snippet.code,
     '```',
     ...(snippet.postNote ? ['', snippet.postNote] : []),
-    '',
-    'Signing key',
-    credential.delegate_key,
+    ...signingKeySection,
     '',
     'Rules for this key',
     '- Keep the signing key in memory or in the agent runtime\'s local secret store only.',

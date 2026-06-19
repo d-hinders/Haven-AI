@@ -22,6 +22,7 @@ function row(over: Partial<AccountingEntrySourceRow> = {}): AccountingEntrySourc
     confirmed_at: '2026-06-19T10:00:00.000Z',
     created_at: '2026-06-19T09:59:00.000Z',
     category: 'media',
+    country: null,
     override_account: null,
     fee_sek: null,
     ...over,
@@ -54,8 +55,12 @@ describe('toAccountingEntry', () => {
     expect(typeof e.amountSek).toBe('string')
   })
 
-  it('defaults foreign agent spend to reverse-charge VAT', () => {
-    expect(toAccountingEntry(row()).vatTreatment).toBe('reverse_charge')
+  it('derives VAT treatment from supplier country', () => {
+    expect(toAccountingEntry(row()).vatTreatment).toBe('reverse_charge') // unknown
+    expect(toAccountingEntry(row({ country: 'DE' })).vatTreatment).toBe('reverse_charge')
+    expect(toAccountingEntry(row({ country: 'US' })).vatTreatment).toBe('reverse_charge')
+    expect(toAccountingEntry(row({ country: 'SE' })).vatTreatment).toBe('standard')
+    expect(toAccountingEntry(row({ country: 'DE' })).counterparty.country).toBe('DE')
   })
 
   it('carries null FX through when none was captured (backfillable)', () => {

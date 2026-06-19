@@ -29,6 +29,7 @@ import * as machinePaymentBookTimeFx from './026_machine_payment_book_time_fx.js
 import * as fortnoxConnections from './027_fortnox_connections.js'
 import * as merchantAccountOverrides from './028_merchant_account_overrides.js'
 import * as paymentFees from './029_payment_fees.js'
+import * as merchantCatalogCountry from './030_merchant_catalog_country.js'
 
 export interface Migration {
   version: string
@@ -71,4 +72,5 @@ export const migrations: Migration[] = [
   fortnoxConnections,
   merchantAccountOverrides,
   paymentFees,
+  merchantCatalogCountry,
 ]

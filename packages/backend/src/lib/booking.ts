@@ -3,7 +3,7 @@ import { DEFAULT_SETTLEMENT_ACCOUNT, basAccountForCategory } from './bas-account
 import {
   REVERSE_CHARGE_INPUT_VAT_ACCOUNT,
   REVERSE_CHARGE_OUTPUT_VAT_ACCOUNT,
-  REVERSE_CHARGE_PURCHASE_ACCOUNT,
+  reverseChargePurchaseAccount,
   reverseChargeVat,
 } from './vat.js'
 
@@ -39,8 +39,9 @@ export function buildBookingLines(entry: AccountingEntry): BookingLine[] | null 
 
   if (entry.vatTreatment === 'reverse_charge') {
     const vat = reverseChargeVat(amount)
+    const purchaseAccount = entry.account ?? reverseChargePurchaseAccount(entry.counterparty.country)
     return [
-      { account: entry.account ?? REVERSE_CHARGE_PURCHASE_ACCOUNT, debit: amount, credit: 0 },
+      { account: purchaseAccount, debit: amount, credit: 0 },
       { account: settlement, debit: 0, credit: amount },
       { account: REVERSE_CHARGE_INPUT_VAT_ACCOUNT, debit: vat, credit: 0 },
       { account: REVERSE_CHARGE_OUTPUT_VAT_ACCOUNT, debit: 0, credit: vat },

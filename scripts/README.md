@@ -114,16 +114,34 @@ gh pr create --base main --fill
 #    --tag latest. A commit that does not change a version is a no-op.
 ```
 
-The workflow authenticates with the `NPM_TOKEN` repo secret (a granular npm
-token scoped to the `@haven_ai` scope with read+write). When it expires,
-publishes fail at the publish step — regenerate the token and update the
-secret under **Settings → Secrets and variables → Actions**.
+The workflow authenticates with **npm Trusted Publishing (OIDC)** — there is no
+`NPM_TOKEN` secret to manage. It grants the job `id-token: write` and upgrades
+npm to ≥ 11.5.1 (the floor for OIDC support); npm exchanges the short-lived
+GitHub Actions OIDC token for publish rights against a *trusted publisher*
+configured per package on npm. OIDC publishes are also exempt from the 2FA
+one-time-password prompt that blocks token-based publishing in CI.
+
+Trusted Publishing additionally emits a signed **sigstore provenance**
+statement. npm validates it against `package.json` and rejects the upload with
+`E422` unless each package declares a `repository.url` (with the monorepo
+`directory`) matching `https://github.com/d-hinders/Haven-AI`. All four
+published packages carry a `repository` block for this reason.
+
+> **Adding a new published package?** Two one-time setup steps before its first
+> release, or that release fails:
+> 1. Configure a trusted publisher for it on npm (package → Settings → Trusted
+>    Publisher → GitHub Actions: org `d-hinders`, repo `Haven-AI`, workflow
+>    `publish.yml`) — otherwise the publish fails to authenticate.
+> 2. Add a `repository` block to its `package.json` (`type`/`url`/`directory`)
+>    — otherwise provenance verification fails with `E422`.
 
 #### Manual fallback
 
-Only if the workflow is unavailable (e.g. expired token mid-incident) and a
-release is urgent, publish by hand from a clean checkout of the merged commit —
-the same versions the workflow would have published:
+Only if the workflow is unavailable mid-incident and a release is urgent,
+publish by hand from a clean checkout of the merged commit — the same versions
+the workflow would have published. This path uses your own npm credentials
+(`npm login`) and **does not produce provenance** (provenance requires the CI
+OIDC flow), so prefer re-running the workflow whenever possible:
 
 ```sh
 npm ci

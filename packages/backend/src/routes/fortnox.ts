@@ -55,6 +55,20 @@ export default async function fortnoxRoutes(app: FastifyInstance): Promise<void>
     }
   })
 
+  // POST /accounting/fortnox/connect-url → consent URL as JSON (the SPA can't
+  // carry the Bearer token through a plain browser navigation to /connect).
+  app.post('/connect-url', { onRequest: authMiddleware }, async (request, reply) => {
+    if (!fortnoxConfigured()) {
+      return reply.code(503).send({ error: 'Fortnox integration is not configured.' })
+    }
+    const { sub } = request.user as { sub: string }
+    const state = app.jwt.sign(
+      { sub, purpose: OAUTH_STATE_PURPOSE } as unknown as { sub: string; email: string },
+      { expiresIn: '10m' },
+    )
+    return { url: buildFortnoxAuthorizeUrl(fortnoxCredentials(), state) }
+  })
+
   // GET /accounting/fortnox/connect → redirect to Fortnox consent
   app.get('/connect', { onRequest: authMiddleware }, async (request, reply) => {
     if (!fortnoxConfigured()) {

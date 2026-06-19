@@ -2,7 +2,7 @@
   "name": "@haven_ai/cli",
   "version": "0.0.0",
   "private": true,
-  "description": "Haven CLI — a terminal-native, scriptable parallel to the dashboard (P0: login + read).",
+  "description": "Haven CLI — a terminal-native, scriptable parallel to the dashboard (login, read, and backend-only management).",
   "type": "module",
   "bin": {
     "haven": "./dist/cli.js"

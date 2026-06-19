@@ -10,6 +10,8 @@ export class CliApiError extends Error {
 export interface CliApi {
   get<T>(path: string): Promise<T>
   post<T>(path: string, body?: unknown): Promise<T>
+  put<T>(path: string, body?: unknown): Promise<T>
+  del<T>(path: string): Promise<T>
 }
 
 export interface CreateCliApiOptions {
@@ -66,6 +68,8 @@ export function createCliApi({ baseUrl, token, fetchImpl = fetch }: CreateCliApi
   return {
     get: <T>(path: string) => request<T>('GET', path),
     post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+    put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
+    del: <T>(path: string) => request<T>('DELETE', path),
   }
 }
 

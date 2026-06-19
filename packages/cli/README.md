@@ -4,24 +4,38 @@ A terminal-native, scriptable companion to the Haven dashboard. Sign in as
 yourself and read or manage your account from the shell — used **alongside** the
 web app, not instead of it.
 
-> **P0 (this version): login + read.** On-chain, owner-signed actions (deploy,
-> budgets, approvers, send) are signed in the dashboard — this CLI never holds
-> your keys. See [`docs/research/haven-cli.md`](../../docs/research/haven-cli.md)
-> for the full design and roadmap.
+> **This version: login, read, and backend-only management.** On-chain,
+> owner-signed actions (deploy, budgets, approvers, send) are signed in the
+> dashboard — this CLI never holds your keys. See
+> [`docs/research/haven-cli.md`](../../docs/research/haven-cli.md) for the full
+> design and roadmap.
 
 ## Usage
 
 ```bash
+# auth
 haven login --email you@example.com      # password via prompt or HAVEN_PASSWORD
 haven whoami
+haven logout
+
+# read
 haven wallets list
 haven wallets balances --safe <id|address>
 haven agents list
 haven agents show <id>
 haven budget show <agentId>
 haven activity list [--safe <id>] [--agent <id>] [--direction in|out] [--limit <n>]
+haven activity export [same filters] > activity.csv
 haven catalog list
-haven logout
+haven contacts list
+
+# manage (backend-only — no on-chain signing)
+haven agents pause <id> | resume <id>
+haven agents revoke <id> --yes           # terminal; needs explicit --yes
+haven agents rotate-key <id>             # new API key, shown once
+haven agents rename <id> <name>
+haven wallets rename <id> <name>
+haven contacts add <name> <address> | contacts remove <id>
 ```
 
 Add `--json` to any read command for machine-readable output:

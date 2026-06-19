@@ -27,6 +27,7 @@ import * as safeApproverMetadata from './024_safe_approver_metadata.js'
 import * as catalogConsecutiveFailures from './025_catalog_consecutive_failures.js'
 import * as machinePaymentBookTimeFx from './026_machine_payment_book_time_fx.js'
 import * as fortnoxConnections from './027_fortnox_connections.js'
+import * as merchantAccountOverrides from './028_merchant_account_overrides.js'
 
 export interface Migration {
   version: string
@@ -67,4 +68,5 @@ export const migrations: Migration[] = [
   catalogConsecutiveFailures,
   machinePaymentBookTimeFx,
   fortnoxConnections,
+  merchantAccountOverrides,
 ]

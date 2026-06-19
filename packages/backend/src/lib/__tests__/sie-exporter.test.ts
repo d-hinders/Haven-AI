@@ -18,6 +18,7 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     fxAt: '2026-06-19T10:00:00.000Z',
     feeSek: null,
     category: 'media',
+    account: null,
     vatTreatment: 'reverse_charge',
     resourceUrl: 'https://api.example/resource',
     receiptRef: 'ev1',
@@ -37,23 +38,40 @@ describe('sieExporter', () => {
     expect(content).toContain('#FNAMN "Acme AB"')
   })
 
-  it('writes a balanced verifikation per entry', () => {
+  it('writes a balanced reverse-charge verifikation (default) summing to zero', () => {
     const { content, entryCount } = sieExporter.export([entry()], OPTS)
     expect(entryCount).toBe(1)
     expect(content).toContain('#VER "A" 1 20260619 "Soundside"')
-    // debit expense (media → 6540) + credit settlement (1930), summing to zero
+    // reverse charge: purchase 4535 + cash 1930 + input VAT 2645 + output VAT 2614
     const trans = content.split('\r\n').filter((l) => l.includes('#TRANS'))
-    expect(trans).toHaveLength(2)
+    expect(trans).toHaveLength(4)
     const amounts = trans.map((l) => Number(l.trim().split(/\s+/)[3]))
-    expect(amounts[0]).toBe(132.5)
-    expect(amounts[1]).toBe(-132.5)
-    expect(amounts[0] + amounts[1]).toBe(0)
+    expect(amounts.reduce((s, a) => s + a, 0)).toBeCloseTo(0, 5)
+    // 25% VAT self-accounted on the 132.50 base
+    expect(content).toContain('#TRANS 4535 {} 132.50')
+    expect(content).toContain('#TRANS 1930 {} -132.50')
+    expect(content).toContain('#TRANS 2645 {} 33.13')
+    expect(content).toContain('#TRANS 2614 {} -33.13')
   })
 
-  it('declares the BAS accounts it uses', () => {
+  it('writes a simple two-line verifikation when VAT is not reverse charge', () => {
+    const { content } = sieExporter.export([entry({ vatTreatment: 'none' })], OPTS)
+    const trans = content.split('\r\n').filter((l) => l.includes('#TRANS'))
+    expect(trans).toHaveLength(2)
+    expect(content).toContain('#TRANS 6540 {} 132.50')
+    expect(content).toContain('#TRANS 1930 {} -132.50')
+  })
+
+  it('honours a per-merchant account override on the expense line', () => {
+    const { content } = sieExporter.export([entry({ vatTreatment: 'none', account: '6550' })], OPTS)
+    expect(content).toContain('#TRANS 6550 {} 132.50')
+  })
+
+  it('declares the accounts it uses with names', () => {
     const { content } = sieExporter.export([entry()], OPTS)
     expect(content).toContain('#KONTO 1930 "Företagskonto"')
-    expect(content).toContain('#KONTO 6540 "IT-tjänster"')
+    expect(content).toContain('#KONTO 4535 "Inköp av tjänster annat EU-land, 25%"')
+    expect(content).toContain('#KONTO 2614 "Utgående moms omvänd skattskyldighet, 25%"')
   })
 
   it('skips entries with no book-time SEK (unbookable) and counts them', () => {
@@ -80,8 +98,8 @@ describe('sieExporter', () => {
     expect(content).toContain('"A \\"quoted\\" co"')
   })
 
-  it('uses the default expense account for an unknown category', () => {
-    const { content } = sieExporter.export([entry({ category: 'something-weird' })], OPTS)
+  it('uses the default expense account for an unknown category (non-reverse)', () => {
+    const { content } = sieExporter.export([entry({ vatTreatment: 'none', category: 'something-weird' })], OPTS)
     expect(content).toContain('#TRANS 6540 {}')
   })
 })

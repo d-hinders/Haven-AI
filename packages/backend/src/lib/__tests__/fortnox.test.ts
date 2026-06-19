@@ -29,6 +29,7 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     fxAt: '2026-06-19T10:00:00.000Z',
     feeSek: null,
     category: 'media',
+    account: null,
     vatTreatment: 'reverse_charge',
     resourceUrl: 'https://api.example/resource',
     receiptRef: 'ev1',
@@ -53,17 +54,27 @@ describe('buildFortnoxAuthorizeUrl', () => {
 })
 
 describe('toFortnoxVoucher', () => {
-  it('maps to a balanced voucher (debit expense / credit settlement)', () => {
+  it('maps to a balanced reverse-charge voucher (default)', () => {
     const v = toFortnoxVoucher(entry())
     expect(v).not.toBeNull()
     expect(v!.TransactionDate).toBe('2026-06-19')
     expect(v!.Description).toBe('Soundside')
     expect(v!.VoucherRows).toEqual([
+      { Account: 4535, Debit: 132.5, Credit: 0 },
+      { Account: 1930, Debit: 0, Credit: 132.5 },
+      { Account: 2645, Debit: 33.13, Credit: 0 },
+      { Account: 2614, Debit: 0, Credit: 33.13 },
+    ])
+    const net = v!.VoucherRows.reduce((s, r) => s + r.Debit - r.Credit, 0)
+    expect(net).toBeCloseTo(0, 5)
+  })
+
+  it('maps a non-reverse entry to a simple two-row voucher', () => {
+    const v = toFortnoxVoucher(entry({ vatTreatment: 'none' }))
+    expect(v!.VoucherRows).toEqual([
       { Account: 6540, Debit: 132.5, Credit: 0 },
       { Account: 1930, Debit: 0, Credit: 132.5 },
     ])
-    const net = v!.VoucherRows.reduce((s, r) => s + r.Debit - r.Credit, 0)
-    expect(net).toBe(0)
   })
 
   it('returns null for an entry with no book-time SEK', () => {

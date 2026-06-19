@@ -51,6 +51,12 @@ export const config = {
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
 
+  // Fortnox bookkeeping integration (P2 #465). Disabled unless all three are
+  // set. Secrets — env only, never commit.
+  fortnoxClientId: process.env.FORTNOX_CLIENT_ID ?? '',
+  fortnoxClientSecret: process.env.FORTNOX_CLIENT_SECRET ?? '',
+  fortnoxRedirectUri: process.env.FORTNOX_REDIRECT_URI ?? '',
+
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,

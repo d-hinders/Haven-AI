@@ -26,6 +26,8 @@ export interface Transaction {
   paymentFlowStatus?: 'paid' | 'confirming_merchant' | 'needs_attention' | null
   paymentAttentionReason?: 'merchant_retry_rejected_after_payment' | null
   activityType?: 'delegate_sweep'
+  /** Book-time SEK value (#463); null for non-machine / unpriced transactions. */
+  amountSek?: string | null
 }
 
 export interface AggregatedTransaction extends Transaction {

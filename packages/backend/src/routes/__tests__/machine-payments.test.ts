@@ -14,6 +14,7 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
+    getBookTimeSekValue: vi.fn().mockResolvedValue(null),
   },
 }))
 

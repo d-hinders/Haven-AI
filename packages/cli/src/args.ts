@@ -13,10 +13,17 @@ export interface ParsedArgs {
     agent?: string
     limit?: number
     direction?: 'in' | 'out'
+    format?: string
+    from?: string
+    to?: string
+    company?: string
   }
 }
 
-const VALUE_FLAGS = new Set(['--api', '--email', '--safe', '--agent', '--limit', '--direction'])
+const VALUE_FLAGS = new Set([
+  '--api', '--email', '--safe', '--agent', '--limit', '--direction',
+  '--format', '--from', '--to', '--company',
+])
 
 /**
  * `haven <command> [sub] [positionals] [--flags]`. Deliberately small — no
@@ -48,7 +55,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       } else if (arg === '--direction') {
         if (value !== 'in' && value !== 'out') throw new Error('--direction must be "in" or "out"')
         flags.direction = value
-      }
+      } else if (arg === '--format') {
+        if (value !== 'csv' && value !== 'sie') throw new Error('--format must be "csv" or "sie"')
+        flags.format = value
+      } else if (arg === '--from') flags.from = value
+      else if (arg === '--to') flags.to = value
+      else if (arg === '--company') flags.company = value
     } else if (arg.startsWith('--')) {
       throw new Error(`Unknown option: ${arg}`)
     } else {
@@ -78,7 +90,9 @@ export function helpText(): string {
     '  agents show <id>        Show one agent + its budget',
     '  budget show <agentId>   Show an agent\'s configured budget',
     '  activity list [--safe <id>] [--agent <id>] [--direction in|out] [--limit <n>]',
-    '  activity export [filters]   Same filters; emit CSV to stdout',
+    '  activity export [filters]   Emit CSV to stdout (--format csv, default)',
+    '  activity export --format sie [--from <ISO>] [--to <ISO>] [--company <name>]',
+    '                          Bookkeeping-ready SIE 4I (Fortnox/Visma/Bokio)',
     '  catalog list            List payable services',
     '  contacts list           List your address book',
     '',

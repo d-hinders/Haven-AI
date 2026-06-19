@@ -285,6 +285,39 @@ describe('installRuntime', () => {
     expect(result.probeResult).toBe('local_stdio_mcp_missing_tools')
     expect(result.messages.join('\n')).toContain('Local Haven MCP handshake failed: missing_tools.')
   })
+
+  it('gives custom "other" runtimes a secret-free, file-referenced setup message', async () => {
+    // The connector cannot auto-config a custom runtime, so it must hand back
+    // actionable, secret-free guidance: name the on-disk credential files and
+    // the signer/MCP commands that read them, and never echo the raw keys
+    // (which would land in the custom agent's context/logs).
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-other-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'other',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+    })
+
+    expect(result.runtime).toBe('other')
+    expect(result.errorCode).toBe('manual_runtime_setup_required')
+    const msg = result.messages.join('\n')
+    expect(msg).toContain(identityPath)
+    expect(msg).toContain(signerPath)
+    expect(msg).toContain('npx -y @haven_ai/signer')
+    expect(msg).toContain('npx -y @haven_ai/mcp')
+    expect(msg).not.toContain(API_KEY)
+    expect(msg).not.toContain(PRIVATE_KEY)
+  })
 })
 
 describe('installRuntime hosted default topology', () => {

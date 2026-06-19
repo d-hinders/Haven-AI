@@ -192,11 +192,15 @@ export function HostedConnectCard({
     }
     setCopyError(null)
     markCopiedSetupPrompt()
-    // The setup prompt embeds both connection identity and the signing key,
-    // so copying it counts as having the Haven credential in hand.
-    onCopySigningKey?.()
+    // For most runtimes the setup prompt embeds both connection identity and
+    // the signing key, so copying it counts as having the key in hand. For
+    // 'other' the prompt is secret-free — the signing key stays in signer.json
+    // on disk — so copying it does NOT hand over the key; don't claim it did.
+    if (activeId !== 'other') {
+      onCopySigningKey?.()
+    }
     onCredentialSaved?.()
-  }, [setupPrompt, markCopiedSetupPrompt, onCopySigningKey, onCredentialSaved])
+  }, [setupPrompt, activeId, markCopiedSetupPrompt, onCopySigningKey, onCredentialSaved])
 
   const handleOpenDeepLink = useCallback(() => {
     if (!activeId || !hasDeepLink(activeId)) return
@@ -301,8 +305,11 @@ export function HostedConnectCard({
       {active && snippet && setupPrompt && (
         <div key={active.id} className="v2-animate-step-rise mt-4 space-y-4">
           {/* ── Recommended path · Copy setup prompt ───────────────────
-              The full prompt contains the connect token and signing key, so
-              it is copied directly and never rendered in the card by default. */}
+              For first-class runtimes the prompt contains the connect token
+              and signing key, so it is copied directly and never rendered in
+              the card by default. For 'other' the prompt is secret-free — the
+              signing key stays in signer.json on disk and is referenced by
+              path, not pasted. */}
           {(!isConnected || showSetupSteps) && (
             <Card.Section>
               <div className="py-4">
@@ -460,18 +467,34 @@ export function HostedConnectCard({
                           follows agent rules
                         </SigningKeyChip>
                       </div>
-                      <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
-                        Copy this only if you are setting up manually. It lets the agent sign
-                        payments locally, and the agent budget still limits what can be spent.
-                      </p>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Button onClick={() => void handleCopyKey()}>
-                          {copiedKey ? 'Copied' : 'Copy signing key'}
-                        </Button>
-                        <span className="text-xs text-[var(--v2-ink-3)]">
-                          Shown once. Full backup below.
-                        </span>
-                      </div>
+                      {active.id === 'other' ? (
+                        // Custom/SDK runtimes read the key from disk — never copy
+                        // it into the clipboard (and from there into a custom
+                        // agent's context, notes, or logs). Reference the file.
+                        <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                          Already saved on disk at{' '}
+                          <code className="font-mono text-xs">
+                            ~/.haven/agents/{credential.agent_id}/signer.json
+                          </code>{' '}
+                          (owner-only). Point your runtime at that file — don&rsquo;t copy the key
+                          into chat, notes, or logs. The agent budget still limits what can be spent.
+                        </p>
+                      ) : (
+                        <>
+                          <p className="mt-2 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+                            Copy this only if you are setting up manually. It lets the agent sign
+                            payments locally, and the agent budget still limits what can be spent.
+                          </p>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <Button onClick={() => void handleCopyKey()}>
+                              {copiedKey ? 'Copied' : 'Copy signing key'}
+                            </Button>
+                            <span className="text-xs text-[var(--v2-ink-3)]">
+                              Shown once. Full backup below.
+                            </span>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     {active.id === 'other' && (

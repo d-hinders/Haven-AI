@@ -1,10 +1,8 @@
 import type { AccountingEntry } from './accounting-entry.js'
 import type { ExportOptions, ExportResult, LedgerExporter } from './ledger-exporter.js'
-import {
-  DEFAULT_SETTLEMENT_ACCOUNT,
-  basAccountForCategory,
-  basAccountName,
-} from './bas-accounts.js'
+import { basAccountName } from './bas-accounts.js'
+import { buildBookingLines } from './booking.js'
+import { VAT_ACCOUNT_NAMES } from './vat.js'
 
 /**
  * SIE 4I writer (epic #462, P1 #464) — the Swedish standard import format for
@@ -29,10 +27,13 @@ function sieDate(iso: string): string {
 }
 
 /** SIE amounts: decimal point, 2 places; debit positive, credit negative. */
-function sieAmount(sek: string, sign: 1 | -1): string {
-  const n = Number(sek)
-  const value = (Number.isFinite(n) ? n : 0) * sign
+function sieAmount(value: number): string {
   return value.toFixed(2)
+}
+
+/** Account display name across BAS + VAT accounts. */
+function accountName(account: string): string {
+  return VAT_ACCOUNT_NAMES[account] ?? basAccountName(account)
 }
 
 /** Quote a SIE field and escape embedded quotes/backslashes. */
@@ -61,27 +62,23 @@ export const sieExporter: LedgerExporter = {
     let series = 1
 
     for (const entry of entries) {
+      const lines = buildBookingLines(entry)
       // Unbookable without a SEK value — surface as skipped rather than book a zero.
-      if (entry.amountSek == null) {
+      if (!lines) {
         skipped += 1
         continue
       }
 
-      const expenseAccount = basAccountForCategory(entry.category)
-      const settlementAccount = DEFAULT_SETTLEMENT_ACCOUNT
-      usedAccounts.add(expenseAccount)
-      usedAccounts.add(settlementAccount)
-
       const date = sieDate(entry.settledAt)
       const text = sieField(verificationText(entry))
 
-      verifications.push(
-        `#VER "A" ${series} ${date} ${text}`,
-        '{',
-        `   #TRANS ${expenseAccount} {} ${sieAmount(entry.amountSek, 1)} ${date}`,
-        `   #TRANS ${settlementAccount} {} ${sieAmount(entry.amountSek, -1)} ${date}`,
-        '}',
-      )
+      const trans = lines.map((line) => {
+        usedAccounts.add(line.account)
+        // SIE signs the amount: debit positive, credit negative.
+        return `   #TRANS ${line.account} {} ${sieAmount(line.debit - line.credit)} ${date}`
+      })
+
+      verifications.push(`#VER "A" ${series} ${date} ${text}`, '{', ...trans, '}')
       series += 1
       entryCount += 1
     }
@@ -97,7 +94,7 @@ export const sieExporter: LedgerExporter = {
 
     const accountDecls = Array.from(usedAccounts)
       .sort()
-      .map((account) => `#KONTO ${account} ${sieField(basAccountName(account))}`)
+      .map((account) => `#KONTO ${account} ${sieField(accountName(account))}`)
 
     const content = [...header, ...accountDecls, ...verifications].join('\r\n') + '\r\n'
 

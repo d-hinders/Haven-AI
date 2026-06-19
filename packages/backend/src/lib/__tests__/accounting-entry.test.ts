@@ -21,6 +21,8 @@ function row(over: Partial<AccountingEntrySourceRow> = {}): AccountingEntrySourc
     resource_url: 'https://api.example/resource',
     confirmed_at: '2026-06-19T10:00:00.000Z',
     created_at: '2026-06-19T09:59:00.000Z',
+    category: 'media',
+    override_account: null,
     ...over,
   }
 }
@@ -71,9 +73,14 @@ describe('toAccountingEntry', () => {
     expect(e.paymentId).toBe('ar9')
   })
 
-  it('leaves fee and category null until the fee ledger / BAS map land', () => {
+  it('populates category from the catalog and leaves fee null (no #386 yet)', () => {
     const e = toAccountingEntry(row())
     expect(e.feeSek).toBeNull()
-    expect(e.category).toBeNull()
+    expect(e.category).toBe('media')
+  })
+
+  it('carries a per-merchant account override when present, else null', () => {
+    expect(toAccountingEntry(row()).account).toBeNull()
+    expect(toAccountingEntry(row({ override_account: '6550' })).account).toBe('6550')
   })
 })

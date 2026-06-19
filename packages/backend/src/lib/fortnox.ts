@@ -1,5 +1,5 @@
 import type { AccountingEntry } from './accounting-entry.js'
-import { DEFAULT_SETTLEMENT_ACCOUNT, basAccountForCategory } from './bas-accounts.js'
+import { buildBookingLines } from './booking.js'
 
 /**
  * Fortnox OAuth2 + voucher push (epic #462, P2 #465).
@@ -149,12 +149,9 @@ export interface FortnoxVoucher {
  * has no book-time SEK value (unbookable) — same rule as the SIE exporter.
  */
 export function toFortnoxVoucher(entry: AccountingEntry): FortnoxVoucher | null {
-  if (entry.amountSek == null) return null
-  const amount = Number(entry.amountSek)
-  if (!Number.isFinite(amount)) return null
+  const lines = buildBookingLines(entry)
+  if (!lines) return null
 
-  const expenseAccount = Number(basAccountForCategory(entry.category))
-  const settlementAccount = Number(DEFAULT_SETTLEMENT_ACCOUNT)
   const description =
     entry.counterparty.name ?? entry.counterparty.address ?? entry.resourceUrl ?? 'Agent payment'
 
@@ -162,10 +159,11 @@ export function toFortnoxVoucher(entry: AccountingEntry): FortnoxVoucher | null 
     VoucherSeries: FORTNOX_VOUCHER_SERIES,
     TransactionDate: entry.settledAt.slice(0, 10),
     Description: description.slice(0, 200),
-    VoucherRows: [
-      { Account: expenseAccount, Debit: amount, Credit: 0 },
-      { Account: settlementAccount, Debit: 0, Credit: amount },
-    ],
+    VoucherRows: lines.map((line) => ({
+      Account: Number(line.account),
+      Debit: line.debit,
+      Credit: line.credit,
+    })),
   }
 }
 

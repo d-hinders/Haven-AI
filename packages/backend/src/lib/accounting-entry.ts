@@ -35,8 +35,10 @@ export interface AccountingEntry {
   fxAt: string | null
   /** Haven fee in SEK. Null until the fee ledger (#386) lands. */
   feeSek: string | null
-  /** BAS account category. Null until the BAS map (P1) / rules (P3). */
+  /** Merchant category from the catalog; feeds the BAS account map. */
   category: string | null
+  /** Explicit per-merchant BAS account override (P3); null = use the map. */
+  account: string | null
   vatTreatment: VatTreatment
   resourceUrl: string | null
   /** Underlag: the settlement evidence backing this entry. */
@@ -60,6 +62,10 @@ export interface AccountingEntrySourceRow {
   resource_url: string | null
   confirmed_at: string | null
   created_at: string
+  /** From the merchant catalog (LEFT JOIN). */
+  category: string | null
+  /** From the user's per-merchant account overrides (LEFT JOIN). */
+  override_account: string | null
 }
 
 /**
@@ -86,7 +92,8 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     fxSource: row.fx_source,
     fxAt: row.fx_at,
     feeSek: null,
-    category: null,
+    category: row.category ?? null,
+    account: row.override_account ?? null,
     vatTreatment: 'reverse_charge',
     resourceUrl: row.resource_url,
     receiptRef: row.id,
@@ -106,26 +113,35 @@ export async function buildAccountingEntries(
   opts: BuildAccountingEntriesOptions,
 ): Promise<AccountingEntry[]> {
   const params: unknown[] = [opts.userId]
-  let where = 'user_id = $1'
+  let where = 'mpe.user_id = $1'
   if (opts.from) {
     params.push(opts.from)
-    where += ` AND COALESCE(confirmed_at, created_at) >= $${params.length}`
+    where += ` AND COALESCE(mpe.confirmed_at, mpe.created_at) >= $${params.length}`
   }
   if (opts.to) {
     params.push(opts.to)
-    where += ` AND COALESCE(confirmed_at, created_at) < $${params.length}`
+    where += ` AND COALESCE(mpe.confirmed_at, mpe.created_at) < $${params.length}`
   }
   params.push(opts.limit ?? 1000)
   const limitParam = `$${params.length}`
 
   const result = await pool.query<AccountingEntrySourceRow>(
-    `SELECT id, payment_intent_id, approval_request_id, tx_hash, chain_id,
-            merchant_address, token_symbol, amount_raw,
-            amount_sek, fx_rate_sek, fx_source, fx_at,
-            resource_url, confirmed_at, created_at
-     FROM machine_payment_evidence
+    `SELECT mpe.id, mpe.payment_intent_id, mpe.approval_request_id, mpe.tx_hash, mpe.chain_id,
+            mpe.merchant_address, mpe.token_symbol, mpe.amount_raw,
+            mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at,
+            mpe.resource_url, mpe.confirmed_at, mpe.created_at,
+            mc.category AS category,
+            mao.bas_account AS override_account
+     FROM machine_payment_evidence mpe
+     LEFT JOIN LATERAL (
+       SELECT category FROM merchant_catalog
+       WHERE resource_url = mpe.resource_url AND status != 'delisted'
+       LIMIT 1
+     ) mc ON TRUE
+     LEFT JOIN merchant_account_overrides mao
+       ON mao.user_id = mpe.user_id AND mao.resource_url = mpe.resource_url
      WHERE ${where}
-     ORDER BY COALESCE(confirmed_at, created_at) DESC
+     ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
      LIMIT ${limitParam}`,
     params,
   )

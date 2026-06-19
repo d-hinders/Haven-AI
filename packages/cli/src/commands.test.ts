@@ -32,6 +32,8 @@ function fakeApi(routes: Record<string, unknown>): CliApi & { calls: string[] } 
     calls,
     get: async <T>(path: string) => resolve('GET', path) as T,
     post: async <T>(path: string) => resolve('POST', path) as T,
+    put: async <T>(path: string) => resolve('PUT', path) as T,
+    del: async <T>(path: string) => resolve('DELETE', path) as T,
   }
 }
 
@@ -138,10 +140,90 @@ describe('read commands', () => {
     expect(out.join('\n')).toContain('Soundside')
   })
 
+  it('exports activity as CSV with a formula-injection guard', async () => {
+    const transactions = [
+      {
+        hash: '0xabc', direction: 'out', valueFormatted: '12.50', asset: 'USDC',
+        tokenSymbol: 'USDC', tokenAddress: '0xtok', timestamp: 1_700_000_000,
+        from: '0xsafe', to: '0xmerchant', source: 'x402', chainId: 8453,
+        safeAddress: '0xsafe', agentName: '=cmd()',
+      },
+    ]
+    const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /transactions': { transactions } }) })
+    expect(await run(['activity', 'export'], deps)).toBe(0)
+    const csv = out.join('\n')
+    expect(csv.split('\n')[0]).toContain('date,type,status,direction,amount')
+    expect(csv).toContain('x402')
+    // agent name starting with = is neutralised
+    expect(csv).toContain('"\'=cmd()"')
+  })
+})
+
+describe('management commands (backend-only)', () => {
+  it('pauses an agent', async () => {
+    const api = fakeApi({ 'POST /agents/a1/pause': {} })
+    const { deps, out } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'pause', 'a1'], deps)).toBe(0)
+    expect(api.calls).toContain('POST /agents/a1/pause')
+    expect(out.join('\n')).toMatch(/paused/)
+  })
+
+  it('refuses to revoke without --yes and never calls the API', async () => {
+    const api = fakeApi({ 'POST /agents/a1/revoke': {} })
+    const { deps, err } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'revoke', 'a1'], deps)).toBe(1)
+    expect(api.calls).not.toContain('POST /agents/a1/revoke')
+    expect(err.join('\n')).toMatch(/--yes/)
+  })
+
+  it('revokes with --yes', async () => {
+    const api = fakeApi({ 'POST /agents/a1/revoke': {} })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'revoke', 'a1', '--yes'], deps)).toBe(0)
+    expect(api.calls).toContain('POST /agents/a1/revoke')
+  })
+
+  it('rotates an agent key and prints it once', async () => {
+    const api = fakeApi({ 'POST /agents/a1/rotate-key': { api_key: 'sk_agent_NEW', api_key_prefix: 'sk_agent_NEW'.slice(0, 12) } })
+    const { deps, out } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'rotate-key', 'a1'], deps)).toBe(0)
+    expect(out.join('\n')).toContain('sk_agent_NEW')
+  })
+
+  it('renames an agent via PUT', async () => {
+    const api = fakeApi({ 'PUT /agents/a1': {} })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'rename', 'a1', 'New', 'Name'], deps)).toBe(0)
+    expect(api.calls).toContain('PUT /agents/a1')
+  })
+
+  it('renames a wallet via PUT', async () => {
+    const api = fakeApi({ 'PUT /user/safes/s1': {} })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['wallets', 'rename', 's1', 'Operating'], deps)).toBe(0)
+    expect(api.calls).toContain('PUT /user/safes/s1')
+  })
+
+  it('adds and removes contacts', async () => {
+    const api = fakeApi({
+      'POST /contacts': { id: 'c1', name: 'Alice', address: '0xalice' },
+      'DELETE /contacts/c1': {},
+    })
+    const add = harness({ makeApi: () => api })
+    expect(await run(['contacts', 'add', 'Alice', '0xalice'], add.deps)).toBe(0)
+    expect(add.out.join('\n')).toContain('Alice')
+
+    const rm = harness({ makeApi: () => api })
+    expect(await run(['contacts', 'remove', 'c1'], rm.deps)).toBe(0)
+    expect(api.calls).toContain('DELETE /contacts/c1')
+  })
+
   it('surfaces a backend error message', async () => {
     const failing: CliApi = {
       get: async () => { throw new CliApiError('Account is locked', 403) },
       post: async () => { throw new CliApiError('Account is locked', 403) },
+      put: async () => { throw new CliApiError('Account is locked', 403) },
+      del: async () => { throw new CliApiError('Account is locked', 403) },
     }
     const { deps, err } = harness({ makeApi: () => failing })
     expect(await run(['agents', 'list'], deps)).toBe(1)

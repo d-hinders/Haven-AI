@@ -6,6 +6,7 @@ export interface ParsedArgs {
     json: boolean
     help: boolean
     version: boolean
+    yes: boolean
     api?: string
     email?: string
     safe?: string
@@ -23,13 +24,14 @@ const VALUE_FLAGS = new Set(['--api', '--email', '--safe', '--agent', '--limit',
  */
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
-  const flags: ParsedArgs['flags'] = { json: false, help: false, version: false }
+  const flags: ParsedArgs['flags'] = { json: false, help: false, version: false, yes: false }
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--json') flags.json = true
     else if (arg === '--help' || arg === '-h') flags.help = true
     else if (arg === '--version' || arg === '-v') flags.version = true
+    else if (arg === '--yes' || arg === '-y') flags.yes = true
     else if (VALUE_FLAGS.has(arg)) {
       const value = argv[++i]
       if (value === undefined || value.startsWith('--')) {
@@ -76,10 +78,21 @@ export function helpText(): string {
     '  agents show <id>        Show one agent + its budget',
     '  budget show <agentId>   Show an agent\'s configured budget',
     '  activity list [--safe <id>] [--agent <id>] [--direction in|out] [--limit <n>]',
+    '  activity export [filters]   Same filters; emit CSV to stdout',
     '  catalog list            List payable services',
+    '  contacts list           List your address book',
+    '',
+    'Manage (backend-only — no on-chain signing):',
+    '  agents pause|resume <id>',
+    '  agents revoke <id> --yes      Permanently revoke an agent',
+    '  agents rotate-key <id>        Issue a new API key (shown once)',
+    '  agents rename <id> <name>',
+    '  wallets rename <id> <name>',
+    '  contacts add <name> <address> | contacts remove <id>',
     '',
     'Options:',
     '  --json                  Machine-readable output (for scripting)',
+    '  --yes, -y               Skip the confirmation prompt for destructive actions',
     '  --api <url>             Backend URL (default: HAVEN_API_URL or http://localhost:3001)',
     '  --help, --version',
     '',

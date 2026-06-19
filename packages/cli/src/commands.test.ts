@@ -34,6 +34,7 @@ function fakeApi(routes: Record<string, unknown>): CliApi & { calls: string[] } 
     post: async <T>(path: string) => resolve('POST', path) as T,
     put: async <T>(path: string) => resolve('PUT', path) as T,
     del: async <T>(path: string) => resolve('DELETE', path) as T,
+    getText: async (path: string) => resolve('GET', path) as string,
   }
 }
 
@@ -133,6 +134,13 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
+  it('exports SIE from the backend accounting endpoint', async () => {
+    const sie = '#FLAGGA 0\r\n#SIETYP 4\r\n#VER "A" 1 20260619 "Soundside"\r\n'
+    const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /accounting/export': sie }) })
+    expect(await run(['activity', 'export', '--format', 'sie', '--company', 'Acme'], deps)).toBe(0)
+    expect(out.join('\n')).toContain('#SIETYP 4')
+  })
+
   it('lists the catalog', async () => {
     const entries = [{ name: 'Soundside', category: 'media', rail: 'x402', price_display: '$0.01 USDC', status: 'active' }]
     const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /catalog': { entries } }) })
@@ -224,6 +232,7 @@ describe('management commands (backend-only)', () => {
       post: async () => { throw new CliApiError('Account is locked', 403) },
       put: async () => { throw new CliApiError('Account is locked', 403) },
       del: async () => { throw new CliApiError('Account is locked', 403) },
+      getText: async () => { throw new CliApiError('Account is locked', 403) },
     }
     const { deps, err } = harness({ makeApi: () => failing })
     expect(await run(['agents', 'list'], deps)).toBe(1)

@@ -350,6 +350,7 @@ async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
 }
 
 async function cmdActivityExport(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
+  if (args.flags.format === 'sie') return exportSie(args, d)
   const { api } = await authed(args, d)
   const params = new URLSearchParams({ offset: '0', limit: String(args.flags.limit ?? 1000) })
   if (args.flags.safe) params.set('safeId', args.flags.safe)
@@ -394,6 +395,18 @@ function exportStatus(t: Txn): string {
   if (t.isError) return 'failed'
   if (t.paymentFlowStatus === 'confirming_merchant') return 'pending'
   return 'executed'
+}
+
+/** SIE 4I export: the backend builds the verifikat file (book-time SEK + BAS). */
+async function exportSie(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
+  const { api } = await authed(args, d)
+  const params = new URLSearchParams({ format: 'sie' })
+  if (args.flags.from) params.set('from', args.flags.from)
+  if (args.flags.to) params.set('to', args.flags.to)
+  if (args.flags.company) params.set('company', args.flags.company)
+  const content = await api.getText(`/accounting/export?${params.toString()}`)
+  d.out(content)
+  return 0
 }
 
 // ── Catalog ─────────────────────────────────────────────────────────

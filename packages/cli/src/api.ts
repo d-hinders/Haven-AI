@@ -12,6 +12,8 @@ export interface CliApi {
   post<T>(path: string, body?: unknown): Promise<T>
   put<T>(path: string, body?: unknown): Promise<T>
   del<T>(path: string): Promise<T>
+  /** GET a non-JSON body (e.g. an export file) as raw text. */
+  getText(path: string): Promise<string>
 }
 
 export interface CreateCliApiOptions {
@@ -65,11 +67,42 @@ export function createCliApi({ baseUrl, token, fetchImpl = fetch }: CreateCliApi
     return payload as T
   }
 
+  async function requestText(path: string): Promise<string> {
+    const headers: Record<string, string> = { Accept: 'text/plain' }
+    if (token) headers.Authorization = `Bearer ${token}`
+
+    let res: Response
+    try {
+      res = await fetchImpl(`${root}${path}`, { method: 'GET', headers })
+    } catch (err) {
+      throw new CliApiError(
+        `Could not reach Haven at ${root}: ${err instanceof Error ? err.message : String(err)}`,
+        0,
+      )
+    }
+
+    if (res.status === 401) {
+      throw new CliApiError('Not authenticated. Run `haven login` first.', 401)
+    }
+
+    const text = await res.text()
+    if (!res.ok) {
+      const payload = text ? safeParse(text) : undefined
+      const message =
+        (payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+          ? payload.error
+          : null) ?? `Request failed (HTTP ${res.status}).`
+      throw new CliApiError(message, res.status)
+    }
+    return text
+  }
+
   return {
     get: <T>(path: string) => request<T>('GET', path),
     post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
     put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
     del: <T>(path: string) => request<T>('DELETE', path),
+    getText: (path: string) => requestText(path),
   }
 }
 

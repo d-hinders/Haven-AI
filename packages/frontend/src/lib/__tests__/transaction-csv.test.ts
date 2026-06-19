@@ -47,7 +47,8 @@ describe('transactionsToCsv', () => {
     const csv = transactionsToCsv([], noNames)
     expect(rows(csv)[0]).toBe(
       'date,type,status,direction,amount,token_symbol,token_address,' +
-        'counterparty_address,counterparty_name,safe_address,agent_name,tx_hash,chain_id',
+        'counterparty_address,counterparty_name,safe_address,agent_name,tx_hash,chain_id,' +
+        'amount_sek,fee_sek',
     )
   })
 
@@ -99,6 +100,16 @@ describe('transactionsToCsv', () => {
     const cols = cells(rows(csv)[1]).map((c) => c.replace(/"/g, ''))
     expect(cols[5]).toBe('ETH') // token_symbol falls back to asset
     expect(cols[6]).toBe('') // token_address empty
+  })
+
+  it('emits book-time SEK and leaves fee_sek empty (until #386)', () => {
+    const withSek = transactionsToCsv([tx({ amountSek: '132.50' })], noNames)
+    const cols = cells(rows(withSek)[1]).map((c) => c.replace(/"/g, ''))
+    expect(cols[13]).toBe('132.50') // amount_sek
+    expect(cols[14]).toBe('') // fee_sek reserved
+    // null SEK (non-machine transfer) → empty cell
+    const noSek = transactionsToCsv([tx({ amountSek: null })], noNames)
+    expect(cells(rows(noSek)[1])[13].replace(/"/g, '')).toBe('')
   })
 
   it('escapes embedded quotes and neutralises spreadsheet formula injection', () => {

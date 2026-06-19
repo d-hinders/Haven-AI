@@ -290,6 +290,8 @@ Independent layers keep the API and signing boundaries separate:
 
 If Haven is compromised, API keys alone cannot sign transactions. A Safe owner can pause or revoke an agent in Haven and can also revoke Safe permissions through Safe-compatible tooling without needing Haven.
 
+Approvers (Safe owners) can be managed per account from **Settings → Approvers** — add or remove an EOA address or a passkey, or reuse an existing approver across accounts. The signing threshold stays at 1, the last owner can never be removed, and each owner change is signed by a current owner and relayed (Haven never signs it).
+
 ### Key Management
 
 | Key | Who holds it | What it can do |
@@ -320,6 +322,7 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 |---|---|---|
 | Dashboard auth | None/JWT | `/auth/signup`, `/auth/login`, `/auth/me` |
 | Haven wallets | JWT | `/user/safes`, `/user/safes/deploy`, balances and account views |
+| Approvers (Safe owners) | JWT | `/user/safes/:id/approvers` (list), `/user/safes/:id/approvers/tx` (build add/remove owner-change tx), `/user/safes/known-approvers` (reuse across Safes) |
 | Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key`, `/agents/:id/allowances` |
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
 | Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |

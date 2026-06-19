@@ -57,6 +57,15 @@ export const config = {
   fortnoxClientSecret: process.env.FORTNOX_CLIENT_SECRET ?? '',
   fortnoxRedirectUri: process.env.FORTNOX_REDIRECT_URI ?? '',
 
+  // Merchant-catalog auto-discovery from the x402 Bazaar (#473). Off by
+  // default — it calls an external catalog API and inserts rows, so it's
+  // opt-in. The URL is overridable for testing/self-hosted facilitators.
+  catalogDiscoveryEnabled: process.env.CATALOG_DISCOVERY_ENABLED === 'true',
+  catalogDiscoveryUrl: optionalEnv(
+    'CATALOG_DISCOVERY_URL',
+    'https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources',
+  ),
+
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,

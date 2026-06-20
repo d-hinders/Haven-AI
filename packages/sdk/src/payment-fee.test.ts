@@ -42,4 +42,29 @@ describe('payment result fee transparency (#386)', () => {
     const result = await haven.getPayment('pi1')
     expect(result.fee).toBeNull()
   })
+
+  it('maps the fee on the x402/MPP payment status too', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        payment_id: 'ar1',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'executed',
+        phase: 'payment_confirmed',
+        next_action: 'none',
+        amount: '0.01',
+        token: 'USDC',
+        resource_url: null,
+        merchant_address: null,
+        tx_hash: '0xabc',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        chain_id: 8453,
+        message: 'done',
+        fee: { amount: '0', token: 'USDC', basis_points: 0, applied: false },
+      })),
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const result = await haven.getPaymentStatus('ar1')
+    expect(result.fee).toEqual({ amount: '0', token: 'USDC', basisPoints: 0, applied: false })
+  })
 })

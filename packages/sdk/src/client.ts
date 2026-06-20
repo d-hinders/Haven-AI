@@ -3018,6 +3018,14 @@ export class HavenClient {
       txHash: raw.tx_hash,
       errorMessage: raw.error_message,
       explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) : null),
+      fee: raw.fee
+        ? {
+            amount: raw.fee.amount,
+            token: raw.fee.token,
+            basisPoints: raw.fee.basis_points,
+            applied: raw.fee.applied,
+          }
+        : null,
       createdAt: raw.created_at,
       signedAt: raw.signed_at,
       submittedAt: raw.submitted_at,

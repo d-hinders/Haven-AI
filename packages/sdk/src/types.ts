@@ -138,6 +138,25 @@ export interface PaymentResult {
   submittedAt: string | null
   confirmedAt: string | null
   expiresAt: string
+
+  /**
+   * Platform fee surfaced on the result so it's never silently collected. Dark
+   * today (`amount` "0", `applied` false); always present so it's visible the
+   * moment fees go live.
+   */
+  fee?: PaymentFee | null
+}
+
+/** The Haven platform fee applied to a payment (#386). */
+export interface PaymentFee {
+  /** Human-readable fee amount ("0" while the fee module is dark). */
+  amount: string
+  /** Token the fee is denominated in. */
+  token: string
+  /** Fee as basis points of gross (0 while dark). */
+  basisPoints: number
+  /** True when a non-zero fee was actually applied. */
+  applied: boolean
 }
 
 // ── x402 Types ──────────────────────────────────────────────────
@@ -1049,6 +1068,7 @@ export interface RawStatusResponse {
   tx_hash: string | null
   explorer_url?: string | null
   chain_id?: number
+  fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   error_message: string | null
   created_at: string
   signed_at: string | null

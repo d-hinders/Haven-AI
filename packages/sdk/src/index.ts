@@ -35,6 +35,7 @@ export type {
   PaymentRequest,
   PaymentIntent,
   PaymentResult,
+  PaymentFee,
   PaymentStatus,
   PendingApproval,
   PaymentStatusResult,

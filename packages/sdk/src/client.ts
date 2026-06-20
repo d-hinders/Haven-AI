@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
 import { privateKeyToAccount } from 'viem/accounts'
 import { signHash, addressFromKey, verifySignature } from './signer.js'
+import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
   PaymentRequest,
@@ -845,6 +846,21 @@ export class HavenClient {
     const query = options.limit ? `?limit=${encodeURIComponent(String(options.limit))}` : ''
     const raw = await this.get<RawHavenPaymentReceiptsResponse>(`/machine-payments/receipts${query}`)
     return raw.receipts.map((receipt) => this.mapPaymentReceipt(receipt))
+  }
+
+  /**
+   * Fetch the verifiable receipt bundle for a settled payment and verify it
+   * locally. The server's own verification is ignored — the receipt is verified
+   * here (independently of Haven) by recovering the signer from the
+   * authorisation, so the result is trustworthy even if the backend lied.
+   */
+  async getReceipt(
+    paymentId: string,
+  ): Promise<{ receipt: PaymentReceipt; verification: ReceiptVerification }> {
+    const { receipt } = await this.get<{ receipt: PaymentReceipt }>(
+      `/payments/${paymentId}/receipt`,
+    )
+    return { receipt, verification: verifyPaymentReceipt(receipt) }
   }
 
   /**

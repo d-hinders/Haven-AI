@@ -15,6 +15,7 @@ import {
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
+import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 
 // ── Constants ─────────────────────────────────────────────────────
@@ -538,6 +539,20 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       confirmed_at: intent.confirmed_at,
       expires_at: intent.expires_at,
     }
+  })
+
+  // ── GET /:id/receipt — verifiable proof bundle for a settled payment ──
+
+  app.get<{ Params: { id: string } }>('/:id/receipt', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const receipt = await getPaymentReceipt(request.params.id, agent.id)
+    if (!receipt) {
+      return reply.code(404).send({ error: 'No settled payment found for this id' })
+    }
+    // Self-verify so the response states the proof status; the bundle is also
+    // verifiable independently of Haven (recover the signer from authorization).
+    const verification = verifyPaymentReceipt(receipt)
+    return { receipt, verification }
   })
 
   // ── GET / — List payment intents for this agent ─────────

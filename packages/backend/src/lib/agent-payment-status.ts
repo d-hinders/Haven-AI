@@ -5,10 +5,41 @@ import {
   type AgentPaymentNextAction as AgentPaymentNextActionValue,
   type AgentPaymentPhase as AgentPaymentPhaseValue,
 } from './agent-payment-taxonomy.js'
+import { ethers } from 'ethers'
 import pool from '../db.js'
 import { type AgentContext } from '../middleware/agentAuth.js'
+import { quoteFee } from './fee/fee-module.js'
 
 export type AgentPaymentKind = 'payment_intent' | 'approval_request'
+
+/**
+ * Platform fee surfaced on a machine-payment status (#386 — no silent
+ * collection), matching the shape on the direct payment result. Dark today
+ * (amount "0", applied false) via the fee module's quote.
+ */
+function statusFee(input: {
+  paymentId: string
+  rail: string
+  amountRaw: string | null
+  token: string | null
+  userId: string
+}): { amount: string; token: string; basis_points: number; applied: boolean } {
+  let gross = 0n
+  try { gross = BigInt(input.amountRaw ?? '0') } catch { gross = 0n }
+  const quote = quoteFee({
+    paymentId: input.paymentId,
+    rail: input.rail,
+    grossAtomic: gross,
+    token: input.token ?? '',
+    userId: input.userId,
+  })
+  return {
+    amount: quote.feeAtomic === 0n ? '0' : ethers.formatUnits(quote.feeAtomic, 18),
+    token: quote.feeToken,
+    basis_points: quote.basisPoints,
+    applied: !quote.isZero,
+  }
+}
 
 export interface AgentPaymentStatus {
   payment_id: string
@@ -25,6 +56,7 @@ export interface AgentPaymentStatus {
   expires_at: string
   chain_id: number
   message: string
+  fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
   network?: string | null
@@ -695,6 +727,7 @@ export async function getAgentPaymentStatus(
       expires_at: payment.expires_at,
       chain_id: payment.chain_id,
       message: messageForRail(rail, payment.status, state.message),
+      fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
       ...railContext({
         rail,
         amountRaw: payment.amount_raw,
@@ -747,6 +780,7 @@ export async function getAgentPaymentStatus(
     expires_at: approval.expires_at,
     chain_id: approval.chain_id,
     message: messageForRail(rail, approval.status, state.message),
+    fee: statusFee({ paymentId: approval.id, rail, amountRaw: approval.amount_raw, token: approval.token_symbol, userId: agent.user_id }),
     ...railContext({
       rail,
       amountRaw: approval.amount_raw,

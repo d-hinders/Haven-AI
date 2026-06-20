@@ -863,6 +863,8 @@ export interface PaymentStatusResult {
   expiresAt: string
   chainId: number
   message: string
+  /** Platform fee surfaced so it's never silently collected (#386). */
+  fee?: PaymentFee | null
   amountAtomic?: string | null
   asset?: string | null
   network?: string | null
@@ -1093,6 +1095,7 @@ export interface RawPaymentStatusResult {
   expires_at: string
   chain_id: number
   message: string
+  fee?: { amount: string; token: string; basis_points: number; applied: boolean } | null
   amount_atomic?: string | null
   asset?: string | null
   network?: string | null

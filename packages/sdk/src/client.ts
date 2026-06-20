@@ -3066,6 +3066,14 @@ export class HavenClient {
       expiresAt: raw.expires_at,
       chainId: raw.chain_id,
       message: raw.message,
+      fee: raw.fee
+        ? {
+            amount: raw.fee.amount,
+            token: raw.fee.token,
+            basisPoints: raw.fee.basis_points,
+            applied: raw.fee.applied,
+          }
+        : null,
       amountAtomic: raw.amount_atomic ?? raw.x402?.amount_atomic ?? null,
       asset: raw.asset ?? raw.x402?.asset ?? null,
       network: raw.network ?? raw.x402?.network ?? null,

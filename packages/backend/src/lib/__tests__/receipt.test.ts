@@ -6,7 +6,6 @@ import {
   RECEIPT_VERSION,
   type PaymentReceiptRow,
 } from '../receipt.js'
-import { recoverSigner } from '../allowance-module.js'
 
 const DELEGATE = new Wallet(`0x${'11'.repeat(32)}`)
 const SIGN_HASH = `0x${'ab'.repeat(32)}`
@@ -31,12 +30,7 @@ function row(over: Partial<PaymentReceiptRow> = {}): PaymentReceiptRow {
   }
 }
 
-/** A real ECDSA signature of SIGN_HASH by the delegate key. */
-async function signByDelegate(hash = SIGN_HASH): Promise<string> {
-  return DELEGATE.signingKey.sign(hash).serialized
-}
-
-describe('buildPaymentReceipt', () => {
+describe('buildPaymentReceipt (backend DB mapping)', () => {
   it('assembles a versioned bundle with payment, authorization, and on-chain parts', () => {
     const r = buildPaymentReceipt(row({ signature: '0xsig' }))
     expect(r.version).toBe(RECEIPT_VERSION)
@@ -45,32 +39,10 @@ describe('buildPaymentReceipt', () => {
     expect(r.authorization).toEqual({ delegate: DELEGATE.address, signHash: SIGN_HASH, signature: '0xsig' })
     expect(r.onChain).toEqual({ txHash: row().tx_hash, chainId: 100 })
   })
-})
 
-describe('verifyPaymentReceipt (independently of Haven)', () => {
-  it('verifies a receipt whose signature recovers to the delegate', async () => {
-    const signature = await signByDelegate()
-    const result = verifyPaymentReceipt(buildPaymentReceipt(row({ signature })), recoverSigner)
-    expect(result.verified).toBe(true)
-    if (result.verified) expect(result.recoveredSigner.toLowerCase()).toBe(DELEGATE.address.toLowerCase())
-  })
-
-  it('rejects a receipt with no signature', () => {
-    const result = verifyPaymentReceipt(buildPaymentReceipt(row({ signature: null })))
-    expect(result).toMatchObject({ verified: false, reason: 'missing_signature' })
-  })
-
-  it('rejects a signature that recovers to someone other than the delegate', async () => {
-    // Signed by a different key → recovers to a non-delegate address.
-    const other = new Wallet(`0x${'22'.repeat(32)}`)
-    const signature = other.signingKey.sign(SIGN_HASH).serialized
-    const result = verifyPaymentReceipt(buildPaymentReceipt(row({ signature })), recoverSigner)
-    expect(result.verified).toBe(false)
-    if (!result.verified) expect(result.reason).toBe('signer_mismatch')
-  })
-
-  it('rejects a malformed signature', () => {
-    const result = verifyPaymentReceipt(buildPaymentReceipt(row({ signature: '0xnotasignature' })), recoverSigner)
-    expect(result).toMatchObject({ verified: false, reason: 'bad_signature' })
+  it('produces a receipt that verifies via the SDK verifier (end-to-end)', () => {
+    const signature = DELEGATE.signingKey.sign(SIGN_HASH).serialized
+    const receipt = buildPaymentReceipt(row({ signature }))
+    expect(verifyPaymentReceipt(receipt).verified).toBe(true)
   })
 })

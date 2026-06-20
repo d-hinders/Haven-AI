@@ -1,43 +1,20 @@
 import pool from '../db.js'
-import { recoverSigner } from './allowance-module.js'
+import {
+  RECEIPT_VERSION,
+  verifyPaymentReceipt,
+  type PaymentReceipt,
+  type ReceiptVerification,
+} from '@haven_ai/sdk'
 
 /**
- * Verifiable payment receipts (non-custody design P2, #479).
+ * Backend wiring for verifiable payment receipts (non-custody design P2, #479).
  *
- * A self-contained proof bundle for a settled payment that anyone can verify
- * *independently of Haven*. The anchor is the agent delegate's signature over
- * the on-chain transfer hash: recover the signer and confirm it is the agent's
- * delegate, and you have cryptographic proof the agent authorised exactly this
- * transfer — no need to trust Haven's database. The on-chain `txHash` is the
- * settlement source of truth (verify on any explorer).
+ * The receipt shape and the independent verifier live in `@haven_ai/sdk` (so
+ * agents/users can verify client-side with zero Haven trust); this module only
+ * adds the DB-specific assembly. Re-exported here for callers in the backend.
  */
-export const RECEIPT_VERSION = 'haven-receipt-1'
-
-export interface PaymentReceipt {
-  version: typeof RECEIPT_VERSION
-  paymentId: string
-  payment: {
-    token: string
-    tokenAddress: string
-    amount: string
-    amountSek: string | null
-    recipient: string
-    safe: string
-    chainId: number
-    settledAt: string | null
-    resourceUrl: string | null
-  }
-  /** The agent's cryptographic authorisation — what makes the receipt verifiable. */
-  authorization: {
-    delegate: string
-    signHash: string
-    signature: string | null
-  }
-  onChain: {
-    txHash: string | null
-    chainId: number
-  }
-}
+export { RECEIPT_VERSION, verifyPaymentReceipt }
+export type { PaymentReceipt, ReceiptVerification }
 
 export interface PaymentReceiptRow {
   id: string
@@ -79,35 +56,6 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
     },
     onChain: { txHash: row.tx_hash, chainId: row.chain_id },
   }
-}
-
-export type ReceiptVerification =
-  | { verified: true; recoveredSigner: string }
-  | { verified: false; reason: 'missing_signature' | 'bad_signature' | 'signer_mismatch'; recoveredSigner?: string }
-
-/**
- * Verify a receipt independently: recover the signer from the authorisation and
- * confirm it is the agent's delegate. Pure — `recover` is injected (defaults to
- * the standard ECDSA recovery) so this can run anywhere, including outside Haven.
- */
-export function verifyPaymentReceipt(
-  receipt: PaymentReceipt,
-  recover: (hash: string, signature: string) => string = recoverSigner,
-): ReceiptVerification {
-  const { delegate, signHash, signature } = receipt.authorization
-  if (!signature) return { verified: false, reason: 'missing_signature' }
-
-  let recovered: string
-  try {
-    recovered = recover(signHash, signature)
-  } catch {
-    return { verified: false, reason: 'bad_signature' }
-  }
-
-  if (recovered.toLowerCase() !== delegate.toLowerCase()) {
-    return { verified: false, reason: 'signer_mismatch', recoveredSigner: recovered }
-  }
-  return { verified: true, recoveredSigner: recovered }
 }
 
 /** Load a settled payment's receipt for the owning agent. Null if not found. */

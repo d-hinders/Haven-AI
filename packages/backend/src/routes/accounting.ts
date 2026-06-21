@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
+import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { buildAccountingEntries } from '../lib/accounting-entry.js'
 import { sieExporter } from '../lib/sie-exporter.js'
@@ -35,6 +36,13 @@ export default async function accountingRoutes(app: FastifyInstance): Promise<vo
 
   // GET /accounting/export?format=sie&from=&to=&company=
   app.get<{ Querystring: ExportQuery }>('/export', async (request, reply) => {
+    // Legacy asserting surface — gated off by default, superseded by the
+    // non-asserting reporting feed (#491/#492).
+    if (!config.legacyBookkeepingEnabled) {
+      return reply.code(410).send({
+        error: 'SIE export is no longer available. Agent spend now syncs into your accounting tool as draft transactions.',
+      })
+    }
     const { sub } = request.user as { sub: string }
     const { format = 'sie', from, to, company } = request.query
 

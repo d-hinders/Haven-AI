@@ -26,7 +26,7 @@ import {
   type PreparedSignerRuntime,
   type PrepareSignerRuntimeInput,
 } from './signer-runtime.js'
-import { MCP_RUNTIME_MANIFEST, signerPackageSpec } from './runtime-manifest.js'
+import { MCP_RUNTIME_MANIFEST, mcpPackageSpec, signerPackageSpec } from './runtime-manifest.js'
 import { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from '@haven_ai/sdk'
 import { normalizeRuntime, restartRequiredForRuntime, runtimeProfile, type RuntimeId } from './runtime-registry.js'
 import {
@@ -140,7 +140,12 @@ export async function installRuntime(
       localMcpAcknowledged: false,
       messages: [
         ...consentMessages,
-        'Runtime was not recognized. Keep the local credentials and add Haven MCP entries manually after wallet approval.',
+        'Custom runtime: Haven did not auto-configure it. Your credentials are on disk (chmod 600) — read them at runtime; never paste a key into the agent prompt, memory, or logs.',
+        `  identity (hosted MCP Bearer): ${input.identityPath}`,
+        `  signer (local signing key):   ${input.signerPath}`,
+        'After wallet approval, wire the runtime to Haven by reference:',
+        `  Hosted MCP + local signer: point your MCP client at ${input.hostedMcpUrl} with the api_key from identity.json, then run  npx -y ${signerPackageSpec()} --credentials ${input.signerPath}`,
+        `  Fully local MCP (no hosted dependency):  npx -y ${mcpPackageSpec()} --identity ${input.identityPath} --signer ${input.signerPath}`,
       ],
     }
   }

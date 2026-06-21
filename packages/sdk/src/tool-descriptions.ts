@@ -146,6 +146,15 @@ export const toolDescriptions = {
       'Returns the agent\'s recent machine-payment receipts ordered by recency. Proof header values are not returned.',
     nextActionGuidance: '',
   },
+  verifyReceipt: {
+    summary:
+      'Verify a payment receipt offline — confirm the agent authorised the transfer.',
+    selectionGuidance:
+      'Use this to check a receipt you already hold; it needs no network and does not trust Haven. Use the history tool to fetch receipts in the first place.',
+    behavior:
+      'Recovers the signer from the receipt authorisation and confirms it matches the agent delegate. Returns verified true/false with the recovered signer or a reason. Pure and local — no backend call.',
+    nextActionGuidance: '',
+  },
   payMcpTool: {
     summary:
       'Call a named tool on an MCP merchant that requires an x402 payment, handling the full initialize → pay → retry round trip.',

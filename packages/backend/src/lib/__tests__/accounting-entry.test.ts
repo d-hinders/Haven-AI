@@ -22,7 +22,9 @@ function row(over: Partial<AccountingEntrySourceRow> = {}): AccountingEntrySourc
     confirmed_at: '2026-06-19T10:00:00.000Z',
     created_at: '2026-06-19T09:59:00.000Z',
     category: 'media',
+    country: null,
     override_account: null,
+    fee_sek: null,
     ...over,
   }
 }
@@ -53,8 +55,12 @@ describe('toAccountingEntry', () => {
     expect(typeof e.amountSek).toBe('string')
   })
 
-  it('defaults foreign agent spend to reverse-charge VAT', () => {
-    expect(toAccountingEntry(row()).vatTreatment).toBe('reverse_charge')
+  it('derives VAT treatment from supplier country', () => {
+    expect(toAccountingEntry(row()).vatTreatment).toBe('reverse_charge') // unknown
+    expect(toAccountingEntry(row({ country: 'DE' })).vatTreatment).toBe('reverse_charge')
+    expect(toAccountingEntry(row({ country: 'US' })).vatTreatment).toBe('reverse_charge')
+    expect(toAccountingEntry(row({ country: 'SE' })).vatTreatment).toBe('standard')
+    expect(toAccountingEntry(row({ country: 'DE' })).counterparty.country).toBe('DE')
   })
 
   it('carries null FX through when none was captured (backfillable)', () => {
@@ -73,10 +79,10 @@ describe('toAccountingEntry', () => {
     expect(e.paymentId).toBe('ar9')
   })
 
-  it('populates category from the catalog and leaves fee null (no #386 yet)', () => {
-    const e = toAccountingEntry(row())
-    expect(e.feeSek).toBeNull()
-    expect(e.category).toBe('media')
+  it('populates category from the catalog and fee from the ledger', () => {
+    expect(toAccountingEntry(row()).feeSek).toBeNull()
+    expect(toAccountingEntry(row()).category).toBe('media')
+    expect(toAccountingEntry(row({ fee_sek: '1.25' })).feeSek).toBe('1.25')
   })
 
   it('carries a per-merchant account override when present, else null', () => {

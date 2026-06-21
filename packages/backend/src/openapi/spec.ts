@@ -701,6 +701,35 @@ export const openapiSpec = {
         },
       },
     },
+    '/payments/{id}/receipt': {
+      get: {
+        tags: ['Payments'],
+        operationId: 'getPaymentReceipt',
+        summary: 'Fetch a verifiable receipt for a settled payment.',
+        description:
+          'Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. The bundle is verifiable independently of Haven by recovering the signer from the authorization and confirming it is the agent delegate.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/PaymentId' }],
+        responses: {
+          '200': {
+            description: 'Receipt bundle and verification result.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    receipt: { type: 'object', additionalProperties: true },
+                    verification: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/payments/{id}/resume_state': {
       get: {
         tags: ['Payments'],

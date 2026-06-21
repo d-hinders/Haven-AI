@@ -44,7 +44,7 @@ describe how the system is actually built and how we work on it.
 - [Agentic delivery workflow](contributing/ai-agent-workflow.md)
 - [Recurring review patterns](contributing/ai-review-patterns.md)
 - [PR workflow checklist](contributing/pr-workflow-checklist.md)
-- [Code-quality roadmap](contributing/code-quality-roadmap.md) and [running loop](contributing/code-quality-loop.md)
+- [Code-quality loop](contributing/code-quality-loop.md)
 
 **Operations**
 - [Deploy the hosted MCP server](operations/hosted-mcp.md)

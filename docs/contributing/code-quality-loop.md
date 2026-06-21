@@ -42,7 +42,7 @@ Last updated: 2026-06-06
 - PR #277: resolved `machine_payment_reconciliation_events` stay resolved on later merchant-retry upserts.
 - PR #278: reconciliation event response status values are explicit in OpenAPI/tests.
 - Planned current PR: machine-payment evidence proof-status values are explicit in OpenAPI/tests.
-- Prior roadmap exists at `docs/contributing/code-quality-roadmap.md`; use this file as the running handoff for the small-PR quality loop going forward.
+- This file is the running handoff for the small-PR quality loop. (A prior strategic roadmap was retired once the loop became the live record.)
 
 ## Deferred Items
 

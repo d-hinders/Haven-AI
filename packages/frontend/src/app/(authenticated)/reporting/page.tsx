@@ -76,6 +76,12 @@ export default function ReportingPage() {
                 )
               }
             />
+            {!status.connected && (
+              <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+                Haven provides data tooling, not accounting or tax advice. Transactions are fed as drafts —
+                you and your accountant remain responsible for coding, correctness, and filing.
+              </p>
+            )}
           </Card>
 
           <Card className="p-0" hover={false}>

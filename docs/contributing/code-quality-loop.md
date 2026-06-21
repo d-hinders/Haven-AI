@@ -99,7 +99,22 @@ still dormant before excluding it (a flag can flip).
 
 ## Current Run
 
-- **Status:** between passes — needs a target picked from the refreshed backlog.
+- **Target:** pin the reporting feed's "never double-post" guarantee with an
+  *integrated* regression guard.
+- **What shipped:** `packages/backend/src/lib/reporting/__tests__/feed-dedup.integration.test.ts`
+  — drives the real `claimSync` / `markPushed` / `markFailed` and the real
+  orchestrator against an in-memory oracle of the `reporting_feed_syncs` unique
+  constraint, then re-feeds the same payment (re-sync, racing claim, post-failure
+  retry) and asserts exactly one connector push each time. Test-only; no runtime
+  change.
+- **Correction to prior discovery:** the earlier backlog claimed the guarantee
+  was unpinned. It was already covered at the *unit* level
+  (`feed-sync.test.ts`, `feed-orchestrator.test.ts`) — I missed those because
+  they live in `lib/reporting/__tests__/`, not `lib/__tests__/`. The real gap was
+  that both unit tests mock the seam they share, so neither exercises the dedup
+  mechanism reacting to its own prior write. This pass closes that specific gap.
+- **Verification:** focused `vitest run src/lib/reporting` green (20 tests);
+  `npm run typecheck` (backend `tsc --noEmit`) exit 0.
 - **Prior two targets have landed** and are verified in OpenAPI/tests:
   `MachinePaymentReceipt.proof_status` is an explicit enum
   (`payment_confirmed | merchant_response_observed | protocol_receipt_attached`)
@@ -117,15 +132,15 @@ still dormant before excluding it (a flag can flip).
 
 Refreshed 2026-06-21 against current code. Ordered by blast radius, not by ease.
 
-- **P0 — Reporting/accounting export correctness.** The reporting feed writes
-  financial records to external systems (Fortnox). `feed-sync.ts` claims
-  "never double-post" via a unique `(provider, payment_id, user_id)` dedup
-  ledger with an atomic claim; `feed-orchestrator.ts` is "idempotent and
-  resumable". That guarantee is a money-trust invariant and is not yet pinned by
-  a route-level regression test or an oracle-grounded loop. Also verify
-  book-time FX and rounding (`026_machine_payment_book_time_fx`) are applied
-  consistently. *Surfaces:* `src/lib/reporting/feed-sync.ts`,
-  `src/lib/reporting/feed-orchestrator.ts`, `src/routes/reporting.ts`,
+- **P0 — Reporting/accounting export correctness.** The "never double-post"
+  dedup guarantee is now pinned (unit + integrated guard — see Current Run).
+  Remaining: verify book-time FX and rounding
+  (`026_machine_payment_book_time_fx`) are applied consistently and never
+  recomputed at feed time, and that the unique index in the migration matches
+  the `ON CONFLICT (provider, payment_id, user_id)` target (SQL-level, which the
+  behavioral oracle deliberately does not cover). *Surfaces:*
+  `src/lib/reporting/reporting-transaction.ts`, `src/lib/accounting-entry.ts`,
+  `src/db/migrations/033_reporting_feed_syncs.ts`, `src/routes/reporting.ts`,
   `src/routes/accounting.ts`.
 - **P0 — Agent credential & external-token hygiene (new surfaces).** Fortnox
   `access_token`/`refresh_token` are stored server-side; confirm they never
@@ -165,7 +180,8 @@ A standing view of *which surfaces are hardened* so the loop has a notion of
 | Owner-side allowance mirror writes | ✅ Hardened | PRs #271, #275, #276 |
 | Reconciliation event status contract | ✅ Hardened | PRs #277, #278; OpenAPI enum |
 | Machine-payment receipt contract (rail, proof_status) | ✅ Hardened | OpenAPI enums + tests |
-| Reporting/accounting export (dedup, FX, idempotency) | ⚠️ Thin | dedup ledger exists; no route-level/invariant test |
+| Reporting feed dedup ("never double-post") | ✅ Hardened | unit tests + integrated `feed-dedup.integration.test.ts` guard |
+| Reporting/accounting FX-at-book-time correctness | ⚠️ Thin | book-time SEK frozen; not separately pinned |
 | External-token hygiene (Fortnox) | ❓ Unverified | server-side storage; redaction not audited |
 | OpenAPI coverage of reporting/fortnox/accounting/x402-resources | ❌ Missing | 0 spec.ts entries |
 | Route-level tests for the above handlers | ❌ Missing | no `__tests__` entry |
@@ -211,6 +227,7 @@ quietly avoiding its hardest item.
 - PR #277: resolved `machine_payment_reconciliation_events` stay resolved on later merchant-retry upserts.
 - PR #278: reconciliation event response status values are explicit in OpenAPI/tests.
 - Machine-payment receipt `proof_status` and `rail` are explicit in OpenAPI/tests (both prior loop targets; verified landed 2026-06-21).
+- Reporting feed "never double-post": added `feed-dedup.integration.test.ts`, an integrated guard that drives the real claim/push/retry lifecycle against an in-memory oracle of the `reporting_feed_syncs` unique constraint, complementing the existing boundary-mocked unit tests (2026-06-21).
 
 ## Deferred Items
 
@@ -232,14 +249,15 @@ quietly avoiding its hardest item.
 
 Pick one narrow target from the refreshed P0/P1 backlog. Recommended order:
 
-1. **Pin the reporting "never double-post" invariant** (P0) — add route-level
-   regression coverage for the dedup ledger and resumable orchestrator, or hand
-   the dedup logic to an oracle-grounded loop. Highest blast radius among the
-   new surfaces, and it leaves a durable machine check behind.
-2. **Audit external-token redaction** for Fortnox (P0) — small, high-value, and
-   matches the existing credential-hygiene bar.
-3. **Document one new route family in OpenAPI** (P1, schema/test-only) —
-   `reporting`, `fortnox`, `accounting`, or `x402-resources`, one per pass.
+1. **Audit external-token redaction** for Fortnox (P0) — confirm
+   `access_token` / `refresh_token` never surface in responses, logs, errors, or
+   generated artifacts; small, high-value, matches the existing credential bar.
+2. **Document one new route family in OpenAPI** (P1, schema/test-only) —
+   `reporting`, `fortnox`, `accounting` (live endpoints only), or
+   `x402-resources`, one per pass.
+3. **Pin the migration-vs-`ON CONFLICT` unique-key match** for
+   `reporting_feed_syncs` (P0 remainder) — the one double-post failure mode the
+   behavioral oracle deliberately does not cover.
 
 Defer broad evidence/reconciliation automation and payment-state rewrites.
 Begin PT-1 the moment a pass would otherwise edit `routes/x402.ts` or

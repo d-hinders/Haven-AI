@@ -45,13 +45,17 @@ export default async function fortnoxRoutes(app: FastifyInstance): Promise<void>
   // GET /accounting/fortnox/status
   app.get('/status', { onRequest: authMiddleware }, async (request) => {
     const { sub } = request.user as { sub: string }
-    if (!fortnoxConfigured()) return { configured: false, connected: false }
+    // legacyBookkeeping tells the UI whether the asserting voucher-push surface
+    // is reachable (#492). Off by default — superseded by the reporting feed.
+    const legacyBookkeeping = config.legacyBookkeepingEnabled
+    if (!fortnoxConfigured()) return { configured: false, connected: false, legacyBookkeeping }
     const conn = await getFortnoxConnection(sub)
     return {
       configured: true,
       connected: Boolean(conn),
       scope: conn?.scope ?? null,
       expiresAt: conn?.expires_at ?? null,
+      legacyBookkeeping,
     }
   })
 
@@ -117,6 +121,12 @@ export default async function fortnoxRoutes(app: FastifyInstance): Promise<void>
 
   // POST /accounting/fortnox/push?from=&to= — push vouchers for a period
   app.post<{ Querystring: PushQuery }>('/push', { onRequest: authMiddleware }, async (request, reply) => {
+    // Legacy asserting surface — finished vouchers are no longer pushed (#491/#492).
+    if (!config.legacyBookkeepingEnabled) {
+      return reply.code(410).send({
+        error: 'Pushing finished vouchers is disabled. Agent spend now syncs into your accounting tool as draft transactions for your accountant to confirm.',
+      })
+    }
     const { sub } = request.user as { sub: string }
     const { from, to } = request.query
     if (from && !ISO_DATE_RE.test(from)) return reply.code(400).send({ error: 'Invalid "from" date (expected ISO)' })

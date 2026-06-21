@@ -97,6 +97,8 @@ export interface FortnoxStatus {
   connected: boolean
   scope?: string | null
   expiresAt?: string | null
+  /** Whether the legacy asserting voucher-push surface is enabled (#492). */
+  legacyBookkeeping?: boolean
 }
 
 export interface FortnoxPushResult {

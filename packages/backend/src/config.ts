@@ -61,6 +61,11 @@ export const config = {
   // zero and no funds move. Real pricing + on-chain collection are deferred.
   feeEnabled: process.env.HAVEN_FEE_ENABLED === 'true',
 
+  // Legacy asserting bookkeeping (epic #462). Dark by default — superseded by
+  // the non-asserting reporting feed (#491). Code retained; surfaces gated:
+  // SIE export, finished voucher push, and any asserted-VAT output.
+  legacyBookkeepingEnabled: process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED === 'true',
+
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,

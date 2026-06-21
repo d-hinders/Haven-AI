@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { AuthProvider } from '@/context/AuthContext'
+import { LocaleProvider } from '@/context/LocaleContext'
 import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RainbowKitProvider, lightTheme } from '@rainbow-me/rainbowkit'
@@ -45,25 +46,27 @@ export default function Providers({ children }: { children: ReactNode }) {
   useEffect(() => setMounted(true), [])
 
   return (
-    <AuthProvider>
-      {mounted ? (
-        <WagmiProvider config={config}>
-          <QueryClientProvider client={queryClient}>
-            <RainbowKitProvider
-              theme={lightTheme({
-                accentColor: '#4f46e5',
-                accentColorForeground: 'white',
-                borderRadius: 'medium',
-                overlayBlur: 'small',
-              })}
-            >
-              {children}
-            </RainbowKitProvider>
-          </QueryClientProvider>
-        </WagmiProvider>
-      ) : (
-        children
-      )}
-    </AuthProvider>
+    <LocaleProvider>
+      <AuthProvider>
+        {mounted ? (
+          <WagmiProvider config={config}>
+            <QueryClientProvider client={queryClient}>
+              <RainbowKitProvider
+                theme={lightTheme({
+                  accentColor: '#4f46e5',
+                  accentColorForeground: 'white',
+                  borderRadius: 'medium',
+                  overlayBlur: 'small',
+                })}
+              >
+                {children}
+              </RainbowKitProvider>
+            </QueryClientProvider>
+          </WagmiProvider>
+        ) : (
+          children
+        )}
+      </AuthProvider>
+    </LocaleProvider>
   )
 }

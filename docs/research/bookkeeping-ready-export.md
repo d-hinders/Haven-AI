@@ -1,8 +1,15 @@
 # Architecture — bookkeeping-ready export (Fortnox / SIE / beyond)
 
-> Status: **design proposal.** Forward-looking; no implementation yet. Companion
-> to the business thesis (agent spend that's audit-ready by construction) and the
-> rail-agnostic patterns already in the codebase.
+> **Superseded in direction by [epic #491](https://github.com/d-hinders/Haven-AI/issues/491)
+> (accounting data feed).** This doc's "audit-ready / verifikat-grade / agent-era
+> Fortnox" framing — Haven *asserting* finished VAT + vouchers — was walked back:
+> on thin payment data those are guesses, and asserting them carries trust +
+> liability risk. The shipped product **feeds drafts / source documents** into
+> the customer's tool and the accountant codes and confirms. The foundation here
+> (book-time FX, `AccountingEntry`) is reused; the "asserting" framing and copy
+> are not. See [`fortnox-non-asserting-feed.md`](fortnox-non-asserting-feed.md).
+>
+> Original status: design proposal / business-thesis companion (historical).
 
 ## 1. TL;DR / recommendation
 

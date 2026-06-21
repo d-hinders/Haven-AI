@@ -523,6 +523,22 @@ describe('payment routes', () => {
     expect(mockQuery.mock.calls[2][0]).toContain("status = 'pending_signature'")
   })
 
+  it('surfaces the platform fee on a payment result so it is never silent (#386)', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [pendingIntent({ status: 'confirmed', tx_hash: TX_HASH })] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/payments/${PAYMENT_ID}`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    // Dark today: zero + not applied — but always present.
+    expect(response.json().fee).toEqual({ amount: '0', token: 'xDAI', basis_points: 0, applied: false })
+  })
+
   it('expires stale pending signature intents before listing payments', async () => {
     mockQuery
       .mockResolvedValueOnce(authRow())

@@ -428,6 +428,45 @@ describe('HostedConnectCard', () => {
     expect(onCredentialSaved).toHaveBeenCalled()
   })
 
+  it('copying the "Other / SDK" setup prompt is secret-free and does not claim a signing-key copy', async () => {
+    // The 'other' setup prompt references signer.json on disk instead of
+    // pasting the key, so copying it must not write a secret to the clipboard
+    // and must not fire onCopySigningKey (no key was handed over).
+    const onCredentialSaved = vi.fn()
+    const onCopySigningKey = vi.fn()
+    render(
+      <HostedConnectCard
+        credential={credential()}
+        onCredentialSaved={onCredentialSaved}
+        onCopySigningKey={onCopySigningKey}
+      />,
+    )
+
+    fireEvent.click(tabByLabel('Other / SDK'))
+    fireEvent.click(screen.getByRole('button', { name: /Copy setup prompt/i }))
+
+    await waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1))
+    const copied = clipboardWriteText.mock.calls[0][0] as string
+    expect(copied).not.toContain(DELEGATE_KEY)
+    expect(copied).not.toContain(API_KEY)
+    expect(copied).toContain('signer.json')
+    expect(onCopySigningKey).not.toHaveBeenCalled()
+    expect(onCredentialSaved).toHaveBeenCalledTimes(1)
+  })
+
+  it('"Other / SDK" manual setup references the on-disk signer file instead of a Copy-key button', () => {
+    // For custom runtimes the key must never reach the clipboard — the manual
+    // setup points at signer.json on disk rather than offering a copy button.
+    render(<HostedConnectCard credential={credential()} />)
+    fireEvent.click(tabByLabel('Other / SDK'))
+    openManualSetup()
+
+    expect(screen.queryByRole('button', { name: /Copy signing key/i })).not.toBeInTheDocument()
+    const allText = document.body.textContent ?? ''
+    expect(allText).toContain('signer.json')
+    expect(allText).not.toContain(DELEGATE_KEY)
+  })
+
   // ── Manual setup disclosure ─────────────────────────────────────────────
 
   it('manual setup is collapsed by default and reveals config plus signing-key controls on click', () => {

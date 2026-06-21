@@ -2,6 +2,9 @@ export { HavenClient } from './client.js'
 export { havenTools } from './tools.js'
 export { signHash, addressFromKey, verifySignature } from './signer.js'
 
+export { verifyPaymentReceipt, RECEIPT_VERSION } from './receipt.js'
+export type { PaymentReceipt, ReceiptVerification } from './receipt.js'
+
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
 export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
 
@@ -32,6 +35,7 @@ export type {
   PaymentRequest,
   PaymentIntent,
   PaymentResult,
+  PaymentFee,
   PaymentStatus,
   PendingApproval,
   PaymentStatusResult,

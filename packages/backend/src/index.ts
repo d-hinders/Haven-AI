@@ -31,6 +31,7 @@ import catalogRoutes from './routes/catalog.js'
 import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
 import fortnoxRoutes from './routes/fortnox.js'
+import reportingRoutes from './routes/reporting.js'
 import { refreshCatalog } from './lib/merchant-catalog.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
@@ -148,6 +149,7 @@ await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
 await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
+await app.register(reportingRoutes, { prefix: '/accounting/reporting' })
 // Public demo — no auth hook, registered separately
 await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
 

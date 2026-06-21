@@ -66,6 +66,12 @@ export const config = {
   // SIE export, finished voucher push, and any asserted-VAT output.
   legacyBookkeepingEnabled: process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED === 'true',
 
+  // Managed-deployment marker — true only on Haven's hosted backend. The
+  // reporting feed (#491) is a hosted-only paid add-on and never runs elsewhere.
+  hosted: process.env.HAVEN_HOSTED === 'true',
+  // Global kill-switch for the reporting feed; dark by default.
+  reportingFeedEnabled: process.env.HAVEN_REPORTING_FEED_ENABLED === 'true',
+
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,

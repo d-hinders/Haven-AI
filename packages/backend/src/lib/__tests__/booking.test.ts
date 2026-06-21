@@ -62,6 +62,15 @@ describe('buildBookingLines', () => {
     expect(buildBookingLines(entry({ account: '4531' }))![0].account).toBe('4531')
   })
 
+  it('picks the reverse-charge purchase account by supplier country', () => {
+    const eu = entry({ counterparty: { address: '0xm', name: null, country: 'DE' } })
+    expect(buildBookingLines(eu)![0].account).toBe('4535') // EU services
+    const nonEu = entry({ counterparty: { address: '0xm', name: null, country: 'US' } })
+    expect(buildBookingLines(nonEu)![0].account).toBe('4537') // outside EU
+    const unknown = entry({ counterparty: { address: '0xm', name: null, country: null } })
+    expect(buildBookingLines(unknown)![0].account).toBe('4535') // flagged default
+  })
+
   it('rounds VAT to öre and stays balanced on awkward amounts', () => {
     const lines = buildBookingLines(entry({ amountSek: '0.10' }))!
     // 25% of 0.10 = 0.025 → 0.03 after rounding

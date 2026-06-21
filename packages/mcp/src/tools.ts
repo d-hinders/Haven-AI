@@ -7,6 +7,8 @@ import {
   HavenSigningError,
   composeDescription,
   toolDescriptions as sharedDescriptions,
+  verifyPaymentReceipt,
+  type PaymentReceipt,
   type MachinePaymentChallenge,
   type MppQuote,
   type MppResumeState,
@@ -32,6 +34,7 @@ export type HavenMcpToolName =
   | 'haven_get_agent'
   | 'haven_get_allowances'
   | 'haven_list_receipts'
+  | 'haven_verify_receipt'
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
 
@@ -102,6 +105,9 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
   },
+  haven_verify_receipt: {
+    receipt: z.unknown(),
+  },
 }
 
 /**
@@ -127,6 +133,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
   haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
+  haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
 }
 
 export interface ToolSuccess<T> {
@@ -407,6 +414,10 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
     haven_list_receipts: async (input) => {
       const args = objectInput('haven_list_receipts', input)
       return runTool(async () => haven.listReceipts({ limit: args.limit }))
+    },
+    haven_verify_receipt: async (input) => {
+      const args = objectInput('haven_verify_receipt', input)
+      return runTool(async () => verifyPaymentReceipt(args.receipt as PaymentReceipt))
     },
   }
 

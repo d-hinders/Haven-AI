@@ -1,4 +1,5 @@
 import pool from '../db.js'
+import { vatTreatmentForCountry } from './vat.js'
 
 /**
  * Canonical accounting record for bookkeeping-ready export (epic #462, P0 #463).
@@ -64,18 +65,22 @@ export interface AccountingEntrySourceRow {
   created_at: string
   /** From the merchant catalog (LEFT JOIN). */
   category: string | null
+  /** Supplier country (ISO-2) from the merchant catalog; drives VAT treatment. */
+  country: string | null
   /** From the user's per-merchant account overrides (LEFT JOIN). */
   override_account: string | null
+  /** Haven fee in SEK from the fee ledger (LEFT JOIN); null while fees are dark. */
+  fee_sek: string | null
 }
 
 /**
  * Pure mapping evidence row → canonical entry. Kept separate from the query so
  * the accounting judgment (direction, VAT default) is unit-testable.
  *
- * VAT defaults to reverse charge: these are agent payments to foreign API /
- * service suppliers, which under Swedish rules are reverse-charge (omvänd
- * skattskyldighet). It's a *flagged default* — per-merchant refinement using the
- * merchant registry's country is P3; the accountant confirms.
+ * VAT treatment is derived from the supplier country (#466): SE → standard
+ * (domestic), everything else / unknown → reverse charge (the dominant foreign
+ * agent-spend case). The EU-vs-non-EU purchase account is resolved at booking
+ * time. It remains a flagged treatment the accountant confirms.
  */
 export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntry {
   return {
@@ -84,21 +89,42 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     chainId: row.chain_id,
     settledAt: row.confirmed_at ?? row.created_at,
     direction: 'out',
-    counterparty: { address: row.merchant_address, name: null, country: null },
+    counterparty: { address: row.merchant_address, name: null, country: row.country ?? null },
     token: row.token_symbol,
     amountAtomic: row.amount_raw,
     amountSek: row.amount_sek,
     fxRate: row.fx_rate_sek,
     fxSource: row.fx_source,
     fxAt: row.fx_at,
-    feeSek: null,
+    feeSek: row.fee_sek ?? null,
     category: row.category ?? null,
     account: row.override_account ?? null,
-    vatTreatment: 'reverse_charge',
+    vatTreatment: vatTreatmentForCountry(row.country),
     resourceUrl: row.resource_url,
     receiptRef: row.id,
   }
 }
+
+/** Shared column + join body for the canonical entry source. */
+const ENTRY_SOURCE_SQL = `
+  mpe.id, mpe.payment_intent_id, mpe.approval_request_id, mpe.tx_hash, mpe.chain_id,
+  mpe.merchant_address, mpe.token_symbol, mpe.amount_raw,
+  mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at,
+  mpe.resource_url, mpe.confirmed_at, mpe.created_at,
+  mc.category AS category,
+  mc.country AS country,
+  mao.bas_account AS override_account,
+  pf.fee_sek AS fee_sek
+  FROM machine_payment_evidence mpe
+  LEFT JOIN LATERAL (
+    SELECT category, country FROM merchant_catalog
+    WHERE resource_url = mpe.resource_url AND status != 'delisted'
+    LIMIT 1
+  ) mc ON TRUE
+  LEFT JOIN merchant_account_overrides mao
+    ON mao.user_id = mpe.user_id AND mao.resource_url = mpe.resource_url
+  LEFT JOIN payment_fees pf
+    ON pf.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)`
 
 export interface BuildAccountingEntriesOptions {
   userId: string
@@ -106,6 +132,22 @@ export interface BuildAccountingEntriesOptions {
   from?: string
   to?: string
   limit?: number
+}
+
+/** Build the canonical accounting entry for a single settled payment. */
+export async function buildAccountingEntryForPayment(
+  userId: string,
+  paymentId: string,
+): Promise<AccountingEntry | null> {
+  const result = await pool.query<AccountingEntrySourceRow>(
+    `SELECT ${ENTRY_SOURCE_SQL}
+     WHERE mpe.user_id = $1
+       AND COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) = $2
+     LIMIT 1`,
+    [userId, paymentId],
+  )
+  const row = result.rows[0]
+  return row ? toAccountingEntry(row) : null
 }
 
 /** Build the canonical accounting entries for a user over a period. */
@@ -126,20 +168,7 @@ export async function buildAccountingEntries(
   const limitParam = `$${params.length}`
 
   const result = await pool.query<AccountingEntrySourceRow>(
-    `SELECT mpe.id, mpe.payment_intent_id, mpe.approval_request_id, mpe.tx_hash, mpe.chain_id,
-            mpe.merchant_address, mpe.token_symbol, mpe.amount_raw,
-            mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at,
-            mpe.resource_url, mpe.confirmed_at, mpe.created_at,
-            mc.category AS category,
-            mao.bas_account AS override_account
-     FROM machine_payment_evidence mpe
-     LEFT JOIN LATERAL (
-       SELECT category FROM merchant_catalog
-       WHERE resource_url = mpe.resource_url AND status != 'delisted'
-       LIMIT 1
-     ) mc ON TRUE
-     LEFT JOIN merchant_account_overrides mao
-       ON mao.user_id = mpe.user_id AND mao.resource_url = mpe.resource_url
+    `SELECT ${ENTRY_SOURCE_SQL}
      WHERE ${where}
      ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
      LIMIT ${limitParam}`,

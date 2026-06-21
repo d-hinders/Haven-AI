@@ -9,7 +9,9 @@ import {
   composeDescription,
   selectStandardPaymentOption,
   toolDescriptions as sharedDescriptions,
+  verifyPaymentReceipt,
   x402AuthorizationAmount,
+  type PaymentReceipt,
   type MachinePaymentChallenge,
   type MppQuote,
   type MppResumeState,
@@ -55,6 +57,7 @@ export type HostedToolName =
   | 'haven_get_payment_status'
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
+  | 'haven_verify_receipt'
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
 
@@ -184,6 +187,9 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
+  },
+  haven_verify_receipt: {
+    receipt: z.unknown(),
   },
 }
 
@@ -351,6 +357,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
+  haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
 }
 
 export interface ToolSuccess<T> {
@@ -924,6 +931,12 @@ export function createToolHandlers(
       runTool(async () => {
         const args = parse('haven_list_receipts', input)
         return haven.listReceipts({ limit: args.limit })
+      }),
+
+    haven_verify_receipt: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_verify_receipt', input)
+        return verifyPaymentReceipt(args.receipt as PaymentReceipt)
       }),
   }
 }

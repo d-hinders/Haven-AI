@@ -36,6 +36,10 @@ export function getConnector(provider: string): AccountingConnector | undefined 
   return registry.get(provider)
 }
 
+export function listConnectors(): AccountingConnector[] {
+  return [...registry.values()]
+}
+
 /** For tests — clear the registry between cases. */
 export function clearConnectors(): void {
   registry.clear()

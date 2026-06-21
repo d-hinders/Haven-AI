@@ -1,6 +1,7 @@
 import pool from '../db.js'
 import { getBookTimeSekValue } from './fiat-values.js'
 import { quoteFee, recordSettledFee } from './fee/fee-module.js'
+import { feedSettledPaymentBestEffort } from './reporting/feed-orchestrator.js'
 
 const PROTOCOL_RAILS = new Set(['x402', 'mpp_demo', 'mpp_crypto', 'spt'])
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -273,6 +274,11 @@ export async function recordMachinePaymentEvidenceBase(
   } catch {
     // swallow — fee recording is non-critical to settlement
   }
+
+  // Auto-feed the settled payment into the user's accounting tool (#491/#499).
+  // Fire-and-forget + idempotent: never blocks or delays settlement, inert
+  // unless the hosted reporting feed is available for this user.
+  feedSettledPaymentBestEffort(intent.user_id, intent.id)
 }
 
 export async function recordMachinePaymentEvidenceBaseById(

@@ -97,7 +97,7 @@ const baseNavItems: NavItem[] = [
   // Approvals is injected dynamically with live badge
   { label: 'Catalog', href: '/catalog', icon: icons.catalog },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
-  { label: 'Accounting', href: '/accounting', icon: icons.accounting },
+  { label: 'Reporting', href: '/reporting', icon: icons.accounting },
   { label: 'Custody', href: '/custody', icon: icons.custody },
 ]
 

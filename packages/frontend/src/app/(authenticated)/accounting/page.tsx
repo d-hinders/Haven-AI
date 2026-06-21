@@ -43,11 +43,15 @@ const STATUS_LABEL: Record<ReconcileStatus, string> = {
 
 // ── SIE export ──────────────────────────────────────────────────────
 function ExportCard() {
+  const { status } = useFortnox()
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [company, setCompany] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  // Legacy asserting surface — hidden once the reporting feed supersedes it (#492).
+  if (status && status.legacyBookkeeping === false) return null
 
   const download = async () => {
     setBusy(true)
@@ -178,7 +182,7 @@ function FortnoxCard() {
   return (
     <SectionCard
       title="Fortnox"
-      description="Push vouchers straight into Fortnox — no file handling. SIE export stays available as a fallback."
+      description="Connect Fortnox so your agent spend can sync into your books."
     >
       {loading ? (
         <Skeleton variant="text" className="h-4 w-40" />
@@ -194,7 +198,9 @@ function FortnoxCard() {
           </div>
           {message && <p className="mt-3 text-sm text-[var(--v2-ink-2)]">{message}</p>}
           <div className="mt-4 flex gap-3">
-            <Button onClick={handlePush} disabled={busy}>{busy ? 'Pushing…' : 'Push vouchers'}</Button>
+            {status.legacyBookkeeping !== false && (
+              <Button onClick={handlePush} disabled={busy}>{busy ? 'Pushing…' : 'Push vouchers'}</Button>
+            )}
             <Button variant="ghost" onClick={disconnect} disabled={busy}>Disconnect</Button>
           </div>
         </>

@@ -277,6 +277,23 @@ export default function AccountingPage() {
         title="Accounting"
         subtitle="Export bookkeeping-ready records of your agents’ spend, reconcile them, and push to Fortnox."
       />
+
+      <Card elevation="anchor" className="mb-5 p-4" hover={false}>
+        <p className="text-sm font-medium text-[var(--v2-ink)]">Proposed records — review before filing</p>
+        <ul className="mt-2 space-y-1.5 text-sm text-[var(--v2-ink-2)]">
+          <li>
+            Haven proposes these entries from your settled payments — it is not your accountant. Confirm them before filing.
+          </li>
+          <li>
+            VAT is a flagged default: foreign suppliers are booked as reverse charge. EU vs non-EU and domestic Swedish VAT
+            need your confirmation — supplier country isn’t always known yet, so some entries fall back to the default account.
+          </li>
+          <li>
+            Verify the first export in your accounting tool (SIE import or Fortnox) before relying on it.
+          </li>
+        </ul>
+      </Card>
+
       <div className="space-y-5">
         <ExportCard />
         <ReconcileCard />

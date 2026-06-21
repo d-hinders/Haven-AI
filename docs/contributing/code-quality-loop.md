@@ -70,6 +70,32 @@ A fast scan to ground each pass in current reality (run from repo root /
   into responses, logs, errors, or generated artifacts.
 - **Idempotency claims:** any "never double X" / dedup / reconciliation code
   whose guarantee is not pinned by a test or an oracle-grounded loop.
+- **Is it actually live?** Check feature gates (`config.*Enabled`, entitlements)
+  and route registration before targeting a surface. Code behind a permanently
+  -off legacy gate, a demo prefix, or no registration is *out of scope* (see
+  "Out of scope"). Distinguish *legacy/superseded* (won't return — leave alone)
+  from *staged rollout* (off-by-default but wired into a live path and under
+  active development — in scope).
+
+## Out of scope — kept but not in use
+
+These surfaces exist in the tree but are **not part of the live product path**.
+Do **not** spend quality-loop effort on them — no new tests, no contract work,
+no refactors. The only legitimate action is *removal*, which is a product
+decision for the captain/owner, not a quality-loop pass. Re-confirm a surface is
+still dormant before excluding it (a flag can flip).
+
+| Surface | Why excluded | Gate / signal |
+| --- | --- | --- |
+| SIE / "full bookkeeping" export | Superseded by the reporting feed (draft-transaction sync); the route returns `410` by default | `config.legacyBookkeepingEnabled` (off); `routes/accounting.ts` `/export`, `lib/sie-exporter.ts`, `lib/ledger-exporter.ts` |
+| MPP demo rail | Internal demo surface, not a production rail | registered at `/demo/mpp`; `routes/demo-mpp.ts` |
+| Self-sign agent tables | Track removed; migrations kept only for chain integrity | `001_self_sign_agents`, `002_self_sign_payment_intents` (unused) |
+| Fee module | Built but dormant — quote is always zero and no funds move while disabled | `config.feeEnabled` (off); `lib/fee/fee-module.ts` |
+
+> Note: the **reporting feed** is also flag-gated (`reportingFeedEnabled`,
+> hosted-only) but is **in scope** — it is wired into the live settlement path
+> and is the forward direction that replaces SIE. Flag-off ≠ dead when the
+> surface is under active rollout.
 
 ## Current Run
 
@@ -110,11 +136,13 @@ Refreshed 2026-06-21 against current code. Ordered by blast radius, not by ease.
   `x402-resources` routes have **zero** entries in `src/openapi/spec.ts`; the
   published contract no longer matches the surface. Classic narrow,
   schema/test-only loop targets — one route family per PR.
-- **P1 — Route-level test coverage for untested handlers.** `accounting.ts`,
-  `reporting.ts`, `fortnox.ts`, `x402-resources.ts`, `contacts.ts`, and
-  `demo-mpp.ts` lack route-level tests (some have lib-level coverage). Prefer
-  tests that assert an invariant (auth required, idempotent write, no
-  double-post) over tests that pin current output.
+- **P1 — Route-level test coverage for untested *live* handlers.**
+  `reporting.ts`, `fortnox.ts`, `x402-resources.ts`, and `contacts.ts` lack
+  route-level tests (some have lib-level coverage). For `accounting.ts`, cover
+  the live endpoints (`/categories`, `/reconcile`) only — **not** the `/export`
+  SIE path (legacy, see "Out of scope"). Skip `demo-mpp.ts` (demo). Prefer tests
+  that assert an invariant (auth required, idempotent write, no double-post) over
+  tests that pin current output.
 - **P1 — Backend/API validation & error responses on new surfaces.** Apply the
   established "reject invalid input before doing work" pattern (PRs #259, #260,
   #271) to the reporting/fortnox/accounting/catalog inputs.

@@ -33,7 +33,7 @@ Protocols → x402, Stripe MPP (agent payment standards)
 ### 1. Safe (Smart Account)
 - Holds funds, executes transactions
 - Multi-owner / threshold security
-- **Gnosis Chain** (POC target)
+- **Base** (chain ID 8453) is the **primary / default network**; **Gnosis Chain** (chain ID 100) is also supported
 - Two onboarding paths: **in-app deployment** during signup (passkey-owned Safe via `POST /safe/deploy`, or EOA-owned via the connected-wallet flow) and **import** of an existing Safe (`POST /user/safes`)
 - Interaction is via direct contract calls with `ethers.js` against Safe + the AllowanceModule (no `@safe-global/protocol-kit` yet — see Tech Stack)
 
@@ -128,7 +128,7 @@ For standard merchant x402, the AllowanceModule transfer is `Safe → delegate E
 
 ## Tech Stack Guidance
 
-- **Chain:** Gnosis Chain (POC target, chain ID 100), multi-chain later
+- **Chain:** **Base (chain ID 8453) is the primary / default network**; Gnosis Chain (chain ID 100) is also supported (see the registry in `lib/chains.ts`). Multi-chain later. Note: some DB column defaults and route fallbacks still default `chain_id` to `100` (Gnosis) — see migrations and `?? 100` fallbacks; align these to Base if/when Base should be the runtime default for new agents, not just the documented one
 - **Smart Accounts:** Safe + AllowanceModule, accessed via direct contract calls with `ethers.js`. Adopting `@safe-global/protocol-kit` is a possible future cleanup, not a current convention
 - **Language:** TypeScript throughout
 - **Backend Framework:** Fastify (Node.js)

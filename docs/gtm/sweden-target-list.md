@@ -47,10 +47,10 @@ limits. Keep the pitch there.
 | Company | Segment | Fit signal (qualify in call) | Lead hook | Reg-fit | Contact / signal | Owner | Next action |
 |---|---|---|---|---|---|---|---|
 | Lovable | A · AI agent-builder | Agents provision/call 3rd-party APIs + infra per user | Budgeted wallet; reference logo | Own-spend ✓ | — | — | Qualify |
-| Legora | A · AI agent-builder | Legal agents pay-per-query for case-law/data APIs | Budgeted wallet + receipt per payment | Own-spend ✓ | — | — | Qualify |
-| Epiminds | A · AI agent-builder | Autonomous marketing agents execute spend across ad channels | Budgeted wallet (money in core loop) + feed | Own-spend ✓ | — | — | Qualify |
+| Legora | A · AI agent-builder | Legal agents pay-per-query for case-law/research APIs; confirm which spend is metered vs flat-licensed | Budgeted wallet + receipt per payment | Own-spend ✓ | Series D ~$5.6B, ~$100M ARR; acquired Qura (Apr 2026) | — | Enter via platform/FinOps team — enterprise procurement, high reference value |
+| Epiminds | A · AI agent-builder | "Lucy" + 20+ agents; confirm metered API/model/compute spend (not just fiat ad budgets) | Budgeted wallet for agents' own API/compute spend + feed | Confirm — own accounts/budget, not client disbursement | Lightspeed-led $6.6M seed (Oct 2025); 240+ brands onboarded | — | Qualify — lead with agents' own API/compute spend; ad-channel spend is fiat, not our rail |
 | Paraglide AI | A · AI agent-builder (finance) | AR/collections agents in finance inboxes | Guardrails + bookkeeping feed (finance values both) | Confirm — not disbursement | — | — | Qualify |
-| Sana | A · AI agent-builder | Enterprise agents call paid connectors/data | Budgeted per-agent connector spend | Own-spend ✓ | — | — | Qualify |
+| Sana | A · AI agent-builder | Enterprise agents call paid connectors/data | Budgeted per-agent connector spend | Own-spend ✓ | Acquired by Workday (Mar 2026); 100+ connectors, SOC2/ISO/EU-residency | — | Enter via Sana Sthlm agent/platform team — not Workday central procurement |
 | Trustly | B · Payments/crypto-native | Payments-native; understands rails | On-chain caps for stablecoin machine spend | Confirm — not payout/PSP | — | — | Qualify |
 | Brite Payments | B · Payments-native | Instant-payments native | On-chain caps; fast technical buy-in | Confirm — not payout/PSP | — | — | Qualify |
 | Zimpler | B · Payments-native | Payments-native | Stablecoin machine-spend + reporting | Confirm — not payout/PSP | — | — | Qualify |

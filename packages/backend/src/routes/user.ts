@@ -161,7 +161,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
   // PUT /user/safe
   app.put<{ Body: SafeBody }>('/safe', async (request, reply) => {
-    const { safe_address, chain_id = 100 } = request.body
+    const { safe_address, chain_id = 8453 } = request.body
     const { sub } = request.user as { sub: string }
 
     if (!safe_address || !ETH_ADDRESS_RE.test(safe_address)) {

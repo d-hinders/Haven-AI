@@ -17,7 +17,7 @@ import {
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
-import { createMachineApproval } from '../lib/machine-payments.js'
+import { createMachineApproval, createPaymentIntent, type PaymentIntentRow } from '../lib/machine-payments.js'
 import { decideCoverage } from '../lib/payment-coverage.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import {
@@ -743,41 +743,35 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // 10. Store intent with x402 metadata
-    const intentResult = await pool.query(
-      `INSERT INTO payment_intents (
-        agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-        to_address, amount_raw, amount_human, delegate_address,
-        allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
-        x402_merchant_address, x402_idempotency_key,
-        payment_rail, payment_resource_url, merchant_address, machine_idempotency_key,
-        machine_metadata, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending_signature',
-        'x402', $13, $14, $15, $16, 'x402', $17, $18, $19, $20,
-        NOW() + interval '10 minutes')
-      ON CONFLICT (agent_id, x402_idempotency_key)
-        WHERE x402_idempotency_key IS NOT NULL
-          AND status NOT IN ('failed', 'expired')
-      DO NOTHING
-      RETURNING *`,
-      [
-        agent.id, agent.user_id, agent.safe_address, agent.chain_id,
-        tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
-        amountRaw.toString(), amountHuman, agent.delegate_address,
-        onChainAllowance.nonce, signHash,
-        url, category ?? null, merchantPayTo?.toLowerCase() ?? null, idempotencyKey ?? null,
-        url, merchantPayTo?.toLowerCase() ?? null, idempotencyKey ?? null,
-        JSON.stringify({
-          protocol: 'x402',
-          network,
-          category: category ?? null,
-          description: description ?? null,
-        }),
-      ],
-    )
-    let intent = intentResult.rows[0]
+    // 10. Store intent via the shared writer (see createPaymentIntent) so the
+    // column set / status / expiry stay identical to the MPP core. x402 dedupes
+    // on x402_idempotency_key; source/payment_rail are 'x402' and there is no
+    // challenge.
+    let intent = await createPaymentIntent({
+      agent,
+      rail: 'x402',
+      payTo,
+      tokenSymbol: tokenConfig.symbol,
+      tokenAddress,
+      amountRaw,
+      amountHuman,
+      allowanceNonce: onChainAllowance.nonce,
+      signHash,
+      resourceUrl: url,
+      category: category ?? null,
+      merchantAddress: merchantPayTo ?? null,
+      challengeId: null,
+      idempotencyKey: idempotencyKey ?? null,
+      metadata: {
+        protocol: 'x402',
+        network,
+        category: category ?? null,
+        description: description ?? null,
+      },
+      conflictTarget: 'x402_idempotency_key',
+    })
     if (!intent && idempotencyKey) {
-      const existingResult = await pool.query(
+      const existingResult = await pool.query<PaymentIntentRow>(
         `SELECT *
          FROM payment_intents
          WHERE agent_id = $1
@@ -788,7 +782,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
          LIMIT 1`,
         [agent.id, idempotencyKey],
       )
-      intent = existingResult.rows[0]
+      intent = existingResult.rows[0] ?? null
     }
     if (!intent) {
       return reply.code(409).send({ error: 'x402 payment already exists but could not be loaded' })

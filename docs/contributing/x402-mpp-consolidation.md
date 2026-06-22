@@ -71,11 +71,28 @@ backend suite + `tsc --noEmit`. Money paths: no auto-merge.
    variants. Hand this to an **oracle-grounded loop** (it is the
    `loop-harness-index.md` "x402 coverage branching" candidate) — it has a clean
    invariant set and is the highest-value differential surface.
-4. **Route `/x402` onto `authorizeMachinePayment`**, passing the balance-aware
-   strategy + x402 metadata. Delete the inline decision/execution. The existing
-   x402 HTTP suite is the regression gate.
-5. **Fold in `x402-resources.ts`** and retire the last inline variant; collapse
-   the duplicated `payment_intents` writers.
+4. **Extract the shared `payment_intents` writer** into
+   `createPaymentIntent(...)` (mirrors PR2's approval writer); route both
+   `lib/machine-payments` and `routes/x402` through it. The conflict arbiter is
+   parameterised — x402 keeps `ON CONFLICT (agent_id, x402_idempotency_key)`,
+   MPP keeps `machine_idempotency_key` — so each rail's exact idempotency
+   semantics are preserved. x402's row gains `machine_challenge_id` = null
+   (semantically unchanged, as in PR2). Characterization pins the preserved
+   conflict arbiter.
+
+   **Re-scope note (PR4):** the original plan was to route `/x402` *wholesale*
+   onto `authorizeMachinePayment` and delete the x402 handler. After PRs 2–3,
+   the genuinely shared logic (coverage decision, approval writer, intent
+   writer) is already extracted; what remains in each handler is truly
+   rail-specific — x402's binding signature / `x402_expected_auth`, its one-shot
+   signature→execute path, and a distinct response shape. Merging those into one
+   function would create a conditional-heavy mega-handler that is *harder* to
+   reason about than two thin handlers over shared primitives. So the end-state
+   is **shared primitives + thin rail handlers**, not one God function. PR4 is
+   the last shared-primitive extraction.
+5. **Fold in `x402-resources.ts`** and extract the remaining shared piece (input
+   validation: token resolve, amount parse, address/chain checks), retiring the
+   last inline variant.
 
 ## Acceptance gate (every PR)
 

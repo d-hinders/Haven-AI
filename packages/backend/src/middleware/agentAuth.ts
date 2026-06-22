@@ -124,7 +124,7 @@ export async function agentAuthMiddleware(
     `SELECT a.id, a.user_id, a.name, a.delegate_address,
             a.status,
             COALESCE(us.safe_address, u.safe_address) as safe_address,
-            COALESCE(us.chain_id, 100) as chain_id
+            COALESCE(us.chain_id, 8453) as chain_id
      FROM agents a
      JOIN users u ON a.user_id = u.id
      LEFT JOIN user_safes us ON a.safe_id = us.id

@@ -725,6 +725,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
       [agent.id],
     )
+    // 100 = default max x402 calls per hour (rate limit), NOT chain 100.
     const maxPerHour = agentConfig.rows[0]?.max_x402_per_hour ?? 100
 
     const recentCount = await pool.query(

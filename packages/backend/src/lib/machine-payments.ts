@@ -67,6 +67,7 @@ export interface PaymentIntentRow {
   error_message: string | null
   source: string | null
   x402_resource_url: string | null
+  x402_category: string | null
   x402_merchant_address: string | null
   x402_idempotency_key: string | null
   payment_rail: string | null
@@ -498,7 +499,7 @@ export async function createMachineApproval(
       amountRaw.toString(), amountHuman, reason, rail,
       rail === 'x402' ? resourceUrl : null,
       rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
-      idempotencyKey ?? null, metadata ? JSON.stringify(metadata) : null,
+      idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
     ],
   )
 
@@ -581,7 +582,7 @@ export async function createPaymentIntent(
       rail === 'x402' ? merchantAddress?.toLowerCase() ?? null : null,
       rail === 'x402' ? idempotencyKey ?? null : null,
       rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
-      idempotencyKey ?? null, metadata ? JSON.stringify(metadata) : null,
+      idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
     ],
   )
 

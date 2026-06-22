@@ -221,12 +221,28 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
     const sql = insertCall![0] as string
     expect(sql).toContain('ON CONFLICT (agent_id, x402_idempotency_key)')
     expect(sql).not.toContain('ON CONFLICT (agent_id, machine_idempotency_key)')
+    // The conflict WHERE predicate must match the partial-unique index
+    // (idx_payment_intents_x402_idempotency) or the upsert throws at runtime.
+    expect(sql).toMatch(
+      /ON CONFLICT \(agent_id, x402_idempotency_key\)\s*WHERE x402_idempotency_key IS NOT NULL\s*AND status NOT IN \('failed', 'expired'\)/,
+    )
 
+    // Pin the row's semantic equivalence by column position. `status` (a literal
+    // 'pending_signature') and `expires_at` (a NOW()+interval literal) have no
+    // bind placeholder, so drop them: the param index is the position among the
+    // remaining bound columns.
+    const cols = (sql.match(/INSERT INTO payment_intents\s*\(([^)]*)\)/i)![1])
+      .split(',').map((c) => c.trim()).filter(Boolean)
+    const boundCols = cols.filter((c) => c !== 'status' && c !== 'expires_at')
     const params = insertCall![1] as unknown[]
-    // Both idempotency-key columns carry the request key (x402 fills both); the
-    // dedup arbiter above is what distinguishes the rail.
-    expect(params).toContain('x402:exec')
-    // source and payment_rail are both 'x402'.
-    expect(params.filter((p) => p === 'x402').length).toBeGreaterThanOrEqual(2)
+    const valueOf = (col: string) => params[boundCols.indexOf(col)]
+
+    expect(valueOf('source')).toBe('x402')
+    expect(valueOf('payment_rail')).toBe('x402')
+    expect(valueOf('machine_challenge_id')).toBeNull()
+    // x402 fills BOTH idempotency-key columns with the request key; the dedup
+    // arbiter (asserted above) is what distinguishes the rail.
+    expect(valueOf('x402_idempotency_key')).toBe('x402:exec')
+    expect(valueOf('machine_idempotency_key')).toBe('x402:exec')
   })
 })

@@ -10,19 +10,21 @@ import x402Routes from '../x402.js'
  * Before routing /x402 onto the shared `authorizeMachinePayment` core, this pins
  * the two things the extraction must reconcile and could silently change:
  *
- *  1. The exact, ORDERED approval-row column contract the x402 inline INSERT
- *     emits — and specifically that it OMITS `machine_challenge_id`, the column
- *     the lib superset includes. PR2 lifts this INSERT into a shared helper; this
- *     proves the x402 row is unchanged. (The existing suite only asserts a few
- *     `toContain` columns, not the full ordered set or the omission.)
+ *  1. The exact, ORDERED approval-row column contract the x402 over-allowance
+ *     path emits. As of PR2 this is the SHARED superset written by
+ *     lib/machine-payments.createMachineApproval (both paths now call it), so the
+ *     x402 INSERT now includes `machine_challenge_id` — set to null for x402.
+ *     The semantic row is unchanged (an explicit null challenge == the old
+ *     omitted column), which these tests pin: source/payment_rail stay 'x402',
+ *     x402_resource_url is set, and the challenge value is null.
  *  2. That the x402 coverage decision is BALANCE-AWARE (consults the delegate
  *     balance), unlike the allowance-only lib core. The unified core must keep
  *     this as a parameterized strategy, not erase it.
  *
- * This is refactor scaffolding, not a permanent correctness guard: once PR2's
- * shared `createMachineApproval` helper lands with its own equivalence test, and
- * PR3 extracts the coverage decision into an oracle-grounded loop, fold these
- * assertions into those and delete this file.
+ * This is refactor scaffolding, not a permanent correctness guard: once PR4
+ * routes /x402 onto authorizeMachinePayment and PR3 extracts the coverage
+ * decision into an oracle-grounded loop, fold these assertions into those and
+ * delete this file.
  */
 
 const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() => ({
@@ -57,12 +59,14 @@ const AGENT = {
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 
-// The contract PR2's shared helper must reproduce for the x402 rail, in order.
-const X402_APPROVAL_COLUMNS = [
+// The unified superset contract written by createMachineApproval (PR2), in
+// order. x402 now goes through the same writer, so machine_challenge_id is
+// present in the column list (the value is null for x402 — pinned below).
+const APPROVAL_COLUMNS = [
   'agent_id', 'user_id', 'safe_address', 'chain_id', 'token_symbol', 'token_address',
   'to_address', 'amount_raw', 'amount_human', 'reason', 'source', 'x402_resource_url',
-  'payment_rail', 'payment_resource_url', 'merchant_address', 'machine_idempotency_key',
-  'machine_metadata', 'status', 'expires_at',
+  'payment_rail', 'payment_resource_url', 'merchant_address', 'machine_challenge_id',
+  'machine_idempotency_key', 'machine_metadata', 'status', 'expires_at',
 ]
 
 /** Pull the ordered column list out of an `INSERT INTO approval_requests (...)` statement. */
@@ -124,7 +128,7 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
     })
   }
 
-  it('emits the exact ordered x402 approval-row column contract', async () => {
+  it('emits the exact ordered shared approval-row column contract', async () => {
     const response = await queueOverAllowance()
     expect(response.statusCode).toBe(202)
 
@@ -134,22 +138,32 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
     expect(insertCall, 'an approval_requests INSERT was issued').toBeDefined()
 
     const columns = approvalInsertColumns(insertCall![0] as string)
-    expect(columns).toEqual(X402_APPROVAL_COLUMNS)
+    expect(columns).toEqual(APPROVAL_COLUMNS)
     expect(insertCall![0]).toContain('ON CONFLICT (agent_id, machine_idempotency_key)')
     expect(insertCall![0]).toContain('DO NOTHING')
   })
 
-  it('omits machine_challenge_id (the column the lib superset includes)', async () => {
-    // This is the structural divergence the unified helper must reconcile: the
-    // x402 INSERT has no challenge column; authorizeMachinePayment's does. If a
-    // refactor accidentally aligns x402 onto the superset, that is a behavior
-    // change that must be deliberate, not silent — so we pin the omission here.
+  it('writes a semantically-x402 row through the shared superset (challenge null)', async () => {
+    // PR2 routed x402 through createMachineApproval, so the column list is now
+    // the superset (machine_challenge_id included). Pin that the x402 row is
+    // semantically unchanged: source/payment_rail are 'x402', x402_resource_url
+    // is set, and the challenge value is null (x402 dedupes on idempotency key).
     const response = await queueOverAllowance()
     expect(response.statusCode).toBe(202)
     const insertCall = mockQuery.mock.calls.find(
       (c) => typeof c[0] === 'string' && /INSERT INTO approval_requests/i.test(c[0] as string),
     )!
-    expect(approvalInsertColumns(insertCall[0] as string)).not.toContain('machine_challenge_id')
+    const cols = approvalInsertColumns(insertCall[0] as string)
+    const params = insertCall[1] as unknown[]
+    // status / expires_at are SQL literals (last two columns), so for every
+    // bound column the param index equals the column index.
+    const valueOf = (col: string) => params[cols.indexOf(col)]
+
+    expect(cols).toContain('machine_challenge_id')
+    expect(valueOf('machine_challenge_id')).toBeNull()
+    expect(valueOf('source')).toBe('x402')
+    expect(valueOf('payment_rail')).toBe('x402')
+    expect(valueOf('x402_resource_url')).toBe('https://mcp.soundside.ai/mcp')
   })
 
   it('routes on the delegate balance (balance-aware coverage, unlike the lib core)', async () => {

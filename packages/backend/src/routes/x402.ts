@@ -17,6 +17,7 @@ import {
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
+import { createMachineApproval } from '../lib/machine-payments.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import {
   agentPaymentStatusHttpCode,
@@ -649,29 +650,25 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         description: description ?? null,
       }
 
-      const approvalResult = await pool.query<X402ApprovalRow>(
-        `INSERT INTO approval_requests (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, reason, source, x402_resource_url,
-          payment_rail, payment_resource_url, merchant_address, machine_idempotency_key,
-          machine_metadata, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'x402', $11,
-          'x402', $12, $13, $14, $15, 'pending',
-          NOW() + interval '24 hours')
-        ON CONFLICT (agent_id, machine_idempotency_key)
-          WHERE machine_idempotency_key IS NOT NULL
-            AND status NOT IN ('expired')
-        DO NOTHING
-        RETURNING id, status, token_symbol, amount_human, expires_at, machine_challenge_id`,
-        [
-          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
-          tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
-          amountRaw.toString(), amountHuman, approvalReason, url,
-          url, merchantPayTo?.toLowerCase() ?? null, idempotencyKey ?? null,
-          JSON.stringify(metadata),
-        ],
-      )
-      let approval = approvalResult.rows[0] ?? null
+      // Shared approval-row writer (see lib/machine-payments.createMachineApproval)
+      // so the column set, ON CONFLICT target, and 'pending'/24h semantics stay
+      // identical to the MPP path. For x402, source/payment_rail are 'x402' and
+      // there is no challenge — dedupe is on the idempotency key.
+      let approval: X402ApprovalRow | null = await createMachineApproval({
+        agent,
+        rail: 'x402',
+        payTo,
+        tokenSymbol: tokenConfig.symbol,
+        tokenAddress,
+        amountRaw,
+        amountHuman,
+        reason: approvalReason,
+        resourceUrl: url,
+        merchantAddress: merchantPayTo ?? null,
+        challengeId: null,
+        idempotencyKey: idempotencyKey ?? null,
+        metadata,
+      })
       if (!approval && idempotencyKey) {
         const existingApprovalResult = await pool.query<X402ApprovalRow>(
           `SELECT id, status, token_symbol, amount_human, expires_at,

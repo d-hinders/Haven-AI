@@ -1,7 +1,14 @@
 # x402 / Machine-Payment Consolidation (PT-1)
 
-Status: **in progress** — characterization stage. Owner: captain.
-Started: 2026-06-22. Tracking: `docs/contributing/code-quality-loop.md` → PT-1.
+Status: **complete** (PRs 1–5 merged/open). Owner: captain.
+Started/finished: 2026-06-22. Tracking: `docs/contributing/code-quality-loop.md` → PT-1.
+
+The two money paths now share every policy-first primitive — coverage decision
+(`decideCoverage`), approval-row writer (`createMachineApproval`), intent writer
+(`createPaymentIntent`), and token resolution (`resolvePaymentToken`) — behind
+thin, rail-specific handlers. What remains per-handler is genuinely rail-specific
+(x402 binding signature / one-shot execute / response shape) and is intentionally
+NOT merged (see the PR4 re-scope note).
 
 ## Why
 
@@ -90,9 +97,23 @@ backend suite + `tsc --noEmit`. Money paths: no auto-merge.
    reason about than two thin handlers over shared primitives. So the end-state
    is **shared primitives + thin rail handlers**, not one God function. PR4 is
    the last shared-primitive extraction.
-5. **Fold in `x402-resources.ts`** and extract the remaining shared piece (input
-   validation: token resolve, amount parse, address/chain checks), retiring the
-   last inline variant.
+5. **Extract shared token resolution** into `resolvePaymentToken(...)` and route
+   both paths through it, deleting x402's byte-for-byte-duplicate local
+   `resolveTokenByAddress`.
+
+   **Findings that re-scoped PR5:**
+   - **`x402-resources.ts` is out of scope.** It is a merchant-side resource
+     registry + receipts feature (`x402_resources` / `x402_receipts`, `_verifyTx`
+     tx verification). It has no coverage decision, no allowance/balance reads,
+     and writes neither `payment_intents` nor `approval_requests` — it is not on
+     the payment-authorization money path, so there is nothing to consolidate.
+   - **The deep input-validation merge was deliberately not done.** Beyond token
+     resolution, the two handlers' validation genuinely diverges (x402:
+     network→CAIP-2, decimal-atomic regex, idempotency-key length, `reply.code`
+     returns; MPP: `chainId` passed in, `{statusCode, body}` returns) with
+     different agent-facing error messages. Unifying it would risk changing those
+     messages for marginal benefit, so only the verbatim-identical piece (token
+     resolution + the supported-tokens 400 body) was extracted.
 
 ## Acceptance gate (every PR)
 

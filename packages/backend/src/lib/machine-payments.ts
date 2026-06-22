@@ -114,6 +114,33 @@ export function resolveTokenByAddress(chainId: number, address: string) {
   return chain.tokenByAddress[lower] ?? null
 }
 
+export type ResolvePaymentTokenResult =
+  | { ok: true; tokenConfig: NonNullable<ReturnType<typeof resolveTokenByAddress>>; tokenAddress: string }
+  | { ok: false; error: string; supported: Array<{ symbol: string; address: string }> }
+
+/**
+ * Resolve a payment token from its contract address, returning the token config
+ * and the AllowanceModule token address (ZERO_ADDRESS for the native asset), or
+ * a structured 400-shaped error listing the chain's supported tokens. The
+ * single token-resolution path for both the x402 route and the MPP core (each
+ * previously had its own identical copy of this block).
+ */
+export function resolvePaymentToken(chainId: number, asset: string): ResolvePaymentTokenResult {
+  const tokenConfig = resolveTokenByAddress(chainId, asset)
+  if (!tokenConfig) {
+    const chain = getChain(chainId)
+    return {
+      ok: false,
+      error: `Unsupported token asset: ${asset}`,
+      supported: Object.values(chain.tokens).map((t) => ({
+        symbol: t.symbol,
+        address: t.address ?? ZERO_ADDRESS,
+      })),
+    }
+  }
+  return { ok: true, tokenConfig, tokenAddress: tokenConfig.address ?? ZERO_ADDRESS }
+}
+
 function paymentResourceUrl(intent: PaymentIntentRow): string | null {
   return intent.payment_resource_url ?? intent.x402_resource_url
 }
@@ -630,22 +657,14 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  const chain = getChain(agent.chain_id)
-  const tokenConfig = resolveTokenByAddress(agent.chain_id, asset)
-  if (!tokenConfig) {
+  const tokenResult = resolvePaymentToken(agent.chain_id, asset)
+  if (!tokenResult.ok) {
     return {
       statusCode: 400,
-      body: {
-        error: `Unsupported token asset: ${asset}`,
-        supported: Object.values(chain.tokens).map((t) => ({
-          symbol: t.symbol,
-          address: t.address ?? ZERO_ADDRESS,
-        })),
-      },
+      body: { error: tokenResult.error, supported: tokenResult.supported },
     }
   }
-
-  const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
+  const { tokenConfig, tokenAddress } = tokenResult
 
   let amountRaw: bigint
   try {

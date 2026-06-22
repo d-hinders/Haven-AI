@@ -4,7 +4,7 @@ import { buildX402ExpectedMessage } from '@haven_ai/sdk'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../lib/agent-payment-taxonomy.js'
-import { getChain, getExplorerUrl } from '../lib/chains.js'
+import { getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import {
@@ -17,7 +17,12 @@ import {
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
-import { createMachineApproval, createPaymentIntent, type PaymentIntentRow } from '../lib/machine-payments.js'
+import {
+  createMachineApproval,
+  createPaymentIntent,
+  resolvePaymentToken,
+  type PaymentIntentRow,
+} from '../lib/machine-payments.js'
 import { decideCoverage } from '../lib/payment-coverage.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import {
@@ -176,16 +181,6 @@ function existingX402IntentMismatch(
   return null
 }
 
-/** Resolve a token from its contract address for a specific chain. */
-function resolveTokenByAddress(chainId: number, address: string) {
-  const lower = address.toLowerCase()
-  const chain = getChain(chainId)
-  if (lower === ZERO_ADDRESS) {
-    return Object.values(chain.tokens).find((t) => t.address === null) ?? null
-  }
-  return chain.tokenByAddress[lower] ?? null
-}
-
 function pendingApprovalResponse(
   approval: X402ApprovalRow,
   remainingHuman: string | null,
@@ -312,21 +307,13 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'idempotencyKey must be a non-empty string up to 128 characters' })
     }
 
-    // 2. Resolve token from asset address
-    const chain = getChain(agent.chain_id)
-    const tokenConfig = resolveTokenByAddress(agent.chain_id, asset)
-    if (!tokenConfig) {
-      return reply.code(400).send({
-        error: `Unsupported token asset: ${asset}`,
-        supported: Object.values(chain.tokens).map((t) => ({
-          symbol: t.symbol,
-          address: t.address ?? ZERO_ADDRESS,
-        })),
-      })
+    // 2. Resolve token from asset address (shared with the MPP core).
+    const tokenResult = resolvePaymentToken(agent.chain_id, asset)
+    if (!tokenResult.ok) {
+      return reply.code(400).send({ error: tokenResult.error, supported: tokenResult.supported })
     }
-
-    // Token address for AllowanceModule
-    const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
+    // tokenAddress is the AllowanceModule token address (ZERO_ADDRESS for native).
+    const { tokenConfig, tokenAddress } = tokenResult
 
     // 3. Parse amount (already in atomic units from x402)
     const amountRaw = BigInt(amount)

@@ -18,6 +18,7 @@ import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
 import { quoteFee } from '../lib/fee/fee-module.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
+import { decideCoverage } from '../lib/payment-coverage.js'
 
 /**
  * Surface the platform fee on a payment result so it's never silently collected
@@ -184,10 +185,16 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
     const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
-    // 5a. Auto-queue for owner approval when the amount exceeds the on-chain
-    // remaining allowance. Agents can request payments of any size — the
+    // 5a. Coverage decision (shared with the x402 / MPP money paths via
+    // lib/payment-coverage.decideCoverage). The normal-send flow is allowance-
+    // only — there is no delegate hot-wallet leg, so over-allowance always
+    // queues for owner approval. Agents can request payments of any size; the
     // owner approves or rejects in the dashboard.
-    if (amountRaw > effective.remaining) {
+    const coverage = decideCoverage('allowance-only', {
+      amount: amountRaw,
+      remaining: effective.remaining,
+    })
+    if (coverage.kind === 'queue') {
       const reason = (request.body as unknown as Record<string, unknown>).reason as string | undefined
       const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
       const approvalReason =

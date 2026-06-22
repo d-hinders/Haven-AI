@@ -2,6 +2,9 @@
   "name": "@haven_ai/connect",
   "version": "0.1.17-alpha.0",
   "description": "Haven Connect Agent 2 local connector — generates the agent signing key locally and registers only the public signing address.",
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "bin": {
     "haven-connect": "./dist/cli.js"

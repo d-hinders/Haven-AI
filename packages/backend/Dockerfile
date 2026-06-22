@@ -1,5 +1,5 @@
 # ── Builder ────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ COPY packages/backend ./packages/backend
 RUN npm run build -w packages/backend
 
 # ── Runner ─────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 
 WORKDIR /app
 

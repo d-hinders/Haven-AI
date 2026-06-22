@@ -2,6 +2,9 @@
   "name": "@haven_ai/mcp",
   "version": "0.1.17-alpha.0",
   "description": "Haven MCP server for local, non-custodial agent payments",
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "bin": {
     "haven-mcp": "./dist/cli.js"

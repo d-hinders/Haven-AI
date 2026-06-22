@@ -436,6 +436,74 @@ async function returnExistingIntent(
   }
 }
 
+export interface CreateMachineApprovalInput {
+  agent: Pick<AgentContext, 'id' | 'user_id' | 'safe_address' | 'chain_id'>
+  rail: MachinePaymentRail
+  payTo: string
+  tokenSymbol: string
+  tokenAddress: string
+  amountRaw: bigint
+  amountHuman: string
+  reason: string
+  resourceUrl: string
+  merchantAddress: string | null
+  challengeId: string | null
+  idempotencyKey: string | null
+  /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
+  metadata: unknown | null
+}
+
+/**
+ * Insert a pending `approval_requests` row for an over-allowance machine
+ * payment. This is the single, rail-agnostic writer for the approval row —
+ * both `authorizeMachinePayment` (MPP rails) and the x402 route call it so the
+ * column set, `ON CONFLICT` target, and `'pending'` / 24h-expiry semantics
+ * cannot drift between paths.
+ *
+ * Returns the inserted row, or `null` when the `ON CONFLICT … DO NOTHING`
+ * clause suppresses the insert (an idempotent replay). Callers own the reload
+ * of the pre-existing row and the HTTP response shaping, which differ per path.
+ *
+ * `source` and `payment_rail` are both set from `rail`; for x402, `challengeId`
+ * is `null` (x402 dedupes on `idempotencyKey`, not a challenge).
+ */
+export async function createMachineApproval(
+  input: CreateMachineApprovalInput,
+): Promise<ApprovalRequestRow | null> {
+  const {
+    agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
+    reason, resourceUrl, merchantAddress, challengeId, idempotencyKey, metadata,
+  } = input
+
+  const result = await pool.query<ApprovalRequestRow>(
+    `INSERT INTO approval_requests (
+      agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+      to_address, amount_raw, amount_human, reason, source, x402_resource_url,
+      payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
+      machine_idempotency_key, machine_metadata, status, expires_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+      $13, $14, $15, $16, $17, $18, 'pending', NOW() + interval '24 hours')
+    ON CONFLICT (agent_id, machine_idempotency_key)
+      WHERE machine_idempotency_key IS NOT NULL
+        AND status NOT IN ('expired')
+    DO NOTHING
+    RETURNING id, chain_id, status, token_symbol, token_address, amount_human,
+              amount_raw, expires_at, tx_hash, machine_challenge_id, payment_rail,
+              payment_resource_url, merchant_address, machine_idempotency_key,
+              machine_metadata`,
+    [
+      agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+      tokenSymbol, tokenAddress, payTo.toLowerCase(),
+      amountRaw.toString(), amountHuman, reason, rail,
+      rail === 'x402' ? resourceUrl : null,
+      rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
+      idempotencyKey ?? null, metadata ? JSON.stringify(metadata) : null,
+    ],
+  )
+
+  return result.rows[0] ?? null
+}
+
 export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInput) {
   const {
     agent,
@@ -602,33 +670,21 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
         ? `x402 payment for ${resourceUrl}${merchantPart}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
         : `Machine payment demo for ${resourceUrl}${merchantPart} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
 
-    const approvalResult = await pool.query<ApprovalRequestRow>(
-      `INSERT INTO approval_requests (
-        agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-        to_address, amount_raw, amount_human, reason, source, x402_resource_url,
-        payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
-        machine_idempotency_key, machine_metadata, status, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, $16, $17, $18, 'pending', NOW() + interval '24 hours')
-      ON CONFLICT (agent_id, machine_idempotency_key)
-        WHERE machine_idempotency_key IS NOT NULL
-          AND status NOT IN ('expired')
-      DO NOTHING
-      RETURNING id, chain_id, status, token_symbol, token_address, amount_human,
-                amount_raw, expires_at, tx_hash, machine_challenge_id, payment_rail,
-                payment_resource_url, merchant_address, machine_idempotency_key,
-                machine_metadata`,
-      [
-        agent.id, agent.user_id, agent.safe_address, agent.chain_id,
-        tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
-        amountRaw.toString(), amountHuman, approvalReason, rail,
-        rail === 'x402' ? resourceUrl : null,
-        rail, resourceUrl, merchantPayTo?.toLowerCase() ?? null, challengeId ?? null,
-        idempotencyKey ?? null, metadata ? JSON.stringify(metadata) : null,
-      ],
-    )
-
-    let approval: ApprovalRequestRow | null = approvalResult.rows[0] ?? null
+    let approval = await createMachineApproval({
+      agent,
+      rail,
+      payTo,
+      tokenSymbol: tokenConfig.symbol,
+      tokenAddress,
+      amountRaw,
+      amountHuman,
+      reason: approvalReason,
+      resourceUrl,
+      merchantAddress: merchantPayTo,
+      challengeId: challengeId ?? null,
+      idempotencyKey: idempotencyKey ?? null,
+      metadata: metadata ?? null,
+    })
     if (!approval) {
       approval = await findExistingApproval(agent, rail, idempotencyKey, challengeId)
     }

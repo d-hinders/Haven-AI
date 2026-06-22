@@ -18,6 +18,7 @@ import {
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 import { createMachineApproval } from '../lib/machine-payments.js'
+import { decideCoverage } from '../lib/payment-coverage.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import {
   agentPaymentStatusHttpCode,
@@ -599,9 +600,19 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    const totalCoverage = delegateBalance + effective.remaining
-    if (amountRaw > totalCoverage) {
-      const shortfallRaw = amountRaw - totalCoverage
+    // Balance-aware coverage decision (see lib/payment-coverage.decideCoverage):
+    // x402's delegate can hold liquid funds from the hot-wallet leg, so a small
+    // overage the balance covers still queues; only amounts beyond
+    // delegateBalance + remaining are unfunded.
+    const decision = decideCoverage('balance-aware', {
+      amount: amountRaw,
+      remaining: effective.remaining,
+      delegateBalance,
+    })
+
+    if (decision.kind === 'insufficient') {
+      const shortfallRaw = decision.shortfall
+      const totalCoverage = decision.totalCoverage
       const balanceHuman = ethers.formatUnits(delegateBalance, tokenConfig.decimals)
       const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
       const coverageHuman = ethers.formatUnits(totalCoverage, tokenConfig.decimals)
@@ -639,7 +650,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    if (amountRaw > effective.remaining) {
+    if (decision.kind === 'queue') {
       const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
       const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''
       const approvalReason = `x402 payment for ${url}${merchantPart}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`

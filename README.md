@@ -43,7 +43,10 @@ This is a TypeScript monorepo:
 
 ## Prerequisites
 
-- **Node.js** v18+ — [nodejs.org](https://nodejs.org)
+- **Node.js 24 (LTS)** — pinned in [`.nvmrc`](.nvmrc) and `engines`; CI and the
+  Docker images run the same major. With [`nvm`](https://github.com/nvm-sh/nvm)
+  or [`fnm`](https://github.com/Schniz/fnm), run `nvm use` / `fnm use` in the repo
+  root to match it automatically (otherwise `npm install` warns `EBADENGINE`).
 - **Docker Desktop** (for local hosting) — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
 - **A browser wallet** (MetaMask, Rabby, etc.) with Gnosis Chain or Base configured
 

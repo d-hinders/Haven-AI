@@ -18,6 +18,7 @@ import {
   executeAllowanceTransfer,
 } from './allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from './machine-payment-evidence.js'
+import { decideCoverage } from './payment-coverage.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -662,7 +663,14 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   }
 
   const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
-  if (amountRaw > effective.remaining) {
+  // Allowance-only coverage: MPP rails route purely on the remaining on-chain
+  // allowance (the delegate balance is not consulted). x402's balance-aware
+  // variant lives in the route. See lib/payment-coverage.decideCoverage.
+  const coverage = decideCoverage('allowance-only', {
+    amount: amountRaw,
+    remaining: effective.remaining,
+  })
+  if (coverage.kind === 'queue') {
     const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
     const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''
     const approvalReason =

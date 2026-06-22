@@ -113,7 +113,7 @@ export default async function x402ResourceRoutes(app: FastifyInstance): Promise<
         return reply.code(400).send({ error: 'price_amount must be an integer string (atomic units)' })
       }
 
-      const resolvedChainId = chain_id ?? 100
+      const resolvedChainId = chain_id ?? 8453
 
       // Verify safe belongs to user (if provided)
       let safeAddress: string | null = null

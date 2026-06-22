@@ -85,7 +85,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   // Registration is done separately via POST /user/safes so the flow is
   // identical for both onboarding and add-account.
   app.post<{ Body: DeploySafeBody }>('/deploy', async (request, reply) => {
-    const { chain_id = 100, owner_address } = request.body
+    const { chain_id = 8453, owner_address } = request.body
 
     if (!owner_address || !ETH_ADDRESS_RE.test(owner_address)) {
       return reply.code(400).send({ error: 'Invalid owner address' })
@@ -107,7 +107,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   // POST /user/safes — add (import) an existing Safe
   app.post<{ Body: AddSafeBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { safe_address, chain_id = 100, name } = request.body
+    const { safe_address, chain_id = 8453, name } = request.body
 
     if (!safe_address || !ETH_ADDRESS_RE.test(safe_address)) {
       return reply.code(400).send({ error: 'Invalid Ethereum address' })

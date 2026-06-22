@@ -200,6 +200,34 @@ describe('User routes', () => {
       expect(response.statusCode).toBe(401)
       expect(response.json().error).toBe('Unauthorized')
     })
+
+    it('defaults chain_id to 8453 (Base) when the body omits it', async () => {
+      // Guards the Base-default change: a body without chain_id must link the
+      // Safe on Base (8453), not Gnosis (100).
+      const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+      const safeAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd'
+
+      mockQuery
+        .mockResolvedValueOnce({
+          rows: [{ id: 'user-1', email: 'test@example.com', wallet_address: '0x1234567890abcdef1234567890abcdef12345678', safe_address: safeAddress }],
+        }) // UPDATE users
+        .mockResolvedValueOnce({ rows: [] }) // INSERT INTO user_safes
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/user/safe',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { safe_address: safeAddress }, // no chain_id
+      })
+
+      expect(response.statusCode).toBe(200)
+      const insertCall = mockQuery.mock.calls.find(
+        (c) => typeof c[0] === 'string' && /INSERT INTO user_safes/.test(c[0] as string),
+      )
+      expect(insertCall, 'a user_safes INSERT was issued').toBeDefined()
+      // params: [user_id, safe_address, chain_id, ...]
+      expect((insertCall![1] as unknown[])[2]).toBe(8453)
+    })
   })
 
   describe('GET /user/owners', () => {

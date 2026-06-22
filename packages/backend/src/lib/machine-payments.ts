@@ -47,7 +47,7 @@ export interface AuthorizeMachinePaymentInput {
   enforceX402RateLimit?: boolean
 }
 
-interface PaymentIntentRow {
+export interface PaymentIntentRow {
   id: string
   agent_id: string
   user_id: string
@@ -505,6 +505,89 @@ export async function createMachineApproval(
   return result.rows[0] ?? null
 }
 
+export interface CreatePaymentIntentInput {
+  agent: Pick<AgentContext, 'id' | 'user_id' | 'safe_address' | 'chain_id' | 'delegate_address'>
+  rail: MachinePaymentRail
+  payTo: string
+  tokenSymbol: string
+  tokenAddress: string
+  amountRaw: bigint
+  amountHuman: string
+  allowanceNonce: number
+  signHash: string
+  resourceUrl: string
+  category: string | null
+  merchantAddress: string | null
+  challengeId: string | null
+  idempotencyKey: string | null
+  /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
+  metadata: unknown | null
+  /**
+   * Which partial-unique index enforces idempotent dedup for this rail. x402
+   * dedupes on `x402_idempotency_key`; MPP rails on `machine_idempotency_key`.
+   * Both columns are written (x402 fills both), so the choice only selects the
+   * conflict arbiter — it does not change the stored row.
+   */
+  conflictTarget: 'machine_idempotency_key' | 'x402_idempotency_key'
+}
+
+/**
+ * Insert a `pending_signature` payment_intents row. The single, rail-agnostic
+ * writer for the intent row (mirrors createMachineApproval for approvals) so the
+ * column set, status, and 10-minute expiry cannot drift between the x402 route
+ * and the MPP core.
+ *
+ * Returns the inserted row, or `null` when ON CONFLICT … DO NOTHING suppresses
+ * the insert (idempotent replay). Callers own the reload of the pre-existing
+ * row and response shaping. The conflict arbiter is parameterised so each rail
+ * keeps its exact dedup semantics.
+ */
+export async function createPaymentIntent(
+  input: CreatePaymentIntentInput,
+): Promise<PaymentIntentRow | null> {
+  const {
+    agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
+    allowanceNonce, signHash, resourceUrl, category, merchantAddress,
+    challengeId, idempotencyKey, metadata, conflictTarget,
+  } = input
+
+  // conflictTarget is a strict union mapped through an allowlist — never raw
+  // input — so interpolating it into the ON CONFLICT clause is injection-safe.
+  const conflictColumn =
+    conflictTarget === 'x402_idempotency_key' ? 'x402_idempotency_key' : 'machine_idempotency_key'
+
+  const result = await pool.query<PaymentIntentRow>(
+    `INSERT INTO payment_intents (
+      agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+      to_address, amount_raw, amount_human, delegate_address,
+      allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
+      x402_merchant_address, x402_idempotency_key,
+      payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
+      machine_idempotency_key, machine_metadata, expires_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+      'pending_signature', $13, $14, $15, $16, $17,
+      $18, $19, $20, $21, $22, $23, NOW() + interval '10 minutes')
+    ON CONFLICT (agent_id, ${conflictColumn})
+      WHERE ${conflictColumn} IS NOT NULL
+        AND status NOT IN ('failed', 'expired')
+    DO NOTHING
+    RETURNING *`,
+    [
+      agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+      tokenSymbol, tokenAddress, payTo.toLowerCase(),
+      amountRaw.toString(), amountHuman, agent.delegate_address,
+      allowanceNonce, signHash,
+      rail, rail === 'x402' ? resourceUrl : null, category ?? null,
+      rail === 'x402' ? merchantAddress?.toLowerCase() ?? null : null,
+      rail === 'x402' ? idempotencyKey ?? null : null,
+      rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
+      idempotencyKey ?? null, metadata ? JSON.stringify(metadata) : null,
+    ],
+  )
+
+  return result.rows[0] ?? null
+}
+
 export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInput) {
   const {
     agent,
@@ -755,35 +838,24 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  const intentResult = await pool.query<PaymentIntentRow>(
-    `INSERT INTO payment_intents (
-      agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-      to_address, amount_raw, amount_human, delegate_address,
-      allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
-      x402_merchant_address, x402_idempotency_key,
-      payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
-      machine_idempotency_key, machine_metadata, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-      'pending_signature', $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, $22, $23, NOW() + interval '10 minutes')
-    ON CONFLICT (agent_id, machine_idempotency_key)
-      WHERE machine_idempotency_key IS NOT NULL
-        AND status NOT IN ('failed', 'expired')
-    DO NOTHING
-    RETURNING *`,
-    [
-      agent.id, agent.user_id, agent.safe_address, agent.chain_id,
-      tokenConfig.symbol, tokenAddress, payTo.toLowerCase(),
-      amountRaw.toString(), amountHuman, agent.delegate_address,
-      onChainAllowance.nonce, signHash,
-      rail, rail === 'x402' ? resourceUrl : null, category ?? null,
-      rail === 'x402' ? merchantPayTo?.toLowerCase() ?? null : null,
-      rail === 'x402' ? idempotencyKey ?? null : null,
-      rail, resourceUrl, merchantPayTo?.toLowerCase() ?? null, challengeId ?? null,
-      idempotencyKey ?? null, metadata ? JSON.stringify(metadata) : null,
-    ],
-  )
-  let intent = intentResult.rows[0]
+  let intent = await createPaymentIntent({
+    agent,
+    rail,
+    payTo,
+    tokenSymbol: tokenConfig.symbol,
+    tokenAddress,
+    amountRaw,
+    amountHuman,
+    allowanceNonce: onChainAllowance.nonce,
+    signHash,
+    resourceUrl,
+    category: category ?? null,
+    merchantAddress: merchantPayTo,
+    challengeId: challengeId ?? null,
+    idempotencyKey: idempotencyKey ?? null,
+    metadata: metadata ?? null,
+    conflictTarget: 'machine_idempotency_key',
+  })
   if (!intent) {
     const existing = await findExistingIntent(agent, rail, idempotencyKey, challengeId)
     if (existing) return returnExistingIntent(existing, agent, rail)

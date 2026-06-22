@@ -176,4 +176,57 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
       AGENT.chain_id, AGENT.delegate_address, USDC,
     )
   })
+
+  // Drive the within-allowance execute path so the payment_intents INSERT runs.
+  function executeWithinAllowance() {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(`0x${'11'.repeat(32)}`)
+    mockQuery
+      .mockResolvedValueOnce({ rows: [AGENT] }) // auth
+      .mockResolvedValueOnce({ rows: [] }) // existing intent lookup
+      .mockResolvedValueOnce({ rows: [] }) // existing approval lookup
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] }) // db allowance
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] }) // rate cfg
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] }) // recent count
+      .mockResolvedValueOnce({
+        rows: [{ id: 'intent-1', expires_at: new Date('2026-05-10T20:00:00.000Z') }],
+      }) // payment_intents INSERT
+    return app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp', payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT, amount: '20000', asset: USDC, network: 'base',
+        category: 'data', idempotencyKey: 'x402:exec',
+      },
+    })
+  }
+
+  it('persists the x402 intent through the shared writer, keeping the x402_idempotency_key conflict arbiter', async () => {
+    // PR4 routed x402 through createPaymentIntent. The critical preserved
+    // behavior is the DEDUP arbiter: x402 must keep ON CONFLICT on
+    // x402_idempotency_key (not machine_idempotency_key) — switching it would
+    // change which partial-unique index enforces idempotency on the money path.
+    // Also pin the semantic equivalence: source/payment_rail 'x402', both
+    // idempotency keys filled, challenge null.
+    const response = await executeWithinAllowance()
+    expect(response.statusCode).toBe(201)
+
+    const insertCall = mockQuery.mock.calls.find(
+      (c) => typeof c[0] === 'string' && /INSERT INTO payment_intents/i.test(c[0] as string),
+    )
+    expect(insertCall, 'a payment_intents INSERT was issued').toBeDefined()
+    const sql = insertCall![0] as string
+    expect(sql).toContain('ON CONFLICT (agent_id, x402_idempotency_key)')
+    expect(sql).not.toContain('ON CONFLICT (agent_id, machine_idempotency_key)')
+
+    const params = insertCall![1] as unknown[]
+    // Both idempotency-key columns carry the request key (x402 fills both); the
+    // dedup arbiter above is what distinguishes the rail.
+    expect(params).toContain('x402:exec')
+    // source and payment_rail are both 'x402'.
+    expect(params.filter((p) => p === 'x402').length).toBeGreaterThanOrEqual(2)
+  })
 })

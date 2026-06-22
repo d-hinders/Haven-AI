@@ -10,16 +10,16 @@ import { decideCoverage, type CoverageDecision } from '../payment-coverage.js'
  */
 
 describe('decideCoverage — allowance-only (MPP / generic rails)', () => {
-  // remaining = 100; delegateBalance is irrelevant and set high to prove it.
-  const cases: Array<[string, bigint, bigint, CoverageDecision['kind']]> = [
-    ['under allowance executes', 50n, 999n, 'execute'],
-    ['exactly at allowance executes (inclusive boundary)', 100n, 999n, 'execute'],
-    ['one over allowance queues', 101n, 999n, 'queue'],
-    ['far over allowance queues', 1_000_000n, 999n, 'queue'],
-    ['zero remaining + positive amount queues', 1n, 999n, 'queue'],
+  // [amount, remaining, delegateBalance, expected]. delegateBalance is set high
+  // where irrelevant to prove it is ignored.
+  const cases: Array<[string, bigint, bigint, bigint, CoverageDecision['kind']]> = [
+    ['under allowance executes', 50n, 100n, 999n, 'execute'],
+    ['exactly at allowance executes (inclusive boundary)', 100n, 100n, 999n, 'execute'],
+    ['one over allowance queues', 101n, 100n, 999n, 'queue'],
+    ['far over allowance queues', 1_000_000n, 100n, 999n, 'queue'],
+    ['zero remaining + positive amount queues', 1n, 0n, 999n, 'queue'],
   ]
-  it.each(cases)('%s', (_label, amount, delegateBalance, expected) => {
-    const remaining = _label.startsWith('zero remaining') ? 0n : 100n
+  it.each(cases)('%s', (_label, amount, remaining, delegateBalance, expected) => {
     const d = decideCoverage('allowance-only', { amount, remaining, delegateBalance })
     expect(d.kind).toBe(expected)
   })
@@ -84,6 +84,21 @@ describe('decideCoverage — balance-aware (x402)', () => {
     const omitted = decideCoverage('balance-aware', { amount: 101n, remaining })
     const explicitZero = decideCoverage('balance-aware', { amount: 101n, remaining, delegateBalance: 0n })
     expect(omitted).toEqual(explicitZero)
+  })
+})
+
+describe('decideCoverage — zero amount', () => {
+  // Callers validate amount > 0 upstream (the API rejects non-positive amounts
+  // before reaching here), so a zero amount should never arrive in practice.
+  // These pin the function's pure behavior if it ever does: 0 is not over any
+  // non-negative threshold, so it resolves to execute under both strategies.
+  it('resolves to execute under allowance-only', () => {
+    expect(decideCoverage('allowance-only', { amount: 0n, remaining: 0n }).kind).toBe('execute')
+    expect(decideCoverage('allowance-only', { amount: 0n, remaining: 100n }).kind).toBe('execute')
+  })
+  it('resolves to execute under balance-aware', () => {
+    expect(decideCoverage('balance-aware', { amount: 0n, remaining: 0n, delegateBalance: 0n }).kind).toBe('execute')
+    expect(decideCoverage('balance-aware', { amount: 0n, remaining: 100n, delegateBalance: 40n }).kind).toBe('execute')
   })
 })
 

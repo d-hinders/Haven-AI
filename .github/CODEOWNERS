@@ -1,0 +1,32 @@
+# CODEOWNERS — money-path carve-out for the autonomous PR loop (policy A).
+#
+# Purpose: with branch protection's "Require review from Code Owners" enabled,
+# ONLY PRs that touch the paths below require @d-hinders's approval. The loop
+# (/ship-next) will NOT auto-merge those — they wait for a human merge. Every
+# other PR (docs, tests, non-money refactors) can reviewer-gated auto-merge on
+# green CI.
+#
+# Keep this list tight: it is the human-in-the-loop boundary for money movement,
+# auth, and schema. See docs/contributing/autonomous-pr-loop.md.
+
+# Payment / policy money path
+/packages/backend/src/routes/x402.ts                        @d-hinders
+/packages/backend/src/routes/x402-resources.ts              @d-hinders
+/packages/backend/src/routes/payments.ts                    @d-hinders
+/packages/backend/src/routes/machine-payments.ts            @d-hinders
+/packages/backend/src/lib/machine-payments.ts               @d-hinders
+/packages/backend/src/lib/payment-coverage.ts               @d-hinders
+/packages/backend/src/lib/allowance-module.ts               @d-hinders
+
+# Auth boundary
+/packages/backend/src/middleware/agentAuth.ts               @d-hinders
+
+# Database schema — migrations are irreversible in prod
+/packages/backend/src/db/migrations/                        @d-hinders
+
+# Release tooling — version/dep integrity across published packages
+/scripts/release-bump.mjs                                   @d-hinders
+/.github/workflows/publish.yml                              @d-hinders
+
+# This carve-out config itself
+/.github/CODEOWNERS                                         @d-hinders

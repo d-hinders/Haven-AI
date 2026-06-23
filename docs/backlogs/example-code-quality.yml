@@ -1,0 +1,34 @@
+# EXAMPLE backlog — illustration only. It is INERT:
+#   - active: false, and every item is status: example (not `todo`),
+#     so /ship-next will never pick it up. Copy it to a new file and set
+#     real `todo` items to actually run a track.
+# This mirrors the kind of track this repo's PT-1 consolidation used.
+
+track: example-code-quality
+active: false
+merge_policy: reviewer-gated-A
+
+items:
+  - id: pr1
+    title: "Characterization: pin behavior of <surface> before refactor"
+    scope: >
+      Add characterization tests that freeze the current observable behavior of
+      <surface> (status codes, response shapes, the decision boundary) so the
+      following refactor PRs are provably behavior-preserving. No runtime change.
+      Acceptance: new tests green; existing suites unchanged; tsc clean.
+    files:
+      - packages/backend/src/routes/__tests__/<surface>.characterization.test.ts
+    money_path: false
+    status: example
+
+  - id: pr2
+    title: "Extract the shared <primitive> used by <A> and <B>"
+    scope: >
+      <A> and <B> duplicate <primitive>. Lift it into one helper and route both
+      through it; the PR1 characterization proves equivalence. If <A>/<B> are
+      money paths, preserve exact dedup/idempotency semantics (parameterize
+      rather than unify-by-force).
+    files:
+      - packages/backend/src/lib/<primitive>.ts
+    money_path: true        # → CODEOWNERS-owned → waits for human merge
+    status: example

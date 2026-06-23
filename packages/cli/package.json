@@ -4,7 +4,7 @@
   "description": "Haven CLI — a terminal-native, scriptable parallel to the dashboard (login, read, and backend-only management).",
   "type": "module",
   "bin": {
-    "haven": "./dist/cli.js"
+    "haven": "dist/cli.js"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { isAddress as isValidAddress } from '../lib/address.js'
 
 interface Contact {
   id: string
@@ -18,10 +19,6 @@ interface CreateContactBody {
 
 interface UpdateContactBody {
   name: string
-}
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
 export default async function contactRoutes(app: FastifyInstance): Promise<void> {

@@ -48,9 +48,16 @@ Without this, `/ship-next` can open PRs but cannot auto-merge them.
    - ☑ **Automatically delete head branches** (housekeeping).
 2. **Settings → Branches → rule for `main`** (or a Ruleset):
    - ☑ **Require a pull request before merging.**
-   - ☑ **Require status checks to pass** → select the real gates (**Backend
-     checks**, **Detect changed surfaces**, and the other per-surface checks).
-     Do **not** require the Vercel preview — it isn't a quality gate.
+   - ☑ **Require status checks to pass** → require **Detect changed surfaces**
+     plus every per-surface quality check: **Backend checks**, **Frontend
+     checks**, **SDK checks**, **MCP server checks**, **MCP checks**, **Connect
+     checks**, **Signer checks**. (Optionally also the smoke checks **Install-path
+     smoke** and **Frontend browser smoke**.) These are safe to require even
+     though they're conditional: on a PR that doesn't touch a surface, that
+     surface's check reports `skipped`, which GitHub counts as satisfied — so
+     requiring all of them gates every surface the loop might touch without ever
+     deadlocking. Do **not** require **Vercel Preview Comments** — it isn't a
+     quality gate.
    - **Required approvals: 0** at the repo level — this is the hands-off lever.
      Your safety comes from CI + haven-reviewer + the CODEOWNERS carve-out.
    - ☑ **Require review from Code Owners** — this is what makes the carve-out

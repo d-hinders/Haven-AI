@@ -55,11 +55,30 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 14. Open the PR via `mcp__github__create_pull_request` with **base `dev`** (never `main`). Body: scope, the behavior-preservation argument, verification output (test counts, tsc), and reviewer outcome. For **epic** items, include `Closes #<sub-issue>` so the epic burns down automatically.
 15. `subscribe_pr_activity` for the PR so CI failures / review comments wake the loop.
 
-## Phase 6 — Merge gate (policy A + carve-out)
+## Phase 6 — Merge gate (policy A: in-session money-path approval; migrations hard-gated)
 
-16. Determine if the PR touches a **money-path / CODEOWNERS-owned** path (see `.github/CODEOWNERS`).
-    - **Not owned** (docs, tests, mechanical refactor, non-money code): if the acceptance gate passed and haven-reviewer returned **no blocking/should-fix**, call `mcp__github__enable_pr_auto_merge` (squash). GitHub merges it once required status checks pass. Then this run is done — `/loop` will pick it up as `merged` on the next pass.
-    - **Owned (money path / migrations)**: do **not** auto-merge. Branch protection requires the user's CODEOWNERS approval. Report: "PR #N needs your review+merge (money-path)." Leave it for the user; do not start the next item until it merges.
+A path is **money-path** if it matches any of: `routes/x402.ts`,
+`routes/x402-resources.ts`, `routes/payments.ts`, `routes/machine-payments.ts`,
+`lib/machine-payments.ts`, `lib/payment-coverage.ts`, `lib/allowance-module.ts`,
+`middleware/agentAuth.ts`, `db/migrations/`, or release tooling
+(`scripts/release-bump.mjs`, `.github/workflows/publish.yml`).
+
+16. Route the merge by class:
+    - **Non-money-path** (docs, tests, mechanical refactor, other code): if the
+      acceptance gate passed and haven-reviewer returned **no
+      blocking/should-fix**, call `mcp__github__enable_pr_auto_merge` (squash).
+      GitHub merges it once required checks pass.
+    - **Money-path, NOT a migration:** do **not** auto-merge silently. **Ask the
+      person running the loop to approve** with `AskUserQuestion` — include the
+      PR link, the scope, and the haven-reviewer verdict so they can decide
+      without digging. On **approve** → `enable_pr_auto_merge` (squash). On
+      **decline / change requested** → apply the change or leave the PR for
+      revision; do not merge. (This is the in-session human checkpoint that
+      replaced the CODEOWNERS gate for these paths.)
+    - **Migration (`db/migrations/`):** do **not** auto-merge. It is hard-gated
+      by `.github/CODEOWNERS` and needs an independent code-owner approval in
+      GitHub. Report: "PR #N changes a DB migration — needs a code-owner
+      review+merge." Leave it; do not start the next item until it merges.
 17. Never bypass a failing required check. If CI fails after auto-merge is armed, the merge won't happen — diagnose, fix, push; re-arm only on green.
 
 ## Phase 7 — Update state and stop

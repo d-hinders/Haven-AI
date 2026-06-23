@@ -1,5 +1,9 @@
 # Autonomous PR loop
 
+**In one line:** hand the loop a list of PRs — a backlog file or a GitHub epic's
+sub-issues — and it implements, tests, reviews, opens, and auto-merges them,
+stopping for a human only on a money-path change, a real decision, or stuck CI.
+
 Ship a defined set of PRs with minimal human input. You define the work; the
 loop implements, tests, reviews, opens, and (for safe PRs) merges each one —
 and only comes back to you for a real decision, a money-path approval, or stuck
@@ -9,7 +13,25 @@ Pieces:
 - **`/ship-next`** (`.claude/commands/ship-next.md`) — does **one** PR end-to-end, then stops.
 - **`/loop /ship-next`** — re-invokes `/ship-next` for each following item until the backlog is empty (self-paced).
 - **haven-reviewer** — the per-PR quality gate.
-- **`.github/CODEOWNERS`** — the money-path carve-out (the only PRs that still need your merge).
+- **`.github/CODEOWNERS`** — the money-path carve-out (the only PRs that still need a human merge).
+
+## Quickstart
+
+```bash
+# A self-defined track (e.g. a code-quality cleanup):
+cp docs/backlogs/_template.yml docs/backlogs/<track>.yml   # then fill in items
+/loop /ship-next docs/backlogs/<track>.yml
+
+# A GitHub epic — its open sub-issues become the queue:
+/loop /ship-next epic=#<n>
+
+# One PR at a time, to watch it before handing over the whole backlog:
+/ship-next docs/backlogs/<track>.yml
+```
+
+Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
+pings you only for a money-path approval, a real decision, or stuck CI.
+
 
 ## Two ways to feed work in
 
@@ -38,6 +60,28 @@ PR go through before handing it the whole backlog.
   (`.github/CODEOWNERS`) **never auto-merge** — they wait for your review+merge.
 - Auto-merge does not bypass anything: GitHub still requires all configured
   status checks. If CI fails, the merge simply doesn't happen.
+- **Who approves money-path PRs:** the loop opens PRs as the connected GitHub
+  account, and GitHub never lets an author approve their own PR. So a money-path
+  PR is reviewed by *another* code owner in `.github/CODEOWNERS`. (To let the
+  PR's driver also be an eligible approver, the loop would have to run under a
+  separate bot account — a deliberate setup choice, not the default.)
+
+## Reviewing a money-path PR (for approvers)
+
+When the loop touches a CODEOWNERS path it **stops, does not arm auto-merge, and
+requests a code-owner review**. If GitHub asks you to review one:
+
+- It has already passed CI **and** haven-reviewer with no blocking findings —
+  your review is the human circuit-breaker for money movement, auth, and schema,
+  not a style pass.
+- The PR body carries the **haven-reviewer verdict** and any deferred findings —
+  skim those first.
+- Sanity-check the money-path invariants: does it **preserve behavior**?
+  Money-path changes are characterization-first, so look for tests pinning the
+  old behavior, and confirm nothing silently changes *who can move funds* or
+  *what auto-executes vs. queues for approval*.
+- **Approve and merge it** (the loop intentionally left it for you). Or request
+  changes — the loop picks up review comments and pushes fixes.
 
 ## One-time GitHub setup (required)
 

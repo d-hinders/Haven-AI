@@ -10,6 +10,7 @@ import {
 import { getTokenBalance } from '../lib/allowance-module.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
+import { isAddress as isValidAddress } from '../lib/address.js'
 import { formatTokenValue } from '../lib/tokens.js'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -62,10 +63,6 @@ interface AllowanceRow {
   token_symbol: string
   allowance_amount: string
   reset_period_min: number
-}
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
 // ── Routes ─────────────────────────────────────────────────────────

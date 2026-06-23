@@ -5,8 +5,8 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
 import { getRelayer, warnIfRelayerLow } from '../lib/relayer.js'
+import { isAddress as isValidAddress } from '../lib/address.js'
 
-const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const HEX_RE = /^0x([0-9a-fA-F]{2})*$/
 const DECIMAL_RE = /^\d+$/
 
@@ -140,10 +140,6 @@ function parseHexCoordinate(value: Buffer): `0x${string}` {
 function isInsufficientFundsError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
   return message.includes('insufficient funds')
-}
-
-function isValidAddress(value: string): boolean {
-  return ETH_ADDRESS_RE.test(value)
 }
 
 function isValidDecimal(value: string): boolean {

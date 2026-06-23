@@ -455,6 +455,49 @@ describe('x402 routes', () => {
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
   })
 
+  it('rejects a malformed payTo address with 400 (address-validation guard)', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: 'not-an-address',
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('Valid payTo address is required')
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+  })
+
+  it('rejects a malformed merchantPayTo address with 400', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: '0xbad',
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('Valid merchantPayTo address is required')
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+  })
+
   it('rejects malformed decimal atomic amounts before allowance checks', async () => {
     const malformedAmounts = [
       '0x4e20',

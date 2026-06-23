@@ -1,0 +1,36 @@
+# Backlog for the autonomous PR loop (/ship-next + /loop).
+# See docs/contributing/autonomous-pr-loop.md.
+#
+# Two ways to feed work to the loop:
+#   1. This file — for self-defined tracks (e.g. code-quality improvements).
+#   2. A GitHub epic — run `/ship-next epic=#NNN`; the epic's open sub-issues
+#      become the queue and no file is needed (GitHub tracks progress).
+#
+# Copy this file to docs/backlogs/<track-name>.yml and fill in `items`.
+
+track: <short-track-name>            # used in branch names: claude/<track>-<item-id>
+
+# merge_policy is informational; the loop always runs policy A (reviewer-gated
+# auto-merge) with the .github/CODEOWNERS money-path carve-out.
+merge_policy: reviewer-gated-A
+
+items:
+  - id: pr1                          # short, unique; becomes the branch suffix
+    title: "Human-readable PR title"
+    scope: >
+      One paragraph the implementer can act on without guessing. State the
+      change AND the acceptance criteria. For a money-path item, name the
+      behavior that must be preserved (characterization-first).
+    files:                           # the files this item should own (best-effort)
+      - packages/backend/src/...
+    money_path: false                # true if it touches x402 / machine-payments /
+                                     # payment-coverage / allowance / migrations
+                                     # (those also match CODEOWNERS → human merge)
+    status: todo                     # todo → in-pr → merged (the loop maintains this)
+
+  - id: pr2
+    title: "..."
+    scope: "..."
+    files: []
+    money_path: false
+    status: todo

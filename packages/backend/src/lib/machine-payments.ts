@@ -19,6 +19,7 @@ import {
 } from './allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from './machine-payment-evidence.js'
 import { decideCoverage } from './payment-coverage.js'
+import { isAddress } from './address.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -97,9 +98,7 @@ interface ApprovalRequestRow {
   machine_metadata: unknown
 }
 
-export function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
+export { isAddress as isValidAddress } from './address.js'
 
 export function normaliseAddress(addr: string): string {
   return ethers.getAddress(addr.toLowerCase())
@@ -638,13 +637,13 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   if (!resourceUrl || typeof resourceUrl !== 'string') {
     return { statusCode: 400, body: { error: 'Resource URL is required' } }
   }
-  if (!payTo || !isValidAddress(payTo)) {
+  if (!payTo || !isAddress(payTo)) {
     return { statusCode: 400, body: { error: 'Valid payTo address is required' } }
   }
   payTo = normaliseAddress(payTo)
 
   if (merchantPayTo !== null) {
-    if (!merchantPayTo || !isValidAddress(merchantPayTo)) {
+    if (!merchantPayTo || !isAddress(merchantPayTo)) {
       return { statusCode: 400, body: { error: 'Valid merchantPayTo address is required' } }
     }
     merchantPayTo = normaliseAddress(merchantPayTo)

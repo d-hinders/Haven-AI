@@ -30,7 +30,7 @@ items:
       isValidAddress export — update importers), middleware/agentAuth. Identical
       regex, behavior-preserving; existing route suites are the regression gate.
     money_path: true        # CODEOWNERS-owned → waits for a collaborator's merge
-    status: todo
+    status: in-pr
 
   # Follow-up (not in this demo run): the three ETH_ADDRESS_RE const copies in
   # routes/portfolio, routes/transactions, routes/safe-details can also import

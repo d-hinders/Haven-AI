@@ -7,6 +7,7 @@ import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../
 import { getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
+import { isAddress as isValidAddress } from '../lib/address.js'
 import {
   getTokenAllowance,
   getTokenBalance,
@@ -72,10 +73,6 @@ interface X402ExpectedContext {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
 
 function isPositiveDecimalAtomicAmount(value: string): boolean {
   return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n

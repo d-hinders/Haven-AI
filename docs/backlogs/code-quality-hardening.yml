@@ -121,4 +121,4 @@ items:
       - packages/backend/src/routes/contacts.ts
       - packages/backend/src/routes/__tests__/contacts.test.ts
     money_path: false
-    status: in-pr   # PR pending
+    status: merged   # PR #543

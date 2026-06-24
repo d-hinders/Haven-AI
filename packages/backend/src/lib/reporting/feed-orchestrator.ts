@@ -13,7 +13,15 @@ import { claimSync, markPushed, markFailed, listSyncs, type FeedSyncRow } from '
  * idempotent; settlement is never blocked or delayed by it.
  */
 
-/** The user's active connector = the first registered one they're connected to. */
+/**
+ * The user's active connector = the first registered one they're connected to.
+ *
+ * Returns null in production today: no live connector is registered yet (the
+ * Fortnox adapter #496/#498 is deferred — see `connector.ts` and
+ * `docs/research/fortnox-non-asserting-feed.md`). So auto-feed and backfill are
+ * inert no-ops until that follow-up lands; the surrounding machinery is fully
+ * built and tested against the in-memory connector.
+ */
 async function getActiveConnector(userId: string): Promise<AccountingConnector | null> {
   for (const connector of listConnectors()) {
     if (await connector.isConnected(userId)) return connector

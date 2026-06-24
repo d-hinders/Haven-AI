@@ -4,6 +4,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { requireReportingFeed } from '../middleware/reportingFeed.js'
 import { reportingFeedAvailable } from '../lib/entitlements.js'
 import { getReportingStatus, syncUser } from '../lib/reporting/feed-orchestrator.js'
+import { hasLiveConnector } from '../lib/reporting/connector.js'
 import { getFortnoxConnection } from '../lib/fortnox-connection.js'
 
 /**
@@ -19,7 +20,14 @@ export default async function reportingRoutes(app: FastifyInstance): Promise<voi
   // GET /accounting/reporting/status
   app.get('/status', async (request) => {
     const { sub } = request.user as { sub: string }
-    const base = { hosted: config.hosted, flagEnabled: config.reportingFeedEnabled }
+    // `liveSyncReady` is false until the live Fortnox adapter (#496/#498) is
+    // registered — the UI uses it to flag that sync is a preview that does not
+    // yet deliver to an external tool. See lib/reporting/connector.ts.
+    const base = {
+      hosted: config.hosted,
+      flagEnabled: config.reportingFeedEnabled,
+      liveSyncReady: hasLiveConnector(),
+    }
     const available = await reportingFeedAvailable(sub)
     if (!available) {
       return { ...base, available: false, connected: false, syncs: [] }

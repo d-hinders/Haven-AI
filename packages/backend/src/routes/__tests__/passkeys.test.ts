@@ -146,6 +146,37 @@ describe('Passkey routes', () => {
     expect(response.json().error).toBe('This credential is already registered')
   })
 
+  it('POST /passkeys re-throws a non-unique DB error instead of mapping it to 409', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    // A different SQLSTATE (not-null violation) must not be swallowed as a 409.
+    mockQuery.mockRejectedValueOnce({ code: '23502', constraint: 'whatever' })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/passkeys',
+      headers: { authorization: `Bearer ${token}` },
+      payload: fixtureBody,
+    })
+
+    expect(response.statusCode).toBe(500)
+  })
+
+  it('POST /passkeys re-throws a 23505 with an unrecognized constraint', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    // A unique violation on some other constraint is not one of the two known
+    // passkey conflicts — surface it as 500, not a misleading 409.
+    mockQuery.mockRejectedValueOnce({ code: '23505', constraint: 'some_other_unique_idx' })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/passkeys',
+      headers: { authorization: `Bearer ${token}` },
+      payload: fixtureBody,
+    })
+
+    expect(response.statusCode).toBe(500)
+  })
+
   it('POST /passkeys requires JWT auth', async () => {
     const response = await app.inject({
       method: 'POST',

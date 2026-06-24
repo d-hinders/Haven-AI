@@ -103,7 +103,7 @@ items:
     files:
       - packages/backend/src/routes/__tests__/reporting.test.ts
     money_path: false
-    status: in-pr   # PR pending
+    status: merged   # PR #542
 
   - id: pr5
     title: "fix(contacts): detect unique violations by code, not message substring"
@@ -121,4 +121,4 @@ items:
       - packages/backend/src/routes/contacts.ts
       - packages/backend/src/routes/__tests__/contacts.test.ts
     money_path: false
-    status: todo
+    status: in-pr   # PR pending

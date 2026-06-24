@@ -56,7 +56,7 @@ export default async function contactRoutes(app: FastifyInstance): Promise<void>
       )
       return reply.code(201).send(result.rows[0])
     } catch (err: unknown) {
-      if (err instanceof Error && err.message.includes('unique')) {
+      if (isUniqueViolation(err)) {
         return reply.code(409).send({ error: 'A contact with this address already exists' })
       }
       throw err
@@ -103,4 +103,15 @@ export default async function contactRoutes(app: FastifyInstance): Promise<void>
 
     return { success: true }
   })
+}
+
+/**
+ * Postgres unique-violation (SQLSTATE 23505). The contacts table has a single
+ * unique constraint — UNIQUE(user_id, address) — so the code alone unambiguously
+ * means "duplicate address for this user". Matches the `err.code` pattern used
+ * in routes/agents.ts; detecting by a message substring would mask any other
+ * error whose text happens to contain "unique".
+ */
+function isUniqueViolation(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && 'code' in err && err.code === '23505')
 }

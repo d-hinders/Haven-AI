@@ -67,7 +67,7 @@ items:
     files:
       - packages/backend/src/routes/__tests__/fortnox.test.ts
     money_path: false
-    status: in-pr   # PR pending
+    status: merged   # PR #540
 
   - id: pr3
     title: "test(contacts): route-level invariants for the address book"
@@ -84,7 +84,7 @@ items:
     files:
       - packages/backend/src/routes/__tests__/contacts.test.ts
     money_path: false
-    status: todo
+    status: in-pr   # PR pending
 
   - id: pr4
     title: "test(reporting): route-level invariants for the reporting feed API"
@@ -102,5 +102,23 @@ items:
       suite + tsc unchanged.
     files:
       - packages/backend/src/routes/__tests__/reporting.test.ts
+    money_path: false
+    status: todo
+
+  - id: pr5
+    title: "fix(contacts): detect unique violations by code, not message substring"
+    scope: >
+      Surfaced by haven-reviewer during pr3. routes/contacts.ts maps a duplicate
+      -address insert to 409 via `err.message.includes('unique')`, which would
+      also promote any unrelated error whose message contains "unique" to 409 and
+      mask it. Tighten to the codebase-standard `err.code === '23505'` check (see
+      routes/agents.ts and routes/agent-connection-setups.ts for the pattern),
+      and update the contacts unique-violation test to throw a pg-shaped error
+      with `.code = '23505'` so it reflects the real driver behavior. Small
+      runtime change, non-money-path. Acceptance: contacts route suite + tsc
+      green; the 409 path still covered, now via code not message.
+    files:
+      - packages/backend/src/routes/contacts.ts
+      - packages/backend/src/routes/__tests__/contacts.test.ts
     money_path: false
     status: todo

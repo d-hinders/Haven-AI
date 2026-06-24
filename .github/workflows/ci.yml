@@ -33,6 +33,7 @@ jobs:
       mcp: ${{ steps.filter.outputs.mcp }}
       mcp_server: ${{ steps.filter.outputs.mcp_server }}
       signer: ${{ steps.filter.outputs.signer }}
+      cli: ${{ steps.filter.outputs.cli }}
       full: ${{ steps.filter.outputs.full }}
 
     steps:
@@ -58,6 +59,7 @@ jobs:
               echo "mcp=true"
               echo "mcp_server=true"
               echo "signer=true"
+              echo "cli=true"
               echo "full=true"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -77,6 +79,7 @@ jobs:
           mcp=false
           mcp_server=false
           signer=false
+          cli=false
           full=false
 
           while IFS= read -r file; do
@@ -119,6 +122,10 @@ jobs:
                 code=true
                 signer=true
                 ;;
+              packages/cli/*)
+                code=true
+                cli=true
+                ;;
               packages/*)
                 code=true
                 full=true
@@ -134,6 +141,7 @@ jobs:
             mcp=true
             mcp_server=true
             signer=true
+            cli=true
           fi
 
           if [ "$sdk" = "true" ]; then
@@ -157,6 +165,7 @@ jobs:
             echo "mcp=$mcp"
             echo "mcp_server=$mcp_server"
             echo "signer=$signer"
+            echo "cli=$cli"
             echo "full=$full"
           } >> "$GITHUB_OUTPUT"
 
@@ -186,6 +195,33 @@ jobs:
 
       - name: Build SDK
         run: npm run build -w packages/sdk
+
+  cli_checks:
+    name: CLI checks
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check CLI
+        run: npm run typecheck -w packages/cli
+
+      - name: Run CLI unit tests
+        run: npm run test -w packages/cli
+
+      - name: Build CLI
+        run: npm run build -w packages/cli
 
   backend_checks:
     name: Backend checks
@@ -501,7 +537,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks]
+    needs: [changes, sdk_checks, cli_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -556,6 +592,11 @@ jobs:
 
           if [ "${{ needs.changes.outputs.signer }}" = "true" ] && [ "${{ needs.signer_checks.result }}" != "success" ]; then
             echo "Signer checks result: ${{ needs.signer_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.cli }}" = "true" ] && [ "${{ needs.cli_checks.result }}" != "success" ]; then
+            echo "CLI checks result: ${{ needs.cli_checks.result }}"
             exit 1
           fi
 

@@ -41,7 +41,13 @@ const fortnoxMocks = vi.hoisted(() => ({
   exchangeCodeForTokens: vi.fn(),
   pushVoucher: vi.fn(),
   toFortnoxVoucher: vi.fn(),
-  FortnoxError: class FortnoxError extends Error {},
+  // Match the real class signature (message, status) so the mock stays
+  // contract-faithful if a future test reaches the push error path.
+  FortnoxError: class FortnoxError extends Error {
+    constructor(message: string, public status: number) {
+      super(message)
+    }
+  },
 }))
 vi.mock('../../lib/fortnox.js', () => fortnoxMocks)
 
@@ -120,6 +126,7 @@ describe('fortnox routes — OAuth token redaction', () => {
     expect(body).not.toHaveProperty('access_token')
     expect(body).not.toHaveProperty('refresh_token')
     expect(leaks(res.body)).toBe(false)
+    expect(leaks(JSON.stringify(res.headers))).toBe(false)
   })
 
   it('GET /status requires authentication', async () => {
@@ -170,5 +177,6 @@ describe('fortnox routes — OAuth token redaction', () => {
     expect(res.statusCode).toBe(204)
     expect(fortnoxConnectionMocks.deleteFortnoxConnection).toHaveBeenCalledOnce()
     expect(leaks(res.body)).toBe(false)
+    expect(leaks(JSON.stringify(res.headers))).toBe(false)
   })
 })

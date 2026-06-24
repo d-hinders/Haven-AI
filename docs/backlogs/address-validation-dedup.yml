@@ -19,7 +19,7 @@ items:
       lib/agent-allowance-validation. Pure refactor; identical regex.
       Acceptance: backend suite + tsc green; behavior unchanged.
     money_path: false
-    status: in-pr
+    status: merged   # landed on main as PR #529
 
   - id: pr2
     title: "Migrate money-path callers to lib/address.ts"

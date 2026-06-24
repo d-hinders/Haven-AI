@@ -202,6 +202,7 @@ describe('fortnox routes — route invariants', () => {
     fortnoxConnectionMocks.fortnoxConfigured.mockReset().mockReturnValue(true)
     fortnoxConnectionMocks.getFortnoxConnection.mockReset().mockResolvedValue(CONNECTION_ROW)
     fortnoxConnectionMocks.getValidFortnoxAccessToken.mockReset().mockResolvedValue('access')
+    fortnoxConnectionMocks.saveFortnoxConnection.mockReset().mockResolvedValue(undefined)
     fortnoxConnectionMocks.deleteFortnoxConnection.mockReset().mockResolvedValue(undefined)
     fortnoxMocks.exchangeCodeForTokens.mockReset()
   })
@@ -250,6 +251,7 @@ describe('fortnox routes — route invariants', () => {
         connected: false,
         scope: null,
         expiresAt: null,
+        legacyBookkeeping: false,
       })
     })
   })

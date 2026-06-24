@@ -84,7 +84,7 @@ items:
     files:
       - packages/backend/src/routes/__tests__/contacts.test.ts
     money_path: false
-    status: in-pr   # PR pending
+    status: merged   # PR #541
 
   - id: pr4
     title: "test(reporting): route-level invariants for the reporting feed API"
@@ -103,7 +103,7 @@ items:
     files:
       - packages/backend/src/routes/__tests__/reporting.test.ts
     money_path: false
-    status: todo
+    status: in-pr   # PR pending
 
   - id: pr5
     title: "fix(contacts): detect unique violations by code, not message substring"

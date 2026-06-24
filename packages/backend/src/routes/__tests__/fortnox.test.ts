@@ -180,3 +180,153 @@ describe('fortnox routes — OAuth token redaction', () => {
     expect(leaks(JSON.stringify(res.headers))).toBe(false)
   })
 })
+
+describe('fortnox routes — route invariants', () => {
+  let app: FastifyInstance
+  let token: string
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
+    token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
+  })
+
+  afterAll(async () => {
+    await app.close()
+  })
+
+  beforeEach(() => {
+    configMock.frontendUrl = 'https://app.test'
+    configMock.legacyBookkeepingEnabled = false
+    fortnoxConnectionMocks.fortnoxConfigured.mockReset().mockReturnValue(true)
+    fortnoxConnectionMocks.getFortnoxConnection.mockReset().mockResolvedValue(CONNECTION_ROW)
+    fortnoxConnectionMocks.getValidFortnoxAccessToken.mockReset().mockResolvedValue('access')
+    fortnoxConnectionMocks.deleteFortnoxConnection.mockReset().mockResolvedValue(undefined)
+    fortnoxMocks.exchangeCodeForTokens.mockReset()
+  })
+
+  describe('authentication', () => {
+    it('POST /connect-url rejects unauthenticated requests', async () => {
+      const res = await app.inject({ method: 'POST', url: '/accounting/fortnox/connect-url' })
+      expect(res.statusCode).toBe(401)
+    })
+
+    it('POST /push rejects unauthenticated requests', async () => {
+      const res = await app.inject({ method: 'POST', url: '/accounting/fortnox/push' })
+      expect(res.statusCode).toBe(401)
+    })
+
+    it('DELETE rejects unauthenticated requests', async () => {
+      const res = await app.inject({ method: 'DELETE', url: '/accounting/fortnox' })
+      expect(res.statusCode).toBe(401)
+    })
+  })
+
+  describe('GET /status', () => {
+    it('reports configured:false when Fortnox is not configured', async () => {
+      fortnoxConnectionMocks.fortnoxConfigured.mockReturnValue(false)
+      const res = await app.inject({
+        method: 'GET',
+        url: '/accounting/fortnox/status',
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ configured: false, connected: false, legacyBookkeeping: false })
+      // No connection is read when the integration isn't configured.
+      expect(fortnoxConnectionMocks.getFortnoxConnection).not.toHaveBeenCalled()
+    })
+
+    it('reports connected:false with null metadata when no connection is stored', async () => {
+      fortnoxConnectionMocks.getFortnoxConnection.mockResolvedValue(null)
+      const res = await app.inject({
+        method: 'GET',
+        url: '/accounting/fortnox/status',
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({
+        configured: true,
+        connected: false,
+        scope: null,
+        expiresAt: null,
+      })
+    })
+  })
+
+  describe('POST /push (legacy voucher push)', () => {
+    it('returns 410 Gone while legacy bookkeeping is disabled', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/accounting/fortnox/push',
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(res.statusCode).toBe(410)
+      // The gate short-circuits before any token/accounting work runs.
+      expect(fortnoxConnectionMocks.getValidFortnoxAccessToken).not.toHaveBeenCalled()
+    })
+
+    it('rejects a malformed "from" date with 400 before doing work', async () => {
+      configMock.legacyBookkeepingEnabled = true
+      const res = await app.inject({
+        method: 'POST',
+        url: '/accounting/fortnox/push?from=not-a-date',
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(fortnoxConnectionMocks.getValidFortnoxAccessToken).not.toHaveBeenCalled()
+    })
+
+    it('rejects a malformed "to" date with 400 before doing work', async () => {
+      configMock.legacyBookkeepingEnabled = true
+      const res = await app.inject({
+        method: 'POST',
+        url: '/accounting/fortnox/push?to=13-2026-01',
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(fortnoxConnectionMocks.getValidFortnoxAccessToken).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('OAuth callback error redirects', () => {
+    it('redirects with fortnox=denied when the user denies consent', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/accounting/fortnox/callback?error=access_denied',
+      })
+      expect(res.statusCode).toBe(302)
+      expect(res.headers.location).toBe('https://app.test/settings?fortnox=denied')
+    })
+
+    it('redirects with fortnox=error when code or state is missing', async () => {
+      const res = await app.inject({ method: 'GET', url: '/accounting/fortnox/callback' })
+      expect(res.statusCode).toBe(302)
+      expect(res.headers.location).toBe('https://app.test/settings?fortnox=error')
+    })
+
+    it('redirects with fortnox=error on a forged/unverifiable state', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/accounting/fortnox/callback?code=auth-code&state=not-a-valid-jwt',
+      })
+      expect(res.statusCode).toBe(302)
+      expect(res.headers.location).toBe('https://app.test/settings?fortnox=error')
+      // A forged state must never reach the token exchange.
+      expect(fortnoxMocks.exchangeCodeForTokens).not.toHaveBeenCalled()
+    })
+
+    it('redirects with fortnox=error when the state has the wrong purpose', async () => {
+      const wrongPurpose = app.jwt.sign(
+        { sub: 'user-1', purpose: 'something_else' } as unknown as { sub: string; email: string },
+      )
+      const res = await app.inject({
+        method: 'GET',
+        url: `/accounting/fortnox/callback?code=auth-code&state=${wrongPurpose}`,
+      })
+      expect(res.statusCode).toBe(302)
+      expect(res.headers.location).toBe('https://app.test/settings?fortnox=error')
+      expect(fortnoxMocks.exchangeCodeForTokens).not.toHaveBeenCalled()
+    })
+  })
+})

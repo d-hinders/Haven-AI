@@ -177,6 +177,22 @@ describe('Passkey routes', () => {
     expect(response.statusCode).toBe(500)
   })
 
+  it('POST /passkeys re-throws a null throw without a secondary TypeError', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    // The old `error as {...}` cast crashed on property access for a null throw;
+    // the narrowing helper short-circuits and re-throws, yielding a clean 500.
+    mockQuery.mockRejectedValueOnce(null)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/passkeys',
+      headers: { authorization: `Bearer ${token}` },
+      payload: fixtureBody,
+    })
+
+    expect(response.statusCode).toBe(500)
+  })
+
   it('POST /passkeys requires JWT auth', async () => {
     const response = await app.inject({
       method: 'POST',

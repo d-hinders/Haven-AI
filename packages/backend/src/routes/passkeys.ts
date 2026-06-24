@@ -136,10 +136,11 @@ export default async function passkeyRoutes(app: FastifyInstance): Promise<void>
  * The constraint name from a Postgres unique violation (SQLSTATE 23505), or null
  * for any other error — including null/primitive throws. Lets the caller map the
  * two distinct passkey unique constraints to their 409s without an unsafe
- * `error as {...}` cast (which would throw on a null/primitive throw). Mirrors
- * the `'code' in err` narrowing used in routes/contacts.ts and routes/agents.ts;
- * unlike contacts (single constraint), passkeys needs the constraint name to
- * tell its two unique constraints apart.
+ * `error as {...}` cast (which would throw on a null/primitive throw). Uses the
+ * `'code' in err` narrowing from routes/contacts.ts and routes/agents.ts, and is
+ * slightly stricter than agents.ts (a `typeof === 'string'` check rather than
+ * coercing via `String(...)`). Unlike contacts (single constraint), passkeys
+ * needs the constraint name to tell its two unique constraints apart.
  */
 function uniqueViolationConstraint(err: unknown): string | null {
   if (

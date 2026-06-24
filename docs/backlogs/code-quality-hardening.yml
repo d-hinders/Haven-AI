@@ -67,7 +67,7 @@ items:
     files:
       - packages/backend/src/routes/__tests__/fortnox.test.ts
     money_path: false
-    status: in-pr   # PR pending
+    status: merged   # PR #540
 
   - id: pr3
     title: "test(contacts): route-level invariants for the address book"
@@ -84,7 +84,7 @@ items:
     files:
       - packages/backend/src/routes/__tests__/contacts.test.ts
     money_path: false
-    status: todo
+    status: in-pr   # PR pending
 
   - id: pr4
     title: "test(reporting): route-level invariants for the reporting feed API"

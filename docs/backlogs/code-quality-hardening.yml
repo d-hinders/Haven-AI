@@ -48,7 +48,7 @@ items:
       - packages/backend/src/routes/__tests__/fortnox.test.ts
       - packages/backend/src/lib/__tests__/fortnox-connection.test.ts
     money_path: false
-    status: todo
+    status: in-pr   # PR #539
 
   - id: pr2
     title: "test(fortnox): route-level invariants for the Fortnox endpoints"

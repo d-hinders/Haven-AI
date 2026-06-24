@@ -18,6 +18,12 @@ export interface ReportingSync {
 export interface ReportingStatus {
   hosted: boolean
   flagEnabled: boolean
+  /**
+   * Whether a live accounting connector is wired up. False today — the Fortnox
+   * adapter (#496/#498) is deferred to a follow-up, so sync is a preview that
+   * doesn't yet deliver to an external tool.
+   */
+  liveSyncReady: boolean
   available: boolean
   connected: boolean
   syncs: ReportingSync[]

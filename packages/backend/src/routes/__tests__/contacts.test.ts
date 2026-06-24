@@ -111,12 +111,29 @@ describe('contacts routes', () => {
       expect(mockQuery).not.toHaveBeenCalled()
     })
 
-    it('maps a unique-violation to 409', async () => {
-      mockQuery.mockRejectedValueOnce(new Error('duplicate key value violates unique constraint'))
+    it('maps a Postgres unique violation (23505) to 409', async () => {
+      const dbErr = Object.assign(
+        new Error('duplicate key value violates unique constraint "contacts_user_id_address_key"'),
+        { code: '23505' },
+      )
+      mockQuery.mockRejectedValueOnce(dbErr)
 
       const res = await auth('POST', '/contacts', { name: 'Acme', address: VALID_ADDRESS })
 
       expect(res.statusCode).toBe(409)
+    })
+
+    it('re-throws a non-unique DB error instead of masking it as 409', async () => {
+      // A different SQLSTATE (e.g. not-null violation) must not be swallowed as a
+      // duplicate-address 409 — it surfaces as a 500 so the real failure is visible.
+      const dbErr = Object.assign(new Error('null value in column violates not-null constraint'), {
+        code: '23502',
+      })
+      mockQuery.mockRejectedValueOnce(dbErr)
+
+      const res = await auth('POST', '/contacts', { name: 'Acme', address: VALID_ADDRESS })
+
+      expect(res.statusCode).toBe(500)
     })
   })
 

@@ -82,7 +82,7 @@ items:
     files:
       - packages/backend/src/routes/__tests__/accounting.test.ts
     money_path: false
-    status: todo
+    status: in-pr
 
   - id: pr3
     title: "test(user-safes): cover the Safe-list endpoint (auth + user scoping)"

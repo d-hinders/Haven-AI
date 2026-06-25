@@ -34,6 +34,17 @@ import accountingRoutes from '../accounting.js'
 
 const USER = 'user-1'
 
+// Faithful to the real `ReconcileReport` shape (lib/reconcile.ts): the route
+// returns this verbatim, so the mock must mirror it or the suite documents a
+// contract the implementation never produces.
+const EMPTY_REPORT = {
+  total: 0,
+  ok: 0,
+  issues: 0,
+  byStatus: { ok: 0, missing_fx: 0, missing_tx: 0, unbalanced: 0 },
+  items: [],
+}
+
 describe('accounting routes — route-level invariants', () => {
   let app: FastifyInstance
   let token: string
@@ -55,12 +66,12 @@ describe('accounting routes — route-level invariants', () => {
     buildAccountingEntries.mockReset().mockResolvedValue([])
     sieExport.mockReset().mockReturnValue({
       content: 'SIE-CONTENT',
-      mimeType: 'application/octet-stream',
+      mimeType: 'text/plain; charset=utf-8',
       filename: 'haven.sie',
       entryCount: 0,
       skipped: 0,
     })
-    reconcileEntries.mockReset().mockReturnValue({ unbalanced: [] })
+    reconcileEntries.mockReset().mockReturnValue(EMPTY_REPORT)
   })
 
   const authed = (method: 'GET' | 'PUT' | 'DELETE', url: string, payload?: unknown) =>
@@ -111,7 +122,7 @@ describe('accounting routes — route-level invariants', () => {
   it('GET /reconcile builds entries scoped to the caller and returns the reconcile result', async () => {
     const res = await authed('GET', '/accounting/reconcile?from=2026-01-01&to=2026-03-31')
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ unbalanced: [] })
+    expect(res.json()).toEqual(EMPTY_REPORT)
     expect(buildAccountingEntries).toHaveBeenCalledWith({ userId: USER, from: '2026-01-01', to: '2026-03-31' })
   })
 
@@ -125,6 +136,20 @@ describe('accounting routes — route-level invariants', () => {
     // Scoped by the JWT subject — never a client-supplied id.
     const [, params] = mockQuery.mock.calls[0]
     expect(params).toEqual([USER])
+  })
+
+  it('GET /categories scopes the query to the *calling* user, not a shared id', async () => {
+    // A different JWT subject must drive a different SQL scope — proving one
+    // user can never read another's overrides through this route.
+    const otherToken = app.jwt.sign({ sub: 'user-2', email: 'grace@example.com' })
+    const res = await app.inject({
+      method: 'GET',
+      url: '/accounting/categories',
+      headers: { authorization: `Bearer ${otherToken}` },
+    })
+    expect(res.statusCode).toBe(200)
+    const [, params] = mockQuery.mock.calls[0]
+    expect(params).toEqual(['user-2'])
   })
 
   // --- PUT /categories -----------------------------------------------------

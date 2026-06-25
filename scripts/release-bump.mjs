@@ -34,7 +34,7 @@ const execAsync = promisify(execFile)
 const ROOT = dirname(fileURLToPath(new URL('.', import.meta.url)))
 const pkg = (name) => join(ROOT, 'packages', name, 'package.json')
 
-const PACKAGES = ['sdk', 'signer', 'mcp', 'connect']
+const PACKAGES = ['sdk', 'signer', 'mcp', 'connect', 'cli']
 
 // Every package whose published/deployed artifact resolves @haven_ai/* deps
 // from outside the workspace (fresh `npx` install or container build). These
@@ -43,7 +43,7 @@ const PACKAGES = ['sdk', 'signer', 'mcp', 'connect']
 // registry serves on a user's machine (the signer@0.1.10-alpha.0 / sdk crash
 // that motivated this guard). `mcp-server` is Docker-deployed rather than
 // npx-installed, but it is not private, so it is held to the same rule.
-const PUBLISHED_PACKAGES = ['sdk', 'signer', 'mcp', 'mcp-server', 'connect']
+const PUBLISHED_PACKAGES = ['sdk', 'signer', 'mcp', 'mcp-server', 'connect', 'cli']
 
 // Dep ranges that are forbidden for an internal @haven_ai/* dependency in any
 // published package, because none of them pin a concrete co-released version.
@@ -71,6 +71,7 @@ const SOURCE_VERSION_CONSTANTS = [
   { name: 'SIGNER_VERSION',        file: join(ROOT, 'packages', 'signer', 'src', 'server.ts'),     label: 'packages/signer/src/server.ts' },
   { name: 'HOSTED_SERVER_VERSION', file: join(ROOT, 'packages', 'mcp-server', 'src', 'server.ts'), label: 'packages/mcp-server/src/server.ts' },
   { name: 'CONNECTOR_VERSION',     file: join(ROOT, 'packages', 'connect', 'src', 'runtime.ts'),   label: 'packages/connect/src/runtime.ts' },
+  { name: 'CLI_VERSION',           file: join(ROOT, 'packages', 'cli', 'src', 'commands.ts'),      label: 'packages/cli/src/commands.ts' },
 ]
 
 // ── Semver helpers ────────────────────────────────────────────────────────────

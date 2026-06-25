@@ -1,6 +1,13 @@
-# Only allow PRs to main from the dev branch.
-# Acts as a gate since GitHub Free has no native branch-source restriction.
-name: "Dev gate: only dev → main"
+# Only allow PRs to main from `dev` (the integration branch) or a `hotfix/*`
+# branch (emergency fixes that can't wait for the dev cycle). Acts as a gate
+# since GitHub Free has no native branch-source restriction.
+#
+# Bootstrap note: this gate blocks any non-allowed source branch — including the
+# PR that introduces it (a feature branch). That PR must be admin-merged once;
+# afterwards the gate lives on `main` and applies to every later PR. For the gate
+# to actually block merges, add this check ("gate") to main's required status
+# checks in branch protection — a failing run alone is only advisory otherwise.
+name: "Dev gate: only dev or hotfix/* → main"
 
 on:
   pull_request:
@@ -17,8 +24,8 @@ jobs:
         run: |
           SOURCE="${{ github.event.pull_request.head.ref }}"
           echo "Source branch: $SOURCE"
-          if [[ "$SOURCE" != "dev" ]]; then
-            echo "::error::Only the 'dev' branch is allowed to merge into 'main'. PR is from '$SOURCE'."
+          if [[ "$SOURCE" != "dev" && "$SOURCE" != hotfix/* ]]; then
+            echo "::error::Only 'dev' or a 'hotfix/*' branch may merge into 'main'. PR is from '$SOURCE'."
             exit 1
           fi
-          echo "✅ Allowed: dev → main"
+          echo "✅ Allowed: $SOURCE → main"

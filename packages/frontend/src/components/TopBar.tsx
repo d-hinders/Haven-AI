@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import ApprovalNotifications from './ApprovalNotifications'
 import WalletButton from './WalletButton'
+import EnvBadge from './EnvBadge'
 
 interface TopBarProps {
   actionSlot?: React.ReactNode
@@ -35,6 +36,7 @@ export default function TopBar({ actionSlot }: TopBarProps) {
       <div className="flex items-center gap-3 min-w-0">
         {/* Spacer for mobile hamburger */}
         <div className="w-8 lg:hidden" />
+        <EnvBadge />
         {back && (
           <Link
             href={back.href}

@@ -4,6 +4,17 @@ A terminal-native, scriptable companion to the Haven dashboard. Sign in as
 yourself and read or manage your account from the shell — used **alongside** the
 web app, not instead of it.
 
+## Install
+
+```bash
+npm i -g @haven_ai/cli   # or run ad hoc: npx @haven_ai/cli <command>
+haven --help
+```
+
+The CLI talks to the hosted Haven backend by default. Point it elsewhere with
+`--api <url>` or `HAVEN_API_URL` (e.g. a local backend at
+`http://localhost:3001`).
+
 > **This version: login, read, and backend-only management.** On-chain,
 > owner-signed actions (deploy, budgets, approvers, send) are signed in the
 > dashboard — this CLI never holds your keys. See
@@ -47,8 +58,8 @@ haven agents list --json | jq '.[] | select(.status == "active") | .name'
 
 ## Config
 
-- `--api <url>` or `HAVEN_API_URL` — backend URL (default `http://localhost:3001`).
-  The backend is pinned into the saved session at login.
+- `--api <url>` or `HAVEN_API_URL` — backend URL (defaults to the hosted Haven
+  backend). The backend is pinned into the saved session at login.
 - `HAVEN_EMAIL` / `HAVEN_PASSWORD` — non-interactive login (CI/scripts).
 - Session is stored owner-only at `~/.haven/session.json`. Treat it like a
   secret; `haven logout` removes it.

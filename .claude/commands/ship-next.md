@@ -15,7 +15,7 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 
 1. If the backlog has an item in state `in-pr` (or, for an epic, a sub-issue with an open Haven PR), check that PR:
    - **Merged** → mark the item `merged` (file mode) and continue to Phase 1.
-   - **Open, awaiting the user** (a money-path PR needing CODEOWNERS approval, or an escalation) → **stop** and report: this item is blocked on the user; do not start the next item (later items branch off `main` and must build on the merged one).
+   - **Open, awaiting the user** (a money-path PR needing CODEOWNERS approval, or an escalation) → **stop** and report: this item is blocked on the user; do not start the next item (later items branch off `dev` and must build on the merged one).
    - **Open, CI still running / fixable failure** → handle it (re-run, fix, push) but do not start a new item.
 2. Only when there is no open in-flight item do you pick the next `todo`.
 
@@ -23,8 +23,9 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 
 3. File mode: first item with `status: todo`. Epic mode: lowest-numbered **open** sub-issue not yet covered by an open/merged Haven PR.
 4. If the item's scope/acceptance is too vague to implement safely (especially an epic sub-issue with no acceptance criteria), **stop and ask the user** to sharpen it. A vague money-path item is never guessed at.
-5. Sync and branch off fresh `main`:
-   - `git fetch origin main && git checkout -B claude/<track>-<item-id> origin/main`
+5. Sync and branch off fresh `dev` (the integration branch — **not** `main`):
+   - `git fetch origin dev && git checkout -B claude/<track>-<item-id> origin/dev`
+   - The loop targets `dev` because the `dev-gate` workflow (`.github/workflows/dev-gate.yml`) only allows `dev` or `hotfix/*` into `main`; a `claude/*` branch can never merge straight to `main`. Feature work flows `claude/* → dev`, and `dev → main` is promoted separately.
 
 ## Phase 2 — Implement
 
@@ -41,7 +42,7 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 
 ## Phase 4 — Review (haven-reviewer)
 
-10. Launch the **haven-reviewer** subagent on the diff (`git diff origin/main...HEAD`), with the item's scope and the invariants it must preserve.
+10. Launch the **haven-reviewer** subagent on the diff (`git diff origin/dev...HEAD`), with the item's scope and the invariants it must preserve.
 11. Triage findings:
     - **blocking / should-fix** that are clearly correct and small → apply them, re-run the gate.
     - **blocking / should-fix that are ambiguous, architectural, or change product behavior** → **stop and ask the user** (use AskUserQuestion with enough context to answer without scrolling). Do not guess on money movement, auth, or schema.
@@ -51,7 +52,7 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 ## Phase 5 — Open the PR
 
 13. Commit with a conventional message (end with the Co-Authored-By / Claude-Session trailers per the repo convention). Push `-u origin <branch>`.
-14. Open the PR via `mcp__github__create_pull_request`. Body: scope, the behavior-preservation argument, verification output (test counts, tsc), and reviewer outcome. For **epic** items, include `Closes #<sub-issue>` so the epic burns down automatically.
+14. Open the PR via `mcp__github__create_pull_request` with **base `dev`** (never `main`). Body: scope, the behavior-preservation argument, verification output (test counts, tsc), and reviewer outcome. For **epic** items, include `Closes #<sub-issue>` so the epic burns down automatically.
 15. `subscribe_pr_activity` for the PR so CI failures / review comments wake the loop.
 
 ## Phase 6 — Merge gate (policy A + carve-out)

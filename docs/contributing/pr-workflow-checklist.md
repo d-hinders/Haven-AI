@@ -2,9 +2,27 @@
 
 Use this checklist for feature branches so PRs stay mergeable, reviewable, and deployable.
 
+## Branch Model
+
+Haven uses a `dev` integration branch in front of `main`:
+
+- **Feature work flows `feature/* → dev → main`.** Branch from `dev`, open your
+  PR into `dev`, and let it merge there once green. `dev` is the shared
+  integration branch and deploys to the **dev environment** (Railway + Vercel).
+- **`dev → main` is a separate promotion step** (a human-opened PR). Merging to
+  `main` deploys to **production**.
+- **`hotfix/* → main` is the only direct-to-`main` path**, for emergency fixes
+  that can't wait for the dev cycle.
+- The **`dev-gate`** workflow (`.github/workflows/dev-gate.yml`) enforces this:
+  only `dev` or `hotfix/*` may merge into `main`. A `feature/*` PR aimed at
+  `main` will fail the gate — retarget it to `dev`.
+
+Throughout this checklist, "the base branch" means **`dev`** for normal feature
+work (and `main` only for a `hotfix/*`).
+
 ## Before You Start
 
-- Branch from `main` unless the work truly depends on another unmerged branch.
+- Branch from `dev` unless the work truly depends on another unmerged branch.
 - Keep the branch scoped to one shippable outcome.
 - For non-trivial feature, UX feedback, or bug-fix work, use `docs/contributing/ai-agent-workflow.md` before implementation and decide the captain, explorer, worker, and reviewer shape up front.
 - If the work touches payments, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, fiat/card, swaps, merchant flows, yield, or advice, read `docs/regulatory/casp-risk-guardrails.md` first.
@@ -13,7 +31,7 @@ Use this checklist for feature branches so PRs stay mergeable, reviewable, and d
 
 ## Preferred PR Shape
 
-- Prefer direct-to-`main` PRs over stacked PRs for product features.
+- Prefer direct-to-`dev` PRs over stacked PRs for product features.
 - Prefer 1 focused feature per PR.
 - Prefer follow-up PRs over one large “finish everything” branch.
 
@@ -26,8 +44,8 @@ Good split examples:
 ## During Development
 
 - Open the PR early, even if it starts as draft.
-- Sync with `main` regularly if the repo is moving.
-- Rebuild after each `main` sync, not just at the end.
+- Sync with `dev` regularly if the repo is moving.
+- Rebuild after each `dev` sync, not just at the end.
 - Call out risky files in the PR description:
   - migrations
   - auth
@@ -37,10 +55,10 @@ Good split examples:
 
 ## Before Requesting Review
 
-- Merge or rebase the latest `main` into the branch.
+- Merge or rebase the latest `dev` into the branch.
 - Confirm the branch still builds locally.
 - Run the relevant local checks from the command guide below.
-- Confirm the PR target is `main` if the work is meant to deploy after merge.
+- Confirm the PR target is `dev` (or `main` only for a `hotfix/*`).
 - Confirm migrations are uniquely ordered and named.
 - Confirm payment-related changes preserve the CASP guardrails: no Haven-held user or agent keys, no API-key-only payment authority, no off-chain-only spend control, no mutation of signed amount/token/recipient/route, and no unreviewed swap, ramp, fiat, card, merchant settlement, yield, or advice functionality.
 - Complete the PR template sections for changed surfaces, workflow used, agents used or skipped, local checks, browser or headless verification, generated artifacts, CASP/MiCA guardrails, review status, and merge readiness.
@@ -53,10 +71,10 @@ Good split examples:
 
 ## Before Merging
 
-- Re-check that the PR has no conflicts with `main`.
-- Re-check that the branch still builds after the latest `main` sync.
+- Re-check that the PR has no conflicts with `dev`.
+- Re-check that the branch still builds after the latest `dev` sync.
 - Re-run the relevant local checks if the branch changed after review.
-- If the PR started stacked, re-open or retarget it so the final merge path is into `main`.
+- If the PR started stacked, re-open or retarget it so the final merge path is into `dev`.
 - Verify that merging this PR will trigger the expected deployment branch.
 - For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green.
 
@@ -110,7 +128,7 @@ Notes:
 
 ## Questions To Ask Up Front
 
-- Should this branch come from `main` or is there a real dependency?
+- Should this branch come from `dev` or is there a real dependency?
 - Can this be split into backend and frontend PRs?
 - Does this add or modify a migration?
 - Which files are most likely to conflict with in-flight work?
@@ -121,11 +139,11 @@ Notes:
 
 ## Quick Copy-Paste Checklist
 
-- [ ] Branch from `main`
+- [ ] Branch from `dev`
 - [ ] Scope is one shippable outcome
 - [ ] Draft PR opened early
-- [ ] Synced with `main` recently
+- [ ] Synced with `dev` recently
 - [ ] Relevant local checks run
 - [ ] Migrations are uniquely ordered
-- [ ] PR target is the deploy branch
-- [ ] Conflicts with `main` checked before merge
+- [ ] PR target is `dev` (or `main` for a `hotfix/*`)
+- [ ] Conflicts with `dev` checked before merge

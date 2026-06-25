@@ -61,7 +61,7 @@ items:
       - packages/backend/src/routes/balances.ts
       - packages/backend/src/routes/user.ts
     money_path: false
-    status: todo
+    status: in-pr
 
   - id: pr2
     title: "test(accounting): route-level invariants for the accounting endpoints"

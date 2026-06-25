@@ -6,7 +6,11 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/:path*`,
+        // `??` only falls back on null/undefined — an empty or whitespace
+        // NEXT_PUBLIC_API_URL (e.g. a blank Vercel env var) would otherwise
+        // yield a hostless `/:path*` destination and fail the build. Treat
+        // blank as unset.
+        destination: `${(process.env.NEXT_PUBLIC_API_URL || '').trim() || 'http://localhost:3001'}/:path*`,
       },
     ]
   },

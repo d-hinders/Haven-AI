@@ -15,6 +15,13 @@ Pieces:
 - **haven-reviewer** — the per-PR quality gate.
 - **`.github/CODEOWNERS`** — the money-path carve-out (the only PRs that still need a human merge).
 
+> **Base branch: `dev`, not `main`.** The loop branches off `dev` and opens every
+> PR with base `dev`. The `dev-gate` workflow (`.github/workflows/dev-gate.yml`)
+> only lets `dev` or `hotfix/*` merge into `main`, so a `claude/*` branch can
+> never target `main` directly — it would fail the gate. Feature work flows
+> `claude/* → dev`; promoting `dev → main` (which deploys to prod) is a separate,
+> human step.
+
 ## Quickstart
 
 ```bash
@@ -90,18 +97,25 @@ Without this, `/ship-next` can open PRs but cannot auto-merge them.
 1. **Settings → General → Pull Requests:**
    - ☑ **Allow auto-merge** (required, or the auto-merge step is a no-op).
    - ☑ **Automatically delete head branches** (housekeeping).
-2. **Settings → Branches → rule for `main`** (or a Ruleset):
-   - ☑ **Require a pull request before merging.**
-   - ☑ **Require status checks to pass** → require **Detect changed surfaces**
-     plus every per-surface quality check: **Backend checks**, **Frontend
-     checks**, **SDK checks**, **MCP server checks**, **MCP checks**, **Connect
-     checks**, **Signer checks**. (Optionally also the smoke checks **Install-path
-     smoke** and **Frontend browser smoke**.) These are safe to require even
-     though they're conditional: on a PR that doesn't touch a surface, that
-     surface's check reports `skipped`, which GitHub counts as satisfied — so
-     requiring all of them gates every surface the loop might touch without ever
-     deadlocking. Do **not** require **Vercel Preview Comments** — it isn't a
-     quality gate.
+2. **Settings → Rules → Rulesets** (the repo uses rulesets, not classic branch
+   protection). Three active rulesets carry this, all targeting **both `main` and
+   `dev`** unless noted:
+   - **"Move fast, just don't break prod by accident"** — ☑ **Require a pull
+     request before merging**, ☑ **Block force pushes**, and ☑ **Require status
+     checks to pass** on the roll-up check **Lint, Type-check & Build**.
+   - **"Haven automerge rules"** — ☑ **Require status checks to pass** on
+     **Detect changed surfaces** plus every per-surface quality check: **Backend
+     checks**, **Frontend checks**, **SDK checks**, **CLI checks**, **MCP server
+     checks**, **MCP checks**, **Connect checks**, **Signer checks**. (Optionally
+     also the smoke checks **Install-path smoke** and **Frontend browser smoke**.)
+     These are safe to require even though they're conditional: on a PR that
+     doesn't touch a surface, that surface's check reports `skipped`, which GitHub
+     counts as satisfied — so requiring all of them gates every surface the loop
+     might touch without ever deadlocking. Do **not** require **Vercel Preview
+     Comments** — it isn't a quality gate.
+   - **"Dev gate"** (targets `main` only) — enforces the **`gate`** check from
+     `.github/workflows/dev-gate.yml`, which only lets `dev` or `hotfix/*` merge
+     into `main`. This is why the loop targets `dev`, never `main`.
    - **Required approvals: 0** at the repo level — this is the hands-off lever.
      Your safety comes from CI + haven-reviewer + the CODEOWNERS carve-out.
    - ☑ **Require review from Code Owners** — this is what makes the carve-out
@@ -125,7 +139,7 @@ classes for human merge, or narrow it to let more auto-merge.
 
 ## Constraints to know
 
-- **Sequential.** Each item branches off `main`, so the loop waits for the
+- **Sequential.** Each item branches off `dev`, so the loop waits for the
   prior PR to merge before starting the next. Wall-clock ≈ sum of CI times.
   A money-path PR awaiting your merge **pauses** the loop (later items build on
   it) — merge it (or tell the loop to skip ahead) to resume.

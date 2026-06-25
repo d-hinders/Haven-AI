@@ -1,7 +1,10 @@
 {
   "name": "@haven_ai/connect",
-  "version": "0.1.16-alpha.0",
+  "version": "0.1.17-alpha.0",
   "description": "Haven Connect Agent 2 local connector — generates the agent signing key locally and registers only the public signing address.",
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "bin": {
     "haven-connect": "./dist/cli.js"
@@ -39,10 +42,15 @@
     "non-custodial"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d-hinders/Haven-AI.git",
+    "directory": "packages/connect"
+  },
   "dependencies": {
-    "@haven_ai/mcp": "0.1.16-alpha.0",
-    "@haven_ai/sdk": "0.1.16-alpha.0",
-    "@haven_ai/signer": "0.1.16-alpha.0",
+    "@haven_ai/mcp": "0.1.17-alpha.0",
+    "@haven_ai/sdk": "0.1.17-alpha.0",
+    "@haven_ai/signer": "0.1.17-alpha.0",
     "ethers": "^6.13.0"
   },
   "devDependencies": {

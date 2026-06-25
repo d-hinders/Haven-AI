@@ -17,6 +17,7 @@ describe how the system is actually built and how we work on it.
 | [`contributing/`](contributing/ai-agent-workflow.md) | How we build: agentic workflow, review patterns, PR checklist, code-quality program. | Process for shipping changes and keeping PRs reviewable. |
 | [`operations/`](operations/hosted-mcp.md) | Deploying and running the hosted MCP server, runtime compatibility, and the local→hosted migration. | Production deployment and runtime setup. |
 | [`regulatory/`](regulatory/casp-risk-guardrails.md) | CASP / MiCA non-custodial guardrails and the payment-code merge checklist. | The compliance perimeter every payment change must respect. |
+| [`research/`](research/README.md) | Forward-looking investigations and decision aids, often with a prototype spec. | Where a part of the system *could* go — options and recommendations, not current contracts. |
 | [`archive/`](archive/README.md) | Shipped designs and point-in-time artifacts, frozen for context. | Historical rationale only — never current state. |
 
 ## Quick links
@@ -30,6 +31,7 @@ describe how the system is actually built and how we work on it.
 - [Agent API (OpenAPI) contract](architecture/05-agent-api-openapi.md)
 - [Hosted MCP connect flow](architecture/06-hosted-mcp-connect-flow.md)
 - [Local vs hosted MCP](architecture/08-local-vs-hosted-mcp.md)
+- [Rail-agnostic fee module](architecture/09-fee-module.md)
 
 **Product / UX**
 - [Product & UX guide (start)](product/README.md)
@@ -42,15 +44,19 @@ describe how the system is actually built and how we work on it.
 - [Agentic delivery workflow](contributing/ai-agent-workflow.md)
 - [Recurring review patterns](contributing/ai-review-patterns.md)
 - [PR workflow checklist](contributing/pr-workflow-checklist.md)
-- [Code-quality roadmap](contributing/code-quality-roadmap.md) and [running loop](contributing/code-quality-loop.md)
+- [Code-quality loop](contributing/code-quality-loop.md)
 
 **Operations**
 - [Deploy the hosted MCP server](operations/hosted-mcp.md)
 - [MCP runtime compatibility](operations/mcp-runtime-compatibility.md)
 - [Migrate local → hosted MCP](operations/local-to-hosted-mcp.md)
+- [E2E QA runbook (agent connection & x402)](operations/e2e-qa-runbook.md)
 
 **Regulatory**
 - [CASP / MiCA risk guardrails](regulatory/casp-risk-guardrails.md)
+
+**Research**
+- [Smart-account-native x402 settlement](research/x402-smart-account-settlement.md)
 
 ## Conventions
 

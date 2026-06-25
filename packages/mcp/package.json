@@ -1,7 +1,10 @@
 {
   "name": "@haven_ai/mcp",
-  "version": "0.1.16-alpha.0",
+  "version": "0.1.17-alpha.0",
   "description": "Haven MCP server for local, non-custodial agent payments",
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "bin": {
     "haven-mcp": "./dist/cli.js"
@@ -38,8 +41,13 @@
     "x402"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d-hinders/Haven-AI.git",
+    "directory": "packages/mcp"
+  },
   "dependencies": {
-    "@haven_ai/sdk": "0.1.16-alpha.0",
+    "@haven_ai/sdk": "0.1.17-alpha.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.25.76"
   },

@@ -1,0 +1,124 @@
+# Code-quality track: harden the new financial-integration surfaces.
+# Driven by the autonomous PR loop — see docs/contributing/autonomous-pr-loop.md
+# and the cadence doc docs/contributing/code-quality-loop.md.
+#
+# Discovery (2026-06-24): the surfaces that shipped since the last loop update
+# (Fortnox connection + accounting, the reporting feed, contacts) are live and
+# registered in src/index.ts but ship with thinner route-level test and
+# credential-hygiene coverage than the older payment routes. This track closes
+# the highest-value, lowest-ambiguity gaps: external-token redaction and
+# route-level invariant tests. Every item below is TEST-ONLY (no runtime
+# change) and non-money-path, so the loop can reviewer-gated auto-merge each.
+#
+# Deliberately OUT of this track:
+#   - OpenAPI entries for reporting/fortnox/accounting. openapi/spec.ts is
+#     intentionally scoped to the agent-payment surface (see the comment in
+#     spec.test.ts: "auth, dashboard, balances, contacts, etc. are deliberately
+#     out of scope"). Publishing those families is a product/scope decision for
+#     the captain, not a quiet quality pass.
+#   - x402-resources.ts route tests. Valuable, but x402-resources.ts is
+#     CODEOWNERS-owned (money path) so it would block on a human merge; left for
+#     a money-path pass rather than stalling this auto-merge track.
+#   - The legacy SIE /export and demo-mpp surfaces (out of scope per the
+#     cadence doc).
+
+track: code-quality-hardening
+
+# Informational; the loop always runs policy A (reviewer-gated auto-merge) with
+# the .github/CODEOWNERS money-path carve-out.
+merge_policy: reviewer-gated-A
+
+items:
+  - id: pr1
+    title: "test(fortnox): guard that OAuth tokens never leak in responses"
+    scope: >
+      P0 credential hygiene. Fortnox access_token/refresh_token are stored
+      server-side via lib/fortnox-connection.ts; pin that they never reach an
+      API response, matching the redaction bar set for delegate keys
+      (PRs #261–#264). Add route-level tests for routes/fortnox.ts asserting the
+      GET /status response (configured + connected paths) exposes only
+      configured/connected/scope/expiresAt/legacyBookkeeping and NO token
+      fields, and that the POST /connect-url and error/redirect paths never echo
+      token material. Add/extend a lib test asserting getFortnoxConnection's
+      returned shape (and any serialization that could reach a response) carries
+      no raw access_token/refresh_token to callers that render responses. Stub
+      the Fortnox HTTP exchange — no live network. Test-only, no runtime change.
+      Acceptance: new tests green; existing backend suite + tsc unchanged.
+    files:
+      - packages/backend/src/routes/__tests__/fortnox.test.ts
+      - packages/backend/src/lib/__tests__/fortnox-connection.test.ts
+    money_path: false
+    status: merged   # PR #539
+
+  - id: pr2
+    title: "test(fortnox): route-level invariants for the Fortnox endpoints"
+    scope: >
+      P1 route coverage for the live (non-legacy) Fortnox surface. Cover, at the
+      route level: authed endpoints (GET /status, POST /connect-url, GET
+      /connect, DELETE /) reject unauthenticated requests; GET /status returns
+      configured:false when Fortnox is unconfigured and connected:false when no
+      connection row exists; POST /push returns 410 while legacyBookkeeping is
+      off (the gate in routes/fortnox.ts); the ISO-date validation on /push
+      returns 400 for malformed from/to; and the OAuth /callback redirects to
+      settings with fortnox=error on a bad/forged state and fortnox=denied on an
+      error param. Prefer invariant assertions over pinning exact copy. Stub
+      lib/fortnox.ts and lib/fortnox-connection.ts seams — no live network.
+      Test-only. Acceptance: new tests green; suite + tsc unchanged.
+    files:
+      - packages/backend/src/routes/__tests__/fortnox.test.ts
+    money_path: false
+    status: merged   # PR #540
+
+  - id: pr3
+    title: "test(contacts): route-level invariants for the address book"
+    scope: >
+      P1 route coverage for routes/contacts.ts (registered at /contacts, no
+      route-level test today). Assert: every endpoint requires auth; contacts
+      are scoped to the requesting user (no cross-user read/write); address
+      input is validated (the shared lib/address.ts guard from PR #529) so an
+      invalid address is rejected before a write; and create/update/delete
+      behave idempotently per the route's current contract. Read routes/
+      contacts.ts first and pin its actual invariants — do not invent endpoints.
+      Test-only, no runtime change. Acceptance: new tests green; suite + tsc
+      unchanged.
+    files:
+      - packages/backend/src/routes/__tests__/contacts.test.ts
+    money_path: false
+    status: merged   # PR #541
+
+  - id: pr4
+    title: "test(reporting): route-level invariants for the reporting feed API"
+    scope: >
+      P1 route coverage for routes/reporting.ts (registered at
+      /accounting/reporting, no route-level test today; lib/reporting has unit +
+      integration coverage). Assert at the route level: auth is required;
+      behavior respects the reportingFeedEnabled gate (gated endpoints
+      unreachable when off); and any sync/push-triggering endpoint preserves the
+      "never double-post" invariant the lib guarantees (a repeat call does not
+      produce a second connector push) — drive through the route, mocking the
+      connector to count pushes. Read routes/reporting.ts first and pin its
+      actual endpoints/gate; do not duplicate the lib-level dedup tests, assert
+      the route wires them correctly. Test-only. Acceptance: new tests green;
+      suite + tsc unchanged.
+    files:
+      - packages/backend/src/routes/__tests__/reporting.test.ts
+    money_path: false
+    status: merged   # PR #542
+
+  - id: pr5
+    title: "fix(contacts): detect unique violations by code, not message substring"
+    scope: >
+      Surfaced by haven-reviewer during pr3. routes/contacts.ts maps a duplicate
+      -address insert to 409 via `err.message.includes('unique')`, which would
+      also promote any unrelated error whose message contains "unique" to 409 and
+      mask it. Tighten to the codebase-standard `err.code === '23505'` check (see
+      routes/agents.ts and routes/agent-connection-setups.ts for the pattern),
+      and update the contacts unique-violation test to throw a pg-shaped error
+      with `.code = '23505'` so it reflects the real driver behavior. Small
+      runtime change, non-money-path. Acceptance: contacts route suite + tsc
+      green; the 409 path still covered, now via code not message.
+    files:
+      - packages/backend/src/routes/contacts.ts
+      - packages/backend/src/routes/__tests__/contacts.test.ts
+    money_path: false
+    status: merged   # PR #543

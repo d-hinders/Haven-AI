@@ -106,14 +106,12 @@ export default async function passkeyRoutes(app: FastifyInstance): Promise<void>
 
       return reply.code(201).send(result.rows[0])
     } catch (error) {
-      const dbError = error as { code?: string; constraint?: string }
-      if (dbError.code === '23505') {
-        if (dbError.constraint === 'user_passkeys_user_id_chain_id_key') {
-          return reply.code(409).send({ error: 'A passkey is already registered for this chain' })
-        }
-        if (dbError.constraint === 'user_passkeys_credential_id_key') {
-          return reply.code(409).send({ error: 'This credential is already registered' })
-        }
+      const constraint = uniqueViolationConstraint(error)
+      if (constraint === 'user_passkeys_user_id_chain_id_key') {
+        return reply.code(409).send({ error: 'A passkey is already registered for this chain' })
+      }
+      if (constraint === 'user_passkeys_credential_id_key') {
+        return reply.code(409).send({ error: 'This credential is already registered' })
       }
       throw error
     }
@@ -132,4 +130,28 @@ export default async function passkeyRoutes(app: FastifyInstance): Promise<void>
 
     return { passkeys: result.rows }
   })
+}
+
+/**
+ * The constraint name from a Postgres unique violation (SQLSTATE 23505), or null
+ * for any other error — including null/primitive throws. Lets the caller map the
+ * two distinct passkey unique constraints to their 409s without an unsafe
+ * `error as {...}` cast (which would throw on a null/primitive throw). Uses the
+ * `'code' in err` narrowing from routes/contacts.ts and routes/agents.ts, and is
+ * slightly stricter than agents.ts (a `typeof === 'string'` check rather than
+ * coercing via `String(...)`). Unlike contacts (single constraint), passkeys
+ * needs the constraint name to tell its two unique constraints apart.
+ */
+function uniqueViolationConstraint(err: unknown): string | null {
+  if (
+    err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    err.code === '23505' &&
+    'constraint' in err &&
+    typeof err.constraint === 'string'
+  ) {
+    return err.constraint
+  }
+  return null
 }

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { signerPackageSpec } from './runtime-manifest.js'
-import { runtimeRequiresHardRestart, type RuntimeId } from './runtime-registry.js'
+import { type RuntimeId } from './runtime-registry.js'
 
 export type RuntimeMcpMode = 'local_stdio' | 'hosted_plus_signer' | 'manual'
 
@@ -227,9 +227,6 @@ async function writeJsonRuntimeConfig(
 async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
   const target = codexConfigPath(input.homeDir)
   const local = input.mode === 'local'
-  const restartMessage = runtimeRequiresHardRestart(input.runtime)
-    ? 'After Haven approval, restart Codex Desktop so it can load Haven tools.'
-    : 'After Haven approval, Haven tools should appear in your next Codex message. If they don\'t, restart Codex to load them.'
   try {
     const existing = await readOptional(target)
     if (local) {
@@ -248,10 +245,6 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
         restartRequired: true,
         messages: [
           `Updated local Haven MCP entry in ${configTargetLabel(input.runtime)}.`,
-          // Codex Desktop loads MCP servers at app launch; Codex CLI typically
-          // picks them up in the next session. Branch the copy so desktop users
-          // get the unambiguous instruction.
-          restartMessage,
         ],
       }
     }
@@ -267,7 +260,6 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
       restartRequired: true,
       messages: [
         `Updated Haven MCP entries in ${configTargetLabel(input.runtime)}.`,
-        restartMessage,
       ],
     }
   } catch (err) {

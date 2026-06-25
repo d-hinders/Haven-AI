@@ -51,6 +51,36 @@ export const config = {
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
 
+  // Fortnox bookkeeping integration (P2 #465). Disabled unless all three are
+  // set. Secrets — env only, never commit.
+  fortnoxClientId: process.env.FORTNOX_CLIENT_ID ?? '',
+  fortnoxClientSecret: process.env.FORTNOX_CLIENT_SECRET ?? '',
+  fortnoxRedirectUri: process.env.FORTNOX_REDIRECT_URI ?? '',
+
+  // Merchant-catalog auto-discovery from the x402 Bazaar (#473). Off by
+  // default — it calls an external catalog API and inserts rows, so it's
+  // opt-in. The URL is overridable for testing/self-hosted facilitators.
+  catalogDiscoveryEnabled: process.env.CATALOG_DISCOVERY_ENABLED === 'true',
+  catalogDiscoveryUrl: optionalEnv(
+    'CATALOG_DISCOVERY_URL',
+    'https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources',
+  ),
+
+  // Platform fee module (#386). Dark by default — when false the fee is always
+  // zero and no funds move. Real pricing + on-chain collection are deferred.
+  feeEnabled: process.env.HAVEN_FEE_ENABLED === 'true',
+
+  // Legacy asserting bookkeeping (epic #462). Dark by default — superseded by
+  // the non-asserting reporting feed (#491). Code retained; surfaces gated:
+  // SIE export, finished voucher push, and any asserted-VAT output.
+  legacyBookkeepingEnabled: process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED === 'true',
+
+  // Managed-deployment marker — true only on Haven's hosted backend. The
+  // reporting feed (#491) is a hosted-only paid add-on and never runs elsewhere.
+  hosted: process.env.HAVEN_HOSTED === 'true',
+  // Global kill-switch for the reporting feed; dark by default.
+  reportingFeedEnabled: process.env.HAVEN_REPORTING_FEED_ENABLED === 'true',
+
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,

@@ -5,8 +5,8 @@ import type { AggregatedTransaction } from '@/types/transactions'
  * export). Pure and side-effect free so it is unit-testable; the browser
  * download is a separate thin helper below.
  *
- * Fees, USD valuation, and accounting categories are intentionally out of
- * scope for v1 — see issue #411.
+ * Book-time SEK value (`amount_sek`) is included per #463; `fee_sek` is a
+ * reserved column, empty until the fee ledger (#386) lands.
  */
 
 export interface TransactionCsvLookups {
@@ -33,6 +33,8 @@ const COLUMNS = [
   'agent_name',
   'tx_hash',
   'chain_id',
+  'amount_sek',
+  'fee_sek',
 ] as const
 
 function rowType(tx: AggregatedTransaction): string {
@@ -88,6 +90,8 @@ export function transactionsToCsv(
       agent_name: tx.agentName ?? '',
       tx_hash: tx.hash,
       chain_id: String(tx.chainId),
+      amount_sek: tx.amountSek ?? '',
+      fee_sek: '',
     }
     lines.push(COLUMNS.map((col) => csvField(record[col])).join(','))
   }

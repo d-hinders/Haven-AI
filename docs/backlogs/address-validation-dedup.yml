@@ -1,0 +1,37 @@
+# Code-quality track: consolidate Ethereum address validation.
+# Driven by the autonomous PR loop — see docs/contributing/autonomous-pr-loop.md.
+#
+# isValidAddress was defined ~9 times and the 40-hex regex copy-pasted ~10+ times
+# across the backend. lib/address.ts (isAddress + ETH_ADDRESS_RE) is the single
+# source of truth; callers migrate to it.
+
+track: address-validation-dedup
+active: true
+merge_policy: reviewer-gated-A
+
+items:
+  - id: pr1
+    title: "Add lib/address.ts; migrate non-money-path callers"
+    scope: >
+      Create lib/address.ts (isAddress type guard + ETH_ADDRESS_RE) with tests,
+      and route the non-CODEOWNERS callers to it: routes/contacts, routes/agents,
+      routes/safe-exec, routes/demo-mpp, lib/agent-connection-setup,
+      lib/agent-allowance-validation. Pure refactor; identical regex.
+      Acceptance: backend suite + tsc green; behavior unchanged.
+    money_path: false
+    status: merged   # landed on main as PR #529
+
+  - id: pr2
+    title: "Migrate money-path callers to lib/address.ts"
+    scope: >
+      Route the CODEOWNERS-owned money-path callers to lib/address.isAddress:
+      routes/x402, routes/x402-resources, routes/payments,
+      routes/machine-payments, lib/machine-payments (drop its local
+      isValidAddress export — update importers), middleware/agentAuth. Identical
+      regex, behavior-preserving; existing route suites are the regression gate.
+    money_path: true        # CODEOWNERS-owned → waits for a collaborator's merge
+    status: todo
+
+  # Follow-up (not in this demo run): the three ETH_ADDRESS_RE const copies in
+  # routes/portfolio, routes/transactions, routes/safe-details can also import
+  # from lib/address.

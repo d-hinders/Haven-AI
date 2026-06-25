@@ -14,6 +14,7 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
+    getBookTimeSekValue: vi.fn().mockResolvedValue(null),
   },
 }))
 
@@ -522,6 +523,22 @@ describe('payment routes', () => {
     expect(mockQuery.mock.calls[2][0]).toContain("status = 'pending_signature'")
   })
 
+  it('surfaces the platform fee on a payment result so it is never silent (#386)', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [pendingIntent({ status: 'confirmed', tx_hash: TX_HASH })] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/payments/${PAYMENT_ID}`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    // Dark today: zero + not applied — but always present.
+    expect(response.json().fee).toEqual({ amount: '0', token: 'xDAI', basis_points: 0, applied: false })
+  })
+
   it('expires stale pending signature intents before listing payments', async () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
@@ -540,5 +557,90 @@ describe('payment routes', () => {
     ])
     expect(mockQuery.mock.calls[1][0]).toContain("status = 'pending_signature'")
     expect(mockQuery.mock.calls[2][0]).toContain('ORDER BY created_at DESC')
+  })
+
+  // POST /payments — the normal send/transfer flow. These pin the coverage
+  // decision now routed through decideCoverage('allowance-only'): over-allowance
+  // queues (202), within-allowance executes (201), and the inclusive boundary
+  // (amount == remaining) executes — not queues.
+  describe('POST /payments (create)', () => {
+    const ONE_XDAI = 1_000_000_000_000_000_000n // 1 xDAI, 18 decimals
+
+    function createBody() {
+      return { token: 'xDAI', amount: '1', to: RECIPIENT }
+    }
+
+    it('queues for approval (202) when amount exceeds remaining allowance', async () => {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI / 2n })
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // db allowance config
+        .mockResolvedValueOnce({ rows: [{ id: 'appr-1', status: 'pending', expires_at: '2099-01-01T00:00:00.000Z' }] }) // approval INSERT
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: createBody(),
+      })
+
+      expect(response.statusCode).toBe(202)
+      expect(response.json()).toMatchObject({ payment_id: 'appr-1', status: 'pending_approval' })
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO approval_requests/.test(c[0] as string))
+      expect(insert, 'over-allowance must INSERT an approval_requests row').toBeDefined()
+      // generateTransferHash must NOT run on the queue path.
+      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    })
+
+    it('executes (201) when amount is within remaining allowance', async () => {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+        .mockResolvedValueOnce({ rows: [pendingIntent()] }) // payment_intents INSERT
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: createBody(),
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, status: 'pending_signature' })
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO payment_intents/.test(c[0] as string))
+      expect(insert, 'within-allowance must INSERT a payment_intents row').toBeDefined()
+    })
+
+    it('executes (201) at the exact allowance boundary (amount == remaining)', async () => {
+      // Inclusive boundary: amount == remaining must execute, not queue. Guards
+      // against a `>=` slip in the shared decideCoverage decision.
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI })
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+        .mockResolvedValueOnce({ rows: [pendingIntent()] })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: createBody(),
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(allowanceMocks.generateTransferHash).toHaveBeenCalled()
+    })
   })
 })

@@ -1,7 +1,10 @@
 {
   "name": "@haven_ai/signer",
-  "version": "0.1.16-alpha.0",
+  "version": "0.1.17-alpha.0",
   "description": "Haven edge signer — holds the delegate key locally and signs payment hashes + x402 headers. Pairs with the hosted, keyless @haven_ai/mcp-server.",
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "bin": {
     "haven-signer": "./dist/cli.js"
@@ -38,8 +41,13 @@
     "x402"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d-hinders/Haven-AI.git",
+    "directory": "packages/signer"
+  },
   "dependencies": {
-    "@haven_ai/sdk": "0.1.16-alpha.0",
+    "@haven_ai/sdk": "0.1.17-alpha.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "viem": "^2.51.0",
     "x402": "^1.2.0",

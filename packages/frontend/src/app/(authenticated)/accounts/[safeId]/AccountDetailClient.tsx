@@ -438,7 +438,7 @@ export default function AccountDetailClient() {
               title="Agent access could not load"
               body="Haven could not verify which agents can request payments from this wallet."
               className="py-8"
-              action={<Button variant="ghost" size="sm" onClick={refetchAgents}>Try again</Button>}
+              action={<Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>}
             />
           </div>
         ) : safeAgents.length > 0 ? (

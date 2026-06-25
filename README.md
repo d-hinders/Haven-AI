@@ -43,7 +43,10 @@ This is a TypeScript monorepo:
 
 ## Prerequisites
 
-- **Node.js** v18+ — [nodejs.org](https://nodejs.org)
+- **Node.js 24 (LTS)** — pinned in [`.nvmrc`](.nvmrc) and `engines`; CI and the
+  Docker images run the same major. With [`nvm`](https://github.com/nvm-sh/nvm)
+  or [`fnm`](https://github.com/Schniz/fnm), run `nvm use` / `fnm use` in the repo
+  root to match it automatically (otherwise `npm install` warns `EBADENGINE`).
 - **Docker Desktop** (for local hosting) — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
 - **A browser wallet** (MetaMask, Rabby, etc.) with Gnosis Chain or Base configured
 
@@ -290,6 +293,8 @@ Independent layers keep the API and signing boundaries separate:
 
 If Haven is compromised, API keys alone cannot sign transactions. A Safe owner can pause or revoke an agent in Haven and can also revoke Safe permissions through Safe-compatible tooling without needing Haven.
 
+Approvers (Safe owners) can be managed per account from **Settings → Approvers** — add or remove an EOA address or a passkey, or reuse an existing approver across accounts. The signing threshold stays at 1, the last owner can never be removed, and each owner change is signed by a current owner and relayed (Haven never signs it).
+
 ### Key Management
 
 | Key | Who holds it | What it can do |
@@ -320,6 +325,7 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 |---|---|---|
 | Dashboard auth | None/JWT | `/auth/signup`, `/auth/login`, `/auth/me` |
 | Haven wallets | JWT | `/user/safes`, `/user/safes/deploy`, balances and account views |
+| Approvers (Safe owners) | JWT | `/user/safes/:id/approvers` (list), `/user/safes/:id/approvers/tx` (build add/remove owner-change tx), `/user/safes/known-approvers` (reuse across Safes) |
 | Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key`, `/agents/:id/allowances` |
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
 | Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |
@@ -511,7 +517,9 @@ npm run release:bump -- <new-version>   # e.g. 0.1.17-alpha.0
 On merge, the **Publish packages** workflow (`.github/workflows/publish.yml`) rebuilds `dist` in dependency order and publishes only the packages whose `package.json` version is not yet on npm. The dist-tag is derived from the version: a prerelease like `0.1.17-alpha.0` publishes under `--tag alpha`, a stable `0.2.0` under `latest`. The connector install command the dashboard hands out is pinned to `@alpha`, so the prerelease line is what real users get.
 
 - **Trigger model:** version bump = the gate. npm rejects republishing an existing version, so a normal (non-bump) commit is a no-op.
-- **Auth:** the workflow uses the `NPM_TOKEN` repo secret — a granular npm token scoped to `@haven_ai`, read+write. It has an expiry; when it lapses, publishes fail and the token must be regenerated and the secret updated.
+- **Auth:** [npm Trusted Publishing (OIDC)](https://docs.npmjs.com/trusted-publishers) — there is **no `NPM_TOKEN` secret**. The workflow grants the job `id-token: write` and upgrades npm to ≥ 11.5.1; npm then authenticates the short-lived GitHub Actions OIDC token against a *trusted publisher* configured per package on npm (pointing at `d-hinders/Haven-AI` + workflow `publish.yml`). Nothing to leak or rotate, and it's exempt from the 2FA one-time-password prompt that blocks token-based publishes.
+- **Provenance:** Trusted Publishing auto-generates a signed [sigstore provenance](https://docs.npmjs.com/generating-provenance-statements) statement. npm rejects the upload (`E422`) unless each `package.json` declares a `repository.url` (with the monorepo `directory`) matching the repo — all four packages carry this.
+- **Adding a new published package?** Before its first release, (1) configure a trusted publisher for it on npm (package → Settings → Trusted Publisher → GitHub Actions: `d-hinders` / `Haven-AI` / `publish.yml`), and (2) give its `package.json` a `repository` block. Skipping either makes the first publish fail — on auth (`EOTP`/OIDC) or provenance (`E422`) respectively.
 - **Not published this way:** `mcp-server` (Docker → Railway), `backend`, and `frontend` (Vercel/Railway) deploy from `main` directly.
 - Full details, the dist-wipe rationale, and a manual fallback live in [`scripts/README.md`](scripts/README.md).
 

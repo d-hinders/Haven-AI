@@ -202,6 +202,50 @@ describe('x402 routes', () => {
     expect(insertCall[1]).toContain('x402:test')
   })
 
+  it('executes at the exact allowance boundary (amount == remaining, zero delegate balance)', async () => {
+    // Boundary regression guard for the balance-aware coverage decision: with a
+    // zero delegate balance, totalCoverage == remaining, so amount == remaining
+    // sits exactly on the inclusive edge — it must execute, not 422 (insufficient)
+    // or 202 (queue). A `>=` slip in decideCoverage would break precisely here.
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 20_000n })
+    allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({
+        rows: [{ id: '33333333-3333-3333-3333-333333333333', expires_at: new Date('2026-05-10T20:00:00.000Z') }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:boundary',
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({ status: 'pending_signature' })
+    expect(allowanceMocks.generateTransferHash).toHaveBeenCalledWith(
+      8453, AGENT.safe_address, USDC, AGENT.delegate_address, 20000n,
+      '0x0000000000000000000000000000000000000000', 0n, 7,
+    )
+  })
+
   it('records one-shot x402 signatures without marking the payment submitted before execution', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })

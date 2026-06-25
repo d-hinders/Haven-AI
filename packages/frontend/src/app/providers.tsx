@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { AuthProvider } from '@/context/AuthContext'
+import { LocaleProvider } from '@/context/LocaleContext'
 import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RainbowKitProvider, lightTheme } from '@rainbow-me/rainbowkit'
@@ -24,33 +25,48 @@ const queryClient = new QueryClient({
   },
 })
 
+/**
+ * The wallet provider tree (wagmi connectors / RainbowKit) must not render
+ * during SSR/prerender — the connectors touch `localStorage` at mount, which
+ * throws during static generation. So it stays gated behind a client `mounted`
+ * flag.
+ *
+ * `AuthProvider` is the *stable root* in both states (it uses no wagmi context
+ * and is already SSR-safe). The previous version swapped the root element type
+ * on hydration (AuthProvider → WagmiProvider), which made React discard and
+ * rebuild the entire app fiber tree — re-running every component's mount, and
+ * re-initialising the wallet connectors (WalletConnect/Coinbase, via the
+ * `events` polyfill, add `close` listeners) more than once. Under React Strict
+ * Mode that churn is what surfaces the "Possible EventEmitter memory leak … N
+ * close listeners" warning. Keeping AuthProvider stable means only the wallet
+ * subtree mounts on hydration, not the whole app. (#410)
+ */
 export default function Providers({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  // During SSR / static prerender, render children without wallet providers
-  // This avoids WagmiProviderNotFoundError during next build
-  if (!mounted) {
-    return <AuthProvider>{children}</AuthProvider>
-  }
+  useEffect(() => setMounted(true), [])
 
   return (
-    <WagmiProvider config={config}>
-      <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider
-          theme={lightTheme({
-            accentColor: '#4f46e5',
-            accentColorForeground: 'white',
-            borderRadius: 'medium',
-            overlayBlur: 'small',
-          })}
-        >
-          <AuthProvider>{children}</AuthProvider>
-        </RainbowKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <LocaleProvider>
+      <AuthProvider>
+        {mounted ? (
+          <WagmiProvider config={config}>
+            <QueryClientProvider client={queryClient}>
+              <RainbowKitProvider
+                theme={lightTheme({
+                  accentColor: '#4f46e5',
+                  accentColorForeground: 'white',
+                  borderRadius: 'medium',
+                  overlayBlur: 'small',
+                })}
+              >
+                {children}
+              </RainbowKitProvider>
+            </QueryClientProvider>
+          </WagmiProvider>
+        ) : (
+          children
+        )}
+      </AuthProvider>
+    </LocaleProvider>
   )
 }

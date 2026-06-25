@@ -15,7 +15,35 @@ import {
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
+import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
+import { quoteFee } from '../lib/fee/fee-module.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
+import { decideCoverage } from '../lib/payment-coverage.js'
+
+/**
+ * Surface the platform fee on a payment result so it's never silently collected
+ * (#386 acceptance). Dark while the fee module is disabled — `amount` is "0" and
+ * `applied` is false — but the field is always present so agents see it the
+ * moment fees go live.
+ */
+function buildResponseFee(intent: PaymentIntentRow) {
+  let gross = 0n
+  try { gross = BigInt(intent.amount_raw) } catch { gross = 0n }
+  const quote = quoteFee({
+    paymentId: intent.id,
+    rail: 'direct',
+    grossAtomic: gross,
+    token: intent.token_symbol,
+    userId: intent.user_id,
+  })
+  const tokenConfig = resolveToken(intent.chain_id, intent.token_symbol)
+  return {
+    amount: quote.feeAtomic === 0n ? '0' : ethers.formatUnits(quote.feeAtomic, tokenConfig?.decimals ?? 18),
+    token: quote.feeToken,
+    basis_points: quote.basisPoints,
+    applied: !quote.isZero,
+  }
+}
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -157,10 +185,16 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
     const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
-    // 5a. Auto-queue for owner approval when the amount exceeds the on-chain
-    // remaining allowance. Agents can request payments of any size — the
+    // 5a. Coverage decision (shared with the x402 / MPP money paths via
+    // lib/payment-coverage.decideCoverage). The normal-send flow is allowance-
+    // only — there is no delegate hot-wallet leg, so over-allowance always
+    // queues for owner approval. Agents can request payments of any size; the
     // owner approves or rejects in the dashboard.
-    if (amountRaw > effective.remaining) {
+    const coverage = decideCoverage('allowance-only', {
+      amount: amountRaw,
+      remaining: effective.remaining,
+    })
+    if (coverage.kind === 'queue') {
       const reason = (request.body as unknown as Record<string, unknown>).reason as string | undefined
       const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
       const approvalReason =
@@ -531,6 +565,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       to: intent.to_address,
       tx_hash: intent.tx_hash,
       explorer_url: intent.tx_hash ? getExplorerUrl(intent.chain_id, 'tx', intent.tx_hash) : null,
+      fee: buildResponseFee(intent),
       error_message: intent.error_message,
       created_at: intent.created_at,
       signed_at: intent.signed_at,
@@ -538,6 +573,20 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       confirmed_at: intent.confirmed_at,
       expires_at: intent.expires_at,
     }
+  })
+
+  // ── GET /:id/receipt — verifiable proof bundle for a settled payment ──
+
+  app.get<{ Params: { id: string } }>('/:id/receipt', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const receipt = await getPaymentReceipt(request.params.id, agent.id)
+    if (!receipt) {
+      return reply.code(404).send({ error: 'No settled payment found for this id' })
+    }
+    // Self-verify so the response states the proof status; the bundle is also
+    // verifiable independently of Haven (recover the signer from authorization).
+    const verification = verifyPaymentReceipt(receipt)
+    return { receipt, verification }
   })
 
   // ── GET / — List payment intents for this agent ─────────

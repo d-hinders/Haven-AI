@@ -33,7 +33,7 @@ Protocols → x402, Stripe MPP (agent payment standards)
 ### 1. Safe (Smart Account)
 - Holds funds, executes transactions
 - Multi-owner / threshold security
-- **Gnosis Chain** (POC target)
+- **Base** (chain ID 8453) is the **primary / default network**; **Gnosis Chain** (chain ID 100) is also supported
 - Two onboarding paths: **in-app deployment** during signup (passkey-owned Safe via `POST /safe/deploy`, or EOA-owned via the connected-wallet flow) and **import** of an existing Safe (`POST /user/safes`)
 - Interaction is via direct contract calls with `ethers.js` against Safe + the AllowanceModule (no `@safe-global/protocol-kit` yet — see Tech Stack)
 
@@ -128,7 +128,7 @@ For standard merchant x402, the AllowanceModule transfer is `Safe → delegate E
 
 ## Tech Stack Guidance
 
-- **Chain:** Gnosis Chain (POC target, chain ID 100), multi-chain later
+- **Chain:** **Base (chain ID 8453) is the primary / default network**; Gnosis Chain (chain ID 100) is also supported (see the registry in `lib/chains.ts`). Multi-chain later. Note: some DB column defaults and route fallbacks still default `chain_id` to `100` (Gnosis) — see migrations and `?? 100` fallbacks; align these to Base if/when Base should be the runtime default for new agents, not just the documented one
 - **Smart Accounts:** Safe + AllowanceModule, accessed via direct contract calls with `ethers.js`. Adopting `@safe-global/protocol-kit` is a possible future cleanup, not a current convention
 - **Language:** TypeScript throughout
 - **Backend Framework:** Fastify (Node.js)
@@ -226,3 +226,5 @@ No nested filled cards. To group content inside a `Card`, use `Card.Section` (wh
 Use `docs/contributing/ai-agent-workflow.md` for feature delivery, UX feedback iteration, and bug fixing. Agentic delivery is a default workflow decision for non-trivial Haven work, not an opt-in phrase the user must repeat. Keep the main interactive session as captain and use the project agents in `.claude/agents/` for workflow coordination, discovery, bounded implementation, and review when the task shape warrants it.
 
 The captain owns product judgment, shared files, gravity files, git hygiene, final integration, and verification. Use workers only for clean, disjoint slices with explicit file ownership. Inform the user which agents are being used, but do not ask for permission unless there is a real blocker, destructive action, credential risk, or tool limitation.
+
+For shipping a **defined set of PRs** (a code-quality track or an epic's sub-issues) with minimal user input, use the autonomous PR loop: `/loop /ship-next`. It implements, tests, runs haven-reviewer, opens, and reviewer-gated auto-merges each PR — escalating to the user only on a blocking finding, a real decision, a money-path merge (the `.github/CODEOWNERS` carve-out), or stuck CI. See `docs/contributing/autonomous-pr-loop.md` (includes the one-time GitHub setup).

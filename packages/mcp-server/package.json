@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/mcp-server",
-  "version": "0.1.16-alpha.0",
+  "version": "0.1.17-alpha.0",
   "description": "Hosted, keyless Haven MCP server — constructs and relays payments over Streamable HTTP. Never holds the delegate key; the edge signs.",
   "type": "module",
   "bin": {
@@ -41,12 +41,12 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@haven_ai/sdk": "0.1.16-alpha.0",
+    "@haven_ai/sdk": "0.1.17-alpha.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@haven_ai/signer": "0.1.16-alpha.0",
+    "@haven_ai/signer": "0.1.17-alpha.0",
     "@types/node": "^20.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",

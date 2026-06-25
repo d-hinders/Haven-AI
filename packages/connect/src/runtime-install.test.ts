@@ -56,6 +56,10 @@ describe('installRuntime', () => {
     expect(codexConfig).not.toContain(API_KEY)
     expect(codexConfig).not.toContain(PRIVATE_KEY)
     expect(ack).toContain('"ack"')
+    // Restart guidance lives only in runConnect's printNextSteps now — the Codex
+    // writer must not re-inject it (it previously did, contradicting that copy).
+    expect(result.messages.join('\n')).not.toContain('should appear')
+    expect(result.messages.join('\n')).not.toMatch(/restart/i)
     expect(result.messages.join('\n')).not.toContain(API_KEY)
     expect(result.messages.join('\n')).not.toContain(PRIVATE_KEY)
   })
@@ -178,6 +182,10 @@ describe('installRuntime', () => {
       args: ['mcp', 'get', 'haven'],
     })
     expect(result.messages.join('\n')).toContain('Verified Claude Code MCP entry.')
+    // Restart/approval guidance is owned solely by runConnect's printNextSteps.
+    // The config writer must not inject its own (previously contradicting) copy.
+    expect(result.messages.join('\n')).not.toContain('should appear')
+    expect(result.messages.join('\n')).not.toMatch(/restart/i)
     expect(JSON.stringify(commands)).not.toContain('Authorization')
     expect(JSON.stringify(commands)).not.toContain(API_KEY)
     expect(JSON.stringify(commands)).not.toContain(PRIVATE_KEY)
@@ -276,6 +284,39 @@ describe('installRuntime', () => {
     expect(result.errorCode).toBe('local_mcp_probe_missing_tools')
     expect(result.probeResult).toBe('local_stdio_mcp_missing_tools')
     expect(result.messages.join('\n')).toContain('Local Haven MCP handshake failed: missing_tools.')
+  })
+
+  it('gives custom "other" runtimes a secret-free, file-referenced setup message', async () => {
+    // The connector cannot auto-config a custom runtime, so it must hand back
+    // actionable, secret-free guidance: name the on-disk credential files and
+    // the signer/MCP commands that read them, and never echo the raw keys
+    // (which would land in the custom agent's context/logs).
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-other-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'other',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+    })
+
+    expect(result.runtime).toBe('other')
+    expect(result.errorCode).toBe('manual_runtime_setup_required')
+    const msg = result.messages.join('\n')
+    expect(msg).toContain(identityPath)
+    expect(msg).toContain(signerPath)
+    expect(msg).toContain('npx -y @haven_ai/signer')
+    expect(msg).toContain('npx -y @haven_ai/mcp')
+    expect(msg).not.toContain(API_KEY)
+    expect(msg).not.toContain(PRIVATE_KEY)
   })
 })
 

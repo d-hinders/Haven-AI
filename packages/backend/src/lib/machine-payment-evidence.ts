@@ -1,4 +1,7 @@
 import pool from '../db.js'
+import { getBookTimeSekValue } from './fiat-values.js'
+import { quoteFee, recordSettledFee } from './fee/fee-module.js'
+import { feedSettledPaymentBestEffort } from './reporting/feed-orchestrator.js'
 
 const PROTOCOL_RAILS = new Set(['x402', 'mpp_demo', 'mpp_crypto', 'spt'])
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -82,6 +85,10 @@ export interface MachinePaymentEvidenceRow {
   protocol_receipt_payload: Record<string, unknown> | null
   merchant_status: number | null
   confirmed_at: string | null
+  amount_sek: string | null
+  fx_rate_sek: string | null
+  fx_source: string | null
+  fx_at: string | null
   created_at: string
   updated_at: string
 }
@@ -177,17 +184,28 @@ export async function recordMachinePaymentEvidenceBase(
   const paymentIntentId = referenceColumn === 'payment_intent_id' ? intent.id : null
   const approvalRequestId = referenceColumn === 'approval_request_id' ? intent.id : null
 
+  // Book-time FX (migration 026): captured here, at settlement, and never
+  // overwritten (the COALESCE below). A pricing outage yields null, which is
+  // backfillable — it must not block settlement.
+  const sek = await getBookTimeSekValue(intent.token_symbol, intent.amount_human)
+  const amountSek = sek ? sek.amountSek : null
+  const fxRateSek = sek ? sek.fxRate : null
+  const fxSource = sek ? sek.fxSource : null
+  const fxAt = sek ? new Date().toISOString() : null
+
   await pool.query(
     `INSERT INTO machine_payment_evidence (
       payment_intent_id, approval_request_id, agent_id, user_id, rail, proof_status, tx_hash,
       chain_id, resource_url, merchant_address, payer_address, settlement_address,
       token_symbol, token_address, amount_raw, amount_human, challenge_id,
-      idempotency_key, challenge_payload, confirmed_at
+      idempotency_key, challenge_payload, confirmed_at,
+      amount_sek, fx_rate_sek, fx_source, fx_at
     ) VALUES (
       $1, $2, $3, $4, $5, 'payment_confirmed', LOWER($6::TEXT),
       $7, $8, LOWER($9::TEXT), LOWER($10::TEXT), LOWER($11::TEXT),
       $12, LOWER($13::TEXT), $14, $15, $16,
-      $17, $18, $19
+      $17, $18, $19,
+      $20, $21, $22, $23
     )
     ${conflictClause}
     DO UPDATE SET
@@ -206,6 +224,10 @@ export async function recordMachinePaymentEvidenceBase(
       idempotency_key = EXCLUDED.idempotency_key,
       challenge_payload = COALESCE(machine_payment_evidence.challenge_payload, EXCLUDED.challenge_payload),
       confirmed_at = EXCLUDED.confirmed_at,
+      amount_sek = COALESCE(machine_payment_evidence.amount_sek, EXCLUDED.amount_sek),
+      fx_rate_sek = COALESCE(machine_payment_evidence.fx_rate_sek, EXCLUDED.fx_rate_sek),
+      fx_source = COALESCE(machine_payment_evidence.fx_source, EXCLUDED.fx_source),
+      fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at),
       updated_at = NOW()`,
     [
       paymentIntentId,
@@ -227,8 +249,36 @@ export async function recordMachinePaymentEvidenceBase(
       idempotencyKeyForPayment(intent),
       normalizeJson(intent.machine_metadata),
       intent.confirmed_at ?? null,
+      amountSek,
+      fxRateSek,
+      fxSource,
+      fxAt,
     ],
   )
+
+  // Record the (currently zero) platform fee for this payment so the fee ledger
+  // and the bookkeeping export have a complete, reconcilable history (#386
+  // scaffold). Best-effort and idempotent — must never block settlement, and
+  // moves no funds while the fee module is dark.
+  try {
+    let grossAtomic = 0n
+    try { grossAtomic = BigInt(intent.amount_raw) } catch { grossAtomic = 0n }
+    const quote = quoteFee({
+      paymentId: intent.id,
+      rail: rail ?? 'unknown',
+      grossAtomic,
+      token: intent.token_symbol,
+      userId: intent.user_id,
+    })
+    await recordSettledFee(quote)
+  } catch {
+    // swallow — fee recording is non-critical to settlement
+  }
+
+  // Auto-feed the settled payment into the user's accounting tool (#491/#499).
+  // Fire-and-forget + idempotent: never blocks or delays settlement, inert
+  // unless the hosted reporting feed is available for this user.
+  feedSettledPaymentBestEffort(intent.user_id, intent.id)
 }
 
 export async function recordMachinePaymentEvidenceBaseById(

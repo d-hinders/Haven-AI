@@ -3,7 +3,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { getExplorerUrl } from '../lib/chains.js'
-import { isValidAddress } from '../lib/machine-payments.js'
+import { isAddress as isValidAddress } from '../lib/address.js'
 
 const RAIL = 'mpp_demo'
 const VERSION = '2026-05-12'

@@ -39,6 +39,8 @@ export interface Transaction {
   paymentFlowStatus?: string | null
   paymentAttentionReason?: string | null
   activityType?: 'delegate_sweep'
+  /** Book-time SEK value (P0 #463); null for non-machine / unpriced transactions. */
+  amountSek?: string | null
 }
 
 interface UserSafeRow {
@@ -69,6 +71,7 @@ interface PaymentIntentAgentRow {
   merchant_address: string | null
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
+  amount_sek: string | null
 }
 
 interface ApprovalRequestAgentRow {
@@ -83,6 +86,7 @@ interface ApprovalRequestAgentRow {
   merchant_address: string | null
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
+  amount_sek: string | null
 }
 
 interface DelegateSweepAgentRow {
@@ -114,6 +118,7 @@ interface X402PaymentIntentRow {
   x402_resource_url: string | null
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
+  amount_sek: string | null
   confirmed_at: string | null
   created_at: string
 }
@@ -136,6 +141,7 @@ interface X402ApprovalRequestRow {
   payment_resource_url: string | null
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
+  amount_sek: string | null
   executed_at: string | null
   created_at: string
 }
@@ -506,6 +512,7 @@ export async function enrichTransactionsWithAgents(
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS payment_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS merchant_address,
               mpe.proof_status AS payment_proof_status,
+              mpe.amount_sek AS amount_sek,
               mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
@@ -539,6 +546,7 @@ export async function enrichTransactionsWithAgents(
         paymentFlowStatus: string | null
         paymentAttentionReason: string | null
         activityType?: 'delegate_sweep'
+        amountSek: string | null
       }
     >()
     for (const row of piResult.rows) {
@@ -559,6 +567,7 @@ export async function enrichTransactionsWithAgents(
           paymentProofStatus: row.payment_proof_status,
           paymentFlowStatus: lifecycle.paymentFlowStatus,
           paymentAttentionReason: lifecycle.paymentAttentionReason,
+          amountSek: row.amount_sek,
         },
       )
     }
@@ -574,6 +583,7 @@ export async function enrichTransactionsWithAgents(
               COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS payment_resource_url,
               ar.merchant_address,
               mpe.proof_status AS payment_proof_status,
+              mpe.amount_sek AS amount_sek,
               mpre.event_type AS payment_reconciliation_event_type
        FROM approval_requests ar
        JOIN agents a ON a.id = ar.agent_id
@@ -618,6 +628,7 @@ export async function enrichTransactionsWithAgents(
         paymentProofStatus: proofStatus,
         paymentFlowStatus: lifecycle.paymentFlowStatus,
         paymentAttentionReason: lifecycle.paymentAttentionReason,
+        amountSek: row.amount_sek,
       })
     }
 
@@ -658,6 +669,7 @@ export async function enrichTransactionsWithAgents(
           paymentFlowStatus: null,
           paymentAttentionReason: null,
           activityType: 'delegate_sweep',
+          amountSek: null,
         },
       )
     }
@@ -678,6 +690,7 @@ export async function enrichTransactionsWithAgents(
         paymentFlowStatus: agent?.paymentFlowStatus ?? tx.paymentFlowStatus,
         paymentAttentionReason: agent?.paymentAttentionReason ?? tx.paymentAttentionReason,
         activityType: agent?.activityType ?? tx.activityType,
+        amountSek: agent?.amountSek ?? tx.amountSek,
       }
     })
   } catch {
@@ -709,6 +722,7 @@ export async function fetchConfirmedX402Transactions(
             pi.x402_merchant_address,
             pi.x402_resource_url,
             mpe.proof_status AS payment_proof_status,
+            mpe.amount_sek AS amount_sek,
             mpre.event_type AS payment_reconciliation_event_type,
             pi.confirmed_at,
             pi.created_at
@@ -750,6 +764,7 @@ export async function fetchConfirmedX402Transactions(
             ar.merchant_address,
             COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS payment_resource_url,
             mpe.proof_status AS payment_proof_status,
+            mpe.amount_sek AS amount_sek,
             mpre.event_type AS payment_reconciliation_event_type,
             ar.executed_at,
             ar.created_at
@@ -816,6 +831,7 @@ export async function fetchConfirmedX402Transactions(
       paymentProofStatus: proofStatus,
       paymentFlowStatus: lifecycle.paymentFlowStatus,
       paymentAttentionReason: lifecycle.paymentAttentionReason,
+      amountSek: row.amount_sek,
     }
   })
 
@@ -861,6 +877,7 @@ export async function fetchConfirmedX402Transactions(
       paymentProofStatus: proofStatus,
       paymentFlowStatus: lifecycle.paymentFlowStatus,
       paymentAttentionReason: lifecycle.paymentAttentionReason,
+      amountSek: row.amount_sek,
     }
   })
 

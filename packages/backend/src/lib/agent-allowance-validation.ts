@@ -1,3 +1,5 @@
+import { isAddress } from './address.js'
+
 export interface AgentAllowanceInput {
   token_address?: unknown
   token_symbol?: unknown
@@ -73,7 +75,7 @@ export function normalizeAgentAllowances(input: unknown): ValidationResult<Norma
 }
 
 export function normalizeAgentAllowanceTokenAddress(input: unknown): ValidationResult<string> {
-  if (typeof input !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(input)) {
+  if (!isAddress(input)) {
     return { ok: false, error: 'Valid token address is required' }
   }
   return { ok: true, value: input.toLowerCase() }

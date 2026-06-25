@@ -1,7 +1,10 @@
 {
   "name": "@haven_ai/sdk",
-  "version": "0.1.16-alpha.0",
+  "version": "0.1.17-alpha.0",
   "description": "TypeScript SDK for Haven — agent wallet infrastructure",
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -40,6 +43,11 @@
     "ai-agent"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d-hinders/Haven-AI.git",
+    "directory": "packages/sdk"
+  },
   "dependencies": {
     "ethers": "^6.13.0",
     "viem": "^2.51.0",

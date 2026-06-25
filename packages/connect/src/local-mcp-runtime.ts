@@ -130,23 +130,35 @@ async function installRuntimePackages(
   npmCacheDirectory: string,
   runCommand: ((command: string, args: string[]) => Promise<void>) | undefined,
 ): Promise<void> {
-  const args = [
+  // Mirrors prepareSignerRuntime's installRuntimePackages: fast path reuses the
+  // default npm cache (warmed by npx) with --prefer-offline so the mcp + sdk
+  // tarballs are not re-downloaded; fall back to the isolated Haven-owned cache
+  // if the default cache is broken or root-owned (see docs/operations/
+  // mcp-runtime-compatibility.md).
+  const baseArgs = [
     'install',
     '--prefix',
     runtimeDirectory,
-    '--cache',
-    npmCacheDirectory,
     '--no-audit',
     '--no-fund',
     '--omit=dev',
+    '--prefer-offline',
     mcpPackageSpec(),
     sdkPackageSpec(),
   ]
-  try {
+  const run = async (args: string[]): Promise<void> => {
     if (runCommand) await runCommand('npm', args)
     else await execFileAsync('npm', args, { timeout: 120_000, maxBuffer: 1024 * 1024 })
-  } catch (err) {
-    throw new Error(`Could not install local Haven MCP runtime ${mcpPackageSpec()}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  try {
+    await run(baseArgs)
+  } catch {
+    try {
+      await run([...baseArgs, '--cache', npmCacheDirectory])
+    } catch (err) {
+      throw new Error(`Could not install local Haven MCP runtime ${mcpPackageSpec()}: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 }
 

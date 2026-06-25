@@ -8,7 +8,7 @@ import { getChain, SUPPORTED_CHAIN_IDS, type TokenConfig } from './chains.js'
 import { config } from '../config.js'
 import { createCache } from './cache.js'
 
-type PriceMap = Record<string, { usd: number; eur: number }>
+type PriceMap = Record<string, { usd: number; eur: number; sek: number }>
 
 const priceCache = createCache<PriceMap>(60_000)
 const CACHE_KEY = 'all'
@@ -32,7 +32,7 @@ export async function fetchTokenPrices(): Promise<PriceMap> {
     const ids = Array.from(idToSymbols.keys()).join(',')
     const apiKey = config.coingeckoApiKey
 
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,eur`
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,eur,sek`
 
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (apiKey) {
@@ -45,17 +45,30 @@ export async function fetchTokenPrices(): Promise<PriceMap> {
       throw new Error(`CoinGecko API error: ${res.status}`)
     }
 
-    const data = (await res.json()) as Record<string, { usd?: number; eur?: number }>
+    const data = (await res.json()) as Record<string, { usd?: number; eur?: number; sek?: number }>
 
     const prices: PriceMap = {}
+    let usable = 0
     for (const [geckoId, symbols] of idToSymbols.entries()) {
       const p = data[geckoId]
       for (const symbol of symbols) {
         prices[symbol] = {
           usd: p?.usd ?? 0,
           eur: p?.eur ?? 0,
+          sek: p?.sek ?? 0,
+        }
+        if (prices[symbol].usd > 0 || prices[symbol].eur > 0 || prices[symbol].sek > 0) {
+          usable += 1
         }
       }
+    }
+
+    // A 200 response that carries no usable price (empty/degraded upstream, e.g.
+    // a soft rate-limit) must not be cached — that would pin every token to 0 for
+    // the full TTL. Throw so getOrFetch skips the cache and callers fall back
+    // safely (book-time SEK → null/backfillable, fiat display → caught → null).
+    if (usable === 0) {
+      throw new Error('CoinGecko returned no usable prices')
     }
 
     return prices
@@ -65,7 +78,7 @@ export async function fetchTokenPrices(): Promise<PriceMap> {
 /** Get the price for a specific token by symbol */
 export async function getTokenPrice(
   symbol: string,
-): Promise<{ usd: number; eur: number }> {
+): Promise<{ usd: number; eur: number; sek: number }> {
   const prices = await fetchTokenPrices()
-  return prices[symbol] ?? { usd: 0, eur: 0 }
+  return prices[symbol] ?? { usd: 0, eur: 0, sek: 0 }
 }

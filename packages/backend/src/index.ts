@@ -29,7 +29,11 @@ import demoMppRoutes from './routes/demo-mpp.js'
 import openapiRoutes from './routes/openapi.js'
 import catalogRoutes from './routes/catalog.js'
 import analyticsRoutes from './routes/analytics.js'
-import { refreshCatalog } from './lib/merchant-catalog.js'
+import accountingRoutes from './routes/accounting.js'
+import fortnoxRoutes from './routes/fortnox.js'
+import reportingRoutes from './routes/reporting.js'
+import { refreshCatalog, type QueryableLike } from './lib/merchant-catalog.js'
+import { ingestDiscoveredCatalog } from './lib/catalog-discovery.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
 import pool from './db.js'
@@ -144,6 +148,9 @@ await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(x402ResourceRoutes, { prefix: '/x402' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
+await app.register(accountingRoutes, { prefix: '/accounting' })
+await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
+await app.register(reportingRoutes, { prefix: '/accounting/reporting' })
 // Public demo — no auth hook, registered separately
 await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
 
@@ -162,6 +169,18 @@ const start = async () => {
     // catalog never advertises stale prices or dead endpoints. Best-effort —
     // a failed run logs and waits for the next tick.
     const runCatalogRefresh = async () => {
+      // Opt-in: pull fresh candidates from the x402 Bazaar and probe-ingest
+      // them before re-verifying the catalog, so newly discovered merchants are
+      // included in the same run. Best-effort — discovery failure never blocks
+      // the refresh of already-listed entries.
+      if (config.catalogDiscoveryEnabled) {
+        try {
+          const discovery = await ingestDiscoveredCatalog(pool as unknown as QueryableLike)
+          app.log.info(discovery, 'Merchant catalog discovery complete')
+        } catch (err) {
+          app.log.warn({ err }, 'Merchant catalog discovery failed')
+        }
+      }
       try {
         const { verified, degraded } = await refreshCatalog()
         app.log.info({ verified, degraded }, 'Merchant catalog refreshed')

@@ -14,6 +14,7 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
+    getBookTimeSekValue: vi.fn().mockResolvedValue(null),
   },
 }))
 
@@ -26,6 +27,13 @@ vi.mock('../../db.js', () => ({
 vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
 
 vi.mock('../../lib/fiat-values.js', () => fiatMocks)
+
+// Fee recording at settlement must not consume a mocked DB call in these
+// sequence-based tests; neutralize it (the module is dark anyway).
+vi.mock('../../lib/fee/fee-module.js', () => ({
+  quoteFee: () => ({ paymentId: '', rail: '', feeAtomic: 0n, feeToken: '', basisPoints: 0, isZero: true }),
+  recordSettledFee: async () => {},
+}))
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',

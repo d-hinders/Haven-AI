@@ -1,6 +1,6 @@
 name: Publish packages
 
-# Merge-triggered npm publish for the four npx-installed packages.
+# Merge-triggered npm publish for the five npx-installed packages.
 #
 # Fires on push to main when any published package changes. For each package it
 # compares the package.json version against what is live on npm and publishes
@@ -28,6 +28,7 @@ on:
       - 'packages/signer/**'
       - 'packages/mcp/**'
       - 'packages/connect/**'
+      - 'packages/cli/**'
   workflow_dispatch:
 
 concurrency:
@@ -72,11 +73,12 @@ jobs:
         # MCP_VERSION from a leftover dist (connect's build also runs
         # verify-connect-bundle.mjs, which fails the job if that happens).
         run: |
-          rm -rf packages/sdk/dist packages/signer/dist packages/mcp/dist packages/connect/dist
+          rm -rf packages/sdk/dist packages/signer/dist packages/mcp/dist packages/connect/dist packages/cli/dist
           npm run build -w packages/sdk
           npm run build -w packages/signer
           npm run build -w packages/mcp
           npm run build -w packages/connect
+          npm run build -w packages/cli
 
       - name: Publish packages whose version is not yet on npm
         run: |
@@ -84,7 +86,7 @@ jobs:
 
           published_any=false
 
-          for pkg in sdk signer mcp connect; do
+          for pkg in sdk signer mcp connect cli; do
             name=$(node -p "require('./packages/$pkg/package.json').name")
             version=$(node -p "require('./packages/$pkg/package.json').version")
 

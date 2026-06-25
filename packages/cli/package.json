@@ -1,11 +1,10 @@
 {
   "name": "@haven_ai/cli",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.17-alpha.0",
   "description": "Haven CLI — a terminal-native, scriptable parallel to the dashboard (login, read, and backend-only management).",
   "type": "module",
   "bin": {
-    "haven": "./dist/cli.js"
+    "haven": "dist/cli.js"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -25,7 +24,10 @@
     "agent",
     "non-custodial"
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "tsup": "^8.0.0",
     "typescript": "^5.6.0",

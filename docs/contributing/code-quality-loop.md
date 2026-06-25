@@ -1,6 +1,6 @@
 # Haven Code Quality Loop
 
-Last updated: 2026-06-21
+Last updated: 2026-06-24
 
 The running handoff for Haven's **small-PR code-quality cadence**: each pass
 finds one narrow, high-value area, hardens it with a guarded and revertable PR,
@@ -182,9 +182,9 @@ A standing view of *which surfaces are hardened* so the loop has a notion of
 | Machine-payment receipt contract (rail, proof_status) | ✅ Hardened | OpenAPI enums + tests |
 | Reporting feed dedup ("never double-post") | ✅ Hardened | unit tests + integrated `feed-dedup.integration.test.ts` guard |
 | Reporting/accounting FX-at-book-time correctness | ⚠️ Thin | book-time SEK frozen; not separately pinned |
-| External-token hygiene (Fortnox) | ❓ Unverified | server-side storage; redaction not audited |
-| OpenAPI coverage of reporting/fortnox/accounting/x402-resources | ❌ Missing | 0 spec.ts entries |
-| Route-level tests for the above handlers | ❌ Missing | no `__tests__` entry |
+| External-token hygiene (Fortnox) | ✅ Hardened | route-level redaction guard + connection lifecycle tests (#539) |
+| OpenAPI coverage of reporting/fortnox/accounting/x402-resources | ➖ Out of scope | `spec.ts` is intentionally the *agent-payment* surface (see `spec.test.ts`: auth/dashboard/accounting deliberately excluded). Publishing these families is a captain scope decision, not a quality pass. |
+| Route-level tests for fortnox/contacts/reporting handlers | ✅ Hardened | #540 (fortnox), #541 (contacts), #542 (reporting) |
 | x402 / generic machine-payment consolidation | ⏳ Tracked | PT-1 |
 
 ## Planned Tracks
@@ -228,6 +228,14 @@ quietly avoiding its hardest item.
 - PR #278: reconciliation event response status values are explicit in OpenAPI/tests.
 - Machine-payment receipt `proof_status` and `rail` are explicit in OpenAPI/tests (both prior loop targets; verified landed 2026-06-21).
 - Reporting feed "never double-post": added `feed-dedup.integration.test.ts`, an integrated guard that drives the real claim/push/retry lifecycle against an in-memory oracle of the `reporting_feed_syncs` unique constraint, complementing the existing boundary-mocked unit tests (2026-06-21).
+- **`code-quality-hardening` track (2026-06-24, autonomous `/loop /ship-next`, backlog `docs/backlogs/code-quality-hardening.yml`).** Hardened the newer financial-integration surfaces, which shipped with thinner route/credential coverage than the older payment routes. Six small reviewer-gated PRs; +44 backend tests (510 → 544):
+  - PR #539: Fortnox OAuth tokens (`access_token`/`refresh_token`) are pinned to never leak in `/status`/callback/connect-url/delete responses or headers (sentinel-string guard against a connection row that genuinely holds the tokens), plus `getValidFortnoxAccessToken` lifecycle coverage. Matches the delegate-key redaction bar (#261–#264).
+  - PR #540: Fortnox route invariants — auth, the legacy `/push` 410 gate (short-circuits before token work), ISO-date 400s, and OAuth callback error redirects (a forged/wrong-purpose state never reaches the token exchange).
+  - PR #541: contacts route invariants — auth on all four endpoints, user-scoped reads/writes (a non-owned row is a 404, never a cross-user mutation), shared-`lib/address` validation before writes, and the 201/400/404/409 contract.
+  - PR #542: reporting feed route invariants — auth, the entitlement gate (real `requireReportingFeed`, 404 when unavailable), `/status` hides the gated data path for unentitled accounts, and one `/sync` request delegates to exactly one `syncUser` call (route adds no double-post on top of the lib's idempotency).
+  - PR #543: contacts duplicate-address detection now keys on Postgres SQLSTATE `23505` instead of a `message.includes('unique')` substring (which could mask unrelated errors as 409). Surfaced by the #541 review; matches the `routes/agents.ts` pattern; a non-unique DB error now re-throws (500) rather than being swallowed.
+  - Discovery correction: the earlier "OpenAPI contract drift" backlog item for reporting/fortnox/accounting was *not* accidental drift — `spec.ts` is intentionally scoped to the agent-payment surface (`spec.test.ts`). Dropped from the track rather than making a unilateral scope decision; recorded in the Coverage Map.
+  - Follow-up noted (not done): `routes/passkeys.ts:109` uses a `code as {...}` cast rather than the `unknown` + `'code' in err` narrowing now standard in contacts/agents — a candidate for a future pass.
 
 ## Deferred Items
 

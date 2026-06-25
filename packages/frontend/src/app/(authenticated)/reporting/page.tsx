@@ -60,6 +60,20 @@ export default function ReportingPage() {
         </Card>
       ) : (
         <div className="space-y-5">
+          {!status.liveSyncReady && (
+            <div
+              role="status"
+              className="rounded-[12px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3"
+            >
+              <p className="text-sm font-medium text-[var(--v2-warning)]">Preview — not yet delivering to Fortnox</p>
+              <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
+                The accounting feed is built and your settled payments are tracked here, but the live Fortnox
+                connection isn&apos;t wired up yet — transactions are not being sent to your accounting tool. We&apos;ll
+                enable delivery in a follow-up; nothing you do here posts to Fortnox in the meantime.
+              </p>
+            </div>
+          )}
+
           <Card className="p-5" hover={false}>
             <Row
               title="Fortnox"

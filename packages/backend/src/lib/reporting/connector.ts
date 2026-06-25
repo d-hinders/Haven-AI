@@ -25,6 +25,19 @@ export interface AccountingConnector {
 }
 
 // ── Registry ─────────────────────────────────────────────────────────────────
+//
+// NOTE — live integration is intentionally NOT wired up yet (epic #491).
+// No production `AccountingConnector` is registered: the Fortnox feed adapter
+// (#496) and its receipt attachment (#498) are deferred to a follow-up because
+// validating the non-asserting push + the "already-paid supplier invoice"
+// semantics requires a live Fortnox sandbox / developer app (see the open
+// questions in `docs/research/fortnox-non-asserting-feed.md`).
+//
+// Until a real connector is registered here, `hasLiveConnector()` returns false,
+// the orchestrator (`getActiveConnector`) finds nothing, and the Reporting UI
+// shows a "preview — not yet delivering to Fortnox" notice. Everything around
+// the connector (gating, dedup ledger, orchestration, UI) is built and tested
+// against the `InMemoryConnector`; only the live adapter is outstanding.
 
 const registry = new Map<string, AccountingConnector>()
 
@@ -38,6 +51,16 @@ export function getConnector(provider: string): AccountingConnector | undefined 
 
 export function listConnectors(): AccountingConnector[] {
   return [...registry.values()]
+}
+
+/**
+ * Whether a real (non-test) accounting connector is registered, i.e. whether the
+ * feed can actually deliver to an external tool. False today — the live Fortnox
+ * adapter (#496/#498) is deferred to a follow-up. The Reporting surface uses this
+ * to flag that sync is a preview. The in-memory test connector does not count.
+ */
+export function hasLiveConnector(): boolean {
+  return listConnectors().some((c) => c.provider !== 'memory')
 }
 
 /** For tests — clear the registry between cases. */

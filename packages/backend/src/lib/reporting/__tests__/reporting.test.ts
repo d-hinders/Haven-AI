@@ -4,6 +4,7 @@ import {
   registerConnector,
   getConnector,
   clearConnectors,
+  hasLiveConnector,
   InMemoryConnector,
 } from '../connector.js'
 import type { AccountingEntry } from '../../accounting-entry.js'
@@ -70,6 +71,21 @@ describe('connector registry + in-memory adapter', () => {
     registerConnector(c)
     expect(getConnector('memory')).toBe(c)
     expect(getConnector('fortnox')).toBeUndefined()
+  })
+
+  it('reports no live connector until a non-test adapter is registered (#496/#498 deferred)', () => {
+    // Empty registry → live sync not ready (production state today).
+    expect(hasLiveConnector()).toBe(false)
+    // The in-memory test connector must not count as live.
+    registerConnector(new InMemoryConnector())
+    expect(hasLiveConnector()).toBe(false)
+    // A real provider does count.
+    registerConnector({
+      provider: 'fortnox',
+      isConnected: async () => false,
+      pushTransaction: async () => ({ externalRef: null, status: 'skipped' as const }),
+    })
+    expect(hasLiveConnector()).toBe(true)
   })
 
   it('skips unconnected users, pushes connected ones, and dedups', async () => {

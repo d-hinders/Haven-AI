@@ -457,18 +457,18 @@ Haven-AI/
 
 ## Contributing — Hosted Setup & Dev Workflow
 
-Haven runs in production on **Vercel** (frontend) and **Railway** (backend + Postgres). The `main` branch auto-deploys to both. The four published npm packages (`@haven_ai/sdk`, `signer`, `mcp`, `connect`) are also published automatically from `main` on a version bump — see [Releasing npm packages](#releasing-npm-packages).
+Haven runs in production on **Vercel** (frontend) and **Railway** (backend + Postgres). Two long-lived branches deploy: **`dev`** auto-deploys to the shared **dev environment**, and **`main`** auto-deploys to **production**. The four published npm packages (`@haven_ai/sdk`, `signer`, `mcp`, `connect`) are also published automatically from `main` on a version bump — see [Releasing npm packages](#releasing-npm-packages). For the dev environment's setup and env vars, see [`docs/operations/dev-environment.md`](docs/operations/dev-environment.md).
 
 ### Repository workflow
 
-All changes go through pull requests — no direct pushes to `main`.
+All changes go through pull requests — no direct pushes to `main` or `dev`. Feature work flows `feature/* → dev → main`; the **`dev-gate`** workflow only lets `dev` or `hotfix/*` merge into `main`.
 
-1. Branch off `main` → make your changes
-2. Push the branch and open a PR on GitHub
-3. CI runs automatically (type-check + build for SDK, backend, frontend)
+1. Branch off `dev` → make your changes
+2. Push the branch and open a PR **into `dev`** on GitHub
+3. CI runs automatically (type-check + build per surface: SDK, CLI, backend, frontend, MCP, connect, signer)
 4. Vercel posts a preview URL as a comment on the PR — click to test the frontend live
-5. Once CI is green, the PR author can self-merge
-6. Merging to `main` triggers automatic deploys to Vercel + Railway (~2 min)
+5. Once CI is green, the PR can merge into `dev` and auto-deploys to the dev environment
+6. **Promote `dev → main`** with a separate PR (the only normal path into `main`); merging triggers automatic production deploys to Vercel + Railway (~2 min). Emergency fixes can use a `hotfix/*` branch straight into `main`.
 
 ### Frontend-only changes
 
@@ -520,7 +520,7 @@ On merge, the **Publish packages** workflow (`.github/workflows/publish.yml`) re
 - **Auth:** [npm Trusted Publishing (OIDC)](https://docs.npmjs.com/trusted-publishers) — there is **no `NPM_TOKEN` secret**. The workflow grants the job `id-token: write` and upgrades npm to ≥ 11.5.1; npm then authenticates the short-lived GitHub Actions OIDC token against a *trusted publisher* configured per package on npm (pointing at `d-hinders/Haven-AI` + workflow `publish.yml`). Nothing to leak or rotate, and it's exempt from the 2FA one-time-password prompt that blocks token-based publishes.
 - **Provenance:** Trusted Publishing auto-generates a signed [sigstore provenance](https://docs.npmjs.com/generating-provenance-statements) statement. npm rejects the upload (`E422`) unless each `package.json` declares a `repository.url` (with the monorepo `directory`) matching the repo — all four packages carry this.
 - **Adding a new published package?** Before its first release, (1) configure a trusted publisher for it on npm (package → Settings → Trusted Publisher → GitHub Actions: `d-hinders` / `Haven-AI` / `publish.yml`), and (2) give its `package.json` a `repository` block. Skipping either makes the first publish fail — on auth (`EOTP`/OIDC) or provenance (`E422`) respectively.
-- **Not published this way:** `mcp-server` (Docker → Railway), `backend`, and `frontend` (Vercel/Railway) deploy from `main` directly.
+- **Not published this way:** `mcp-server` (Docker → Railway), `backend`, and `frontend` (Vercel/Railway) deploy from branches directly — `main` to production and `dev` to the shared dev environment.
 - Full details, the dist-wipe rationale, and a manual fallback live in [`scripts/README.md`](scripts/README.md).
 
 ## License

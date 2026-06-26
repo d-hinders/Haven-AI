@@ -327,10 +327,27 @@ async function cmdWalletRename(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
 
 // ── Activity ────────────────────────────────────────────────────────
 
+/**
+ * Resolve `--safe` (id or address) to a Safe id for the `/transactions` filter,
+ * mirroring `wallets balances`. Throws if `--safe` was given but matches no
+ * wallet, so a typo'd filter fails loudly instead of silently returning all rows.
+ */
+async function resolveSafeId(args: ParsedArgs, api: CliApi): Promise<string | undefined> {
+  if (!args.flags.safe) return undefined
+  const { safes } = await api.get<{ safes: Safe[] }>('/user/safes')
+  const safe = pickSafe(safes, args.flags.safe)
+  if (!safe) throw new CliApiError(`No wallet matches "${args.flags.safe}".`, 1)
+  return safe.id
+}
+
 async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const params = new URLSearchParams({ offset: '0', limit: String(args.flags.limit ?? 25) })
-  if (args.flags.safe) params.set('safeId', args.flags.safe)
+  const safeId = await resolveSafeId(args, api)
+  const params = new URLSearchParams({
+    offset: String(args.flags.offset ?? 0),
+    limit: String(args.flags.limit ?? 25),
+  })
+  if (safeId) params.set('safeId', safeId)
   if (args.flags.agent) params.set('agentId', args.flags.agent)
   const { transactions } = await api.get<{ transactions: Txn[] }>(`/transactions?${params.toString()}`)
   const visible = args.flags.direction
@@ -356,8 +373,12 @@ async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
 async function cmdActivityExport(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   if (args.flags.format === 'sie') return exportSie(args, d)
   const { api } = await authed(args, d)
-  const params = new URLSearchParams({ offset: '0', limit: String(args.flags.limit ?? 1000) })
-  if (args.flags.safe) params.set('safeId', args.flags.safe)
+  const safeId = await resolveSafeId(args, api)
+  const params = new URLSearchParams({
+    offset: String(args.flags.offset ?? 0),
+    limit: String(args.flags.limit ?? 1000),
+  })
+  if (safeId) params.set('safeId', safeId)
   if (args.flags.agent) params.set('agentId', args.flags.agent)
   const { transactions } = await api.get<{ transactions: Txn[] }>(`/transactions?${params.toString()}`)
   const visible = args.flags.direction

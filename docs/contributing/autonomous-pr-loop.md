@@ -77,36 +77,44 @@ PR go through before handing it the whole queue.
 
 ## Merge policy A (what this loop does)
 
-**Reviewer-gated auto-merge with a money-path carve-out:**
-- A PR auto-merges (squash) only when **CI is green** *and* **haven-reviewer
-  returned no blocking/should-fix findings** *and* it does **not** touch a
-  CODEOWNERS-owned path.
-- PRs touching money-path / auth / migration / release paths
-  (`.github/CODEOWNERS`) **never auto-merge** — they wait for your review+merge.
+**Reviewer-gated auto-merge, with an in-session money-path checkpoint:**
+- A **non-money-path** PR (docs, tests, mechanical refactor, other code)
+  auto-merges (squash) when **CI is green** *and* **haven-reviewer returned no
+  blocking/should-fix findings**.
+- A **money-path** PR (x402 / payments / machine-payments / payment-coverage /
+  allowance-module / agentAuth / release tooling) does **not** auto-merge
+  silently — the loop **pauses and asks whoever is running it to approve**
+  in-session, then merges on approval. This is the human checkpoint for money
+  movement.
+- A **DB-migration** PR (`db/migrations/`) additionally needs an **independent
+  code-owner approval in GitHub** — it's the one class still hard-gated by
+  `.github/CODEOWNERS` (migrations are irreversible in prod).
 - Auto-merge does not bypass anything: GitHub still requires all configured
   status checks. If CI fails, the merge simply doesn't happen.
-- **Who approves money-path PRs:** the loop opens PRs as the connected GitHub
-  account, and GitHub never lets an author approve their own PR. So a money-path
-  PR is reviewed by *another* code owner in `.github/CODEOWNERS`. (To let the
-  PR's driver also be an eligible approver, the loop would have to run under a
-  separate bot account — a deliberate setup choice, not the default.)
 
-## Reviewing a money-path PR (for approvers)
+## Money-path safety model (read this)
 
-When the loop touches a CODEOWNERS path it **stops, does not arm auto-merge, and
-requests a code-owner review**. If GitHub asks you to review one:
+The gate for most money-path changes is a **soft, in-session checkpoint**, not a
+hard GitHub rule. Two consequences to be aware of:
+- It's a **self-approval**: the person running the loop approves the change —
+  there's no independent second reviewer (except for migrations, see above).
+- It **only covers PRs made through the loop.** A money-path PR created *outside*
+  the loop (a hand-written PR, another agent) merges on green CI alone — there is
+  no human gate on it. This is the deliberate trade-off for low contributor
+  friction at this stage; widen `.github/CODEOWNERS` if you want a hard gate back
+  on more paths.
 
-- It has already passed CI **and** haven-reviewer with no blocking findings —
-  your review is the human circuit-breaker for money movement, auth, and schema,
-  not a style pass.
-- The PR body carries the **haven-reviewer verdict** and any deferred findings —
-  skim those first.
-- Sanity-check the money-path invariants: does it **preserve behavior**?
-  Money-path changes are characterization-first, so look for tests pinning the
-  old behavior, and confirm nothing silently changes *who can move funds* or
-  *what auto-executes vs. queues for approval*.
-- **Approve and merge it** (the loop intentionally left it for you). Or request
-  changes — the loop picks up review comments and pushes fixes.
+## Reviewing a migration PR (for code owners)
+
+DB-migration PRs are the only ones GitHub will request a code-owner review on.
+If you're asked to review one:
+- It has already passed CI **and** haven-reviewer — your review is the human
+  circuit-breaker for an irreversible schema change.
+- Confirm the migration is **additive / reversible-in-practice** (no destructive
+  `DROP`/`ALTER` of in-use columns without a backfill plan) and that any default
+  or constraint change is safe on existing rows.
+- The PR body carries the haven-reviewer verdict — skim it, then **approve and
+  merge**, or request changes (the loop picks up review comments).
 
 ## One-time GitHub setup (required)
 
@@ -135,10 +143,12 @@ Without this, `/ship-next` can open PRs but cannot auto-merge them.
      `.github/workflows/dev-gate.yml`, which only lets `dev` or `hotfix/*` merge
      into `main`. This is why the loop targets `dev`, never `main`.
    - **Required approvals: 0** at the repo level — this is the hands-off lever.
-     Your safety comes from CI + haven-reviewer + the CODEOWNERS carve-out.
-   - ☑ **Require review from Code Owners** — this is what makes the carve-out
-     bite: only PRs touching `.github/CODEOWNERS` paths need your approval;
-     everything else flows on green CI.
+     Your safety comes from CI + haven-reviewer + the loop's in-session money-path
+     checkpoint, plus the code-owner gate below for migrations.
+   - ☑ **Require review from Code Owners** — keep this on. With the current
+     `.github/CODEOWNERS` it bites only **DB migrations** (the one hard-gated
+     class); every other path flows on green CI. Widen `.github/CODEOWNERS` if you
+     want more paths hard-gated again.
 3. **Token/app permissions:** the Claude GitHub integration for this repo needs
    **contents: write, pull_requests: write, issues: write** (issues:write lets
    the loop read epics/labelled issues and close them via `Closes #`). If
@@ -158,7 +168,8 @@ classes for human merge, or narrow it to let more auto-merge.
 - Defining the work as issues — a well-scoped labeled task or epic sub-issue — once.
 - Answering when haven-reviewer flags something **blocking/ambiguous**, or a
   genuine product/architecture/security decision comes up.
-- **Merging money-path PRs** (the CODEOWNERS carve-out).
+- **Approving money-path PRs in-session** when the loop pauses for them, and
+  **code-owner-reviewing migration PRs** in GitHub (the one hard gate).
 - Unblocking CI the loop can't fix after a couple of attempts.
 
 ## Constraints to know

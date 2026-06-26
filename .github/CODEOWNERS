@@ -1,36 +1,16 @@
-# CODEOWNERS — money-path carve-out for the autonomous PR loop (policy A).
+# CODEOWNERS — minimal money-path hard gate.
 #
-# Purpose: with branch protection's "Require review from Code Owners" enabled,
-# ONLY PRs that touch the paths below require a code-owner approval. The loop
-# (/ship-next) will NOT auto-merge those — they wait for a human merge. Every
-# other PR (docs, tests, non-money refactors) can reviewer-gated auto-merge on
-# green CI.
+# Only DB migrations require a code-owner review in GitHub. Migrations are
+# irreversible in production, so they keep an independent second approval (from
+# a collaborator other than the PR author — GitHub's self-approval rule).
 #
-# Owners: every repo collaborator with write access — ANY ONE of them approving
-# satisfies the required review. Keep this in sync with the collaborator list as
-# the team changes. See docs/contributing/autonomous-pr-loop.md.
+# All OTHER money-path changes (x402 / payments / machine-payments /
+# payment-coverage / allowance-module / agentAuth / release tooling) are NOT
+# hard-gated here. The autonomous PR loop gates them in-session: it pauses such
+# a PR and asks whoever is running the loop to approve before it merges. A
+# money-path PR created OUTSIDE the loop merges on green CI alone — that is the
+# accepted trade-off for low contributor friction at this stage.
 #
-# Keep the path list tight: it is the human-in-the-loop boundary for money
-# movement, auth, and schema.
+# See docs/contributing/autonomous-pr-loop.md ("Money-path safety model").
 
-# Payment / policy money path
-/packages/backend/src/routes/x402.ts                        @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/routes/x402-resources.ts              @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/routes/payments.ts                    @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/routes/machine-payments.ts            @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/lib/machine-payments.ts               @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/lib/payment-coverage.ts               @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/lib/allowance-module.ts               @d-hinders @AntonioSaaranen @PhilipEriksson
-
-# Auth boundary
-/packages/backend/src/middleware/agentAuth.ts               @d-hinders @AntonioSaaranen @PhilipEriksson
-
-# Database schema — migrations are irreversible in prod
-/packages/backend/src/db/migrations/                        @d-hinders @AntonioSaaranen @PhilipEriksson
-
-# Release tooling — version/dep integrity across published packages
-/scripts/release-bump.mjs                                   @d-hinders @AntonioSaaranen @PhilipEriksson
-/.github/workflows/publish.yml                              @d-hinders @AntonioSaaranen @PhilipEriksson
-
-# This carve-out config itself
-/.github/CODEOWNERS                                         @d-hinders @AntonioSaaranen @PhilipEriksson
+/packages/backend/src/db/migrations/   @d-hinders @AntonioSaaranen @PhilipEriksson

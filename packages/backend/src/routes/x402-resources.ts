@@ -27,6 +27,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getChain } from '../lib/chains.js'
 import { getProvider } from '../lib/allowance-module.js'
 import { formatTokenValue } from '../lib/tokens.js'
+import { isAddress as isValidAddress } from '../lib/address.js'
 
 // ── ABI for decoding AllowanceModule calldata ─────────────────────
 
@@ -75,10 +76,6 @@ interface CreateResourceBody {
 
 interface VerifyBody {
   tx_hash: string
-}
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
 function isValidTxHash(hash: string): boolean {

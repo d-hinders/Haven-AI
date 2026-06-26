@@ -7,6 +7,7 @@ import {
   type MachinePaymentRail,
 } from '../lib/machine-payments.js'
 import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../lib/agent-payment-status.js'
+import { isAddress as isValidAddress } from '../lib/address.js'
 import {
   attachMachinePaymentEvidence,
   type MachinePaymentEvidenceRow,
@@ -204,10 +205,6 @@ function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): strin
     return 'MPP demo challenge has expired'
   }
   return null
-}
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
 function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {

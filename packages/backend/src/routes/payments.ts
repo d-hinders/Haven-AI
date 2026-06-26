@@ -5,6 +5,7 @@ import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.
 import { AgentPaymentNextAction, AgentPaymentPhase } from '../lib/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
+import { isAddress as isValidAddress } from '../lib/address.js'
 import {
   getTokenAllowance,
   getLatestBlockTimeSec,
@@ -86,10 +87,6 @@ interface PaymentIntentRow {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
 
 /** Resolve a token symbol to its config for a specific chain. */
 function resolveToken(chainId: number, symbol: string) {

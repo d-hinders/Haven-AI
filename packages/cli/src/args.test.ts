@@ -27,6 +27,12 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['activity', 'list', '--direction', 'sideways'])).toThrow(/in.*out|"in"/)
   })
 
+  it('parses --offset and rejects a negative one', () => {
+    expect(parseArgs(['activity', 'list', '--offset', '50']).flags.offset).toBe(50)
+    expect(parseArgs(['activity', 'list', '--offset', '0']).flags.offset).toBe(0)
+    expect(() => parseArgs(['activity', 'list', '--offset', '-1'])).toThrow(/non-negative integer/)
+  })
+
   it('surfaces help and version', () => {
     expect(parseArgs(['--help']).flags.help).toBe(true)
     expect(parseArgs(['-v']).flags.version).toBe(true)

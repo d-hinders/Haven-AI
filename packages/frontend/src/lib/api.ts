@@ -88,8 +88,31 @@ export interface ExecSafeResponse {
   chain_id: number
 }
 
+/**
+ * The `?apiBaseUrl` override (and its persisted localStorage value) is a dev/QA
+ * convenience for domain-less testing (a preview frontend re-pointed at the
+ * shared dev backend — see the dev-environment + QA epics). It MUST stay disabled
+ * in production: otherwise a crafted link (`…/?apiBaseUrl=https://evil`) redirects
+ * the user's authenticated requests — including the `Authorization: Bearer <jwt>`
+ * that `request()` attaches — to an attacker-controlled host, leaking the session
+ * token. See #582.
+ *
+ * `NEXT_PUBLIC_HAVEN_ENV` is build-time inlined, so the production bundle (where
+ * it is unset) evaluates this to `false` and the override path is dead code.
+ */
+function isApiOverrideEnabled(): boolean {
+  const env = process.env.NEXT_PUBLIC_HAVEN_ENV?.trim().toLowerCase()
+  return env != null && env !== '' && env !== 'production' && env !== 'prod'
+}
+
 export function getResolvedApiBaseUrl(): string {
   if (typeof window === 'undefined') {
+    return BASE_URL
+  }
+
+  // Production: never honor a query-param or stored override — always use the
+  // baked-in base URL. This is the gate that stops the token-exfiltration vector.
+  if (!isApiOverrideEnabled()) {
     return BASE_URL
   }
 

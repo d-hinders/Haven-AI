@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Autonomous PR loop — how it works
+    url: https://github.com/d-hinders/Haven-AI/blob/main/docs/contributing/autonomous-pr-loop.md
+    about: How the loop reads issues (labeled tasks + epics), the money-path carve-out, and one-time setup.

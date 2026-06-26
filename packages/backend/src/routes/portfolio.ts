@@ -3,8 +3,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
 import { isSupportedChain } from '../lib/chains.js'
 import { fetchPortfolioForSafe } from '../lib/portfolio.js'
-
-const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+import { ETH_ADDRESS_RE } from '../lib/address.js'
 
 function parseChainId(value: unknown): number | null {
   if (value === undefined) return null

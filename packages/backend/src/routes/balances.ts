@@ -7,8 +7,7 @@ import { getProvider } from '../lib/allowance-module.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import { createCache } from '../lib/cache.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
-
-const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+import { ETH_ADDRESS_RE } from '../lib/address.js'
 
 // Minimal ERC-20 ABI for balanceOf
 const ERC20_ABI = ['function balanceOf(address account) view returns (uint256)']

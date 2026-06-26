@@ -3,8 +3,7 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getSafeDetails } from '../lib/safe-details.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
-
-const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+import { ETH_ADDRESS_RE } from '../lib/address.js'
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 const OWNER_FETCH_CONCURRENCY = 4

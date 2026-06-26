@@ -6,6 +6,15 @@ The running handoff for Haven's **small-PR code-quality cadence**: each pass
 finds one narrow, high-value area, hardens it with a guarded and revertable PR,
 and records the result here so the next pass starts warm.
 
+> **This ledger is the discovery/priority record, not the loop's runtime queue.**
+> The autonomous PR loop (`/loop /ship-next`) now draws its work from **GitHub
+> Issues** — standalone tasks labeled `code-quality`, or an epic's sub-issues
+> (the old `docs/backlogs/*.yml` tracks are retired; see
+> [`../backlogs/README.md`](../backlogs/README.md)). When a pass here promotes an
+> item to actual loop work, open it as an issue with that label rather than a
+> YAML file. Historical references to `docs/backlogs/*.yml` below describe how a
+> completed track ran at the time.
+
 > **Not the same as the oracle-grounded loops.** This file is a human-curated
 > cadence of small quality PRs. The *oracle-grounded differential loops* (a
 > coding agent fuzzes a surface against an independent oracle and leaves a

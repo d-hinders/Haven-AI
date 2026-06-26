@@ -1,0 +1,102 @@
+# Code-quality track: finish the address-regex dedup + close route-level
+# coverage gaps on non-money-path surfaces.
+# Driven by the autonomous PR loop — see docs/contributing/autonomous-pr-loop.md
+# and the cadence doc docs/contributing/code-quality-loop.md.
+#
+# Discovery (2026-06-25): after the code-quality-hardening track (Fortnox /
+# reporting / contacts, PRs #539–#543) and the address-validation-dedup track
+# (lib/address.ts, #529 + open money-path #530), two clean gaps remain that are
+# TEST-ONLY or pure refactor and NON-money-path, so the loop can reviewer-gated
+# auto-merge each:
+#   1. Six routes still inline a raw `const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/`
+#      copy instead of importing from lib/address.ts. This is the explicit
+#      follow-up named at the bottom of address-validation-dedup.yml, extended to
+#      the full non-money-path set found on 2026-06-25 (balances, user, user-safes
+#      in addition to portfolio, transactions, safe-details).
+#   2. routes/accounting.ts (registered at /accounting) ships with NO route-level
+#      test; its categories/reconcile endpoints are non-legacy and non-money-path.
+#   3. routes/user-safes.ts GET / (the Safe list) has no coverage; the existing
+#      user-safes-* tests only cover approvers and delete.
+#
+# Deliberately OUT of this track (left for a money-path pass — they are
+# CODEOWNERS-owned, so they would block on a human merge and stall this
+# auto-merge track):
+#   - The remaining money-path ETH_ADDRESS_RE copies in routes/x402,
+#     routes/x402-resources, routes/payments, routes/machine-payments,
+#     lib/machine-payments. These are the same dedup, but money-path; fold them
+#     into the address-validation-dedup money-path pass (open PR #530) rather
+#     than here.
+#   - routes/x402-resources.ts route tests (no suite today, flagged in #530) and
+#     the MPP authorize malformed-address rejection. High value, but money-path.
+#   - routes/accounting.ts GET /export — legacy SIE surface, out of scope per the
+#     cadence doc. The accounting item below asserts only that /export requires
+#     auth, not its body.
+#   - routes/demo-mpp.ts — demo surface, out of scope per the cadence doc.
+
+track: route-coverage-dedup
+active: true
+merge_policy: reviewer-gated-A
+
+items:
+  - id: pr1
+    title: "refactor(address): import ETH_ADDRESS_RE from lib/address.ts in non-money-path routes"
+    scope: >
+      Pure refactor, non-money-path. Six route files still declare their own
+      `const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/` instead of using the single
+      source of truth in lib/address.ts (ETH_ADDRESS_RE + isAddress, from #529).
+      Replace the local const in each with an import from '../lib/address.js' and
+      route every use through the imported value; delete the now-unused local
+      const. The regex is byte-identical, so this is behavior-preserving. Do NOT
+      touch the money-path copies (x402, x402-resources, payments,
+      machine-payments, lib/machine-payments) — those are CODEOWNERS-owned and
+      handled separately. Read each file first to confirm the const is only used
+      for address validation before removing it.
+      Acceptance: backend suite + tsc green; no local ETH_ADDRESS_RE remains in
+      the six files; behavior unchanged.
+    files:
+      - packages/backend/src/routes/portfolio.ts
+      - packages/backend/src/routes/transactions.ts
+      - packages/backend/src/routes/safe-details.ts
+      - packages/backend/src/routes/user-safes.ts
+      - packages/backend/src/routes/balances.ts
+      - packages/backend/src/routes/user.ts
+    money_path: false
+    status: in-pr
+
+  - id: pr2
+    title: "test(accounting): route-level invariants for the accounting endpoints"
+    scope: >
+      P1 route coverage for routes/accounting.ts (registered at /accounting, no
+      route-level test today). All endpoints sit behind an onRequest authMiddleware
+      hook. Read the route first and pin its actual contract; do not invent
+      endpoints. Cover, at the route level: every endpoint rejects unauthenticated
+      requests (GET /export, GET /reconcile, GET /categories, PUT /categories,
+      DELETE /categories); GET /categories returns the category list shape;
+      PUT /categories validates the override body and persists/returns the
+      override; DELETE /categories removes an override (and behaves sanely when
+      resourceUrl is missing/unknown); and GET /reconcile respects its period
+      query. Treat /export as legacy SIE (out of scope) — assert only that it
+      requires auth, not its body. Stub the accounting lib/db seams — no live
+      network. Prefer invariant assertions over pinning exact copy. Test-only, no
+      runtime change. Acceptance: new tests green; backend suite + tsc unchanged.
+    files:
+      - packages/backend/src/routes/__tests__/accounting.test.ts
+    money_path: false
+    status: in-pr
+
+  - id: pr3
+    title: "test(user-safes): cover the Safe-list endpoint (auth + user scoping)"
+    scope: >
+      P1 route coverage for routes/user-safes.ts GET / (the Safe list at
+      /user/safes), which has no test today — the existing user-safes-approvers
+      and user-safes-delete suites cover only approvers and delete. Read the route
+      first and pin its actual invariants; do not invent endpoints. Assert: the
+      endpoint requires auth; it returns only Safes that belong to the requesting
+      user (no cross-user leakage); and the response shape matches the route's
+      current contract (including consolidated balances/metadata if the handler
+      returns them). Mock the db/balance seams — no live network. Test-only, no
+      runtime change. Acceptance: new tests green; backend suite + tsc unchanged.
+    files:
+      - packages/backend/src/routes/__tests__/user-safes-list.test.ts
+    money_path: false
+    status: in-pr

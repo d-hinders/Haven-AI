@@ -1,30 +1,37 @@
 ---
-description: "Autonomous PR loop (policy A): take the next item from a backlog file or a GitHub epic's sub-issues, implement it on a branch, gate it through tests + haven-reviewer, open a PR, and reviewer-gated auto-merge it — escalating to the user only on a blocking finding, a real decision, or stuck CI. Designed to be driven by /loop."
+description: "Autonomous PR loop (policy A): take the next ready GitHub issue — a labeled standalone task or an epic's sub-issue — implement it on a branch, gate it through tests + haven-reviewer, open a PR, and reviewer-gated auto-merge it — escalating to the user only on a blocking finding, a real decision, or stuck CI. Designed to be driven by /loop."
 ---
 
-Ship the **next single item** of defined work end-to-end, then stop. `/loop` re-invokes this for the following item, so each run handles exactly one PR.
+Ship the **next single ready issue** end-to-end, then stop. `/loop` re-invokes this for the following item, so each run handles exactly one PR.
 
-Argument (optional): a backlog source.
-- `docs/backlogs/<track>.yml` — a repo backlog file (default: the most recently modified file in `docs/backlogs/` whose status is not all-merged).
-- `epic=#<n>` — a GitHub epic (parent issue); its **open sub-issues** are the queue.
-If no argument is given, look for an in-progress `docs/backlogs/*.yml`; if none, ask the user which source to use and stop.
+The queue is **GitHub Issues** (not a repo file — backlogs are no longer tracked in-tree; see `docs/contributing/autonomous-pr-loop.md`). Argument (optional) selects the source:
+
+- *(no argument)* or `label=<name>` — **standalone labeled issues**: open issues carrying the loop label (default **`code-quality`**), oldest first (lowest issue number). Use this for small, self-contained tasks.
+- `epic=#<n>` — an **epic** (parent issue): its **open sub-issues** are the queue, lowest number first. Use this for a multi-PR plan that should burn down together.
+
+Issue state *is* the backlog state — there is nothing to edit in the repo:
+- **open issue, no linked PR** → ready (a candidate to pick).
+- **open issue, linked open Haven PR** → in flight (handled in Phase 0).
+- **closed issue** → done (its PR merged with `Closes #`).
+
+If both a `label` queue and an `epic` are in play, run them as separate invocations; a single run draws from exactly one source. If the selected source has no ready issue and nothing in flight, report "no ready items" and stop.
 
 This command implements **merge policy A**: reviewer-gated auto-merge, with a money-path carve-out enforced by `.github/CODEOWNERS`. See `docs/contributing/autonomous-pr-loop.md`.
 
-## Phase 0 — Serialize (never run two open PRs from one backlog)
+## Phase 0 — Serialize (never run two open PRs from one queue)
 
-1. If the backlog has an item in state `in-pr` (or, for an epic, a sub-issue with an open Haven PR), check that PR:
-   - **Merged** → mark the item `merged` (file mode) and continue to Phase 1.
+1. Before picking new work, check whether any issue in the selected queue already has an **open Haven PR** (a PR that `Closes #<issue>`). If so, act on that PR:
+   - **Merged** (issue now closed) → continue to Phase 1.
    - **Open, awaiting the user** (a money-path PR needing CODEOWNERS approval, or an escalation) → **stop** and report: this item is blocked on the user; do not start the next item (later items branch off `dev` and must build on the merged one).
    - **Open, CI still running / fixable failure** → handle it (re-run, fix, push) but do not start a new item.
-2. Only when there is no open in-flight item do you pick the next `todo`.
+2. Only when there is no open in-flight PR from the queue do you pick the next ready issue.
 
-## Phase 1 — Pick the next item
+## Phase 1 — Pick the next issue
 
-3. File mode: first item with `status: todo`. Epic mode: lowest-numbered **open** sub-issue not yet covered by an open/merged Haven PR.
-4. If the item's scope/acceptance is too vague to implement safely (especially an epic sub-issue with no acceptance criteria), **stop and ask the user** to sharpen it. A vague money-path item is never guessed at.
+3. Label mode: the lowest-numbered **open** issue carrying the loop label that has no linked open/merged Haven PR. Epic mode: the lowest-numbered **open** sub-issue not yet covered by an open/merged Haven PR.
+4. If the issue's scope/acceptance is too vague to implement safely (no acceptance criteria, ambiguous surface), **stop and ask the user** to sharpen the issue body. A vague money-path issue is never guessed at.
 5. Sync and branch off fresh `dev` (the integration branch — **not** `main`):
-   - `git fetch origin dev && git checkout -B claude/<track>-<item-id> origin/dev`
+   - `git fetch origin dev && git checkout -B claude/issue-<n>-<slug> origin/dev` (use the issue number so the branch traces back to its issue).
    - The loop targets `dev` because the `dev-gate` workflow (`.github/workflows/dev-gate.yml`) only allows `dev` or `hotfix/*` into `main`; a `claude/*` branch can never merge straight to `main`. Feature work flows `claude/* → dev`, and `dev → main` is promoted separately.
 
 ## Phase 2 — Implement
@@ -52,7 +59,7 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 ## Phase 5 — Open the PR
 
 13. Commit with a conventional message (end with the Co-Authored-By / Claude-Session trailers per the repo convention). Push `-u origin <branch>`.
-14. Open the PR via `mcp__github__create_pull_request` with **base `dev`** (never `main`). Body: scope, the behavior-preservation argument, verification output (test counts, tsc), and reviewer outcome. For **epic** items, include `Closes #<sub-issue>` so the epic burns down automatically.
+14. Open the PR via `mcp__github__create_pull_request` with **base `dev`** (never `main`). Body: scope, the behavior-preservation argument, verification output (test counts, tsc), and reviewer outcome. **Always include `Closes #<n>`** for the issue being shipped (standalone or epic sub-issue) so merging closes it and an epic burns down automatically.
 15. `subscribe_pr_activity` for the PR so CI failures / review comments wake the loop.
 
 ## Phase 6 — Merge gate (policy A: in-session money-path approval; migrations hard-gated)
@@ -81,16 +88,15 @@ A path is **money-path** if it matches any of: `routes/x402.ts`,
       review+merge." Leave it; do not start the next item until it merges.
 17. Never bypass a failing required check. If CI fails after auto-merge is armed, the merge won't happen — diagnose, fix, push; re-arm only on green.
 
-## Phase 7 — Update state and stop
+## Phase 7 — Stop
 
-18. File mode: set the item to `in-pr` (it becomes `merged` on a later pass once GitHub merges it). Commit the backlog change on the item branch's PR, or on a tiny follow-up — keep the backlog file truthful.
-19. Epic mode: the `Closes #` handles it; no file to update.
-20. Report a one-line status (item, PR link, gate result, merge mode) and **stop**. Do not begin the next item in the same run.
+18. State lives in GitHub, so there is nothing to edit in the repo: the open PR (with `Closes #<n>`) is the in-flight marker, and the issue closing on merge is the done marker. Leave the issue open until the PR merges.
+19. Report a one-line status (issue #, PR link, gate result, merge mode) and **stop**. Do not begin the next item in the same run.
 
 ## When to involve the user (the only times)
 
 - A blocking/ambiguous reviewer finding, or any real product/architecture/security decision.
 - A money-path PR (it waits for the user's CODEOWNERS approval by design).
 - CI failing in a way you can't resolve after a couple of focused attempts.
-- A backlog item too underspecified to implement safely.
+- An issue too underspecified to implement safely.
 Everything else — implement, test, review nits, open PR, auto-merge clean PRs, chain to the next — runs without the user.

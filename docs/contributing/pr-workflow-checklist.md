@@ -10,7 +10,8 @@ Haven uses a `dev` integration branch in front of `main`:
   PR into `dev`, and let it merge there once green. `dev` is the shared
   integration branch and deploys to the **dev environment** (Railway + Vercel).
 - **`dev → main` is a separate promotion step** (a human-opened PR). Merging to
-  `main` deploys to **production**.
+  `main` deploys to **production** — follow the
+  [`dev → main` promotion checklist](../operations/promoting-dev-to-main.md).
 - **`hotfix/* → main` is the only direct-to-`main` path**, for emergency fixes
   that can't wait for the dev cycle.
 - The **`dev-gate`** workflow (`.github/workflows/dev-gate.yml`) enforces this:

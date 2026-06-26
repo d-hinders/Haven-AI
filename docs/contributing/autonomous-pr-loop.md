@@ -1,8 +1,15 @@
 # Autonomous PR loop
 
-**In one line:** hand the loop a list of PRs — a backlog file or a GitHub epic's
-sub-issues — and it implements, tests, reviews, opens, and auto-merges them,
-stopping for a human only on a money-path change, a real decision, or stuck CI.
+**In one line:** hand the loop a list of PRs — as **GitHub issues** (a labeled
+standalone task, or an epic's sub-issues) — and it implements, tests, reviews,
+opens, and auto-merges them, stopping for a human only on a money-path change, a
+real decision, or stuck CI.
+
+> **The backlog is GitHub Issues, not a repo file.** Backlogs used to live in
+> `docs/backlogs/*.yml`, but with the `dev`/`main` split a committed status file
+> drifts out of sync between branches and has to be hand-reconciled. Issues live
+> outside git — one source of truth for humans and the loop, on every branch.
+> The old YAML tracks have been retired (see `docs/backlogs/README.md`).
 
 Ship a defined set of PRs with minimal human input. You define the work; the
 loop implements, tests, reviews, opens, and (for safe PRs) merges each one —
@@ -25,15 +32,15 @@ Pieces:
 ## Quickstart
 
 ```bash
-# A self-defined track (e.g. a code-quality cleanup):
-cp docs/backlogs/_template.yml docs/backlogs/<track>.yml   # then fill in items
-/loop /ship-next docs/backlogs/<track>.yml
+# Standalone small tasks — open issues labeled `code-quality` are the queue:
+/loop /ship-next                 # default source = the `code-quality` label
+/loop /ship-next label=<label>   # or any other loop label you've set up
 
 # A GitHub epic — its open sub-issues become the queue:
 /loop /ship-next epic=#<n>
 
-# One PR at a time, to watch it before handing over the whole backlog:
-/ship-next docs/backlogs/<track>.yml
+# One PR at a time, to watch it before handing over the whole queue:
+/ship-next
 ```
 
 Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
@@ -42,20 +49,31 @@ pings you only for a money-path approval, a real decision, or stuck CI.
 
 ## Two ways to feed work in
 
-1. **Backlog file** — for self-defined tracks (e.g. code-quality). Copy
-   `docs/backlogs/_template.yml` to `docs/backlogs/<track>.yml`, fill in `items`
-   (each with a concrete `scope` + acceptance criteria), then run
-   `/loop /ship-next docs/backlogs/<track>.yml`.
+Both are **GitHub issues** — nothing is tracked in the repo. Issue state *is* the
+backlog state: an open issue with no PR is ready, an open issue with an open
+Haven PR is in flight, and a closed issue is done (its PR closed it via
+`Closes #`).
 
-2. **A GitHub epic + sub-issues** — for pre-defined epics. Run
-   `/loop /ship-next epic=#<n>`. The epic's **open sub-issues** are the queue;
-   each PR includes `Closes #<sub-issue>`, so merging burns the epic down and
-   GitHub is the source of truth (no file to maintain). The only requirement:
-   sub-issues must be defined well enough to implement — a sub-issue with no
-   acceptance criteria makes the loop stop and ask you to sharpen it.
+1. **Standalone labeled issues** — for small, self-contained tasks. Open an issue
+   with a concrete **scope + acceptance criteria** and add the **`code-quality`**
+   label (the loop's default "ready" marker). The "🔁 Loop task" issue template
+   (`.github/ISSUE_TEMPLATE/`) prompts for the fields the loop needs and applies
+   the label for you. Run `/loop /ship-next` (or `label=<name>` for a different
+   loop label); the loop takes them oldest-first.
+
+2. **A GitHub epic + sub-issues** — for a multi-PR plan that should burn down
+   together. Open a parent (epic) issue with well-scoped **sub-issues**, then run
+   `/loop /ship-next epic=#<n>`. The epic's **open sub-issues** are the queue,
+   lowest number first. (Drive an epic via `epic=#n`; you don't also need to put
+   the `code-quality` label on its sub-issues — that's for the standalone queue.)
+
+Either way, each PR includes `Closes #<n>`, so merging closes the issue and
+GitHub stays the source of truth — there is no file to maintain. The only
+requirement: an issue must be defined well enough to implement — one with no
+acceptance criteria makes the loop stop and ask you to sharpen it.
 
 You can run a single step manually with `/ship-next` (no `/loop`) to watch one
-PR go through before handing it the whole backlog.
+PR go through before handing it the whole queue.
 
 ## Merge policy A (what this loop does)
 
@@ -123,15 +141,21 @@ Without this, `/ship-next` can open PRs but cannot auto-merge them.
      everything else flows on green CI.
 3. **Token/app permissions:** the Claude GitHub integration for this repo needs
    **contents: write, pull_requests: write, issues: write** (issues:write lets
-   the loop read epics and close sub-issues). If auto-merge calls fail, it's
-   almost always this or step 1.
+   the loop read epics/labelled issues and close them via `Closes #`). If
+   auto-merge calls fail, it's almost always this or step 1.
+4. **The loop label:** the standalone queue reads open issues labeled
+   **`code-quality`**. Create it once (Issues → Labels → New label, e.g.
+   `code-quality`, description "Ready for the autonomous PR loop"). The
+   "🔁 Loop task" issue template (`.github/ISSUE_TEMPLATE/loop-task.md`) applies
+   it automatically. To run a different queue, use any label via
+   `/ship-next label=<name>`.
 
 Tune the carve-out by editing `.github/CODEOWNERS` — widen it to hold more PR
 classes for human merge, or narrow it to let more auto-merge.
 
 ## What stays manual (by design)
 
-- Defining/approving the backlog (or writing well-scoped epic sub-issues) — once.
+- Defining the work as issues — a well-scoped labeled task or epic sub-issue — once.
 - Answering when haven-reviewer flags something **blocking/ambiguous**, or a
   genuine product/architecture/security decision comes up.
 - **Merging money-path PRs** (the CODEOWNERS carve-out).

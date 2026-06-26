@@ -30,8 +30,9 @@ items:
       isValidAddress export — update importers), middleware/agentAuth. Identical
       regex, behavior-preserving; existing route suites are the regression gate.
     money_path: true        # CODEOWNERS-owned → waits for a collaborator's merge
-    status: todo
+    status: in-pr   # PR #530 open against dev — money-path, awaits CODEOWNERS approval/merge
 
-  # Follow-up (not in this demo run): the three ETH_ADDRESS_RE const copies in
-  # routes/portfolio, routes/transactions, routes/safe-details can also import
-  # from lib/address.
+  # Follow-up DONE: the non-money-path ETH_ADDRESS_RE const copies (portfolio,
+  # transactions, safe-details + balances, user, user-safes) were migrated to
+  # lib/address by the route-coverage-dedup track, pr1 / PR #563. The only
+  # remaining inline copies are the money-path ones handled by pr2 / PR #530.

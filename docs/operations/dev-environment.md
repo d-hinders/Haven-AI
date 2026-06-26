@@ -22,6 +22,11 @@ how to configure it. For the branch workflow that feeds it, see
 Production is the same shape deploying from `main`. The two never share a
 database, JWT secret, or relayer key.
 
+**Live URLs** (no custom domain yet — we test against the platform URLs):
+
+- Frontend (Vercel): `https://haven-dev.vercel.app`
+- Backend (Railway): `https://dev-backend.up.railway.app` (`/health` is public)
+
 ## Branch → deploy mapping
 
 - **`dev`** auto-deploys to the **dev environment** (this doc).
@@ -59,7 +64,9 @@ renders nothing.
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
-- **Vercel → dev project** — frontend build logs and the live `dev.haven.ai` URL.
+- **Vercel → dev project** — frontend build logs and the live frontend at
+  `https://haven-dev.vercel.app` (no custom domain yet; the backend is
+  `https://dev-backend.up.railway.app`).
 
 If you need an env var changed or a secret rotated in the dev projects, ping the
 project owner — collaborators have Viewer access, not env-var write access.

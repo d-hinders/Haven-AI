@@ -11,8 +11,7 @@ import {
   OwnerExistsError,
   OwnerNotFoundError,
 } from '../lib/safe-owner-tx.js'
-
-const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+import { ETH_ADDRESS_RE } from '../lib/address.js'
 const APPROVER_TYPES = new Set(['eoa', 'passkey'])
 
 // ── Types ─────────────────────────────────────────────────────────

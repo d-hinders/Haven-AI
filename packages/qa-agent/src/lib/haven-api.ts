@@ -29,11 +29,6 @@ export interface PaymentStatus {
   details?: string
 }
 
-export interface Transaction {
-  tx_hash: string
-  [key: string]: unknown
-}
-
 export interface ApiResponse<T> {
   ok: boolean
   status: number
@@ -84,10 +79,6 @@ export class HavenApi {
 
   getPayment(id: string): Promise<ApiResponse<PaymentStatus>> {
     return this.call('GET', `/payments/${id}`)
-  }
-
-  listTransactions(): Promise<ApiResponse<{ transactions: Transaction[] }>> {
-    return this.call('GET', '/transactions')
   }
 
   /** Poll a payment to a terminal state (confirmed / failed / expired). */

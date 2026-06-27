@@ -12,9 +12,11 @@ dev stack (which the mocked Playwright suite structurally can't):
 
 ## Status
 
-Implemented: the shared **config contract** (`src/config.ts`) and the **dev seed**
-(`src/seed.ts`, #574 item 1). The deterministic money-flow scenarios (#575) are
-still to come.
+Implemented: the shared **config contract** (`src/config.ts`), the **dev seed**
+(`src/seed.ts`, #574 item 1), and the **money-flow harness** (`src/run.ts`, #575)
+with two of the four #420 invariants asserted live (within-budget settle,
+over-budget queue). The two x402 invariants (`PRICE_EXCEEDS_MAX`, delegate sweep
+recovery) need the demo-merchant round-trip and are follow-ups.
 
 ⚠️ The seed's **on-chain steps are not exercised in CI** (no funded testnet
 wallets there). It's grounded against the real backend endpoints and Safe
@@ -23,6 +25,31 @@ confirm end-to-end. Prerequisites: the Base Sepolia chain support (PR #598)
 deployed to the dev backend, a SEED owner EOA with a little Base Sepolia ETH, and
 the Safe funded with test USDC afterwards. See
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
+
+## Money-flow harness — `qa:dev` (#575)
+
+`npm run qa:dev -w packages/qa-agent` drives the real Haven payment path on **Base
+Sepolia** against the shared dev backend using the seeded QA identity, asserts the
+#420 invariants (no LLM, fixed inputs), prints a per-scenario pass/fail + a run
+report, and **exits non-zero on any failure**. It reads the `QA_*` env (see
+[the config table below](#config-contract)). A manual `workflow_dispatch` job
+([`.github/workflows/qa-dev.yml`](../../.github/workflows/qa-dev.yml)) runs it in
+CI from the `QA_*` Actions secrets.
+
+Scenarios (`src/scenarios/`):
+
+| Scenario | #420 invariant | Status |
+|---|---|---|
+| `within-budget-settle` | A payment inside the allowance settles on-chain + is logged | live |
+| `over-budget-queue` | A payment over the allowance is queued (`pending_approval`), never auto-executed | live |
+| `PRICE_EXCEEDS_MAX` (x402) | A priced call above the agent max is rejected | follow-up (needs demo-merchant) |
+| sweep recovery | Stranded delegate balance is reclaimable after verify-without-settle | follow-up (needs demo-merchant) |
+
+> **Infra dependency:** `within-budget-settle` moves real testnet USDC, so the
+> dev **relayer** (`RELAYER_PRIVATE_KEY`) must hold Base Sepolia **ETH** for gas —
+> it submits the AllowanceModule transfer. A gas-empty relayer surfaces as
+> `execution failed: insufficient funds …` (the harness reports the on-chain
+> reason, not just a 502). Fund the relayer EOA and re-run.
 
 ## Seed — provision the QA identity (#574)
 

@@ -401,7 +401,9 @@ async function ensureAgent(
         {
           token_symbol: 'USDC',
           token_address: ADDR.usdc,
-          allowance_amount: cfg.allowanceUsdc,
+          // Atomic units — must match the on-chain setAllowance value, and the
+          // backend validates allowance_amount as an atomic integer.
+          allowance_amount: ethers.parseUnits(cfg.allowanceUsdc, USDC_DECIMALS).toString(),
           reset_period_min: cfg.resetMin,
         },
       ],

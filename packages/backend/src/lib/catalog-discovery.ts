@@ -26,6 +26,29 @@ const SUPPORTED_NETWORKS = new Set(SUPPORTED_CHAIN_IDS.map((id) => `eip155:${id}
 /** Default category for discovered resources (BAS-mapped in bas-accounts.ts). */
 const DEFAULT_DISCOVERY_CATEGORY = 'api'
 
+/**
+ * Map a Bazaar resource's `tags` to a catalog category that has a BAS expense
+ * account (`lib/bas-accounts.ts`), so discovered spend classifies into the right
+ * account instead of always landing on the default (#473 bookkeeping tie-in).
+ * Conservative: the first clearly-matching tag wins; otherwise `api`.
+ */
+const TAG_CATEGORY_RULES: Array<{ category: string; keywords: string[] }> = [
+  { category: 'search', keywords: ['search', 'web-search', 'serp'] },
+  { category: 'ai', keywords: ['ai', 'llm', 'inference', 'model', 'gpt', 'completion', 'embedding'] },
+  { category: 'media', keywords: ['image', 'audio', 'video', 'media', 'music', 'tts', 'speech', 'vision'] },
+  { category: 'compute', keywords: ['compute', 'code', 'sandbox', 'execution', 'runtime'] },
+  { category: 'data', keywords: ['data', 'weather', 'market', 'finance', 'crypto', 'enrichment', 'lookup'] },
+]
+
+function categoryFromTags(tags: string[] | undefined): string {
+  if (!tags?.length) return DEFAULT_DISCOVERY_CATEGORY
+  const lower = tags.map((t) => t.toLowerCase())
+  for (const { category, keywords } of TAG_CATEGORY_RULES) {
+    if (lower.some((tag) => keywords.some((kw) => tag.includes(kw)))) return category
+  }
+  return DEFAULT_DISCOVERY_CATEGORY
+}
+
 /** Safety cap so one run never probes thousands of endpoints. */
 const DEFAULT_MAX_ITEMS = 50
 const PAGE_SIZE = 100
@@ -42,6 +65,11 @@ interface BazaarResource {
   resource?: string
   type?: string
   accepts?: BazaarAccept[]
+  /** Current Bazaar shape: name/description/tags live at the top level. */
+  serviceName?: string
+  description?: string
+  tags?: string[]
+  /** Older Bazaar shape — kept as a fallback. */
   metadata?: { name?: string; description?: string }
   lastUpdated?: string
 }
@@ -157,9 +185,12 @@ export async function ingestDiscoveredCatalog(
       continue
     }
 
-    const name = item.metadata?.name?.trim() || deriveName(resourceUrl)
+    const name = item.serviceName?.trim() || item.metadata?.name?.trim() || deriveName(resourceUrl)
     const description =
-      item.metadata?.description?.trim() || `x402 resource discovered via the Bazaar (${name}).`
+      item.description?.trim() ||
+      item.metadata?.description?.trim() ||
+      `x402 resource discovered via the Bazaar (${name}).`
+    const category = categoryFromTags(item.tags)
 
     await db.query(
       `INSERT INTO merchant_catalog
@@ -170,7 +201,7 @@ export async function ingestDiscoveredCatalog(
       [
         name,
         description,
-        DEFAULT_DISCOVERY_CATEGORY,
+        category,
         resourceUrl,
         probe.priceDisplay ?? null,
         probe.priceAtomic ?? null,

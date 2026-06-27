@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsup",
     "seed": "tsx src/seed.ts",
+    "qa:dev": "tsx src/run.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

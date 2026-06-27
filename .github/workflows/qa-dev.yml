@@ -1,0 +1,31 @@
+name: QA — money-flow (dev)
+
+# Manual only (#575): runs the deterministic money-flow harness against the
+# shared dev backend using the QA_* secrets. No schedule and no merge gate yet
+# (that is Sub-issue 5). Testnet-only (Base Sepolia); never touches mainnet.
+on:
+  workflow_dispatch:
+    inputs:
+      haven_api_url:
+        description: Override the dev backend URL (defaults to the QA_HAVEN_API_URL secret)
+        required: false
+        type: string
+
+jobs:
+  money-flow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+      - run: npm ci
+      - name: Run money-flow QA
+        env:
+          QA_HAVEN_API_URL: ${{ github.event.inputs.haven_api_url || secrets.QA_HAVEN_API_URL }}
+          QA_AGENT_API_KEY: ${{ secrets.QA_AGENT_API_KEY }}
+          QA_DELEGATE_PRIVATE_KEY: ${{ secrets.QA_DELEGATE_PRIVATE_KEY }}
+          QA_PAYMENT_TO: ${{ secrets.QA_PAYMENT_TO }}
+          QA_DEMO_MERCHANT_URL: ${{ secrets.QA_DEMO_MERCHANT_URL }}
+        run: npm run qa:dev -w packages/qa-agent

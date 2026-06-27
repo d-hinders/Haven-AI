@@ -12,7 +12,7 @@ Deployment model decision guide for agent developers.
 
 | | **Local MCP** (`@haven_ai/mcp`) | **Hosted MCP + Edge Signer** (`@haven_ai/mcp-server` + `@haven_ai/signer`) |
 |---|---|---|
-| **Server** | Runs on the user's machine alongside the agent runtime | Haven's hosted endpoint (e.g. `https://mcp.haven.ai/v1`) |
+| **Server** | Runs on the user's machine alongside the agent runtime | Haven's hosted endpoint (the Railway URL, e.g. `https://haven-ai-production-5953.up.railway.app/v1`) |
 | **Signing key** | On the local machine, loaded by the MCP process at startup | On the local machine, held exclusively by `@haven_ai/signer` |
 | **Agent config** | Points to a local `npx @haven_ai/connect`-managed server | Points to the hosted URL + Bearer token; separate signer config |
 | **Setup complexity** | One tool call: `npx @haven_ai/connect` | Two MCP servers: one hosted URL, one local signer binary |

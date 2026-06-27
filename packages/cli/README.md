@@ -35,7 +35,7 @@ haven wallets balances --safe <id|address>
 haven agents list
 haven agents show <id>
 haven budget show <agentId>
-haven activity list [--safe <id>] [--agent <id>] [--direction in|out] [--limit <n>]
+haven activity list [--safe <id|address>] [--agent <id>] [--direction in|out] [--limit <n>] [--offset <n>]
 haven activity export [same filters] > activity.csv
 haven activity export --format sie [--from <ISO>] [--to <ISO>] [--company <name>] > books.si
 haven catalog list

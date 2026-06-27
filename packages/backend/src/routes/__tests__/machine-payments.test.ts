@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
+import { authorizeMachinePayment } from '../../lib/machine-payments.js'
 
 const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -63,6 +64,15 @@ const challenge = {
   recipient: RECIPIENT,
   expiresAt: '2099-01-01T00:00:00.000Z',
   metadata: { demoResource: 'market-summary' },
+}
+
+function expectNoAuthorizationWork() {
+  expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+  expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
+  expect(allowanceMocks.computeEffectiveAllowance).not.toHaveBeenCalled()
+  expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+  expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
+  expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
 }
 
 function authRow() {
@@ -841,10 +851,56 @@ describe('machine payment routes', () => {
       expect(response.json().error).toBe('expiresAt must be a valid ISO timestamp')
     }
 
-    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+    expectNoAuthorizationWork()
     expect(mockQuery).toHaveBeenCalledTimes(invalidExpiresAtValues.length)
+  })
+
+  it('rejects malformed MPP payTo before allowance, hash, or execution work', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        challenge: { ...challenge, recipient: 'not-an-address' },
+        idempotencyKey: 'mpp_demo:test',
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'Valid payTo address is required' })
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+    expectNoAuthorizationWork()
+  })
+
+  it('rejects malformed MPP merchantPayTo before allowance, hash, or execution work', async () => {
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: RECIPIENT,
+      merchantPayTo: 'not-an-address',
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: {
+        ...challenge.metadata,
+        protocol: 'mpp',
+        network: challenge.network.name,
+        description: challenge.description,
+      },
+    })
+
+    expect(result).toEqual({
+      statusCode: 400,
+      body: { error: 'Valid merchantPayTo address is required' },
+    })
+    expect(mockQuery).not.toHaveBeenCalled()
+    expectNoAuthorizationWork()
   })
 
   it('rejects signatures from the wrong delegate', async () => {

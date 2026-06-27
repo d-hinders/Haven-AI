@@ -1,0 +1,26 @@
+{
+  "name": "@haven_ai/qa-agent",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Internal QA harness for the Haven dev environment (epic #573): deterministic money-flow scenarios + dev seeding. Not published.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "haven",
+    "qa",
+    "internal"
+  ],
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.4"
+  }
+}

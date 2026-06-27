@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { api, ApiRequestError } from '@/lib/api'
 
 describe('ApiClient', () => {
@@ -6,6 +6,13 @@ describe('ApiClient', () => {
     vi.stubGlobal('fetch', vi.fn())
     localStorage.clear()
     window.history.replaceState({}, '', '/')
+    // The ?apiBaseUrl override is gated to non-production (see #582). Tests that
+    // exercise the override opt into a dev env; the rest run as production.
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'dev')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   function mockFetchOk(data: unknown) {
@@ -158,6 +165,42 @@ describe('ApiClient', () => {
         headers: {},
       })
       expect(localStorage.getItem('haven_api_base_url')).toBeNull()
+    })
+  })
+
+  describe('apiBaseUrl override gating (#582)', () => {
+    it('ignores the ?apiBaseUrl query param in production', async () => {
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'production')
+      localStorage.setItem('haven_token', 'test-token')
+      mockFetchOk({ id: 1 })
+      window.history.replaceState({}, '', '/?apiBaseUrl=https%3A%2F%2Fevil.example')
+
+      await api.get('/users')
+
+      // The bearer JWT must go to the baked-in base URL, never the attacker host.
+      expect(fetch).toHaveBeenCalledWith('/api/users', {
+        headers: { Authorization: 'Bearer test-token' },
+      })
+    })
+
+    it('ignores a persisted override in production', async () => {
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'production')
+      mockFetchOk({ id: 1 })
+      localStorage.setItem('haven_api_base_url', 'https://evil.example')
+
+      await api.get('/users')
+
+      expect(fetch).toHaveBeenCalledWith('/api/users', { headers: {} })
+    })
+
+    it('ignores the override when NEXT_PUBLIC_HAVEN_ENV is unset', async () => {
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+      mockFetchOk({ id: 1 })
+      window.history.replaceState({}, '', '/?apiBaseUrl=https%3A%2F%2Fevil.example')
+
+      await api.get('/users')
+
+      expect(fetch).toHaveBeenCalledWith('/api/users', { headers: {} })
     })
   })
 })

@@ -159,7 +159,9 @@ async function ensureSafe(
   token: string,
   owner: ethers.Wallet,
 ): Promise<UserSafe> {
-  const existing = await api<UserSafe[]>(cfg, 'GET', '/user/safes', { token })
+  const { safes: existing } = await api<{ safes: UserSafe[] }>(cfg, 'GET', '/user/safes', {
+    token,
+  })
   const onChain = existing.find((s) => s.chain_id === CHAIN_ID)
   if (onChain) {
     console.log(`  ✓ reusing linked Safe ${onChain.safe_address}`)
@@ -175,7 +177,9 @@ async function ensureSafe(
     body: { safe_address: safeAddress, chain_id: CHAIN_ID, name: 'QA Safe' },
   })
   console.log('  ✓ Safe linked to QA user')
-  const refreshed = await api<UserSafe[]>(cfg, 'GET', '/user/safes', { token })
+  const { safes: refreshed } = await api<{ safes: UserSafe[] }>(cfg, 'GET', '/user/safes', {
+    token,
+  })
   const safe = refreshed.find((s) => s.safe_address.toLowerCase() === safeAddress.toLowerCase())
   if (!safe) throw new Error('Linked Safe not found after POST /user/safes')
   return safe
@@ -225,7 +229,6 @@ async function deploySafe(cfg: SeedConfig, owner: ethers.Wallet): Promise<string
 // gas). Each sub-step is included only if not already on-chain (idempotent).
 async function ensureAllowance(
   cfg: SeedConfig,
-  token: string,
   safe: UserSafe,
   owner: ethers.Wallet,
   provider: ethers.JsonRpcProvider,
@@ -321,26 +324,30 @@ async function ensureAllowance(
   // (v=27/28) is what Safe's checkSignatures verifies.
   const signature = owner.signingKey.sign(safeTxHash).serialized
 
-  await api(cfg, 'POST', '/safe-exec/exec', {
-    token,
-    body: {
-      chain_id: CHAIN_ID,
-      safe_address: safe.safe_address,
-      to: message.to,
-      value: '0',
-      data: message.data,
-      operation: 1,
-      safe_tx_gas: '0',
-      base_gas: '0',
-      gas_price: '0',
-      gas_token: ZERO,
-      refund_receiver: ZERO,
-      nonce: nonce.toString(),
-      signatures: signature,
-    },
-  })
+  // The backend's /safe/exec relay is passkey-only, so for an EOA-owned Safe the
+  // owner submits execTransaction directly on-chain (owner pays gas).
+  const safeExec = new ethers.Contract(
+    safe.safe_address,
+    [
+      'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns (bool)',
+    ],
+    owner,
+  )
+  const tx = await safeExec.execTransaction(
+    message.to,
+    message.value,
+    message.data,
+    message.operation,
+    message.safeTxGas,
+    message.baseGas,
+    message.gasPrice,
+    message.gasToken,
+    message.refundReceiver,
+    signature,
+  )
+  await tx.wait()
   console.log(
-    `  ✓ allowance set: ${cfg.allowanceUsdc} USDC → delegate, reset ${cfg.resetMin} min`,
+    `  ✓ allowance set: ${cfg.allowanceUsdc} USDC → delegate, reset ${cfg.resetMin} min (tx ${tx.hash})`,
   )
 }
 
@@ -375,7 +382,7 @@ async function ensureAgent(
   token: string,
   safe: UserSafe,
 ): Promise<{ apiKey: string | null }> {
-  const agents = await api<Agent[]>(cfg, 'GET', '/agents', { token })
+  const { agents } = await api<{ agents: Agent[] }>(cfg, 'GET', '/agents', { token })
   const existing = agents.find(
     (a) => a.delegate_address?.toLowerCase() === cfg.delegateAddress.toLowerCase(),
   )
@@ -425,7 +432,7 @@ async function main(): Promise<void> {
   console.log('\n[2/4] QA Safe')
   const safe = await ensureSafe(cfg, token, owner)
   console.log('\n[3/4] Spend gate (module + delegate + allowance)')
-  await ensureAllowance(cfg, token, safe, owner, provider)
+  await ensureAllowance(cfg, safe, owner, provider)
   console.log('\n[4/4] QA agent')
   const { apiKey } = await ensureAgent(cfg, token, safe)
 

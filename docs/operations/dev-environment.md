@@ -1,9 +1,11 @@
 # Dev environment
 
-Haven runs a single **shared dev environment** that mirrors production, so
+Haven runs a **shared dev backend stack** that mirrors production, so
 work-in-progress on the `dev` integration branch can be exercised end-to-end
-before it is promoted to `main`. There is one dev environment, not a per-PR
-preview stack: **one `dev` branch → one set of Railway/Vercel deploys**.
+before it is promoted to `main`. The **backend, hosted MCP, demo-merchant, and
+Postgres** are one shared set of Railway services deploying from `dev`. The
+**frontend has no permanent dev URL** — it is served as **per-PR Vercel preview
+deployments**, and the preview URL changes on every deployment.
 
 This doc is the authoritative reference for how the dev environment is wired and
 how to configure it. For the branch workflow that feeds it, see
@@ -13,7 +15,7 @@ how to configure it. For the branch workflow that feeds it, see
 
 | Service | Platform | Deploys from | Notes |
 |---|---|---|---|
-| Frontend | **Vercel** (dev project) | `dev` branch | Bakes in `NEXT_PUBLIC_HAVEN_ENV=dev` at build time → shows the `DEV` badge. |
+| Frontend | **Vercel** (dev project) | per-PR preview deploys | **No permanent URL** — each PR gets a Vercel preview link that changes on every deployment. The Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend. |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. |
@@ -22,10 +24,13 @@ how to configure it. For the branch workflow that feeds it, see
 Production is the same shape deploying from `main`. The two never share a
 database, JWT secret, or relayer key.
 
-**Live URLs** (no custom domain yet — we test against the platform URLs):
+**URLs** (no custom domain — we test against the platform URLs):
 
-- Frontend (Vercel): `https://haven-dev.vercel.app`
-- Backend (Railway): `https://dev-backend.up.railway.app` (`/health` is public)
+- Frontend (Vercel): **no permanent URL.** Use the **per-PR Vercel preview link**
+  for the deployment under test (it changes on every deploy) — get it from the
+  PR's Vercel check or the Vercel dev project's Deployments list.
+- Backend (Railway): the stable dev backend URL from the Railway dev project
+  (`/health` is public). Confirm the exact host in Railway rather than assuming it.
 
 ## Branch → deploy mapping
 
@@ -64,9 +69,9 @@ renders nothing.
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
-- **Vercel → dev project** — frontend build logs and the live frontend at
-  `https://haven-dev.vercel.app` (no custom domain yet; the backend is
-  `https://dev-backend.up.railway.app`).
+- **Vercel → dev project** — frontend build logs and the **per-PR preview
+  deployments** (no permanent dev frontend URL; open the preview link for the
+  deployment under test).
 
 If you need an env var changed or a secret rotated in the dev projects, ping the
 project owner — collaborators have Viewer access, not env-var write access.

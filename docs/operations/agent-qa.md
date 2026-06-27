@@ -11,13 +11,16 @@ and how the layers connect. Companion to
 > wired dev stack; today parts of it are unverified (CORS origin, `/api` proxy,
 > demo-merchant on dev — see #585 and the #574 checklist).
 
-## Targets (no custom domain yet)
+## Targets
 
-The dev environment has no custom domain. Target the real deploy URLs:
+The dev **backend** stack has stable Railway URLs; the dev **frontend** has **no
+permanent URL** — it is a per-PR Vercel preview link that changes on every
+deployment. Pass the preview link in per run (e.g. as `PLAYWRIGHT_BASE_URL` / the
+Layer 1 `base_url` input), and confirm the backend host in the Railway dev project.
 
 | Surface | URL | Used by |
 |---|---|---|
-| Dev frontend | `https://haven-dev.vercel.app` (Vercel, `NEXT_PUBLIC_HAVEN_ENV=dev`) | Layer 1 (#576), Layer 3 (#579) |
+| Dev frontend | **Per-PR Vercel preview link** — changes each deploy, no permanent URL. Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev`. | Layer 1 (#576), Layer 3 (#579) |
 | Dev backend / API | `https://dev-backend.up.railway.app` | All layers (the stable API money flows hit) |
 | Dev demo-merchant | _TBD — record once confirmed deployed on dev_ | Layer 2a (#575) x402 settlement |
 | Dev MCP | _TBD — `.env.dev.example`'s `dev-mcp…/v1` returns 404; record the real one_ | Layer 2b (#577) |

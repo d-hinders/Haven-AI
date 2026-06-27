@@ -145,11 +145,64 @@ const BASE: ChainConfig = {
   tokenByAddress: buildTokenByAddress(BASE_TOKENS),
 }
 
+// ── Base Sepolia (84532) — testnet for dev / QA ───────────────────
+//
+// All addresses verified deployed on Base Sepolia via eth_getCode across three
+// RPCs. The only delta from Base mainnet is the AllowanceModule: v0.1.0's
+// 0xCFbF… address is NOT deployed on Base Sepolia, so this uses the v0.1.1
+// deployment (0xAA46…). v0.1.1's ABI is identical to v0.1.0's, so the existing
+// AllowanceModule integration works unchanged.
+
+const BASE_SEPOLIA_TOKENS: Record<string, TokenConfig> = {
+  ETH: {
+    symbol: 'ETH',
+    decimals: 18,
+    address: null,
+    coingeckoId: 'ethereum',
+  },
+  USDC: {
+    symbol: 'USDC',
+    decimals: 6,
+    // Circle's canonical Base Sepolia testnet USDC.
+    address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    coingeckoId: 'usd-coin',
+  },
+}
+
+const BASE_SEPOLIA: ChainConfig = {
+  chainId: 84532,
+  name: 'Base Sepolia',
+  shortName: 'base-sepolia',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrl: config.rpcUrlBaseSepolia,
+  explorerUrl: 'https://sepolia.basescan.org',
+  explorerApiUrl: 'https://base-sepolia.blockscout.com/api/v2',
+  explorerApiKey: '',
+  explorerApiProvider: 'blockscout-v2',
+  safeTxServiceUrl: 'https://api.safe.global/tx-service/basesep',
+  contracts: {
+    safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
+    safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
+    fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
+    // AllowanceModule v0.1.1 (identical ABI to v0.1.0; v0.1.0's address is not
+    // on Base Sepolia). Verified via eth_getCode.
+    allowanceModule: '0xAA46724893dedD72658219405185Fb0Fc91e091C',
+    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
+  },
+  passkey: {
+    verifier: '0x0000000000000000000000000000000000000100',
+    factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',
+  },
+  tokens: BASE_SEPOLIA_TOKENS,
+  tokenByAddress: buildTokenByAddress(BASE_SEPOLIA_TOKENS),
+}
+
 // ── Registry ──────────────────────────────────────────────────────
 
 const CHAINS: Record<number, ChainConfig> = {
   100: GNOSIS,
   8453: BASE,
+  84532: BASE_SEPOLIA,
 }
 
 export const SUPPORTED_CHAIN_IDS = Object.keys(CHAINS).map(Number)

@@ -265,7 +265,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     const apiKey = `sk_agent_${crypto.randomBytes(24).toString('hex')}`
     const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest('hex')
-    const apiKeyPrefix = apiKey.slice(0, 20)
+    // The api_key_prefix column is VARCHAR(12); slicing 20 overflows it and the
+    // INSERT fails (Postgres 22001), 500-ing every agent creation. Matches the
+    // rotate-key path, which already slices 12.
+    const apiKeyPrefix = apiKey.slice(0, 12)
 
     const client = await pool.connect()
     try {

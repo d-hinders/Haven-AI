@@ -26,11 +26,15 @@ database, JWT secret, or relayer key.
 
 **URLs** (no custom domain — we test against the platform URLs):
 
-- Frontend (Vercel): **no permanent URL.** Use the **per-PR Vercel preview link**
-  for the deployment under test (it changes on every deploy) — get it from the
-  PR's Vercel check or the Vercel dev project's Deployments list.
-- Backend (Railway): the stable dev backend URL from the Railway dev project
-  (`/health` is public). Confirm the exact host in Railway rather than assuming it.
+- Frontend (Vercel): **no permanent URL** — it's a **per-PR Vercel preview link**
+  that changes on every deploy (get it from the PR's Vercel check or the dev
+  project's Deployments list). ⚠️ `haven-dev.vercel.app` is a *different* app
+  ("HAVEN Project" Vite SPA), not Haven's dashboard.
+- Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).
+  ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
+  not use it; it caused real confusion (#585/#595).
+- Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
+- Hosted MCP (Railway): `haven-ai-hosted-mcp-dev-<hash>.up.railway.app` — confirm the hash.
 
 ## Branch → deploy mapping
 
@@ -71,7 +75,8 @@ renders nothing.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
 - **Vercel → dev project** — frontend build logs and the **per-PR preview
   deployments** (no permanent dev frontend URL; open the preview link for the
-  deployment under test).
+  deployment under test). ⚠️ `haven-dev.vercel.app` is a different app, not ours.
+  The backend is `https://havenbackend-dev-8b95.up.railway.app`.
 
 If you need an env var changed or a secret rotated in the dev projects, ping the
 project owner — collaborators have Viewer access, not env-var write access.

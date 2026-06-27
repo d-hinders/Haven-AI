@@ -7,9 +7,10 @@ and how the layers connect. Companion to
 [`dev-environment.md`](./dev-environment.md) (how the dev stack is wired).
 
 > **Verify the stack first.** Do not start a QA run until the dev-stack
-> verification checklist on #574 is fully green. The layers assume a correctly
-> wired dev stack; today parts of it are unverified (CORS origin, `/api` proxy,
-> demo-merchant on dev — see #585 and the #574 checklist).
+> verification checklist on #574 is green. The dev backend, demo-merchant and
+> hosted MCP are deployed and auto-deploy from `dev` (verified); the open items
+> are the **real dev frontend URL**, the **funded QA delegate**, and the `QA_*`
+> secrets — plus retiring the stale `dev-backend.up.railway.app` duplicate.
 
 ## Targets
 
@@ -20,10 +21,10 @@ Layer 1 `base_url` input), and confirm the backend host in the Railway dev proje
 
 | Surface | URL | Used by |
 |---|---|---|
-| Dev frontend | **Per-PR Vercel preview link** — changes each deploy, no permanent URL. Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev`. | Layer 1 (#576), Layer 3 (#579) |
-| Dev backend / API | `https://dev-backend.up.railway.app` | All layers (the stable API money flows hit) |
-| Dev demo-merchant | _TBD — record once confirmed deployed on dev_ | Layer 2a (#575) x402 settlement |
-| Dev MCP | _TBD — `.env.dev.example`'s `dev-mcp…/v1` returns 404; record the real one_ | Layer 2b (#577) |
+| Dev frontend | **Per-PR Vercel preview link** — changes each deploy, no permanent URL; Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev`. ⚠️ *not* `haven-dev.vercel.app` (a different "HAVEN Project" app). | Layer 1 (#576), Layer 3 (#579) |
+| Dev backend / API | `https://havenbackend-dev-8b95.up.railway.app` (⚠️ *not* `dev-backend.up.railway.app`, a stale duplicate) | All layers (the stable API money flows hit) |
+| Dev demo-merchant | `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz` verified online) | Layer 2a (#575) x402 settlement |
+| Dev MCP | `haven-ai-hosted-mcp-dev-<hash>.up.railway.app` (confirm the hash in Railway) | Layer 2b (#577) |
 
 ## Two ways the layers reach the backend — they differ on CORS
 
@@ -31,7 +32,7 @@ This distinction decides what each layer depends on:
 
 - **Node → API (server-to-server):** the seed script (#574) and the money-flow
   harness (#575) call the backend **directly** at
-  `HAVEN_API_URL=https://dev-backend.up.railway.app`. No browser, **no CORS** — so
+  `HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app`. No browser, **no CORS** — so
   these layers do **not** depend on the CORS fix (#585). Their blockers are the
   **demo-merchant on dev** and the **funded delegate / secrets**.
 - **Browser (cross-origin):** the live UI smoke (#576) and browser-exploration
@@ -43,7 +44,7 @@ This distinction decides what each layer depends on:
 
 A frontend can be re-pointed at a chosen backend at runtime:
 
-- `…?apiBaseUrl=https://dev-backend.up.railway.app` → routes the app's API calls
+- `…?apiBaseUrl=https://havenbackend-dev-8b95.up.railway.app` → routes the app's API calls
   to that backend and persists it to `localStorage['haven_api_base_url']`.
 - `…?apiBaseUrl=default` → clears the stored override.
 

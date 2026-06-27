@@ -34,6 +34,7 @@ import * as dropLegacyPlaintextApiKey from './031_drop_legacy_plaintext_api_key.
 import * as accountEntitlements from './032_account_entitlements.js'
 import * as reportingFeedSyncs from './033_reporting_feed_syncs.js'
 import * as baseDefaultChain from './034_base_default_chain.js'
+import * as merchantCatalogSeedExpansion from './035_merchant_catalog_seed_expansion.js'
 
 export interface Migration {
   version: string
@@ -81,4 +82,5 @@ export const migrations: Migration[] = [
   accountEntitlements,
   reportingFeedSyncs,
   baseDefaultChain,
+  merchantCatalogSeedExpansion,
 ]

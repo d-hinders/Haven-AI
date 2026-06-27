@@ -24,8 +24,13 @@ database, JWT secret, or relayer key.
 
 **Live URLs** (no custom domain yet — we test against the platform URLs):
 
-- Frontend (Vercel): `https://haven-dev.vercel.app`
-- Backend (Railway): `https://dev-backend.up.railway.app` (`/health` is public)
+- Frontend (Vercel): **confirm the real URL in the Vercel dashboard** — `haven-dev.vercel.app`
+  is a *different* app ("HAVEN Project" Vite SPA), not Haven's dashboard.
+- Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).
+  ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
+  not use it; it caused real confusion (#585/#595).
+- Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
+- Hosted MCP (Railway): `haven-ai-hosted-mcp-dev-<hash>.up.railway.app` — confirm the hash.
 
 ## Branch → deploy mapping
 
@@ -64,9 +69,9 @@ renders nothing.
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
-- **Vercel → dev project** — frontend build logs and the live frontend at
-  `https://haven-dev.vercel.app` (no custom domain yet; the backend is
-  `https://dev-backend.up.railway.app`).
+- **Vercel → dev project** — frontend build logs and the live frontend URL
+  (confirm it in the dashboard; not `haven-dev.vercel.app`, which is a different app).
+  The backend is `https://havenbackend-dev-8b95.up.railway.app`.
 
 If you need an env var changed or a secret rotated in the dev projects, ping the
 project owner — collaborators have Viewer access, not env-var write access.

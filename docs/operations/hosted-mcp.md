@@ -46,9 +46,13 @@ for the wire contract and the custody invariant.
 6. **Resources:** start at Railway's defaults; this service is stateless and
    per-request, scale horizontally if traffic warrants.
 
-### Custom domain (`mcp.haven.ai`) — when the frontend (#187) needs a stable URL
+### Custom domain — when the frontend (#187) needs a stable URL
 
-1. Railway → Service → **Networking → Custom Domain** → add `mcp.haven.ai`.
+> Haven does not own a custom domain today; the hosted MCP is reached at its
+> Railway URL. These steps apply only once a domain we control is registered —
+> use that domain (e.g. `mcp.<your-domain>`), not a placeholder we don't own.
+
+1. Railway → Service → **Networking → Custom Domain** → add `mcp.<your-domain>`.
 2. Add the displayed `CNAME` record at your DNS provider.
 3. Wait for Railway to issue a cert (TLS automatic).
 4. Update the frontend connect command generator to point at the custom domain.
@@ -67,7 +71,7 @@ points `HAVEN_API_URL` at the internal Compose hostname.
 ## Smoke tests after a deploy
 
 ```sh
-URL=https://havenmcp-production-XXXX.up.railway.app    # or mcp.haven.ai once mapped
+URL=https://havenmcp-production-XXXX.up.railway.app    # or your custom domain once mapped
 
 # 1. Liveness:
 curl -s $URL/healthz                 # → {"status":"ok"}

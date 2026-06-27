@@ -12,13 +12,16 @@ and how the layers connect. Companion to
 > are the **real dev frontend URL**, the **funded QA delegate**, and the `QA_*`
 > secrets — plus retiring the stale `dev-backend.up.railway.app` duplicate.
 
-## Targets (no custom domain yet)
+## Targets
 
-The dev environment has no custom domain. Target the real deploy URLs:
+The dev **backend** stack has stable Railway URLs; the dev **frontend** has **no
+permanent URL** — it is a per-PR Vercel preview link that changes on every
+deployment. Pass the preview link in per run (e.g. as `PLAYWRIGHT_BASE_URL` / the
+Layer 1 `base_url` input), and confirm the backend host in the Railway dev project.
 
 | Surface | URL | Used by |
 |---|---|---|
-| Dev frontend | **confirm in Vercel** — *not* `haven-dev.vercel.app` (a different "HAVEN Project" app) | Layer 1 (#576), Layer 3 (#579) |
+| Dev frontend | **Per-PR Vercel preview link** — changes each deploy, no permanent URL; Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev`. ⚠️ *not* `haven-dev.vercel.app` (a different "HAVEN Project" app). | Layer 1 (#576), Layer 3 (#579) |
 | Dev backend / API | `https://havenbackend-dev-8b95.up.railway.app` (⚠️ *not* `dev-backend.up.railway.app`, a stale duplicate) | All layers (the stable API money flows hit) |
 | Dev demo-merchant | `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz` verified online) | Layer 2a (#575) x402 settlement |
 | Dev MCP | `haven-ai-hosted-mcp-dev-<hash>.up.railway.app` (confirm the hash in Railway) | Layer 2b (#577) |

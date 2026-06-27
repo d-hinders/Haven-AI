@@ -76,6 +76,24 @@ describe('ingestDiscoveredCatalog', () => {
     ])
   })
 
+  it('uses the current Bazaar shape (serviceName/description/tags) and maps tags to a BAS category', async () => {
+    const { db, inserts } = fakeDb()
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/discovery/resources')) {
+        return bazaarPage([
+          { resource: 'https://api.search.example/q', type: 'http', accepts: X402_BODY.accepts,
+            serviceName: 'Agent Search', description: 'Web search for agents.', tags: ['search', 'web'] },
+        ])
+      }
+      return paid402()
+    })
+
+    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    // name ← serviceName, description ← top-level description, category ← tag rule
+    expect(inserts[0]?.slice(0, 3)).toEqual(['Agent Search', 'Web search for agents.', 'search'])
+  })
+
   it('skips resources on unsupported networks (e.g. Solana) without probing', async () => {
     const { db, inserts } = fakeDb()
     const probe = vi.fn()

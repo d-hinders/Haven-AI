@@ -5,6 +5,7 @@ import Link from 'next/link'
 import ApprovalNotifications from './ApprovalNotifications'
 import WalletButton from './WalletButton'
 import EnvBadge from './EnvBadge'
+import NetworkSwitcher from './NetworkSwitcher'
 
 interface TopBarProps {
   actionSlot?: React.ReactNode
@@ -37,6 +38,7 @@ export default function TopBar({ actionSlot }: TopBarProps) {
         {/* Spacer for mobile hamburger */}
         <div className="w-8 lg:hidden" />
         <EnvBadge />
+        <NetworkSwitcher />
         {back && (
           <Link
             href={back.href}

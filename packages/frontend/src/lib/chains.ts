@@ -140,16 +140,21 @@ const CHAINS: Record<number, FrontendChainConfig> = {
  * Chains currently *offered to users* — network pickers, wallet
  * network-validation, and the wagmi connector list all derive from this.
  *
- * Single-chain per deploy. The active chain is configurable via
+ * Multichain: both **Base mainnet (8453)** and **Base Sepolia (84532)** are
+ * selectable in every environment (network pickers, account creation, etc.).
  * `NEXT_PUBLIC_HAVEN_CHAIN_ID` (build-time inlined, like `NEXT_PUBLIC_HAVEN_ENV`)
- * — defaults to Base mainnet (8453); the **dev** Vercel deploy sets `84532`
- * (Base Sepolia) so dev onboards on testnet against the testnet relayer, mirroring
- * the demo-merchant's `MERCHANT_CHAIN_ID`. Unknown/unset values fall back to Base.
+ * sets the **default pre-selection** — the dev Vercel deploy sets `84532` so dev
+ * defaults to Base Sepolia; prod leaves it unset and defaults to Base mainnet.
+ * Both chains stay enabled regardless of the default.
+ *
+ * Note: each enabled chain needs a relayer funded on that chain for deploys /
+ * payments to succeed (Base Sepolia gas on the testnet relayer, Base mainnet gas
+ * on the mainnet relayer).
  */
 const CONFIGURED_CHAIN_ID = Number(process.env.NEXT_PUBLIC_HAVEN_CHAIN_ID ?? '')
 const ACTIVE_CHAIN: FrontendChainConfig = CHAINS[CONFIGURED_CHAIN_ID] ?? BASE_CONFIG
 
-const ENABLED_CHAIN_IDS: number[] = [ACTIVE_CHAIN.chainId]
+const ENABLED_CHAIN_IDS: number[] = [BASE_CONFIG.chainId, BASE_SEPOLIA_CONFIG.chainId]
 
 export const SUPPORTED_CHAINS = ENABLED_CHAIN_IDS.map((id) => CHAINS[id])
 export const SUPPORTED_CHAIN_IDS = ENABLED_CHAIN_IDS

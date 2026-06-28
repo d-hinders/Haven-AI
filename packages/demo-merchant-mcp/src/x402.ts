@@ -311,7 +311,7 @@ export function buildPaymentRequired(params: {
         payTo: params.merchantAddress,
         maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
         asset: USDC_ADDRESS,
-        extra: { name: 'USD Coin', version: '2' },
+        extra: { name: USDC_DOMAIN_NAME, version: USDC_DOMAIN_VERSION },
       },
     ],
     error: 'Payment required',
@@ -369,8 +369,11 @@ function assertPaymentOptionMatches(
   if (accepted.maxTimeoutSeconds !== expected.maxTimeoutSeconds) {
     throw new PaymentError('Payment accepted option does not match timeout')
   }
-  if ((accepted.extra?.name ?? null) !== 'USD Coin' || (accepted.extra?.version ?? null) !== '2') {
-    throw new PaymentError('Payment accepted option is missing Base USDC domain metadata')
+  if (
+    (accepted.extra?.name ?? null) !== USDC_DOMAIN_NAME ||
+    (accepted.extra?.version ?? null) !== USDC_DOMAIN_VERSION
+  ) {
+    throw new PaymentError('Payment accepted option is missing the expected USDC domain metadata')
   }
 }
 

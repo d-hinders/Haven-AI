@@ -1,3 +1,14 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/routes/safe-deploy.ts
+  - packages/backend/src/lib/safe-deployer.ts
+  - packages/backend/src/routes/passkeys.ts
+  - packages/backend/src/routes/user-safes.ts
+last-verified: "2026-06-28"
+---
+
 # Haven — Identity & Key/Credential Custody
 
 Every identity, key, and credential in the system plotted with the party that

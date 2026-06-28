@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven AI UX Review
 
 Use this checklist before finishing any Haven UI task. It is written for AI implementers and reviewers, so each item should be checked against the actual changed screen, not just the code diff.

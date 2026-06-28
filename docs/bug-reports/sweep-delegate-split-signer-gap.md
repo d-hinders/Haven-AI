@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Feedback Report: `haven_sweep_delegate` Is Broken in the Split-Signer Architecture
 
 **Date:** 2026-06-16  

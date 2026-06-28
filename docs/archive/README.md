@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: archived
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Archive
 
 Frozen, point-in-time documents kept for context only. **Nothing here describes

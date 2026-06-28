@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: research
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Architecture — accounting data feed (Fortnox-first, hosted add-on)
 
 > Status: **design proposal.** Forward-looking; tracked by epic

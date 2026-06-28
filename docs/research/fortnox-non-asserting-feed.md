@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: research
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Spike — Fortnox non-asserting feed mechanism (#494)
 
 > Status: **spike / design decision.** Resolves *how* Haven feeds a settled agent

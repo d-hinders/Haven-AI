@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven — Architecture Diagrams
 
 Internal engineering reference for how identity, custody, and authority flow

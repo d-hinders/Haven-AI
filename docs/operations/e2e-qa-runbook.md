@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
 
 These two flows are inherently **live**: real agent runtimes, real wallets, real

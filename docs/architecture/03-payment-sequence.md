@@ -1,3 +1,13 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/lib/payment-coverage.ts
+last-verified: "2026-06-28"
+---
+
 # Haven — Payment Execution Sequence
 
 How an agent payment actually flows through the system, from intent to

@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # x402 / Machine-Payment Consolidation (PT-1)
 
 Status: **complete** (PRs 1–5 merged/open). Owner: captain.

@@ -1,3 +1,12 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/mcp-server/src/**
+  - packages/connect/**
+last-verified: "2026-06-28"
+---
+
 # Haven - Hosted MCP Connect Flow And Edge-Signing Contract
 
 Current architecture for the hosted Haven MCP connection. The hosted server is

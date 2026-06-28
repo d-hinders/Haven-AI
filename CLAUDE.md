@@ -1,3 +1,11 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/lib/chains.ts
+last-verified: "2026-06-28"
+---
+
 # Haven — CLAUDE.md
 
 ## What Is Haven

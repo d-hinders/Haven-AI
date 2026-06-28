@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: research
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Research — Smart-account-native x402 settlement (removing the funding leg)
 
 > Status: **investigation / decision aid** for [#431](https://github.com/d-hinders/Haven-AI/issues/431).

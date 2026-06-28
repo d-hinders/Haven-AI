@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: research
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Architecture — bookkeeping-ready export (Fortnox / SIE / beyond)
 
 > **Superseded in direction by [epic #491](https://github.com/d-hinders/Haven-AI/issues/491)

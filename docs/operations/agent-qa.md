@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Agent QA — running the QA layers against the dev environment
 
 The home doc for the automated, agent-based QA flow (epic #573). It lets a

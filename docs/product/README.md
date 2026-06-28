@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven Product & UX Guide
 
 This is the durable product UX entrypoint for Haven and the index for the `docs/product/` folder. Read it together with the current design-system and copy docs:

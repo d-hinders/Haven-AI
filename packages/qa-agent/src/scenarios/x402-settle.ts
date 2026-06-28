@@ -42,8 +42,10 @@ export const x402Settle: Scenario = {
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
-      // Cheapest product (0.0005 USDC) — comfortably within the QA allowance.
-      params: { name: 'buy_cloud_storage', arguments: { tier: '50gb' } },
+      // buy_vpn basic (0.001 USDC) — within the QA allowance, and a *settling*
+      // product (storage_50gb is the merchant's verify-without-settle product,
+      // used by the sweep scenario).
+      params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
     })
 
     const res = await client.fetch(mcpUrl, {

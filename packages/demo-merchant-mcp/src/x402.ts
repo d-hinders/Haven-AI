@@ -26,6 +26,17 @@ export { USDC_ADDRESS }
 const NETWORK: `${string}:${string}` = `eip155:${CHAIN_ID}`
 const MAX_TIMEOUT_SECONDS = 300
 const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
+const ZERO_TX_HASH = `0x${'0'.repeat(64)}` as Hex
+
+// Verify-without-settle test hook (#603). Product ids listed here are verified
+// but not settled on-chain — used by the QA sweep-recovery scenario to strand the
+// delegate deterministically. Off (empty) by default; set on the dev merchant only.
+const SKIP_SETTLE_PRODUCTS = new Set(
+  (process.env.MERCHANT_SKIP_SETTLE_PRODUCT ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
 
 export const PAYMENT_REQUIRED_HEADER = 'PAYMENT-REQUIRED'
 export const PAYMENT_SIGNATURE_HEADER = 'PAYMENT-SIGNATURE'
@@ -230,6 +241,31 @@ export function createX402PaymentProcessor(settlementClient: SettlementClient): 
       assertPaymentOptionMatches(accepted, paymentOption, params.merchantAddress, params.expectedAmount)
       assertResourceMatches(payload, params.paymentRequired)
       await verifyAuthorization(authorization, signature, params.merchantAddress, params.expectedAmount)
+
+      // Verify-without-settle test hook (#603 sweep-recovery QA). For products in
+      // MERCHANT_SKIP_SETTLE_PRODUCT, verify the payment but do NOT submit the
+      // on-chain transfer — leaving the payer's funds stranded so the sweep path
+      // can be exercised deterministically. Off by default; per-product so the
+      // normal x402 settle path is unaffected. Testnet/dev only.
+      if (SKIP_SETTLE_PRODUCTS.has(params.productId)) {
+        const response: SettleResponse = {
+          success: true,
+          payer: getAddress(authorization.from),
+          transaction: ZERO_TX_HASH,
+          network: NETWORK,
+          amount: params.expectedAmount.toString(),
+        }
+        return {
+          productId: params.productId,
+          from: getAddress(authorization.from),
+          to: getAddress(authorization.to),
+          value: params.expectedAmount,
+          nonce: authorization.nonce as Hex,
+          txHash: ZERO_TX_HASH,
+          paymentResponse: response,
+          paymentResponseHeader: encodePaymentResponseHeader(response),
+        }
+      }
 
       return settleOnce({
         productId: params.productId,

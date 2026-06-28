@@ -423,11 +423,13 @@ function formatFiat(value: number, currency: 'USD' | 'EUR'): string {
 interface SafeCardProps {
   safe: UserSafe
   isActive: boolean
+  showActiveBadge: boolean
   agentCount: number
   showDefaultBadge: boolean
   currency: 'USD' | 'EUR'
   staggerIndex: number
   onClick: () => void
+  onSetActive: () => void
   onSetDefault: () => void
 }
 
@@ -439,11 +441,13 @@ const TOP_TOKENS_PREVIEW = 3
 function SafeCard({
   safe,
   isActive,
+  showActiveBadge,
   agentCount,
   showDefaultBadge,
   currency,
   staggerIndex,
   onClick,
+  onSetActive,
   onSetDefault,
 }: SafeCardProps) {
   const {
@@ -474,8 +478,18 @@ function SafeCard({
         ['--v2-stagger-delay' as string]: `${staggerIndex * 60}ms`,
       }}
     >
-      {/* Default action — stop link navigation for nested buttons. */}
+      {/* Active + default actions — stop link navigation for nested buttons. */}
       <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        {!isActive && (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetActive() }}
+            className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            aria-label={`Set ${safe.name} as active`}
+          >
+            Set active
+          </button>
+        )}
         {!safe.is_default && (
           <button
             type="button"
@@ -490,9 +504,15 @@ function SafeCard({
         )}
       </div>
 
-      {/* Header — name + default chip */}
+      {/* Header — name + active / default chips */}
       <div className="mb-2 flex items-center gap-2 pr-12">
         <h3 className="truncate text-base font-semibold text-[var(--v2-ink)]">{safe.name}</h3>
+        {showActiveBadge && (
+          <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-[var(--v2-success-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--v2-success)]">
+            <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--v2-success)]" />
+            Active
+          </span>
+        )}
         {showDefaultBadge && (
           <span className="flex-shrink-0 rounded bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--v2-brand)]">
             default
@@ -641,11 +661,13 @@ export default function AccountsOverviewClient() {
               key={safe.id}
               safe={safe}
               isActive={activeSafe?.id === safe.id}
+              showActiveBadge={activeSafe?.id === safe.id && safes.length > 1}
               agentCount={agentCountBySafe.get(safe.id) ?? 0}
               showDefaultBadge={!!safe.is_default && safes.length > 1}
               currency={currency}
               staggerIndex={index}
               onClick={() => setActiveSafe(safe)}
+              onSetActive={() => setActiveSafe(safe)}
               onSetDefault={() => setDefault(safe.id)}
             />
           ))}

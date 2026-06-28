@@ -17,15 +17,17 @@ import { withinBudgetSettle } from './scenarios/within-budget-settle.js'
 import { overBudgetQueue } from './scenarios/over-budget-queue.js'
 import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js'
 import { x402Settle } from './scenarios/x402-settle.js'
+import { x402Sweep } from './scenarios/x402-sweep.js'
 
-// Deterministic, no-LLM scenarios run in order. (Delegate sweep recovery — the
-// last #420 invariant — needs a verify-without-settle merchant mode and is
-// tracked as #603.)
+// Deterministic, no-LLM scenarios run in order — all four #420 money-flow
+// invariants (within-budget settle, over-budget queue, x402 over-budget reject,
+// x402 settle) plus delegate sweep recovery (#603).
 const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetQueue,
   x402OverBudgetRejected,
   x402Settle,
+  x402Sweep,
 ]
 
 async function main(): Promise<void> {

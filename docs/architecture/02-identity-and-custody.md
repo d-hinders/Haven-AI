@@ -6,6 +6,13 @@ covers:
   - packages/backend/src/lib/safe-deployer.ts
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/agents.ts
+  - packages/backend/src/routes/auth.ts
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/lib/relayer.ts
+  - packages/backend/src/config.ts
+  - packages/backend/src/middleware/agentAuth.ts
 last-verified: "2026-06-28"
 ---
 

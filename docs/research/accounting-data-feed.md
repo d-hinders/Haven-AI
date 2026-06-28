@@ -1,7 +1,10 @@
 ---
 owner: "@d-hinders"
 status: research
-covers: []  # narrative — no direct code mirror
+covers:
+  - packages/backend/src/lib/accounting-entry.ts
+  - packages/backend/src/lib/fortnox-connection.ts
+  - packages/backend/src/lib/reporting/reporting-transaction.ts
 last-verified: "2026-06-28"
 ---
 

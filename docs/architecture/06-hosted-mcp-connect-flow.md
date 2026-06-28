@@ -4,6 +4,9 @@ status: current
 covers:
   - packages/mcp-server/src/**
   - packages/connect/**
+  - packages/signer/**
+  - packages/frontend/src/lib/hosted-connect.ts
+  - packages/backend/src/routes/agent-connection-setups.ts
 last-verified: "2026-06-28"
 ---
 

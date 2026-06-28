@@ -3,6 +3,9 @@ owner: "@d-hinders"
 status: current
 covers:
   - .claude/agents/**
+  - .claude/commands/ship-next.md
+  - .github/pull_request_template.md
+  - AGENTS.md
 last-verified: "2026-06-28"
 ---
 

@@ -4,6 +4,8 @@ status: current
 covers:
   - .github/workflows/**
   - .github/pull_request_template.md
+  - package.json
+  - .claude/agents/haven-reviewer.md
 last-verified: "2026-06-28"
 ---
 

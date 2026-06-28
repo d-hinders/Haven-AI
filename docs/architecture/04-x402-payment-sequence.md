@@ -4,6 +4,12 @@ status: current
 covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/x402-resources.ts
+  - packages/backend/src/lib/agent-payment-status.ts
+  - packages/sdk/src/x402.ts
+  - packages/mcp/src/tools.ts
+  - packages/mcp-server/src/tools.ts
+  - packages/signer/src/core.ts
+  - packages/signer/src/tools.ts
 last-verified: "2026-06-28"
 ---
 

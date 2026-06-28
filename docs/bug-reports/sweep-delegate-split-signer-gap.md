@@ -1,7 +1,17 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
+covers:
+  - packages/sdk/src/client.ts
+  - packages/sdk/src/sweep.ts
+  - packages/sdk/src/types.ts
+  - packages/signer/src/core.ts
+  - packages/signer/src/tools.ts
+  - packages/backend/src/db/migrations/022_delegate_sweeps.ts
+  - packages/backend/src/lib/sweep.ts
+  - packages/backend/src/routes/machine-payments.ts
+  - packages/mcp-server/src/server.ts
+  - packages/mcp-server/src/tools.ts
 last-verified: "2026-06-28"
 ---
 

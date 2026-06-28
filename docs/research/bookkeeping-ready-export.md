@@ -1,7 +1,12 @@
 ---
 owner: "@d-hinders"
 status: research
-covers: []  # narrative — no direct code mirror
+covers:
+  - packages/backend/src/lib/accounting-entry.ts
+  - packages/backend/src/lib/machine-payment-evidence.ts
+  - packages/backend/src/lib/reporting/reporting-transaction.ts
+  - packages/backend/src/routes/accounting.ts
+  - packages/backend/src/routes/reporting.ts
 last-verified: "2026-06-28"
 ---
 

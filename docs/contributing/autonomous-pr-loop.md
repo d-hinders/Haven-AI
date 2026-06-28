@@ -3,6 +3,10 @@ owner: "@d-hinders"
 status: current
 covers:
   - .github/CODEOWNERS
+  - .github/workflows/dev-gate.yml
+  - .github/ISSUE_TEMPLATE/loop-task.md
+  - .github/ISSUE_TEMPLATE/loop-epic.md
+  - .claude/commands/ship-next.md
 last-verified: "2026-06-28"
 ---
 

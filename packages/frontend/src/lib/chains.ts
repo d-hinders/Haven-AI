@@ -137,6 +137,13 @@ const CHAINS: Record<number, FrontendChainConfig> = {
 }
 
 /**
+ * Every chain in the registry — including ones no longer *offered* in pickers
+ * (e.g. Gnosis). Surfaces that display historical data across chains (catalog,
+ * contacts, transactions) resolve against this, not the offered subset.
+ */
+export const ALL_CHAINS: FrontendChainConfig[] = Object.values(CHAINS)
+
+/**
  * Chains currently *offered to users* — network pickers, wallet
  * network-validation, and the wagmi connector list all derive from this.
  *

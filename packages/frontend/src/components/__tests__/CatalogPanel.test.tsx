@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockUseCatalog, mockUseAgents } = vi.hoisted(() => ({
+const { mockUseCatalog, mockUseAgents, mockUseAuth } = vi.hoisted(() => ({
   mockUseCatalog: vi.fn(),
   mockUseAgents: vi.fn(),
+  mockUseAuth: vi.fn(),
 }))
 
 vi.mock('@/hooks/useCatalog', async (importOriginal) => {
@@ -15,7 +16,12 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
-import CatalogPanel, { agentInstruction, withinBudget } from '../CatalogPanel'
+// useChainScope (the real hook) reads the active chain from AuthContext.
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
+}))
+
+import CatalogPanel, { agentInstruction, withinBudget, networkToChainId } from '../CatalogPanel'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
@@ -81,9 +87,23 @@ describe('withinBudget', () => {
   })
 })
 
+describe('networkToChainId', () => {
+  it('resolves CAIP-2 and short-name network forms, undefined otherwise', () => {
+    expect(networkToChainId('eip155:8453')).toBe(8453)
+    expect(networkToChainId('eip155:84532')).toBe(84532)
+    expect(networkToChainId('base')).toBe(8453)
+    expect(networkToChainId('base-sepolia')).toBe(84532)
+    expect(networkToChainId('gnosis')).toBe(100)
+    expect(networkToChainId(null)).toBeUndefined()
+    expect(networkToChainId('solana')).toBeUndefined()
+  })
+})
+
 describe('CatalogPanel', () => {
   beforeEach(() => {
     mockUseAgents.mockReturnValue({ agents: [activeAgent] })
+    // Active chain = Base mainnet by default (the existing entries are on Base).
+    mockUseAuth.mockReturnValue({ activeSafe: { id: 's1', chain_id: 8453 } })
   })
 
   afterEach(() => {
@@ -159,5 +179,68 @@ describe('CatalogPanel', () => {
     mockUseCatalog.mockReturnValue({ entries: [], loading: false, error: 'boom' })
     render(<CatalogPanel />)
     expect(screen.getByText('Could not load the catalog')).toBeDefined()
+  })
+
+  function twoChainCatalog() {
+    mockUseCatalog.mockReturnValue({
+      entries: [
+        entry({ id: 'base-1', name: 'Base service', network: 'eip155:8453' }),
+        entry({ id: 'sep-1', name: 'Sepolia service', network: 'eip155:84532' }),
+      ],
+      loading: false,
+      error: null,
+    })
+  }
+
+  it('defaults to the active chain and offers a network override', () => {
+    twoChainCatalog() // active chain = Base (beforeEach)
+    render(<CatalogPanel />)
+
+    expect(screen.getByText('Base service')).toBeDefined()
+    expect(screen.queryByText('Sepolia service')).toBeNull()
+    // The override dropdown is offered because more than one chain is present.
+    expect(screen.getByLabelText('Filter catalog by network')).toBeDefined()
+  })
+
+  it('overrides to another chain, then to all networks', () => {
+    twoChainCatalog()
+    render(<CatalogPanel />)
+    const select = screen.getByLabelText('Filter catalog by network')
+
+    fireEvent.change(select, { target: { value: '84532' } })
+    expect(screen.getByText('Sepolia service')).toBeDefined()
+    expect(screen.queryByText('Base service')).toBeNull()
+
+    fireEvent.change(select, { target: { value: 'all' } })
+    expect(screen.getByText('Base service')).toBeDefined()
+    expect(screen.getByText('Sepolia service')).toBeDefined()
+  })
+
+  it('re-defaults to the active chain when it switches', () => {
+    twoChainCatalog()
+    const { rerender } = render(<CatalogPanel />)
+    expect(screen.getByText('Base service')).toBeDefined()
+    expect(screen.queryByText('Sepolia service')).toBeNull()
+
+    // Flip the active account to a Sepolia one — catalog follows.
+    mockUseAuth.mockReturnValue({ activeSafe: { id: 's2', chain_id: 84532 } })
+    rerender(<CatalogPanel />)
+    expect(screen.getByText('Sepolia service')).toBeDefined()
+    expect(screen.queryByText('Base service')).toBeNull()
+  })
+
+  it('shows an escape hatch when the active chain has no services', () => {
+    // Active chain = Gnosis (100), but the catalog only has Base entries.
+    mockUseAuth.mockReturnValue({ activeSafe: { id: 's3', chain_id: 100 } })
+    mockUseCatalog.mockReturnValue({
+      entries: [entry({ id: 'base-1', name: 'Base service', network: 'eip155:8453' })],
+      loading: false,
+      error: null,
+    })
+    render(<CatalogPanel />)
+
+    expect(screen.getByText('No services on Gnosis Chain yet')).toBeDefined()
+    fireEvent.click(screen.getByText('View all networks'))
+    expect(screen.getByText('Base service')).toBeDefined()
   })
 })

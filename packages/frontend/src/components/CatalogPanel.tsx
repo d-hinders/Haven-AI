@@ -3,10 +3,34 @@
 import { useMemo, useState, useCallback } from 'react'
 import { useCatalog, type CatalogEntry } from '@/hooks/useCatalog'
 import { useAgents } from '@/hooks/useAgents'
+import { useChainScope } from '@/hooks/useActiveChain'
+import { ALL_CHAINS, getChainConfig } from '@/lib/chains'
 import { EmptyState } from './ui/EmptyState'
+import { Select } from './ui/Select'
 import { Skeleton } from './ui/Skeleton'
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+/**
+ * Resolve a catalog entry's `network` to a chain id. The field is heterogeneous
+ * — it arrives as a CAIP-2 id (`eip155:8453`) or a chain short-name (`base`,
+ * `base-sepolia`, `gnosis`) — so handle both. Returns `undefined` for unknown /
+ * null networks (those only ever show under "All networks").
+ */
+export function networkToChainId(network: string | null | undefined): number | undefined {
+  if (!network) return undefined
+  const caip = /^eip155:(\d+)$/.exec(network)
+  if (caip) return Number(caip[1])
+  return ALL_CHAINS.find((c) => c.shortName === network)?.chainId
+}
+
+function chainName(chainId: number): string {
+  try {
+    return getChainConfig(chainId).name
+  } catch {
+    return `Chain ${chainId}`
+  }
+}
 
 /**
  * The ready-to-paste instruction for an entry, phrased so the MCP tool set
@@ -144,15 +168,39 @@ export default function CatalogPanel() {
   const { entries, loading, error } = useCatalog()
   const { agents } = useAgents()
   const [category, setCategory] = useState<string | null>(null)
+  // Catalog follows the active chain by default and re-defaults when it switches;
+  // the network dropdown is the manual override (#633, epic #625).
+  const { scope, setScope } = useChainScope('follow-active')
 
   const categories = useMemo(
     () => Array.from(new Set(entries.map((e) => e.category))).sort(),
     [entries],
   )
-  const visible = useMemo(
-    () => (category ? entries.filter((e) => e.category === category) : entries),
-    [entries, category],
+  // Distinct chains present in the catalog, for the override dropdown.
+  const chainIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          entries
+            .map((e) => networkToChainId(e.network))
+            .filter((id): id is number => id !== undefined),
+        ),
+      ).sort((a, b) => a - b),
+    [entries],
   )
+  const visible = useMemo(
+    () =>
+      entries.filter((e) => {
+        if (category && e.category !== category) return false
+        if (scope === 'all') return true
+        return networkToChainId(e.network) === scope
+      }),
+    [entries, category, scope],
+  )
+  // Show the network filter when there's a real choice: multiple chains, or the
+  // active chain has no catalog entries (so the user has an escape hatch to "all").
+  const showNetworkFilter =
+    chainIds.length > 1 || (typeof scope === 'number' && !chainIds.includes(scope))
 
   if (loading) {
     return (
@@ -184,6 +232,30 @@ export default function CatalogPanel() {
 
   return (
     <div>
+      {showNetworkFilter && (
+        <div className="mb-4 flex items-center gap-2">
+          <label htmlFor="catalog-network" className="text-xs font-medium text-[var(--v2-ink-3)]">
+            Network
+          </label>
+          <Select
+            id="catalog-network"
+            aria-label="Filter catalog by network"
+            value={scope === 'all' ? 'all' : String(scope)}
+            onChange={(e) =>
+              setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))
+            }
+            className="max-w-[200px]"
+          >
+            <option value="all">All networks</option>
+            {chainIds.map((id) => (
+              <option key={id} value={String(id)}>
+                {chainName(id)}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+
       {categories.length > 1 && (
         <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter by category">
           <button
@@ -212,11 +284,29 @@ export default function CatalogPanel() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {visible.map((entry) => (
-          <CatalogCard key={entry.id} entry={entry} budget={withinBudget(entry, agents)} />
-        ))}
-      </div>
+      {visible.length === 0 ? (
+        <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-6 text-center">
+          <p className="text-sm font-medium text-[var(--v2-ink-2)]">
+            {typeof scope === 'number'
+              ? `No services on ${chainName(scope)} yet`
+              : 'No services match this filter'}
+          </p>
+          {typeof scope === 'number' && (
+            <button
+              onClick={() => setScope('all')}
+              className="mt-2 text-xs font-medium text-[var(--v2-brand)] hover:underline"
+            >
+              View all networks
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {visible.map((entry) => (
+            <CatalogCard key={entry.id} entry={entry} budget={withinBudget(entry, agents)} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

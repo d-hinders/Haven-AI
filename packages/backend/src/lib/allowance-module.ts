@@ -8,7 +8,7 @@
  */
 
 import { ethers } from 'ethers'
-import { config } from '../config.js'
+import { config, relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from './chains.js'
 
 // ── Constants ─────────────────────────────────────────────────────
@@ -64,9 +64,13 @@ export function getProvider(chainId: number): ethers.JsonRpcProvider {
 export function getRelayerWallet(chainId: number): ethers.Wallet {
   let wallet = relayerWallets.get(chainId)
   if (!wallet) {
-    const key = config.relayerPrivateKey
+    // Per-chain key (RELAYER_PRIVATE_KEY_<chainId>) with global fallback, so a
+    // single backend can run isolated relayers per chain (#640).
+    const key = relayerPrivateKeyForChain(chainId)
     if (!key) {
-      throw new Error('RELAYER_PRIVATE_KEY environment variable is not set')
+      throw new Error(
+        `No relayer key for chain ${chainId} — set RELAYER_PRIVATE_KEY_${chainId} or RELAYER_PRIVATE_KEY`,
+      )
     }
     wallet = new ethers.Wallet(key, getProvider(chainId))
     relayerWallets.set(chainId, wallet)

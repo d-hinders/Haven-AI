@@ -11,7 +11,7 @@ import {
   type PrivateKeyAccount,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { base } from 'viem/chains'
+import { base, baseSepolia } from 'viem/chains'
 import {
   decodePaymentSignatureHeader,
   encodePaymentRequiredHeader,
@@ -250,8 +250,11 @@ export function createViemSettlementClient(params: {
 }): SettlementClient {
   const account = privateKeyToAccount(params.settlementPrivateKey) as PrivateKeyAccount
   const transport = http(params.baseRpcUrl)
-  const publicClient = createPublicClient({ chain: base, transport })
-  const walletClient = createWalletClient({ account, chain: base, transport })
+  // viem validates the chain id against the RPC before submitting, so this must
+  // match BASE_RPC_URL's chain (Base mainnet vs Base Sepolia per MERCHANT_CHAIN_ID).
+  const chain = CHAIN_ID === 84532 ? baseSepolia : base
+  const publicClient = createPublicClient({ chain, transport })
+  const walletClient = createWalletClient({ account, chain, transport })
 
   return {
     async submit(authorization, signature) {

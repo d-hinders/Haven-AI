@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: archived
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven redesign — implementation handoff
 
 > **ARCHIVED — historical.** The v2 redesign migration is complete. This document is frozen for context only; do not action its tasks. References to old doc paths below are left as written at the time. For current guidance start from `docs/product/README.md`, `docs/product/design-system.md`, and `docs/product/copy-guidelines.md`.

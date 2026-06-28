@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: research
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Sketch — `haven` CLI (terminal-native parallel to the dashboard)
 
 > Status: **design sketch / proposal.** No package built yet. Purpose: agree the

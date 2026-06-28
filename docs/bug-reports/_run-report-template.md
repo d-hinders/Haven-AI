@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 <!--
 Per-run E2E feedback report (the loop required by #419 / #420).
 Copy this file to `<yyyy-mm-dd>-<flow>-<env>.md` (e.g. 2026-06-19-connect-claude-code.md),

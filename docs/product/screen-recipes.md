@@ -1,3 +1,11 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/frontend/src/app/**
+last-verified: "2026-06-28"
+---
+
 # Haven Screen Recipes
 
 Use these recipes when designing or refactoring Haven product screens. They translate the product doctrine into repeatable structures Codex and Claude can reuse without inventing new UX each time.

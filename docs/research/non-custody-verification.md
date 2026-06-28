@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: research
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Design — make non-custody provable (CI invariants + "verify your control")
 
 > Status: **design proposal.** Forward-looking; no implementation yet. Turns the

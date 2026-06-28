@@ -1,3 +1,11 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/workflows/**
+last-verified: "2026-06-28"
+---
+
 # Dev environment
 
 Haven runs a **shared dev backend stack** that mirrors production, so

@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Agent UX Feedback: Connect Flow & x402 Payment Flow
 
 **Date:** 2026-06-17

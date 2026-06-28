@@ -1,3 +1,11 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/CODEOWNERS
+last-verified: "2026-06-28"
+---
+
 # Autonomous PR loop
 
 **In one line:** hand the loop a list of PRs — as **GitHub issues** (a labeled

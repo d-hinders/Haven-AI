@@ -1,3 +1,12 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/openapi/**
+  - packages/backend/src/routes/agents.ts
+last-verified: "2026-06-28"
+---
+
 # Haven Agent API OpenAPI Contract
 
 Haven publishes the agent payment API as OpenAPI 3.1 JSON:

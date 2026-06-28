@@ -1,3 +1,12 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/mcp/**
+  - packages/connect/**
+last-verified: "2026-06-28"
+---
+
 # MCP Runtime Compatibility
 
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent

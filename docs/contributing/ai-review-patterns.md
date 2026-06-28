@@ -1,3 +1,11 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .claude/agents/haven-reviewer.md
+last-verified: "2026-06-28"
+---
+
 # AI Review Patterns
 
 Use this as shared memory for PR review feedback that was worth fixing. Keep it pattern-based, not PR-based, so future agents can apply it to new surfaces.

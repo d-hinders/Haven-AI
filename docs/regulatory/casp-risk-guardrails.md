@@ -1,3 +1,15 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/middleware/agentAuth.ts
+last-verified: "2026-06-28"
+---
+
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
 ## Purpose

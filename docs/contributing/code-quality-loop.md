@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven Code Quality Loop
 
 Last updated: 2026-06-24

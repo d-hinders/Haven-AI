@@ -1,3 +1,13 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/frontend/src/app/globals.css
+  - packages/frontend/tailwind.config.js
+  - packages/frontend/src/components/ui/**
+last-verified: "2026-06-28"
+---
+
 # Haven Design System
 
 This is the source of truth for Haven's current light visual language. Companion to the product UX guide (`docs/product/README.md`, which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.

@@ -1,3 +1,12 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/mcp/**
+  - packages/mcp-server/src/**
+last-verified: "2026-06-28"
+---
+
 # Haven — Local MCP vs. Hosted MCP + Edge Signer
 
 Deployment model decision guide for agent developers.

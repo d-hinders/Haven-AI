@@ -1,3 +1,12 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/workflows/**
+  - .github/pull_request_template.md
+last-verified: "2026-06-28"
+---
+
 # PR Workflow Checklist
 
 Use this checklist for feature branches so PRs stay mergeable, reviewable, and deployable.

@@ -1,3 +1,11 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .claude/agents/**
+last-verified: "2026-06-28"
+---
+
 # Haven AI Agent Workflow
 
 This repo uses one main session as the captain and a few narrow subagents as specialists.

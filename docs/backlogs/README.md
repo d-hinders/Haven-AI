@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Backlogs moved to GitHub Issues
 
 The autonomous PR loop (`/ship-next` + `/loop`) used to read its queue from

@@ -1,3 +1,11 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/lib/machine-payments.ts
+last-verified: "2026-06-28"
+---
+
 # Haven — Rail-agnostic platform fee module
 
 > Overview of the per-transaction fee architecture. Design of record lives in

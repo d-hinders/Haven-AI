@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: archived
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven - Connect Agent 2 Rollout Closeout
 
 > **ARCHIVED — historical.** Point-in-time merge-readiness and rollout report for

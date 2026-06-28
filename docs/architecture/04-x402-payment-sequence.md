@@ -1,3 +1,12 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/x402-resources.ts
+last-verified: "2026-06-28"
+---
+
 # Haven - x402 Payment Execution Sequence
 
 How an agent pays for an x402-protected resource through Haven today.

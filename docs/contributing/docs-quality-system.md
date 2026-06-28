@@ -4,6 +4,7 @@ status: current
 covers:
   - scripts/docs/**
   - .github/workflows/docs.yml
+  - .github/workflows/docs-coupling.yml
   - .vale.ini
   - .lychee.toml
   - .markdownlint.json

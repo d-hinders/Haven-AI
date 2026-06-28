@@ -34,6 +34,9 @@ jobs:
 
       - name: Find docs implicated by changed code
         id: gate
+        # The script always exits 0, but this makes the non-blocking guarantee
+        # unconditional even against a module-load failure before main() runs.
+        continue-on-error: true
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

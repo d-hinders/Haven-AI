@@ -29,9 +29,23 @@ export interface PaymentStatus {
   details?: string
 }
 
-export interface Transaction {
-  tx_hash: string
-  [key: string]: unknown
+export interface X402AuthorizeResult {
+  /** Present only when the request produced a signable/executable intent. */
+  payment_id?: string
+  status?: string
+  error?: string
+  error_code?: string
+  phase?: string
+  shortfall?: number | string
+  remaining_allowance?: number | string
+}
+
+export interface X402AuthorizeBody {
+  url: string
+  payTo: string
+  amount: string // atomic units
+  asset: string // token contract address
+  network: string // CAIP-2 (e.g. eip155:84532) or x402 network name
 }
 
 export interface ApiResponse<T> {
@@ -86,8 +100,8 @@ export class HavenApi {
     return this.call('GET', `/payments/${id}`)
   }
 
-  listTransactions(): Promise<ApiResponse<{ transactions: Transaction[] }>> {
-    return this.call('GET', '/transactions')
+  authorizeX402(body: X402AuthorizeBody): Promise<ApiResponse<X402AuthorizeResult>> {
+    return this.call('POST', '/x402/authorize', body as unknown as Record<string, unknown>)
   }
 
   /** Poll a payment to a terminal state (confirmed / failed / expired). */

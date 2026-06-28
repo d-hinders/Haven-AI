@@ -228,6 +228,16 @@ Example:
 Use the haven-reviewer agent to review the current diff for Haven product, UX, security, regression, and test risks. Findings first with file and line references.
 ```
 
+### `haven-doc-reviewer`
+
+Use after implementation when the diff touches code that some doc's `covers:` front-matter maps to (the coupling gate flags these on the PR). It reports specific stale, missing, or broken doc claims so the captain can update them before merge. Read-only and advisory.
+
+Example:
+
+```text
+Use the haven-doc-reviewer agent to check whether `git diff origin/dev...HEAD` has invalidated any docs that cover the changed code. Findings first with the exact stale claim and the smallest correct update.
+```
+
 ## Default Feature Loop
 
 1. Start from a clean branch.
@@ -240,9 +250,10 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 8. Run relevant build or test checks.
 9. Run the **Captain Self-Check Preflight** above for the surfaces the diff touches. Pair any skipped browser verification with a headless equivalent vitest.
 10. Ask `haven-reviewer` for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
-11. Let the captain fix final issues, commit, push, and open the PR.
-12. Add the PR closeout contract and merge-readiness report before calling the work complete.
-13. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur. Keep `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer agent's recurring-traps list in sync.
+11. Ask `haven-doc-reviewer` for a doc-accuracy pass when the diff touches code mapped by some doc's `covers:` front-matter (the coupling gate flags these). Update the implicated docs before opening the PR.
+12. Let the captain fix final issues, commit, push, and open the PR.
+13. Add the PR closeout contract and merge-readiness report before calling the work complete.
+14. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur. Keep `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer agent's recurring-traps list in sync.
 
 ## Files The Captain Should Usually Own
 

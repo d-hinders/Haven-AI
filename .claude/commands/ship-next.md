@@ -56,6 +56,10 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
     - **nice-to-have / nits** → apply if cheap; otherwise note in the PR body and skip.
 12. Record in the commit/PR which findings were applied and which were deferred (with reasons), as in this session's PRs.
 
+## Phase 4.5 — Doc accuracy (advisory)
+
+- If the diff touches code that a doc's `covers:` front-matter maps to (the **docs coupling gate** flags these on the PR; you can also run `node scripts/docs/coupling-gate.mjs` locally), launch the **haven-doc-reviewer** subagent on the diff. Update any docs it finds stale/missing/broken, then re-run the acceptance gate. This is **advisory** — it never blocks the merge — but updating implicated docs is part of definition-of-done. See `docs/contributing/docs-quality-system.md`.
+
 ## Phase 5 — Open the PR
 
 13. Commit with a conventional message (end with the Co-Authored-By / Claude-Session trailers per the repo convention). Push `-u origin <branch>`.

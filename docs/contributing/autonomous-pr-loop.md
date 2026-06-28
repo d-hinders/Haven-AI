@@ -28,6 +28,7 @@ Pieces:
 - **`/ship-next`** (`.claude/commands/ship-next.md`) — does **one** PR end-to-end, then stops.
 - **`/loop /ship-next`** — re-invokes `/ship-next` for each following item until the backlog is empty (self-paced).
 - **haven-reviewer** — the per-PR quality gate.
+- **haven-doc-reviewer** — advisory per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Run it when the diff touches code that some doc's `covers:` front-matter maps to; updating those docs is part of definition-of-done. Advisory today — it does not block auto-merge.
 - **`.github/CODEOWNERS`** — the money-path carve-out (the only PRs that still need a human merge).
 
 > **Base branch: `dev`, not `main`.** The loop branches off `dev` and opens every

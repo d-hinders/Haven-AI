@@ -1,6 +1,6 @@
 import { createDemoMerchantServer } from './http.js'
 import { createViemSettlementClient, createX402PaymentProcessor } from './x402.js'
-import { PRODUCTS, formatUsdc } from './products.js'
+import { PRODUCTS, formatUsdc, CHAIN_ID } from './products.js'
 import type { Address } from 'viem'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
@@ -19,7 +19,8 @@ const BASE_RPC_URL = process.env.BASE_RPC_URL
 if (!BASE_RPC_URL) {
   console.error(
     'BASE_RPC_URL env var is required.\n' +
-      'Set it to a Base mainnet RPC URL used to submit and confirm USDC settlement transactions.',
+      'Set it to a Base RPC URL (Base mainnet, or Base Sepolia when MERCHANT_CHAIN_ID=84532) ' +
+      'used to submit and confirm USDC settlement transactions.',
   )
   process.exit(1)
 }
@@ -52,7 +53,7 @@ server.listen(PORT, () => {
   console.log(`  Endpoint:  ${BASE_URL}/mcp`)
   console.log(`  Healthz:   ${BASE_URL}/healthz`)
   console.log(`  Merchant:  ${MERCHANT_ADDRESS}`)
-  console.log(`  Network:   Base (chain ID 8453)`)
+  console.log(`  Network:   eip155:${CHAIN_ID}${CHAIN_ID === 84532 ? ' (Base Sepolia testnet)' : CHAIN_ID === 8453 ? ' (Base mainnet)' : ''}`)
   console.log(`  Payment:   USDC via x402 EIP-3009`)
   console.log()
   console.log(

@@ -88,12 +88,26 @@ scoped to `docs/product/**` on purpose: engineering docs legitimately use
 "Safe", "AllowanceModule", and "signer", so the terminology rule must not flood
 them.
 
-### Phase 2 — coupling gate + drift tests (planned, [#644](https://github.com/d-hinders/Haven-AI/issues/644))
+### Phase 2 — coupling gate + drift tests ([#644](https://github.com/d-hinders/Haven-AI/issues/644))
 
-A CI step that, when a PR changes a file matched by some doc's `covers` glob
-without touching that doc, posts an advisory comment naming the doc and its
-`last-verified` age. Plus vitest drift tests (modeled on the OpenAPI test) for
-hand-maintained mirrors such as the `CLAUDE.md` API table and `.env.example`.
+**Coupling gate** (`.github/workflows/docs-coupling.yml` →
+`scripts/docs/coupling-gate.mjs`): on every PR, finds docs whose `covers` globs
+match a changed file the PR did **not** also touch, and posts a single advisory
+sticky comment naming each doc and its `last-verified` age. The script always
+exits 0 and the workflow is not a required check, so it can never block a merge.
+Run it locally with `node scripts/docs/coupling-gate.mjs --changed=path/a,path/b`.
+
+**Drift tests** (`packages/backend/src/docs-drift/docs-drift.test.ts`): vitest
+tests, modeled on the OpenAPI drift test, that pin hand-maintained `CLAUDE.md`
+claims to the code they mirror:
+
+| Mirror | Pinned to |
+| --- | --- |
+| `CLAUDE.md` API surface table | `openapiSpec.paths` (path + method) |
+| `CLAUDE.md` chain claims (Base 8453 / Gnosis 100) | `lib/chains.ts` registry |
+
+Each carries a `because:` allowlist for intentional exceptions — the default is
+"document it correctly", not "add an exception".
 
 ### Phase 3 — `haven-doc-reviewer` agent (planned, [#645](https://github.com/d-hinders/Haven-AI/issues/645))
 

@@ -83,7 +83,15 @@ jobs:
           full=false
 
           while IFS= read -r file; do
+            # CLAUDE.md mirrors backend contracts (the API surface table and the
+            # chain registry) that packages/backend/src/docs-drift pins. A
+            # CLAUDE.md-only edit must therefore run the backend suite even
+            # though it is Markdown — otherwise the drift test never guards it.
             case "$file" in
+              CLAUDE.md)
+                code=true
+                backend=true
+                ;;
               *.md|docs/*|AGENTS.md|LICENSE|LICENSE.*)
                 continue
                 ;;

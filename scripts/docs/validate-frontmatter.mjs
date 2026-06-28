@@ -24,14 +24,14 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join, dirname, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 const STATUSES = new Set(['current', 'research', 'archived'])
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 // Root-level docs that are part of the doc surface even though they live
 // outside docs/. These are the "gravity files" agents read first.
-const ROOT_DOCS = ['CLAUDE.md', 'AGENTS.md', 'README.md', 'ABOUT_HAVEN.md']
+export const ROOT_DOCS = ['CLAUDE.md', 'AGENTS.md', 'README.md', 'ABOUT_HAVEN.md']
 
 // Directories never worth walking when resolving `covers` globs or finding docs.
 const IGNORED_DIRS = new Set([
@@ -46,7 +46,7 @@ const IGNORED_DIRS = new Set([
 ])
 
 /** Recursively list every file under `root` as repo-relative posix paths. */
-async function walk(root) {
+export async function walk(root) {
   const out = []
   async function recurse(dir) {
     const entries = await readdir(dir, { withFileTypes: true })

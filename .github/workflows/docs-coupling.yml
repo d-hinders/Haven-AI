@@ -1,0 +1,58 @@
+name: Docs coupling gate
+
+# Phase 2 of the documentation-quality system (epic #642). On every PR, flags
+# docs whose `covers:` front-matter matches changed code that the PR did not
+# also touch. Advisory only — it posts a sticky comment and never fails the
+# build (the script always exits 0 and is not a required check).
+# See docs/contributing/docs-quality-system.md.
+
+on:
+  pull_request:
+
+concurrency:
+  group: docs-coupling-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coupling:
+    name: Doc↔code coupling
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Find docs implicated by changed code
+        id: gate
+        # The script always exits 0, but this makes the non-blocking guarantee
+        # unconditional even against a module-load failure before main() runs.
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/docs/coupling-gate.mjs --out=coupling-comment.md
+
+      - name: Post advisory comment (when docs are implicated)
+        if: steps.gate.outputs.has_findings == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: docs-coupling
+          recreate: true
+          path: coupling-comment.md
+
+      - name: Clear stale comment (when nothing is implicated)
+        if: steps.gate.outputs.has_findings != 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: docs-coupling
+          delete: true

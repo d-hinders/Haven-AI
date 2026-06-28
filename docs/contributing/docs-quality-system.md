@@ -60,7 +60,8 @@ last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
 ### Validate locally
 
 ```bash
-npm run docs:check
+npm run docs:check   # validate every doc's front-matter + covers globs
+npm run docs:test    # unit tests for the validator's parser & glob matcher
 ```
 
 `scripts/docs/validate-frontmatter.mjs` is dependency-free (no `js-yaml`): it

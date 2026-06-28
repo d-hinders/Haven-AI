@@ -64,7 +64,7 @@ async function walk(root) {
 }
 
 /** Turn a glob (supporting **, *, ?) into an anchored RegExp. */
-function globToRegExp(glob) {
+export function globToRegExp(glob) {
   let re = ''
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i]
@@ -98,7 +98,7 @@ function globToRegExp(glob) {
  * Deliberately minimal: handles scalar keys and a `covers` block-list or
  * inline `[]`, with `# comments` stripped from scalar lines.
  */
-function parseFrontMatter(raw) {
+export function parseFrontMatter(raw) {
   if (!raw.startsWith('---')) {
     return { ok: false, error: 'missing front-matter (file must start with `---`)' }
   }
@@ -138,14 +138,20 @@ function parseFrontMatter(raw) {
       const inline = rest.trim()
       if (inline === '[]' || inline === '') {
         const items = []
-        // Block list form: subsequent `  - item` lines.
+        // Block list form: subsequent `  - item` lines, each with its own
+        // trailing `# comment` stripped (same as scalars and the inline form).
         let j = i + 1
         while (j < end && /^\s*-\s+/.test(lines[j])) {
-          items.push(lines[j].replace(/^\s*-\s+/, '').trim().replace(/^["']|["']$/g, ''))
+          let item = lines[j].replace(/^\s*-\s+/, '')
+          const h = item.indexOf(' #')
+          if (h !== -1) item = item.slice(0, h)
+          items.push(item.trim().replace(/^["']|["']$/g, ''))
           j++
         }
-        // If inline was [] but block items also follow, the block wins only
-        // when inline was empty (not literally []).
+        // Literal `covers: []` means "narrative, no items": consume just that
+        // line. (Following `- ` lines, if any, are malformed and the main loop
+        // reports them loudly rather than silently dropping them.) Empty inline
+        // (`covers:`) takes the block list that follows.
         data.covers = inline === '[]' ? [] : items
         i = inline === '[]' ? i + 1 : j
         continue
@@ -224,7 +230,11 @@ async function main() {
   console.log(`✓ Front-matter valid across ${docFiles.length} docs.`)
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+// Only run the CLI when executed directly (`node validate-frontmatter.mjs`),
+// not when imported by the test file.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

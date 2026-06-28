@@ -51,10 +51,17 @@ jobs:
       - name: Validate doc front-matter
         run: node scripts/docs/validate-frontmatter.mjs
 
-      # ── Advisory checks below: report findings, never fail the build ──
+      # Unit tests for the validator's parser + glob matcher.
+      - name: Test the front-matter validator
+        if: always()
+        run: node --test scripts/docs/*.test.mjs
+
+      # ── Advisory checks below: report findings, never fail the build.
+      # `if: always()` so they still run when the validator step fails. ──
 
       - name: Link check (lychee)
         id: lychee
+        if: always()
         continue-on-error: true
         uses: lycheeverse/lychee-action@v2
         with:
@@ -62,6 +69,7 @@ jobs:
           fail: true
 
       - name: Markdown lint
+        if: always()
         continue-on-error: true
         uses: DavidAnson/markdownlint-cli2-action@v19
         with:
@@ -70,8 +78,9 @@ jobs:
             !node_modules
 
       - name: Terminology (Vale, product copy only)
+        if: always()
         continue-on-error: true
-        uses: errata-ai/vale-action@reviewdog
+        uses: errata-ai/vale-action@v2
         with:
           files: docs/product
           fail_on_error: false

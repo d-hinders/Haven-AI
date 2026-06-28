@@ -75,6 +75,7 @@ export async function executeAgentSetup(
     allowances,
     !moduleEnabled,
     nonce,
+    chainId,
   )
   const safeTxHash = getSafeTxHash(safeAddress, safeTx, chainId)
 

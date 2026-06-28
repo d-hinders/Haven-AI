@@ -34,7 +34,7 @@ export async function revokeAgentOnChain({
   }
 
   const nonce = await getSafeNonce(publicClient, safeAddress)
-  const safeTx = buildAgentRevokeTx(agent.delegate_address as Address, nonce)
+  const safeTx = buildAgentRevokeTx(agent.delegate_address as Address, nonce, chainId)
   const signature = await signSafeTx(signer, safeAddress, safeTx, chainId)
 
   const threshold = safeDetails.threshold ?? 1

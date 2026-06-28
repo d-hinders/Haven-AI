@@ -248,6 +248,7 @@ export default function EditAgentModal({
           rawAmount,
           resetTimeMin,
           nonce,
+          chainId,
         )
 
         // Sign
@@ -358,6 +359,7 @@ export default function EditAgentModal({
         agent.delegate_address as Address,
         pendingRemoval.token,
         nonce,
+        chainId,
       )
 
       const signature = await signSafeTx(

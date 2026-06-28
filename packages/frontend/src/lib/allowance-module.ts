@@ -30,12 +30,18 @@ export { computeEffectiveAllowance }
 export type { AllowanceInfo, EffectiveAllowance }
 
 // ── Contract addresses ─────────────────────────────────────────────
-// The frontend operates on a single chain per deploy (DEFAULT_CHAIN_ID), so the
-// AllowanceModule resolves to that chain's deployment: Base mainnet uses v0.1.0
-// (0xCFbF…), Base Sepolia uses v0.1.1 (0xAA46…) — see lib/chains.ts. multiSend is
-// the same CREATE2 address on every chain, so it stays a constant.
-export const ALLOWANCE_MODULE_ADDRESS: Address =
-  getChainConfig(DEFAULT_CHAIN_ID).contracts.allowanceModule
+// The AllowanceModule is per chain (Base mainnet v0.1.0 `0xCFbF…`, Base Sepolia
+// v0.1.1 `0xAA46…` — see lib/chains.ts), so it must be resolved from the chain a
+// call operates on, never a single global. multiSend is the same CREATE2 address
+// on every chain, so it stays a constant.
+export function allowanceModuleFor(chainId: number): Address {
+  return getChainConfig(chainId).contracts.allowanceModule
+}
+
+/** Resolve the AllowanceModule from the chain a viem client is bound to. */
+function allowanceModuleForClient(client: PublicClient): Address {
+  return allowanceModuleFor(client.chain?.id ?? DEFAULT_CHAIN_ID)
+}
 
 const MULTISEND_CALL_ONLY_ADDRESS =
   '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D' as Address
@@ -177,7 +183,7 @@ export async function isModuleEnabled(
     address: safeAddress,
     abi: SAFE_MODULE_ABI,
     functionName: 'isModuleEnabled',
-    args: [ALLOWANCE_MODULE_ADDRESS],
+    args: [allowanceModuleForClient(publicClient)],
   }) as Promise<boolean>
 }
 
@@ -186,7 +192,7 @@ export async function getDelegates(
   safeAddress: Address,
 ): Promise<Address[]> {
   const result = await publicClient.readContract({
-    address: ALLOWANCE_MODULE_ADDRESS,
+    address: allowanceModuleForClient(publicClient),
     abi: ALLOWANCE_MODULE_ABI,
     functionName: 'getDelegates',
     args: [safeAddress, 0, 255],
@@ -201,7 +207,7 @@ export async function getTokensForDelegate(
   delegate: Address,
 ): Promise<Address[]> {
   return publicClient.readContract({
-    address: ALLOWANCE_MODULE_ADDRESS,
+    address: allowanceModuleForClient(publicClient),
     abi: ALLOWANCE_MODULE_ABI,
     functionName: 'getTokens',
     args: [safeAddress, delegate],
@@ -215,7 +221,7 @@ export async function getTokenAllowance(
   token: Address,
 ): Promise<AllowanceInfo> {
   const raw = await publicClient.readContract({
-    address: ALLOWANCE_MODULE_ADDRESS,
+    address: allowanceModuleForClient(publicClient),
     abi: ALLOWANCE_MODULE_ABI,
     functionName: 'getTokenAllowance',
     args: [safeAddress, delegate, token],
@@ -289,6 +295,7 @@ export function buildAgentSetupTx(
   allowances: AllowanceSetup[],
   needsModuleEnable: boolean,
   nonce: bigint,
+  chainId: number,
 ): SafeTxParams {
   const innerTxs: `0x${string}`[] = []
 
@@ -300,7 +307,7 @@ export function buildAgentSetupTx(
         encodeFunctionData({
           abi: SAFE_MODULE_ABI,
           functionName: 'enableModule',
-          args: [ALLOWANCE_MODULE_ADDRESS],
+          args: [allowanceModuleFor(chainId)],
         }),
       ),
     )
@@ -309,7 +316,7 @@ export function buildAgentSetupTx(
   // 2. Add delegate
   innerTxs.push(
     encodeInnerTx(
-      ALLOWANCE_MODULE_ADDRESS,
+      allowanceModuleFor(chainId),
       encodeFunctionData({
         abi: ALLOWANCE_MODULE_ABI,
         functionName: 'addDelegate',
@@ -322,7 +329,7 @@ export function buildAgentSetupTx(
   for (const a of allowances) {
     innerTxs.push(
       encodeInnerTx(
-        ALLOWANCE_MODULE_ADDRESS,
+        allowanceModuleFor(chainId),
         encodeFunctionData({
           abi: ALLOWANCE_MODULE_ABI,
           functionName: 'setAllowance',
@@ -359,9 +366,10 @@ export function buildAgentSetupTx(
 export function buildAgentRevokeTx(
   delegate: Address,
   nonce: bigint,
+  chainId: number,
 ): SafeTxParams {
   return {
-    to: ALLOWANCE_MODULE_ADDRESS,
+    to: allowanceModuleFor(chainId),
     value: 0n,
     data: encodeFunctionData({
       abi: ALLOWANCE_MODULE_ABI,
@@ -387,12 +395,13 @@ export function buildSetAllowanceTx(
   amount: bigint,
   resetTimeMin: number,
   nonce: bigint,
+  chainId: number,
 ): SafeTxParams {
   // For updating, resetBaseMin must be > lastResetMin.
   // Use current time in minutes as a safe value.
   const resetBaseMin = Math.floor(Date.now() / 60000)
   return {
-    to: ALLOWANCE_MODULE_ADDRESS,
+    to: allowanceModuleFor(chainId),
     value: 0n,
     data: encodeFunctionData({
       abi: ALLOWANCE_MODULE_ABI,
@@ -423,9 +432,10 @@ export function buildDeleteAllowanceTx(
   delegate: Address,
   token: Address,
   nonce: bigint,
+  chainId: number,
 ): SafeTxParams {
   return {
-    to: ALLOWANCE_MODULE_ADDRESS,
+    to: allowanceModuleFor(chainId),
     value: 0n,
     data: encodeFunctionData({
       abi: ALLOWANCE_MODULE_ABI,

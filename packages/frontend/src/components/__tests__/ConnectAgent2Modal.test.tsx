@@ -103,7 +103,7 @@ vi.mock('@/lib/signer', () => ({
 }))
 
 vi.mock('@/lib/allowance-module', () => ({
-  ALLOWANCE_MODULE_ADDRESS: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
+  allowanceModuleFor: () => '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
   RESET_PERIODS: [
     { value: 1440, label: 'Daily' },
     { value: 10080, label: 'Weekly' },
@@ -700,6 +700,7 @@ describe('ConnectAgent2Modal', () => {
       })],
       true,
       7n,
+      100,
     )
     expect(mockApiPost).toHaveBeenCalledWith(
       '/agent-connection-setups/setup-1/wallet-approval',
@@ -799,6 +800,7 @@ describe('ConnectAgent2Modal', () => {
       })],
       true,
       7n,
+      8453,
     )
     expect(mockApiPost).toHaveBeenCalledWith(
       '/agent-connection-setups/setup-1/wallet-approval',
@@ -1157,6 +1159,7 @@ describe('ConnectAgent2Modal', () => {
       })],
       true,
       7n,
+      100,
     )
     expect(mockApiPost).toHaveBeenCalledWith(
       '/agent-connection-setups/setup-1/wallet-approval',

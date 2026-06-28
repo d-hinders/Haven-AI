@@ -3,10 +3,25 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/lib/machine-payments.ts
+  - packages/backend/src/lib/payment-coverage.ts
+  - packages/backend/src/lib/relayer.ts
+  - packages/backend/src/lib/safe-deployer.ts
   - packages/backend/src/middleware/agentAuth.ts
+  - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/routes/passkeys.ts
+  - packages/backend/src/routes/safe-deploy.ts
+  - packages/backend/src/routes/user-safes.ts
+  - packages/sdk/src/**
+  - packages/connect/src/**
+  - packages/mcp/src/**
+  - packages/mcp-server/src/**
+  - packages/signer/src/**
+  - packages/demo-merchant-mcp/src/**
 last-verified: "2026-06-28"
 ---
 

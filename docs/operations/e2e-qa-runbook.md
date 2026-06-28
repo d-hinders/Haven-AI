@@ -1,7 +1,17 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
+covers:
+  - packages/frontend/e2e/connect-agent-2.spec.ts
+  - packages/frontend/e2e/hosted-mcp.spec.ts
+  - packages/frontend/e2e/transactions-detail.spec.ts
+  - packages/connect/src/runtime-manifest.ts
+  - packages/frontend/src/components/settings/ManageApprovers.tsx
+  - packages/frontend/src/components/settings/__tests__/ManageApprovers.test.tsx
+  - packages/backend/src/lib/safe-owner-tx.ts
+  - packages/backend/src/lib/__tests__/safe-owner-tx.test.ts
+  - packages/frontend/src/lib/transaction-csv.ts
+  - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
 last-verified: "2026-06-28"
 ---
 

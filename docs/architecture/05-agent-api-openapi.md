@@ -4,6 +4,13 @@ status: current
 covers:
   - packages/backend/src/openapi/**
   - packages/backend/src/routes/agents.ts
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/routes/transactions.ts
+  - packages/sdk/src/x402.ts
+  - packages/sdk/src/types.ts
+  - .github/workflows/ci.yml
 last-verified: "2026-06-28"
 ---
 

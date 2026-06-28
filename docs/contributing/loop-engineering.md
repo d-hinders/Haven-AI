@@ -1,7 +1,9 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
+covers:
+  - packages/backend/src/loop-harness/**
+  - packages/frontend/src/lib/loop-harness/**
 last-verified: "2026-06-28"
 ---
 

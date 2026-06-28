@@ -1,7 +1,10 @@
 ---
 owner: "@d-hinders"
 status: research
-covers: []  # narrative — no direct code mirror
+covers:
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/lib/relayer.ts
+  - packages/frontend/src/lib/revoke-agent.ts
 last-verified: "2026-06-28"
 ---
 

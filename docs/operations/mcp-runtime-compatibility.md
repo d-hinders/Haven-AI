@@ -4,6 +4,8 @@ status: current
 covers:
   - packages/mcp/**
   - packages/connect/**
+  - packages/signer/**
+  - .github/workflows/publish.yml
 last-verified: "2026-06-28"
 ---
 

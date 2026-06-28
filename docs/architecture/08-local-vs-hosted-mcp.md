@@ -4,6 +4,8 @@ status: current
 covers:
   - packages/mcp/**
   - packages/mcp-server/src/**
+  - packages/connect/src/**
+  - packages/signer/src/**
 last-verified: "2026-06-28"
 ---
 

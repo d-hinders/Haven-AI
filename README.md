@@ -1,7 +1,21 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
+covers:
+  - .nvmrc
+  - .env.example
+  - docker-compose.yml
+  - package.json
+  - packages/backend/package.json
+  - packages/frontend/package.json
+  - packages/sdk/package.json
+  - packages/mcp/package.json
+  - packages/mcp-server/package.json
+  - packages/signer/package.json
+  - packages/connect/package.json
+  - packages/demo-merchant-mcp/package.json
+  - .github/workflows/publish.yml
+  - scripts/release-bump.mjs
 last-verified: "2026-06-28"
 ---
 

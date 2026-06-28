@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - .claude/agents/haven-reviewer.md
+  - packages/frontend/src/lib/allowance-format.ts
 last-verified: "2026-06-28"
 ---
 

@@ -1,7 +1,11 @@
 ---
 owner: "@d-hinders"
 status: research
-covers: []  # narrative — no direct code mirror
+covers:
+  - packages/connect/src/args.ts
+  - packages/connect/src/redact.ts
+  - packages/connect/src/storage.ts
+  - packages/sdk/src/client.ts
 last-verified: "2026-06-28"
 ---
 

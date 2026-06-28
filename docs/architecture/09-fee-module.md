@@ -2,7 +2,12 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - packages/backend/src/lib/machine-payments.ts
+  - packages/backend/src/lib/fee/**
+  - packages/backend/src/lib/agent-payment-status.ts
+  - packages/backend/src/lib/machine-payment-evidence.ts
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/db/migrations/029_payment_fees.ts
+  - packages/backend/src/config.ts
 last-verified: "2026-06-28"
 ---
 

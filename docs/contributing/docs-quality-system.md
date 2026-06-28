@@ -10,6 +10,8 @@ covers:
   - .lychee.toml
   - .markdownlint.json
   - .github/vale/**
+  - packages/backend/src/openapi/spec.test.ts
+  - packages/backend/src/docs-drift/docs-drift.test.ts
 last-verified: "2026-06-28"
 ---
 

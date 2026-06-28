@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/mcp-server/**
+  - docker-compose.yml
 last-verified: "2026-06-28"
 ---
 

@@ -5,6 +5,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/lib/allowance-module.ts
   - packages/backend/src/lib/payment-coverage.ts
+  - packages/backend/src/routes/x402.ts
 last-verified: "2026-06-28"
 ---
 

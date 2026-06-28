@@ -3,6 +3,21 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/lib/chains.ts
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/middleware/agentAuth.ts
+  - packages/backend/src/openapi/spec.ts
+  - packages/backend/src/routes/agents.ts
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/routes/safe-deploy.ts
+  - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/x402.ts
+  - packages/frontend/src/app/globals.css
+  - packages/frontend/src/components/ui/Card.tsx
+  - packages/frontend/src/components/ui/Row.tsx
+  - .github/workflows/dev-gate.yml
+  - .github/workflows/publish.yml
+  - .github/CODEOWNERS
+  - scripts/release-bump.mjs
 last-verified: "2026-06-28"
 ---
 

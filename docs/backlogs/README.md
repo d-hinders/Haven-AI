@@ -1,7 +1,11 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
+covers:
+  - .github/ISSUE_TEMPLATE/loop-task.md
+  - .github/ISSUE_TEMPLATE/loop-epic.md
+  - .claude/commands/ship-next.md
+  - .github/CODEOWNERS
 last-verified: "2026-06-28"
 ---
 

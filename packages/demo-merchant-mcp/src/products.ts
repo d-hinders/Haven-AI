@@ -1,6 +1,44 @@
-/** USDC on Base mainnet */
-export const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const
-export const CHAIN_ID = 8453
+/**
+ * Chain config — env-selectable so the dev instance can run on Base Sepolia
+ * (testnet) while production stays on Base mainnet. Set `MERCHANT_CHAIN_ID=84532`
+ * for the dev/testnet deploy (default is `8453`, Base mainnet).
+ *
+ * The USDC EIP-712 domain `name` differs per chain — "USD Coin" on Base mainnet,
+ * "USDC" on Base Sepolia (both verified on-chain via the token's `name()`).
+ * Getting it wrong breaks `transferWithAuthorization` signature verification, so
+ * it is tracked per chain here, not hardcoded.
+ */
+interface MerchantChainConfig {
+  usdcAddress: `0x${string}`
+  usdcDomainName: string
+  usdcDomainVersion: string
+}
+
+const CHAINS: Record<number, MerchantChainConfig> = {
+  8453: {
+    usdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    usdcDomainName: 'USD Coin',
+    usdcDomainVersion: '2',
+  },
+  84532: {
+    usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    usdcDomainName: 'USDC',
+    usdcDomainVersion: '2',
+  },
+}
+
+export const CHAIN_ID = Number(process.env.MERCHANT_CHAIN_ID ?? '8453')
+
+const chain = CHAINS[CHAIN_ID]
+if (!chain) {
+  throw new Error(
+    `Unsupported MERCHANT_CHAIN_ID: ${CHAIN_ID}. Supported: ${Object.keys(CHAINS).join(', ')}`,
+  )
+}
+
+export const USDC_ADDRESS = chain.usdcAddress
+export const USDC_DOMAIN_NAME = chain.usdcDomainName
+export const USDC_DOMAIN_VERSION = chain.usdcDomainVersion
 
 export type ProductId =
   | 'vpn_basic'

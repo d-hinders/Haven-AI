@@ -53,9 +53,17 @@ Endpoints:
 - `GET /healthz` - liveness
 
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
-`BASE_RPC_URL` must point to Base mainnet. `SETTLEMENT_PRIVATE_KEY` is the
-gas-funded key that submits USDC `transferWithAuthorization`; it does not need
-to be the receiving wallet and should not hold user or agent funds.
+`SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC
+`transferWithAuthorization`; it does not need to be the receiving wallet and
+should not hold user or agent funds.
+
+**`MERCHANT_CHAIN_ID`** selects the chain (default `8453`, Base mainnet). Set it
+to **`84532`** for a **Base Sepolia** testnet deploy — e.g. the dev instance used
+by the QA harness (#575). On Base Sepolia the merchant uses Circle's testnet USDC
+(`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) and the correct per-chain EIP-712
+domain name (`"USDC"` vs mainnet's `"USD Coin"`). `BASE_RPC_URL` must point at the
+matching chain's RPC (Base mainnet, or `https://sepolia.base.org` for Sepolia),
+and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
 
 ## Test With Haven
 

@@ -18,12 +18,12 @@ import {
   encodePaymentResponseHeader,
 } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse } from '@x402/core/types'
-import { USDC_ADDRESS, CHAIN_ID } from './products.js'
+import { USDC_ADDRESS, CHAIN_ID, USDC_DOMAIN_NAME, USDC_DOMAIN_VERSION } from './products.js'
 import type { ProductId } from './products.js'
 
 export { USDC_ADDRESS }
 
-const NETWORK = 'eip155:8453'
+const NETWORK: `${string}:${string}` = `eip155:${CHAIN_ID}`
 const MAX_TIMEOUT_SECONDS = 300
 const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
 
@@ -44,8 +44,8 @@ const TRANSFER_WITH_AUTH_TYPES = {
 } as const
 
 const USDC_DOMAIN = {
-  name: 'USD Coin',
-  version: '2',
+  name: USDC_DOMAIN_NAME,
+  version: USDC_DOMAIN_VERSION,
   chainId: CHAIN_ID,
   verifyingContract: USDC_ADDRESS,
 } as const

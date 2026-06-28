@@ -14,9 +14,9 @@ dev stack (which the mocked Playwright suite structurally can't):
 
 Implemented: the shared **config contract** (`src/config.ts`), the **dev seed**
 (`src/seed.ts`, #574 item 1), and the **money-flow harness** (`src/run.ts`, #575)
-with two of the four #420 invariants asserted live (within-budget settle,
-over-budget queue). The two x402 invariants (`PRICE_EXCEEDS_MAX`, delegate sweep
-recovery) need the demo-merchant round-trip and are follow-ups.
+with **four #420 invariants asserted live** — within-budget settle, over-budget
+queue, x402 over-budget rejection, and the full **x402 settle** through the
+demo-merchant round-trip. Only delegate **sweep recovery** remains (#603).
 
 ⚠️ The seed's **on-chain steps are not exercised in CI** (no funded testnet
 wallets there). It's grounded against the real backend endpoints and Safe
@@ -42,8 +42,9 @@ Scenarios (`src/scenarios/`):
 |---|---|---|
 | `within-budget-settle` | A payment inside the allowance settles on-chain + is logged | live |
 | `over-budget-queue` | A payment over the allowance is queued (`pending_approval`), never auto-executed | live |
-| `PRICE_EXCEEDS_MAX` (x402) | A priced call above the agent max is rejected | follow-up (needs demo-merchant) |
-| sweep recovery | Stranded delegate balance is reclaimable after verify-without-settle | follow-up (needs demo-merchant) |
+| `x402-over-budget-rejected` | A priced x402 call above the allowance is rejected (`insufficient_funds`), never a signable intent | live |
+| `x402-settle` | A within-budget x402 call settles end-to-end via the demo-merchant round-trip (fund delegate → EIP-3009 → settle) | live |
+| sweep recovery | Stranded delegate balance is reclaimable after verify-without-settle | follow-up (#603 — needs verify-without-settle merchant mode) |
 
 > **Infra dependency:** `within-budget-settle` moves real testnet USDC, so the
 > dev **relayer** (`RELAYER_PRIVATE_KEY`) must hold Base Sepolia **ETH** for gas —

@@ -41,20 +41,14 @@ export const withinBudgetSettle: Scenario = {
       return fail(`execution failed: ${phrase}${code ? ` [${code}]` : ''}`)
     }
 
+    // The confirmed payment record (terminal status + tx_hash, read back from
+    // GET /payments/:id) is the agent-visible receipt. /transactions is a
+    // dashboard (user-JWT) endpoint, not agent-auth, so it is not used here.
     const settled = await ctx.api.pollUntilSettled(payment_id)
     if (settled.status !== 'confirmed' || !settled.tx_hash) {
       return fail(`payment ended '${settled.status}' (tx ${settled.tx_hash ?? 'none'}; ${settled.error_message ?? ''})`)
     }
 
-    // Receipt assertion: the settlement tx is in the transaction history.
-    const txs = await ctx.api.listTransactions()
-    const logged = txs.ok && txs.data.transactions.some(
-      (t) => t.tx_hash?.toLowerCase() === settled.tx_hash!.toLowerCase(),
-    )
-    if (!logged) {
-      return fail(`settled (tx ${settled.tx_hash}) but tx not found in /transactions`)
-    }
-
-    return pass(`settled ${AMOUNT} USDC on-chain + logged (tx ${settled.tx_hash})`)
+    return pass(`settled ${AMOUNT} USDC on-chain + receipt confirmed (tx ${settled.tx_hash})`)
   },
 }

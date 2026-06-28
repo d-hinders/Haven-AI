@@ -15,11 +15,18 @@ import { HavenApi } from './lib/haven-api.js'
 import type { Scenario, ScenarioContext, ScenarioResult } from './scenarios/types.js'
 import { withinBudgetSettle } from './scenarios/within-budget-settle.js'
 import { overBudgetQueue } from './scenarios/over-budget-queue.js'
+import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js'
+import { x402Settle } from './scenarios/x402-settle.js'
 
-// Deterministic, no-LLM scenarios run in order. (x402 PRICE_EXCEEDS_MAX and
-// delegate sweep recovery — the remaining two #420 invariants — need the
-// demo-merchant x402 round-trip and are tracked as follow-ups in #575.)
-const SCENARIOS: Scenario[] = [withinBudgetSettle, overBudgetQueue]
+// Deterministic, no-LLM scenarios run in order. (Delegate sweep recovery — the
+// last #420 invariant — needs a verify-without-settle merchant mode and is
+// tracked as #603.)
+const SCENARIOS: Scenario[] = [
+  withinBudgetSettle,
+  overBudgetQueue,
+  x402OverBudgetRejected,
+  x402Settle,
+]
 
 async function main(): Promise<void> {
   let cfg

@@ -16,6 +16,9 @@ import type { PaymentRequirements } from 'x402/types'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
 
 const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+const BASE_SEPOLIA_USDC_ADDRESS = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
+/** USDC addresses the standard EIP-3009 exact scheme can pay (Base mainnet + Base Sepolia). */
+const STANDARD_X402_USDC_ADDRESSES = new Set([BASE_USDC_ADDRESS, BASE_SEPOLIA_USDC_ADDRESS])
 const X402_IDEMPOTENCY_BUCKET_MS = 300_000
 const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
 
@@ -116,15 +119,19 @@ function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
 
 /** Network identifiers that Haven can recognise in x402 payment requests. */
 export const SUPPORTED_X402_NETWORKS: Record<string, string> = {
-  'eip155:100':  'Gnosis Chain',
-  'eip155:8453': 'Base',
-  'base':        'Base',
+  'eip155:100':   'Gnosis Chain',
+  'eip155:8453':  'Base',
+  'base':         'Base',
+  'eip155:84532': 'Base Sepolia',
+  'base-sepolia': 'Base Sepolia',
 }
 
 /** Networks supported by the official x402 EIP-3009 exact scheme. */
 const STANDARD_X402_NETWORKS: Record<string, PaymentRequirements['network']> = {
-  'eip155:8453': 'base',
-  'base':        'base',
+  'eip155:8453':  'base',
+  'base':         'base',
+  'eip155:84532': 'base-sepolia',
+  'base-sepolia': 'base-sepolia',
 }
 
 // ── Token address maps ────────────────────────────────────────────
@@ -142,17 +149,26 @@ const BASE_TOKENS: Record<string, { symbol: string; decimals: number }> = {
   '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC', decimals: 6  },
 }
 
+/** Known tokens on Base Sepolia (chainId 84532) — testnet. */
+const BASE_SEPOLIA_TOKENS: Record<string, { symbol: string; decimals: number }> = {
+  '0x0000000000000000000000000000000000000000': { symbol: 'ETH',  decimals: 18 },
+  '0x036cbd53842c5426634e7929541ec2318f3dcf7e': { symbol: 'USDC', decimals: 6  },
+}
+
 /** All known tokens across all supported chains (for display / resolution). */
 const ALL_TOKENS: Record<string, { symbol: string; decimals: number }> = {
   ...GNOSIS_TOKENS,
   ...BASE_TOKENS,
+  ...BASE_SEPOLIA_TOKENS,
 }
 
 /** Maps CAIP-2 network ID → token address map. */
 const NETWORK_TOKENS: Record<string, Record<string, { symbol: string; decimals: number }>> = {
-  'eip155:100':  GNOSIS_TOKENS,
-  'eip155:8453': BASE_TOKENS,
-  'base':        BASE_TOKENS,
+  'eip155:100':   GNOSIS_TOKENS,
+  'eip155:8453':  BASE_TOKENS,
+  'base':         BASE_TOKENS,
+  'eip155:84532': BASE_SEPOLIA_TOKENS,
+  'base-sepolia': BASE_SEPOLIA_TOKENS,
 }
 
 // ── Parser ───────────────────────────────────────────────────────
@@ -269,7 +285,7 @@ export function selectStandardPaymentOption(
     if (
       opt.scheme === 'exact' &&
       opt.network in STANDARD_X402_NETWORKS &&
-      opt.asset.toLowerCase() === BASE_USDC_ADDRESS &&
+      STANDARD_X402_USDC_ADDRESSES.has(opt.asset.toLowerCase()) &&
       isPositiveDecimalAtomicAmount(optionAuthorizationAmount(opt))
     ) {
       return opt

@@ -5,6 +5,7 @@ covers:
   - scripts/docs/**
   - .github/workflows/docs.yml
   - .github/workflows/docs-coupling.yml
+  - .claude/agents/haven-doc-reviewer.md
   - .vale.ini
   - .lychee.toml
   - .markdownlint.json
@@ -110,10 +111,16 @@ claims to the code they mirror:
 Each carries a `because:` allowlist for intentional exceptions — the default is
 "document it correctly", not "add an exception".
 
-### Phase 3 — `haven-doc-reviewer` agent (planned, [#645](https://github.com/d-hinders/Haven-AI/issues/645))
+### Phase 3 — `haven-doc-reviewer` agent ([#645](https://github.com/d-hinders/Haven-AI/issues/645))
 
-A read-only review agent that flags specific doc claims a diff has invalidated,
-wired into the `/ship-next` loop so doc updates become part of done.
+`.claude/agents/haven-doc-reviewer.md` is a read-only review agent (sibling to
+`haven-reviewer`). Given a diff, it finds the docs whose `covers:` globs match
+the changed code and reports any **specific** claim the diff made stale,
+missing, or broken — with the smallest correct update. It's wired into the
+agentic workflow (`ai-agent-workflow.md`) and the autonomous loop
+(`autonomous-pr-loop.md`): when the coupling gate flags implicated docs, run the
+doc reviewer and update them before opening the PR. Advisory in this phase — it
+never blocks auto-merge.
 
 ### Phase 4 — promotion + audit cron (deferred, [#646](https://github.com/d-hinders/Haven-AI/issues/646))
 

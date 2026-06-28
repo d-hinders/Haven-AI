@@ -18,6 +18,7 @@ import {
   type PublicClient,
 } from 'viem'
 import type { SafeTxParams } from './safe-tx'
+import { getChainConfig, DEFAULT_CHAIN_ID } from './chains'
 
 // The pure allowance arithmetic lives in a viem-free module so it can be unit-
 // and loop-tested without the wallet stack. Imported for local use and
@@ -28,9 +29,13 @@ import type { AllowanceInfo, EffectiveAllowance } from './allowance-math'
 export { computeEffectiveAllowance }
 export type { AllowanceInfo, EffectiveAllowance }
 
-// ── Contract addresses (deterministic across chains) ───────────────
-export const ALLOWANCE_MODULE_ADDRESS =
-  '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134' as Address
+// ── Contract addresses ─────────────────────────────────────────────
+// The frontend operates on a single chain per deploy (DEFAULT_CHAIN_ID), so the
+// AllowanceModule resolves to that chain's deployment: Base mainnet uses v0.1.0
+// (0xCFbF…), Base Sepolia uses v0.1.1 (0xAA46…) — see lib/chains.ts. multiSend is
+// the same CREATE2 address on every chain, so it stays a constant.
+export const ALLOWANCE_MODULE_ADDRESS: Address =
+  getChainConfig(DEFAULT_CHAIN_ID).contracts.allowanceModule
 
 const MULTISEND_CALL_ONLY_ADDRESS =
   '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D' as Address

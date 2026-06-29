@@ -33,6 +33,7 @@ Pieces:
 - **`/loop /ship-next`** — re-invokes `/ship-next` for each following item until the backlog is empty (self-paced).
 - **haven-reviewer** — the per-PR quality gate.
 - **haven-doc-reviewer** — advisory per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Run it when the diff touches code that some doc's `covers:` front-matter maps to; updating those docs is part of definition-of-done. Advisory today — it does not block auto-merge.
+- **Surface playbooks** — `/ship-next` classifies each issue's surface from its `area:*` / `money-path` labels (Phase 1.5) and loads the matching playbook from `docs/contributing/ship-playbooks/` (UX + design system for frontend, CASP for money-path, etc.), so the right standards apply without a long prompt. See [`ship-playbooks/README.md`](ship-playbooks/README.md).
 - **`.github/CODEOWNERS`** — the money-path carve-out (the only PRs that still need a human merge).
 
 > **Base branch: `dev`, not `main`.** The loop branches off `dev` and opens every

@@ -13,7 +13,7 @@ Loaded by `/ship-next` for `area:frontend` issues. The goal: a UI issue is shipp
 
 Read, in order — these are `AGENTS.md` → "Required Reading For UI Work":
 
-1. [`product/README.md`](../../product/README.md) — product doctrine, IA, money-movement clarity, accessibility.
+1. [`product/README.md`](../../product/README.md) — product doctrine, IA, money-movement clarity, accessibility, and closeout checks.
 2. [`product/design-system.md`](../../product/design-system.md) — tokens, typography, cards, buttons, motion, surface hierarchy.
 3. [`product/copy-guidelines.md`](../../product/copy-guidelines.md) — user-facing wording and banned technical terms.
 4. [`product/screen-recipes.md`](../../product/screen-recipes.md) — repeatable screen structures.
@@ -39,4 +39,4 @@ Run `haven-reviewer` with UI context, checking the diff against [`product/design
 
 ## 6. Merge policy (UI)
 
-A non-money frontend PR **auto-merges** on green CI + verification **unless** the design-review / `haven-reviewer` UI pass flags a UX, copy, or design-system issue — then **pause and ask the user** (UX is subjective; a flagged finding is a human call). This is the `area:frontend` case of the skill's Phase 6. Money-path UI still follows the `money.md` human gate.
+A non-money frontend PR **auto-merges** on green CI + verification **unless** the design-review / `haven-reviewer` UI pass flags a UX, copy, or design-system issue (**even a nit-level one**) — then **pause and ask the user** (UX is subjective; a flagged finding is a human call). This is the `area:frontend` case of the skill's Phase 6. Money-path UI still follows the `money.md` human gate.

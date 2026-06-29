@@ -97,8 +97,8 @@ PR go through before handing it the whole queue.
   blocking/should-fix findings**. For a **frontend (`area:frontend`)** PR there is
   one addition (see [`ship-playbooks/frontend.md`](ship-playbooks/frontend.md)):
   if the design-review / haven-reviewer UI pass flags a UX, copy, or
-  design-system issue, the loop **pauses for the user** even if CI is green —
-  UX is a human call.
+  design-system issue (even a nit-level one), the loop **pauses for the user**
+  even if CI is green — UX is a human call.
 - A **money-path** PR (x402 / payments / machine-payments / payment-coverage /
   allowance-module / agentAuth / release tooling) does **not** auto-merge
   silently — the loop **pauses and asks whoever is running it to approve**

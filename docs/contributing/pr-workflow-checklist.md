@@ -15,6 +15,8 @@ Use this checklist for feature branches so PRs stay mergeable, reviewable, and d
 
 ## Branch Model
 
+> Canonical reference: [`branch-and-release-flow.md`](branch-and-release-flow.md) — the full dev → prod lifecycle, issue closing, and prod-promotion tracking. The summary below is the gist.
+
 Haven uses a `dev` integration branch in front of `main`:
 
 - **Feature work flows `feature/* → dev → main`.** Branch from `dev`, open your

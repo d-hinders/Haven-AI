@@ -60,13 +60,25 @@ export function ageDays(lastVerified, now = Date.now()) {
  * Pure core: given changed files and the docs (each with its `covers` globs),
  * return the docs implicated by the change. A doc is implicated when a changed
  * file matches one of its globs AND the doc itself was not changed.
+ *
+ * Same-day suppression: a doc whose `last-verified` is `today` is skipped — it
+ * was already confirmed accurate in this day's work, so re-flagging it on every
+ * subsequent edit to a covered file is just noise. This is a heuristic: it
+ * trades a small same-day-staleness risk for far less noise, and the gate is
+ * advisory anyway. `today` is injectable for testing.
+ *
+ * Note: the default `today` is the UTC calendar date, while `last-verified` is a
+ * human-written local date — so for non-UTC contributors the match can be off by
+ * at most ±1 calendar day. Harmless given the advisory posture (worst case: one
+ * extra advisory comment, never a missed real staleness across days).
  */
-export function implicatedDocs(changed, docs) {
+export function implicatedDocs(changed, docs, today = new Date().toISOString().slice(0, 10)) {
   const changedSet = new Set(changed)
   const findings = []
   for (const { doc, covers, lastVerified } of docs) {
     if (changedSet.has(doc)) continue
     if (!covers || covers.length === 0) continue
+    if (lastVerified && lastVerified === today) continue
     const matched = new Set()
     for (const glob of covers) {
       const re = globToRegExp(glob)

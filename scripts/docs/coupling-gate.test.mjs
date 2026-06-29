@@ -55,3 +55,15 @@ test('ageDays computes whole-day differences', () => {
   assert.equal(ageDays('2026-06-01', now), 10)
   assert.equal(ageDays('not-a-date', now), null)
 })
+
+test('suppresses a doc whose last-verified is today (same-day)', () => {
+  // Inject '2026-06-01' as today → matches every doc's lastVerified → all suppressed.
+  const f = implicatedDocs(['packages/backend/src/routes/x402.ts'], DOCS, '2026-06-01')
+  assert.equal(f.length, 0)
+})
+
+test('still flags a doc verified before today', () => {
+  // today is later than the docs' 2026-06-01 verification → not suppressed.
+  const f = implicatedDocs(['packages/backend/src/routes/x402.ts'], DOCS, '2026-06-02')
+  assert.deepEqual(f.map((x) => x.doc).sort(), ['docs/architecture/04-x402.md', 'docs/regulatory/casp.md'])
+})

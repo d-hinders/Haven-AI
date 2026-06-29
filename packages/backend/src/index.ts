@@ -5,6 +5,7 @@ import Fastify, { type FastifyError } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import { runMigrations } from './db/migrate.js'
+import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './lib/chains.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
 import balanceRoutes from './routes/balances.js'
@@ -124,6 +125,13 @@ app.get('/health', async (_request, reply) => {
       db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
     }
   }
+})
+
+// Public chain config (#679): which chains this environment serves account
+// deploys on, so the onboarding / Add-account pickers offer only those. Not
+// sensitive — no auth.
+app.get('/chains', async () => {
+  return { deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS }
 })
 
 await app.register(authRoutes, { prefix: '/auth' })

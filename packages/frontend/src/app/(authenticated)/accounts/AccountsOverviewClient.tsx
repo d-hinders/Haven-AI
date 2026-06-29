@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { useUserSafes } from '@/hooks/useUserSafes'
+import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { useAgents } from '@/hooks/useAgents'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
@@ -49,6 +50,18 @@ function AddSafeModal({
   const [deployedAddress, setDeployedAddress] = useState('')
   const [deployTxHash, setDeployTxHash] = useState('')
   const [deployChainId, setDeployChainId] = useState(DEFAULT_CHAIN_ID)
+
+  // Only deploy on chains the backend serves (#679); snap the selection to a
+  // served chain if the default isn't one in this environment.
+  const { chains: deployableChains } = useDeployableChains()
+  useEffect(() => {
+    if (
+      deployableChains.length > 0 &&
+      !deployableChains.some((c) => c.chainId === deployChainId)
+    ) {
+      setDeployChainId(deployableChains[0].chainId)
+    }
+  }, [deployableChains, deployChainId])
 
   const { address: walletAddress, isConnected } = useAccount()
 
@@ -225,7 +238,7 @@ function AddSafeModal({
                   onChange={(e) => setDeployChainId(Number(e.target.value))}
                   className="w-full px-3 py-2.5 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] text-sm text-[var(--v2-ink)] focus:outline-none focus:border-[var(--v2-brand)] transition-colors"
                 >
-                  {SUPPORTED_CHAINS.map((c) => (
+                  {deployableChains.map((c) => (
                     <option key={c.chainId} value={c.chainId}>{c.name}</option>
                   ))}
                 </select>

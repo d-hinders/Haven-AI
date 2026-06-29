@@ -12,7 +12,7 @@ covers:
   - .github/vale/**
   - packages/backend/src/openapi/spec.test.ts
   - packages/backend/src/docs-drift/docs-drift.test.ts
-last-verified: "2026-06-28"
+last-verified: "2026-06-29"
 ---
 
 # Documentation-quality system
@@ -100,6 +100,9 @@ match a changed file the PR did **not** also touch, and posts a single advisory
 sticky comment naming each doc and its `last-verified` age. The script always
 exits 0 and the workflow is not a required check, so it can never block a merge.
 Run it locally with `node scripts/docs/coupling-gate.mjs --changed=path/a,path/b`.
+A doc whose `last-verified` is **today** is suppressed — once you've confirmed it
+accurate in a day's work, subsequent edits to a covered file won't re-flag it
+the same day (a noise-reduction heuristic; the gate is advisory regardless).
 
 **Drift tests** (`packages/backend/src/docs-drift/docs-drift.test.ts`): vitest
 tests, modeled on the OpenAPI drift test, that pin hand-maintained `CLAUDE.md`

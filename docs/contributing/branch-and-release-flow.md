@@ -69,8 +69,9 @@ the epic when its last sub-issue lands on `dev`.
    - **`release.yml`** cuts a **`prod-<timestamp>` GitHub Release** with
      auto-generated notes listing the PRs in this promotion (anchored to the
      previous `prod-*` release). This is the durable "what's in prod, and when".
-   - **`publish.yml`** publishes any changed npm packages (a separate, version-
-     driven concern — see [`../../scripts/README.md`](../../scripts/README.md)).
+   - **`publish.yml`** publishes packages whose version isn't yet on npm — a
+     version-gated step, so a promotion that didn't bump a version is a no-op
+     here (a separate concern — see [`../../scripts/README.md`](../../scripts/README.md)).
 3. The pending-promotion digest updates to show `dev` and `main` back in sync.
 
 ## What's in prod vs. pending
@@ -79,7 +80,7 @@ the epic when its last sub-issue lands on `dev`.
   — one per promotion, each with its PR list.
 - **Awaiting promotion:** the **📦 "Pending promotion: dev → main"** issue, kept
   current by `promotion-digest.yml` (weekly + on-demand via *Run workflow*). The
-  `main...dev` compare is the same view on demand.
+  `main..dev` compare is the same view on demand.
 
 ## Workflows in this flow
 
@@ -88,7 +89,7 @@ the epic when its last sub-issue lands on `dev`.
 | `dev-gate.yml` | PR into `main` | blocks anything but `dev`/`hotfix/*` |
 | `release.yml` | push to `main` | cuts the `prod-*` Release |
 | `promotion-digest.yml` | weekly + manual | upserts the pending-promotion issue |
-| `publish.yml` | push to `main` | publishes changed npm packages |
+| `publish.yml` | push to `main` | publishes packages whose version isn't yet on npm |
 
 ## One-time setup
 

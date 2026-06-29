@@ -1,0 +1,44 @@
+name: Frontend copy lint
+
+# Advisory: flag banned technical terms from docs/product/copy-guidelines.md in
+# user-facing frontend copy (app/ + components/). Never blocks a merge — the
+# step is continue-on-error and this workflow is not a required check. See
+# docs/contributing/ship-playbooks/frontend.md.
+
+on:
+  pull_request:
+    paths:
+      - 'packages/frontend/src/app/**'
+      - 'packages/frontend/src/components/**'
+      - 'scripts/frontend-copy-lint.mjs'
+      - 'scripts/frontend-copy-lint.test.mjs'
+      - 'docs/product/copy-guidelines.md'
+      - '.github/workflows/frontend-copy-lint.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-copy-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  copy-lint:
+    name: Banned product-copy terms (advisory)
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      # The matcher's own unit tests — a real gate (a broken matcher should show
+      # red), unlike the advisory lint below.
+      - name: Test the matcher
+        run: node --test scripts/frontend-copy-lint.test.mjs
+
+      # Advisory — surfaces findings without failing the build.
+      - name: Frontend copy lint
+        continue-on-error: true
+        run: node scripts/frontend-copy-lint.mjs

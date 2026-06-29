@@ -35,7 +35,7 @@ Verify the change in the **browser**, or — when the browser path is unavailabl
 
 ## 5. Review (advisory design pass)
 
-Run `haven-reviewer` with UI context, checking the diff against [`product/design-review.md`](../../product/design-review.md) and [`copy-guidelines.md`](../../product/copy-guidelines.md). The Vale terminology rule (`.vale.ini`, scoped to `docs/product`) flags banned terms in docs copy; for product **UI** copy, check changed strings against `copy-guidelines.md` by hand until a frontend-copy lint exists.
+Run `haven-reviewer` with UI context, checking the diff against [`product/design-review.md`](../../product/design-review.md) and [`copy-guidelines.md`](../../product/copy-guidelines.md). Two automated aids back this up: the Vale terminology rule (`.vale.ini`, scoped to `docs/product`) for docs copy, and **`npm run lint:copy`** (`scripts/frontend-copy-lint.mjs`, also an advisory CI job) which flags banned multi-word terms in user-facing frontend copy (`app/` + `components/`). Both are advisory — for anything they miss, check changed strings against `copy-guidelines.md` by hand. Use `// copy-lint-ignore` for a legitimate advanced/developer-facing surface.
 
 ## 6. Merge policy (UI)
 

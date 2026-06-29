@@ -29,3 +29,7 @@
 - name: "money-path"
   color: "b60205"
   description: "Payments, agent authority, allowances, or migrations — human merge gate"
+
+- name: "promotion"
+  color: "1d76db"
+  description: "Tracks dev → prod promotion (used by the pending-promotion digest)"

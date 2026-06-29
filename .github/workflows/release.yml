@@ -1,0 +1,50 @@
+name: Prod release on promotion
+
+# When dev (or a hotfix) is promoted to main — i.e. deployed to production —
+# cut a GitHub Release tagging the promoted commit, with auto-generated notes
+# listing the PRs included since the previous prod release. This is the durable
+# "what's in prod, and when" record, so feature issues can close on dev-merge
+# (implementation done) without losing track of what's actually live.
+# See docs/contributing/autonomous-pr-loop.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prod-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Cut prod release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="prod-$(date -u +%Y%m%d-%H%M%S)"
+
+          # Anchor the auto-generated notes to the previous prod release so they
+          # list exactly the PRs in this promotion (not npm package tags).
+          prev=$(gh release list --limit 100 --json tagName \
+            --jq 'map(.tagName) | map(select(startswith("prod-"))) | .[0]' || true)
+
+          args=(--target "$GITHUB_SHA" --title "Production promotion — $tag" --generate-notes)
+          if [ -n "${prev:-}" ] && [ "$prev" != "null" ]; then
+            args+=(--notes-start-tag "$prev")
+          fi
+
+          gh release create "$tag" "${args[@]}"
+          echo "Created **$tag** (notes since ${prev:-repo start})." >> "$GITHUB_STEP_SUMMARY"

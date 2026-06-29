@@ -1,0 +1,57 @@
+name: Pending promotion digest
+
+# With `dev` as the default branch, feature issues close on dev-merge
+# (implementation done). This digest is how we track what still needs a
+# dev → main promotion: it keeps a single always-current "📦 Pending promotion"
+# issue listing the commits on dev that aren't in prod (main) yet.
+# See docs/contributing/autonomous-pr-loop.md.
+
+on:
+  schedule:
+    - cron: '13 8 * * 1'   # Mondays 08:13 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: promotion-digest
+  cancel-in-progress: true
+
+jobs:
+  digest:
+    name: Report dev-not-in-prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build and upsert the digest issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main dev
+
+          count=$(git rev-list --count --first-parent origin/main..origin/dev)
+          list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev)
+          ts=$(date -u +%FT%TZ)
+
+          if [ "$count" -eq 0 ]; then
+            body=$(printf '✅ **dev and main are in sync** — nothing awaiting promotion.\n\n_Updated %s by the promotion-digest workflow._' "$ts")
+          else
+            body=$(printf '**%s commit(s) on `dev` not yet in prod (`main`).** Promote with a `dev → main` PR.\n\n%s\n\n_Updated %s by the promotion-digest workflow._' "$count" "$list" "$ts")
+          fi
+
+          # Self-heal the label so the workflow works even before labels.yml syncs.
+          gh label create promotion --color 1d76db --description "Tracks dev → prod promotion" --force >/dev/null 2>&1 || true
+
+          num=$(gh issue list --label promotion --state open --json number --jq '.[0].number' || true)
+          if [ -n "${num:-}" ] && [ "$num" != "null" ]; then
+            gh issue edit "$num" --body "$body"
+          else
+            gh issue create --title "📦 Pending promotion: dev → main" --label promotion --body "$body"
+          fi

@@ -1,0 +1,89 @@
+name: Docs quality
+
+# Phase 1 of the documentation-quality system (epic #642). Runs only when docs
+# or the docs tooling change. Advisory-first: this workflow is intentionally NOT
+# a required status check, so nothing here blocks a merge yet. The front-matter
+# validator fails the job (red, visible signal); link/markdown/style checks are
+# continue-on-error. See docs/contributing/docs-quality-system.md.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - '**/*.md'
+      - 'docs/**'
+      - '.vale.ini'
+      - '.lychee.toml'
+      - '.markdownlint.json'
+      - '.github/vale/**'
+      - 'scripts/docs/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - '**/*.md'
+      - 'docs/**'
+      - '.vale.ini'
+      - '.lychee.toml'
+      - '.markdownlint.json'
+      - '.github/vale/**'
+      - 'scripts/docs/**'
+      - '.github/workflows/docs.yml'
+
+concurrency:
+  group: docs-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    name: Front-matter, links & style
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      # The real gate: every doc has valid front-matter and every `covers`
+      # glob resolves to a real path. Dependency-free, so no `npm ci` needed.
+      - name: Validate doc front-matter
+        run: node scripts/docs/validate-frontmatter.mjs
+
+      # Unit tests for the validator's parser + glob matcher.
+      - name: Test the front-matter validator
+        if: always()
+        run: node --test scripts/docs/*.test.mjs
+
+      # ── Advisory checks below: report findings, never fail the build.
+      # `if: always()` so they still run when the validator step fails. ──
+
+      - name: Link check (lychee)
+        id: lychee
+        if: always()
+        continue-on-error: true
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config .lychee.toml --no-progress './**/*.md'
+          fail: true
+
+      - name: Markdown lint
+        if: always()
+        continue-on-error: true
+        uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          globs: |
+            **/*.md
+            !node_modules
+
+      - name: Terminology (Vale, product copy only)
+        if: always()
+        continue-on-error: true
+        uses: errata-ai/vale-action@v2
+        with:
+          files: docs/product
+          fail_on_error: false
+          reporter: github-pr-check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

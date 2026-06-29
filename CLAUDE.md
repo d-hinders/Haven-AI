@@ -1,3 +1,26 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/lib/chains.ts
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/middleware/agentAuth.ts
+  - packages/backend/src/openapi/spec.ts
+  - packages/backend/src/routes/agents.ts
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/routes/safe-deploy.ts
+  - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/x402.ts
+  - packages/frontend/src/app/globals.css
+  - packages/frontend/src/components/ui/Card.tsx
+  - packages/frontend/src/components/ui/Row.tsx
+  - .github/workflows/dev-gate.yml
+  - .github/workflows/publish.yml
+  - .github/CODEOWNERS
+  - scripts/release-bump.mjs
+last-verified: "2026-06-28"
+---
+
 # Haven — CLAUDE.md
 
 ## What Is Haven
@@ -211,12 +234,12 @@ Multiple independent layers, all need to be compromised for funds to be at risk:
 
 ## Releasing & publishing packages
 
-Four packages are published to npm: `@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect` (the connector the dashboard hands out via `npx @haven_ai/connect@alpha`). `mcp-server`, `backend`, and `frontend` are NOT on npm — they deploy from branches (Railway/Vercel): `main` → production, and the `dev` integration branch → the shared **dev environment** (see [`docs/operations/dev-environment.md`](docs/operations/dev-environment.md)).
+Five packages are published to npm: `@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect` (the connector the dashboard hands out via `npx @haven_ai/connect@alpha`), and `@haven_ai/cli`. `mcp-server`, `backend`, and `frontend` are NOT on npm — they deploy from branches (Railway/Vercel): `main` → production, and the `dev` integration branch → the shared **dev environment** (see [`docs/operations/dev-environment.md`](docs/operations/dev-environment.md)).
 
-> **Branch model:** feature work flows `feature/* → dev → main`. The `dev-gate` workflow only lets `dev` or `hotfix/*` merge into `main`, so open feature PRs into `dev`, not `main`. Full workflow: [`docs/contributing/pr-workflow-checklist.md`](docs/contributing/pr-workflow-checklist.md).
+> **Branch model:** feature work flows `feature/* → dev → main`. The `dev-gate` workflow only lets `dev` or `hotfix/*` merge into `main`, so open feature PRs into `dev`, not `main`. **`dev` is the default branch**, so issues close on the dev-merge (= implemented); what's in **prod** is tracked by the prod-release + pending-promotion-digest workflows on `main`, not by issue state. Canonical reference: [`docs/contributing/branch-and-release-flow.md`](docs/contributing/branch-and-release-flow.md); PR mechanics: [`docs/contributing/pr-workflow-checklist.md`](docs/contributing/pr-workflow-checklist.md).
 
 - **Never run `npm publish` by hand.** To cut a release, run `npm run release:bump -- <version>` (e.g. `0.1.17-alpha.0`), commit on a release branch, open a PR, and merge. The **Publish packages** workflow (`.github/workflows/publish.yml`) publishes on merge to `main`, choosing the dist-tag from the version (prerelease → `alpha`, stable → `latest`) and skipping any version already on npm.
-- **Never hand-edit the version fields or cross-package dep pins.** `release-bump.mjs` is the single source of truth — it updates all four `package.json` versions, the internal dep pins, and the source version constants (`MCP_VERSION`, `SIGNER_VERSION`, `HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION`, connect's `runtime-manifest`) atomically, then verifies the connect bundle. Pinning an internal `@haven_ai/*` dep to a wildcard (`*`, `latest`, `workspace:*`) is forbidden — it ships green in-repo but resolves to the wrong version on a user's machine.
+- **Never hand-edit the version fields or cross-package dep pins.** `release-bump.mjs` is the single source of truth — it updates all five `package.json` versions, the internal dep pins, and the source version constants (`MCP_VERSION`, `SIGNER_VERSION`, `HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION`, `CLI_VERSION`, connect's `runtime-manifest`) atomically, then verifies the connect bundle. Pinning an internal `@haven_ai/*` dep to a wildcard (`*`, `latest`, `workspace:*`) is forbidden — it ships green in-repo but resolves to the wrong version on a user's machine.
 - Full procedure: [`scripts/README.md`](scripts/README.md). Runtime-compatibility checklist: [`docs/operations/mcp-runtime-compatibility.md`](docs/operations/mcp-runtime-compatibility.md).
 
 ## UI surface hierarchy
@@ -229,4 +252,6 @@ Use `docs/contributing/ai-agent-workflow.md` for feature delivery, UX feedback i
 
 The captain owns product judgment, shared files, gravity files, git hygiene, final integration, and verification. Use workers only for clean, disjoint slices with explicit file ownership. Inform the user which agents are being used, but do not ask for permission unless there is a real blocker, destructive action, credential risk, or tool limitation.
 
-For shipping a **defined set of PRs** with minimal user input, use the autonomous PR loop: `/loop /ship-next`. Its queue is **GitHub Issues** — standalone tasks labeled `code-quality`, or an epic's sub-issues via `/loop /ship-next epic=#<n>` (the old `docs/backlogs/*.yml` file tracks are retired; see `docs/backlogs/README.md`). It implements, tests, runs haven-reviewer, opens, and reviewer-gated auto-merges each PR — escalating to the user only on a blocking finding, a real decision, a money-path merge (the `.github/CODEOWNERS` carve-out), or stuck CI. See `docs/contributing/autonomous-pr-loop.md` (includes the one-time GitHub setup).
+For shipping a **defined set of PRs** with minimal user input, use the autonomous PR loop: `/loop /ship-next`. Its queue is **GitHub Issues** — standalone tasks labeled `code-quality`, or an epic's sub-issues via `/loop /ship-next epic=#<n>` (the old `docs/backlogs/*.yml` file tracks are retired; see `docs/backlogs/README.md`). It implements, tests, runs haven-reviewer, opens, and reviewer-gated auto-merges each PR — escalating to the user only on a blocking finding, a real decision, a money-path merge (the `.github/CODEOWNERS` carve-out), or stuck CI. You don't have to hand-write those issues: **`/new-task "<description>"`** captures a one-liner as a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default; **`/ship-next "<description>"`** does the same *and* ships it in one go — the low-friction front door. See `docs/contributing/autonomous-pr-loop.md` (includes the one-time GitHub setup).
+
+**`/ship-next` is the default way to ship anything defined as a GitHub issue or sub-issue.** Say "ship next" and it classifies the issue's surface from its `area:*` / `money-path` labels (Phase 1.5) and loads the matching **playbook** (`docs/contributing/ship-playbooks/`) so the right standards apply without a long prompt — UX + design system for `area:frontend`, CASP for `money-path`, runtime/release rules for `area:sdk`/`area:mcp`, the docs-quality system for `area:docs`. It then runs the Captain Self-Check Preflight before review, keeps implicated docs accurate (coupling gate + haven-doc-reviewer), and opens a PR filled from the template. The skill **routes, it does not contain**: it links the canonical standards rather than copying them. See `docs/contributing/ship-playbooks/README.md`.

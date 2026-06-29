@@ -1,3 +1,14 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/ISSUE_TEMPLATE/loop-task.md
+  - .github/ISSUE_TEMPLATE/loop-epic.md
+  - .claude/commands/ship-next.md
+  - .github/CODEOWNERS
+last-verified: "2026-06-29"
+---
+
 # Backlogs moved to GitHub Issues
 
 The autonomous PR loop (`/ship-next` + `/loop`) used to read its queue from
@@ -32,6 +43,8 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
 - **Scope** — one paragraph the implementer can act on without guessing: the
   change *and* its acceptance criteria.
 - **Files** — the file(s) the change should own (best-effort).
+- **Surface** — which `area:*` / `money-path` label(s) apply, so `/ship-next`
+  loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).
 - **Money-path?** — whether it touches x402 / machine-payments / payment-coverage
   / allowance / migrations. Money-path issues are implemented by the loop but
   **never auto-merged** — `.github/CODEOWNERS` routes them to a human merge.

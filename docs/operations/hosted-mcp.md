@@ -1,3 +1,12 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/mcp-server/**
+  - docker-compose.yml
+last-verified: "2026-06-28"
+---
+
 # Deploy — Hosted MCP server (`@haven_ai/mcp-server`)
 
 How to deploy and operate the hosted, keyless MCP server on Railway alongside

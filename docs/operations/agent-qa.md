@@ -1,3 +1,14 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .env.dev.example
+  - packages/qa-agent/**
+  - packages/frontend/src/lib/api.ts
+  - packages/backend/src/lib/allowance-module.ts
+last-verified: "2026-06-28"
+---
+
 # Agent QA — running the QA layers against the dev environment
 
 The home doc for the automated, agent-based QA flow (epic #573). It lets a
@@ -65,11 +76,21 @@ The QA layers run as a dedicated, seeded dev identity — never a real user. Set
 per #574; all values are **testnet/dev-only** and must differ from production.
 
 - **Seeded identity:** a QA user + one Safe on Base Sepolia + a `QA Agent` with a
-  small, reset-bound allowance, created idempotently against the dev backend
-  (seed script — #574 item 1).
-- **Funded delegate:** the QA delegate EOA funded on **Base Sepolia** with test
-  USDC + gas, sized for many small runs. Keep it topped up — a gas-empty delegate
-  fails QA silently. Record the address so its balance can be monitored.
+  small, reset-bound allowance, created idempotently against the dev backend by
+  the seed script — `npm run seed -w packages/qa-agent` (#574 item 1; `SEED_*`
+  env documented in [`packages/qa-agent/README.md`](../../packages/qa-agent/README.md)).
+  The seed never holds the delegate key — it takes the delegate **address** only.
+- **Funding (three wallets, distinct roles):** the delegate **signs** payments
+  off-chain and never submits a transaction (`lib/allowance-module.ts`: *"the
+  relayer pays gas; the delegate's signature authorises the transfer"*), so the
+  delegate needs **no gas and no pre-funded USDC**. What actually needs funding on
+  **Base Sepolia**:
+  - **Safe** — test **USDC** (the spendable funds the allowance draws from), sized
+    for many small runs.
+  - **Relayer** (`RELAYER_PRIVATE_KEY`) — Base Sepolia **ETH** for gas; it submits
+    the AllowanceModule transfers. Keep it topped up — a gas-empty relayer fails QA
+    silently.
+  - **Delegate** — nothing on-chain; just the key. Record its address for audit.
 - **Secrets (names only — never commit values):** GitHub Actions secrets for the
   CI-driven layers — `QA_AGENT_API_KEY`, `QA_DELEGATE_PRIVATE_KEY`,
   `QA_HAVEN_API_URL` (= the dev backend), `QA_PAYMENT_TO`, plus any seeded-session

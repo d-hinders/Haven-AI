@@ -1,3 +1,13 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/workflows/publish.yml
+  - scripts/release-bump.mjs
+  - .claude/agents/**
+last-verified: "2026-06-28"
+---
+
 # Haven Codex Instructions
 
 ## Product Context

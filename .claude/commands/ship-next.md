@@ -8,6 +8,7 @@ The queue is **GitHub Issues** (not a repo file — backlogs are no longer track
 
 - *(no argument)* or `label=<name>` — **standalone labeled issues**: open issues carrying the loop label (default **`code-quality`**), oldest first (lowest issue number). Use this for small, self-contained tasks.
 - `epic=#<n>` — an **epic** (parent issue): its **open sub-issues** are the queue, lowest number first. Use this for a multi-PR plan that should burn down together.
+- `"<task>"` — a **quoted freeform description** (no pre-existing issue needed): first draft a well-formed issue via the [`/new-task`](new-task.md) flow — but since the intent is to ship, **add the `code-quality` label** and assign the requester — then run the pipeline below on that issue. This is the low-friction front door: throw a sentence, the system does the paperwork. If the task is genuinely underspecified or money-path, `/new-task` asks one or two clarifying questions before filing.
 
 Issue state *is* the backlog state — there is nothing to edit in the repo:
 - **open issue, no linked PR** → ready (a candidate to pick).
@@ -22,7 +23,7 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 
 1. Before picking new work, check whether any issue in the selected queue already has an **open Haven PR** (a PR that `Closes #<issue>`). If so, act on that PR:
    - **Merged** (issue now closed) → continue to Phase 1.
-   - **Open, awaiting the user** (a money-path PR needing CODEOWNERS approval, or an escalation) → **stop** and report: this item is blocked on the user; do not start the next item (later items branch off `dev` and must build on the merged one).
+   - **Open, awaiting the user** (a money-path PR awaiting in-session approval, a migration awaiting code-owner review, a frontend UI PR paused for a UX finding, or an escalation) → **stop** and report: this item is blocked on the user; do not start the next item (later items branch off `dev` and must build on the merged one).
    - **Open, CI still running / fixable failure** → handle it (re-run, fix, push) but do not start a new item.
 2. Only when there is no open in-flight PR from the queue do you pick the next ready issue.
 
@@ -33,6 +34,26 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 5. Sync and branch off fresh `dev` (the integration branch — **not** `main`):
    - `git fetch origin dev && git checkout -B claude/issue-<n>-<slug> origin/dev` (use the issue number so the branch traces back to its issue).
    - The loop targets `dev` because the `dev-gate` workflow (`.github/workflows/dev-gate.yml`) only allows `dev` or `hotfix/*` into `main`; a `claude/*` branch can never merge straight to `main`. Feature work flows `claude/* → dev`, and `dev → main` is promoted separately.
+
+## Phase 1.5 — Classify & load the playbook
+
+The skill **routes, it does not contain.** Before implementing, classify the issue's surface(s) and load the matching playbook(s) — small files that link the standards, checks, and agents for that surface. Never restate guideline content; load and apply it. See `docs/contributing/ship-playbooks/README.md`. (Steps here are unnumbered — this phase is inserted between steps 5 and 6 without renumbering the rest.)
+
+- **Classify.** Determine the surface(s):
+  - **Primary:** the issue's labels — `area:frontend`, `area:backend`, `area:sdk`, `area:mcp`, `area:docs`, `money-path`.
+  - **Fallback / confirmation:** the files the change will touch — `packages/frontend/**` → frontend; `packages/backend/**` → backend; `packages/{sdk,connect}/**` → sdk; `packages/{mcp,mcp-server,signer}/**` → mcp; `*.md`/`docs/**` → docs; the Phase 6 money-path file list → money-path. Use this when labels are missing, and to catch a surface the labels missed.
+  - An issue can span several surfaces — load every matching playbook.
+- **Load** the matching playbook(s) from `docs/contributing/ship-playbooks/` and apply them through Phases 2–6:
+
+  | Surface | Playbook | Loads / enforces |
+  |---|---|---|
+  | `area:frontend` | `frontend.md` | UX + design-system required reading, reuse-first, Captain Self-Check Preflight, browser/headless verification, advisory design-review, UI merge policy |
+  | `area:backend` | `backend.md` | OpenAPI drift + package gate |
+  | `area:sdk` / `area:mcp` | `sdk.md` | generated-artifact regen/verify, OpenAPI drift, runtime-compatibility |
+  | `money-path` | `money.md` | CASP required reading, characterization-tests-first, human merge gate (Phase 6) |
+  | `area:docs` | `docs.md` → `docs-quality-system.md` | `docs:check` + coupling gate + haven-doc-reviewer |
+
+- **Discovery.** For a non-trivial issue, run `haven-explorer` (and `haven-workflow-coordinator` for multi-surface work) to map terrain before implementing — scale this to the issue's complexity; skip it for a one-file change.
 
 ## Phase 2 — Implement
 
@@ -49,6 +70,7 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 
 ## Phase 4 — Review (haven-reviewer)
 
+- **Preflight first.** Before invoking the reviewer, run the **Captain Self-Check Preflight** (`docs/contributing/ai-agent-workflow.md`) for the surfaces the diff touches, plus the loaded playbook's checks (Phase 1.5). Fixing what it surfaces here means the reviewer finds fewer issues and review rounds shrink.
 10. Launch the **haven-reviewer** subagent on the diff (`git diff origin/dev...HEAD`), with the item's scope and the invariants it must preserve.
 11. Triage findings:
     - **blocking / should-fix** that are clearly correct and small → apply them, re-run the gate.
@@ -56,10 +78,14 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
     - **nice-to-have / nits** → apply if cheap; otherwise note in the PR body and skip.
 12. Record in the commit/PR which findings were applied and which were deferred (with reasons), as in this session's PRs.
 
+## Phase 4.5 — Doc accuracy (standard step)
+
+- Always check doc accuracy. If the diff touches code a doc's `covers:` front-matter maps to (run `node scripts/docs/coupling-gate.mjs` locally; the gate also comments on the PR), launch the **haven-doc-reviewer** subagent on the diff, update any docs it finds stale / missing / broken **and bump their `last-verified`**, then re-run the acceptance gate. The findings are **advisory** — they never block the merge — but updating implicated docs is part of definition-of-done. See `docs/contributing/docs-quality-system.md`.
+
 ## Phase 5 — Open the PR
 
 13. Commit with a conventional message (end with the Co-Authored-By / Claude-Session trailers per the repo convention). Push `-u origin <branch>`.
-14. Open the PR via `mcp__github__create_pull_request` with **base `dev`** (never `main`). Body: scope, the behavior-preservation argument, verification output (test counts, tsc), and reviewer outcome. **Always include `Closes #<n>`** for the issue being shipped (standalone or epic sub-issue) so merging closes it and an epic burns down automatically.
+14. Open the PR via `mcp__github__create_pull_request` with **base `dev`** (never `main`). Write the body by **filling the sections of `.github/pull_request_template.md`** for the surfaces the diff touches — Changed Surfaces, Workflow Used, Local Checks, Browser Or Headless Verification, Intentionally Left Out, Generated Artifacts And Handoffs, CASP / MiCA Guardrail Check, Review Status — plus a **Merge Readiness** report (the block in `docs/contributing/pr-workflow-checklist.md`: CI, local checks, review status, risk level, why-safe, residual risk). Skip a template section that doesn't apply with a one-line reason. **Always include `Closes #<n>`** for the issue being shipped (standalone or epic sub-issue) so merging closes it and an epic burns down automatically.
 15. `subscribe_pr_activity` for the PR so CI failures / review comments wake the loop.
 
 ## Phase 6 — Merge gate (policy A: in-session money-path approval; migrations hard-gated)
@@ -75,6 +101,11 @@ A path is **money-path** if it matches any of: `routes/x402.ts`,
       acceptance gate passed and haven-reviewer returned **no
       blocking/should-fix**, call `mcp__github__enable_pr_auto_merge` (squash).
       GitHub merges it once required checks pass.
+      - **`area:frontend` (UI) — one addition** from [`ship-playbooks/frontend.md`](../../docs/contributing/ship-playbooks/frontend.md):
+        if the design-review / haven-reviewer UI pass flagged a **UX, copy, or
+        design-system** issue (even non-blocking), do **not** auto-merge —
+        **ask the user** with `AskUserQuestion` (UX is a human call). With no
+        such finding, auto-merge as normal.
     - **Money-path, NOT a migration:** do **not** auto-merge silently. **Ask the
       person running the loop to approve** with `AskUserQuestion` — include the
       PR link, the scope, and the haven-reviewer verdict so they can decide
@@ -96,7 +127,8 @@ A path is **money-path** if it matches any of: `routes/x402.ts`,
 ## When to involve the user (the only times)
 
 - A blocking/ambiguous reviewer finding, or any real product/architecture/security decision.
-- A money-path PR (it waits for the user's CODEOWNERS approval by design).
+- A money-path PR (it waits for in-session approval; a migration additionally waits for a code-owner review).
+- A frontend UI PR where the design/copy review flagged a UX issue (even a nit) — it waits for your call.
 - CI failing in a way you can't resolve after a couple of focused attempts.
 - An issue too underspecified to implement safely.
 Everything else — implement, test, review nits, open PR, auto-merge clean PRs, chain to the next — runs without the user.

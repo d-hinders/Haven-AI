@@ -5,7 +5,7 @@ import { type Address, parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { useAccount, usePublicClient, useSwitchChain } from 'wagmi'
 import {
-  ALLOWANCE_MODULE_ADDRESS,
+  allowanceModuleFor,
   RESET_PERIODS,
   type AllowanceSetup,
 } from '@/lib/allowance-module'
@@ -480,7 +480,7 @@ export default function ConnectAgent2Modal({
         safe_tx_hash: result.safeTxHash,
         chain_id: approvalNetwork,
         safe_address: approvalWallet,
-        allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
+        allowance_module_address: allowanceModuleFor(approvalNetwork),
         delegate_address: delegateAddress,
       }
 

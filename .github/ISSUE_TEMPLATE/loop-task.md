@@ -32,9 +32,24 @@ AND its acceptance criteria. -->
 
 -
 
+## Surface
+
+<!-- Check all that apply, AND add the matching label(s) so /ship-next can
+classify deterministically and load the right playbook. See
+docs/contributing/ship-playbooks/README.md. -->
+
+- [ ] `area:frontend` — UI in packages/frontend
+- [ ] `area:backend` — backend / API in packages/backend
+- [ ] `area:sdk` — SDK / connect / API contract / credentials
+- [ ] `area:mcp` — MCP server / signer / hosted MCP
+- [ ] `area:docs` — docs only
+- [ ] `money-path` — payments, agent authority, allowances, migrations
+
 ## Money-path?
 
-<!-- Check one. Money-path issues are implemented by the loop but NEVER
+<!-- The `money-path` Surface label above drives playbook routing; this section
+drives the MERGE GATE (yes = human merge required). Set both consistently.
+Check one. Money-path issues are implemented by the loop but NEVER
 auto-merged — .github/CODEOWNERS routes them to a human merge, and any change to
 existing money-path behavior must be characterization-tested first. -->
 

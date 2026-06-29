@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { decodeFunctionData, type Address } from 'viem'
-import { buildAgentRevokeTx, ALLOWANCE_MODULE_ADDRESS } from '../allowance-module'
+import { buildAgentRevokeTx, allowanceModuleFor } from '../allowance-module'
+
+const CHAIN_ID = 8453 // Base mainnet
 
 /**
  * No-lock-in contract test (design: docs/research/non-custody-verification.md;
@@ -30,10 +32,10 @@ const DELEGATE = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1' as Address
 
 describe('no lock-in: agent revocation is a user-signed on-chain Safe tx', () => {
   it('targets the AllowanceModule and removes the delegate on-chain', () => {
-    const tx = buildAgentRevokeTx(DELEGATE, 5n)
+    const tx = buildAgentRevokeTx(DELEGATE, 5n, CHAIN_ID)
 
     // Goes to the on-chain AllowanceModule, not a Haven endpoint.
-    expect(tx.to).toBe(ALLOWANCE_MODULE_ADDRESS)
+    expect(tx.to).toBe(allowanceModuleFor(CHAIN_ID))
     expect(tx.value).toBe(0n)
     expect(tx.operation).toBe(0) // a plain call, not a delegatecall
 
@@ -44,6 +46,6 @@ describe('no lock-in: agent revocation is a user-signed on-chain Safe tx', () =>
   })
 
   it('carries the user-supplied Safe nonce, so the owner signs it', () => {
-    expect(buildAgentRevokeTx(DELEGATE, 42n).nonce).toBe(42n)
+    expect(buildAgentRevokeTx(DELEGATE, 42n, CHAIN_ID).nonce).toBe(42n)
   })
 })

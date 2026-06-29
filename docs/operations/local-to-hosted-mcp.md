@@ -1,3 +1,15 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/mcp/**
+  - packages/mcp-server/**
+  - packages/signer/**
+  - packages/frontend/src/lib/hosted-connect.ts
+  - packages/frontend/src/lib/agent-runtime-snippets.ts
+last-verified: "2026-06-28"
+---
+
 # Migration - Local MCP To Hosted MCP
 
 > **Scope:** This guide is for agents with an **existing local MCP setup**. New

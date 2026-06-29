@@ -1,3 +1,11 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/signer/**
+last-verified: "2026-06-28"
+---
+
 # Haven — Edge Signer
 
 The edge signer is the half of the hosted-MCP architecture that holds the

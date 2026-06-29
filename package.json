@@ -19,7 +19,11 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "quality": "npm run typecheck && npm run test:unit && npm run build",
     "test:e2e": "npm run test:e2e -w packages/frontend",
-    "release:bump": "node scripts/release-bump.mjs"
+    "release:bump": "node scripts/release-bump.mjs",
+    "docs:check": "node scripts/docs/validate-frontmatter.mjs",
+    "docs:test": "node --test scripts/docs/*.test.mjs",
+    "lint:copy": "node scripts/frontend-copy-lint.mjs",
+    "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs"
   },
   "overrides": {
     "axios": "^1.16.1",

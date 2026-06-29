@@ -1,3 +1,24 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/frontend/src/app/globals.css
+  - packages/frontend/tailwind.config.js
+  - packages/frontend/src/components/ui/**
+  - packages/frontend/src/app/layout.tsx
+  - packages/frontend/src/app/page.tsx
+  - packages/frontend/src/app/how-it-works/**
+  - packages/frontend/src/app/protocols/**
+  - packages/frontend/src/app/(authenticated)/design-system/**
+  - packages/frontend/src/components/marketing/**
+  - packages/frontend/src/components/sidebar/**
+  - packages/frontend/src/components/TopBar.tsx
+  - packages/frontend/src/components/haven/TransactionActivityRow.tsx
+  - packages/frontend/src/components/haven/TransactionMovement.tsx
+  - packages/frontend/src/components/transactions/**
+last-verified: "2026-06-28"
+---
+
 # Haven Design System
 
 This is the source of truth for Haven's current light visual language. Companion to the product UX guide (`docs/product/README.md`, which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.

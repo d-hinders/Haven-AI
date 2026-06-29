@@ -1,3 +1,15 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/x402-resources.ts
+  - packages/backend/src/lib/machine-payments.ts
+  - packages/backend/src/lib/payment-coverage.ts
+last-verified: "2026-06-28"
+---
+
 # x402 / Machine-Payment Consolidation (PT-1)
 
 Status: **complete** (PRs 1–5 merged/open). Owner: captain.

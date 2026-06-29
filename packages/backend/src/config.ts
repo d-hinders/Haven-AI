@@ -44,12 +44,22 @@ export const config = {
 
   // Chain-specific RPC URLs
   rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
+  rpcUrlBaseSepolia: optionalEnv('RPC_URL_BASE_SEPOLIA', 'https://sepolia.base.org'),
 
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',
   basescanApiKey: process.env.BASESCAN_API_KEY ?? '',
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
+
+  // Chains this environment actually serves account deploys on (#679). Comma-
+  // separated chain ids; **unset = all supported** (backward-compatible). Dev
+  // sets `84532` (Base Sepolia); prod sets `8453,84532`. A chain not listed is
+  // rejected up front with a clear message instead of failing on an empty relayer.
+  deployChainIds: (process.env.HAVEN_DEPLOY_CHAIN_IDS ?? '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0),
 
   // Fortnox bookkeeping integration (P2 #465). Disabled unless all three are
   // set. Secrets — env only, never commit.
@@ -86,3 +96,17 @@ export const config = {
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,
   dbPoolConnectionTimeout: Number(process.env.DB_POOL_CONNECTION_TIMEOUT) || 5000,
 } as const
+
+/**
+ * The relayer key to use for a given chain (#640, epic #625).
+ *
+ * Lets a single backend serve multiple chains while keeping relayers **isolated
+ * per chain**: a `RELAYER_PRIVATE_KEY_<chainId>` (e.g. `RELAYER_PRIVATE_KEY_84532`)
+ * overrides the global `RELAYER_PRIVATE_KEY` for that chain. Prod uses this to run
+ * a dedicated, testnet-only Base Sepolia relayer that can never touch the mainnet
+ * relayer's funds (mirrors the dev/prod isolation, #613). Falls back to the global
+ * key, so existing single-chain deployments are unchanged.
+ */
+export function relayerPrivateKeyForChain(chainId: number): string {
+  return process.env[`RELAYER_PRIVATE_KEY_${chainId}`] || config.relayerPrivateKey
+}

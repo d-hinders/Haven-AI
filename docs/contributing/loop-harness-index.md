@@ -1,3 +1,16 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/loop-harness/**
+  - packages/frontend/src/lib/allowance-math.ts
+  - packages/frontend/src/lib/loop-harness/**
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/x402-resources.ts
+last-verified: "2026-06-28"
+---
+
 # Loop Harness Index
 
 Last updated: 2026-06-13

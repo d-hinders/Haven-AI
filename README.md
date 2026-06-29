@@ -1,3 +1,24 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .nvmrc
+  - .env.example
+  - docker-compose.yml
+  - package.json
+  - packages/backend/package.json
+  - packages/frontend/package.json
+  - packages/sdk/package.json
+  - packages/mcp/package.json
+  - packages/mcp-server/package.json
+  - packages/signer/package.json
+  - packages/connect/package.json
+  - packages/demo-merchant-mcp/package.json
+  - .github/workflows/publish.yml
+  - scripts/release-bump.mjs
+last-verified: "2026-06-28"
+---
+
 # Haven
 
 Haven is an agentic stablecoin payment wallet. Users create or link a Haven account, add funds to a Haven wallet, and give AI agents constrained spending ability through agent rules and budgets.

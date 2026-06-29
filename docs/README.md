@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven Documentation
 
 Start here. This folder is the engineering and product reference for Haven. Each
@@ -45,6 +52,8 @@ describe how the system is actually built and how we work on it.
 - [Recurring review patterns](contributing/ai-review-patterns.md)
 - [PR workflow checklist](contributing/pr-workflow-checklist.md)
 - [Code-quality loop](contributing/code-quality-loop.md)
+- [Documentation-quality system](contributing/docs-quality-system.md)
+- [Branch & release flow (dev → prod, issue lifecycle)](contributing/branch-and-release-flow.md)
 
 **Operations**
 - [Deploy the hosted MCP server](operations/hosted-mcp.md)

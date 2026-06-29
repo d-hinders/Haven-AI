@@ -1,3 +1,15 @@
+---
+owner: "@d-hinders"
+status: research
+covers:
+  - packages/sdk/src/x402.ts
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/lib/sweep.ts
+  - packages/backend/src/lib/machine-payment-evidence.ts
+last-verified: "2026-06-28"
+---
+
 # Research — Smart-account-native x402 settlement (removing the funding leg)
 
 > Status: **investigation / decision aid** for [#431](https://github.com/d-hinders/Haven-AI/issues/431).

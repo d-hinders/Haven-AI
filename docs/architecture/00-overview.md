@@ -1,3 +1,19 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/connect/src/runtime-manifest.ts
+  - packages/connect/src/runtime.ts
+  - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/index.ts
+  - packages/sdk/src/index.ts
+  - packages/mcp/src/tools.ts
+  - packages/mcp-server/src/tools.ts
+  - packages/signer/src/tools.ts
+  - packages/demo-merchant-mcp/src/server.ts
+last-verified: "2026-06-28"
+---
+
 # Haven — Architecture Overview
 
 > Overview only — see the linked docs for detail. Keep this file short.

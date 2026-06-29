@@ -1,3 +1,12 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/loop-harness/**
+  - packages/frontend/src/lib/loop-harness/**
+last-verified: "2026-06-28"
+---
+
 # Loop Engineering (oracle-grounded automated loops)
 
 Last updated: 2026-06-13

@@ -94,6 +94,7 @@ const CHAIN_EXPLORER_TX: Record<number, string> = {
 // BASE_TOKENS). Add a chain here to make its USDC sweepable.
 const CHAIN_USDC: Record<number, string> = {
   8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  84532: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
 }
 
 function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
@@ -720,10 +721,14 @@ export class HavenClient {
     // ── 2. Sweep native ETH ─────────────────────────────────────────
     const ethBalance = await provider.getBalance(delegateAddress)
     if (ethBalance > 0n) {
-      // Reserve gas for the native transfer itself.
-      const gasPrice = (await provider.getFeeData()).gasPrice ?? 1_000_000n
+      // Reserve gas for the native transfer. An EIP-1559 (type-2) tx is billed up
+      // to maxFeePerGas, not gasPrice, so reserve against that — with a buffer for
+      // base-fee drift between estimation and inclusion — or the send reverts with
+      // "insufficient funds for intrinsic transaction cost".
+      const fee = await provider.getFeeData()
+      const effectiveGasPrice = fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n
       const gasLimit = 21_000n
-      const gasCost = gasPrice * gasLimit
+      const gasCost = effectiveGasPrice * gasLimit * 2n
       const ethToSend = ethBalance > gasCost ? ethBalance - gasCost : 0n
       if (ethToSend > 0n) {
         const tx = await wallet.sendTransaction({ to: safeAddress, value: ethToSend })

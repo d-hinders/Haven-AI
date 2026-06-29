@@ -1,8 +1,21 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/workflows/**
+  - .github/pull_request_template.md
+  - package.json
+  - .claude/agents/haven-reviewer.md
+last-verified: "2026-06-29"
+---
+
 # PR Workflow Checklist
 
 Use this checklist for feature branches so PRs stay mergeable, reviewable, and deployable.
 
 ## Branch Model
+
+> Canonical reference: [`branch-and-release-flow.md`](branch-and-release-flow.md) — the full dev → prod lifecycle, issue closing, and prod-promotion tracking. The summary below is the gist.
 
 Haven uses a `dev` integration branch in front of `main`:
 
@@ -113,7 +126,7 @@ Use the smallest reliable set that matches the change.
 Notes:
 
 - `npm run quality` means typecheck, unit tests, and builds across workspaces.
-- Docs-only CI treats Markdown, `.claude/agents/*.md`, and `.github/pull_request_template.md` as non-code. Editing `.github/workflows/*.yml` triggers full workflow checks.
+- Docs-only CI treats Markdown, `.claude/agents/*.md`, and `.github/pull_request_template.md` as non-code, with one exception: editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend lint is not a required gate yet because `next lint` currently prompts for ESLint setup. Add lint only after a dedicated non-interactive lint migration.
 - Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.
 

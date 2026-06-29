@@ -1,3 +1,45 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/config.ts
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/x402-resources.ts
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/routes/catalog.ts
+  - packages/backend/src/routes/reporting.ts
+  - packages/backend/src/routes/accounting.ts
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/lib/accounting-entry.ts
+  - packages/backend/src/lib/catalog-discovery.ts
+  - packages/backend/src/lib/merchant-catalog.ts
+  - packages/backend/src/lib/machine-payments.ts
+  - packages/backend/src/lib/payment-coverage.ts
+  - packages/backend/src/lib/relayer.ts
+  - packages/backend/src/lib/reporting/**
+  - packages/backend/src/lib/safe-deployer.ts
+  - packages/backend/src/middleware/agentAuth.ts
+  - packages/backend/src/middleware/reportingFeed.ts
+  - packages/backend/src/db/migrations/**
+  - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/routes/passkeys.ts
+  - packages/backend/src/routes/safe-deploy.ts
+  - packages/backend/src/routes/user-safes.ts
+  - packages/frontend/src/app/(authenticated)/accounting/**
+  - packages/frontend/src/app/(authenticated)/reporting/**
+  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ApprovalQueue.tsx
+  - packages/frontend/src/components/UsingYourAgentInfo.tsx
+  - packages/sdk/src/**
+  - packages/connect/src/**
+  - packages/mcp/src/**
+  - packages/mcp-server/src/**
+  - packages/signer/src/**
+  - packages/demo-merchant-mcp/src/**
+last-verified: "2026-06-29"
+---
+
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
 ## Purpose
@@ -41,13 +83,19 @@ Haven may provide:
 - Indexing, transaction status, receipts, and proof management.
 - Developer and agent APIs that require independently valid user or agent signatures.
 
-The source of payment authority must always be:
+Payment authority must always come from external signatures and the applicable
+on-chain controls:
 
 ```text
-User-controlled Safe
-  + user-approved Safe transaction
+Safe-originated funding
+  -> user-controlled Safe
+  + user-approved transaction or agent-signed module call
   + on-chain Safe module or guard constraints
-  + user-held or agent-held private key
+
+Standard x402 delegate-to-merchant payment
+  -> agent-held delegate key
+  + exact authenticated merchant/amount/asset/network/resource context
+  + delegate's available token balance
 ```
 
 The source of payment authority must never be:
@@ -63,16 +111,16 @@ Haven backend
 
 Preserve these facts as non-negotiable implementation invariants:
 
-- Funds are held in the user's Safe.
+- User treasury funds are held in the user's Safe. An agent-held delegate EOA may also have a pre-existing, newly funded, or residual balance used for a standard x402 merchant payment; Haven controls neither account.
 - Haven never holds user private keys, agent private keys, or seed phrases.
 - Haven never operates an unrestricted server-side signer.
 - Haven cannot unilaterally move funds.
 - Haven cannot bypass Safe owners, Safe modules, Safe guards, or on-chain constraints.
 - Agent spend authority is created or changed only through Safe transactions approved by the user.
-- Agent payments flow through Safe's Allowance Module or an equivalent on-chain control.
+- Safe-originated agent funding flows through Safe's Allowance Module, a user-approved Safe transaction, or an equivalent on-chain control. A standard x402 merchant leg is a separate agent-signed transfer from the delegate's available balance, bound to the exact authenticated payment context; it is not itself a Safe module call.
 - Allowance limits are enforced on-chain, not only by Haven.
-- Agent-initiated transactions are signed by an agent private key held by the agent or user, not by Haven.
-- Haven may relay execution, but the source of authority is the Safe/module state and user or agent signature.
+- Agent-initiated transactions, including the standard x402 merchant leg, are signed by an agent private key held by the agent or user, not by Haven.
+- Haven may relay execution, but authority comes from the user or agent signature and the controls applicable to that leg, never from Haven authentication or database policy alone.
 - Users can access their Safe through other Safe-compatible UIs.
 - Users can revoke or modify agent authority independently of Haven.
 - Haven cannot block users from transacting with their Safe outside Haven.
@@ -96,7 +144,7 @@ Never implement:
 Preferred pattern:
 
 - User keys remain in the user's wallet, passkey stack, hardware device, or security environment.
-- Haven receives only signatures or signed transaction payloads.
+- Haven stores the public passkey credential ID, P-256 public-key coordinates, and optional raw attestation for future verification. Current enrollment does not cryptographically verify that attestation. Authentication flows may verify assertions and signatures, and Haven may receive signed transaction payloads, but it never receives passkey private material.
 - Recovery uses Safe-native recovery, additional owners, guardians, or other user-controlled mechanisms.
 
 ### 2. Server-Side Agent Key Custody
@@ -143,7 +191,7 @@ Never implement:
 Preferred pattern:
 
 - Haven may mirror policies off-chain for UX and pre-validation.
-- The executable transfer must still be constrained by Safe modules, Safe guards, or other on-chain controls.
+- Safe-originated funding must still be constrained by Safe modules, Safe guards, user-approved Safe transactions, or equivalent on-chain controls. A delegate-to-merchant x402 transfer must be externally signed and bound to the exact authenticated payment context rather than authorised by Haven policy alone.
 - If a policy cannot be enforced on-chain, treat it as advisory and require manual user approval for execution.
 
 ### 5. Discretionary Transfer Authority
@@ -212,12 +260,28 @@ Never implement in production without review:
 
 Preferred pattern:
 
-- Keep MPP/x402 demo endpoints clearly marked as internal technical demos.
-- Do not support real merchant settlement.
-- Do not support third-party production merchant acceptance.
+- Support buyer-side outbound x402 payments and discovery of live merchants without becoming the merchant's facilitator, acquirer, processor, or settlement provider.
+- Keep Haven-operated merchant endpoints clearly marked as internal technical demos.
+- Do not provide third-party merchants with commercial payment acceptance, validation, balances, or settlement services.
 - Do not let funds flow through Haven.
 
-### 9. Fiat And Card Rails
+### 9. Reporting, Accounting, Or Tax Assertions
+
+Never implement without review:
+
+- Automatic posting of asserted accounts, VAT treatment, tax treatment, or journal entries.
+- Product claims that Haven has completed bookkeeping, reconciliation, tax filing, or accounting judgment for the user.
+- A live accounting connector that turns Haven suggestions into asserted records without user or accountant confirmation.
+- Personalised tax or accounting advice.
+
+Preferred pattern:
+
+- Export or sync factual source data as draft, non-asserting transactions.
+- Label categories and account mappings as suggestions.
+- Require the user or accountant to review, code, and confirm entries in the accounting system.
+- Obtain separate product and regulatory review before enabling a live connector or any asserted accounting judgment.
+
+### 10. Fiat And Card Rails
 
 Never implement without review:
 
@@ -236,7 +300,7 @@ Preferred pattern:
 - Haven never becomes the payment account provider, issuer, acquirer, or PSP.
 - Haven never handles raw card details.
 
-### 10. Haven Lock-In Over Funds
+### 11. Haven Lock-In Over Funds
 
 Never implement:
 
@@ -274,9 +338,9 @@ Authorisation examples:
 
 Implementation rule:
 
-> A request is not executable merely because it is authenticated. It must be independently authorised by a user-held or agent-held key and permitted by on-chain Safe constraints.
+> A request is not executable merely because it is authenticated. It must be independently authorised by a user-held or agent-held key. Safe-originated funding must also satisfy on-chain Safe constraints; a standard x402 merchant leg must match the authenticated exact payment context.
 
-### Use On-Chain Enforcement As The Final Gate
+### Use On-Chain Enforcement Wherever Safe Authority Is Exercised
 
 Haven can pre-check:
 
@@ -288,13 +352,17 @@ Haven can pre-check:
 - Protocol type.
 - Transaction metadata.
 
-The final gate should be:
+The final gate for Safe-originated funding should be:
 
 - Safe owners.
 - Safe module.
 - Safe guard.
 - Allowance Module.
 - On-chain spender limits.
+
+For a standard x402 delegate-to-merchant leg, the final gates are the agent-held
+delegate signature, token-contract authorization rules, and exact authenticated
+merchant, amount, asset, network, resource, and expiry context.
 
 Implementation rule:
 
@@ -357,6 +425,12 @@ Haven relay must not:
 - Decide whether a user should pay.
 - Batch transactions in a way that changes user or agent economic intent without explicit prior approval.
 
+Server key roles must remain narrow and distinct:
+
+- `RELAYER_PRIVATE_KEY` and per-chain `RELAYER_PRIVATE_KEY_<chainId>` keys fund gas and submit delegate-signed Allowance Module calls. A relayer key does not supply the delegate signature and cannot authorise a payment by itself.
+- `X402_BINDING_PRIVATE_KEY` signs the exact expected x402 authorization context, including the corresponding sweep context. It authenticates Haven-provided context; it does not sign the payment or spend funds.
+- Neither key may be reused as an agent, user, or unrestricted payment signer.
+
 ### Keep Transaction Construction Deterministic
 
 Transaction construction should be based on:
@@ -383,7 +457,7 @@ The codebase should make it easy to prove:
 - Haven has no signer capable of spending user funds.
 - Agent keys are not stored by Haven.
 - All executable transfers require external signatures.
-- On-chain Safe/module limits are the real constraints.
+- On-chain Safe/module limits constrain Safe-originated funding; external signatures and exact authenticated context constrain the standard x402 merchant leg.
 - Users can revoke permissions outside Haven.
 
 Add comments, docs, tests, and PR notes around these points when touching payment, agent authority, relaying, Safe setup, SDK, or demo payment flows.
@@ -442,7 +516,7 @@ Before merging any payment-related, agent-authority, Safe, SDK, x402/MPP, or rel
 - [ ] Haven does not operate a server-side signer that can spend user funds.
 - [ ] API keys cannot authorise payments by themselves.
 - [ ] Every automated payment requires an agent-held or user-held key signature.
-- [ ] Every automated payment is constrained by Safe Allowance Module or equivalent on-chain control.
+- [ ] Every Safe-originated automated funding transfer is constrained by Safe Allowance Module or equivalent on-chain control; any standard x402 merchant leg carries the agent-held delegate signature and matches exact authenticated payment context.
 - [ ] Haven database policy is not the only spend control.
 - [ ] User-approved Safe transactions establish or modify agent authority.
 - [ ] Users can revoke agent authority on-chain.
@@ -460,7 +534,7 @@ Use wording like:
 
 - Haven helps you configure agent spending limits on your Safe.
 - Agents can request payments within user-approved on-chain limits.
-- Payments are signed by your agent key and constrained by your Safe.
+- Safe funding is signed by your agent key and constrained by your Safe; a standard x402 merchant payment is separately signed by the same agent-held key from its available balance and bound to the exact payment context.
 - Haven relays policy-limited Safe transactions.
 - Haven cannot move funds outside the limits you approve.
 - You can revoke agent access through your Safe.
@@ -475,12 +549,23 @@ Avoid wording like:
 - Haven is your payment processor.
 - Haven optimises your treasury.
 - Haven recommends the best yield.
+- Haven gave you the private key.
+- Haven signs and settles the payment.
+
+Known compliance gap: `UsingYourAgentInfo.tsx` still uses both of the final two
+phrases above. Do not copy that wording into new surfaces; update that component
+in a product-copy change before treating the covered UI as compliant with this
+rule.
 
 ## Preferred Architecture Summary
 
 ```text
 User funds
   -> held in user-controlled Safe
+
+Delegate balance
+  -> held in agent-controlled EOA, never by Haven
+  -> may be pre-existing, newly funded from the Safe, or residual
 
 User authority
   -> Safe owner wallet/passkey
@@ -490,6 +575,8 @@ Agent authority
   -> user-approved Safe Allowance Module permission
   -> agent-held or user-held private key
   -> on-chain limits
+  -> Safe-originated funding follows on-chain Safe constraints
+  -> standard x402 merchant leg is exact-context-bound and spends delegate balance
 
 Haven role
   -> UI

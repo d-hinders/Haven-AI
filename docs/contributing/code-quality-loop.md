@@ -1,3 +1,23 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/config.ts
+  - packages/backend/src/openapi/**
+  - packages/backend/src/lib/accounting-entry.ts
+  - packages/backend/src/lib/fortnox-connection.ts
+  - packages/backend/src/lib/fee/**
+  - packages/backend/src/lib/reporting/**
+  - packages/backend/src/routes/accounting.ts
+  - packages/backend/src/routes/contacts.ts
+  - packages/backend/src/routes/fortnox.ts
+  - packages/backend/src/routes/passkeys.ts
+  - packages/backend/src/routes/reporting.ts
+  - packages/backend/src/routes/x402-resources.ts
+  - packages/backend/src/db/migrations/033_reporting_feed_syncs.ts
+last-verified: "2026-06-28"
+---
+
 # Haven Code Quality Loop
 
 Last updated: 2026-06-24

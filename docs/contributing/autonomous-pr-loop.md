@@ -1,3 +1,16 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/CODEOWNERS
+  - .github/workflows/dev-gate.yml
+  - .github/ISSUE_TEMPLATE/loop-task.md
+  - .github/ISSUE_TEMPLATE/loop-epic.md
+  - .claude/commands/ship-next.md
+  - .claude/commands/new-task.md
+last-verified: "2026-06-29"
+---
+
 # Autonomous PR loop
 
 **In one line:** hand the loop a list of PRs — as **GitHub issues** (a labeled
@@ -17,9 +30,12 @@ and only comes back to you for a real decision, a money-path approval, or stuck
 CI.
 
 Pieces:
-- **`/ship-next`** (`.claude/commands/ship-next.md`) — does **one** PR end-to-end, then stops.
+- **`/new-task`** (`.claude/commands/new-task.md`) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default.
+- **`/ship-next`** (`.claude/commands/ship-next.md`) — **execute**: does **one** PR end-to-end, then stops. `/ship-next "<task>"` is `/new-task` + ship in one go — the low-friction front door: throw a sentence, the system does the paperwork *and* ships it.
 - **`/loop /ship-next`** — re-invokes `/ship-next` for each following item until the backlog is empty (self-paced).
 - **haven-reviewer** — the per-PR quality gate.
+- **haven-doc-reviewer** — advisory per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Run it when the diff touches code that some doc's `covers:` front-matter maps to; updating those docs is part of definition-of-done. Advisory today — it does not block auto-merge.
+- **Surface playbooks** — `/ship-next` classifies each issue's surface from its `area:*` / `money-path` labels (Phase 1.5) and loads the matching playbook from `docs/contributing/ship-playbooks/` (UX + design system for frontend, CASP for money-path, etc.), so the right standards apply without a long prompt. See [`ship-playbooks/README.md`](ship-playbooks/README.md).
 - **`.github/CODEOWNERS`** — the money-path carve-out (the only PRs that still need a human merge).
 
 > **Base branch: `dev`, not `main`.** The loop branches off `dev` and opens every
@@ -28,10 +44,25 @@ Pieces:
 > never target `main` directly — it would fail the gate. Feature work flows
 > `claude/* → dev`; promoting `dev → main` (which deploys to prod) is a separate,
 > human step.
+>
+> **`dev` is the repo's default branch**, so `Closes #<n>` closes the issue on the
+> **dev-merge** — closed = implemented and on dev. What's actually in **prod** is
+> tracked separately (issue state is not overloaded with promotion state): each
+> `dev → main` promotion cuts a **prod GitHub Release** (`.github/workflows/release.yml`)
+> with auto-generated notes, and a weekly **pending-promotion digest**
+> (`.github/workflows/promotion-digest.yml`) keeps a "📦 Pending promotion" issue
+> listing what's on `dev` but not yet in prod. The `main..dev` compare is the
+> same view on demand. Full details: [`branch-and-release-flow.md`](branch-and-release-flow.md).
 
 ## Quickstart
 
 ```bash
+# Capture a task as a well-formed backlog issue (does NOT ship it):
+/new-task "add a copy button to the agent card"
+
+# Throw a task straight at the loop — drafts the issue AND ships it:
+/ship-next "add a copy button to the agent card"
+
 # Standalone small tasks — open issues labeled `code-quality` are the queue:
 /loop /ship-next                 # default source = the `code-quality` label
 /loop /ship-next label=<label>   # or any other loop label you've set up
@@ -47,12 +78,22 @@ Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
 pings you only for a money-path approval, a real decision, or stuck CI.
 
 
-## Two ways to feed work in
+## Feeding work in
 
-Both are **GitHub issues** — nothing is tracked in the repo. Issue state *is* the
-backlog state: an open issue with no PR is ready, an open issue with an open
-Haven PR is in flight, and a closed issue is done (its PR closed it via
-`Closes #`).
+The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
+state *is* the backlog state: an open issue with no PR is ready, an open issue
+with an open Haven PR is in flight, and a closed issue is done (its PR closed it
+via `Closes #`).
+
+You don't have to hand-write those issues. **Capture is its own step:**
+[`/new-task "<description>"`](../../.claude/commands/new-task.md) turns a one-line
+task into a well-formed issue (Scope + Acceptance + Surface + Money-path), asking
+a clarifying question or two when needed. It's **backlog-only by default** — it
+applies `area:*` labels but *not* `code-quality`, so capturing a task doesn't
+queue it. Promote it later by adding `code-quality`, or skip straight to shipping
+with `/ship-next "<description>"` (drafts the issue *and* runs the pipeline). This
+is the low-friction front door for partners: throw a sentence, the system does
+the paperwork. Then the loop consumes those issues one of these ways:
 
 1. **Standalone labeled issues** — for small, self-contained tasks. Open an issue
    with a concrete **scope + acceptance criteria** and add the **`code-quality`**
@@ -80,7 +121,11 @@ PR go through before handing it the whole queue.
 **Reviewer-gated auto-merge, with an in-session money-path checkpoint:**
 - A **non-money-path** PR (docs, tests, mechanical refactor, other code)
   auto-merges (squash) when **CI is green** *and* **haven-reviewer returned no
-  blocking/should-fix findings**.
+  blocking/should-fix findings**. For a **frontend (`area:frontend`)** PR there is
+  one addition (see [`ship-playbooks/frontend.md`](ship-playbooks/frontend.md)):
+  if the design-review / haven-reviewer UI pass flags a UX, copy, or
+  design-system issue (even a nit-level one), the loop **pauses for the user**
+  even if CI is green — UX is a human call.
 - A **money-path** PR (x402 / payments / machine-payments / payment-coverage /
   allowance-module / agentAuth / release tooling) does **not** auto-merge
   silently — the loop **pauses and asks whoever is running it to approve**
@@ -120,10 +165,15 @@ If you're asked to review one:
 
 Without this, `/ship-next` can open PRs but cannot auto-merge them.
 
-1. **Settings → General → Pull Requests:**
+1. **Settings → General → Default branch: set to `dev`.** This is what makes
+   `Closes #<n>` close issues on the **dev-merge** (closed = implemented). `main`
+   stays the protected prod branch (GitFlow-style: prod is a non-default branch).
+   Prod promotion is tracked by the release + pending-promotion-digest workflows,
+   not by issue state.
+2. **Settings → General → Pull Requests:**
    - ☑ **Allow auto-merge** (required, or the auto-merge step is a no-op).
    - ☑ **Automatically delete head branches** (housekeeping).
-2. **Settings → Rules → Rulesets** (the repo uses rulesets, not classic branch
+3. **Settings → Rules → Rulesets** (the repo uses rulesets, not classic branch
    protection). Three active rulesets carry this, all targeting **both `main` and
    `dev`** unless noted:
    - **"Move fast, just don't break prod by accident"** — ☑ **Require a pull
@@ -149,11 +199,11 @@ Without this, `/ship-next` can open PRs but cannot auto-merge them.
      `.github/CODEOWNERS` it bites only **DB migrations** (the one hard-gated
      class); every other path flows on green CI. Widen `.github/CODEOWNERS` if you
      want more paths hard-gated again.
-3. **Token/app permissions:** the Claude GitHub integration for this repo needs
+4. **Token/app permissions:** the Claude GitHub integration for this repo needs
    **contents: write, pull_requests: write, issues: write** (issues:write lets
    the loop read epics/labelled issues and close them via `Closes #`). If
    auto-merge calls fail, it's almost always this or step 1.
-4. **The loop label:** the standalone queue reads open issues labeled
+5. **The loop label:** the standalone queue reads open issues labeled
    **`code-quality`**. Create it once (Issues → Labels → New label, e.g.
    `code-quality`, description "Ready for the autonomous PR loop"). The
    "🔁 Loop task" issue template (`.github/ISSUE_TEMPLATE/loop-task.md`) applies
@@ -165,7 +215,7 @@ classes for human merge, or narrow it to let more auto-merge.
 
 ## What stays manual (by design)
 
-- Defining the work as issues — a well-scoped labeled task or epic sub-issue — once.
+- Deciding what to build — defining a well-scoped task or epic sub-issue — once. (Writing the issue text itself is automatable via `/new-task`; deciding *which* work to queue is the human call.)
 - Answering when haven-reviewer flags something **blocking/ambiguous**, or a
   genuine product/architecture/security decision comes up.
 - **Approving money-path PRs in-session** when the loop pauses for them, and

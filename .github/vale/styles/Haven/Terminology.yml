@@ -1,0 +1,21 @@
+extends: substitution
+message: "Product copy: prefer '%s' over '%s' (see docs/product/copy-guidelines.md)."
+level: suggestion
+ignorecase: true
+# Only unambiguous, multi-word technical phrases — never generic words like
+# "safe", "owner", or "deploy", which appear legitimately in plain English.
+swap:
+  spending policy: agent rule
+  spending policies: agent rules
+  policy engine: agent rules
+  allowance module: rules/budget controls
+  session key: agent credential
+  session keys: agent credentials
+  passkey signer: secure passkey
+  passkey-backed signer: secure passkey
+  enroll signer: save your sign-in method
+  webauthn credential: secure passkey
+  smart contract wallet: Haven account
+  smart account: Haven account
+  smart wallet: Haven wallet
+  transaction hash: setup transaction

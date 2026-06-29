@@ -1,3 +1,15 @@
+---
+owner: "@d-hinders"
+status: research
+covers:
+  - packages/backend/src/lib/accounting-entry.ts
+  - packages/backend/src/lib/machine-payment-evidence.ts
+  - packages/backend/src/lib/reporting/reporting-transaction.ts
+  - packages/backend/src/routes/accounting.ts
+  - packages/backend/src/routes/reporting.ts
+last-verified: "2026-06-28"
+---
+
 # Architecture — bookkeeping-ready export (Fortnox / SIE / beyond)
 
 > **Superseded in direction by [epic #491](https://github.com/d-hinders/Haven-AI/issues/491)

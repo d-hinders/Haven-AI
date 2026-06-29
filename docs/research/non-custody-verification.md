@@ -1,3 +1,13 @@
+---
+owner: "@d-hinders"
+status: research
+covers:
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/lib/relayer.ts
+  - packages/frontend/src/lib/revoke-agent.ts
+last-verified: "2026-06-28"
+---
+
 # Design — make non-custody provable (CI invariants + "verify your control")
 
 > Status: **design proposal.** Forward-looking; no implementation yet. Turns the

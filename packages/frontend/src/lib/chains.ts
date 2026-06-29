@@ -5,10 +5,10 @@
  * tokens, explorer URLs, and Safe TX service URLs.
  */
 import type { Address } from 'viem'
-import { gnosis, base } from 'viem/chains'
+import { gnosis, base, baseSepolia } from 'viem/chains'
 
 // Re-export viem chain objects for convenience
-export { gnosis, base }
+export { gnosis, base, baseSepolia }
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -22,7 +22,7 @@ export interface FrontendChainConfig {
   chainId: number
   name: string
   shortName: string
-  viemChain: typeof gnosis | typeof base
+  viemChain: typeof gnosis | typeof base | typeof baseSepolia
   explorerUrl: string
   safeTxServiceUrl: string
   contracts: {
@@ -93,6 +93,35 @@ const BASE_CONFIG: FrontendChainConfig = {
   },
 }
 
+// ── Base Sepolia (84532) — testnet, for the dev environment ───────
+//
+// Mirrors the backend BASE_SEPOLIA (#598); every address verified deployed on
+// Base Sepolia via eth_getCode. The AllowanceModule is the **v0.1.1** deployment
+// (0xAA46…) — v0.1.0's 0xCFbF… is not on Base Sepolia (identical ABI). USDC is
+// Circle's testnet token.
+const BASE_SEPOLIA_CONFIG: FrontendChainConfig = {
+  chainId: 84532,
+  name: 'Base Sepolia',
+  shortName: 'base-sepolia',
+  viemChain: baseSepolia,
+  explorerUrl: 'https://sepolia.basescan.org',
+  safeTxServiceUrl: 'https://api.safe.global/tx-service/basesep',
+  contracts: {
+    safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
+    safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
+    fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
+    allowanceModule: '0xAA46724893dedD72658219405185Fb0Fc91e091C',
+    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
+  },
+  passkey: {
+    verifier: '0x0000000000000000000000000000000000000100',
+  },
+  tokens: {
+    'USDC': { symbol: 'USDC', decimals: 6, address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' },
+    'ETH': { symbol: 'ETH', decimals: 18, address: null },
+  },
+}
+
 // ── Registry ──────────────────────────────────────────────────────
 
 /**
@@ -104,22 +133,39 @@ const BASE_CONFIG: FrontendChainConfig = {
 const CHAINS: Record<number, FrontendChainConfig> = {
   100: GNOSIS_CONFIG,
   8453: BASE_CONFIG,
+  84532: BASE_SEPOLIA_CONFIG,
 }
+
+/**
+ * Every chain in the registry — including ones no longer *offered* in pickers
+ * (e.g. Gnosis). Surfaces that display historical data across chains (catalog,
+ * contacts, transactions) resolve against this, not the offered subset.
+ */
+export const ALL_CHAINS: FrontendChainConfig[] = Object.values(CHAINS)
 
 /**
  * Chains currently *offered to users* — network pickers, wallet
  * network-validation, and the wagmi connector list all derive from this.
  *
- * TEMPORARY: Base-only. Multichain is the long-term goal, but offering
- * multiple chains today confuses the single-account-flow UX. To re-enable
- * Gnosis (or add another chain) put its ID back in this list — the per-chain
- * config above is already in place, so that's the only change needed here.
+ * Multichain: both **Base mainnet (8453)** and **Base Sepolia (84532)** are
+ * selectable in every environment (network pickers, account creation, etc.).
+ * `NEXT_PUBLIC_HAVEN_CHAIN_ID` (build-time inlined, like `NEXT_PUBLIC_HAVEN_ENV`)
+ * sets the **default pre-selection** — the dev Vercel deploy sets `84532` so dev
+ * defaults to Base Sepolia; prod leaves it unset and defaults to Base mainnet.
+ * Both chains stay enabled regardless of the default.
+ *
+ * Note: each enabled chain needs a relayer funded on that chain for deploys /
+ * payments to succeed (Base Sepolia gas on the testnet relayer, Base mainnet gas
+ * on the mainnet relayer).
  */
-const ENABLED_CHAIN_IDS: number[] = [BASE_CONFIG.chainId]
+const CONFIGURED_CHAIN_ID = Number(process.env.NEXT_PUBLIC_HAVEN_CHAIN_ID ?? '')
+const ACTIVE_CHAIN: FrontendChainConfig = CHAINS[CONFIGURED_CHAIN_ID] ?? BASE_CONFIG
+
+const ENABLED_CHAIN_IDS: number[] = [BASE_CONFIG.chainId, BASE_SEPOLIA_CONFIG.chainId]
 
 export const SUPPORTED_CHAINS = ENABLED_CHAIN_IDS.map((id) => CHAINS[id])
 export const SUPPORTED_CHAIN_IDS = ENABLED_CHAIN_IDS
-export const DEFAULT_CHAIN_ID = BASE_CONFIG.chainId
+export const DEFAULT_CHAIN_ID = ACTIVE_CHAIN.chainId
 
 export function getChainConfig(chainId: number): FrontendChainConfig {
   const chain = CHAINS[chainId]

@@ -1,3 +1,14 @@
+---
+owner: "@d-hinders"
+status: research
+covers:
+  - packages/connect/src/args.ts
+  - packages/connect/src/redact.ts
+  - packages/connect/src/storage.ts
+  - packages/sdk/src/client.ts
+last-verified: "2026-06-28"
+---
+
 # Sketch — `haven` CLI (terminal-native parallel to the dashboard)
 
 > Status: **design sketch / proposal.** No package built yet. Purpose: agree the

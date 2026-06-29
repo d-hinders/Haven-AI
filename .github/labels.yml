@@ -1,0 +1,35 @@
+# Surface labels for /ship-next classification (epic #651).
+# Synced to the repo by .github/workflows/labels.yml on merge to dev/main.
+# `skip-delete: true` there means labels NOT listed here (epic, code-quality, …)
+# are left untouched — this file owns only the surface taxonomy below.
+#
+# These drive the skill's Phase 1.5 routing — see
+# docs/contributing/ship-playbooks/README.md.
+
+- name: "area:frontend"
+  color: "1d76db"
+  description: "Touches packages/frontend UI — loads the frontend playbook (UX + design system)"
+
+- name: "area:backend"
+  color: "0e8a16"
+  description: "Touches packages/backend routes/services/API"
+
+- name: "area:sdk"
+  color: "5319e7"
+  description: "SDK / connect / API contract / credential surfaces"
+
+- name: "area:mcp"
+  color: "fbca04"
+  description: "MCP server, signer, or hosted-MCP surfaces"
+
+- name: "area:docs"
+  color: "0052cc"
+  description: "Documentation-only change"
+
+- name: "money-path"
+  color: "b60205"
+  description: "Payments, agent authority, allowances, or migrations — human merge gate"
+
+- name: "promotion"
+  color: "1d76db"
+  description: "Tracks dev → prod promotion (used by the pending-promotion digest)"

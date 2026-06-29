@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: archived
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven Agentic Workflow Audit
 
 > **ARCHIVED — historical.** This is a point-in-time audit (2026-06-02) whose recommendations have been actioned. Frozen for context; current workflow guidance lives in `docs/contributing/ai-agent-workflow.md`.

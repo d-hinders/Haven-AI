@@ -1,3 +1,13 @@
+---
+owner: "@d-hinders"
+status: research
+covers:
+  - packages/backend/src/lib/accounting-entry.ts
+  - packages/backend/src/lib/fortnox-connection.ts
+  - packages/backend/src/lib/reporting/reporting-transaction.ts
+last-verified: "2026-06-28"
+---
+
 # Architecture — accounting data feed (Fortnox-first, hosted add-on)
 
 > Status: **design proposal.** Forward-looking; tracked by epic

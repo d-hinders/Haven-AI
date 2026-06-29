@@ -8,7 +8,8 @@ import { api } from '@/lib/api'
 import { displayName } from '@/lib/user'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount } from 'wagmi'
-import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig } from '@/lib/chains'
+import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { StepProgress } from '@/components/ui/StepProgress'
 import PasskeyEnrollFlow from './PasskeyEnrollFlow'
@@ -34,6 +35,19 @@ export default function OnboardingClient() {
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
   const [selectedChainId, setSelectedChainId] = useState(DEFAULT_CHAIN_ID)
+
+  // Only offer chains the backend actually serves deploys on (#679). If the
+  // current selection isn't served (e.g. the default is mainnet but this env
+  // only serves Base Sepolia), snap to the first served chain.
+  const { chains: deployableChains } = useDeployableChains()
+  useEffect(() => {
+    if (
+      deployableChains.length > 0 &&
+      !deployableChains.some((c) => c.chainId === selectedChainId)
+    ) {
+      setSelectedChainId(deployableChains[0].chainId)
+    }
+  }, [deployableChains, selectedChainId])
 
   const progressSteps = useMemo(() => {
     if (signerMode === 'eoa') {
@@ -229,7 +243,7 @@ export default function OnboardingClient() {
                   onChange={(e) => setSelectedChainId(Number(e.target.value))}
                   className="w-full bg-transparent text-sm text-[var(--v2-ink)] outline-none cursor-pointer"
                 >
-                  {SUPPORTED_CHAINS.map((chain) => (
+                  {deployableChains.map((chain) => (
                     <option key={chain.chainId} value={chain.chainId}>
                       {chain.name}
                     </option>
@@ -316,7 +330,7 @@ export default function OnboardingClient() {
                   onChange={(e) => setSelectedChainId(Number(e.target.value))}
                   className="w-full bg-transparent text-sm text-[var(--v2-ink)] outline-none cursor-pointer"
                 >
-                  {SUPPORTED_CHAINS.map((chain) => (
+                  {deployableChains.map((chain) => (
                     <option key={chain.chainId} value={chain.chainId}>
                       {chain.name}
                     </option>

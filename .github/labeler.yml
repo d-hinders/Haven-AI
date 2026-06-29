@@ -1,0 +1,48 @@
+# PR auto-labeling by changed path → drives /ship-next Phase 1.5 classification
+# and surfaces the money path on every PR. Applied by .github/workflows/labeler.yml
+# (actions/labeler@v5, additive). The labels themselves live in .github/labels.yml.
+# See docs/contributing/ship-playbooks/README.md.
+
+"area:frontend":
+  - changed-files:
+      - any-glob-to-any-file: "packages/frontend/**"
+
+"area:backend":
+  - changed-files:
+      - any-glob-to-any-file: "packages/backend/**"
+
+"area:sdk":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/sdk/**"
+          - "packages/connect/**"
+          - "packages/cli/**"
+
+"area:mcp":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/mcp/**"
+          - "packages/mcp-server/**"
+          - "packages/signer/**"
+
+"area:docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "**/*.md"
+
+# Mirrors the skill's Phase 6 money-path file list. Keep these in sync.
+"money-path":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/backend/src/routes/x402.ts"
+          - "packages/backend/src/routes/x402-resources.ts"
+          - "packages/backend/src/routes/payments.ts"
+          - "packages/backend/src/routes/machine-payments.ts"
+          - "packages/backend/src/lib/machine-payments.ts"
+          - "packages/backend/src/lib/payment-coverage.ts"
+          - "packages/backend/src/lib/allowance-module.ts"
+          - "packages/backend/src/middleware/agentAuth.ts"
+          - "packages/backend/src/db/migrations/**"
+          - "scripts/release-bump.mjs"
+          - ".github/workflows/publish.yml"

@@ -34,6 +34,26 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
    - `git fetch origin dev && git checkout -B claude/issue-<n>-<slug> origin/dev` (use the issue number so the branch traces back to its issue).
    - The loop targets `dev` because the `dev-gate` workflow (`.github/workflows/dev-gate.yml`) only allows `dev` or `hotfix/*` into `main`; a `claude/*` branch can never merge straight to `main`. Feature work flows `claude/* → dev`, and `dev → main` is promoted separately.
 
+## Phase 1.5 — Classify & load the playbook
+
+The skill **routes, it does not contain.** Before implementing, classify the issue's surface(s) and load the matching playbook(s) — small files that link the standards, checks, and agents for that surface. Never restate guideline content; load and apply it. See `docs/contributing/ship-playbooks/README.md`.
+
+- **Classify.** Determine the surface(s):
+  - **Primary:** the issue's labels — `area:frontend`, `area:backend`, `area:sdk`, `area:mcp`, `area:docs`, `money-path`.
+  - **Fallback / confirmation:** the files the change will touch — `packages/frontend/**` → frontend; `packages/backend/**` → backend; `packages/{sdk,connect}/**` → sdk; `packages/{mcp,mcp-server,signer}/**` → mcp; `*.md`/`docs/**` → docs; the Phase 6 money-path file list → money-path. Use this when labels are missing, and to catch a surface the labels missed.
+  - An issue can span several surfaces — load every matching playbook.
+- **Load** the matching playbook(s) from `docs/contributing/ship-playbooks/` and apply them through Phases 2–6:
+
+  | Surface | Playbook | Loads / enforces |
+  |---|---|---|
+  | `area:frontend` | `frontend.md` | UX + design-system required reading, reuse-first, Captain Self-Check Preflight, browser/headless verification, advisory design-review, UI merge policy |
+  | `area:backend` | `backend.md` | OpenAPI drift + package gate |
+  | `area:sdk` / `area:mcp` | `sdk.md` | generated-artifact regen/verify, OpenAPI drift, runtime-compatibility |
+  | `money-path` | `money.md` | CASP required reading, characterization-tests-first, human merge gate (Phase 6) |
+  | `area:docs` | `docs.md` → `docs-quality-system.md` | `docs:check` + coupling gate + haven-doc-reviewer |
+
+- **Discovery.** For a non-trivial issue, run `haven-explorer` (and `haven-workflow-coordinator` for multi-surface work) to map terrain before implementing — scale this to the issue's complexity; skip it for a one-file change.
+
 ## Phase 2 — Implement
 
 6. Implement only this item's scope. If the change alters existing behavior of a money path (`x402`, `machine-payments`, `payment-coverage`, allowance/coverage decisions, migrations), **write characterization tests first** (pin current behavior), then change.

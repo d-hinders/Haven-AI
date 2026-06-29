@@ -38,7 +38,7 @@ playbook. `money-path` always keeps the human merge gate.
 
 ## How a run uses these
 
-1. **Classify** (skill Phase 1.5 — wired in PR2, [#653](https://github.com/d-hinders/Haven-AI/issues/653)): read the issue's `area:*` / `money-path`
+1. **Classify** (skill Phase 1.5): read the issue's `area:*` / `money-path`
    labels; if absent, infer from the files the change will touch.
 2. **Load** only the matching playbook(s) — not all of them, so each run stays
    cheap.
@@ -47,7 +47,8 @@ playbook. `money-path` always keeps the human merge gate.
 
 ## Status
 
-The playbook files (`frontend.md`, `money.md`, `sdk.md`, `backend.md`,
-`docs.md`) are introduced as stubs in PR2 and filled by the later sub-issues of
-[#651](https://github.com/d-hinders/Haven-AI/issues/651). New checks land
-**advisory** first, then graduate to blocking once trusted.
+Phase 1.5 routing and all five playbook files are live. `backend.md` and
+`docs.md` are complete; `frontend.md`, `money.md`, and `sdk.md` are stubs filled
+by the later sub-issues of
+[#651](https://github.com/d-hinders/Haven-AI/issues/651) (#654, #655). New checks
+land **advisory** first, then graduate to blocking once trusted.

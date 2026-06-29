@@ -6,7 +6,7 @@ covers:
   - .claude/commands/ship-next.md
   - .github/pull_request_template.md
   - AGENTS.md
-last-verified: "2026-06-28"
+last-verified: "2026-06-29"
 ---
 
 # Haven AI Agent Workflow

@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .claude/commands/ship-next.md
   - .github/CODEOWNERS
-last-verified: "2026-06-28"
+last-verified: "2026-06-29"
 ---
 
 # Backlogs moved to GitHub Issues

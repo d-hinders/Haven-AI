@@ -16,6 +16,7 @@
       - any-glob-to-any-file:
           - "packages/sdk/**"
           - "packages/connect/**"
+          - "packages/cli/**"
 
 "area:mcp":
   - changed-files:

@@ -27,6 +27,14 @@ visibility. -->
 - [ ] #
 - [ ] #
 
+## Surface(s)
+
+<!-- The union of surfaces the sub-issues touch. Apply the matching label(s) to
+each sub-issue (not the epic) so /ship-next routes per PR. See
+docs/contributing/ship-playbooks/README.md. -->
+
+- [ ] `area:frontend`  [ ] `area:backend`  [ ] `area:sdk`  [ ] `area:mcp`  [ ] `area:docs`  [ ] `money-path`
+
 ## Notes
 
 <!-- Shared context, invariants to preserve, money-path callouts, etc. -->

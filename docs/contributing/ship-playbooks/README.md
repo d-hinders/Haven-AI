@@ -19,10 +19,19 @@ Epic: [#651](https://github.com/d-hinders/Haven-AI/issues/651).
 
 ## Surface taxonomy
 
-Classification is driven by **labels first** (applied to the issue), with the
-**files the change touches** as a fallback/confirmation. The labels live in
-[`.github/labels.yml`](../../../.github/labels.yml) and are synced to the repo by
-`.github/workflows/labels.yml`.
+Classification is driven by **labels first**, with the **files the change
+touches** as a fallback/confirmation. Labels are applied two ways:
+
+- **PRs are auto-labeled by changed path** — `.github/workflows/labeler.yml`
+  (`actions/labeler`, config in [`.github/labeler.yml`](../../../.github/labeler.yml))
+  applies `area:*` / `money-path` from the paths the PR touches. This is the
+  authoritative signal for what a change actually is, and surfaces the money path
+  on every PR. It's additive — a manually-applied label is never stripped.
+- **Issues can be labeled manually** (the template's Surface checklist) for the
+  pre-implementation hint, before any files exist.
+
+The labels themselves live in [`.github/labels.yml`](../../../.github/labels.yml)
+and are synced to the repo by `.github/workflows/labels.yml`.
 
 | Label | Surface | Playbook |
 |---|---|---|

@@ -99,6 +99,11 @@ A path is **money-path** if it matches any of: `routes/x402.ts`,
       acceptance gate passed and haven-reviewer returned **no
       blocking/should-fix**, call `mcp__github__enable_pr_auto_merge` (squash).
       GitHub merges it once required checks pass.
+      - **`area:frontend` (UI) — one addition** from [`ship-playbooks/frontend.md`](../../docs/contributing/ship-playbooks/frontend.md):
+        if the design-review / haven-reviewer UI pass flagged a **UX, copy, or
+        design-system** issue (even non-blocking), do **not** auto-merge —
+        **ask the user** with `AskUserQuestion` (UX is a human call). With no
+        such finding, auto-merge as normal.
     - **Money-path, NOT a migration:** do **not** auto-merge silently. **Ask the
       person running the loop to approve** with `AskUserQuestion` — include the
       PR link, the scope, and the haven-reviewer verdict so they can decide

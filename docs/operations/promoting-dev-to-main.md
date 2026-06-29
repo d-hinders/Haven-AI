@@ -1,3 +1,13 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/workflows/dev-gate.yml
+  - .github/workflows/publish.yml
+  - docs/operations/dev-environment.md
+last-verified: "2026-06-29"
+---
+
 # Promoting `dev → main` (production release)
 
 Merging `dev → main` deploys to **production** (Railway + Vercel) and, if the

@@ -22,6 +22,7 @@ concurrency:
 jobs:
   digest:
     name: Report dev-not-in-prod
+    if: github.repository == 'd-hinders/Haven-AI'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

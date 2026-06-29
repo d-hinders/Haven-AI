@@ -22,9 +22,21 @@ concurrency:
 jobs:
   release:
     name: Cut prod release
+    if: github.repository == 'd-hinders/Haven-AI'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Guard the workflow_dispatch path: once `dev` is the default branch, the
+      # "Run workflow" UI defaults to `dev`. A prod release must only ever tag a
+      # commit on `main` (prod). The push path is always `main`; this only blocks
+      # a manual dispatch run from the wrong branch.
+      - name: Only release from main (prod)
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::release.yml must run on main (prod), got $GITHUB_REF — re-run from main." >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0

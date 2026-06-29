@@ -42,6 +42,15 @@ Pieces:
 > never target `main` directly — it would fail the gate. Feature work flows
 > `claude/* → dev`; promoting `dev → main` (which deploys to prod) is a separate,
 > human step.
+>
+> **`dev` is the repo's default branch**, so `Closes #<n>` closes the issue on the
+> **dev-merge** — closed = implemented and on dev. What's actually in **prod** is
+> tracked separately (issue state is not overloaded with promotion state): each
+> `dev → main` promotion cuts a **prod GitHub Release** (`.github/workflows/release.yml`)
+> with auto-generated notes, and a weekly **pending-promotion digest**
+> (`.github/workflows/promotion-digest.yml`) keeps a "📦 Pending promotion" issue
+> listing what's on `dev` but not yet in prod. The `main...dev` compare is the
+> same view on demand.
 
 ## Quickstart
 
@@ -138,10 +147,15 @@ If you're asked to review one:
 
 Without this, `/ship-next` can open PRs but cannot auto-merge them.
 
-1. **Settings → General → Pull Requests:**
+1. **Settings → General → Default branch: set to `dev`.** This is what makes
+   `Closes #<n>` close issues on the **dev-merge** (closed = implemented). `main`
+   stays the protected prod branch (GitFlow-style: prod is a non-default branch).
+   Prod promotion is tracked by the release + pending-promotion-digest workflows,
+   not by issue state.
+2. **Settings → General → Pull Requests:**
    - ☑ **Allow auto-merge** (required, or the auto-merge step is a no-op).
    - ☑ **Automatically delete head branches** (housekeeping).
-2. **Settings → Rules → Rulesets** (the repo uses rulesets, not classic branch
+3. **Settings → Rules → Rulesets** (the repo uses rulesets, not classic branch
    protection). Three active rulesets carry this, all targeting **both `main` and
    `dev`** unless noted:
    - **"Move fast, just don't break prod by accident"** — ☑ **Require a pull
@@ -167,11 +181,11 @@ Without this, `/ship-next` can open PRs but cannot auto-merge them.
      `.github/CODEOWNERS` it bites only **DB migrations** (the one hard-gated
      class); every other path flows on green CI. Widen `.github/CODEOWNERS` if you
      want more paths hard-gated again.
-3. **Token/app permissions:** the Claude GitHub integration for this repo needs
+4. **Token/app permissions:** the Claude GitHub integration for this repo needs
    **contents: write, pull_requests: write, issues: write** (issues:write lets
    the loop read epics/labelled issues and close them via `Closes #`). If
    auto-merge calls fail, it's almost always this or step 1.
-4. **The loop label:** the standalone queue reads open issues labeled
+5. **The loop label:** the standalone queue reads open issues labeled
    **`code-quality`**. Create it once (Issues → Labels → New label, e.g.
    `code-quality`, description "Ready for the autonomous PR loop"). The
    "🔁 Loop task" issue template (`.github/ISSUE_TEMPLATE/loop-task.md`) applies

@@ -9,8 +9,8 @@ The argument is the freeform task (e.g. `/new-task "add a copy button to the age
 ## Steps
 
 1. **Ground it.** Take a quick look at the repo to anchor scope and likely files — Grep/Glob/Read, or `haven-explorer` for anything non-trivial. Scale to the task; skip for an obvious one-liner.
-2. **Classify the surface(s)** — `area:frontend|backend|sdk|mcp|docs` and `money-path` — from the described change and the files it will likely touch (the Phase 6 money-path file list defines money-path).
-3. **Ask clarifying questions when needed — do NOT guess.** If the scope is vague, the acceptance bar is unclear, the surface is ambiguous, or it touches the **money path / auth / schema**, use `AskUserQuestion` to get what you need before filing. A high-quality issue is the goal; a one-line prompt that's genuinely underspecified gets one or two sharp questions, not a guess.
+2. **Classify the surface(s)** — `area:frontend|backend|sdk|mcp|docs` and `money-path` — from the described change and the files it will likely touch (the money-path file list is defined in Phase 6 of [`ship-next.md`](ship-next.md)).
+3. **Ask clarifying questions when needed — do NOT guess.** If the scope is vague, the acceptance bar is unclear, the surface is ambiguous, or it touches the **money path / auth / schema**, use `AskUserQuestion` to get what you need before filing. A genuinely underspecified prompt gets one or two sharp questions; a **money-path / auth / schema** task always gets a clarifying question regardless of how clear the one-liner seems — that surface is never guessed at.
 4. **Draft the issue body** in the loop-task shape:
    - **Scope** — one paragraph the implementer can act on *without guessing*.
    - **Acceptance criteria** — the observable bar for "done" (concrete; the loop refuses vague issues).

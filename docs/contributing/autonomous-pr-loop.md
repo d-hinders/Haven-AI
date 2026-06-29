@@ -7,6 +7,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-task.md
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .claude/commands/ship-next.md
+  - .claude/commands/new-task.md
 last-verified: "2026-06-29"
 ---
 
@@ -29,8 +30,8 @@ and only comes back to you for a real decision, a money-path approval, or stuck
 CI.
 
 Pieces:
-- **`/new-task`** (`.claude/commands/new-task.md`) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default. The low-friction front door.
-- **`/ship-next`** (`.claude/commands/ship-next.md`) — **execute**: does **one** PR end-to-end, then stops. `/ship-next "<task>"` is `/new-task` + ship in one go.
+- **`/new-task`** (`.claude/commands/new-task.md`) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default.
+- **`/ship-next`** (`.claude/commands/ship-next.md`) — **execute**: does **one** PR end-to-end, then stops. `/ship-next "<task>"` is `/new-task` + ship in one go — the low-friction front door: throw a sentence, the system does the paperwork *and* ships it.
 - **`/loop /ship-next`** — re-invokes `/ship-next` for each following item until the backlog is empty (self-paced).
 - **haven-reviewer** — the per-PR quality gate.
 - **haven-doc-reviewer** — advisory per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Run it when the diff touches code that some doc's `covers:` front-matter maps to; updating those docs is part of definition-of-done. Advisory today — it does not block auto-merge.
@@ -214,7 +215,7 @@ classes for human merge, or narrow it to let more auto-merge.
 
 ## What stays manual (by design)
 
-- Defining the work as issues — a well-scoped labeled task or epic sub-issue — once.
+- Deciding what to build — defining a well-scoped task or epic sub-issue — once. (Writing the issue text itself is automatable via `/new-task`; deciding *which* work to queue is the human call.)
 - Answering when haven-reviewer flags something **blocking/ambiguous**, or a
   genuine product/architecture/security decision comes up.
 - **Approving money-path PRs in-session** when the loop pauses for them, and

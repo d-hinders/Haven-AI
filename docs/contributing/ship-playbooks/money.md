@@ -17,6 +17,8 @@ Read [`docs/regulatory/casp-risk-guardrails.md`](../../regulatory/casp-risk-guar
 
 For any change to **existing** money-path behavior (`routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, `routes/machine-payments.ts`, `lib/{machine-payments,payment-coverage,allowance-module}.ts`, `middleware/agentAuth.ts`, `db/migrations/`), pin the current behavior with a characterization test **before** changing it (skill Phase 2). The test encodes the invariant the change must preserve.
 
+For other files in `casp-risk-guardrails.md`'s `covers:` list (e.g. `lib/relayer.ts`, `lib/safe-deployer.ts`, the passkeys / safe-deploy / user-safes routes), the §1 required reading still applies — §2 scopes only the characterization-test requirement.
+
 ## 3. Non-negotiables (CASP)
 
 The change must not, and generated artifacts must not imply Haven can:
@@ -30,4 +32,6 @@ The change must not, and generated artifacts must not imply Haven can:
 
 ## 4. Merge gate (unchanged — human in the loop)
 
-Money-path PRs **never auto-merge.** Phase 6 routes them to an in-session approval (`AskUserQuestion`); a **migration** additionally needs an independent code-owner review in GitHub (`.github/CODEOWNERS`). This playbook does not relax that gate — it reaffirms it.
+Money-path PRs **never auto-merge** *through the loop.* Phase 6 routes them to an in-session approval (`AskUserQuestion`); a **migration** additionally needs an independent code-owner review in GitHub (`.github/CODEOWNERS`). This playbook does not relax that gate — it reaffirms it.
+
+Scope caveat: this is a **soft, in-session checkpoint the loop self-enforces** — it covers PRs opened *through* `/ship-next`, not hand-written money-path PRs (those merge on green CI alone; only migrations are hard-gated by `.github/CODEOWNERS`). Widen `.github/CODEOWNERS` if you want a hard gate on more paths. See the "Money-path safety model" in [`autonomous-pr-loop.md`](../autonomous-pr-loop.md).

@@ -69,6 +69,7 @@ The skill **routes, it does not contain.** Before implementing, classify the iss
 
 ## Phase 4 — Review (haven-reviewer)
 
+- **Preflight first.** Before invoking the reviewer, run the **Captain Self-Check Preflight** (`docs/contributing/ai-agent-workflow.md`) for the surfaces the diff touches, plus the loaded playbook's checks (Phase 1.5). Fixing what it surfaces here means the reviewer finds fewer issues and review rounds shrink.
 10. Launch the **haven-reviewer** subagent on the diff (`git diff origin/dev...HEAD`), with the item's scope and the invariants it must preserve.
 11. Triage findings:
     - **blocking / should-fix** that are clearly correct and small → apply them, re-run the gate.
@@ -76,14 +77,14 @@ The skill **routes, it does not contain.** Before implementing, classify the iss
     - **nice-to-have / nits** → apply if cheap; otherwise note in the PR body and skip.
 12. Record in the commit/PR which findings were applied and which were deferred (with reasons), as in this session's PRs.
 
-## Phase 4.5 — Doc accuracy (advisory)
+## Phase 4.5 — Doc accuracy (standard step)
 
-- If the diff touches code that a doc's `covers:` front-matter maps to (the **docs coupling gate** flags these on the PR; you can also run `node scripts/docs/coupling-gate.mjs` locally), launch the **haven-doc-reviewer** subagent on the diff. Update any docs it finds stale/missing/broken, then re-run the acceptance gate. This is **advisory** — it never blocks the merge — but updating implicated docs is part of definition-of-done. See `docs/contributing/docs-quality-system.md`.
+- Always check doc accuracy. If the diff touches code a doc's `covers:` front-matter maps to (run `node scripts/docs/coupling-gate.mjs` locally; the gate also comments on the PR), launch the **haven-doc-reviewer** subagent on the diff, update any docs it finds stale / missing / broken **and bump their `last-verified`**, then re-run the acceptance gate. The findings are **advisory** — they never block the merge — but updating implicated docs is part of definition-of-done. See `docs/contributing/docs-quality-system.md`.
 
 ## Phase 5 — Open the PR
 
 13. Commit with a conventional message (end with the Co-Authored-By / Claude-Session trailers per the repo convention). Push `-u origin <branch>`.
-14. Open the PR via `mcp__github__create_pull_request` with **base `dev`** (never `main`). Body: scope, the behavior-preservation argument, verification output (test counts, tsc), and reviewer outcome. **Always include `Closes #<n>`** for the issue being shipped (standalone or epic sub-issue) so merging closes it and an epic burns down automatically.
+14. Open the PR via `mcp__github__create_pull_request` with **base `dev`** (never `main`). Write the body by **filling the sections of `.github/pull_request_template.md`** for the surfaces the diff touches — Changed Surfaces, Workflow Used, Local Checks, Browser Or Headless Verification, Intentionally Left Out, Generated Artifacts And Handoffs, CASP / MiCA Guardrail Check, Review Status — plus a **Merge Readiness** report (the block in `docs/contributing/pr-workflow-checklist.md`: CI, local checks, review status, risk level, why-safe, residual risk). Skip a template section that doesn't apply with a one-line reason. **Always include `Closes #<n>`** for the issue being shipped (standalone or epic sub-issue) so merging closes it and an epic burns down automatically.
 15. `subscribe_pr_activity` for the PR so CI failures / review comments wake the loop.
 
 ## Phase 6 — Merge gate (policy A: in-session money-path approval; migrations hard-gated)

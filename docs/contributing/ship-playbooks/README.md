@@ -48,7 +48,7 @@ playbook. `money-path` always keeps the human merge gate.
 ## Status
 
 Phase 1.5 routing and all five playbook files are live and complete
-(`frontend.md`, `backend.md`, `sdk.md`, `money.md`, `docs.md`). New checks land
-**advisory** first, then graduate to blocking once trusted. The remaining epic
-work ([#656](https://github.com/d-hinders/Haven-AI/issues/656)) wires the
-cross-surface closeout (populated PR template + preflight) into the skill.
+(`frontend.md`, `backend.md`, `sdk.md`, `money.md`, `docs.md`), and the skill's
+cross-surface closeout — the Captain Self-Check Preflight before review, the
+standard doc-accuracy step, and a PR body filled from the template — is wired in.
+New checks land **advisory** first, then graduate to blocking once trusted.

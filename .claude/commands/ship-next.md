@@ -8,6 +8,7 @@ The queue is **GitHub Issues** (not a repo file — backlogs are no longer track
 
 - *(no argument)* or `label=<name>` — **standalone labeled issues**: open issues carrying the loop label (default **`code-quality`**), oldest first (lowest issue number). Use this for small, self-contained tasks.
 - `epic=#<n>` — an **epic** (parent issue): its **open sub-issues** are the queue, lowest number first. Use this for a multi-PR plan that should burn down together.
+- `"<task>"` — a **quoted freeform description** (no pre-existing issue needed): first draft a well-formed issue via the [`/new-task`](new-task.md) flow — but since the intent is to ship, **add the `code-quality` label** and assign the requester — then run the pipeline below on that issue. This is the low-friction front door: throw a sentence, the system does the paperwork. If the task is genuinely underspecified or money-path, `/new-task` asks one or two clarifying questions before filing.
 
 Issue state *is* the backlog state — there is nothing to edit in the repo:
 - **open issue, no linked PR** → ready (a candidate to pick).

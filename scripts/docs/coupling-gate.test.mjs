@@ -57,7 +57,7 @@ test('ageDays computes whole-day differences', () => {
 })
 
 test('suppresses a doc whose last-verified is today (same-day)', () => {
-  // DOCS are last-verified 2026-06-01; treat that as "today" → suppressed.
+  // Inject '2026-06-01' as today → matches every doc's lastVerified → all suppressed.
   const f = implicatedDocs(['packages/backend/src/routes/x402.ts'], DOCS, '2026-06-01')
   assert.equal(f.length, 0)
 })

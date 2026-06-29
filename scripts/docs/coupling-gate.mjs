@@ -66,6 +66,11 @@ export function ageDays(lastVerified, now = Date.now()) {
  * subsequent edit to a covered file is just noise. This is a heuristic: it
  * trades a small same-day-staleness risk for far less noise, and the gate is
  * advisory anyway. `today` is injectable for testing.
+ *
+ * Note: the default `today` is the UTC calendar date, while `last-verified` is a
+ * human-written local date — so for non-UTC contributors the match can be off by
+ * at most ±1 calendar day. Harmless given the advisory posture (worst case: one
+ * extra advisory comment, never a missed real staleness across days).
  */
 export function implicatedDocs(changed, docs, today = new Date().toISOString().slice(0, 10)) {
   const changedSet = new Set(changed)

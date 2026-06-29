@@ -13,6 +13,9 @@ const webServerCommand = process.env.CI
 
 export default defineConfig({
   testDir: './e2e',
+  // The unmocked live smoke (e2e/live) runs only via playwright.live.config.ts
+  // against a real deployment — keep it out of the fast, fully-mocked suite.
+  testIgnore: ['**/live/**'],
   timeout: 60_000,
   expect: {
     timeout: 15_000,

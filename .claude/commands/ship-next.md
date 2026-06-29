@@ -36,7 +36,7 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 
 ## Phase 1.5 — Classify & load the playbook
 
-The skill **routes, it does not contain.** Before implementing, classify the issue's surface(s) and load the matching playbook(s) — small files that link the standards, checks, and agents for that surface. Never restate guideline content; load and apply it. See `docs/contributing/ship-playbooks/README.md`.
+The skill **routes, it does not contain.** Before implementing, classify the issue's surface(s) and load the matching playbook(s) — small files that link the standards, checks, and agents for that surface. Never restate guideline content; load and apply it. See `docs/contributing/ship-playbooks/README.md`. (Steps here are unnumbered — this phase is inserted between steps 5 and 6 without renumbering the rest.)
 
 - **Classify.** Determine the surface(s):
   - **Primary:** the issue's labels — `area:frontend`, `area:backend`, `area:sdk`, `area:mcp`, `area:docs`, `money-path`.

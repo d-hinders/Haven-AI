@@ -29,7 +29,7 @@ Classification is driven by **labels first** (applied to the issue), with the
 | `area:frontend` | UI in `packages/frontend` | `frontend.md` |
 | `area:backend` | backend / API in `packages/backend` | `backend.md` |
 | `area:sdk` | SDK / connect / API contract / credentials | `sdk.md` |
-| `area:mcp` | MCP server / signer / hosted MCP | (see `sdk.md` / operations docs) |
+| `area:mcp` | MCP server / signer / hosted MCP | `sdk.md` |
 | `area:docs` | docs only | `docs.md` → [`docs-quality-system.md`](../docs-quality-system.md) |
 | `money-path` | payments, agent authority, allowances, migrations | `money.md` |
 

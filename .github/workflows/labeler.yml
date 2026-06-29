@@ -1,0 +1,29 @@
+name: PR labeler
+
+# Auto-apply surface labels (area:* / money-path) to PRs from their changed
+# paths, so /ship-next Phase 1.5 classification is robust and the money path is
+# visible on every PR. Config: .github/labeler.yml. Additive (sync-labels: false)
+# — never strips a manually-applied label. See docs/contributing/ship-playbooks/README.md.
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Apply surface labels
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          configuration-path: .github/labeler.yml
+          sync-labels: false

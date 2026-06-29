@@ -23,6 +23,13 @@ const CHAIN_STYLES: Record<number, { dot: string; text: string; border: string; 
     border: 'border-sky-200',
     bg: 'bg-sky-50',
   },
+  // Base Sepolia — amber, to flag the testnet distinctly from Base mainnet
+  84532: {
+    dot: 'bg-amber-500',
+    text: 'text-amber-700',
+    border: 'border-amber-200',
+    bg: 'bg-amber-50',
+  },
 }
 
 const FALLBACK_STYLE = {

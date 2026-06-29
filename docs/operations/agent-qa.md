@@ -113,3 +113,30 @@ layers (#577 LLM-agent, #579 browser exploration), with automation/gating last
 (#578). Deterministic layers (#575/#576) are the promotion signal; the LLM layers
 are non-gating coverage that file run reports under
 [`bug-reports/`](../bug-reports/).
+
+## Layer 2b — exploratory agent QA (`/qa-dev`, #577)
+
+An LLM agent drives **natural-language payment goals** through the **real Haven
+MCP** with the dev QA credentials, using the agent session's own model (no
+`ANTHROPIC_API_KEY` in CI), and files a run report under
+[`bug-reports/`](../bug-reports/). It exercises the live tool surface + runtime
+wiring the deterministic harness (2a) can't. Because the tester is an LLM, it is
+**never a deploy gate** — #575/#576 are the gate; 2b is exploratory.
+
+- **When to run:** before a promotion, or after a risky change to the payment / MCP surface.
+- **How findings feed back:** the report's *Friction* and *Notes for the coding agent* sections (and any issues it files) are the loop #419/#420 call for.
+- **Claude Code:** run `/qa-dev` ([`.claude/commands/qa-dev.md`](../../.claude/commands/qa-dev.md)).
+
+**Codex / generic runtime (pasteable prompt):**
+
+> You are running exploratory QA against Haven's **dev** environment (testnet / Base
+> Sepolia, capped QA delegate — never prod). Using the already-connected Haven MCP
+> (or connect with `npx @haven_ai/connect@alpha --setup <QA setup token> --api <dev backend URL>`):
+> 1. `haven_get_agent` + `haven_get_allowances` — confirm the dev QA agent and note the live remaining budget.
+> 2. Pay the demo-merchant x402 call **within** budget (`haven_pay_x402`) → expect settlement + a receipt.
+> 3. Attempt a payment **over** the remaining budget → expect it to queue for approval, not execute.
+> 4. Make a priced call **above the max price** → expect a `PRICE_EXCEEDS_MAX` rejection.
+> 5. `haven_list_receipts`, then `haven_verify_receipt` on the step-2 payment → expect it verifies.
+> Stop at the first failed step. Then write a run report from
+> `docs/bug-reports/_run-report-template.md` (per-goal pass/fail + friction) and file
+> concrete bugs as issues. This is non-gating exploratory coverage.

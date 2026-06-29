@@ -5,7 +5,7 @@ covers:
   - .github/workflows/**
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-06-28"
+last-verified: "2026-06-29"
 ---
 
 # Dev environment

@@ -38,7 +38,7 @@ playbook. `money-path` always keeps the human merge gate.
 
 ## How a run uses these
 
-1. **Classify** (skill Phase 1.5): read the issue's `area:*` / `money-path`
+1. **Classify** (skill Phase 1.5 — wired in PR2, [#653](https://github.com/d-hinders/Haven-AI/issues/653)): read the issue's `area:*` / `money-path`
    labels; if absent, infer from the files the change will touch.
 2. **Load** only the matching playbook(s) — not all of them, so each run stays
    cheap.

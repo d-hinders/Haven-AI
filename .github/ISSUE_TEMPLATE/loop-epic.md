@@ -33,7 +33,12 @@ visibility. -->
 each sub-issue (not the epic) so /ship-next routes per PR. See
 docs/contributing/ship-playbooks/README.md. -->
 
-- [ ] `area:frontend`  [ ] `area:backend`  [ ] `area:sdk`  [ ] `area:mcp`  [ ] `area:docs`  [ ] `money-path`
+- [ ] `area:frontend`
+- [ ] `area:backend`
+- [ ] `area:sdk`
+- [ ] `area:mcp`
+- [ ] `area:docs`
+- [ ] `money-path`
 
 ## Notes
 

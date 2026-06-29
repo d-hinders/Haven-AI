@@ -47,7 +47,9 @@ docs/contributing/ship-playbooks/README.md. -->
 
 ## Money-path?
 
-<!-- Check one. Money-path issues are implemented by the loop but NEVER
+<!-- The `money-path` Surface label above drives playbook routing; this section
+drives the MERGE GATE (yes = human merge required). Set both consistently.
+Check one. Money-path issues are implemented by the loop but NEVER
 auto-merged — .github/CODEOWNERS routes them to a human merge, and any change to
 existing money-path behavior must be characterization-tested first. -->
 

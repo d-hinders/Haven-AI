@@ -7,7 +7,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-task.md
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .claude/commands/ship-next.md
-last-verified: "2026-06-28"
+last-verified: "2026-06-29"
 ---
 
 # Autonomous PR loop

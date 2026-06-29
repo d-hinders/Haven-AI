@@ -34,6 +34,12 @@ test('reports each banned phrase with its preferred replacement', () => {
   assert.ok(r.every((x) => typeof x.suggestion === 'string' && x.suggestion.length > 0))
 })
 
+test('does not double-report a plural against its singular (session keys)', () => {
+  const r = findCopyIssues('Rotate your session keys regularly\n')
+  assert.equal(r.length, 1)
+  assert.equal(r[0].phrase, 'session keys')
+})
+
 test('clean copy yields no findings', () => {
   assert.equal(findCopyIssues('Set agent rules and budgets for your Haven account\n').length, 0)
 })

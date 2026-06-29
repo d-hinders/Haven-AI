@@ -37,7 +37,7 @@ export const BANNED = [
   ['smart contract wallet', 'Haven account'],
   ['smart account', 'Haven account'],
   ['smart wallet', 'Haven wallet'],
-  ['transaction hash', 'setup transaction'],
+  ['transaction hash', "context-specific copy (e.g. 'Setup transaction', or a 'View on explorer' link)"],
   ['passkey-backed signer', 'secure passkey'],
   ['passkey signer', 'secure passkey'],
   ['enroll signer', 'save your sign-in method'],
@@ -54,16 +54,31 @@ const IGNORE = 'copy-lint-ignore'
 export function findCopyIssues(text) {
   const lines = text.split(/\r?\n/)
   const out = []
+  // Longest phrases first so a longer match claims its span before a shorter
+  // substring can re-report it (e.g. "session keys" must not also fire
+  // "session key" at the same column).
+  const ordered = [...BANNED].sort((a, b) => b[0].length - a[0].length)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (line.includes(IGNORE)) continue
     if (i > 0 && lines[i - 1].includes(IGNORE)) continue
     const lower = line.toLowerCase()
-    for (const [phrase, suggestion] of BANNED) {
-      const col = lower.indexOf(phrase)
-      if (col !== -1) out.push({ line: i + 1, col: col + 1, phrase, suggestion })
+    const claimed = [] // [start, end) spans already reported on this line
+    for (const [phrase, suggestion] of ordered) {
+      let from = 0
+      let col
+      while ((col = lower.indexOf(phrase, from)) !== -1) {
+        const start = col
+        const end = col + phrase.length
+        if (!claimed.some(([s, e]) => start < e && end > s)) {
+          out.push({ line: i + 1, col: start + 1, phrase, suggestion })
+          claimed.push([start, end])
+        }
+        from = end
+      }
     }
   }
+  out.sort((a, b) => a.line - b.line || a.col - b.col)
   return out
 }
 

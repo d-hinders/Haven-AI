@@ -11,6 +11,7 @@ on:
       - 'packages/frontend/src/app/**'
       - 'packages/frontend/src/components/**'
       - 'scripts/frontend-copy-lint.mjs'
+      - 'scripts/frontend-copy-lint.test.mjs'
       - 'docs/product/copy-guidelines.md'
       - '.github/workflows/frontend-copy-lint.yml'
 
@@ -32,6 +33,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
+      # The matcher's own unit tests — a real gate (a broken matcher should show
+      # red), unlike the advisory lint below.
+      - name: Test the matcher
+        run: node --test scripts/frontend-copy-lint.test.mjs
+
       # Advisory — surfaces findings without failing the build.
       - name: Frontend copy lint
         continue-on-error: true

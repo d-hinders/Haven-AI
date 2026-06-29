@@ -7,8 +7,23 @@ last-verified: "2026-06-29"
 
 # SDK / API / credentials playbook
 
-Loaded by `/ship-next` for `area:sdk` and `area:mcp` issues. **Stub — filled in [#655](https://github.com/d-hinders/Haven-AI/issues/655).**
+Loaded by `/ship-next` for `area:sdk` and `area:mcp` issues — the published packages (`@haven_ai/{sdk,signer,mcp,connect}`), the agent API contract, and credential surfaces. The playbook **links** the canonical procedures; it does not restate them.
 
-When complete, this playbook will require, by reference: reading `docs/operations/mcp-runtime-compatibility.md` (and `scripts/README.md` for releases); regenerating/verifying generated artifacts when SDK/API behavior changes (`.env` examples, SDK snippets, credential files, demo scripts, skill bundles); keeping the OpenAPI drift test green; and never hand-editing version/dep pins (`scripts/release-bump.mjs` is the source of truth).
+## 1. Required reading
 
-Until #655 lands, follow `docs/operations/mcp-runtime-compatibility.md` and `scripts/README.md` directly.
+- [`docs/operations/mcp-runtime-compatibility.md`](../../operations/mcp-runtime-compatibility.md) — the runtime-compatibility checklist for MCP / signer / connect.
+- [`scripts/README.md`](../../../scripts/README.md) — the release procedure, for any version-affecting change.
+
+## 2. Keep generated artifacts in sync
+
+When SDK/API behavior, credential semantics, x402/MPP behavior, setup prompts, or product language change, regenerate **and review** the artifacts that mirror them: `.env` examples, SDK snippets, credential files, demo scripts, and skill bundles. Apply the CASP guardrails to these too — they must not imply Haven holds funds, controls keys, or that an API credential is sufficient to spend (see [`money.md`](money.md)).
+
+## 3. Contract & release integrity
+
+- **OpenAPI drift** — keep `packages/backend/src/openapi/spec.test.ts` green; a documented agent-payment route must be in the spec or the `because:` allowlist.
+- **Install-path** — `connect`/`mcp`/`sdk` changes run the install smoke (`npm run smoke:pack -w packages/connect`); don't break the packed tarball resolution.
+- **Versioning** — never hand-edit version fields or cross-package dep pins; `scripts/release-bump.mjs` is the single source of truth, and pinning an internal `@haven_ai/*` dep to a wildcard is forbidden.
+
+## 4. Merge
+
+`area:sdk` / `area:mcp` PRs are non-money and auto-merge on green CI + clean review — **unless** the change also touches a money-path file or release tooling (`scripts/release-bump.mjs`, `.github/workflows/publish.yml`), which Phase 6 routes to a human gate. Release tooling changes are hard-gated by `.github/CODEOWNERS`.

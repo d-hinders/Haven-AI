@@ -50,7 +50,7 @@ Pieces:
 > with auto-generated notes, and a weekly **pending-promotion digest**
 > (`.github/workflows/promotion-digest.yml`) keeps a "📦 Pending promotion" issue
 > listing what's on `dev` but not yet in prod. The `main...dev` compare is the
-> same view on demand.
+> same view on demand. Full details: [`branch-and-release-flow.md`](branch-and-release-flow.md).
 
 ## Quickstart
 

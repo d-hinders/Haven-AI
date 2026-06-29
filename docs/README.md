@@ -53,6 +53,7 @@ describe how the system is actually built and how we work on it.
 - [PR workflow checklist](contributing/pr-workflow-checklist.md)
 - [Code-quality loop](contributing/code-quality-loop.md)
 - [Documentation-quality system](contributing/docs-quality-system.md)
+- [Branch & release flow (dev → prod, issue lifecycle)](contributing/branch-and-release-flow.md)
 
 **Operations**
 - [Deploy the hosted MCP server](operations/hosted-mcp.md)

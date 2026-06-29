@@ -29,7 +29,8 @@ and only comes back to you for a real decision, a money-path approval, or stuck
 CI.
 
 Pieces:
-- **`/ship-next`** (`.claude/commands/ship-next.md`) — does **one** PR end-to-end, then stops.
+- **`/new-task`** (`.claude/commands/new-task.md`) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default. The low-friction front door.
+- **`/ship-next`** (`.claude/commands/ship-next.md`) — **execute**: does **one** PR end-to-end, then stops. `/ship-next "<task>"` is `/new-task` + ship in one go.
 - **`/loop /ship-next`** — re-invokes `/ship-next` for each following item until the backlog is empty (self-paced).
 - **haven-reviewer** — the per-PR quality gate.
 - **haven-doc-reviewer** — advisory per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Run it when the diff touches code that some doc's `covers:` front-matter maps to; updating those docs is part of definition-of-done. Advisory today — it does not block auto-merge.
@@ -55,6 +56,12 @@ Pieces:
 ## Quickstart
 
 ```bash
+# Capture a task as a well-formed backlog issue (does NOT ship it):
+/new-task "add a copy button to the agent card"
+
+# Throw a task straight at the loop — drafts the issue AND ships it:
+/ship-next "add a copy button to the agent card"
+
 # Standalone small tasks — open issues labeled `code-quality` are the queue:
 /loop /ship-next                 # default source = the `code-quality` label
 /loop /ship-next label=<label>   # or any other loop label you've set up
@@ -70,12 +77,22 @@ Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
 pings you only for a money-path approval, a real decision, or stuck CI.
 
 
-## Two ways to feed work in
+## Feeding work in
 
-Both are **GitHub issues** — nothing is tracked in the repo. Issue state *is* the
-backlog state: an open issue with no PR is ready, an open issue with an open
-Haven PR is in flight, and a closed issue is done (its PR closed it via
-`Closes #`).
+The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
+state *is* the backlog state: an open issue with no PR is ready, an open issue
+with an open Haven PR is in flight, and a closed issue is done (its PR closed it
+via `Closes #`).
+
+You don't have to hand-write those issues. **Capture is its own step:**
+[`/new-task "<description>"`](../../.claude/commands/new-task.md) turns a one-line
+task into a well-formed issue (Scope + Acceptance + Surface + Money-path), asking
+a clarifying question or two when needed. It's **backlog-only by default** — it
+applies `area:*` labels but *not* `code-quality`, so capturing a task doesn't
+queue it. Promote it later by adding `code-quality`, or skip straight to shipping
+with `/ship-next "<description>"` (drafts the issue *and* runs the pipeline). This
+is the low-friction front door for partners: throw a sentence, the system does
+the paperwork. Then the loop consumes those issues one of these ways:
 
 1. **Standalone labeled issues** — for small, self-contained tasks. Open an issue
    with a concrete **scope + acceptance criteria** and add the **`code-quality`**

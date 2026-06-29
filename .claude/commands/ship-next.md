@@ -22,7 +22,7 @@ This command implements **merge policy A**: reviewer-gated auto-merge, with a mo
 
 1. Before picking new work, check whether any issue in the selected queue already has an **open Haven PR** (a PR that `Closes #<issue>`). If so, act on that PR:
    - **Merged** (issue now closed) → continue to Phase 1.
-   - **Open, awaiting the user** (a money-path PR needing CODEOWNERS approval, or an escalation) → **stop** and report: this item is blocked on the user; do not start the next item (later items branch off `dev` and must build on the merged one).
+   - **Open, awaiting the user** (a money-path PR awaiting in-session approval, a migration awaiting code-owner review, a frontend UI PR paused for a UX finding, or an escalation) → **stop** and report: this item is blocked on the user; do not start the next item (later items branch off `dev` and must build on the merged one).
    - **Open, CI still running / fixable failure** → handle it (re-run, fix, push) but do not start a new item.
 2. Only when there is no open in-flight PR from the queue do you pick the next ready issue.
 
@@ -99,6 +99,11 @@ A path is **money-path** if it matches any of: `routes/x402.ts`,
       acceptance gate passed and haven-reviewer returned **no
       blocking/should-fix**, call `mcp__github__enable_pr_auto_merge` (squash).
       GitHub merges it once required checks pass.
+      - **`area:frontend` (UI) — one addition** from [`ship-playbooks/frontend.md`](../../docs/contributing/ship-playbooks/frontend.md):
+        if the design-review / haven-reviewer UI pass flagged a **UX, copy, or
+        design-system** issue (even non-blocking), do **not** auto-merge —
+        **ask the user** with `AskUserQuestion` (UX is a human call). With no
+        such finding, auto-merge as normal.
     - **Money-path, NOT a migration:** do **not** auto-merge silently. **Ask the
       person running the loop to approve** with `AskUserQuestion` — include the
       PR link, the scope, and the haven-reviewer verdict so they can decide
@@ -120,7 +125,8 @@ A path is **money-path** if it matches any of: `routes/x402.ts`,
 ## When to involve the user (the only times)
 
 - A blocking/ambiguous reviewer finding, or any real product/architecture/security decision.
-- A money-path PR (it waits for the user's CODEOWNERS approval by design).
+- A money-path PR (it waits for in-session approval; a migration additionally waits for a code-owner review).
+- A frontend UI PR where the design/copy review flagged a UX issue (even a nit) — it waits for your call.
 - CI failing in a way you can't resolve after a couple of focused attempts.
 - An issue too underspecified to implement safely.
 Everything else — implement, test, review nits, open PR, auto-merge clean PRs, chain to the next — runs without the user.

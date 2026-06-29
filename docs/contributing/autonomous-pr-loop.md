@@ -94,7 +94,11 @@ PR go through before handing it the whole queue.
 **Reviewer-gated auto-merge, with an in-session money-path checkpoint:**
 - A **non-money-path** PR (docs, tests, mechanical refactor, other code)
   auto-merges (squash) when **CI is green** *and* **haven-reviewer returned no
-  blocking/should-fix findings**.
+  blocking/should-fix findings**. For a **frontend (`area:frontend`)** PR there is
+  one addition (see [`ship-playbooks/frontend.md`](ship-playbooks/frontend.md)):
+  if the design-review / haven-reviewer UI pass flags a UX, copy, or
+  design-system issue (even a nit-level one), the loop **pauses for the user**
+  even if CI is green — UX is a human call.
 - A **money-path** PR (x402 / payments / machine-payments / payment-coverage /
   allowance-module / agentAuth / release tooling) does **not** auto-merge
   silently — the loop **pauses and asks whoever is running it to approve**

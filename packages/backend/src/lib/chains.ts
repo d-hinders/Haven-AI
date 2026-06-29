@@ -228,6 +228,24 @@ export function isSupportedChain(chainId: number): boolean {
   return chainId in CHAINS
 }
 
+/**
+ * Whether this environment actually serves account **deploys** on a chain (#679).
+ * A chain can be in the registry (renders historical data) yet not be served for
+ * new deploys here — e.g. the dev backend serves only Base Sepolia. Driven by
+ * `config.deployChainIds`; an empty list means "all supported" (backward-compat).
+ */
+export function isDeployableChain(chainId: number): boolean {
+  if (!isSupportedChain(chainId)) return false
+  const allow = config.deployChainIds
+  return allow.length === 0 || allow.includes(chainId)
+}
+
+/** The chains this environment serves deploys on — for the frontend picker. */
+export function deployableChainIds(): number[] {
+  const allow = config.deployChainIds
+  return allow.length === 0 ? SUPPORTED_CHAIN_IDS : allow.filter(isSupportedChain)
+}
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 function buildTokenByAddress(

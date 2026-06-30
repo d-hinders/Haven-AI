@@ -10,6 +10,7 @@
 import { ethers } from 'ethers'
 import { config, relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from './chains.js'
+import { recordAllowanceNonce } from './allowance-nonce-coordinator.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -280,6 +281,16 @@ export async function executeAllowanceTransfer(
   }
   if (receipt.status === 0) {
     throw new Error(`Allowance transfer ${tx.hash} reverted`)
+  }
+
+  // Record the post-transfer nonce so the next build for this delegate waits for
+  // it to be visible before signing, avoiding the stale-nonce race (#692).
+  // Best-effort — never fail a confirmed transfer over the bookkeeping read.
+  try {
+    const { nonce } = await getTokenAllowance(chainId, safe, delegate, token)
+    recordAllowanceNonce(chainId, safe, delegate, token, nonce)
+  } catch {
+    // The preflight + retry still cover a stale next-read.
   }
   return { txHash: tx.hash }
 }

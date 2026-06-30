@@ -9,19 +9,20 @@
  *   2. QA Safe        — EOA-owned Safe (owner = SEED_OWNER key, threshold 1),
  *                       deployed via SafeProxyFactory and linked via POST /user/safes
  *   3. Spend gate     — owner-signed multiSend {enableModule, addDelegate,
- *                       setAllowance} relayed through POST /safe-exec
+ *                       setAllowance} submitted directly by the owner EOA
  *   4. QA Agent       — POST /agents with the delegate address + USDC allowance
  *
  * It then prints the `QA_*` env block (#574 secrets) for the harness.
  *
  * ── Funding model (verified against backend `lib/allowance-module.ts`) ────────
- *   - The **delegate signs only** — it never submits a tx, so it needs no gas
- *     and no pre-funded USDC. Pass only its *address* here (SEED_DELEGATE_ADDRESS).
+ *   - Ordinary payments use delegate signatures + relayer submission. The direct
+ *     sweep-recovery scenario additionally needs delegate gas. Pass only the
+ *     delegate *address* here (SEED_DELEGATE_ADDRESS).
  *   - The **Safe** holds the spendable test **USDC** (fund via Circle faucet).
  *   - The dev **relayer** (RELAYER_PRIVATE_KEY on the backend) pays gas for the
- *     allowance transfers and for the /safe-exec relay.
- *   - The **SEED_OWNER** EOA needs a little Base Sepolia **ETH** for the one-time
- *     Safe deploy (it sends that one tx itself).
+ *     allowance transfers during harness runs.
+ *   - The **SEED_OWNER** EOA needs Base Sepolia **ETH** for the Safe deployment
+ *     and the owner-approved allowance setup.
  *
  * ⚠️ The on-chain steps are NOT exercised in CI (no funded testnet wallets here).
  *    Run this once against funded Base Sepolia wallets; iterate on any on-chain
@@ -225,8 +226,8 @@ async function deploySafe(cfg: SeedConfig, owner: ethers.Wallet): Promise<string
 }
 
 // ── Phase 3: enable module + addDelegate + setAllowance (owner-signed) ────────
-// Built as one multiSend and relayed via POST /safe-exec (the dev relayer pays
-// gas). Each sub-step is included only if not already on-chain (idempotent).
+// Built as one multiSend and submitted directly by the owner EOA. Each sub-step
+// is included only if not already on-chain (idempotent).
 async function ensureAllowance(
   cfg: SeedConfig,
   safe: UserSafe,

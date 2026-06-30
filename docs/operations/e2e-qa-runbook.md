@@ -2,6 +2,10 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - .github/workflows/qa-dev.yml
+  - .github/workflows/qa-live.yml
+  - packages/qa-agent/**
+  - packages/frontend/e2e/live/**
   - packages/frontend/e2e/connect-agent-2.spec.ts
   - packages/frontend/e2e/hosted-mcp.spec.ts
   - packages/frontend/e2e/transactions-detail.spec.ts
@@ -12,16 +16,20 @@ covers:
   - packages/backend/src/lib/__tests__/safe-owner-tx.test.ts
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
-last-verified: "2026-06-28"
+last-verified: "2026-06-30"
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
 
-These two flows are inherently **live**: real agent runtimes, real wallets, real
-merchants, on-chain settlement. They can't be fully automated in CI, so this is
-the repeatable manual procedure. Where a slice *is* automatable it's noted and
-already covered by Playwright — don't re-test those by hand unless investigating
-a regression.
+These flows are inherently **live**: real agent runtimes, real wallets, real
+merchants, and on-chain settlement. Haven now automates the deterministic
+money-flow invariants and deployed-UI smoke through manual GitHub Actions
+workflows; environment-specific runtime and merchant exploration remains manual.
+
+Start with the canonical
+[`agent-qa.md`](./agent-qa.md) operator runbook for provisioning, funding,
+secrets, local commands, GitHub dispatch commands, and troubleshooting. Use this
+document for the remaining exploratory checklist.
 
 > After **every** run, capture findings in a run report under
 > [`docs/bug-reports/`](../bug-reports/) using
@@ -33,14 +41,22 @@ a regression.
 
 | Slice | Coverage |
 |---|---|
+| Base Sepolia money-flow invariants: settle, queue, reject, x402 settle, sweep recovery | `packages/qa-agent`; local `npm run qa:dev -w packages/qa-agent` or Actions `qa-dev.yml` |
+| Unmocked login/dashboard smoke against a Vercel preview + dev backend | `packages/frontend/e2e/live`; local `test:e2e:live` or Actions `qa-live.yml` |
 | Connect-agent modal: create setup → prompt → connected-local → approval screen, no secrets leaked | `e2e/connect-agent-2.spec.ts` |
 | Hosted-MCP connect copy/command | `e2e/hosted-mcp.spec.ts` |
 | **x402 tx displays in history + opens the per-type detail panel** (#420 UI half) | `e2e/transactions-detail.spec.ts` |
 | Approver add/remove/reuse/passkey logic, last-owner guard | unit tests (`ManageApprovers`, `safe-owner-tx`, route tests) |
 | CSV export shape + injection guard | unit tests (`transaction-csv`) |
 
-Run them with `pnpm --filter @haven/frontend test:e2e:desktop` (and the unit
-suites with `pnpm -r test`).
+Run the regular mocked frontend suite with:
+
+```bash
+npm run test:e2e -w packages/frontend
+```
+
+Do not substitute mocked browser coverage for the live money-flow or deployed-UI
+workflows.
 
 ## #419 — Agent connection, end to end
 

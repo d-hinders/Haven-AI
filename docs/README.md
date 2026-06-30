@@ -60,6 +60,7 @@ describe how the system is actually built and how we work on it.
 - [MCP runtime compatibility](operations/mcp-runtime-compatibility.md)
 - [Migrate local → hosted MCP](operations/local-to-hosted-mcp.md)
 - [Dev environment (Railway + Vercel, `dev` branch)](operations/dev-environment.md)
+- [Automated agent QA (local + GitHub Actions)](operations/agent-qa.md)
 - [E2E QA runbook (agent connection & x402)](operations/e2e-qa-runbook.md)
 
 **Regulatory**

@@ -19,9 +19,9 @@ import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js
 import { x402Settle } from './scenarios/x402-settle.js'
 import { x402Sweep } from './scenarios/x402-sweep.js'
 
-// Deterministic, no-LLM scenarios run in order — all four #420 money-flow
-// invariants (within-budget settle, over-budget queue, x402 over-budget reject,
-// x402 settle) plus delegate sweep recovery (#603).
+// Deterministic, no-LLM scenarios run in order — five money-flow invariants:
+// within-budget settle, over-budget queue, x402 over-budget reject, x402 settle,
+// and delegate sweep recovery (#603/#684).
 const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetQueue,

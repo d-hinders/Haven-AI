@@ -20,16 +20,23 @@ import { HavenSigningError } from './types.js'
 /** Base mainnet. The only chain Haven sweeps today. */
 export const SWEEP_BASE_CHAIN_ID = 8453
 
+/** Base Sepolia testnet — used by the dev environment / QA harness. */
+export const SWEEP_BASE_SEPOLIA_CHAIN_ID = 84532
+
 /** Canonical Circle USDC on Base (FiatTokenV2_2). */
 export const SWEEP_BASE_USDC_ADDRESS =
   '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
+/** Circle's canonical Base Sepolia testnet USDC. */
+export const SWEEP_BASE_SEPOLIA_USDC_ADDRESS =
+  '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+
 /**
- * EIP-712 domain for Base mainnet USDC. `name`/`version` are the on-chain
- * `FiatTokenV2_2` values ("USD Coin" / "2"); a mismatch here makes the relayer's
- * `transferWithAuthorization` revert, so these are pinned to the known-good Base
- * USDC values (the same token the x402 EIP-3009 merchant leg already settles
- * against). Add a chain here only after verifying its USDC EIP-712 domain.
+ * EIP-712 domain per chain. `name`/`version` are the on-chain `FiatTokenV2_2`
+ * values; a mismatch makes the relayer's `transferWithAuthorization` revert, so
+ * each is pinned to the known-good, **on-chain-verified** USDC values. Base
+ * mainnet is "USD Coin"/"2"; Base Sepolia is "USDC"/"2" (verified via `name()`/
+ * `version()`). Add a chain here only after verifying its USDC EIP-712 domain.
  */
 const USDC_EIP712_DOMAIN_BY_CHAIN: Record<number, SweepEip712Domain> = {
   [SWEEP_BASE_CHAIN_ID]: {
@@ -38,12 +45,22 @@ const USDC_EIP712_DOMAIN_BY_CHAIN: Record<number, SweepEip712Domain> = {
     chainId: SWEEP_BASE_CHAIN_ID,
     verifyingContract: SWEEP_BASE_USDC_ADDRESS,
   },
+  [SWEEP_BASE_SEPOLIA_CHAIN_ID]: {
+    name: 'USDC',
+    version: '2',
+    chainId: SWEEP_BASE_SEPOLIA_CHAIN_ID,
+    verifyingContract: SWEEP_BASE_SEPOLIA_USDC_ADDRESS,
+  },
 }
 
 /** USDC contract per sweepable chain. */
 const USDC_ADDRESS_BY_CHAIN: Record<number, string> = {
   [SWEEP_BASE_CHAIN_ID]: SWEEP_BASE_USDC_ADDRESS,
+  [SWEEP_BASE_SEPOLIA_CHAIN_ID]: SWEEP_BASE_SEPOLIA_USDC_ADDRESS,
 }
+
+/** Sweepable chains, for error messages. */
+const SWEEPABLE_CHAIN_IDS = Object.keys(USDC_ADDRESS_BY_CHAIN).map(Number)
 
 /** EIP-712 `TransferWithAuthorization` struct, per EIP-3009. */
 export const TRANSFER_WITH_AUTHORIZATION_TYPES = {
@@ -168,7 +185,7 @@ export function sweepUsdcAddress(chainId: number): string {
   const address = USDC_ADDRESS_BY_CHAIN[chainId]
   if (!address) {
     throw new HavenSigningError(
-      `Sweep is only supported on Base (chainId ${SWEEP_BASE_CHAIN_ID}). Got chainId ${chainId}.`,
+      `Sweep is not supported on chain ${chainId}. Supported: ${SWEEPABLE_CHAIN_IDS.join(', ')}.`,
     )
   }
   return address
@@ -179,7 +196,7 @@ export function sweepUsdcDomain(chainId: number): SweepEip712Domain {
   const domain = USDC_EIP712_DOMAIN_BY_CHAIN[chainId]
   if (!domain) {
     throw new HavenSigningError(
-      `Sweep is only supported on Base (chainId ${SWEEP_BASE_CHAIN_ID}). Got chainId ${chainId}.`,
+      `Sweep is not supported on chain ${chainId}. Supported: ${SWEEPABLE_CHAIN_IDS.join(', ')}.`,
     )
   }
   return domain

@@ -26,7 +26,9 @@ If either call fails or returns a non-dev/uncapped identity, **stop and report**
 Run each goal through the actual tools. Record the outcome (pass/fail + what you observed) as you go.
 
 6. **Within-budget payment** — pay the demo-merchant x402 call for an amount **within** the remaining budget (`haven_pay_x402`). Expect: it **settles** and a receipt is produced.
-7. **Over-budget** — attempt a payment **larger than the remaining budget**. Expect: it is **queued for approval, not executed** (no settlement). Confirm it did not silently spend.
+7. **Over-budget** — use direct `haven_pay` for an amount **larger than the
+   remaining budget**. Expect: it is **queued for approval, not executed** (no
+   settlement). Confirm it did not silently spend.
 8. **Over max price** — make a priced call **above the configured max price**. Expect the `PRICE_EXCEEDS_MAX` rejection — not a settlement.
 9. **Receipts** — `haven_list_receipts` for recent activity, then `haven_verify_receipt` on the within-budget payment from step 6. Expect the receipt verifies.
 
@@ -34,8 +36,11 @@ Stop and report on the **first failed step** rather than pressing on (a failed m
 
 ## Phase 4 — Report
 
-10. Copy `docs/bug-reports/_run-report-template.md` to `docs/bug-reports/<yyyy-mm-dd>-qa-dev-<runtime>.md` (e.g. `2026-06-29-qa-dev-claude-code.md`).
-11. Fill it in: per-goal pass/fail (map the goals above onto the **x402 payments (#420)** checklist), the connector + app versions, and a concrete **Friction / bugs / UX gaps** section — what was confusing, slow, or surprising, with what you did / expected / saw.
+10. Copy `docs/bug-reports/_run-report-template.md` to a unique UTC/run-id path
+    such as `docs/bug-reports/2026-07-01T143022Z-manual-qa-dev-claude-code.md`.
+11. Fill in run metadata, exact command/exit, per-goal pass/fail/skip, public
+    evidence, artifacts, cleanup, secret review, versions, and concrete
+    friction/bugs. A required skip makes the result partial/blocked.
 12. File any concrete bug as its own issue and link it from the report. Leave **Notes for the coding agent** with anything worth feeding back.
 
 The run report (not a green check) is the deliverable — this layer's value is the friction it surfaces, not a pass/fail gate.

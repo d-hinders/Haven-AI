@@ -6,168 +6,92 @@ covers:
   - packages/mcp-server/src/**
   - packages/connect/src/**
   - packages/signer/src/**
-last-verified: "2026-06-28"
+  - packages/sdk/src/client.ts
+  - packages/sdk/src/x402.ts
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/middleware/agentToolAudit.ts
+last-verified: "2026-07-01"
 ---
 
-# Haven — Local MCP vs. Hosted MCP + Edge Signer
+# Haven — Local MCP vs Hosted MCP + Edge Signer
 
-Deployment model decision guide for agent developers.
+The default is hosted MCP plus the local edge signer. The connector writes this
+topology for supported runtimes. Local MCP is an advanced `--local` option for
+Claude Code and Codex.
 
-> **Default: hosted MCP + edge signer — for every runtime.** The connector
-> (`npx @haven_ai/connect`) writes the hosted topology for all supported agent
-> environments. Local MCP is an **advanced, explicit opt-in** (`--local`),
-> available only for Claude Code and Codex. See
-> "Advanced: fully-local MCP" below for when that trade-off makes sense.
-
-## The two models
-
-| | **Local MCP** (`@haven_ai/mcp`) | **Hosted MCP + Edge Signer** (`@haven_ai/mcp-server` + `@haven_ai/signer`) |
+| | Local MCP (`@haven_ai/mcp`) | Hosted MCP + edge signer |
 |---|---|---|
-| **Server** | Runs on the user's machine alongside the agent runtime | Haven's hosted endpoint (the Railway URL, e.g. `https://haven-ai-production-5953.up.railway.app/v1`) |
-| **Signing key** | On the local machine, loaded by the MCP process at startup | On the local machine, held exclusively by `@haven_ai/signer` |
-| **Agent config** | Points to a local `npx @haven_ai/connect`-managed server | Points to the hosted URL + Bearer token; separate signer config |
-| **Setup complexity** | One tool call: `npx @haven_ai/connect` | Two MCP servers: one hosted URL, one local signer binary |
-| **Key exposure surface** | Loaded into the MCP process that also runs the business logic | Loaded only into the dedicated signer process; never the hosted server |
-| **Runtime requirement** | Node.js on the user's machine | Internet access to Haven's endpoint; Node.js for the local signer only |
-| **Multi-runtime** | One local server per agent runtime | One hosted URL shared across all runtimes; each runtime runs its own signer |
+| MCP process | Runs locally | Runs at Haven's configured hosted URL |
+| Signing | Delegate key is loaded by the local MCP process | Delegate key is isolated in local `@haven_ai/signer` |
+| Haven API | Still used to construct, submit, and poll payments | Used through hosted MCP orchestration |
+| Updates | User picks up package releases | Hosted orchestration updates centrally |
+| Audit | Payment/API tool activity reaches the Haven backend | Backend plus hosted-transport activity is visible |
 
-## The default: hosted MCP + edge signer
+Local MCP removes the hosted MCP transport. It is not offline or air-gapped:
+the SDK still depends on the configured Haven API and its relay/chain services,
+plus merchant services. Its privacy and availability trade-off is therefore
+narrower than running the whole Haven stack locally.
 
-`npx @haven_ai/connect` writes the hosted topology for every runtime — a hosted
-MCP entry (URL + Bearer API key) plus a local `haven-signer` stdio entry. This
-is the path all users land on unless they explicitly opt out:
-
-- **Uniform key isolation** — the delegate key lives only in the dedicated
-  sign-only signer process on every runtime; funding relay sends only
-  `{ payment_id, signature }` to the hosted server.
-- **Server-side updatability** — construct/relay fixes ship once, centrally;
-  no local MCP package for users to keep current.
-- **Central audit** — every payment is logged by Haven's hosted infrastructure
-  (Layer 5 of the security model).
-- **One well-tested path** — a single topology across all runtimes instead of
-  a silent per-runtime fork.
-
-See [Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md)
-for the pairing flow.
-
-## Advanced: fully-local MCP (no hosted dependency)
-
-Local MCP (`@haven_ai/mcp`) is the only topology where Haven's hosted
-infrastructure is **not** in the construct/relay path. It remains available as
-an explicit opt-in for users who need:
-
-- **Offline / air-gapped-adjacent operation** — no dependency on hosted-MCP
-  uptime or latency.
-- **Self-hosting / privacy** — payment construction and relay happen entirely
-  on your machine.
-
-Opt in with the connector flag (Claude Code and Codex only):
+Opt in on a supported runtime:
 
 ```bash
 npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code --local
 ```
 
-Trade-offs you accept with `--local`:
+## Custody boundary
 
-- **No central audit** — Haven keeps no hosted log of payment construction.
-- **You update it yourself** — fixes ship as new package versions you must
-  pick up; nothing updates server-side.
-- **Wider key surface** — the delegate key is loaded into the same process
-  that runs construct/relay business logic, instead of a dedicated signer.
-- **No usage-based relay** — hosted-relay features do not apply.
+The hosted service must never hold, process, or transmit the delegate private
+key. Doing so would violate Haven's non-custodial architecture and materially
+increase custody and CASP risk; any such change requires product and legal
+review. The regulatory guardrails are risk guidance, not a legal opinion.
 
-On unsupported runtimes the flag fails with a clear error and the connector
-suggests re-running without `--local`.
+Local MCP keeps signing local but loads the key into the same process that
+performs orchestration. Hosted mode narrows that key surface to a dedicated,
+no-network signer.
 
-## Why the split exists (CASP/MiCA compliance)
+## Tool model
 
-Haven's hosted server is **non-custodial by design**. A hosted server that held the delegate private key would be a **custodial agent wallet** — which triggers CASP (Crypto Asset Service Provider) licensing requirements under MiCA in the EU.
+Both modes expose the common reads, direct-payment operations, x402 and MPP
+quote/resume/status operations, receipt operations, and discovery where their
+semantics match. They are not byte-for-byte identical:
 
-The hosted MCP + edge signer split satisfies CASP/MiCA Red Line #2:
+- Local MCP can perform some one-call flows because it owns the local key.
+- Hosted MCP exposes prepare/submit and paid-MCP orchestration helpers so the
+  edge signer can authorize without sharing the key.
+- Hosted MCP provides gasless sweep orchestration; the signer supplies
+  `haven_sign_sweep_delegate`.
 
-> The hosted server never holds, processes, or transmits the delegate private key. It constructs unsigned payment hashes and relays signed payloads. Signing authority stays at the edge with the user's local signer.
+Treat the registered tool unions in `packages/mcp/src/tools.ts`,
+`packages/mcp-server/src/tools.ts`, and `packages/signer/src/tools.ts` as the
+source of truth.
 
-See [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md) for the full guardrails.
+The four edge-signer tools are `haven_sign`, `haven_x402_sign_header`,
+`haven_sign_x402`, and `haven_sign_sweep_delegate`.
 
-## Tool surface parity
+## x402 comparison
 
-Both deployment models expose the same tool names wherever the semantics map cleanly:
+Local MCP can orchestrate a one-shot `haven_pay_x402` flow from its local
+process; Haven's backend still constructs and relays the payment.
 
-| Tool | Local MCP | Hosted MCP |
-|---|---|---|
-| `haven_get_agent` | ✓ | ✓ |
-| `haven_get_allowances` | ✓ | ✓ |
-| `haven_get_payment_status` | ✓ | ✓ |
-| `haven_get_resume_state` | ✓ | ✓ |
-| `haven_list_receipts` | ✓ | ✓ |
-| `haven_quote_x402` | ✓ | ✓ |
-| `haven_pay_x402_quote` | Signs locally in one call | Returns `payload_hash` for edge signer |
-| `haven_pay_x402` (one-shot) | ✓ (full round-trip) | — (agent orchestrates; see flow below) |
-| `haven_resume_x402_payment` | ✓ | Returns signing context for edge signer |
-| `haven_quote_mpp` | ✓ | ✓ |
-| `haven_pay_mpp_challenge` | Signs locally | Returns `payload_hash` for edge signer |
-| `haven_resume_mpp_payment` | ✓ | Returns signing context for edge signer |
-| `haven_pay` (SafeTransfer) | ✓ | ✓ returns `payload_hash` |
-| `haven_submit` | — | ✓ relays signature to Haven |
+For a paid MCP tool in hosted mode, prefer:
 
-**Edge signer tools** (local only, paired with hosted MCP):
-
-| Tool | Purpose |
-|---|---|
-| `haven_sign` | Signs a payment hash or x402 funding hash locally; returns `{ signature, x402_binding }` |
-| `haven_x402_sign_header` | Builds the EIP-3009 X-PAYMENT header for the merchant leg of an x402 payment |
-
-## x402 payment flow comparison
-
-### Local MCP (one-shot)
-
-```
-Agent: haven_pay_x402 { url }
-  ↳ MCP: probes merchant, creates funding intent, signs EIP-3009 header, retries merchant
-Agent: receives merchant response
+```text
+haven_pay_mcp_tool → haven_sign_x402 → haven_settle_mcp_tool
 ```
 
-### Hosted MCP + Edge Signer
+The decomposed generic hosted flow remains:
 
-```
-Agent → Hosted MCP:  haven_quote_x402 { url }
-                     → returns { payment_required, ... }
-
-Agent → Hosted MCP:  haven_pay_x402_quote { payment_required }
-                     → returns { payment_id, payload_hash, x402.expected }
-
-Agent → Signer:      haven_sign { payload_hash, x402_expected }
-                     → returns { signature, x402_binding }
-                     (key never leaves signer process)
-
-Agent → Hosted MCP:  haven_submit { payment_id, signature }
-                     → funds the delegate wallet via Safe AllowanceModule
-                     → returns { status: "confirmed", tx_hash }
-
-Agent → Signer:      haven_x402_sign_header { payment_required, x402_binding }
-                     → returns { payment_header }
-                     (EIP-3009 authorization signed locally)
-
-Agent → Merchant:    GET /data   X-PAYMENT: <payment_header>
-                     → receives the paid resource
+```text
+haven_pay_x402_quote → haven_sign → haven_submit
+  → haven_x402_sign_header → merchant retry
 ```
 
-For paid MCP tools, the final merchant call can be `haven_complete_mcp_tool`
-instead: the agent passes the funding `payment_id`, merchant tool arguments, and
-signed `payment_header` back to hosted MCP. Hosted MCP does not sign; it relays
-the header to the merchant and records success evidence or a reconciliation
-event if the merchant rejects after funding.
+In both cases, Haven's backend constructs and records the payment intent.
+Hosted MCP never signs; it relays already signed, context-bound payloads.
 
-## Custody invariant
+## Related docs
 
-The hosted server must **never** receive the delegate private key:
-
-- Funding relay sends only `{ payment_id, signature }` via `haven_submit`.
-- Paid MCP-tool completion can send a signed, single-use `payment_header` back
-  to hosted MCP with the funding `payment_id`; the header is already bound to
-  the merchant, amount, and nonce, and is not a key.
-- The hosted MCP boot guard (`createHostedHavenClient`) throws if a delegate key is detected on the client.
-- Deep links and setup tokens from Haven may carry the hosted URL and Bearer token, but **never** the delegate key.
-
-See [`06-hosted-mcp-connect-flow.md`](06-hosted-mcp-connect-flow.md) for the full sequence and
-[`07-edge-signer.md`](07-edge-signer.md) for the signer design rationale.
+- [Hosted connect flow](06-hosted-mcp-connect-flow.md)
+- [Edge signer](07-edge-signer.md)
+- [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

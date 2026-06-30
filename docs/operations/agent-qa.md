@@ -5,10 +5,19 @@ covers:
   - .env.dev.example
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
+  - .claude/commands/qa-dev.md
   - packages/qa-agent/**
+  - packages/frontend/package.json
   - packages/frontend/e2e/live/**
+  - packages/frontend/e2e/fixtures/live-session.ts
   - packages/frontend/playwright.live.config.ts
-last-verified: "2026-06-30"
+  - packages/frontend/src/lib/api.ts
+  - packages/sdk/src/sweep.ts
+  - packages/backend/src/lib/sweep.ts
+  - packages/backend/src/config.ts
+  - packages/backend/src/routes/machine-payments.ts
+  - docs/bug-reports/_run-report-template.md
+last-verified: "2026-07-01"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -106,13 +115,12 @@ receive or store the owner or delegate private key.
 |---|---|---|
 | Owner EOA | Base Sepolia ETH | Submits the Safe deployment and owner-approved allowance setup |
 | Safe | Base Sepolia test USDC | Source of the QA agent allowance and payments |
-| Dev relayer | Base Sepolia ETH | Submits Allowance Module transfers during payment scenarios |
-| Delegate EOA | Small amount of Base Sepolia ETH | Required by the current SDK direct-transfer sweep scenario |
+| Dev relayer | Base Sepolia ETH | Submits Allowance Module transfers and gasless sweep recovery |
+| Delegate EOA | No on-chain funding required | Signs payment and EIP-3009 sweep authorizations off-chain |
 
-Ordinary agent payments do not require delegate gas: the delegate signs and the
-relayer submits the constrained Safe transfer. The `x402-sweep-recovery`
-scenario is different: `HavenClient.sweepDelegate()` currently submits a USDC
-transfer directly from the delegate, so the delegate needs testnet ETH.
+Ordinary payments and sweep recovery do not require delegate gas. The delegate
+signs off-chain; the relayer submits both constrained Safe transfers and the
+gasless EIP-3009 USDC sweep. Keep the dev relayer funded with Base Sepolia ETH.
 
 The demo merchant must also be configured with:
 
@@ -157,15 +165,18 @@ The deterministic harness runs five scenarios in order:
 | `over-budget-queue` | An over-budget payment queues for approval and does not execute |
 | `x402-over-budget-rejected` | An unaffordable x402 request is rejected before a signable intent |
 | `x402-settle` | A small x402 payment settles through the dev demo merchant |
-| `x402-sweep-recovery` | Verify-without-settle strands USDC, then the delegate sweeps it back to the Safe |
+| `x402-sweep-recovery` | Verify-without-settle strands a small, under-cap USDC balance, then a gasless sweep returns it to the Safe |
 
-The harness exits non-zero if any non-skipped scenario fails and prints a
-Markdown run report suitable for `docs/bug-reports/`.
+The harness exits non-zero if any non-skipped scenario fails. Its Markdown
+scenario table is an evidence starter, not a complete report: copy it into
+[`_run-report-template.md`](../bug-reports/_run-report-template.md) and add run
+metadata, exact command and exit code, preflight, artifacts, public evidence,
+cleanup, and secret review.
 
 See epic #573. Build order: **#574 (foundation) → #575 (deterministic money-flow,
 Node→API) → #576 (live UI smoke, browser) →** then the non-gating exploratory
 layers (#577 LLM-agent, #579 browser exploration), with automation/gating last
-(#578). Deterministic layers (#575/#576) are the promotion signal; the LLM layers
+(#578). Deterministic layers (#575/#576) are repeatable promotion signals; the LLM layers
 are non-gating coverage that file run reports under
 [`bug-reports/`](../bug-reports/).
 
@@ -296,7 +307,8 @@ MCP** with the dev QA credentials, using the agent session's own model (no
 `ANTHROPIC_API_KEY` in CI), and files a run report under
 [`bug-reports/`](../bug-reports/). It exercises the live tool surface + runtime
 wiring the deterministic harness (2a) can't. Because the tester is an LLM, it is
-**never a deploy gate** — #575/#576 are the gate; 2b is exploratory.
+**never a deploy gate** — #575/#576 are repeatable checks, while 2b is
+exploratory.
 
 - **When to run:** before a promotion, or after a risky change to the payment / MCP surface.
 - **How findings feed back:** the report's *Friction* and *Notes for the coding agent* sections (and any issues it files) are the loop #419/#420 call for.
@@ -309,7 +321,8 @@ wiring the deterministic harness (2a) can't. Because the tester is an LLM, it is
 > (or connect with `npx @haven_ai/connect@alpha --setup <QA setup token> --api <dev backend URL>`):
 > 1. `haven_get_agent` + `haven_get_allowances` — confirm the dev QA agent and note the live remaining budget.
 > 2. Pay the demo-merchant x402 call **within** budget (`haven_pay_x402`) → expect settlement + a receipt.
-> 3. Attempt a payment **over** the remaining budget → expect it to queue for approval, not execute.
+> 3. Use direct `haven_pay` for an amount **over** the remaining budget → expect
+> it to queue for approval, not execute.
 > 4. Make a priced call **above the max price** → expect a `PRICE_EXCEEDS_MAX` rejection.
 > 5. `haven_list_receipts`, then `haven_verify_receipt` on the step-2 payment → expect it verifies.
 > Stop at the first failed step. Then write a run report from
@@ -319,7 +332,7 @@ wiring the deterministic harness (2a) can't. Because the tester is an LLM, it is
 ## Reading results and filing bugs
 
 - `PASS`: the asserted invariant held.
-- `SKIP`: an optional prerequisite was absent. For sweep recovery, this commonly
+- `SKIP`: a prerequisite was absent. For sweep recovery, this commonly
   means the merchant did not leave a stranded balance; confirm
   `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb`.
 - `FAIL`: the invariant was exercised and failed.
@@ -327,9 +340,10 @@ wiring the deterministic harness (2a) can't. Because the tester is an LLM, it is
   a red gate, not a workflow configuration failure.
 - Process exit `2`: required `QA_*` configuration is missing.
 
-Copy the generated run report into `docs/bug-reports/` and file a GitHub issue
-for a reproducible failure. Include the Actions run URL and transaction/payment
-identifiers, but never include API keys or private keys.
+A required skipped scenario makes the overall report partial/blocked even
+though the harness can exit zero. Copy the generated table into the full report
+template and file a GitHub issue for a reproducible failure. Include the Actions
+run URL and transaction/payment identifiers, but never API or private keys.
 
 ## Troubleshooting
 
@@ -364,8 +378,7 @@ Check balances by role:
 
 1. Safe: enough test USDC and remaining allowance.
 2. Dev relayer: enough Base Sepolia ETH for allowance transfers.
-3. Delegate: enough Base Sepolia ETH for the direct USDC sweep.
-4. Owner: enough Base Sepolia ETH only when reseeding or changing the allowance.
+3. Owner: enough Base Sepolia ETH only when reseeding or changing the allowance.
 
 Do not repeatedly rerun a money-moving harness while the cause is unknown; each
 run consumes test allowance and test USDC.
@@ -375,6 +388,14 @@ run consumes test allowance and test USDC.
 The merchant did not produce a visible stranded balance. Confirm its Base
 Sepolia deployment and `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb`, then check
 for RPC propagation delay.
+
+### Sweep is parked for manual recovery
+
+The backend does not create a sweep authorization when the stranded USDC
+balance exceeds `SWEEP_MAX_USDC` (default `1`). Record the returned
+`parked: true`, balance, and cap in the run report; stop automated recovery and
+assign explicit manual follow-up. Do not raise the cap during a QA run merely
+to make the scenario pass.
 
 ### GitHub warning about actions using Node 20
 

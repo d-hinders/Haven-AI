@@ -1,8 +1,19 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
-last-verified: "2026-06-28"
+covers:
+  - AGENTS.md
+  - docs/product/copy-guidelines.md
+  - docs/product/design-system.md
+  - docs/product/screen-recipes.md
+  - docs/product/design-review.md
+  - docs/regulatory/casp-risk-guardrails.md
+  - packages/frontend/src/app/globals.css
+  - packages/frontend/tailwind.config.js
+  - packages/frontend/src/app/**
+  - packages/frontend/src/components/**
+  - packages/frontend/src/hooks/useEscapeToClose.ts
+last-verified: "2026-06-29"
 ---
 
 # Haven Product & UX Guide
@@ -31,16 +42,25 @@ The old dark app system is retired. Do not extend old dark token patterns, gradi
 Haven is a fintech product for agent payments. Every UX decision should reinforce three truths:
 
 1. **The user stays in control.** Haven helps users approve and automate payments within rules; it must not imply Haven can move money on its own.
-2. **Agents are constrained actors.** Agents have budgets, rules, and credentials. They are not wallets and should not be described as having unrestricted access.
+2. **Agents receive narrow authority, not unrestricted wallet access.** Haven-supported Safe funding follows explicit agent rules. An agent-held signing key may also control a temporary, pre-existing, or residual agent-wallet balance, so recovery and sweep controls must remain clear.
 3. **Trust is built in small moments.** Loading states, empty states, review screens, and errors should be calm, specific, and useful.
 
 Use technical infrastructure terms only when they add transparency for a technical or advanced context. Product surfaces should lead with what the user understands and controls.
 
 ### First-Run Simplicity
 
-Brand-new users should not see the full operational dashboard until it helps them. A first-run state should lead with one balance or account status, one next setup action, and only the context needed to take that action.
+Brand-new users should not see the full operational dashboard until it helps
+them. A first-run state should lead with one balance or account status, one
+active setup action, and only the context needed to take that action. A compact
+setup sequence is acceptable when exactly one step has a CTA. Other steps may
+show their independently computed status but remain non-actionable until their
+prerequisites make them current.
 
-Avoid showing analytics cards, empty management panels, transaction previews, multi-step checklists, account/network summaries, or risk explainers all at once just because those components exist. Add detail progressively inside the relevant action flow, detail page, modal, or after the user dismisses setup.
+Avoid showing competing analytics cards, empty management panels, transaction
+previews, multiple simultaneous CTAs, account/network summaries, or risk
+explainers all at once just because those components exist. Add detail
+progressively inside the relevant action flow, detail page, modal, or after the
+user dismisses setup.
 
 ---
 
@@ -80,8 +100,13 @@ Core rules:
 - Page backgrounds use the v2 light system.
 - Primary buttons use solid brand color: `bg-[var(--v2-brand)]` with `hover:bg-[var(--v2-brand-strong)]`.
 - No gradient buttons. The brand gradient is reserved for the app wordmark and one restrained hero accent phrase.
-- Cards are white with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
-- Raised cards are reserved for major page anchors such as the dashboard balance hero and account total balance. Do not use elevation to make ordinary cards compete for attention.
+- Flat cards are white with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
+- Raised cards are prominent white page anchors such as the dashboard balance hero and account total balance.
+- Other elevations already present in the shared `Card` primitive, including
+  the restrained tinted `anchor` tier, must match the live `/design-system`
+  reference and remain secondary to the page's primary anchor. The static
+  `design-system.md` card table does not yet document `anchor`; treat that as
+  documentation debt, not permission to invent another tier.
 - Modals use white surfaces and a darkened blurred backdrop.
 - Avoid old dark app classes for new work: `bg-gray-*`, `text-gray-*`, dark-only `zinc` surfaces, glow shadows, and white alpha borders.
 - Use semantic colors only for their meaning: success, warning, danger.
@@ -116,11 +141,15 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 ### Tables And Activity
 
-- Full transaction history uses the semantic `TransactionsTable`.
+- Full `/transactions` history uses the semantic full-page `TransactionsTable`.
 - Sortable headers need `aria-sort` and clear labels.
 - Amount sorting must use raw numeric values, not formatted strings.
-- Dashboard, account detail, and agent detail previews use compact activity rows rather than full tables.
-- Mobile table views should collapse secondary metadata while preserving the event, amount, time, and external detail link.
+- Account and agent detail pages may use the card/compact `TransactionsTable`
+  variants for scoped, sortable histories.
+- Short non-sortable previews such as Dashboard use `TransactionActivityRow`.
+- Mobile table views should collapse secondary metadata while preserving the
+  direction, activity/movement, amount, and external detail link. Date may move
+  to a detail surface.
 
 ### Modals
 
@@ -152,18 +181,24 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 ## 6. Money Movement
 
-Every payment or account-changing action needs a review moment that answers:
+Every money-moving or agent-authority-changing action needs a review moment that
+answers:
 
+- Who can spend?
 - What amount or rule is changing?
-- Which account is involved?
+- Which Haven wallet and agent wallet, if any, are involved?
 - Which network is involved?
 - Who or what receives the payment?
 - Who approves or signs?
+- What happened already?
 - What happens next if more approvals are needed?
+- How can the user pause, revoke, reject, stop, recover, or sweep funds?
 
 Rules:
 
 - Never imply Haven has custody.
+- Distinguish Safe funding constrained by on-chain agent rules from funds already
+  controlled by an agent-held signing key.
 - Always show network context in signing and transaction review surfaces.
 - Results for on-chain actions include an externally verifiable link.
 - High-risk or destructive actions require confirmation.
@@ -195,7 +230,9 @@ Rules:
 - Mobile uses one column.
 - Tablet can use two columns where content density allows.
 - Desktop should preserve readable max widths; do not stretch cards beyond useful scan width.
-- Touch targets should be at least 44px on mobile.
+- Primary and risk-bearing touch targets should be at least 44px on mobile.
+  Visually compact controls need an expanded hit area and enough separation to
+  remain reliable by touch.
 - Tables may scroll horizontally; ordinary page layouts should not.
 - Text must not overlap controls or overflow buttons.
 
@@ -203,13 +240,32 @@ Rules:
 
 ## 9. Closeout Checklist
 
-Use this checklist before calling a redesign slice done:
+Use [design-review.md](./design-review.md) before calling any UI change done.
+At minimum:
 
 - `rg -n "from-indigo-500 to-violet-600|bg-gradient-to-r from-indigo|bg-gray-|text-gray-|dark:" packages/frontend/src`
-- `rg -i "policy engine|safe deployed|relayer|generate credentials|hand the credential|drop the credential" packages/frontend/src/app packages/frontend/src/components`
-- Check primary authenticated routes: Dashboard, Transactions, Agents, Agent detail, Accounts, Account detail, Approvals, Contacts, Settings.
-- Check unauthenticated routes: Home, How it works, Protocols, Login, Signup, Onboarding.
+- `rg -i "policy engine|safe deployed|relayer|allowance module|session key|owner type|generate credentials|hand the credential|drop the credential|Haven gave.*private key|Haven (signs|settles|signed)" packages/frontend/src/app packages/frontend/src/components`
+- Inspect `/design-system` before changing shared UI patterns.
+- Check every changed route plus every shared consumer of changed components;
+  do not rely on a frozen route inventory.
 - Run frontend tests and production build.
-- Open at least one mobile-width and one desktop-width viewport for any route with layout changes.
+- Open at least one mobile-width and one desktop-width viewport for any route
+  with layout changes. If browser verification is skipped, state why and add a
+  named headless-equivalent test for the skipped risk.
 - For transaction/history work, verify semantic table behavior, mobile collapse, sorting labels, and raw-value amount sorting.
 - For modal or feedback work, verify focus trap, focus return, Escape behavior, toast placement, and inline error states.
+- Run the matching Captain Self-Check Preflight items from
+  `docs/contributing/ai-agent-workflow.md`.
+- Review changed strings against `copy-guidelines.md`; apply CASP/MiCA guardrails
+  to payment, authority, credential, x402/MPP, fiat, swap, yield, treasury, and
+  reporting/accounting surfaces.
+- Review generated credential and agent-handoff artifacts when relevant, then
+  run `haven-reviewer` and report CI, local checks, review status, risk, and
+  residual risk.
+- Run `haven-doc-reviewer` when changed paths match any document's `covers:`
+  mapping, and resolve stale claims before opening the PR.
+
+Known implementation gap: the shared `Button` primitive's common small/default
+sizes are 36px and 40px high. Until those controls or their hit areas are
+updated, verify mobile placement and spacing explicitly; do not treat the
+current dimensions as the target standard for primary or risk-bearing actions.

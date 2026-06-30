@@ -1,32 +1,43 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
-last-verified: "2026-06-28"
+covers:
+  - docs/architecture/0*.md
+  - docs/archive/connect-agent-2-*.md
+  - docs/research/**
+  - packages/backend/src/lib/chains.ts
+  - packages/frontend/src/lib/chains.ts
+  - packages/backend/src/middleware/agentAuth.ts
+  - packages/connect/src/runtime.ts
+  - packages/backend/src/lib/fee/fee-module.ts
+last-verified: "2026-06-29"
 ---
 
-# Haven — Architecture Diagrams
+# Haven — Architecture
 
 Internal engineering reference for how identity, custody, and authority flow
-through Haven today. Mermaid in markdown is canonical; some diagrams also have
-exported PNG and SVG alongside.
+through Haven. Numbered docs describe current implementation unless a row is
+explicitly marked as design/scaffold. Where Mermaid is present, markdown source
+is canonical; exported PNG and SVG files are convenience artifacts.
 
-| # | Diagram | Use when |
+| # | Document | Use when |
 |---|---|---|
 | 0 | [Architecture Overview](00-overview.md) | First stop — the whole stack at a glance: components, default topology, connect flow, external pieces. |
 | 1 | [System Context](01-system-context.md) | Onboarding, security reviews, "who talks to who" questions. Shows trust boundaries. |
 | 2 | [Identity & Custody Map](02-identity-and-custody.md) | Reasoning about blast radius — what is held by user, Haven, agent, and on-chain. |
 | 3 | [Payment Execution Sequence](03-payment-sequence.md) | Tracing a payment from API call to on-chain settlement; auto-execute vs over-allowance branches. |
-| 4 | [x402 Payment Sequence](04-x402-payment-sequence.md) | Agent encounters HTTP 402 from a resource server and pays through Haven; one-shot vs two-step modes. |
+| 4 | [x402 Payment Sequence](04-x402-payment-sequence.md) | Standard SDK/local MCP, hosted generic split, hosted paid-MCP three-call fast path, and approval resume. |
 | 5 | [Agent API OpenAPI Contract](05-agent-api-openapi.md) | Public OpenAPI surface for non-TypeScript agent integrators and external reviewers. |
-| 6 | [Hosted MCP Connect Flow & Edge-Signing Contract](06-hosted-mcp-connect-flow.md) | Designing/reviewing the hosted MCP server — the wire contract, the two-credential split, and the non-custodial rule that the delegate key never reaches Haven. |
+| 6 | [Hosted MCP Connect Flow & Edge-Signing Contract](06-hosted-mcp-connect-flow.md) | Topology/custody contract and two-credential split. It predates the one-call signer fast path; use docs 4 and 7 for current x402 orchestration. |
 | 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |
-| 8 | [Local vs Hosted MCP](08-local-vs-hosted-mcp.md) | Choosing the deployment model — the default hosted MCP + edge signer vs the advanced fully-local MCP opt-in, with the custody rationale and tool parity. |
-| 9 | [Rail-agnostic Fee Module](09-fee-module.md) | Designing/reviewing the per-transaction fee — the shared policy/accounting module vs. per-rail on-chain settlement, and the surcharge/allowance invariants. |
+| 8 | [Local vs Hosted MCP](08-local-vs-hosted-mcp.md) | Topology and deployment trade-offs for default hosted MCP + edge signer versus advanced fully-local MCP. Use doc 7 for the current signer tool list and x402 fast path. |
+| 9 | [Rail-agnostic Fee Module](09-fee-module.md) | Current disabled zero-fee backend scaffold plus future per-rail settlement design; no fee transfer executes today. |
 
 The detailed Connect Agent 2 contract and its rollout closeout were point-in-time
 artifacts for shipping that feature; they now live in
-[`docs/archive/`](../archive/connect-agent-2-local-key-pairing.md) for reference.
+[`docs/archive/`](../archive/README.md) for reference:
+[pairing contract](../archive/connect-agent-2-local-key-pairing.md) and
+[rollout closeout](../archive/connect-agent-2-rollout-closeout.md).
 The current connect mechanism is covered by docs 6 (hosted MCP connect flow) and
 7 (edge signer).
 
@@ -37,8 +48,8 @@ the spike to remove the delegate funding leg.
 
 ## Regenerating exports
 
-Mermaid is the source of truth. Regenerate PNG/SVG after editing when the
-Mermaid CLI is available:
+Where a doc contains Mermaid, its markdown is the source of truth. Regenerate
+PNG/SVG after editing when the Mermaid CLI is available:
 
 ```sh
 # Needs a headless Chromium; run where one is available.
@@ -58,12 +69,15 @@ done
 
 ## Scope notes
 
-- Current code supports **Gnosis Chain (id 100)** and **Base (id 8453)** for
-  Haven wallet/Safe flows where configured. Standard merchant x402 demos focus
-  on Base USDC.
+- Current registries support **Base (8453)**, **Base Sepolia (84532)**, and
+  **Gnosis Chain (100)**. Base is primary production, Base Sepolia is dev/QA,
+  and Gnosis remains for existing configured flows. Standard exact-scheme USDC
+  x402 supports Base and Base Sepolia.
 - **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
   removed — it is no longer part of the codebase.)
-- Diagrams reflect what the code does, not the aspirational model in
-  [CLAUDE.md](../../CLAUDE.md). Where they diverge (e.g. Safe ownership is not
-  on-chain-verified at import; the delegate EOA is user-supplied, not
-  Haven-generated), the diagrams reflect the code.
+- These docs and their mapped code are the implementation authority.
+  [CLAUDE.md](../../CLAUDE.md) is current repository guidance, but broad claims
+  must still be checked against implementation. Safe import does not prove
+  ownership on-chain at import time. Delegate keys are locally generated by
+  Connect Agent or supplied by the user/agent runtime; they are never generated
+  by Haven's backend.

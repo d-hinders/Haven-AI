@@ -15,7 +15,7 @@ import { getRelayerWallet } from './allowance-module.js'
  * The delegate signs an off-chain authorization; the relayer submits it and pays
  * gas. The relayer is only the gas payer here — it is never a spender and holds
  * no allowance, so a relayer compromise cannot move user funds. See
- * docs/bug-reports/sweep-delegate-split-signer-gap.md.
+ * docs/archive/sweep-delegate-split-signer-gap.md.
  */
 
 /** How long a prepared authorization is valid for signing + relaying. */

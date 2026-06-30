@@ -1,11 +1,31 @@
 ---
 owner: "@d-hinders"
-status: current
+status: archived
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-06-28"
+last-verified: "2026-06-29"
 ---
 
 # Agent UX Feedback: Connect Flow & x402 Payment Flow
+
+> **ARCHIVED — point-in-time feedback.** This report records an agent's
+> experience on 2026-06-17. Most findings are now resolved, and the remaining
+> full-challenge handoff is an intentional security boundary. Do not use the
+> suggested quick wins as current implementation guidance. Start with
+> [`04-x402-payment-sequence.md`](../architecture/04-x402-payment-sequence.md),
+> [`06-hosted-mcp-connect-flow.md`](../architecture/06-hosted-mcp-connect-flow.md),
+> and [`07-edge-signer.md`](../architecture/07-edge-signer.md).
+
+## Resolution Snapshot — 2026-06-29
+
+| Original observation | Current disposition |
+|---|---|
+| No one-call readiness/budget summary | Resolved: `haven_get_agent` returns readiness and live per-token remaining budget; `haven_get_allowances` exposes configured and on-chain values. |
+| `x402_expected` nesting is confusing | Resolved without a breaking rename: tool descriptions show `x402.expected`, and the signer accepts and unwraps the whole `x402` object. |
+| `expires_at` looked optional | Resolved: required by the signer schema, with `PAYMENT_WINDOW_EXPIRED` retry guidance. |
+| Settle omitted `payment_id` | Resolved: returned on unconfirmed and settled paths. |
+| No observable post-funding pause | The three-call fast path remains atomic by design; use the documented decomposed flow when that boundary must be observed. Approval decisions belong before irreversible funding. |
+| Sweep recovery lacked exact guidance | Mostly resolved: the merchant error points to `haven_sweep_delegate`; sweep preparation returns the authorization, expected context, signer tool, and next step. Local signing remains intentionally separate. |
+| Full `payment_required` pass-through is noisy | Retained by design so the local signer can verify exact merchant, amount, resource, asset, network, and expiry context. Any future reduced shape must preserve those guarantees. |
 
 **Date:** 2026-06-17
 **Author:** Claude (agent perspective — direct experience using Haven MCP tools)

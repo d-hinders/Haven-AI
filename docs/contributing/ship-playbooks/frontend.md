@@ -2,12 +2,12 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # Frontend playbook
 
-Loaded by `/ship-next` for `area:frontend` issues. The goal: a UI issue is shipped on Haven's UX standards without the contributor having to name them. This playbook **links** the standards; it does not restate them.
+Loaded by `ship-next` for `area:frontend` issues. The goal: a UI issue is shipped on Haven's UX standards without the contributor having to name them. This playbook **links** the standards; it does not restate them.
 
 ## 1. Required reading (before implementing)
 
@@ -39,4 +39,4 @@ Run `haven-reviewer` with UI context, checking the diff against [`product/design
 
 ## 6. Merge policy (UI)
 
-A non-money frontend PR **auto-merges** on green CI + verification **unless** the design-review / `haven-reviewer` UI pass flags a UX, copy, or design-system issue (**even a nit-level one**) — then **pause and ask the user** (UX is subjective; a flagged finding is a human call). This is the `area:frontend` case of the skill's Phase 6. Money-path UI still follows the `money.md` human gate.
+A non-money frontend PR **auto-merges** on green CI + verification **unless** the design-review / `haven-reviewer` UI pass flags a UX, copy, or design-system issue (**even a nit-level one**) — then **pause and ask the user** (UX is subjective; a flagged finding is a human call). This is the `area:frontend` case of the canonical skill's [Merge Gate](../../../.agents/skills/ship-next/SKILL.md#merge-gate). Money-path UI still follows the `money.md` human gate.

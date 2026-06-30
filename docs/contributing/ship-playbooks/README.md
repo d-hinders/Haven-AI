@@ -2,14 +2,14 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - .claude/commands/ship-next.md
+  - .agents/skills/ship-next/SKILL.md
   - .github/labels.yml
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # Ship-next playbooks
 
-`/ship-next` is the default way to ship anything defined as a GitHub issue. It
+The canonical `ship-next` skill is the default way to ship anything defined as a GitHub issue. It
 **routes, it does not contain**: it classifies the issue's surface, then loads
 the matching *playbook* — a small file that links the standards, checks, and
 agents for that surface. Playbooks link the canonical docs; they never copy
@@ -47,7 +47,7 @@ playbook. `money-path` always keeps the human merge gate.
 
 ## How a run uses these
 
-1. **Classify** (skill Phase 1.5): read the issue's `area:*` / `money-path`
+1. **Classify** in the canonical skill's [Prepare section](../../../.agents/skills/ship-next/SKILL.md#prepare): read the issue's `area:*` / `money-path`
    labels; if absent, infer from the files the change will touch.
 2. **Load** only the matching playbook(s) — not all of them, so each run stays
    cheap.
@@ -56,7 +56,7 @@ playbook. `money-path` always keeps the human merge gate.
 
 ## Status
 
-Phase 1.5 routing and all five playbook files are live and complete
+Surface routing and all five playbook files are live and complete
 (`frontend.md`, `backend.md`, `sdk.md`, `money.md`, `docs.md`), and the skill's
 cross-surface closeout — the Captain Self-Check Preflight before review, the
 standard doc-accuracy step, and a PR body filled from the template — is wired in.

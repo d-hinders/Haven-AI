@@ -2,12 +2,12 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # SDK / API / credentials playbook
 
-Loaded by `/ship-next` for `area:sdk` and `area:mcp` issues — the published packages (`@haven_ai/{sdk,signer,mcp,connect}`), the agent API contract, and credential surfaces. The playbook **links** the canonical procedures; it does not restate them.
+Loaded by `ship-next` for `area:sdk` and `area:mcp` issues — the published packages (`@haven_ai/{sdk,signer,mcp,connect}`), the agent API contract, and credential surfaces. The playbook **links** the canonical procedures; it does not restate them.
 
 ## 1. Required reading
 
@@ -26,4 +26,4 @@ When SDK/API behavior, credential semantics, x402/MPP behavior, setup prompts, o
 
 ## 4. Merge
 
-`area:sdk` / `area:mcp` PRs are non-money and auto-merge on green CI + clean review — **unless** the change also touches a money-path file or release tooling (`scripts/release-bump.mjs`, `.github/workflows/publish.yml`), which Phase 6 routes to a human gate. Release tooling changes are hard-gated by `.github/CODEOWNERS`.
+`area:sdk` / `area:mcp` PRs are non-money and auto-merge on green CI + clean review — **unless** the change also touches a money-path file or release tooling (`scripts/release-bump.mjs`, `.github/workflows/publish.yml`), which the canonical skill's [Merge Gate](../../../.agents/skills/ship-next/SKILL.md#merge-gate) routes to in-session approval. Only database migrations are additionally hard-gated by `.github/CODEOWNERS`.

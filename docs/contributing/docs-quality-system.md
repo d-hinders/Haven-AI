@@ -5,14 +5,14 @@ covers:
   - scripts/docs/**
   - .github/workflows/docs.yml
   - .github/workflows/docs-coupling.yml
-  - .claude/agents/haven-doc-reviewer.md
+  - .agents/skills/haven-agent-workflow/references/doc-reviewer.md
   - .vale.ini
   - .lychee.toml
   - .markdownlint.json
   - .github/vale/**
   - packages/backend/src/openapi/spec.test.ts
   - packages/backend/src/docs-drift/docs-drift.test.ts
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # Documentation-quality system
@@ -65,13 +65,18 @@ last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
 
 ```bash
 npm run docs:check   # validate every doc's front-matter + covers globs
-npm run docs:test    # unit tests for the validator's parser & glob matcher
+npm run docs:test    # unit tests for the docs and agent-skill validators
 ```
 
 `scripts/docs/validate-frontmatter.mjs` is dependency-free (no `js-yaml`): it
 checks required keys, the `status` enum, the `last-verified` date format, and
 that every `covers` glob resolves to at least one real path. It exits non-zero
 on any problem.
+
+`scripts/docs/validate-agent-skills.mjs` validates the canonical skills under
+`.agents/skills/`, their relative references, the thin client-adapter targets,
+and the boundary between portable workflow text and client-specific mechanics.
+It is dependency-free and runs as part of `npm run docs:check`.
 
 ## Check layers
 
@@ -82,6 +87,7 @@ Run by `.github/workflows/docs.yml`, only when docs or the docs tooling change:
 | Check | Tool | Blocking? |
 | --- | --- | --- |
 | Front-matter + `covers` resolution | `scripts/docs/validate-frontmatter.mjs` | Fails the job (advisory overall — see below) |
+| Agent-skill structure + adapter alignment | `scripts/docs/validate-agent-skills.mjs` | Fails the job (advisory overall — see below) |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**`) | Advisory |
@@ -118,8 +124,8 @@ Each carries a `because:` allowlist for intentional exceptions — the default i
 
 ### Phase 3 — `haven-doc-reviewer` agent ([#645](https://github.com/d-hinders/Haven-AI/issues/645))
 
-`.claude/agents/haven-doc-reviewer.md` is a read-only review agent (sibling to
-`haven-reviewer`). Given a diff, it finds the docs whose `covers:` globs match
+The canonical `haven-doc-reviewer` role under
+`.agents/skills/haven-agent-workflow/references/` is read-only. Given a diff, it finds the docs whose `covers:` globs match
 the changed code and reports any **specific** claim the diff made stale,
 missing, or broken — with the smallest correct update. It's wired into the
 agentic workflow (`ai-agent-workflow.md`) and the autonomous loop

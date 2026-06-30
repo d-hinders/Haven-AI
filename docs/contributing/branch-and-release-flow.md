@@ -6,7 +6,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # Branch & release flow
@@ -97,7 +97,7 @@ Set **Settings → General → Default branch → `dev`** (the lever that makes 
 close on dev-merge). Full ruleset/auto-merge setup is in
 [`autonomous-pr-loop.md`](autonomous-pr-loop.md) → "One-time GitHub setup".
 
-## For agents (and `/ship-next`)
+## For agents (and `ship-next`)
 
 - Branch off `dev`; open PRs with base `dev`; include `Closes #<n>` — the
   dev-merge closes the issue. **Don't** manually close issues, and **don't** read

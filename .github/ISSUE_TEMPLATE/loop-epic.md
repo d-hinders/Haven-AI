@@ -1,6 +1,6 @@
 ---
 name: "📦 Loop epic"
-about: A multi-PR plan for the autonomous PR loop. Add sub-issues, then run /loop /ship-next epic=#<this>.
+about: A multi-PR plan for the autonomous ship-next workflow. Add sub-issues, then run ship-next epic=#<this>.
 title: "Epic: "
 labels: ["epic"]
 assignees: []
@@ -8,7 +8,8 @@ assignees: []
 
 <!--
 An epic is a parent issue whose SUB-ISSUES are the loop's queue. Drive it with
-`/loop /ship-next epic=#<this-issue>` — the loop takes the open sub-issues
+`ship-next epic=#<this-issue>` and repeat it with the client's loop capability
+when available. The workflow takes the open sub-issues
 lowest-number-first and closes each with `Closes #`, so the epic burns down on
 its own. You do NOT also need the `code-quality` label on the sub-issues; that
 label is for the standalone queue. See docs/contributing/autonomous-pr-loop.md.
@@ -30,7 +31,7 @@ visibility. -->
 ## Surface(s)
 
 <!-- The union of surfaces the sub-issues touch. Apply the matching label(s) to
-each sub-issue (not the epic) so /ship-next routes per PR. See
+each sub-issue (not the epic) so ship-next routes per PR. See
 docs/contributing/ship-playbooks/README.md. -->
 
 - [ ] `area:frontend`

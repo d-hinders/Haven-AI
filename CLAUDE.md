@@ -18,7 +18,10 @@ covers:
   - .github/workflows/publish.yml
   - .github/CODEOWNERS
   - scripts/release-bump.mjs
-last-verified: "2026-06-28"
+  - .agents/skills/**
+  - .claude/agents/**
+  - .claude/commands/**
+last-verified: "2026-06-30"
 ---
 
 # Haven — CLAUDE.md
@@ -248,10 +251,10 @@ No nested filled cards. To group content inside a `Card`, use `Card.Section` (wh
 
 ## Agentic Development Workflow
 
-Use `docs/contributing/ai-agent-workflow.md` for feature delivery, UX feedback iteration, and bug fixing. Agentic delivery is a default workflow decision for non-trivial Haven work, not an opt-in phrase the user must repeat. Keep the main interactive session as captain and use the project agents in `.claude/agents/` for workflow coordination, discovery, bounded implementation, and review when the task shape warrants it.
+Use `docs/contributing/ai-agent-workflow.md` for feature delivery, UX feedback iteration, and bug fixing. Agentic delivery is a default workflow decision for non-trivial Haven work, not an opt-in phrase the user must repeat. Portable workflow policy and role instructions live in `.agents/skills/`; `.claude/commands/` and `.claude/agents/` are thin Claude Code adapters. Keep the main interactive session as captain and use the canonical Haven roles for workflow coordination, discovery, bounded implementation, and review when the task shape warrants it.
 
 The captain owns product judgment, shared files, gravity files, git hygiene, final integration, and verification. Use workers only for clean, disjoint slices with explicit file ownership. Inform the user which agents are being used, but do not ask for permission unless there is a real blocker, destructive action, credential risk, or tool limitation.
 
-For shipping a **defined set of PRs** with minimal user input, use the autonomous PR loop: `/loop /ship-next`. Its queue is **GitHub Issues** — standalone tasks labeled `code-quality`, or an epic's sub-issues via `/loop /ship-next epic=#<n>` (the old `docs/backlogs/*.yml` file tracks are retired; see `docs/backlogs/README.md`). It implements, tests, runs haven-reviewer, opens, and reviewer-gated auto-merges each PR — escalating to the user only on a blocking finding, a real decision, a money-path merge (the `.github/CODEOWNERS` carve-out), or stuck CI. You don't have to hand-write those issues: **`/new-task "<description>"`** captures a one-liner as a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default; **`/ship-next "<description>"`** does the same *and* ships it in one go — the low-friction front door. See `docs/contributing/autonomous-pr-loop.md` (includes the one-time GitHub setup).
+For shipping a **defined set of PRs** with minimal user input, use the canonical `ship-next` skill. In Claude Code, `/loop /ship-next` repeatedly invokes its thin slash-command adapter. The queue is **GitHub Issues** — standalone tasks labeled `code-quality`, or an epic's sub-issues via `epic=#<n>` (the old `docs/backlogs/*.yml` file tracks are retired; see `docs/backlogs/README.md`). It implements, tests, runs haven-reviewer, opens, and reviewer-gated auto-merges each PR — escalating to the user only on a blocking finding, a real decision, a money-path merge, or stuck CI. You don't have to hand-write those issues: the canonical `new-task` skill captures a one-liner as a well-formed backlog issue, backlog-only by default; `ship-next "<description>"` does the same and ships it. Claude Code exposes these as `/new-task` and `/ship-next`.
 
-**`/ship-next` is the default way to ship anything defined as a GitHub issue or sub-issue.** Say "ship next" and it classifies the issue's surface from its `area:*` / `money-path` labels (Phase 1.5) and loads the matching **playbook** (`docs/contributing/ship-playbooks/`) so the right standards apply without a long prompt — UX + design system for `area:frontend`, CASP for `money-path`, runtime/release rules for `area:sdk`/`area:mcp`, the docs-quality system for `area:docs`. It then runs the Captain Self-Check Preflight before review, keeps implicated docs accurate (coupling gate + haven-doc-reviewer), and opens a PR filled from the template. The skill **routes, it does not contain**: it links the canonical standards rather than copying them. See `docs/contributing/ship-playbooks/README.md`.
+**`ship-next` is the default way to ship anything defined as a GitHub issue or sub-issue.** It classifies the issue's surface from its `area:*` / `money-path` labels and loads the matching **playbook** (`docs/contributing/ship-playbooks/`) so the right standards apply without a long prompt — UX + design system for `area:frontend`, CASP for `money-path`, runtime/release rules for `area:sdk`/`area:mcp`, and the docs-quality system for `area:docs`. It then runs the Captain Self-Check Preflight before review, keeps implicated docs accurate, and opens a PR filled from the template. The skill **routes, it does not contain**: it links canonical standards rather than copying them.

@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - .claude/agents/haven-reviewer.md
+  - .agents/skills/haven-agent-workflow/references/reviewer.md
   - docs/contributing/ai-agent-workflow.md
   - packages/frontend/src/lib/allowance-format.ts
   - packages/frontend/src/lib/__tests__/allowance-format.test.ts
@@ -12,14 +12,14 @@ covers:
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/components/NetworkGate.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # AI Review Patterns
 
 Use this as shared memory for PR review feedback that was worth fixing. Keep it pattern-based, not PR-based, so future agents can apply it to new surfaces.
 
-The patterns below are also the items checked by the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` and the **Recurring traps** must-check list in `.claude/agents/haven-reviewer.md`. The three lists should stay in sync.
+The patterns below are also the items checked by the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` and the **Recurring traps** must-check list in the canonical reviewer role. The three lists should stay in sync.
 
 ## Data Semantics
 

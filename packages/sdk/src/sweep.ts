@@ -62,6 +62,11 @@ const USDC_ADDRESS_BY_CHAIN: Record<number, string> = {
 /** Sweepable chains, for error messages. */
 const SWEEPABLE_CHAIN_IDS = Object.keys(USDC_ADDRESS_BY_CHAIN).map(Number)
 
+/** True when the gasless sweep supports a chain (its USDC domain + address are known). */
+export function isSweepableChain(chainId: number): boolean {
+  return chainId in USDC_ADDRESS_BY_CHAIN
+}
+
 /** EIP-712 `TransferWithAuthorization` struct, per EIP-3009. */
 export const TRANSFER_WITH_AUTHORIZATION_TYPES = {
   TransferWithAuthorization: [

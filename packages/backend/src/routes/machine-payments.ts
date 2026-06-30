@@ -21,7 +21,7 @@ import {
 } from '../lib/allowance-module.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
 import {
-  SWEEP_BASE_CHAIN_ID,
+  isSweepableChain,
   sweepUsdcAddress,
   type SweepAuthorization,
 } from '@haven_ai/sdk'
@@ -1067,9 +1067,9 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   app.post('/sweep/prepare', async (request, reply) => {
     const agent = request.agent as AgentContext
 
-    if (agent.chain_id !== SWEEP_BASE_CHAIN_ID) {
+    if (!isSweepableChain(agent.chain_id)) {
       return reply.code(422).send({
-        error: `Sweep is only supported on Base (chainId ${SWEEP_BASE_CHAIN_ID}). Agent chain is ${agent.chain_id}.`,
+        error: `Sweep is not supported on chain ${agent.chain_id}.`,
       })
     }
     if (!agent.delegate_address || !agent.safe_address) {

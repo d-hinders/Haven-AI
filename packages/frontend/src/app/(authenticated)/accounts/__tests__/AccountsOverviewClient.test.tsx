@@ -22,6 +22,15 @@ vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferen
 vi.mock('@/hooks/usePortfolio', () => ({
   usePortfolio: () => ({ totalUsd: 0, totalEur: 0, breakdown: [], loading: false }),
 }))
+vi.mock('@/hooks/useDeployableChains', () => ({
+  useDeployableChains: () => ({
+    chains: [
+      { chainId: 8453, name: 'Base' },
+      { chainId: 84532, name: 'Base Sepolia' },
+    ],
+    loading: false,
+  }),
+}))
 vi.mock('wagmi', () => ({ useAccount: () => ({ address: undefined, isConnected: false }) }))
 vi.mock('@rainbow-me/rainbowkit', () => ({
   ConnectButton: Object.assign(() => null, { Custom: () => null }),

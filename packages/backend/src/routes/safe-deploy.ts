@@ -11,7 +11,7 @@ import {
 } from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getChain, isSupportedChain } from '../lib/chains.js'
+import { getChain, isSupportedChain, isDeployableChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
 import { getRelayer, warnIfRelayerLow } from '../lib/relayer.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
@@ -154,6 +154,15 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
 
     if (!isSupportedChain(chain_id)) {
       return reply.code(400).send({ error: `Unsupported chain: ${chain_id}` })
+    }
+
+    // Served-chains guard (#679): a chain this environment doesn't deploy on
+    // would otherwise fail later on an empty relayer with a misleading transient
+    // "relayer unfunded". Reject up front with a clear, non-transient message.
+    if (!isDeployableChain(chain_id)) {
+      return reply.code(422).send({
+        error: `Haven isn't creating accounts on ${getChain(chain_id).name} in this environment. Choose a supported network.`,
+      })
     }
 
     if (salt_nonce !== undefined && !/^\d+$/.test(salt_nonce)) {

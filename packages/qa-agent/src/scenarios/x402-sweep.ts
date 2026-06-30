@@ -159,9 +159,21 @@ export const x402Sweep: Scenario = {
     try {
       submitted = await client.submitSweep(prep.authorization, signature)
     } catch (e) {
-      // (#1) A genuine sweep failure: there WAS a stranded balance and the relayer
-      // couldn't move it. Report both balances so the cause is unambiguous.
       const after = await readUsdc(provider, ctx.delegateAddress)
+      if (after === 0n) {
+        // The delegate was funded then drained to 0 before the sweep, and the
+        // sweep reverted ("transfer amount exceeds balance"). The only other
+        // drainer is the merchant settling — i.e. it did NOT verify-without-settle,
+        // so there was nothing to recover. An unmet precondition (skip), not a
+        // sweep regression (fail). Same classification as the no-stranded case.
+        return skip(
+          `delegate funded ${fmt(strandedBefore)} USDC then drained to 0 before the sweep — ` +
+            `the merchant settled instead of verify-without-settle (check ` +
+            `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb on the demo-merchant)`,
+        )
+      }
+      // A genuine sweep failure: the stranded balance is still on the delegate but
+      // the relayer couldn't move it. Report both balances so the cause is clear.
       return fail(
         `gasless sweep submit failed (delegate held ${fmt(strandedBefore)} USDC before, ` +
           `${fmt(after)} after): ${e instanceof Error ? e.message : String(e)}`,

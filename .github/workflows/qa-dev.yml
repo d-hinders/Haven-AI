@@ -21,6 +21,8 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
       - run: npm ci
+      - name: Build SDK dependency
+        run: npm run build -w packages/sdk
       - name: Run money-flow QA
         env:
           QA_HAVEN_API_URL: ${{ github.event.inputs.haven_api_url || secrets.QA_HAVEN_API_URL }}

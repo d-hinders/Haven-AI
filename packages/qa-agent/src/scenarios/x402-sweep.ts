@@ -45,6 +45,35 @@ async function waitForStrandedUsdc(provider: ethers.Provider, delegate: string):
   return balance
 }
 
+// The x402 funding leg (Safe → delegate) can revert on a stale allowance nonce
+// when a prior transfer's nonce increment hasn't propagated to the backend's RPC
+// (#692). The backend preflight (#693) makes that a clean no-op — no transfer
+// landed — so retrying after a short delay (to let the nonce propagate) is safe
+// and cannot double-fund.
+const FUNDING_RETRY_ATTEMPTS = 3
+const FUNDING_RETRY_DELAY_MS = 6_000
+const STALE_NONCE_RE = /stale allowance nonce|allowance transfer would revert/i
+
+async function fetchWithFundingRetry(
+  client: HavenClient,
+  url: string,
+  init: Parameters<HavenClient['fetch']>[1],
+): Promise<Awaited<ReturnType<HavenClient['fetch']>>> {
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= FUNDING_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await client.fetch(url, init)
+    } catch (e) {
+      lastErr = e
+      const msg = e instanceof Error ? e.message : String(e)
+      // Only the stale-nonce funding race is retry-safe; anything else is real.
+      if (!STALE_NONCE_RE.test(msg) || attempt === FUNDING_RETRY_ATTEMPTS) throw e
+      await new Promise((resolve) => setTimeout(resolve, FUNDING_RETRY_DELAY_MS))
+    }
+  }
+  throw lastErr
+}
+
 export const x402Sweep: Scenario = {
   name: 'x402-sweep-recovery',
   invariant:
@@ -71,7 +100,7 @@ export const x402Sweep: Scenario = {
       method: 'tools/call',
       params: { name: 'buy_cloud_storage', arguments: { tier: '50gb' } },
     })
-    const res = await client.fetch(mcpUrlOf(ctx), {
+    const res = await fetchWithFundingRetry(client, mcpUrlOf(ctx), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
       body,

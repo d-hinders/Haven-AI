@@ -15,7 +15,7 @@
  * a stranded balance the sweep failed to reclaim → `fail` with both balances.
  */
 
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, buildSweepTypedData } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
@@ -28,13 +28,6 @@ const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 // deciding nothing was stranded. Absorbs cross-RPC propagation lag (#603/#684).
 const STRAND_WAIT_MS = 20_000
 const POLL_INTERVAL_MS = 2_000
-
-interface SweepTransfer {
-  asset: string
-  amount: string
-  amountAtomic: string
-  txHash: string
-}
 
 async function readUsdc(provider: ethers.Provider, address: string): Promise<bigint> {
   const usdc = new ethers.Contract(SEPOLIA_USDC, USDC_ABI, provider)
@@ -100,30 +93,53 @@ export const x402Sweep: Scenario = {
       )
     }
 
-    // The funds are stranded on the delegate — reclaim them to the Safe.
-    let sweep: { transfers?: SweepTransfer[] }
+    // Gasless sweep (#684): the delegate signs an EIP-3009 transferWithAuthorization
+    // off-chain and the Haven relayer submits it (pays gas). This works for a
+    // gasless delegate (no ETH needed) and matches the production sweep path —
+    // unlike sweepDelegate()'s direct ERC-20 transfer, which needs the delegate to
+    // hold gas and so can never sweep a Haven delegate.
+    let prep
     try {
-      sweep = (await client.sweepDelegate()) as { transfers?: SweepTransfer[] }
+      prep = await client.prepareSweep()
     } catch (e) {
       return fail(
-        `sweepDelegate threw (delegate held ${fmt(strandedBefore)} USDC): ` +
+        `prepareSweep failed (delegate held ${fmt(strandedBefore)} USDC): ` +
           `${e instanceof Error ? e.message : String(e)}`,
       )
     }
 
-    const reclaimed = sweep.transfers?.find(
-      (t) => t.asset === 'USDC' && BigInt(t.amountAtomic || '0') > 0n,
-    )
-    if (!reclaimed) {
-      // (#1) A genuine sweep failure: there WAS a stranded balance and the sweep
-      // didn't move it. Report both balances so the cause is unambiguous.
-      const after = await readUsdc(provider, ctx.delegateAddress)
+    if (prep.nothing_stranded || !prep.authorization) {
+      // We saw a balance on our RPC but the backend's read found none — a
+      // backend↔harness RPC discrepancy, not a clean recovery.
       return fail(
-        `sweep failed to reclaim an existing balance: delegate held ${fmt(strandedBefore)} USDC ` +
-          `before sweep, ${fmt(after)} after; sweep transfers: ${JSON.stringify(sweep.transfers ?? [])}`,
+        `backend reported nothing stranded, but the delegate held ${fmt(strandedBefore)} USDC ` +
+          `on ${BASE_SEPOLIA_RPC}`,
       )
     }
-    return pass(`stranded ${reclaimed.amount} USDC reclaimed to the Safe (tx ${reclaimed.txHash})`)
+
+    const typed = buildSweepTypedData(prep.authorization)
+    const signature = await new ethers.Wallet(ctx.delegateKey).signTypedData(
+      typed.domain,
+      typed.types as unknown as Record<string, ethers.TypedDataField[]>,
+      typed.message,
+    )
+
+    let submitted: Awaited<ReturnType<HavenClient['submitSweep']>>
+    try {
+      submitted = await client.submitSweep(prep.authorization, signature)
+    } catch (e) {
+      // (#1) A genuine sweep failure: there WAS a stranded balance and the relayer
+      // couldn't move it. Report both balances so the cause is unambiguous.
+      const after = await readUsdc(provider, ctx.delegateAddress)
+      return fail(
+        `gasless sweep submit failed (delegate held ${fmt(strandedBefore)} USDC before, ` +
+          `${fmt(after)} after): ${e instanceof Error ? e.message : String(e)}`,
+      )
+    }
+
+    return pass(
+      `stranded ${submitted.amount} USDC reclaimed to the Safe via gasless sweep (tx ${submitted.tx_hash})`,
+    )
   },
 }
 

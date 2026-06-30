@@ -1,4 +1,4 @@
-# Surface labels for /ship-next classification (epic #651).
+# Surface labels for ship-next classification (epic #651).
 # Synced to the repo by .github/workflows/labels.yml on merge to dev/main.
 # `skip-delete: true` there means labels NOT listed here (epic, code-quality, …)
 # are left untouched — this file owns only the surface taxonomy below.

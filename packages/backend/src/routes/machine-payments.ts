@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
+import { config } from '../config.js'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import {
@@ -1094,6 +1095,26 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         asset: 'USDC',
         chain_id: agent.chain_id,
         message: 'No stranded USDC on the delegate wallet — nothing to recover.',
+      })
+    }
+
+    // Auto-sweep value cap (#700): only auto-recover small stranded balances; park
+    // anything over the cap for manual recovery, bounding the blast radius while
+    // the sweep money-path matures. The funds stay safely on the delegate (the
+    // sweep only ever moves them to the user's own Safe), so nothing is lost — and
+    // since no authorization is stored, /sweep/submit can't relay an over-cap sweep.
+    const capAtomic = ethers.parseUnits(config.sweepMaxUsdc, USDC_DECIMALS)
+    if (balance > capAtomic) {
+      return reply.code(200).send({
+        parked: true,
+        asset: 'USDC',
+        amount: ethers.formatUnits(balance, USDC_DECIMALS),
+        amount_atomic: balance.toString(),
+        cap_usdc: config.sweepMaxUsdc,
+        chain_id: agent.chain_id,
+        message:
+          `Stranded ${ethers.formatUnits(balance, USDC_DECIMALS)} USDC exceeds the auto-sweep ` +
+          `cap of ${config.sweepMaxUsdc} USDC — parked for manual recovery.`,
       })
     }
 

@@ -3,109 +3,164 @@ owner: "@d-hinders"
 status: current
 covers:
   - .env.dev.example
+  - .github/workflows/qa-dev.yml
+  - .github/workflows/qa-live.yml
   - packages/qa-agent/**
-  - packages/frontend/src/lib/api.ts
-  - packages/backend/src/lib/allowance-module.ts
-last-verified: "2026-06-28"
+  - packages/frontend/e2e/live/**
+  - packages/frontend/playwright.live.config.ts
+last-verified: "2026-06-30"
 ---
 
-# Agent QA — running the QA layers against the dev environment
+# Agent QA — run the automated QA layers against dev
 
-The home doc for the automated, agent-based QA flow (epic #573). It lets a
-contributor reproduce a QA run against the shared **dev environment**: which URLs
-to target, how the backend override works, what credentials/funding are needed,
-and how the layers connect. Companion to
-[`dev-environment.md`](./dev-environment.md) (how the dev stack is wired).
+This is the canonical operator runbook for Haven's automated QA against the
+shared **dev environment**. It covers initial provisioning, local runs, GitHub
+Actions runs, funding, expected results, and troubleshooting.
 
-> **Verify the stack first.** Do not start a QA run until the dev-stack
-> verification checklist on #574 is green. The dev backend, demo-merchant and
-> hosted MCP are deployed and auto-deploy from `dev` (verified); the open items
-> are the **real dev frontend URL**, the **funded QA delegate**, and the `QA_*`
-> secrets — plus retiring the stale `dev-backend.up.railway.app` duplicate.
+All money-flow QA uses **Base Sepolia (`84532`) and test USDC only**. Never use
+production credentials, a mainnet RPC, or real funds.
 
-## Targets
+## Which path should I use?
 
-The dev **backend** stack has stable Railway URLs; the dev **frontend** has **no
-permanent URL** — it is a per-PR Vercel preview link that changes on every
-deployment. Pass the preview link in per run (e.g. as `PLAYWRIGHT_BASE_URL` / the
-Layer 1 `base_url` input), and confirm the backend host in the Railway dev project.
+| Operation | Local terminal | GitHub Actions | When to use it |
+|---|---:|---:|---|
+| Seed the QA user, Safe, allowance, and agent | Yes | No | First-time setup or identity replacement |
+| Deterministic money-flow QA (`qa-dev.yml`) | Yes | Yes | Local debugging or shared repeatable evidence |
+| Live deployed-UI smoke (`qa-live.yml`) | Yes | Yes | Verify a Vercel preview against the dev backend |
+| Exploratory agent/merchant QA | Yes | No | Coverage that needs human or LLM judgment |
 
-| Surface | URL | Used by |
+Use **GitHub Actions** for the normal shared money-flow run after the identity,
+funding, and repository secrets exist. Use a **local run** to provision the
+identity, debug failures, or validate changes before pushing them.
+
+Neither workflow is scheduled or a merge gate today; both are manually
+dispatched with `workflow_dispatch`.
+
+## Stable dev targets
+
+| Surface | Target |
+|---|---|
+| Backend | `https://havenbackend-dev-8b95.up.railway.app` |
+| Demo merchant | `https://demo-merchant-dev-84e4.up.railway.app` |
+| Chain | Base Sepolia (`84532`) |
+| USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| Frontend | The current Vercel preview URL; there is no permanent dev frontend URL |
+
+The seed and money-flow harness are Node processes that call the backend
+directly. They do not depend on browser CORS. The live UI smoke drives a real
+browser and uses the guarded `?apiBaseUrl`/local-storage override described
+under [Live deployed-UI smoke](#live-deployed-ui-smoke).
+
+## One-time setup
+
+### 1. Prepare a clean `dev` checkout
+
+The repository requires Node 24:
+
+```bash
+git fetch origin
+git switch dev
+git pull --ff-only
+node --version
+npm ci
+npm run build -w packages/sdk
+```
+
+The SDK build is required because `packages/qa-agent` imports the workspace SDK
+through `packages/sdk/dist/index.js`. The GitHub workflow performs this build
+automatically.
+
+If another branch has unresolved conflicts, do not reset it just to run QA.
+Create a clean worktree from `origin/dev` instead:
+
+```bash
+git worktree add --detach .worktrees/qa-dev origin/dev
+cd .worktrees/qa-dev
+npm ci
+npm run build -w packages/sdk
+```
+
+### 2. Create the seed environment file
+
+Keep credential files outside the repository. Example
+`/secure/path/qa-seed.env`:
+
+```bash
+SEED_HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app
+SEED_RPC_URL=https://sepolia.base.org
+SEED_OWNER_PRIVATE_KEY=<throwaway Base Sepolia owner key>
+SEED_DELEGATE_ADDRESS=<address derived from the QA delegate key>
+SEED_PAYMENT_TO=<Base Sepolia recipient address>
+SEED_QA_EMAIL=<dedicated dev QA user email>
+SEED_QA_PASSWORD=<dedicated dev QA user password>
+SEED_ALLOWANCE_USDC=5
+SEED_RESET_MIN=1440
+```
+
+The seed accepts the delegate **address**, not its private key. Haven must never
+receive or store the owner or delegate private key.
+
+### 3. Fund the required testnet accounts
+
+| Account | Funding | Why |
 |---|---|---|
-| Dev frontend | **Per-PR Vercel preview link** — changes each deploy, no permanent URL; Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev`. ⚠️ *not* `haven-dev.vercel.app` (a different "HAVEN Project" app). | Layer 1 (#576), Layer 3 (#579) |
-| Dev backend / API | `https://havenbackend-dev-8b95.up.railway.app` (⚠️ *not* `dev-backend.up.railway.app`, a stale duplicate) | All layers (the stable API money flows hit) |
-| Dev demo-merchant | `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz` verified online) | Layer 2a (#575) x402 settlement |
-| Dev MCP | `haven-ai-hosted-mcp-dev-<hash>.up.railway.app` (confirm the hash in Railway) | Layer 2b (#577) |
+| Owner EOA | Base Sepolia ETH | Submits the Safe deployment and owner-approved allowance setup |
+| Safe | Base Sepolia test USDC | Source of the QA agent allowance and payments |
+| Dev relayer | Base Sepolia ETH | Submits Allowance Module transfers during payment scenarios |
+| Delegate EOA | Small amount of Base Sepolia ETH | Required by the current SDK direct-transfer sweep scenario |
 
-## Two ways the layers reach the backend — they differ on CORS
+Ordinary agent payments do not require delegate gas: the delegate signs and the
+relayer submits the constrained Safe transfer. The `x402-sweep-recovery`
+scenario is different: `HavenClient.sweepDelegate()` currently submits a USDC
+transfer directly from the delegate, so the delegate needs testnet ETH.
 
-This distinction decides what each layer depends on:
+The demo merchant must also be configured with:
 
-- **Node → API (server-to-server):** the seed script (#574) and the money-flow
-  harness (#575) call the backend **directly** at
-  `HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app`. No browser, **no CORS** — so
-  these layers do **not** depend on the CORS fix (#585). Their blockers are the
-  **demo-merchant on dev** and the **funded delegate / secrets**.
-- **Browser (cross-origin):** the live UI smoke (#576) and browser-exploration
-  (#579) drive a real browser against the **frontend** URL. To re-point a frontend
-  at the shared dev backend they append `?apiBaseUrl=<dev-backend>` — a **browser
-  cross-origin** call, so these layers **do** depend on the CORS fix (#585).
+```text
+MERCHANT_CHAIN_ID=84532
+MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb
+```
 
-## The `?apiBaseUrl` override (gated — #582/#583)
+The second setting creates the deterministic stranded-balance condition used by
+the sweep-recovery scenario.
 
-A frontend can be re-pointed at a chosen backend at runtime:
+### 4. Run the seed locally
 
-- `…?apiBaseUrl=https://havenbackend-dev-8b95.up.railway.app` → routes the app's API calls
-  to that backend and persists it to `localStorage['haven_api_base_url']`.
-- `…?apiBaseUrl=default` → clears the stored override.
+```bash
+set -a
+source "/secure/path/qa-seed.env"
+set +a
+npm run seed -w packages/qa-agent
+```
 
-**Security gate (do not remove):** the override is honored **only when the build
-is non-production** — i.e. `NEXT_PUBLIC_HAVEN_ENV` is a non-prod value (`dev`).
-A production build ignores `?apiBaseUrl` entirely, so a crafted link cannot
-redirect a logged-in user's `Authorization: Bearer <JWT>` to an attacker host
-(#582). Implementation: `packages/frontend/src/lib/api.ts` (`getResolvedApiBaseUrl`).
+The seed is idempotent:
 
-**Consequence for QA:** the frontend you target must be a **dev/preview build**
-with `NEXT_PUBLIC_HAVEN_ENV` set to a non-prod value, or `?apiBaseUrl` is a no-op.
-The dev Vercel project sets `NEXT_PUBLIC_HAVEN_ENV=dev`; for PR-preview QA, the
-Vercel **Preview** scope must set it too.
+1. Create or log in to the QA user.
+2. Deploy or reuse the Base Sepolia Safe.
+3. Enable the Allowance Module and configure the delegate allowance.
+4. Create or reuse the QA agent.
 
-## QA identity, funding & secrets (owner-provisioned)
+It prints the Safe address and the `QA_*` block for the harness. Fund the Safe
+with Base Sepolia test USDC after its first deployment.
 
-The QA layers run as a dedicated, seeded dev identity — never a real user. Set up
-per #574; all values are **testnet/dev-only** and must differ from production.
+An API key is shown only when a new agent is created. If the agent already
+exists and its key was lost or exposed, rotate it instead of creating duplicate
+QA identities.
 
-- **Seeded identity:** a QA user + one Safe on Base Sepolia + a `QA Agent` with a
-  small, reset-bound allowance, created idempotently against the dev backend by
-  the seed script — `npm run seed -w packages/qa-agent` (#574 item 1; `SEED_*`
-  env documented in [`packages/qa-agent/README.md`](../../packages/qa-agent/README.md)).
-  The seed never holds the delegate key — it takes the delegate **address** only.
-- **Funding (three wallets, distinct roles):** the delegate **signs** payments
-  off-chain and never submits a transaction (`lib/allowance-module.ts`: *"the
-  relayer pays gas; the delegate's signature authorises the transfer"*), so the
-  delegate needs **no gas and no pre-funded USDC**. What actually needs funding on
-  **Base Sepolia**:
-  - **Safe** — test **USDC** (the spendable funds the allowance draws from), sized
-    for many small runs.
-  - **Relayer** (`RELAYER_PRIVATE_KEY`) — Base Sepolia **ETH** for gas; it submits
-    the AllowanceModule transfers. Keep it topped up — a gas-empty relayer fails QA
-    silently.
-  - **Delegate** — nothing on-chain; just the key. Record its address for audit.
-- **Secrets (names only — never commit values):** GitHub Actions secrets for the
-  CI-driven layers — `QA_AGENT_API_KEY`, `QA_DELEGATE_PRIVATE_KEY`,
-  `QA_HAVEN_API_URL` (= the dev backend), `QA_PAYMENT_TO`, plus any seeded-session
-  token the live UI smoke needs. Local `.env` equivalents mirror
-  [`.env.dev.example`](../../.env.dev.example).
+## Money-flow QA
 
-## Safety (why this is safe to run often)
+The deterministic harness runs five scenarios in order:
 
-The dev environment is **testnet-only** (Gnosis Chiado / Base Sepolia), with an
-isolated Postgres and a throwaway relayer/delegate holding only test funds. A
-fully-compromised QA identity cannot move real money — QA leans on Haven's own
-non-custodial invariant. No layer ever needs a production credential, a mainnet
-RPC, or real funds.
+| Scenario | Expected result |
+|---|---|
+| `within-budget-settle` | A 0.1 USDC payment settles on-chain and has a receipt |
+| `over-budget-queue` | An over-budget payment queues for approval and does not execute |
+| `x402-over-budget-rejected` | An unaffordable x402 request is rejected before a signable intent |
+| `x402-settle` | A small x402 payment settles through the dev demo merchant |
+| `x402-sweep-recovery` | Verify-without-settle strands USDC, then the delegate sweeps it back to the Safe |
 
-## The layers (build order)
+The harness exits non-zero if any non-skipped scenario fails and prints a
+Markdown run report suitable for `docs/bug-reports/`.
 
 See epic #573. Build order: **#574 (foundation) → #575 (deterministic money-flow,
 Node→API) → #576 (live UI smoke, browser) →** then the non-gating exploratory
@@ -113,6 +168,126 @@ layers (#577 LLM-agent, #579 browser exploration), with automation/gating last
 (#578). Deterministic layers (#575/#576) are the promotion signal; the LLM layers
 are non-gating coverage that file run reports under
 [`bug-reports/`](../bug-reports/).
+
+### Required harness environment
+
+Keep `/secure/path/qa-run.env` outside the repository:
+
+```bash
+QA_HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app
+QA_AGENT_API_KEY=<testnet QA agent API key>
+QA_DELEGATE_PRIVATE_KEY=<throwaway Base Sepolia delegate key>
+QA_PAYMENT_TO=<Base Sepolia recipient address>
+QA_DEMO_MERCHANT_URL=https://demo-merchant-dev-84e4.up.railway.app
+```
+
+`QA_DEMO_MERCHANT_URL` is technically optional in the config loader, but it is
+required to exercise all five scenarios. A leading `#` comments out a variable;
+do not write `# QA_AGENT_API_KEY=...`.
+
+### Run locally
+
+```bash
+set -a
+source "/secure/path/qa-run.env"
+set +a
+npm run qa:dev -w packages/qa-agent
+```
+
+Environment files are not loaded automatically. Source the file again after
+editing it or after opening a new terminal.
+
+### Configure GitHub Actions
+
+The repository needs these encrypted Actions secrets:
+
+- `QA_HAVEN_API_URL`
+- `QA_AGENT_API_KEY`
+- `QA_DELEGATE_PRIVATE_KEY`
+- `QA_PAYMENT_TO`
+- `QA_DEMO_MERCHANT_URL`
+
+If the dotenv file contains exactly those five entries, upload them with:
+
+```bash
+gh secret set -f "/secure/path/qa-run.env" --repo d-hinders/Haven-AI
+gh secret list --repo d-hinders/Haven-AI
+```
+
+The delegate key authorizes testnet payments and sweeps. Only upload a
+throwaway, allowance-capped Base Sepolia key. Anyone able to modify and run a
+workflow with access to repository secrets may be able to use that key in the
+runner. Rotate exposed credentials and never reuse them outside QA.
+
+### Run from GitHub
+
+CLI:
+
+```bash
+gh workflow run qa-dev.yml \
+  --repo d-hinders/Haven-AI \
+  --ref dev
+
+gh run list \
+  --repo d-hinders/Haven-AI \
+  --workflow qa-dev.yml \
+  --limit 1
+```
+
+Inspect a run:
+
+```bash
+gh run view <run-id>
+gh run view <run-id> --log-failed
+```
+
+GitHub UI:
+
+1. Open **Actions**.
+2. Select **QA — money-flow (dev)**.
+3. Choose **Run workflow**.
+4. Select the `dev` branch and run it.
+
+Secrets should appear as `***` in logs. The workflow checks out `dev`, installs
+dependencies, builds the SDK, and executes the same harness as the local
+command.
+
+## Live deployed-UI smoke
+
+The live smoke is read-only. It logs the seeded QA user into the dev backend and
+checks that a deployed frontend can load real dashboard data.
+
+Required Actions secrets:
+
+- `QA_HAVEN_API_URL`
+- `QA_USER_EMAIL`
+- `QA_USER_PASSWORD`
+
+Run it against the current non-production Vercel preview:
+
+```bash
+gh workflow run qa-live.yml \
+  --repo d-hinders/Haven-AI \
+  --ref dev \
+  -f base_url=https://<current-preview>.vercel.app
+```
+
+The preview must set `NEXT_PUBLIC_HAVEN_ENV=dev`; production builds intentionally
+ignore the backend override.
+
+For a local invocation:
+
+```bash
+npx playwright install chromium
+export PLAYWRIGHT_BASE_URL=https://<current-preview>.vercel.app
+export QA_HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app
+export QA_USER_EMAIL=<dedicated dev QA user email>
+export QA_USER_PASSWORD=<dedicated dev QA user password>
+npm run test:e2e:live -w packages/frontend
+```
+
+GitHub uploads the Playwright report, screenshots, video, and trace as a
+seven-day artifact when the run completes.
 
 ## Layer 2b — exploratory agent QA (`/qa-dev`, #577)
 
@@ -140,3 +315,75 @@ wiring the deterministic harness (2a) can't. Because the tester is an LLM, it is
 > Stop at the first failed step. Then write a run report from
 > `docs/bug-reports/_run-report-template.md` (per-goal pass/fail + friction) and file
 > concrete bugs as issues. This is non-gating exploratory coverage.
+
+## Reading results and filing bugs
+
+- `PASS`: the asserted invariant held.
+- `SKIP`: an optional prerequisite was absent. For sweep recovery, this commonly
+  means the merchant did not leave a stranded balance; confirm
+  `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb`.
+- `FAIL`: the invariant was exercised and failed.
+- Process exit `1`: at least one scenario failed; this is expected behavior for
+  a red gate, not a workflow configuration failure.
+- Process exit `2`: required `QA_*` configuration is missing.
+
+Copy the generated run report into `docs/bug-reports/` and file a GitHub issue
+for a reproducible failure. Include the Actions run URL and transaction/payment
+identifiers, but never include API keys or private keys.
+
+## Troubleshooting
+
+### `ERR_MODULE_NOT_FOUND ... @haven_ai/sdk/dist/index.js`
+
+Build the workspace SDK:
+
+```bash
+npm run build -w packages/sdk
+```
+
+### `Missing required QA env`
+
+The dotenv file was not sourced, a variable is commented out, or the shell was
+restarted. Source it and verify names without printing values:
+
+```bash
+for name in QA_HAVEN_API_URL QA_AGENT_API_KEY QA_DELEGATE_PRIVATE_KEY QA_PAYMENT_TO QA_DEMO_MERCHANT_URL; do
+  printenv "$name" >/dev/null && echo "$name: present" || echo "$name: MISSING"
+done
+```
+
+### Seed returns `could not decode result data`
+
+The public Base Sepolia RPC can briefly return stale state immediately after a
+Safe deployment. The seed is idempotent; retry it. If this repeats, set
+`SEED_RPC_URL` to a dedicated Base Sepolia provider.
+
+### `On-chain execution failed` or `insufficient funds`
+
+Check balances by role:
+
+1. Safe: enough test USDC and remaining allowance.
+2. Dev relayer: enough Base Sepolia ETH for allowance transfers.
+3. Delegate: enough Base Sepolia ETH for the direct USDC sweep.
+4. Owner: enough Base Sepolia ETH only when reseeding or changing the allowance.
+
+Do not repeatedly rerun a money-moving harness while the cause is unknown; each
+run consumes test allowance and test USDC.
+
+### Sweep is skipped after 20 seconds
+
+The merchant did not produce a visible stranded balance. Confirm its Base
+Sepolia deployment and `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb`, then check
+for RPC propagation delay.
+
+### GitHub warning about actions using Node 20
+
+This runner warning is not a harness failure. The repository uses Node 24 for
+project commands; update third-party action versions separately when supported.
+
+## Related documentation
+
+- [`packages/qa-agent/README.md`](../../packages/qa-agent/README.md) — package and scenario details
+- [`e2e-qa-runbook.md`](./e2e-qa-runbook.md) — manual agent/merchant coverage
+- [`dev-environment.md`](./dev-environment.md) — shared dev topology
+- [`promoting-dev-to-main.md`](./promoting-dev-to-main.md) — promotion checks

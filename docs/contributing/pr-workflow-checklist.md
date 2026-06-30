@@ -5,8 +5,8 @@ covers:
   - .github/workflows/**
   - .github/pull_request_template.md
   - package.json
-  - .claude/agents/haven-reviewer.md
-last-verified: "2026-06-29"
+  - .agents/skills/haven-agent-workflow/references/reviewer.md
+last-verified: "2026-06-30"
 ---
 
 # PR Workflow Checklist
@@ -23,7 +23,8 @@ Haven uses a `dev` integration branch in front of `main`:
   PR into `dev`, and let it merge there once green. `dev` is the shared
   integration branch and deploys to the **dev environment** (Railway + Vercel).
 - **`dev → main` is a separate promotion step** (a human-opened PR). Merging to
-  `main` deploys to **production**.
+  `main` deploys to **production** — follow the
+  [`dev → main` promotion checklist](../operations/promoting-dev-to-main.md).
 - **`hotfix/* → main` is the only direct-to-`main` path**, for emergency fixes
   that can't wait for the dev cycle.
 - The **`dev-gate`** workflow (`.github/workflows/dev-gate.yml`) enforces this:
@@ -125,7 +126,7 @@ Use the smallest reliable set that matches the change.
 Notes:
 
 - `npm run quality` means typecheck, unit tests, and builds across workspaces.
-- Docs-only CI treats Markdown, `.claude/agents/*.md`, and `.github/pull_request_template.md` as non-code, with one exception: editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Editing `.github/workflows/*.yml` triggers full workflow checks.
+- Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with one exception: editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend lint is not a required gate yet because `next lint` currently prompts for ESLint setup. Add lint only after a dedicated non-interactive lint migration.
 - Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.
 

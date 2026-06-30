@@ -8,6 +8,8 @@ import {
   TRANSFER_WITH_AUTHORIZATION_TYPES,
   SWEEP_BASE_CHAIN_ID,
   SWEEP_BASE_USDC_ADDRESS,
+  SWEEP_BASE_SEPOLIA_CHAIN_ID,
+  SWEEP_BASE_SEPOLIA_USDC_ADDRESS,
   type SweepAuthorization,
 } from './sweep.js'
 import { HavenSigningError } from './types.js'
@@ -39,6 +41,21 @@ describe('buildSweepTypedData', () => {
     expect(td.message.value).toBe(40000n)
     expect(td.message.validAfter).toBe(0n)
     expect(typeof td.message.nonce).toBe('string')
+  })
+
+  it('builds Base Sepolia USDC typed data with the testnet domain (name "USDC")', () => {
+    const td = buildSweepTypedData(
+      baseAuthorization({
+        chainId: SWEEP_BASE_SEPOLIA_CHAIN_ID,
+        token: SWEEP_BASE_SEPOLIA_USDC_ADDRESS,
+      }),
+    )
+    expect(td.domain).toEqual(sweepUsdcDomain(SWEEP_BASE_SEPOLIA_CHAIN_ID))
+    // Base Sepolia USDC reports name "USDC"/version "2" on-chain — distinct from
+    // Base mainnet's "USD Coin"; a mismatch would make the relayer tx revert.
+    expect(td.domain.name).toBe('USDC')
+    expect(td.domain.chainId).toBe(SWEEP_BASE_SEPOLIA_CHAIN_ID)
+    expect(td.domain.verifyingContract).toBe(SWEEP_BASE_SEPOLIA_USDC_ADDRESS)
   })
 
   it('rejects an unsupported chain', () => {

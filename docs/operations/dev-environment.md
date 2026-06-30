@@ -5,7 +5,7 @@ covers:
   - .github/workflows/**
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # Dev environment
@@ -70,6 +70,12 @@ Isolation rules that are non-negotiable for a payments product:
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado**, `RPC_URL_BASE` →
   **Base Sepolia**. Swap to mainnet RPCs only if a test genuinely needs mainnet
   state.
+- **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
+  accounts on Base Sepolia (onboarding offers only served chains, #679), and
+  `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
+  multichain backend resolves the relayer **per chain**
+  (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678), so a testnet relayer can never
+  touch mainnet funds.
 
 ### The `DEV` badge
 

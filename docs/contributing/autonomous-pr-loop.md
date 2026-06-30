@@ -6,8 +6,11 @@ covers:
   - .github/workflows/dev-gate.yml
   - .github/ISSUE_TEMPLATE/loop-task.md
   - .github/ISSUE_TEMPLATE/loop-epic.md
+  - .agents/skills/ship-next/SKILL.md
+  - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
-last-verified: "2026-06-29"
+  - .claude/commands/new-task.md
+last-verified: "2026-06-30"
 ---
 
 # Autonomous PR loop
@@ -29,18 +32,20 @@ and only comes back to you for a real decision, a money-path approval, or stuck
 CI.
 
 Pieces:
-- **`/ship-next`** (`.claude/commands/ship-next.md`) — does **one** PR end-to-end, then stops.
-- **`/loop /ship-next`** — re-invokes `/ship-next` for each following item until the backlog is empty (self-paced).
+- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default.
+- **`ship-next`** ([canonical skill](../../.agents/skills/ship-next/SKILL.md)) — **execute**: does **one** PR end-to-end, then stops. `ship-next "<task>"` is `new-task` + ship in one go.
+- **Client adapters** — Claude Code exposes thin `/new-task` and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
 - **haven-reviewer** — the per-PR quality gate.
 - **haven-doc-reviewer** — advisory per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Run it when the diff touches code that some doc's `covers:` front-matter maps to; updating those docs is part of definition-of-done. Advisory today — it does not block auto-merge.
-- **Surface playbooks** — `/ship-next` classifies each issue's surface from its `area:*` / `money-path` labels (Phase 1.5) and loads the matching playbook from `docs/contributing/ship-playbooks/` (UX + design system for frontend, CASP for money-path, etc.), so the right standards apply without a long prompt. See [`ship-playbooks/README.md`](ship-playbooks/README.md).
-- **`.github/CODEOWNERS`** — the money-path carve-out (the only PRs that still need a human merge).
+- **Surface playbooks** — `ship-next` classifies each issue's surface from its `area:*` / `money-path` labels and loads the matching playbook from `docs/contributing/ship-playbooks/` (UX + design system for frontend, CASP for money-path, etc.), so the right standards apply without a long prompt. See [`ship-playbooks/README.md`](ship-playbooks/README.md).
+- **`.github/CODEOWNERS`** — the migration carve-out for independent GitHub review and merge.
 
 > **Base branch: `dev`, not `main`.** The loop branches off `dev` and opens every
 > PR with base `dev`. The `dev-gate` workflow (`.github/workflows/dev-gate.yml`)
-> only lets `dev` or `hotfix/*` merge into `main`, so a `claude/*` branch can
-> never target `main` directly — it would fail the gate. Feature work flows
-> `claude/* → dev`; promoting `dev → main` (which deploys to prod) is a separate,
+> only lets `dev` or `hotfix/*` merge into `main`, so feature branches can
+> never target `main` directly — they would fail the gate. Feature work uses
+> the active client's required branch prefix and flows into `dev`; promoting
+> `dev → main` (which deploys to prod) is a separate,
 > human step.
 >
 > **`dev` is the repo's default branch**, so `Closes #<n>` closes the issue on the
@@ -54,7 +59,18 @@ Pieces:
 
 ## Quickstart
 
+The examples below use the Claude Code slash-command adapter. In a compatible
+client, invoke the canonical `new-task` or `ship-next` skill with the same
+arguments. Repetition is client-specific; every `ship-next` run handles one
+issue and stops.
+
 ```bash
+# Capture a task as a well-formed backlog issue (does NOT ship it):
+/new-task "add a copy button to the agent card"
+
+# Throw a task straight at the loop — drafts the issue AND ships it:
+/ship-next "add a copy button to the agent card"
+
 # Standalone small tasks — open issues labeled `code-quality` are the queue:
 /loop /ship-next                 # default source = the `code-quality` label
 /loop /ship-next label=<label>   # or any other loop label you've set up
@@ -70,12 +86,22 @@ Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
 pings you only for a money-path approval, a real decision, or stuck CI.
 
 
-## Two ways to feed work in
+## Feeding work in
 
-Both are **GitHub issues** — nothing is tracked in the repo. Issue state *is* the
-backlog state: an open issue with no PR is ready, an open issue with an open
-Haven PR is in flight, and a closed issue is done (its PR closed it via
-`Closes #`).
+The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
+state *is* the backlog state: an open issue with no PR is ready, an open issue
+with an open Haven PR is in flight, and a closed issue is done (its PR closed it
+via `Closes #`).
+
+You don't have to hand-write those issues. **Capture is its own step:**
+[`new-task "<description>"`](../../.agents/skills/new-task/SKILL.md) turns a one-line
+task into a well-formed issue (Scope + Acceptance + Surface + Money-path), asking
+a clarifying question or two when needed. It's **backlog-only by default** — it
+applies `area:*` labels but *not* `code-quality`, so capturing a task doesn't
+queue it. Promote it later by adding `code-quality`, or skip straight to shipping
+with `ship-next "<description>"` (drafts the issue *and* runs the pipeline). This
+is the low-friction front door for partners: throw a sentence, the system does
+the paperwork. Then the loop consumes those issues one of these ways:
 
 1. **Standalone labeled issues** — for small, self-contained tasks. Open an issue
    with a concrete **scope + acceptance criteria** and add the **`code-quality`**
@@ -95,7 +121,7 @@ GitHub stays the source of truth — there is no file to maintain. The only
 requirement: an issue must be defined well enough to implement — one with no
 acceptance criteria makes the loop stop and ask you to sharpen it.
 
-You can run a single step manually with `/ship-next` (no `/loop`) to watch one
+You can run a single step manually with `ship-next` (without a client loop) to watch one
 PR go through before handing it the whole queue.
 
 ## Merge policy A (what this loop does)
@@ -145,7 +171,7 @@ If you're asked to review one:
 
 ## One-time GitHub setup (required)
 
-Without this, `/ship-next` can open PRs but cannot auto-merge them.
+Without this, `ship-next` can open PRs but cannot auto-merge them.
 
 1. **Settings → General → Default branch: set to `dev`.** This is what makes
    `Closes #<n>` close issues on the **dev-merge** (closed = implemented). `main`
@@ -181,7 +207,7 @@ Without this, `/ship-next` can open PRs but cannot auto-merge them.
      `.github/CODEOWNERS` it bites only **DB migrations** (the one hard-gated
      class); every other path flows on green CI. Widen `.github/CODEOWNERS` if you
      want more paths hard-gated again.
-4. **Token/app permissions:** the Claude GitHub integration for this repo needs
+4. **Token/app permissions:** the active GitHub integration or CLI identity needs
    **contents: write, pull_requests: write, issues: write** (issues:write lets
    the loop read epics/labelled issues and close them via `Closes #`). If
    auto-merge calls fail, it's almost always this or step 1.
@@ -197,7 +223,7 @@ classes for human merge, or narrow it to let more auto-merge.
 
 ## What stays manual (by design)
 
-- Defining the work as issues — a well-scoped labeled task or epic sub-issue — once.
+- Deciding what to build — defining a well-scoped task or epic sub-issue — once. (Writing the issue text itself is automatable via `new-task`; deciding *which* work to queue is the human call.)
 - Answering when haven-reviewer flags something **blocking/ambiguous**, or a
   genuine product/architecture/security decision comes up.
 - **Approving money-path PRs in-session** when the loop pauses for them, and
@@ -208,8 +234,9 @@ classes for human merge, or narrow it to let more auto-merge.
 
 - **Sequential.** Each item branches off `dev`, so the loop waits for the
   prior PR to merge before starting the next. Wall-clock ≈ sum of CI times.
-  A money-path PR awaiting your merge **pauses** the loop (later items build on
-  it) — merge it (or tell the loop to skip ahead) to resume.
+  A money-path PR awaiting your approval, or a migration awaiting code-owner
+  merge, **pauses** the loop (later items build on it). Approve or merge it, or
+  tell the loop to skip ahead, to resume.
 - **Session lifetime.** A self-paced loop lives only while the session is
   running. Webhooks wake it on CI *failures* and review comments, but **not** on
   CI *success* or the merge itself, so between PRs it polls PR state. For a long

@@ -1,13 +1,13 @@
 ---
 name: "🔁 Loop task (code-quality)"
-about: A small, self-contained task for the autonomous PR loop (/ship-next). Auto-labeled code-quality so the loop picks it up.
+about: A small, self-contained task for the autonomous ship-next workflow. Auto-labeled code-quality so the loop picks it up.
 title: ""
 labels: ["code-quality"]
 assignees: []
 ---
 
 <!--
-This issue feeds the autonomous PR loop (/loop /ship-next). It is picked up
+This issue feeds the autonomous ship-next workflow. It is picked up
 automatically because of the `code-quality` label. Keep it small and
 self-contained — one PR's worth of work. See docs/contributing/autonomous-pr-loop.md.
 The loop will STOP and ask you to sharpen anything it can't implement safely,
@@ -34,7 +34,7 @@ AND its acceptance criteria. -->
 
 ## Surface
 
-<!-- Check all that apply, AND add the matching label(s) so /ship-next can
+<!-- Check all that apply, AND add the matching label(s) so ship-next can
 classify deterministically and load the right playbook. See
 docs/contributing/ship-playbooks/README.md. -->
 
@@ -48,10 +48,10 @@ docs/contributing/ship-playbooks/README.md. -->
 ## Money-path?
 
 <!-- The `money-path` Surface label above drives playbook routing; this section
-drives the MERGE GATE (yes = human merge required). Set both consistently.
-Check one. Money-path issues are implemented by the loop but NEVER
-auto-merged — .github/CODEOWNERS routes them to a human merge, and any change to
-existing money-path behavior must be characterization-tested first. -->
+drives the MERGE GATE. Set both consistently. Check one. Non-migration
+money-path changes require in-session approval before auto-merge; migrations
+also require independent code-owner review and merge. Changes to existing
+money-path behavior must be characterization-tested first. -->
 
 - [ ] No — docs / tests / non-money refactor (eligible for reviewer-gated auto-merge)
-- [ ] Yes — touches x402 / machine-payments / payment-coverage / allowance / migrations (human merge required)
+- [ ] Yes — touches x402 / machine-payments / payment-coverage / allowance / migrations (in-session approval; migrations also require code-owner merge)

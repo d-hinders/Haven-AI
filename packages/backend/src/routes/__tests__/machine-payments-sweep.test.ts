@@ -120,6 +120,20 @@ describe('machine payment sweep routes', () => {
       expect(body.amount).toBe('0.04')
       expect(body.amount_atomic).toBe('40000')
     })
+
+    it('parks the sweep when the stranded balance exceeds the auto-sweep cap (#700)', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n) // 2 USDC > 1 cap
+
+      const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
+
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.parked).toBe(true)
+      expect(body.authorization).toBeUndefined()
+      expect(body.amount).toBe('2.0')
+      expect(body.cap_usdc).toBe('1')
+    })
   })
 
   describe('POST /sweep/submit', () => {

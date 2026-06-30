@@ -47,12 +47,14 @@ async function waitForStrandedUsdc(provider: ethers.Provider, delegate: string):
 
 // The x402 funding leg (Safe → delegate) can revert on a stale allowance nonce
 // when a prior transfer's nonce increment hasn't propagated to the backend's RPC
-// (#692). The backend preflight (#693) makes that a clean no-op — no transfer
-// landed — so retrying after a short delay (to let the nonce propagate) is safe
-// and cannot double-fund.
+// (#692). Two retry-safe signals: the backend preflight (#693) — nothing was
+// submitted — and a confirmed on-chain **revert** (status 0 = full revert = no
+// funds moved). Both are safe to retry after a short delay (to let the nonce
+// propagate); neither can double-fund. A "not confirmed within Ns" error is NOT
+// matched here — that outcome is uncertain and must not be auto-retried.
 const FUNDING_RETRY_ATTEMPTS = 3
 const FUNDING_RETRY_DELAY_MS = 6_000
-const STALE_NONCE_RE = /stale allowance nonce|allowance transfer would revert/i
+const STALE_NONCE_RE = /stale allowance nonce|allowance transfer.*revert/i
 
 async function fetchWithFundingRetry(
   client: HavenClient,

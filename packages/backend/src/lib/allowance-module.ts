@@ -248,18 +248,38 @@ export async function executeAllowanceTransfer(
 ): Promise<{ txHash: string }> {
   const relayer = getRelayerWallet(chainId)
   const contract = getContract(chainId, relayer)
+  const args = [safe, token, to, amount, paymentToken, payment, delegate, signature] as const
 
-  const tx = await contract.executeAllowanceTransfer(
-    safe,
-    token,
-    to,
-    amount,
-    paymentToken,
-    payment,
-    delegate,
-    signature,
-  )
+  // Preflight (#692): a stale allowance nonce — the signature was built against a
+  // nonce a prior transfer already consumed (cross-RPC propagation) — makes
+  // executeAllowanceTransfer revert with no reason. Static-call first so a doomed
+  // transfer never lands or burns gas. This turns a masked "On-chain execution
+  // failed" into a clear, retry-safe error: nothing was submitted, so re-reading
+  // the nonce and re-signing cannot double-spend.
+  try {
+    await contract.executeAllowanceTransfer.staticCall(...args)
+  } catch {
+    throw new Error(
+      'Allowance transfer would revert before submission — likely a stale allowance ' +
+        'nonce; re-read the allowance and re-sign before retrying.',
+    )
+  }
 
-  const receipt = await tx.wait()
-  return { txHash: receipt.hash }
+  const tx = await contract.executeAllowanceTransfer(...args)
+
+  // tx.wait() can return null on a lagging RPC even when the tx confirmed (#690);
+  // poll by hash with a timeout, then assert it didn't revert. The nonce is then
+  // confirmed-visible on this provider for the next transfer's read.
+  const provider = relayer.provider
+  if (!provider) {
+    throw new Error(`Relayer provider not configured for chain ${chainId}`)
+  }
+  const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
+  if (!receipt) {
+    throw new Error(`Allowance transfer ${tx.hash} not confirmed within 90s`)
+  }
+  if (receipt.status === 0) {
+    throw new Error(`Allowance transfer ${tx.hash} reverted`)
+  }
+  return { txHash: tx.hash }
 }

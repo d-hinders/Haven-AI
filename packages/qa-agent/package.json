@@ -15,7 +15,8 @@
     "pilot:provision": "tsx src/pilot/provision-pilot-safe.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "pilot:policies": "tsx src/pilot/policy-scenarios.ts"
+    "pilot:policies": "tsx src/pilot/policy-scenarios.ts",
+    "pilot:compare": "tsx src/pilot/compare-rails.ts"
   },
   "keywords": [
     "haven",

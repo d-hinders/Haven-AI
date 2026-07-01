@@ -11,6 +11,7 @@
     "build": "tsup",
     "seed": "tsx src/seed.ts",
     "qa:dev": "tsx src/run.ts",
+    "pilot:rig": "tsx src/pilot/rig-hello-userop.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -22,7 +23,9 @@
   "license": "UNLICENSED",
   "dependencies": {
     "@haven_ai/sdk": "0.1.17-alpha.0",
-    "ethers": "^6.13.0"
+    "ethers": "^6.13.0",
+    "permissionless": "^0.3.6",
+    "viem": "^2.54.1"
   },
   "devDependencies": {
     "tsup": "^8.0.0",

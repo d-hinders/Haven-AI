@@ -20,6 +20,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - .claude/commands/qa-dev.md
+  - .claude/commands/qa-explore-ui.md
 last-verified: "2026-07-01"
 ---
 
@@ -41,7 +42,7 @@ Procedures: ../operations/e2e-qa-runbook.md and ../operations/agent-qa.md.
 
 ## Run Metadata
 
-- **Run mode:** mocked Playwright | deployed live Playwright | deterministic `qa:dev` | manual live runtime/merchant
+- **Run mode:** mocked Playwright | deployed live Playwright | deterministic `qa:dev` | manual live runtime/merchant | browser exploration
 - **Flow/scenarios:**
 - **Started / finished (UTC):**
 - **Runner:**

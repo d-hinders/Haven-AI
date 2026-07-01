@@ -7,6 +7,7 @@ covers:
   - .github/workflows/qa-live.yml
   - .github/workflows/dev-gate.yml
   - .claude/commands/qa-dev.md
+  - .claude/commands/qa-explore-ui.md
   - packages/qa-agent/**
   - packages/frontend/package.json
   - packages/frontend/e2e/live/**
@@ -37,7 +38,8 @@ production credentials, a mainnet RPC, or real funds.
 | Seed the QA user, Safe, allowance, and agent | Yes | No | First-time setup or identity replacement |
 | Deterministic money-flow QA (`qa-dev.yml`) | Yes | Yes | Local debugging or shared repeatable evidence |
 | Live deployed-UI smoke (`qa-live.yml`) | Yes | Yes | Verify a Vercel preview against the dev backend |
-| Exploratory agent/merchant QA | Yes | No | Coverage that needs human or LLM judgment |
+| Exploratory agent/merchant QA (Layer 2b, `/qa-dev`) | Yes | No | Payment / MCP coverage that needs LLM judgment |
+| Browser UI exploration (Layer 3, `/qa-explore-ui`) | Yes | No | Dashboard UX / visual coverage that needs LLM judgment |
 
 Use **GitHub Actions** for the normal shared money-flow run after the identity,
 funding, and repository secrets exist. Use a **local run** to provision the
@@ -405,6 +407,50 @@ exploratory.
 > Stop at the first failed step. Then write a run report from
 > `docs/bug-reports/_run-report-template.md` (per-goal pass/fail + friction) and file
 > concrete bugs as issues. This is non-gating exploratory coverage.
+
+## Layer 3 — AI-driven browser exploration (`/qa-explore-ui`, #579)
+
+An LLM agent drives a **real browser** (via **Playwright MCP**, reusing the
+existing Chromium/Playwright setup) over the **dev dashboard**, using the agent
+session's own model (no `ANTHROPIC_API_KEY` in CI). It adds agentic coverage of
+the **UI itself** — layout breakage, horizontal overflow, confusing states, dead
+ends, console errors, and secret leakage that fixed-selector specs miss. Like
+Layer 2b it is **never a deploy gate**; it is **read-oriented** exploration (no
+money movement beyond what the existing testnet flows already cover) that files a
+findings report under [`bug-reports/`](../bug-reports/).
+
+- **When to run:** before a promotion, or after a risky change to the dashboard UI.
+- **Target:** a **non-production** Vercel deployment (`NEXT_PUBLIC_HAVEN_ENV=dev`)
+  re-pointed at the shared dev backend with `?apiBaseUrl=` — same convention as the
+  [live UI smoke](#live-deployed-ui-smoke). A production build ignores the override
+  (#582/#583), so it must be a dev/preview build.
+- **Exploration brief:** visit the dashboard, transactions + detail panel, agents +
+  connect-agent modal, and approvals; look for horizontal overflow (the
+  `expectNoHorizontalOverflow` invariant in
+  `packages/frontend/e2e/fixtures/haven-api.ts`), secret leakage, console errors,
+  dead ends, and whether money/authority screens answer the AGENTS.md
+  "Money And Risk Clarity" questions.
+- **How findings feed back:** the report's *Friction* table and *Notes for the
+  coding agent* (and any issues it files) are the loop #419/#420 call for.
+- **Claude Code:** run `/qa-explore-ui` ([`.claude/commands/qa-explore-ui.md`](../../.claude/commands/qa-explore-ui.md)).
+
+**Codex / generic runtime (pasteable prompt):**
+
+> You are running exploratory **UI** QA against Haven's **dev** dashboard (testnet /
+> Base Sepolia — never prod), read-oriented. Attach a Playwright MCP browser driver
+> (`npx @playwright/mcp@latest`, reusing the installed Chromium). Open the given
+> **non-production** Vercel URL with `?apiBaseUrl=https://havenbackend-dev-8b95.up.railway.app`
+> appended, sign in as the seeded QA user, and confirm the `DEV` badge + real dev data.
+> Then explore the dashboard, transactions + detail panel, agents + connect-agent
+> modal, and approvals — **observe only; do not connect an agent, approve/reject, or
+> send a payment** (the shared dev identity is used by other QA runs). Look for:
+> horizontal overflow / broken layout, secret leakage (no keys/JWTs/setup tokens in
+> the UI), console errors, dead ends, and whether money/authority screens are clear
+> (who can spend, from which wallet, how much, when approval is needed, how to
+> pause/revoke). Screenshot key screens.
+> Write a findings report from `docs/bug-reports/_run-report-template.md` (surfaces
+> visited + a Friction/Bugs table), run the secret review before committing, and file
+> concrete UI bugs as issues. This is non-gating exploratory coverage.
 
 ## Reading results and filing bugs
 

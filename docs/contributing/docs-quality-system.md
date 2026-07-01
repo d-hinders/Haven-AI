@@ -12,6 +12,8 @@ covers:
   - .github/vale/**
   - packages/backend/src/openapi/spec.test.ts
   - packages/backend/src/docs-drift/docs-drift.test.ts
+  - packages/backend/src/docs-drift/env-example-drift.test.ts
+  - .env.example
 last-verified: "2026-07-01"
 ---
 
@@ -125,17 +127,25 @@ A doc whose `last-verified` is **today** is suppressed — once you've confirmed
 accurate in a day's work, subsequent edits to a covered file won't re-flag it
 the same day (a noise-reduction heuristic; the gate is advisory regardless).
 
-**Drift tests** (`packages/backend/src/docs-drift/docs-drift.test.ts`): vitest
-tests, modeled on the OpenAPI drift test, that pin hand-maintained `CLAUDE.md`
-claims to the code they mirror:
+**Drift tests** (`packages/backend/src/docs-drift/`): vitest tests, modeled on
+the OpenAPI drift test, that pin hand-maintained doc/config claims to the code
+they mirror:
 
-| Mirror | Pinned to |
-| --- | --- |
-| `CLAUDE.md` API surface table | `openapiSpec.paths` (path + method) |
-| `CLAUDE.md` chain claims (Base 8453 / Gnosis 100) | `lib/chains.ts` registry |
+| Mirror | Pinned to | Test |
+| --- | --- | --- |
+| `CLAUDE.md` API surface table | `openapiSpec.paths` (path + method) | `docs-drift.test.ts` |
+| `CLAUDE.md` chain claims (Base 8453 / Gnosis 100) | `lib/chains.ts` registry | `docs-drift.test.ts` |
+| `.env.example` documented keys | env vars read in the code (`process.env.X`, `requireEnv`/`optionalEnv`) | `env-example-drift.test.ts` |
+
+The `.env.example` mirror is two-directional: every var the **backend** reads
+must be documented, and every documented key must be read **somewhere** in the
+repo (backend, frontend, scripts, or the qa/demo packages) — so config docs
+can't silently drift from what a deployment actually reads.
 
 Each carries a `because:` allowlist for intentional exceptions — the default is
-"document it correctly", not "add an exception".
+"document it correctly" / "delete the dead key", not "add an exception". The
+`.env.example` allowlists are self-checked so they can't rot: an entry that no
+longer applies (the var is now documented, or is no longer read) fails the suite.
 
 ### Phase 3 — `haven-doc-reviewer` agent ([#645](https://github.com/d-hinders/Haven-AI/issues/645))
 

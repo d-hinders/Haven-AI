@@ -5,6 +5,7 @@ covers:
   - .env.dev.example
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
+  - .github/workflows/dev-gate.yml
   - .claude/commands/qa-dev.md
   - packages/qa-agent/**
   - packages/frontend/package.json
@@ -42,8 +43,10 @@ Use **GitHub Actions** for the normal shared money-flow run after the identity,
 funding, and repository secrets exist. Use a **local run** to provision the
 identity, debug failures, or validate changes before pushing them.
 
-Neither workflow is scheduled or a merge gate today; both are manually
-dispatched with `workflow_dispatch`.
+`qa-live.yml` is manual only (`workflow_dispatch`) — there is no permanent dev
+frontend URL to schedule it against. The money-flow `qa-dev.yml` also runs
+**nightly and on each dev deploy**, and a recent green run **gates dev → main**
+promotion — see [Automation & gating](#automation--gating).
 
 ## Stable dev targets
 
@@ -262,6 +265,80 @@ GitHub UI:
 Secrets should appear as `***` in logs. The workflow checks out `dev`, installs
 dependencies, builds the SDK, and executes the same harness as the local
 command.
+
+## Automation & gating
+
+Once the deterministic money-flow harness proved stable when run manually (#575),
+`qa-dev.yml` was automated and wired into promotion (#578). The model is
+**pre-promotion, not per-PR**: the harness runs on a cadence and produces a
+signal; the `dev → main` gate reads that signal instead of re-running the
+money-moving harness on every promotion PR (which would burn testnet funds and
+need the `QA_*` secrets in a PR-triggered workflow).
+
+### When the money-flow QA runs
+
+| Trigger | Purpose |
+|---|---|
+| `workflow_dispatch` | Manual run / parity with the local `qa:dev` command. |
+| `schedule` (nightly, `17 3 * * *` UTC) | Always have a fresh green signal without anyone triggering it. |
+| `repository_dispatch` (`dev-deployed`) | Test exactly what the Railway/Vercel dev deploy just shipped. |
+
+Runs are **serialized** (`concurrency: qa-dev-money-flow`, no cancel) so two
+money-moving runs never share the one QA delegate/allowance at once.
+
+### Post-deploy trigger (webhook setup)
+
+Point the dev deploy at GitHub's `repository_dispatch` API so a deploy fires a QA
+run. In the **Railway dev backend** (and/or the **Vercel dev project**) add a
+deploy/post-deploy hook that runs:
+
+```bash
+curl -sf -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer $GH_DISPATCH_TOKEN" \
+  https://api.github.com/repos/d-hinders/Haven-AI/dispatches \
+  -d '{"event_type":"dev-deployed"}'
+```
+
+`GH_DISPATCH_TOKEN` is a fine-grained PAT (or GitHub App token) with **Actions:
+write** on this repo only — store it as a deploy-provider secret, never in the
+repo. Firing `dev-deployed` starts the `money-flow` job against the stable dev
+targets above.
+
+### Automated failure reporting
+
+On failure, `qa-dev.yml` files a GitHub issue labeled **`qa-failure`** with the
+run URL and trigger (or comments on the existing open one, so a flapping chain
+doesn't spam new issues). Triage it via [Troubleshooting](#troubleshooting):
+re-dispatch to clear a transient testnet/RPC flake, or open a
+[`bug-reports/`](../bug-reports/) report for a real regression, then close the
+`qa-failure` issue once green.
+
+### The dev → main freshness gate
+
+`dev-gate.yml` adds a **`qa-freshness`** job: a promotion PR (`dev → main`) passes
+only if a **successful** `qa-dev.yml` run exists on `dev` **within
+`QA_FRESHNESS_HOURS`** (default **30h** — covers one missed nightly). No recent
+green run → the gate fails with instructions to dispatch one. Only the
+deterministic money-flow harness gates; the LLM-agent layer (2b, #577) and browser
+exploration (Layer 3, #579) stay **non-gating**.
+
+Like the branch-source gate, `qa-freshness` is **advisory until added to `main`'s
+required status checks** in branch protection. It needs the `QA_*` secrets
+configured (so the scheduled run can go green) before it's enforced.
+
+### Flake budget & quarantine policy
+
+Testnet/RPC hiccups must not permanently wedge promotion. Two levers:
+
+- **Retry budget** — each `qa-dev.yml` run retries the whole suite up to
+  `QA_MAX_ATTEMPTS` times (default **2**, repo variable) before it's called red.
+  Keep it low; each attempt consumes test funds.
+- **`qa-override` label** — adding it to a promotion PR **skips** the freshness
+  gate (logged as a warning). Use it only to unblock a known-flaky testnet
+  hiccup when you've confirmed a recent QA run out-of-band; remove it once a fresh
+  green run exists. It is the deliberate quarantine escape hatch, not a routine
+  bypass.
 
 ## Live deployed-UI smoke
 

@@ -29,3 +29,47 @@ jobs:
             exit 1
           fi
           echo "✅ Allowed: $SOURCE → main"
+
+  # Money-flow QA freshness gate (#578). Rather than run the money-moving harness
+  # inline on every promotion PR (which would burn testnet funds per-attempt and
+  # need the QA_* secrets in this PR-triggered workflow), require that a recent
+  # GREEN `qa-dev.yml` run already exists on `dev` — produced by the nightly
+  # schedule or the post-deploy repository_dispatch. That run is the promotion
+  # signal; the harness itself stays out of the hot path. Escape hatch: a
+  # `qa-override` PR label skips the check (documented quarantine for a wedged
+  # testnet flake). Like the branch gate above, this is advisory until added to
+  # main's required status checks in branch protection.
+  qa-freshness:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: read
+    env:
+      # A green money-flow run must be no older than this many hours. Override with a
+      # repo variable if the dev cadence changes. Default 30h covers a missed nightly.
+      FRESHNESS_HOURS: ${{ vars.QA_FRESHNESS_HOURS || '30' }}
+    steps:
+      - name: "Require a recent green money-flow QA run on dev"
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'qa-override') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          LATEST_AT=$(gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow qa-dev.yml --branch dev --status success \
+            --limit 1 --json createdAt -q '.[0].createdAt // empty')
+          if [ -z "$LATEST_AT" ]; then
+            echo "::error::No successful 'QA — money-flow (dev)' run found on dev. Trigger it (Actions → 'QA — money-flow (dev)' → Run workflow) and re-run this check, or add the 'qa-override' label to bypass. See docs/operations/agent-qa.md → Automation & gating."
+            exit 1
+          fi
+          NOW=$(date -u +%s)
+          RUN_TS=$(date -u -d "$LATEST_AT" +%s 2>/dev/null || python3 -c "import datetime;print(int(datetime.datetime.fromisoformat('${LATEST_AT}'.replace('Z','+00:00')).timestamp()))")
+          AGE_H=$(( (NOW - RUN_TS) / 3600 ))
+          if [ "$AGE_H" -gt "$FRESHNESS_HOURS" ]; then
+            echo "::error::Latest green qa-dev run is ${AGE_H}h old (> ${FRESHNESS_HOURS}h). Re-run the money-flow QA against the current dev deploy before promoting, or add the 'qa-override' label."
+            exit 1
+          fi
+          echo "✅ Money-flow QA green ${AGE_H}h ago (within ${FRESHNESS_HOURS}h)."
+      - name: "Note qa-override bypass"
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'qa-override') }}
+        run: echo "::warning::'qa-override' label present — skipping the money-flow freshness gate. Confirm a recent manual QA run before promoting."

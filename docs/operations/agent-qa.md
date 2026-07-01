@@ -170,7 +170,7 @@ The deterministic harness runs five scenarios in order:
 | `over-budget-queue` | An over-budget payment queues for approval and does not execute |
 | `x402-over-budget-rejected` | An unaffordable x402 request is rejected before a signable intent |
 | `x402-settle` | A small x402 payment settles through the dev demo merchant |
-| `x402-sweep-recovery` | Verify-without-settle strands a small, under-cap USDC balance, then a gasless sweep returns it to the Safe |
+| `x402-sweep-recovery` | Verify-without-settle strands a small USDC balance; with the dev sweep floor at 0 (`SWEEP_MIN_USDC=0`) a gasless sweep returns it to the Safe |
 
 The harness exits non-zero if any non-skipped scenario fails. Its Markdown
 scenario table is an evidence starter, not a complete report: copy it into
@@ -512,13 +512,14 @@ The merchant did not produce a visible stranded balance. Confirm its Base
 Sepolia deployment and `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb`, then check
 for RPC propagation delay.
 
-### Sweep is parked for manual recovery
+### Sweep left as dust below the floor
 
 The backend does not create a sweep authorization when the stranded USDC
-balance exceeds `SWEEP_MAX_USDC` (default `1`). Record the returned
-`parked: true`, balance, and cap in the run report; stop automated recovery and
-assign explicit manual follow-up. Do not raise the cap during a QA run merely
-to make the scenario pass.
+balance is **below** `SWEEP_MIN_USDC` (default `1`) — recovering dust would cost
+more relayer gas than it returns, so it is left on the delegate. The scenario
+returns `below_min: true` with the balance and floor. In dev this should not
+happen (dev sets `SWEEP_MIN_USDC=0`); if it does, confirm the dev backend's
+floor is `0` rather than lowering the prod default.
 
 ### GitHub warning about actions using Node 20
 

@@ -139,6 +139,16 @@ export const x402Sweep: Scenario = {
       )
     }
 
+    if (prep.below_min) {
+      // The stranded amount is below the backend's sweep floor (SWEEP_MIN_USDC), so
+      // it's intentionally left as dust — not a regression. Dev should set
+      // SWEEP_MIN_USDC=0 so the tiny QA stranding still exercises a real sweep.
+      return skip(
+        `stranded ${fmt(strandedBefore)} USDC is below the sweep floor (${prep.min_usdc} USDC) — ` +
+          `left as dust by design. Set SWEEP_MIN_USDC=0 on the dev backend to exercise a real sweep.`,
+      )
+    }
+
     if (prep.nothing_stranded || !prep.authorization) {
       // We saw a balance on our RPC but the backend's read found none — a
       // backend↔harness RPC discrepancy, not a clean recovery.

@@ -123,7 +123,7 @@ Record one row per deterministic or manual scenario.
 | over-budget direct queue | Queues; never auto-executes | pass/fail/skip | | | | |
 | x402 above-total-coverage reject | Rejects with no signable intent | pass/fail/skip | | | | |
 | x402 settle | Funding and merchant settlement complete | pass/fail/skip | | | | |
-| x402 sweep recovery | Under-cap stranded USDC returns to the originating Haven wallet; over-cap balance is parked for manual recovery | pass/fail/skip | | | Record actual chain and `parked`/cap state | |
+| x402 sweep recovery | Stranded USDC at or above the sweep floor returns to the originating Haven wallet; dust below the floor is left on the delegate | pass/fail/skip | | | Record actual chain and `below_min`/floor state | |
 
 For a manual live merchant also record:
 

@@ -80,14 +80,25 @@ export interface ProvisionBatchArgs {
   safeAddress: string
   safe7579Adapter: string
   smartSessionsValidator: string
-  registry: string
-  attester: string
 }
 
 /**
  * The three inner calls of the migration batch, in dependency order: the
  * adapter must be an enabled module before initializeAccount runs (module
  * installs execute through the Safe's module path).
+ *
+ * Live-run lessons baked in (#721):
+ * - initializeAccount is called on THE SAFE, not the adapter directly. The
+ *   adapter uses ERC-2771 HandlerContext for access control, so the call must
+ *   route through the Safe's fallback handler (installed one step earlier in
+ *   this same batch), which appends the authenticated sender. A direct call
+ *   reads garbage calldata bytes as the sender and reverts (surfaced as GS013).
+ * - ERC-7484 registry gating is DISABLED for the pilot (zero registry, no
+ *   attesters): neither the Rhinestone nor the mock attester has an attestation
+ *   for this Smart Sessions deployment on Base Sepolia, so any threshold > 0
+ *   reverts the install. Defense-in-depth we explicitly forgo on testnet —
+ *   recorded as a Stage 2 finding for #724 (verify attestation coverage per
+ *   chain/module version, or run an own attester, before production).
  */
 export function buildProvisionBatch(args: ProvisionBatchArgs): InnerTx[] {
   const safe = new ethers.Interface(SAFE_ABI)
@@ -106,7 +117,8 @@ export function buildProvisionBatch(args: ProvisionBatchArgs): InnerTx[] {
       operation: 0,
     },
     {
-      to: args.safe7579Adapter,
+      // Routed via the Safe's fallback handler — see the 2771 note above.
+      to: args.safeAddress,
       value: 0n,
       data: adapter.encodeFunctionData('initializeAccount', [
         // validators: Smart Sessions installed with no initial sessions (#722 adds them)
@@ -114,7 +126,8 @@ export function buildProvisionBatch(args: ProvisionBatchArgs): InnerTx[] {
         [], // executors
         [], // fallbacks
         [], // hooks
-        { registry: args.registry, attesters: [args.attester], threshold: 1 },
+        // registry gating disabled — see the attestation note above.
+        { registry: ethers.ZeroAddress, attesters: [], threshold: 0 },
       ]),
       operation: 0,
     },

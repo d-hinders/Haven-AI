@@ -11,8 +11,6 @@ import {
 const SAFE = '0x' + 'aa'.repeat(20)
 const ADAPTER = '0x' + 'bb'.repeat(20)
 const SESSIONS = '0x' + 'cc'.repeat(20)
-const REGISTRY = '0x' + 'dd'.repeat(20)
-const ATTESTER = '0x' + 'ee'.repeat(20)
 
 describe('encodeMultiSendTransactions', () => {
   it('packs operation ++ to ++ value ++ length ++ data', () => {
@@ -43,16 +41,16 @@ describe('buildProvisionBatch', () => {
     safeAddress: SAFE,
     safe7579Adapter: ADAPTER,
     smartSessionsValidator: SESSIONS,
-    registry: REGISTRY,
-    attester: ATTESTER,
   })
   const safeIface = new ethers.Interface(SAFE_ABI)
   const adapterIface = new ethers.Interface(SAFE7579_ABI)
 
-  it('is exactly three plain CALLs in dependency order', () => {
+  it('is exactly three plain CALLs, all targeting the Safe (2771 fallback routing)', () => {
     expect(batch).toHaveLength(3)
     expect(batch.map((t) => t.operation)).toEqual([0, 0, 0])
-    expect(batch.map((t) => t.to.toLowerCase())).toEqual([SAFE, SAFE, ADAPTER])
+    // initializeAccount goes to the SAFE, not the adapter — the adapter's
+    // HandlerContext access control only authenticates via the fallback path.
+    expect(batch.map((t) => t.to.toLowerCase())).toEqual([SAFE, SAFE, SAFE])
   })
 
   it('enables the adapter as module, then as fallback handler', () => {
@@ -61,7 +59,7 @@ describe('buildProvisionBatch', () => {
     expect(safeIface.decodeFunctionData('enableModule', batch[0].data)[0].toLowerCase()).toBe(ADAPTER)
   })
 
-  it('initializes the adapter with Smart Sessions as sole validator + registry', () => {
+  it('initializes with Smart Sessions as sole validator and registry gating disabled', () => {
     const decoded = adapterIface.decodeFunctionData('initializeAccount', batch[2].data)
     const [validators, executors, fallbacks, hooks, registryInit] = decoded
     expect(validators).toHaveLength(1)
@@ -70,9 +68,11 @@ describe('buildProvisionBatch', () => {
     expect(executors).toHaveLength(0)
     expect(fallbacks).toHaveLength(0)
     expect(hooks).toHaveLength(0)
-    expect(registryInit.registry.toLowerCase()).toBe(REGISTRY)
-    expect([...registryInit.attesters].map((a: string) => a.toLowerCase())).toEqual([ATTESTER])
-    expect(registryInit.threshold).toBe(1n)
+    // pilot runs without ERC-7484 gating — no attestation coverage on Base
+    // Sepolia for this Smart Sessions deployment (Stage 2 finding, see lib docs)
+    expect(registryInit.registry).toBe(ethers.ZeroAddress)
+    expect([...registryInit.attesters]).toEqual([])
+    expect(registryInit.threshold).toBe(0n)
   })
 })
 

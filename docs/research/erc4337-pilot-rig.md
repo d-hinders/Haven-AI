@@ -1,0 +1,112 @@
+---
+owner: "@d-hinders"
+status: research
+covers:
+  - packages/qa-agent/src/pilot/**
+last-verified: "2026-07-01"
+---
+
+# ERC-4337 pilot rig — bundler, paymaster & SDK decisions (#720)
+
+Decision note for the first slice of the ADR #719 Stage 1 pilot: the
+infrastructure choices behind `packages/qa-agent/src/pilot/`, and the operator
+runbook for the live half of #720 (landing one sponsored UserOp on Base
+Sepolia). Everything here is **testnet-only and experimental** — no production
+code path touches it.
+
+## What the rig proves
+
+`npm run pilot:rig -w packages/qa-agent` takes a throwaway owner key, derives a
+counterfactual **Safe in ERC-7579 mode** (the Safe7579 launchpad wires the
+adapter in at deploy time), signs one 0-value self-call as a UserOp, and has a
+bundler land it with **paymaster-sponsored gas** — the account holds no ETH,
+mirroring Haven's gasless model. First run also deploys the account. That
+single transaction validates every rig choice below at once.
+
+## Decisions
+
+### Client SDK: `permissionless` + `viem` (in `qa-agent` only)
+
+| Option | Verdict |
+|---|---|
+| **`permissionless` 0.3.x (chosen)** | First-class `toSafeSmartAccount` with ERC-7579 launchpad mode; Pimlico-maintained; the most-used 4337 client library. |
+| Rhinestone `module-sdk` | Not needed for the rig; **expected for #722** (Smart Sessions install/policy encoding) — it composes with `permissionless`, so this choice doesn't foreclose it. |
+| Hand-rolled UserOps over `ethers` | Maximum control, but re-implements signing/gas/packing that `permissionless` already gets right; wrong trade for a spike. |
+
+**ethers interop:** the repo is an `ethers` codebase; `permissionless` requires
+`viem`. For the pilot this is contained — the `src/pilot/` files are a viem-only
+island inside the private `qa-agent` package, and nothing imports across the
+boundary. Whether the production SDK grows a viem dependency (or wraps UserOp
+construction behind the backend) is a **Stage 2 question for the pilot report
+(#724)**, deliberately not decided here.
+
+### Bundler + paymaster: Pimlico for the pilot
+
+| Option | Trade-off |
+|---|---|
+| **Pimlico (chosen for pilot)** | One URL serves bundler + paymaster + gas-price oracle; testnet sponsorship on the free tier; best Safe/7579 documentation. Lock-in risk is low — the API is standard `eth_sendUserOperation` + sponsorship, and the rig keeps the URL as config. |
+| Alchemy / Biconomy | Comparable hosted offerings; separate paymaster configuration; no pilot-relevant advantage over Pimlico. Re-evaluate at Stage 2 when volume pricing matters. |
+| Self-hosted (e.g. Alto) | No vendor dependency, full control — and a new service to operate. Wrong cost/benefit for a pilot; documented as the escape hatch if vendor terms change. |
+
+**The bundler URL is a credential** (hosted bundlers embed the API key in it).
+It lives in an env file outside the repository, exactly like the `QA_*`
+secrets. Never commit it.
+
+### Canonical addresses (env-overridable defaults)
+
+| Contract | Default | Note |
+|---|---|---|
+| Safe7579 adapter | `0x7579EE8307284F293B1927136486880611F20002` | Deterministic cross-chain deployment |
+| Safe7579 launchpad | `0x7579011aB74c46090561ea277Ba79D510c6C00ff` | Used for counterfactual 7579 setup |
+| Registry attester (Rhinestone) | `0x000000333034E9f539ce08819E12c1b8Cb29084d` | `attestersThreshold: 1` |
+| EntryPoint v0.7 | `0x0000000071727De22E5E9d8BAf0edAc6f37da032` | From `viem/account-abstraction` |
+
+The first operator run is the live verification of these addresses on Base
+Sepolia — if account creation fails, re-check them against the Rhinestone and
+Safe7579 docs **before** debugging anything else, then override via env
+(`PILOT_SAFE7579_ADAPTER`, `PILOT_ERC7579_LAUNCHPAD`, `PILOT_ATTESTER`).
+
+## Operator runbook (the live half of #720)
+
+1. Create a Pimlico account (free tier) and copy the Base Sepolia API URL —
+   this is the secret `PILOT_BUNDLER_URL`.
+2. Generate a **throwaway** owner key (never a production, QA-harness, or
+   funded key):
+   `node -e "const{ethers}=require('ethers');const w=ethers.Wallet.createRandom();console.log(w.address,w.privateKey)"`
+3. Keep the env outside the repo, e.g. `/secure/path/pilot.env`:
+
+   ```bash
+   PILOT_OWNER_PRIVATE_KEY=0x…   # throwaway
+   PILOT_BUNDLER_URL=https://api.pimlico.io/v2/84532/rpc?apikey=…   # secret
+   # optional: PILOT_RPC_URL, PILOT_SALT_NONCE, PILOT_SAFE7579_ADAPTER, …
+   ```
+
+4. Run it:
+
+   ```bash
+   set -a; source /secure/path/pilot.env; set +a
+   npm run pilot:rig -w packages/qa-agent
+   ```
+
+5. Success = the script prints the Basescan links for the sponsored tx and the
+   deployed pilot Safe. Paste both into #720 and close it.
+
+Exit codes mirror the QA harness: `2` = missing/invalid env, `1` = run failure.
+
+## Scope boundaries
+
+- **No Haven flow is wired in**: no SDK, no backend, no QA-harness identity —
+  the deterministic money-flow signal (`qa-dev.yml`) is untouched.
+- **Base Sepolia only.** Gnosis (v1.3.0 singleton) is explicitly out of scope
+  until the pilot report (#724) assesses it.
+- Next slices build on this rig: #721 (provision the pilot QA Safe with one
+  owner tx), #722 (Smart Sessions policies + enforcement tests), #723 (gasless
+  payment E2E + rail comparison), #724 (report + go/no-go).
+
+## References
+
+- ADR: issue #719 (session-key policy layer)
+- Safe7579: https://docs.safe.global/advanced/erc-7579/7579-safe
+- Smart Sessions: https://docs.rhinestone.dev/module-sdk/modules/smart-sessions
+- permissionless.js: https://docs.pimlico.io/permissionless
+- ERC-4337 EntryPoint v0.7 / ERC-7579 / ERC-7484 (registry attesters)

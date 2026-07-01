@@ -38,7 +38,8 @@ production credentials, a mainnet RPC, or real funds.
 | Seed the QA user, Safe, allowance, and agent | Yes | No | First-time setup or identity replacement |
 | Deterministic money-flow QA (`qa-dev.yml`) | Yes | Yes | Local debugging or shared repeatable evidence |
 | Live deployed-UI smoke (`qa-live.yml`) | Yes | Yes | Verify a Vercel preview against the dev backend |
-| Exploratory agent/merchant QA | Yes | No | Coverage that needs human or LLM judgment |
+| Exploratory agent/merchant QA (Layer 2b, `/qa-dev`) | Yes | No | Payment / MCP coverage that needs LLM judgment |
+| Browser UI exploration (Layer 3, `/qa-explore-ui`) | Yes | No | Dashboard UX / visual coverage that needs LLM judgment |
 
 Use **GitHub Actions** for the normal shared money-flow run after the identity,
 funding, and repository secrets exist. Use a **local run** to provision the
@@ -441,10 +442,12 @@ findings report under [`bug-reports/`](../bug-reports/).
 > **non-production** Vercel URL with `?apiBaseUrl=https://havenbackend-dev-8b95.up.railway.app`
 > appended, sign in as the seeded QA user, and confirm the `DEV` badge + real dev data.
 > Then explore the dashboard, transactions + detail panel, agents + connect-agent
-> modal, and approvals, looking for: horizontal overflow / broken layout, secret
-> leakage (no keys/JWTs/setup tokens in the UI), console errors, dead ends, and
-> whether money/authority screens are clear (who can spend, from which wallet, how
-> much, when approval is needed, how to pause/revoke). Screenshot key screens.
+> modal, and approvals — **observe only; do not connect an agent, approve/reject, or
+> send a payment** (the shared dev identity is used by other QA runs). Look for:
+> horizontal overflow / broken layout, secret leakage (no keys/JWTs/setup tokens in
+> the UI), console errors, dead ends, and whether money/authority screens are clear
+> (who can spend, from which wallet, how much, when approval is needed, how to
+> pause/revoke). Screenshot key screens.
 > Write a findings report from `docs/bug-reports/_run-report-template.md` (surfaces
 > visited + a Friction/Bugs table), run the secret review before committing, and file
 > concrete UI bugs as issues. This is non-gating exploratory coverage.

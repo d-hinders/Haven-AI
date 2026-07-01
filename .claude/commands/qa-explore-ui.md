@@ -10,7 +10,7 @@ Run an exploratory **UI** QA pass as the agent, using **this session's own model
 
 1. **Target URL** — a **non-production** Vercel deployment (a PR preview or the dev project). It must build with `NEXT_PUBLIC_HAVEN_ENV=dev`, or the `?apiBaseUrl` override is a no-op (production ignores it — the #582/#583 security gate). There is **no permanent dev frontend URL**; take it as input. If you don't have one, stop and ask.
 2. **Re-point at the shared dev backend** by appending `?apiBaseUrl=https://havenbackend-dev-8b95.up.railway.app` to the URL (persists to `localStorage['haven_api_base_url']`). See `docs/operations/agent-qa.md` → "Stable dev targets".
-3. **Attach Playwright MCP** (reuses the pre-installed Chromium — do not download a browser):
+3. **Attach Playwright MCP** — reuses the Playwright/Chromium setup when the sandbox already has it; otherwise Playwright MCP manages its own browser:
    `claude mcp add playwright -- npx @playwright/mcp@latest`
    Confirm with `claude mcp list` (`playwright` connected). Any browser-driving MCP with equivalent navigate/snapshot/console tools is fine.
 
@@ -21,9 +21,9 @@ Run an exploratory **UI** QA pass as the agent, using **this session's own model
 
 ## Phase 3 — Explore the surfaces (the brief)
 
-Visit each surface, navigate as a user would, and try a flow a scripted test wouldn't. Record what you observe per surface.
+**Observe only — do not submit state-changing actions.** This layer looks, it doesn't act. Navigate, open, scroll, and inspect, but do **not**: complete the connect-agent flow / generate a credential, Approve or Reject in the approvals queue, or Send/Confirm a payment. The dev QA identity is shared with the deterministic harness and Layer 2b (#577); a stray submit here mutates state other runs depend on. Record what you observe per surface — including flows a scripted test wouldn't try, short of actually submitting them.
 
-6. **Surfaces to visit:** dashboard (balances), transactions list + the transaction **detail panel**, agents list + the **connect-agent modal**, and **approvals**.
+6. **Surfaces to visit:** dashboard (balances), transactions list + the transaction **detail panel**, agents list + the **connect-agent modal** (open it; do not complete it), and **approvals** (view; do not approve/reject).
 7. **What to look for on each:**
    - **Broken layout / horizontal overflow** — the existing `expectNoHorizontalOverflow` helper (`packages/frontend/e2e/fixtures/haven-api.ts`) is the invariant to reproduce by eye: no horizontal scrollbar at standard widths.
    - **Secret leakage** — no private key, API key, JWT, or setup token ever rendered in the UI (especially the connect-agent setup prompt — reuse the "no-secret-leak" expectation from the mocked suite).

@@ -52,11 +52,12 @@ export const config = {
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
 
-  // Auto-sweep value cap (#700). The gasless delegate sweep auto-recovers stranded
-  // USDC only up to this many USDC; larger balances are *parked* for manual
-  // recovery, capping the blast radius while the sweep money-path matures. Human
-  // USDC string (parsed to atomic with 6 decimals). Default 1; raise/lower per env.
-  sweepMaxUsdc: process.env.SWEEP_MAX_USDC ?? '1',
+  // Sweep dust floor in USDC (#700, corrected). The gasless delegate sweep only
+  // recovers a stranded balance when it is AT LEAST this much — smaller "dust"
+  // amounts are left on the delegate because recovering them would cost more
+  // relayer gas than the value returned. Human USDC string (6 decimals). Default
+  // 1; dev sets SWEEP_MIN_USDC=0 so QA's tiny stranded amounts still sweep.
+  sweepMinUsdc: process.env.SWEEP_MIN_USDC ?? '1',
 
   // Chains this environment actually serves account deploys on (#679). Comma-
   // separated chain ids; **unset = all supported** (backward-compatible). Dev

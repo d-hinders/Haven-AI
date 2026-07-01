@@ -135,13 +135,14 @@ export interface SweepPrepareResponse {
   /** Present and true when the delegate holds nothing to recover. */
   nothing_stranded?: boolean
   /**
-   * Present and true when the stranded balance exceeds the auto-sweep cap (#700)
-   * and was parked for manual recovery — no `authorization` is built. `cap_usdc`
-   * carries the configured cap.
+   * Present and true when the stranded balance is below the sweep floor (#700):
+   * it is left on the delegate as dust rather than recovered, because the gas to
+   * sweep it would exceed its value. `min_usdc` carries the configured floor. No
+   * `authorization` is built.
    */
-  parked?: boolean
-  cap_usdc?: string
-  /** The authorization to sign — absent when nothing is stranded or parked. */
+  below_min?: boolean
+  min_usdc?: string
+  /** The authorization to sign — absent when nothing is stranded or below the floor. */
   authorization?: SweepAuthorization
   /** Haven's binding over the authorization — absent when nothing is stranded. */
   expected_auth?: SweepExpectedAuth

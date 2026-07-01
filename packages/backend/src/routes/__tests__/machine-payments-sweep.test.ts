@@ -104,9 +104,9 @@ describe('machine payment sweep routes', () => {
       expect(sweepMocks.buildSweepAuthorization).not.toHaveBeenCalled()
     })
 
-    it('builds an authorization and binding when funds are stranded', async () => {
+    it('builds an authorization and binding when funds are stranded above the floor', async () => {
       mockQuery.mockResolvedValueOnce(authRow())
-      allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n) // 2 USDC ≥ 1 floor
       sweepMocks.buildSweepAuthorization.mockReturnValueOnce(AUTH)
       const expectedAuth = { version: 1, message: 'm', signature: '0xaa', signer: ATTACKER }
       sweepMocks.signSweepExpectedContext.mockResolvedValueOnce(expectedAuth)
@@ -117,22 +117,22 @@ describe('machine payment sweep routes', () => {
       const body = res.json()
       expect(body.authorization).toEqual(AUTH)
       expect(body.expected_auth).toEqual(expectedAuth)
-      expect(body.amount).toBe('0.04')
-      expect(body.amount_atomic).toBe('40000')
+      expect(body.amount).toBe('2.0')
+      expect(body.amount_atomic).toBe('2000000')
     })
 
-    it('parks the sweep when the stranded balance exceeds the auto-sweep cap (#700)', async () => {
+    it('leaves dust below the sweep floor un-swept (#700 floor)', async () => {
       mockQuery.mockResolvedValueOnce(authRow())
-      allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n) // 2 USDC > 1 cap
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(500_000n) // 0.5 USDC < 1 floor
 
       const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
 
       expect(res.statusCode).toBe(200)
       const body = res.json()
-      expect(body.parked).toBe(true)
+      expect(body.below_min).toBe(true)
       expect(body.authorization).toBeUndefined()
-      expect(body.amount).toBe('2.0')
-      expect(body.cap_usdc).toBe('1')
+      expect(body.amount).toBe('0.5')
+      expect(body.min_usdc).toBe('1')
     })
   })
 

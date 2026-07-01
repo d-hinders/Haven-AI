@@ -85,3 +85,46 @@ export function loadPilotRigConfig(env: NodeJS.ProcessEnv): PilotRigConfig {
     saltNonce,
   }
 }
+
+export interface PilotProvisionConfig {
+  /** Throwaway owner of the pilot Safe. Pays gas here (deploy + one owner tx). */
+  ownerPrivateKey: `0x${string}`
+  rpcUrl: string
+  safe7579AdapterAddress: `0x${string}`
+  /** CREATE2 salt for the vanilla pilot Safe — bump for a fresh account. */
+  saltNonce: bigint
+}
+
+/**
+ * Env for the #721 provisioning script. Unlike the rig, no bundler is involved:
+ * the owner EOA submits both transactions itself (it needs a little Base
+ * Sepolia faucet ETH), exactly like a customer-owned Safe would migrate.
+ */
+export function loadPilotProvisionConfig(env: NodeJS.ProcessEnv): PilotProvisionConfig {
+  const ownerPrivateKey = env.PILOT_OWNER_PRIVATE_KEY
+  if (!ownerPrivateKey) {
+    throw new Error(
+      'Missing required pilot env:\n  - PILOT_OWNER_PRIVATE_KEY (throwaway Base Sepolia key with faucet ETH)\n' +
+        'See docs/research/erc4337-pilot-rig.md for the operator runbook.',
+    )
+  }
+  if (!HEX_32_BYTES.test(ownerPrivateKey)) {
+    throw new Error('PILOT_OWNER_PRIVATE_KEY must be a 0x-prefixed 32-byte hex private key')
+  }
+
+  let saltNonce = 0n
+  if (env.PILOT_SALT_NONCE !== undefined) {
+    try {
+      saltNonce = BigInt(env.PILOT_SALT_NONCE)
+    } catch {
+      throw new Error(`PILOT_SALT_NONCE must be an integer, got "${env.PILOT_SALT_NONCE}"`)
+    }
+  }
+
+  return {
+    ownerPrivateKey: ownerPrivateKey as `0x${string}`,
+    rpcUrl: env.PILOT_RPC_URL ?? DEFAULT_BASE_SEPOLIA_RPC,
+    safe7579AdapterAddress: readAddress(env, 'PILOT_SAFE7579_ADAPTER', DEFAULT_SAFE7579_ADAPTER),
+    saltNonce,
+  }
+}

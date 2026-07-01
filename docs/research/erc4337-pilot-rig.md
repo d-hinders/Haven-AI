@@ -103,10 +103,49 @@ Exit codes mirror the QA harness: `2` = missing/invalid env, `1` = run failure.
   owner tx), #722 (Smart Sessions policies + enforcement tests), #723 (gasless
   payment E2E + rail comparison), #724 (report + go/no-go).
 
+## #721 — the one-owner-tx migration recipe
+
+`npm run pilot:provision -w packages/qa-agent` is the migration story: it
+deploys a **vanilla Safe v1.4.1** (the exact shape Haven deploys for customers
+today), then upgrades it to ERC-7579 with **one owner-signed
+`execTransaction`** — a MultiSendCallOnly batch of, in dependency order:
+
+1. `safe.enableModule(safe7579Adapter)` — the adapter may execute via the
+   Safe's module path;
+2. `safe.setFallbackHandler(safe7579Adapter)` — EntryPoint/7579 calls route to
+   the adapter;
+3. `safe7579.initializeAccount(validators, executors, fallbacks, hooks,
+   registryInit)` — called *by the Safe* (inner MultiSend calls run with
+   `msg.sender = safe`), installing the **Smart Sessions validator** with no
+   initial sessions (#722 adds them) and trusting the Rhinestone attester on
+   the ERC-7484 registry (threshold 1).
+
+Post-migration the script verifies the upgrade is **additive**: `accountId()`
+answers via the new fallback handler, `isModuleInstalled(1, SmartSessions)`
+is true — and a plain owner `execTransaction` still executes, proving the
+classic Safe path is untouched. This batch, unchanged, is the per-account
+Stage 2 migration payload.
+
+**ABI pinning caveat (the drift lesson again):** the deployed canonical
+adapter is the **v1.0.2 artifact** — `initializeAccount` takes five arrays and
+a two-field `ModuleInit {module, initData}`. The repo's `main` branch has
+diverged (single `ModuleInit[]` with a `moduleType` field). The ABI in
+`provision-lib.ts` is pinned to the deployed v1.0.2 tag; do not "refresh" it
+from `main` without confirming what the canonical address actually runs.
+Smart Sessions / registry / attester addresses are imported from
+`@rhinestone/module-sdk` (package-pinned, not hand-copied).
+
+Operator run: same env as the rig minus the bundler —
+`PILOT_OWNER_PRIVATE_KEY` (throwaway, **funded with faucet ETH**: the owner
+pays for the deploy and the one owner tx, exactly like a migrating customer)
+plus optional `PILOT_RPC_URL` / `PILOT_SALT_NONCE`. Success evidence (Safe +
+migration-tx Basescan links) closes #721.
+
 ## References
 
 - ADR: issue #719 (session-key policy layer)
 - Safe7579: https://docs.safe.global/advanced/erc-7579/7579-safe
+- Safe7579 v1.0.2 interface (deployed artifact): https://github.com/rhinestonewtf/safe7579/blob/v1.0.2/src/ISafe7579.sol
 - Smart Sessions: https://docs.rhinestone.dev/module-sdk/modules/smart-sessions
 - permissionless.js: https://docs.pimlico.io/permissionless
 - ERC-4337 EntryPoint v0.7 / ERC-7579 / ERC-7484 (registry attesters)

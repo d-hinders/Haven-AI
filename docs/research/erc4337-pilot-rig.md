@@ -194,6 +194,41 @@ Safe funded with **≥ 0.15 test-USDC** (the two pass cases spend ~0.12 to the
 owner address; rejected cases move nothing). Paste the printed case table
 into #722 to close it.
 
+## #723 — payment E2E + rail comparison
+
+`npm run pilot:compare -w packages/qa-agent` produces the #723 deliverable: one
+Markdown table, both rails, same metrics — median latency, average gas per
+payment, and the **concurrency probe** (three simultaneous payments).
+
+- **Session rail (always measured):** three sequential policy-bound payments
+  (0.01 USDC each) from the pilot Safe, then three **concurrent** payments with
+  consecutive pre-assigned 2D nonces — bundlers can include all three, which is
+  exactly what the single-EOA relayer cannot do today (#718/#692). Spends 0.06
+  test-USDC to the owner address.
+- **Relayer rail (opt-in):** `PILOT_COMPARE_RELAYER=1` + the `QA_*` env runs
+  the same shape through the existing AllowanceModule rail via the SDK against
+  the dev backend (3 + 3 × 0.1 USDC). **Off by default** — it uses the shared
+  QA identity and consumes its allowance, so the deterministic `qa-dev` signal
+  is never touched accidentally. Expect the concurrent phase to surface the
+  nonce serialization (retries or failures) — that divergence *is* the data.
+- Every confirmed payment emits a **rail-agnostic evidence JSON line**
+  mirroring the backend's `machine-payment-evidence` columns (`rail`,
+  `tx_hash`, `chain_id`, `payer_address`, `settlement_address`, …) — proving
+  the ledger shape works unchanged whichever rail executed.
+
+### Paymaster budgets — the structural #717 answer
+
+On the pilot's Pimlico rig, sponsorship is governed by **sponsorship policies**
+configured on the dashboard: per-policy spend caps, per-user (per-sender)
+limits, and time windows. When a policy's budget is exhausted the paymaster
+**declines at sponsorship time** — `prepareUserOperation` fails before
+anything reaches the chain, and no gas is spent. That maps 1:1 to the #717
+ask (per-agent gas budgets + rate limits): one sponsorship policy per agent
+(or per tier), with the decline surfacing as a clean, retryable client error
+instead of a drained relayer. Vendor-specific mechanics; the equivalent knobs
+exist at Alchemy/Biconomy, and a self-hosted paymaster would own them
+directly — a Stage 2 line item for the #724 report.
+
 ## References
 
 - ADR: issue #719 (session-key policy layer)

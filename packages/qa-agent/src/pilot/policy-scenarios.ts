@@ -11,40 +11,19 @@
  *   5. session outside its validity window      → REJECTED (validAfter in future)
  *   6. owner revokes the session                → REJECTED afterwards
  *
- * Spend per full run ≈ 0.12 test-USDC (cases 1 + 4a + 4b) to the owner address.
+ * Spend per full run ≈ 0.12 test-USDC (cases 1 + 4a) to the owner address.
  * Rejected cases fail at validation — no funds move, no gas is burned.
  *
  * Run: npm run pilot:policies -w packages/qa-agent   (env: see pilot/config.ts)
  */
 
 import { ethers } from 'ethers'
-import {
-  http,
-  createPublicClient,
-  encodeFunctionData,
-  formatUnits,
-  parseAbi,
-  type Address,
-  type Hex,
-} from 'viem'
+import { formatUnits, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { baseSepolia } from 'viem/chains'
-import { entryPoint07Address, getUserOperationHash } from 'viem/account-abstraction'
-import { createSmartAccountClient } from 'permissionless'
-import { toSafeSmartAccount } from 'permissionless/accounts'
-import { createPimlicoClient } from 'permissionless/clients/pimlico'
-import { getAccountNonce } from 'permissionless/actions'
-import {
-  SMART_SESSIONS_ADDRESS,
-  encodeSmartSessionSignature,
-  encodeValidatorNonce,
-  getAccount,
-  getOwnableValidatorMockSignature,
-} from '@rhinestone/module-sdk'
 import { loadPilotPolicyConfig, type PilotPolicyConfig } from './config.js'
 import { SAFE_ABI, execSafeTransactionAsOwner } from './provision-lib.js'
+import { ERC20_ABI, SEPOLIA_USDC, createSessionRail } from './session-rail.js'
 import {
-  SmartSessionMode,
   buildHavenPolicySession,
   getEnableSessionsAction,
   getPermissionId,
@@ -52,11 +31,6 @@ import {
 } from './session-policies.js'
 
 const CHAIN_ID = 84532
-const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as Address
-const ERC20_ABI = parseAbi([
-  'function transfer(address to, uint256 amount) returns (bool)',
-  'function balanceOf(address) view returns (uint256)',
-])
 const NOT_ALLOWLISTED = '0x000000000000000000000000000000000000dEaD' as Address
 
 // Policy numbers (atomic, 6 decimals): per-tx 0.05, session-lifetime 0.10.
@@ -81,7 +55,6 @@ async function main(): Promise<void> {
     process.exit(2)
   }
 
-  const publicClient = createPublicClient({ chain: baseSepolia, transport: http(cfg.rpcUrl) })
   const provider = new ethers.JsonRpcProvider(cfg.rpcUrl, CHAIN_ID)
   const owner = new ethers.Wallet(cfg.ownerPrivateKey, provider)
   const sessionKey = privateKeyToAccount(cfg.sessionPrivateKey)
@@ -90,8 +63,10 @@ async function main(): Promise<void> {
   console.log(`session key:     ${sessionKey.address}`)
   console.log(`allowlisted to:  ${allowedRecipient}`)
 
+  const rail = await createSessionRail(cfg)
+
   // Preflight: the pass cases move real test-USDC — require a funded pilot Safe.
-  const usdcBalance = (await publicClient.readContract({
+  const usdcBalance = (await rail.publicClient.readContract({
     address: SEPOLIA_USDC,
     abi: ERC20_ABI,
     functionName: 'balanceOf',
@@ -105,26 +80,20 @@ async function main(): Promise<void> {
 
   // ── Sessions: A = the Haven policy shape, live now. B = not yet valid. ──────
   const nowSec = Math.floor(Date.now() / 1000)
-  const sessionA = buildHavenPolicySession({
+  const shared = {
     sessionKeyAddress: sessionKey.address,
     usdcAddress: SEPOLIA_USDC,
     allowedRecipient,
     perTxCapAtomic: PER_TX_CAP,
     cumulativeLimitAtomic: CUMULATIVE_LIMIT,
     validUntilSec: nowSec + 24 * 3600,
-    salt: ('0x' + '01'.repeat(32)) as Hex,
     chainId: BigInt(CHAIN_ID),
-  })
+  }
+  const sessionA = buildHavenPolicySession({ ...shared, salt: ('0x' + '01'.repeat(32)) as Hex })
   const sessionB = buildHavenPolicySession({
-    sessionKeyAddress: sessionKey.address,
-    usdcAddress: SEPOLIA_USDC,
-    allowedRecipient,
-    perTxCapAtomic: PER_TX_CAP,
-    cumulativeLimitAtomic: CUMULATIVE_LIMIT,
+    ...shared,
     validAfterSec: nowSec + 3600, // window opens in the future → unusable now
-    validUntilSec: nowSec + 24 * 3600,
     salt: ('0x' + '02'.repeat(32)) as Hex,
-    chainId: BigInt(CHAIN_ID),
   })
   const permissionA = getPermissionId({ session: sessionA })
   const permissionB = getPermissionId({ session: sessionB })
@@ -138,69 +107,6 @@ async function main(): Promise<void> {
     data: enable.callData,
     operation: 0,
   })
-
-  // ── 4337 plumbing (the #720 rig, pointed at the provisioned account) ────────
-  const account = await toSafeSmartAccount({
-    client: publicClient,
-    address: cfg.safeAddress,
-    owners: [privateKeyToAccount(cfg.ownerPrivateKey)],
-    version: '1.4.1',
-    entryPoint: { address: entryPoint07Address, version: '0.7' },
-    safe4337ModuleAddress: cfg.safe7579AdapterAddress,
-    erc7579LaunchpadAddress: cfg.erc7579LaunchpadAddress,
-  })
-  const pimlico = createPimlicoClient({
-    transport: http(cfg.bundlerUrl),
-    entryPoint: { address: entryPoint07Address, version: '0.7' },
-  })
-  const client = createSmartAccountClient({
-    account,
-    chain: baseSepolia,
-    bundlerTransport: http(cfg.bundlerUrl),
-    paymaster: pimlico,
-    userOperation: {
-      estimateFeesPerGas: async () => (await pimlico.getUserOperationGasPrice()).fast,
-    },
-  })
-
-  /** Send one USDC transfer as a session-key UserOp under `permissionId`. */
-  async function sendSessionTransfer(
-    permissionId: Hex,
-    to: Address,
-    amount: bigint,
-  ): Promise<string> {
-    const nonce = await getAccountNonce(publicClient, {
-      address: cfg.safeAddress,
-      entryPointAddress: entryPoint07Address,
-      key: encodeValidatorNonce({
-        account: getAccount({ address: cfg.safeAddress, type: 'safe' }),
-        validator: SMART_SESSIONS_ADDRESS,
-      }),
-    })
-    const mock = encodeSessionSig(permissionId, getOwnableValidatorMockSignature({ threshold: 1 }))
-    const userOperation = await client.prepareUserOperation({
-      calls: [
-        {
-          to: SEPOLIA_USDC,
-          value: 0n,
-          data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [to, amount] }),
-        },
-      ],
-      nonce,
-      signature: mock,
-    })
-    const hash = getUserOperationHash({
-      chainId: CHAIN_ID,
-      entryPointAddress: entryPoint07Address,
-      entryPointVersion: '0.7',
-      userOperation: { ...userOperation, sender: cfg.safeAddress },
-    })
-    userOperation.signature = encodeSessionSig(permissionId, await sessionKey.sign({ hash }))
-    const opHash = await client.sendUserOperation(userOperation)
-    const receipt = await pimlico.waitForUserOperationReceipt({ hash: opHash })
-    if (!receipt.success) throw new Error('UserOp included but reverted')
-    return receipt.receipt.transactionHash
-  }
 
   const results: CaseResult[] = []
   async function runCase(
@@ -219,25 +125,27 @@ async function main(): Promise<void> {
     const ok = r.outcome === r.expected
     console.log(`${ok ? '✅' : '❌'} ${name} — expected ${expected}, got ${r.outcome}`)
   }
+  const transfer = (permissionId: Hex, to: Address, amount: bigint) =>
+    rail.sendTransfer(permissionId, to, amount).then((r) => r.txHash)
 
   // ── The six cases ───────────────────────────────────────────────────────────
   await runCase('1 within caps → allowlisted', 'execute', () =>
-    sendSessionTransfer(permissionA, allowedRecipient, OK_AMOUNT),
+    transfer(permissionA, allowedRecipient, OK_AMOUNT),
   )
   await runCase('2 non-allowlisted recipient', 'reject', () =>
-    sendSessionTransfer(permissionA, NOT_ALLOWLISTED, OK_AMOUNT),
+    transfer(permissionA, NOT_ALLOWLISTED, OK_AMOUNT),
   )
   await runCase('3 over per-tx cap', 'reject', () =>
-    sendSessionTransfer(permissionA, allowedRecipient, OVER_TX_AMOUNT),
+    transfer(permissionA, allowedRecipient, OVER_TX_AMOUNT),
   )
   await runCase('4a second within-cap payment (0.08 total)', 'execute', () =>
-    sendSessionTransfer(permissionA, allowedRecipient, OK_AMOUNT),
+    transfer(permissionA, allowedRecipient, OK_AMOUNT),
   )
   await runCase('4b cumulative limit crossed (would be 0.12 > 0.10)', 'reject', () =>
-    sendSessionTransfer(permissionA, allowedRecipient, OK_AMOUNT),
+    transfer(permissionA, allowedRecipient, OK_AMOUNT),
   )
   await runCase('5 session outside validity window', 'reject', () =>
-    sendSessionTransfer(permissionB, allowedRecipient, OK_AMOUNT),
+    transfer(permissionB, allowedRecipient, OK_AMOUNT),
   )
   const remove = getRemoveSessionAction({ permissionId: permissionA })
   console.log('owner revoking session A…')
@@ -248,7 +156,7 @@ async function main(): Promise<void> {
     operation: 0,
   })
   await runCase('6 revoked session', 'reject', () =>
-    sendSessionTransfer(permissionA, allowedRecipient, OK_AMOUNT),
+    transfer(permissionA, allowedRecipient, OK_AMOUNT),
   )
 
   // ── Verdict ─────────────────────────────────────────────────────────────────
@@ -265,10 +173,6 @@ async function main(): Promise<void> {
     process.exit(1)
   }
   console.log('✅ all six policies enforced on-chain — paste this table into #722')
-}
-
-function encodeSessionSig(permissionId: Hex, signature: Hex): Hex {
-  return encodeSmartSessionSignature({ mode: SmartSessionMode.USE, permissionId, signature })
 }
 
 main().catch((e) => {

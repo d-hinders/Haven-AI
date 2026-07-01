@@ -12,7 +12,7 @@ covers:
   - .github/vale/**
   - packages/backend/src/openapi/spec.test.ts
   - packages/backend/src/docs-drift/docs-drift.test.ts
-last-verified: "2026-06-30"
+last-verified: "2026-07-01"
 ---
 
 # Documentation-quality system
@@ -60,6 +60,21 @@ last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
   doc, so the Phase 2 coupling gate stays high-signal.
 - `status` must match location: `docs/archive/**` is `archived`,
   `docs/research/**` is `research`.
+
+### Scaffold a new doc
+
+Don't hand-write the header — scaffold it so it's valid on the first try:
+
+```bash
+npm run docs:new -- docs/operations/new-thing.md          # → owner @d-hinders, status current, today's date
+npm run docs:new -- docs/research/idea.md --owner "@you"   # status inferred as research
+```
+
+`scripts/docs/new-doc.mjs` emits a correct front-matter block (owner default
+`@d-hinders` overridable with `--owner`, `status` inferred from the path,
+`covers: []` with a hint comment, `last-verified` = today) plus an H1 heading,
+then you fill in `covers` and the body. It refuses to overwrite an existing
+file and is dependency-free like the other `scripts/docs/*` tools.
 
 ### Validate locally
 

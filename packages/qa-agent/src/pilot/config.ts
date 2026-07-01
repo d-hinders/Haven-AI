@@ -93,6 +93,11 @@ export interface PilotProvisionConfig {
   safe7579AdapterAddress: `0x${string}`
   /** CREATE2 salt for the vanilla pilot Safe — bump for a fresh account. */
   saltNonce: bigint
+  /**
+   * Resume path: an already-deployed vanilla Safe (owned by the owner key) to
+   * migrate — set PILOT_SAFE_ADDRESS to skip the deploy step entirely.
+   */
+  existingSafeAddress?: `0x${string}`
 }
 
 /**
@@ -126,6 +131,9 @@ export function loadPilotProvisionConfig(env: NodeJS.ProcessEnv): PilotProvision
     rpcUrl: env.PILOT_RPC_URL ?? DEFAULT_BASE_SEPOLIA_RPC,
     safe7579AdapterAddress: readAddress(env, 'PILOT_SAFE7579_ADAPTER', DEFAULT_SAFE7579_ADAPTER),
     saltNonce,
+    existingSafeAddress: env.PILOT_SAFE_ADDRESS
+      ? readAddress(env, 'PILOT_SAFE_ADDRESS', '')
+      : undefined,
   }
 }
 

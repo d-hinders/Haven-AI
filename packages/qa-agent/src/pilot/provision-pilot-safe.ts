@@ -62,27 +62,47 @@ async function main(): Promise<void> {
   }
   console.log(`owner gas balance:   ${ethers.formatEther(ownerBalance)} ETH`)
 
-  // ── 1. Deploy a vanilla Safe v1.4.1 (the shape Haven deploys today) ─────────
-  const safeIface = new ethers.Interface(SAFE_ABI)
-  const initializer = safeIface.encodeFunctionData('setup', [
-    [owner.address], 1, ethers.ZeroAddress, '0x',
-    SEPOLIA_SAFE_CONTRACTS.compatibilityFallbackHandler,
-    ethers.ZeroAddress, 0, ethers.ZeroAddress,
-  ])
-  const factory = new ethers.Contract(
-    SEPOLIA_SAFE_CONTRACTS.safeProxyFactory, SAFE_PROXY_FACTORY_ABI, owner,
-  )
-  console.log('deploying vanilla Safe…')
-  const deployTx = await factory.createProxyWithNonce(
-    SEPOLIA_SAFE_CONTRACTS.safeSingletonL2, initializer, cfg.saltNonce,
-  )
-  const deployReceipt = await deployTx.wait()
-  const proxyCreated = deployReceipt.logs
-    .map((log: ethers.Log) => { try { return factory.interface.parseLog(log) } catch { return null } })
-    .find((parsed: ethers.LogDescription | null) => parsed?.name === 'ProxyCreation')
-  if (!proxyCreated) throw new Error('ProxyCreation event not found in deploy receipt')
-  const safeAddress: string = proxyCreated.args.proxy
-  console.log(`vanilla Safe:        ${safeAddress}`)
+  // ── 1. Deploy a vanilla Safe v1.4.1 — or resume an already-deployed one ────
+  let safeAddress: string
+  if (cfg.existingSafeAddress) {
+    const code = await provider.getCode(cfg.existingSafeAddress)
+    if (code === '0x') {
+      console.error(`PILOT_SAFE_ADDRESS ${cfg.existingSafeAddress} has no code on Base Sepolia.`)
+      process.exit(2)
+    }
+    safeAddress = cfg.existingSafeAddress
+    console.log(`reusing vanilla Safe: ${safeAddress} (PILOT_SAFE_ADDRESS set — deploy skipped)`)
+  } else {
+    const safeIface = new ethers.Interface(SAFE_ABI)
+    const initializer = safeIface.encodeFunctionData('setup', [
+      [owner.address], 1, ethers.ZeroAddress, '0x',
+      SEPOLIA_SAFE_CONTRACTS.compatibilityFallbackHandler,
+      ethers.ZeroAddress, 0, ethers.ZeroAddress,
+    ])
+    const factory = new ethers.Contract(
+      SEPOLIA_SAFE_CONTRACTS.safeProxyFactory, SAFE_PROXY_FACTORY_ABI, owner,
+    )
+    console.log('deploying vanilla Safe…')
+    let deployReceipt
+    try {
+      const deployTx = await factory.createProxyWithNonce(
+        SEPOLIA_SAFE_CONTRACTS.safeSingletonL2, initializer, cfg.saltNonce,
+      )
+      deployReceipt = await deployTx.wait()
+    } catch (e) {
+      throw new Error(
+        'Safe deploy reverted — if this owner+salt already deployed one (CREATE2 ' +
+          'collision), set PILOT_SAFE_ADDRESS to reuse it or bump PILOT_SALT_NONCE. ' +
+          (e instanceof Error ? e.message.split('\n')[0] : String(e)),
+      )
+    }
+    const proxyCreated = deployReceipt.logs
+      .map((log: ethers.Log) => { try { return factory.interface.parseLog(log) } catch { return null } })
+      .find((parsed: ethers.LogDescription | null) => parsed?.name === 'ProxyCreation')
+    if (!proxyCreated) throw new Error('ProxyCreation event not found in deploy receipt')
+    safeAddress = proxyCreated.args.proxy
+    console.log(`vanilla Safe:        ${safeAddress}`)
+  }
 
   // ── 2. THE one owner tx: enableModule + setFallbackHandler + initializeAccount
   const batch = buildProvisionBatch({

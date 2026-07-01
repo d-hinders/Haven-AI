@@ -64,7 +64,11 @@ describe('non-custody invariants', () => {
 
   it('keeps the relayer a gas-only signer (derived from the relayer gas key)', () => {
     const relayer = readFileSync(join(SRC, 'lib', 'relayer.ts'), 'utf8')
-    expect(relayer).toMatch(/config\.relayerPrivateKey/)
+    // Per-chain relayer keys (#640/#678): the deploy/exec signer resolves via
+    // relayerPrivateKeyForChain(chainId) — RELAYER_PRIVATE_KEY_<chainId> with a
+    // global RELAYER_PRIVATE_KEY fallback. Both are relayer *gas* keys, so the
+    // invariant (relayer derived only from a relayer gas key) still holds.
+    expect(relayer).toMatch(/relayerPrivateKeyForChain\(/)
   })
 
   // Invariant 4 — Red Line #1/#2: Haven never generates key material server-side.

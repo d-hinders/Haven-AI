@@ -19,11 +19,7 @@
  */
 
 import { ethers } from 'ethers'
-import {
-  REGISTRY_ADDRESS,
-  RHINESTONE_ATTESTER_ADDRESS,
-  SMART_SESSIONS_ADDRESS,
-} from '@rhinestone/module-sdk'
+import { SMART_SESSIONS_ADDRESS } from '@rhinestone/module-sdk'
 import { loadPilotProvisionConfig } from './config.js'
 import {
   ERC7579_ACCOUNT_ABI,
@@ -109,8 +105,6 @@ async function main(): Promise<void> {
     safeAddress,
     safe7579Adapter: cfg.safe7579AdapterAddress,
     smartSessionsValidator: SMART_SESSIONS_ADDRESS,
-    registry: REGISTRY_ADDRESS,
-    attester: RHINESTONE_ATTESTER_ADDRESS,
   })
   const multiSendData = new ethers.Interface(MULTI_SEND_ABI).encodeFunctionData('multiSend', [
     encodeMultiSendTransactions(batch),

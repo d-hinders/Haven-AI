@@ -1,5 +1,5 @@
 import { JsonRpcProvider, Wallet, formatEther, parseEther } from 'ethers'
-import { config } from '../config.js'
+import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from './chains.js'
 
 const providers = new Map<number, JsonRpcProvider>()
@@ -15,16 +15,24 @@ function getProvider(chainId: number): JsonRpcProvider {
 }
 
 /**
- * Returns a signer connected to the given chain's RPC, funded by RELAYER_PRIVATE_KEY.
- * The signer is reused across calls for the same chainId (cached).
+ * Returns a signer connected to the given chain's RPC, funded by the relayer key
+ * for that chain — `RELAYER_PRIVATE_KEY_<chainId>` with a global
+ * `RELAYER_PRIVATE_KEY` fallback (#640). This is the signer that submits Safe
+ * **deploys** and **execTransaction**, so it must resolve per chain to honour the
+ * per-chain relayer isolation; otherwise a single backend serving multiple chains
+ * would deploy/exec on every chain with the same key (e.g. a prod Base Sepolia
+ * deploy run by the mainnet relayer key → unfunded on Sepolia). Cached per chainId.
  */
 export function getRelayer(chainId: number): Wallet {
   let relayer = relayers.get(chainId)
   if (!relayer) {
-    if (!config.relayerPrivateKey) {
-      throw new Error('RELAYER_PRIVATE_KEY environment variable is not set')
+    const key = relayerPrivateKeyForChain(chainId)
+    if (!key) {
+      throw new Error(
+        `No relayer key for chain ${chainId} — set RELAYER_PRIVATE_KEY_${chainId} or RELAYER_PRIVATE_KEY`,
+      )
     }
-    relayer = new Wallet(config.relayerPrivateKey, getProvider(chainId))
+    relayer = new Wallet(key, getProvider(chainId))
     relayers.set(chainId, relayer)
   }
   return relayer

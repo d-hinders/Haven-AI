@@ -21,7 +21,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-06-30"
+last-verified: "2026-07-01"
 ---
 
 # Haven — CLAUDE.md
@@ -234,6 +234,7 @@ Multiple independent layers, all need to be compromised for funds to be at risk:
 - Environment config via `.env` files (never commit secrets)
 - Use conventional commit messages
 - Document public API endpoints with JSDoc or OpenAPI
+- Every new doc under `docs/` (and the root gravity files) needs front-matter (`owner` / `status` / `covers` / `last-verified`) — run `npm run docs:new -- <path>` to scaffold it correctly, then fill in `covers` and the body
 
 ## Releasing & publishing packages
 

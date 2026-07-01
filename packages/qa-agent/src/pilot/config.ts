@@ -128,3 +128,50 @@ export function loadPilotProvisionConfig(env: NodeJS.ProcessEnv): PilotProvision
     saltNonce,
   }
 }
+
+export interface PilotPolicyConfig {
+  /** Owner of the provisioned pilot Safe — enables/revokes sessions (pays gas). */
+  ownerPrivateKey: `0x${string}`
+  /** The session key: today's "delegate", now policy-bound. Throwaway. */
+  sessionPrivateKey: `0x${string}`
+  /** The pilot Safe provisioned by pilot:provision (#721). */
+  safeAddress: `0x${string}`
+  /** Bundler + paymaster RPC (Pimlico-style). Secret. */
+  bundlerUrl: string
+  rpcUrl: string
+  safe7579AdapterAddress: `0x${string}`
+  erc7579LaunchpadAddress: `0x${string}`
+}
+
+/** Env for the #722 policy-enforcement suite. Aggregates missing vars like the others. */
+export function loadPilotPolicyConfig(env: NodeJS.ProcessEnv): PilotPolicyConfig {
+  const missing: string[] = []
+  if (!env.PILOT_OWNER_PRIVATE_KEY) missing.push('PILOT_OWNER_PRIVATE_KEY (pilot Safe owner, throwaway)')
+  if (!env.PILOT_SESSION_PRIVATE_KEY) missing.push('PILOT_SESSION_PRIVATE_KEY (session key, throwaway)')
+  if (!env.PILOT_SAFE_ADDRESS) missing.push('PILOT_SAFE_ADDRESS (from the pilot:provision run, #721)')
+  if (!env.PILOT_BUNDLER_URL) missing.push('PILOT_BUNDLER_URL (bundler+paymaster RPC — secret)')
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required pilot env:\n  - ${missing.join('\n  - ')}\n` +
+        'See docs/research/erc4337-pilot-rig.md for the operator runbook.',
+    )
+  }
+  for (const [name, value] of [
+    ['PILOT_OWNER_PRIVATE_KEY', env.PILOT_OWNER_PRIVATE_KEY],
+    ['PILOT_SESSION_PRIVATE_KEY', env.PILOT_SESSION_PRIVATE_KEY],
+  ] as const) {
+    if (!HEX_32_BYTES.test(value as string)) {
+      throw new Error(`${name} must be a 0x-prefixed 32-byte hex private key`)
+    }
+  }
+
+  return {
+    ownerPrivateKey: env.PILOT_OWNER_PRIVATE_KEY as `0x${string}`,
+    sessionPrivateKey: env.PILOT_SESSION_PRIVATE_KEY as `0x${string}`,
+    safeAddress: readAddress(env, 'PILOT_SAFE_ADDRESS', ''),
+    bundlerUrl: env.PILOT_BUNDLER_URL as string,
+    rpcUrl: env.PILOT_RPC_URL ?? DEFAULT_BASE_SEPOLIA_RPC,
+    safe7579AdapterAddress: readAddress(env, 'PILOT_SAFE7579_ADAPTER', DEFAULT_SAFE7579_ADAPTER),
+    erc7579LaunchpadAddress: readAddress(env, 'PILOT_ERC7579_LAUNCHPAD', DEFAULT_ERC7579_LAUNCHPAD),
+  }
+}

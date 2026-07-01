@@ -55,7 +55,7 @@ covers:
   - docs/architecture/07-edge-signer.md
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-06-29"
+last-verified: "2026-07-02"
 ---
 
 # Haven — Architecture Overview
@@ -82,7 +82,7 @@ enforcement for automatic Safe funding.**
 | `@haven_ai/signer` | Local edge signer — holds the delegate key, signs only. Funding relay sends `{ payment_id, signature }` to hosted MCP; paid MCP-tool completion can also send a signed, merchant-bound `payment_header` for settlement/evidence. |
 | `@haven_ai/mcp` | Fully-local MCP — tool orchestration and signing share one local process, while still using the configured Haven API/relayer and external chain or merchant; **advanced opt-in** (`--local`), not the default. |
 | `@haven_ai/cli` | User-authenticated terminal companion for reads and backend-only management; owner-signed on-chain actions remain in the dashboard. |
-| `@haven_ai/qa-agent` | Private Base-Sepolia dev harness for deterministic seeded money-flow and merchant round-trip checks; not published. |
+| `@haven_ai/qa-agent` | Private Base-Sepolia dev harness for deterministic seeded money-flow and merchant round-trip checks; also hosts the experimental ERC-4337 pilot scripts (ADR #719, `src/pilot/` — see the research doc); not published. |
 | `@haven_ai/demo-merchant-mcp` | Internal x402 demo merchant — test counterparty, not product. |
 
 ## Default topology

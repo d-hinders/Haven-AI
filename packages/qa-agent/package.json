@@ -14,7 +14,8 @@
     "pilot:rig": "tsx src/pilot/rig-hello-userop.ts",
     "pilot:provision": "tsx src/pilot/provision-pilot-safe.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pilot:policies": "tsx src/pilot/policy-scenarios.ts"
   },
   "keywords": [
     "haven",

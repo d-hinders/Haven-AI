@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/lib/fee/fee-module.ts
-last-verified: "2026-06-29"
+last-verified: "2026-07-02"
 ---
 
 # Haven — Architecture
@@ -44,7 +44,10 @@ The current connect mechanism is covered by docs 6 (hosted MCP connect flow) and
 Forward-looking investigations (not current architecture) live in
 [`docs/research/`](../research/) — e.g.
 [smart-account-native x402 settlement](../research/x402-smart-account-settlement.md),
-the spike to remove the delegate funding leg.
+the spike to remove the delegate funding leg, and the
+[ERC-4337 pilot rig](../research/erc4337-pilot-rig.md) (ADR #719: session-key
+policy layer — rig, one-owner-tx migration recipe, and policy-enforcement
+suite).
 
 ## Regenerating exports
 

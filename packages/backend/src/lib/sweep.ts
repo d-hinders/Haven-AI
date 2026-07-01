@@ -15,7 +15,7 @@ import { getRelayerWallet } from './allowance-module.js'
  * The delegate signs an off-chain authorization; the relayer submits it and pays
  * gas. The relayer is only the gas payer here — it is never a spender and holds
  * no allowance, so a relayer compromise cannot move user funds. See
- * docs/bug-reports/sweep-delegate-split-signer-gap.md.
+ * docs/archive/sweep-delegate-split-signer-gap.md.
  */
 
 /** How long a prepared authorization is valid for signing + relaying. */
@@ -116,6 +116,21 @@ export async function relaySweepAuthorization(
     auth.nonce,
     signature,
   )
-  const receipt = await tx.wait()
-  return { txHash: receipt.hash }
+  // `tx.wait()` can return null (or race) on a lagging RPC even when the tx has
+  // landed — which previously surfaced as a spurious "Sweep relay failed" while
+  // the funds had actually moved. Poll for the receipt by hash with a timeout,
+  // then assert it didn't revert. The tx is already broadcast and the EIP-3009
+  // nonce makes it idempotent, so we never re-submit.
+  const provider = relayer.provider
+  if (!provider) {
+    throw new Error(`Relayer provider not configured for chain ${auth.chainId}`)
+  }
+  const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
+  if (!receipt) {
+    throw new Error(`Sweep tx ${tx.hash} not confirmed within 90s`)
+  }
+  if (receipt.status === 0) {
+    throw new Error(`Sweep tx ${tx.hash} reverted`)
+  }
+  return { txHash: tx.hash }
 }

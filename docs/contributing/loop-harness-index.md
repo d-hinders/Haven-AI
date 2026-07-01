@@ -6,14 +6,18 @@ covers:
   - packages/backend/src/loop-harness/**
   - packages/frontend/src/lib/allowance-math.ts
   - packages/frontend/src/lib/loop-harness/**
-  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/lib/payment-coverage.ts
+  - packages/backend/src/lib/machine-payments.ts
   - packages/backend/src/routes/x402-resources.ts
-last-verified: "2026-06-28"
+  - packages/backend/package.json
+  - packages/frontend/package.json
+  - .github/workflows/ci.yml
+last-verified: "2026-07-01"
 ---
 
 # Loop Harness Index
 
-Last updated: 2026-06-13
+Last updated: 2026-07-01
 
 The portfolio of **oracle-grounded differential loops** in this repo — see
 [`loop-engineering.md`](./loop-engineering.md) for the concept and the template.
@@ -51,9 +55,9 @@ work.
 
 | Candidate | Where | Oracle to define | Notes |
 | --- | --- | --- | --- |
-| x402 coverage branching | `packages/backend/src/routes/x402.ts` (`totalCoverage` 202/422/execute) | invariant set over `delegateBalance + remaining` vs requested amount | bespoke Haven logic, no on-chain backstop on the merchant leg |
+| x402 coverage branching | `packages/backend/src/lib/payment-coverage.ts` (`decideCoverage`) | invariant set over `delegateBalance + remaining` vs requested amount | bespoke Haven logic, no on-chain backstop on the merchant leg |
 | x402 tx verification decoder | `packages/backend/src/routes/x402-resources.ts` (`_verifyTx`) | AllowanceModule calldata spec (decode `executeAllowanceTransfer`) | parsing/validation surface |
-| Approval-flow state machine | machine-payment lifecycle | invariant: no `executed` record without a tx hash; over-limit never auto-executes | property/invariant shape, not differential |
+| Approval-flow state machine | `packages/backend/src/lib/machine-payments.ts` | invariant: no `executed` record without a tx hash; over-limit never auto-executes | property/invariant shape, not differential |
 
 ## Maintenance notes
 

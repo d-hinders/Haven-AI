@@ -3,17 +3,24 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/loop-harness/**
+  - packages/backend/package.json
   - packages/frontend/src/lib/loop-harness/**
-last-verified: "2026-06-28"
+  - packages/frontend/package.json
+  - .github/workflows/ci.yml
+  - docs/contributing/autonomous-pr-loop.md
+  - docs/contributing/code-quality-loop.md
+last-verified: "2026-07-01"
 ---
 
 # Loop Engineering (oracle-grounded automated loops)
 
-Last updated: 2026-06-13
+Last updated: 2026-07-01
 
-> **Disambiguation.** This is *not* the same thing as
-> [`code-quality-loop.md`](./code-quality-loop.md), which is a human-curated
-> cadence of small quality PRs (a backlog/completed ledger). This doc is about
+> **Disambiguation.** Haven uses “loop” in three ways:
+> [`code-quality-loop.md`](./code-quality-loop.md) is a human-curated discovery
+> method whose actionable queue is GitHub Issues;
+> [`autonomous-pr-loop.md`](./autonomous-pr-loop.md) describes the issue-driven
+> `/loop /ship-next` workflow; and this doc is about
 > **automated, oracle-grounded loops**: a coding agent generates adversarial
 > inputs, grades them against an independent oracle, and converges on fixes —
 > leaving behind a permanent differential test. They compose, but they are
@@ -145,8 +152,8 @@ A loop has a terminal state, and the harness encodes it:
 - Focused run:
   - Backend: `npm --prefix packages/backend run test:loop`
   - Frontend: `npm --prefix packages/frontend test -- src/lib/loop-harness`
-- The harness lives under the package's normal test glob, so **CI runs it on
-  every PR** — that is where the durable value is.
+- The harness lives under the package's normal test glob, so it runs whenever
+  CI's change detection selects that package's unit-test job.
 - As a recurring *active* campaign (only worth it while editing that surface or
   to widen coverage — re-running identical seeds on frozen code is a no-op):
   ```

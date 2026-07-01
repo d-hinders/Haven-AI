@@ -1,8 +1,17 @@
 name: QA — money-flow (dev)
 
-# Manual only (#575): runs the deterministic money-flow harness against the
-# shared dev backend using the QA_* secrets. No schedule and no merge gate yet
-# (that is Sub-issue 5). Testnet-only (Base Sepolia); never touches mainnet.
+# Deterministic money-flow harness against the shared dev backend using the QA_*
+# secrets. Testnet-only (Base Sepolia); never touches mainnet.
+#
+# Triggers (#578):
+#   - workflow_dispatch: manual run / local-debug parity.
+#   - schedule: nightly, so a fresh green signal exists without anyone triggering it.
+#   - repository_dispatch (dev-deployed): fired by the Railway/Vercel dev deploy so QA
+#     runs against exactly what just shipped. Webhook setup is in
+#     docs/operations/agent-qa.md → "Automation & gating".
+#
+# This run is the promotion signal that dev-gate.yml's freshness gate reads before
+# allowing dev → main. On failure it files (or comments on) a `qa-failure` issue.
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +19,21 @@ on:
         description: Override the dev backend URL (defaults to the QA_HAVEN_API_URL secret)
         required: false
         type: string
+  schedule:
+    # 03:17 UTC nightly. Odd minute to dodge the top-of-hour Actions scheduling surge.
+    - cron: '17 3 * * *'
+  repository_dispatch:
+    types: [dev-deployed]
+
+# The harness moves shared testnet funds on one QA delegate/allowance — never run two
+# at once, and let an in-flight money-moving run finish rather than cancelling it.
+concurrency:
+  group: qa-dev-money-flow
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   money-flow:
@@ -21,11 +45,64 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
       - run: npm ci
-      - name: Run money-flow QA
+      - name: Build SDK dependency
+        run: npm run build -w packages/sdk
+      - name: Run money-flow QA (bounded flake-retry)
         env:
           QA_HAVEN_API_URL: ${{ github.event.inputs.haven_api_url || secrets.QA_HAVEN_API_URL }}
           QA_AGENT_API_KEY: ${{ secrets.QA_AGENT_API_KEY }}
           QA_DELEGATE_PRIVATE_KEY: ${{ secrets.QA_DELEGATE_PRIVATE_KEY }}
           QA_PAYMENT_TO: ${{ secrets.QA_PAYMENT_TO }}
           QA_DEMO_MERCHANT_URL: ${{ secrets.QA_DEMO_MERCHANT_URL }}
-        run: npm run qa:dev -w packages/qa-agent
+          # Flake budget (#578): the harness is idempotent-safe to re-run, so a transient
+          # testnet RPC hiccup gets one more shot before the run is called red. Bump via a
+          # repo variable if a chain is flaky; keep low — each attempt consumes test funds.
+          QA_MAX_ATTEMPTS: ${{ vars.QA_MAX_ATTEMPTS || '2' }}
+        run: |
+          set -o pipefail
+          attempts="${QA_MAX_ATTEMPTS:-2}"
+          for i in $(seq 1 "$attempts"); do
+            echo "::group::money-flow attempt $i/$attempts"
+            if npm run qa:dev -w packages/qa-agent; then
+              echo "::endgroup::"
+              echo "money-flow QA passed on attempt $i/$attempts"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "::warning::money-flow QA attempt $i/$attempts failed"
+            if [ "$i" -lt "$attempts" ]; then sleep 30; fi
+          done
+          echo "::error::money-flow QA failed after $attempts attempt(s)"
+          exit 1
+      - name: File (or update) a failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          TRIGGER="${GITHUB_EVENT_NAME}"
+          # Ensure the label exists (labels.yml owns only the surface taxonomy).
+          gh label create qa-failure --color b60205 \
+            --description "Automated: a scheduled/post-deploy money-flow QA run failed" 2>/dev/null || true
+          BODY=$(printf '%s\n' \
+            "The deterministic money-flow QA run (\`qa-dev.yml\`) failed." \
+            "" \
+            "- **Trigger:** \`${TRIGGER}\`" \
+            "- **Run:** ${RUN_URL}" \
+            "- **When:** $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            "" \
+            "This blocks the dev → main freshness gate (#578) until a green run exists." \
+            "Open the run to see which scenario failed, then follow the triage steps in" \
+            "\`docs/operations/agent-qa.md\` → Troubleshooting. A transient testnet/RPC" \
+            "flake can be cleared by re-dispatching the workflow; a real regression should" \
+            "get its own bug report under \`docs/bug-reports/\`.")
+          EXISTING=$(gh issue list --label qa-failure --state open --limit 1 --json number -q '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "Another \`qa-dev\` failure (trigger: \`${TRIGGER}\`) — ${RUN_URL}"
+            echo "Commented on existing qa-failure issue #${EXISTING}"
+          else
+            gh issue create --label qa-failure \
+              --title "qa-dev money-flow failed ($(date -u '+%Y-%m-%d'))" \
+              --body "$BODY"
+          fi

@@ -46,13 +46,14 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
-      # The real gate: every doc has valid front-matter and every `covers`
-      # glob resolves to a real path. Dependency-free, so no `npm ci` needed.
-      - name: Validate doc front-matter
-        run: node scripts/docs/validate-frontmatter.mjs
+      # The real gate: every doc has valid front-matter, every `covers` glob
+      # resolves, and portable agent skills plus client adapters stay aligned.
+      # Dependency-free, so no `npm ci` is needed.
+      - name: Validate docs and agent skills
+        run: npm run docs:check
 
-      # Unit tests for the validator's parser + glob matcher.
-      - name: Test the front-matter validator
+      # Unit tests for the documentation and agent-skill validators.
+      - name: Test the docs validators
         if: always()
         run: node --test scripts/docs/*.test.mjs
 

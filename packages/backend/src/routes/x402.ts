@@ -17,6 +17,7 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
+import { waitForFreshAllowanceNonce } from '../lib/allowance-nonce-coordinator.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 import {
   createMachineApproval,
@@ -554,6 +555,27 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         details: err instanceof Error ? err.message : String(err),
       })
     }
+
+    // Proactively avoid the stale-nonce race (#692): if a prior transfer for this
+    // delegate just incremented the nonce, wait until that increment is visible
+    // before signing, so the sign_hash never targets an already-consumed nonce.
+    // Best-effort with a timeout fallback — the preflight + retry still cover it.
+    onChainAllowance.nonce = await waitForFreshAllowanceNonce(
+      agent.chain_id,
+      agent.safe_address,
+      agent.delegate_address,
+      tokenAddress,
+      onChainAllowance.nonce,
+      async () =>
+        (
+          await getTokenAllowance(
+            agent.chain_id,
+            agent.safe_address,
+            agent.delegate_address,
+            tokenAddress,
+          )
+        ).nonce,
+    )
 
     const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 

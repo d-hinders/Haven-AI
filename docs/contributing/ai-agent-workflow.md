@@ -2,13 +2,15 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - .agents/skills/haven-agent-workflow/**
+  - .agents/skills/ship-next/**
   - .claude/agents/**
   - .claude/commands/ship-next.md
   - .github/pull_request_template.md
   - AGENTS.md
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # Haven AI Agent Workflow
@@ -58,7 +60,7 @@ Before final review, the captain should do a risk-specific self-check based on t
 - credential and setup surfaces: one-time credential visibility, modal reset behavior, in-flight action reset, identifier entropy, and setup-copy consistency
 - generated artifacts: credential files, SDK examples, demo scripts, and skill bundles stay aligned with current Haven capabilities, env vars, product language, and regulatory guardrails
 
-After a Claude or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer prompt together. Do not add one-off preferences or obsolete implementation details.
+After an agent or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the canonical reviewer role together. Do not add one-off preferences or obsolete implementation details.
 
 Workers can implement narrow slices, but the captain owns cross-surface consistency, shared abstractions, PR shape, final review judgment, and deciding which review comments become durable workflow memory.
 
@@ -160,11 +162,30 @@ For generated artifacts, pair implementation changes with output review. If SDK/
 
 ## How To Create Or Invoke Agents
 
-In Claude Code, project agents live in `.claude/agents/`. Restart Claude Code after adding or editing these files, or use `/agents` to manage them interactively. Invoke one explicitly with prompts like `Use the haven-explorer agent...`.
+Canonical role instructions live in `.agents/skills/haven-agent-workflow/references/`. Every client should use those role contracts even when its delegation mechanism differs.
 
-The `color:` fields in `.claude/agents/` are cosmetic Claude Code metadata. Codex and other tools can ignore them.
+In Claude Code, `.claude/agents/` contains thin adapters with Claude-specific tool, model, and color metadata. Restart Claude Code after changing the adapters, or use `/agents` to manage them interactively. Invoke a role explicitly with prompts like `Use the haven-explorer agent...`.
 
-In Codex, keep the same mental model even when agents are not stored as `.claude/agents` files. Ask the main session to spawn a read-only explorer, a bounded worker, or a reviewer, and include the same ownership contract in the prompt.
+In Codex and other clients with delegation support, ask the captain to spawn a read-only explorer, a bounded worker, or a reviewer and point it at the matching canonical role reference. When delegation is unavailable, perform a separate pass using the same role contract.
+
+### Skill discovery verification
+
+Portable project skills live under `.agents/skills/<name>/SKILL.md`. Run
+`npm run docs:check` to verify their metadata, references, portable-language
+boundary, and client-adapter targets.
+
+Skill catalogs are loaded at session start. After adding or changing a skill:
+
+- start a fresh Codex session rooted at the repository and invoke the skill by
+  name with a no-mutation request;
+- start a fresh Claude Code session and invoke the matching slash-command
+  adapter with a no-mutation request;
+- confirm the response follows the canonical skill's default and does not rely
+  on workflow text copied into the adapter.
+
+For example, ask `new-task` to report whether its default is backlog-only while
+explicitly forbidding issue creation. This checks discovery and argument
+forwarding without changing GitHub state.
 
 Example:
 
@@ -248,7 +269,7 @@ Use the haven-doc-reviewer agent to check whether `git diff origin/dev...HEAD` h
 
 ## Default Feature Loop
 
-The `/ship-next` command follows the narrower autonomous issue-to-PR loop in `docs/contributing/autonomous-pr-loop.md`. Treat it as an explicit specialized exception to the coordinator/explorer sequence below; its command-specific gates and closeout contract take precedence when that command is invoked.
+The canonical `ship-next` skill follows the narrower autonomous issue-to-PR loop in `docs/contributing/autonomous-pr-loop.md`. Treat it as an explicit specialized exception to the coordinator/explorer sequence below; its gates and closeout contract take precedence when invoked. Claude Code exposes it through the thin `/ship-next` command adapter.
 
 1. Start from a clean branch.
 2. Use `haven-workflow-coordinator` for non-trivial work to choose the agent plan and ownership boundaries. This is a default workflow decision, not something that depends on the user explicitly asking for parallel agents.

@@ -1,21 +1,33 @@
 ---
 owner: "@d-hinders"
-status: current
-covers:
-  - packages/sdk/src/client.ts
-  - packages/sdk/src/sweep.ts
-  - packages/sdk/src/types.ts
-  - packages/signer/src/core.ts
-  - packages/signer/src/tools.ts
-  - packages/backend/src/db/migrations/022_delegate_sweeps.ts
-  - packages/backend/src/lib/sweep.ts
-  - packages/backend/src/routes/machine-payments.ts
-  - packages/mcp-server/src/server.ts
-  - packages/mcp-server/src/tools.ts
-last-verified: "2026-06-28"
+status: archived
+covers: []
+last-verified: "2026-07-01"
 ---
 
-# Feedback Report: `haven_sweep_delegate` Is Broken in the Split-Signer Architecture
+# ARCHIVED — Split-signer delegate sweep gap
+
+> Historical incident and design record from 2026-06-16. The gap was resolved
+> by PR #403 and later extended to Base Sepolia. Do not use the implementation
+> details below as current instructions. Current sources are
+> [`packages/sdk/src/sweep.ts`](../../packages/sdk/src/sweep.ts),
+> [`packages/signer/src/tools.ts`](../../packages/signer/src/tools.ts), and
+> [`packages/backend/src/lib/sweep.ts`](../../packages/backend/src/lib/sweep.ts).
+
+## Resolution snapshot
+
+- Hosted MCP prepares and submits the sweep while remaining keyless.
+- Local `haven_sign_sweep_delegate` signs EIP-3009 authorization.
+- The Haven relayer pays gas; the delegate does not need ETH.
+- Base and Base Sepolia use chain-specific USDC domains and relayers.
+- The backend re-derives delegate, Haven wallet, chain, amount, and nonce.
+
+The report below is preserved to explain the original failure and shipped
+design.
+
+---
+
+# Feedback Report: `haven_sweep_delegate` Was Broken in the Split-Signer Architecture
 
 **Date:** 2026-06-16  
 **Trigger:** Stranded 0.04 USDC on delegate EOA `0x94A3F25B8F14A70802CCC73D5F4D7E5eaF132549` (Base) after an expired x402 payment  
@@ -163,7 +175,7 @@ When funds strand on the delegate (expired x402, failed merchant retry, etc.), a
 
 ---
 
-## Corrected Implementation Spec (authoritative)
+## Corrected Implementation Spec (historical)
 
 > This supersedes the speculative options above. It folds in review feedback on the
 > first-draft plan. The non-negotiable invariants: **the API key is identity + rate
@@ -266,7 +278,8 @@ delegate key entirely on the edge.
 
 ---
 
-## Current State
+## Outcome
 
-- 0.04 USDC remains stranded on delegate EOA `0x94A3F25B8F14A70802CCC73D5F4D7E5eaF132549` on Base, with no ETH for gas.
-- The gasless EIP-3009 sweep above recovers it without funding the delegate. Implementation in progress per the spec.
+The gasless split-signer design shipped. Later work added Base Sepolia support
+and per-chain USDC domains and relayers. This archived report makes no live
+claim about the original account balance.

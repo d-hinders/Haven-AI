@@ -4,8 +4,10 @@ status: current
 covers:
   - .github/workflows/dev-gate.yml
   - .github/workflows/publish.yml
+  - .github/workflows/qa-dev.yml
+  - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-06-29"
+last-verified: "2026-06-30"
 ---
 
 # Promoting `dev → main` (production release)
@@ -26,6 +28,12 @@ for how the environments are wired, see
 
 - [ ] `dev` CI is green, and the **dev environment is healthy** — the Railway/
       Vercel dev deploys are live with no errors in recent logs.
+- [ ] Manually dispatch **QA — money-flow (dev)** from `dev` and confirm all
+      scenarios pass, or link and assess every known failure. See
+      [`agent-qa.md`](./agent-qa.md) for secrets, funding, commands, and result
+      interpretation.
+- [ ] Run **QA — live smoke (dev)** against the current Vercel preview and review
+      its Playwright artifact if it fails.
 - [ ] The change set has **soaked on `dev`** — exercise the key flows against the
       dev URL (login, balances, one x402 / payment happy path).
 

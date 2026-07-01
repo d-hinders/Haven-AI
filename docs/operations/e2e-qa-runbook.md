@@ -2,26 +2,40 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - .github/workflows/qa-dev.yml
+  - .github/workflows/qa-live.yml
+  - packages/qa-agent/**
+  - packages/frontend/package.json
+  - packages/frontend/playwright.live.config.ts
+  - packages/frontend/e2e/fixtures/live-session.ts
+  - packages/frontend/e2e/live/**
   - packages/frontend/e2e/connect-agent-2.spec.ts
   - packages/frontend/e2e/hosted-mcp.spec.ts
   - packages/frontend/e2e/transactions-detail.spec.ts
-  - packages/connect/src/runtime-manifest.ts
+  - packages/connect/src/**
+  - packages/frontend/src/components/haven/__tests__/HostedConnectCard.test.tsx
+  - packages/frontend/src/lib/__tests__/hosted-connect.test.ts
   - packages/frontend/src/components/settings/ManageApprovers.tsx
   - packages/frontend/src/components/settings/__tests__/ManageApprovers.test.tsx
   - packages/backend/src/lib/safe-owner-tx.ts
   - packages/backend/src/lib/__tests__/safe-owner-tx.test.ts
+  - packages/backend/src/routes/__tests__/user-safes-approvers.test.ts
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
-last-verified: "2026-06-28"
+  - docs/bug-reports/_run-report-template.md
+last-verified: "2026-07-01"
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
 
-These two flows are inherently **live**: real agent runtimes, real wallets, real
-merchants, on-chain settlement. They can't be fully automated in CI, so this is
-the repeatable manual procedure. Where a slice *is* automatable it's noted and
-already covered by Playwright — don't re-test those by hand unless investigating
-a regression.
+These flows combine mocked Playwright, deterministic Base Sepolia QA, deployed
+UI smoke, and manual live exploration. Only the live modes prove real runtime,
+wallet, merchant, or on-chain behavior.
+
+Start with the canonical
+[`agent-qa.md`](./agent-qa.md) operator runbook for provisioning, funding,
+secrets, local commands, GitHub dispatch commands, and troubleshooting. Use this
+document for the remaining exploratory checklist.
 
 > After **every** run, capture findings in a run report under
 > [`docs/bug-reports/`](../bug-reports/) using
@@ -33,14 +47,23 @@ a regression.
 
 | Slice | Coverage |
 |---|---|
+| Base Sepolia money-flow invariants: settle, queue, reject, x402 settle, sweep recovery | `packages/qa-agent`; local `npm run qa:dev -w packages/qa-agent` or Actions `qa-dev.yml` |
+| Unmocked login/dashboard smoke against a Vercel preview + dev backend | `packages/frontend/e2e/live`; local `test:e2e:live` or Actions `qa-live.yml` |
 | Connect-agent modal: create setup → prompt → connected-local → approval screen, no secrets leaked | `e2e/connect-agent-2.spec.ts` |
-| Hosted-MCP connect copy/command | `e2e/hosted-mcp.spec.ts` |
+| Hosted-MCP agent/allowance/CTA states and mobile overflow | `e2e/hosted-mcp.spec.ts` |
+| Hosted connect copy, commands, and deep-link behavior | `HostedConnectCard.test.tsx`; `hosted-connect.test.ts` |
 | **x402 tx displays in history + opens the per-type detail panel** (#420 UI half) | `e2e/transactions-detail.spec.ts` |
 | Approver add/remove/reuse/passkey logic, last-owner guard | unit tests (`ManageApprovers`, `safe-owner-tx`, route tests) |
 | CSV export shape + injection guard | unit tests (`transaction-csv`) |
 
-Run them with `pnpm --filter @haven/frontend test:e2e:desktop` (and the unit
-suites with `pnpm -r test`).
+Run the regular mocked frontend suite with:
+
+```bash
+npm run test:e2e -w packages/frontend
+```
+
+Do not substitute mocked browser coverage for the live money-flow or deployed-UI
+workflows.
 
 ## #419 — Agent connection, end to end
 
@@ -69,8 +92,10 @@ Record per environment: did each of steps 1–5 pass, and any friction.
 Run per merchant: **Soundside, the demo merchant, and any additional real
 merchants** found.
 
-1. **Settle on-chain** — agent pays an x402-gated call. Expect direct settlement
-   within budget, or a queued approval when over. Confirm the on-chain transfer.
+1. **Settle on-chain** — agent pays an x402-gated call. Within remaining
+   allowance it settles; above remaining but within total coverage it queues;
+   above remaining plus delegate balance it rejects as insufficient. Confirm
+   the expected on-chain or approval result.
 2. **Displays correctly in the UI** — the payment appears in Transaction history
    and its detail panel shows the x402 fields (resource host, merchant, amount,
    payment id, on-chain section). *Happy path here is automated
@@ -79,11 +104,15 @@ merchants** found.
 3. **Receipt is logged** — payment evidence is recorded (smart account/delegate,
    merchant, token, amount, chain, x402 resource, tx hash).
 
-Note edge cases worth forcing: over-budget (queues for approval),
+Note edge cases worth forcing: over-budget with available total coverage
+(queues for approval), above total coverage (rejects as insufficient),
 `PRICE_EXCEEDS_MAX`, and a merchant that verifies but doesn't settle
 (delegate sweep recovery).
 
 ## Reporting
 
-One run report per session in `docs/bug-reports/` from the template. Summarize
-pass/fail per checklist item and file any concrete bug as its own issue.
+Create one uniquely named UTC/run-id report per session from the template.
+Record mode and targets, exact command and exit code, pass/fail/skip per check,
+evidence and artifact paths, cleanup, and secret review. A required skip makes
+the run partial/blocked even if its process exits zero. File concrete bugs as
+separate issues.

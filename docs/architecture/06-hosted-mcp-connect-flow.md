@@ -5,205 +5,133 @@ covers:
   - packages/mcp-server/src/**
   - packages/connect/**
   - packages/signer/**
+  - packages/frontend/src/components/ConnectAgent2Modal.tsx
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/backend/src/routes/agent-connection-setups.ts
-last-verified: "2026-06-28"
+  - packages/backend/src/routes/payments.ts
+  - packages/backend/src/routes/x402.ts
+  - packages/backend/src/lib/payment-coverage.ts
+  - packages/backend/src/lib/sweep.ts
+  - packages/sdk/src/client.ts
+  - packages/sdk/src/x402.ts
+last-verified: "2026-07-01"
 ---
 
-# Haven - Hosted MCP Connect Flow And Edge-Signing Contract
+# Haven — Hosted MCP Connect Flow And Edge-Signing Contract
 
-Current architecture for the hosted Haven MCP connection. The hosted server is
-keyless: it authenticates agent identity, reads state, constructs unsigned
-payment payloads, and relays signatures. Signing stays at the edge with the
-agent runtime or `@haven_ai/signer`.
+Hosted MCP is keyless: it authenticates agent identity, reads state, constructs
+unsigned payment payloads, and relays signatures. Signing stays with the agent
+runtime or `@haven_ai/signer`.
 
-Source of truth:
+## Trust boundary
 
-- [`packages/mcp-server`](../../packages/mcp-server/README.md)
-- [`packages/signer`](../../packages/signer/README.md)
-- [`packages/frontend/src/lib/hosted-connect.ts`](../../packages/frontend/src/lib/hosted-connect.ts)
-- [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
-
-## Why This Exists
-
-The original local MCP server, `@haven_ai/mcp`, ran beside the agent runtime,
-read the local Haven credential file, and signed locally. That is
-non-custodial, but every runtime needed its own local server config.
-
-Hosted MCP makes the connect step a stable HTTP URL plus Bearer token. A hosted
-server that held the delegate key would cross a custody boundary, so Haven
-splits identity from authority:
-
-| Piece | Holds | Role |
+| Component | Holds | Responsibility |
 |---|---|---|
-| Hosted MCP | API key / Bearer token | Identity, read state, construct unsigned hashes, relay signatures |
-| Edge signer or runtime | Delegate private key | Authority to sign payment payloads locally |
-| Safe AllowanceModule | On-chain allowance state | Enforcement of automatic agent budget |
+| Hosted MCP | API key / Bearer token | Identity, state reads, orchestration, unsigned payload construction, signature relay |
+| Edge signer | Delegate private key | Local signing authority |
+| Safe AllowanceModule | On-chain allowance | Automatic-spend enforcement |
 
-API auth is identity. Signature is authority. On-chain module state is
-enforcement.
+API authentication is identity, a delegate signature is authority, and the
+on-chain module is enforcement. Hosted MCP must never accept, store, or log a
+delegate key. It has a boot-time guard that rejects an injected key.
 
-## Custody Rule
+For direct funding relay, the agent sends only the locally produced
+`{ payment_id, signature }` to hosted MCP. Paid MCP completion may additionally
+send a signed, merchant-bound `payment_header`; that single-use authorization
+is not a key.
 
-Only `{ payment_id, signature }` should cross from the signer side back to
-hosted MCP for funding relay. Paid MCP-tool completion may also send the signed
-`payment_header` back to hosted MCP so it can settle with the merchant and
-attach evidence to the funding `payment_id`. The delegate private key must
-never appear in hosted MCP headers, URLs, request bodies, logs, deep links, or
-config snippets.
+## Current connection flow
 
-Hosted MCP also has a boot-time custody guard: it must not start when a
-delegate key is injected into its environment.
+Staged Connect Agent pairing is the only current dashboard flow:
 
-## Connect-Agent Flow
+1. The user chooses the Haven wallet, agent rules, and agent budget.
+2. Haven creates a pending setup and returns a setup token and connector
+   command.
+3. The connector runs locally, generates the delegate signing key and API key,
+   and stores both in protected local runtime configuration.
+4. Registration sends only the setup token, runtime/version metadata, public
+   signing address and proof, and API-key hash/prefix. No private key or
+   plaintext API key is registered.
+5. The user signs the wallet approval. The agent cannot spend until the
+   AllowanceModule permission exists on-chain.
+6. Later hosted requests use the locally stored API key as Bearer identity;
+   the local signer retains the delegate key as authority.
 
-The original Connect Agent flow remains supported during the Connect Agent 2
-rollout. In that original flow, the Haven dashboard renders runtime-specific
-hosted MCP snippets from `HOSTED_CLIENT_REGISTRY`.
+Manual fallback is limited to the explicit, warning-gated surfaces that support
+it. Setup links and snippets may contain hosted identity configuration, but
+never a delegate key.
 
-1. User creates an agent and approves its on-chain agent budget.
-2. Haven shows the one-time credential handoff.
-3. User chooses a runtime in **Connect your agent**.
-4. Haven generates a hosted MCP snippet with the hosted URL and Bearer API key.
-5. The snippet never includes the delegate private key.
-6. User provides the signing key to the local signer or runtime-local secret
-   handling.
-7. Runtime calls hosted MCP tools and local signing tools as needed.
+## Direct payment
 
-Deep links are allowed only for runtimes with tested install schemes. They may
-carry the hosted URL and Bearer token, but never the delegate key.
+1. `haven_pay` asks the backend to construct a payment intent.
+2. Within the remaining allowance, it returns `payment_id`, `payload_hash`, and
+   expiry. Above the remaining allowance it queues for user approval and
+   returns no signable hash.
+3. `haven_sign` signs the hash locally.
+4. `haven_submit` relays the signature; the backend verifies the delegate and
+   executes the AllowanceModule transfer.
 
-Connect Agent 2 adds a guarded staged pairing flow before hosted MCP can be
-used for payments:
+## x402
 
-1. User starts in Haven with agent name, description, Haven wallet, agent
-   rules, and agent budget.
-2. Haven creates a pending setup and returns a setup token plus a copyable
-   connector prompt/command.
-3. The connector runs locally in the user's agent environment, resolves the
-   setup, generates the delegate signing key and API key locally, and stores
-   them in local protected storage or runtime config.
-4. The connector sends Haven only the public signing address, proof of
-   possession, API-key hash/prefix, and install status.
-5. User returns to Haven and signs the wallet approval. The agent cannot spend
-   until the Safe AllowanceModule approval exists on-chain.
-6. Hosted MCP uses the locally stored API key for identity, while the local
-   signer/runtime keeps using the local delegate key for authority.
+The recommended paid-MCP path is:
 
-See [Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md)
-and [Connect Agent 2 rollout closeout](../archive/connect-agent-2-rollout-closeout.md).
-
-## Direct Payment Sequence
-
-```mermaid
-sequenceDiagram
-  autonumber
-  participant Agent as Agent runtime
-  participant Signer as Edge signer / local key
-  participant MCP as Hosted MCP (keyless)
-  participant API as Haven backend
-  participant AM as Safe AllowanceModule
-  participant Safe as Haven wallet / Safe
-
-  Agent->>MCP: haven_pay { token, amount, to } + Bearer sk_agent_*
-  MCP->>API: POST /payments
-  API->>AM: Read allowance + generate transfer hash
-  alt within remaining allowance
-    API-->>MCP: 201 { payment_id, sign_data.hash, expires_at }
-    MCP-->>Agent: { payment_id, payload_hash, expires_at }
-    Agent->>Signer: haven_sign { payload_hash }
-    Signer-->>Agent: { signature }
-    Agent->>MCP: haven_submit { payment_id, signature }
-    MCP->>API: POST /payments/:id/sign
-    API->>API: recoverSigner(hash, signature) == delegate
-    API->>AM: executeAllowanceTransfer(...)
-    AM->>Safe: Transfer within approved budget
-    API-->>MCP: { status, tx_hash }
-    MCP-->>Agent: { status, tx_hash }
-  else outside remaining allowance
-    API-->>MCP: 202 { status: pending_approval, payment_id, no hash }
-    MCP-->>Agent: pending_approval
-  end
+```text
+haven_pay_mcp_tool
+  → haven_sign_x402
+  → haven_settle_mcp_tool
 ```
 
-Over-budget requests return no hash. There is nothing for the edge signer to
-sign until the user approves in Haven and status advances to the appropriate
-next action.
+Hosted MCP prepares the funding and merchant contexts, the signer locally
+authorizes both legs, and hosted MCP relays the signed merchant authorization.
 
-## x402 Sequence
+The generic decomposed path remains available:
 
-Hosted MCP uses a two-step x402 funding path. One-shot x402 is not used over
-hosted MCP because the hosted server must obtain the funding hash before the
-edge can sign.
+```text
+haven_quote_x402 / haven_pay_x402_quote
+  → haven_sign
+  → haven_submit
+  → haven_x402_sign_header
+  → merchant retry or haven_complete_mcp_tool
+```
 
-1. Agent receives an HTTP 402 challenge from the merchant/resource server.
-2. Agent calls hosted `haven_pay_x402_quote` with the parsed
-   `payment_required` challenge.
-3. Hosted MCP asks Haven to construct the Safe-to-delegate funding leg.
-4. Haven returns `{ payment_id, payload_hash, x402.expected }` or
-   `pending_approval`.
-5. Agent calls local `haven_sign` with the payload hash and `x402.expected`.
-6. Agent calls hosted `haven_submit` with the funding signature.
-7. After the funding leg succeeds, agent calls local
-   `haven_x402_sign_header` with the original merchant challenge and the
-   signer binding.
-8. The local signer builds the EIP-3009 `X-PAYMENT` header only if amount,
-   merchant, resource URL, asset, and network match the funded intent.
-9. Agent retries the merchant request with `X-PAYMENT`. For paid MCP tools, the
-   agent can instead pass the funding `payment_id` and signed `payment_header`
-   to hosted `haven_complete_mcp_tool`; hosted MCP calls the merchant tool and
-   records success evidence or a merchant-rejection reconciliation event.
+For balance-aware x402 coverage:
 
-Haven never builds the merchant payment header on the hosted server. Hosted MCP
-only relays an already signed, merchant-bound header for paid MCP-tool
-completion.
+- `amount <= remaining allowance` can execute;
+- `remaining < amount <= remaining + delegate balance` queues for approval;
+- `amount > remaining + delegate balance` is rejected as insufficient coverage.
 
-## Hosted MCP Tools
+Neither a queued nor rejected request returns a funding hash.
 
-| Tool | Signs? | Purpose |
-|---|---|---|
-| `haven_get_agent` | No | Read agent identity and wallet context |
-| `haven_get_allowances` | No | Read configured and on-chain budget state |
-| `haven_pay` | No | Construct direct payment hash or queue approval |
-| `haven_submit` | No | Relay a locally produced signature |
-| `haven_pay_x402_quote` | No | Construct x402 funding hash or queue approval |
-| `haven_complete_mcp_tool` | No | Complete a paid MCP tool with a signed merchant header and attach evidence |
-| `haven_get_payment_status` | No | Read direct/x402/MPP payment state |
-| `haven_list_transactions` | No | Read recent receipts/activity |
+## Tool surfaces
 
-Local signer tools:
+Hosted MCP provides identity and allowance reads, direct send/prepare/submit,
+x402 and MPP quote/resume/status operations, paid-MCP prepare/settle,
+receipt listing and verification, discovery, and gasless USDC sweep
+orchestration. The exact registered union is in
+`packages/mcp-server/src/tools.ts`.
+
+The edge signer exposes four local, no-network tools:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign hosted direct-payment or x402 funding hashes |
-| `haven_x402_sign_header` | Build the merchant `X-PAYMENT` header after x402 funding succeeds |
+| `haven_sign` | Sign a prepared payment hash |
+| `haven_x402_sign_header` | Sign the decomposed merchant authorization |
+| `haven_sign_x402` | Sign the recommended paid-MCP funding and merchant contexts |
+| `haven_sign_sweep_delegate` | Sign a gasless delegate-to-wallet USDC sweep |
 
-## Review Checklist
+## Review checklist
 
-Use this checklist for PRs that touch hosted MCP, edge signing, connect-agent
-snippets, x402 signing, or relay code:
+- Hosted services never receive a delegate key.
+- Setup registration contains public proof and hashed API-key metadata only.
+- API-key rotation changes identity credentials, not signing authority.
+- Queued or insufficient requests expose no signable hash.
+- x402 authorization is bound to amount, merchant, resource, asset, and network.
+- Sweep authorization is bound to the registered delegate and Haven wallet.
+- Users can pause or revoke in Haven and revoke Safe permissions outside Haven.
 
-- Hosted MCP does not import, read, log, accept, or store a delegate key.
-- Hosted snippets and deep links include the API key only, never the delegate
-  key.
-- Connect Agent 2 setup/register payloads include only setup token, public
-  signing address, proof, API-key hash/prefix, and install status. They must not
-  include plaintext API keys or private keys.
-- Hosted MCP can construct and relay, but cannot sign.
-- The signer emits signatures or x402 payment headers only; it does not need an
-  API key and makes no network calls.
-- API-key rotation affects identity only and does not imply signing-key
-  rotation.
-- Over-budget direct and x402 paths return `pending_approval` with no hash.
-- x402 merchant header signing is bound to the funded amount, merchant,
-  resource, asset, and network.
-- The user can pause/revoke the agent in Haven and revoke Safe permissions
-  outside Haven.
+## Related docs
 
-## Related Docs
-
-- [Edge signer](07-edge-signer.md)
-- [Connect Agent 2 local-key pairing](../archive/connect-agent-2-local-key-pairing.md)
 - [x402 payment sequence](04-x402-payment-sequence.md)
-- [Local to hosted MCP migration](../operations/local-to-hosted-mcp.md)
+- [Edge signer](07-edge-signer.md)
+- [Local vs hosted MCP](08-local-vs-hosted-mcp.md)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

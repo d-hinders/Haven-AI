@@ -1,4 +1,4 @@
-# PR auto-labeling by changed path → drives /ship-next Phase 1.5 classification
+# PR auto-labeling by changed path → drives ship-next surface classification
 # and surfaces the money path on every PR. Applied by .github/workflows/labeler.yml
 # (actions/labeler@v5, additive). The labels themselves live in .github/labels.yml.
 # See docs/contributing/ship-playbooks/README.md.
@@ -31,7 +31,7 @@
           - "docs/**"
           - "**/*.md"
 
-# Mirrors the skill's Phase 6 money-path file list. Keep these in sync.
+# Mirrors the canonical ship-next skill's Merge Gate money-path list.
 "money-path":
   - changed-files:
       - any-glob-to-any-file:

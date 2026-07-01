@@ -3005,10 +3005,22 @@ export class HavenClient {
       const data = await res.json()
 
       if (!res.ok) {
+        const record = data as Record<string, unknown>
+        const errorText = typeof record.error === 'string' ? record.error : undefined
+        const rawDetails = record.details
+        const detailsText =
+          typeof rawDetails === 'string'
+            ? rawDetails
+            : rawDetails != null
+              ? JSON.stringify(rawDetails)
+              : undefined
+        // Surface the backend's `details` alongside the generic `error` —
+        // otherwise messages like "On-chain execution failed" mask the actual
+        // revert reason (#684). The full body is still attached for callers.
         const message =
-          (data as Record<string, unknown>).error as string
-          ?? (data as Record<string, unknown>).details as string
-          ?? `API request failed`
+          errorText && detailsText
+            ? `${errorText}: ${detailsText}`
+            : errorText ?? detailsText ?? `API request failed`
         throw new HavenApiError(message, res.status, data)
       }
 

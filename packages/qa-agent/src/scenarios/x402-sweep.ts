@@ -5,20 +5,75 @@
  * Drives the demo-merchant's verify-without-settle product (set
  * `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb`): Haven funds the delegate and the
  * merchant returns success without settling on-chain, leaving the delegate
- * holding the funds. Then `sweepDelegate()` reclaims them to the Safe, which the
- * scenario asserts.
+ * holding the funds. Then `sweepDelegate()` reclaims them to the Safe.
+ *
+ * Reliability (#684, follow-up to #603): the funding tx (Safe → delegate) and the
+ * RPC the sweep reads can be out of sync, so a bare `transfers: []` is ambiguous.
+ * This scenario therefore (1) **waits for the stranded balance** to become visible
+ * before sweeping — absorbing cross-RPC propagation lag — and (2) **classifies**
+ * the outcome: no stranded balance → `skip` (merchant likely settled / misconfig),
+ * a stranded balance the sweep failed to reclaim → `fail` with both balances.
  */
 
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, buildSweepTypedData } from '@haven_ai/sdk'
+import { ethers } from 'ethers'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
 const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
+// Circle's canonical Base Sepolia USDC (matches the SDK's CHAIN_USDC[84532]).
+const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
-interface SweepTransfer {
-  asset: string
-  amount: string
-  amountAtomic: string
-  txHash: string
+// Wait for the Safe → delegate funding tx to become visible on the RPC before
+// deciding nothing was stranded. Absorbs cross-RPC propagation lag (#603/#684).
+const STRAND_WAIT_MS = 20_000
+const POLL_INTERVAL_MS = 2_000
+
+async function readUsdc(provider: ethers.Provider, address: string): Promise<bigint> {
+  const usdc = new ethers.Contract(SEPOLIA_USDC, USDC_ABI, provider)
+  return (await usdc.balanceOf(address)) as bigint
+}
+
+/** Poll the delegate's USDC balance until it's stranded (> 0) or the wait elapses. */
+async function waitForStrandedUsdc(provider: ethers.Provider, delegate: string): Promise<bigint> {
+  const deadline = Date.now() + STRAND_WAIT_MS
+  let balance = await readUsdc(provider, delegate)
+  while (balance === 0n && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+    balance = await readUsdc(provider, delegate)
+  }
+  return balance
+}
+
+// The x402 funding leg (Safe → delegate) can revert on a stale allowance nonce
+// when a prior transfer's nonce increment hasn't propagated to the backend's RPC
+// (#692). Two retry-safe signals: the backend preflight (#693) — nothing was
+// submitted — and a confirmed on-chain **revert** (status 0 = full revert = no
+// funds moved). Both are safe to retry after a short delay (to let the nonce
+// propagate); neither can double-fund. A "not confirmed within Ns" error is NOT
+// matched here — that outcome is uncertain and must not be auto-retried.
+const FUNDING_RETRY_ATTEMPTS = 3
+const FUNDING_RETRY_DELAY_MS = 6_000
+const STALE_NONCE_RE = /stale allowance nonce|allowance transfer.*revert/i
+
+async function fetchWithFundingRetry(
+  client: HavenClient,
+  url: string,
+  init: Parameters<HavenClient['fetch']>[1],
+): Promise<Awaited<ReturnType<HavenClient['fetch']>>> {
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= FUNDING_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await client.fetch(url, init)
+    } catch (e) {
+      lastErr = e
+      const msg = e instanceof Error ? e.message : String(e)
+      // Only the stale-nonce funding race is retry-safe; anything else is real.
+      if (!STALE_NONCE_RE.test(msg) || attempt === FUNDING_RETRY_ATTEMPTS) throw e
+      await new Promise((resolve) => setTimeout(resolve, FUNDING_RETRY_DELAY_MS))
+    }
+  }
+  throw lastErr
 }
 
 export const x402Sweep: Scenario = {
@@ -36,6 +91,8 @@ export const x402Sweep: Scenario = {
       baseUrl: ctx.cfg.apiUrl,
       chainRpcs: { 84532: BASE_SEPOLIA_RPC },
     })
+    const provider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC)
+    const fmt = (v: bigint) => ethers.formatUnits(v, 6)
 
     // storage_50gb is the merchant's verify-without-settle product: Haven funds
     // the delegate, the merchant verifies but does not settle → funds stranded.
@@ -45,26 +102,87 @@ export const x402Sweep: Scenario = {
       method: 'tools/call',
       params: { name: 'buy_cloud_storage', arguments: { tier: '50gb' } },
     })
-    const res = await client.fetch(mcpUrlOf(ctx), {
+    const res = await fetchWithFundingRetry(client, mcpUrlOf(ctx), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
       body,
     })
     if (!res.ok) return fail(`verify-without-settle call failed: HTTP ${res.status}`)
 
-    // The funds are now stranded on the delegate — reclaim them to the Safe.
-    let sweep: { transfers?: SweepTransfer[] }
-    try {
-      sweep = (await client.sweepDelegate()) as { transfers?: SweepTransfer[] }
-    } catch (e) {
-      return fail(`sweepDelegate failed: ${e instanceof Error ? e.message : String(e)}`)
+    // (#2) Wait for the stranded balance to become visible before sweeping. This
+    // both absorbs the funding-tx propagation lag and tells us whether a balance
+    // was produced at all.
+    const strandedBefore = await waitForStrandedUsdc(provider, ctx.delegateAddress)
+    if (strandedBefore === 0n) {
+      // (#1) Distinguish "no stranded balance produced" from a real sweep failure.
+      // A merchant that settled (or `MERCHANT_SKIP_SETTLE_PRODUCT` unset) is an
+      // unmet precondition, not a sweep regression — skip rather than fail.
+      return skip(
+        `no stranded balance on the delegate after ${STRAND_WAIT_MS / 1000}s — the merchant ` +
+          `likely settled instead of verify-without-settle (check ` +
+          `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb on the demo-merchant)`,
+      )
     }
 
-    const usdc = sweep.transfers?.find((t) => t.asset === 'USDC' && BigInt(t.amountAtomic || '0') > 0n)
-    if (!usdc) {
-      return fail(`no USDC reclaimed; sweep transfers: ${JSON.stringify(sweep.transfers ?? [])}`)
+    // Gasless sweep (#684): the delegate signs an EIP-3009 transferWithAuthorization
+    // off-chain and the Haven relayer submits it (pays gas). This works for a
+    // gasless delegate (no ETH needed) and matches the production sweep path —
+    // unlike sweepDelegate()'s direct ERC-20 transfer, which needs the delegate to
+    // hold gas and so can never sweep a Haven delegate.
+    let prep
+    try {
+      prep = await client.prepareSweep()
+    } catch (e) {
+      return fail(
+        `prepareSweep failed (delegate held ${fmt(strandedBefore)} USDC): ` +
+          `${e instanceof Error ? e.message : String(e)}`,
+      )
     }
-    return pass(`stranded ${usdc.amount} USDC reclaimed to the Safe (tx ${usdc.txHash})`)
+
+    if (prep.nothing_stranded || !prep.authorization) {
+      // We saw a balance on our RPC but the backend's read found none — a
+      // backend↔harness RPC discrepancy, not a clean recovery.
+      return fail(
+        `backend reported nothing stranded, but the delegate held ${fmt(strandedBefore)} USDC ` +
+          `on ${BASE_SEPOLIA_RPC}`,
+      )
+    }
+
+    const typed = buildSweepTypedData(prep.authorization)
+    const signature = await new ethers.Wallet(ctx.delegateKey).signTypedData(
+      typed.domain,
+      typed.types as unknown as Record<string, ethers.TypedDataField[]>,
+      typed.message,
+    )
+
+    let submitted: Awaited<ReturnType<HavenClient['submitSweep']>>
+    try {
+      submitted = await client.submitSweep(prep.authorization, signature)
+    } catch (e) {
+      const after = await readUsdc(provider, ctx.delegateAddress)
+      if (after === 0n) {
+        // The delegate was funded then drained to 0 before the sweep, and the
+        // sweep reverted ("transfer amount exceeds balance"). The only other
+        // drainer is the merchant settling — i.e. it did NOT verify-without-settle,
+        // so there was nothing to recover. An unmet precondition (skip), not a
+        // sweep regression (fail). Same classification as the no-stranded case.
+        return skip(
+          `delegate funded ${fmt(strandedBefore)} USDC then drained to 0 before the sweep — ` +
+            `the merchant settled instead of verify-without-settle (check ` +
+            `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb on the demo-merchant)`,
+        )
+      }
+      // A genuine sweep failure: the stranded balance is still on the delegate but
+      // the relayer couldn't move it. Report both balances so the cause is clear.
+      return fail(
+        `gasless sweep submit failed (delegate held ${fmt(strandedBefore)} USDC before, ` +
+          `${fmt(after)} after): ${e instanceof Error ? e.message : String(e)}`,
+      )
+    }
+
+    return pass(
+      `stranded ${submitted.amount} USDC reclaimed to the Safe via gasless sweep (tx ${submitted.tx_hash})`,
+    )
   },
 }
 

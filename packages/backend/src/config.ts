@@ -52,6 +52,12 @@ export const config = {
   coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
   relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY ?? '',
 
+  // Auto-sweep value cap (#700). The gasless delegate sweep auto-recovers stranded
+  // USDC only up to this many USDC; larger balances are *parked* for manual
+  // recovery, capping the blast radius while the sweep money-path matures. Human
+  // USDC string (parsed to atomic with 6 decimals). Default 1; raise/lower per env.
+  sweepMaxUsdc: process.env.SWEEP_MAX_USDC ?? '1',
+
   // Chains this environment actually serves account deploys on (#679). Comma-
   // separated chain ids; **unset = all supported** (backward-compatible). Dev
   // sets `84532` (Base Sepolia); prod sets `8453,84532`. A chain not listed is

@@ -36,7 +36,7 @@ export const SAFE_ABI = [
 
 export const SAFE_PROXY_FACTORY_ABI = [
   'function createProxyWithNonce(address _singleton, bytes initializer, uint256 saltNonce) returns (address proxy)',
-  'event ProxyCreation(address indexed proxy, address singleton)',
+  'event ProxyCreation(address proxy, address singleton)', // NOT indexed on the deployed factory (empirically 1 topic; matches backend safe-deployer.ts)
 ] as const
 
 // Deployed safe7579 v1.0.2 interface (5-array initializeAccount, 2-field ModuleInit).

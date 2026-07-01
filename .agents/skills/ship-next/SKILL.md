@@ -51,8 +51,9 @@ Run checks proportionate to every changed surface:
 
 - package tests and type checks for package changes;
 - full `npm run quality` for cross-package behavior;
-- the docs playbook checks for workflow and documentation changes;
 - browser verification or the required headless equivalent for UI changes.
+
+When the diff touches any Markdown file, anything under `docs/`, anything under `scripts/docs/`, or a root gravity file (`CLAUDE.md`, `README.md`, `AGENTS.md`, `ABOUT_HAVEN.md`), run `npm run docs:check` and `npm run docs:test` as a **hard gate**. Front-matter, agent-skill, coupling, and drift failures block the pull request exactly like a failing test or type check — never open or update a pull request while they are red. This is the loop's own gate; it does not depend on any GitHub required-check configuration.
 
 Fix failures before pushing. Never open or update a pull request with a known red local gate.
 
@@ -64,7 +65,7 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
 4. Record applied and deferred findings with reasons.
-5. Run `node scripts/docs/coupling-gate.mjs` for the changed paths. When it implicates docs, use the doc-reviewer role, update stale claims, bump `last-verified`, and rerun checks.
+5. Run `node scripts/docs/coupling-gate.mjs` for the changed paths. When the diff touches code that any doc's `covers:` maps to, running the doc-reviewer role is a **hard definition-of-done step**, not optional: review the implicated docs and, in the same pull request, either update the stale claims or genuinely re-verify them and bump `last-verified`, then rerun the docs checks. Do not open the pull request while a `covers:`-mapped doc is left unreviewed.
 
 ## Commit And Pull Request
 

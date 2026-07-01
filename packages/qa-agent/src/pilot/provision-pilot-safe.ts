@@ -34,34 +34,10 @@ import {
   SEPOLIA_SAFE_CONTRACTS,
   buildProvisionBatch,
   encodeMultiSendTransactions,
-  safeTxTypedData,
+  execSafeTransactionAsOwner,
 } from './provision-lib.js'
 
 const CHAIN_ID = 84532
-
-async function execAsOwner(
-  safe: ethers.Contract,
-  owner: ethers.Wallet,
-  args: { to: string; data: string; operation: 0 | 1 },
-): Promise<ethers.TransactionReceipt> {
-  const nonce: bigint = await safe.nonce()
-  const typed = safeTxTypedData({
-    chainId: CHAIN_ID,
-    safeAddress: await safe.getAddress(),
-    to: args.to,
-    data: args.data,
-    operation: args.operation,
-    nonce,
-  })
-  const signature = await owner.signTypedData(typed.domain, typed.types, typed.message)
-  const tx = await safe.execTransaction(
-    args.to, 0n, args.data, args.operation, 0n, 0n, 0n,
-    ethers.ZeroAddress, ethers.ZeroAddress, signature,
-  )
-  const receipt = await tx.wait()
-  if (!receipt || receipt.status !== 1) throw new Error('execTransaction reverted')
-  return receipt
-}
 
 async function main(): Promise<void> {
   let cfg
@@ -121,7 +97,8 @@ async function main(): Promise<void> {
   ])
   const safe = new ethers.Contract(safeAddress, SAFE_ABI, owner)
   console.log('submitting the ONE owner tx (MultiSend: enable + fallback + initialize)…')
-  const migrateReceipt = await execAsOwner(safe, owner, {
+  const migrateReceipt = await execSafeTransactionAsOwner(safe, owner, {
+    chainId: CHAIN_ID,
     to: SEPOLIA_SAFE_CONTRACTS.multiSendCallOnly,
     data: multiSendData,
     operation: 1, // delegatecall into MultiSendCallOnly; inner calls are plain CALLs
@@ -140,7 +117,7 @@ async function main(): Promise<void> {
   console.log(`adapter as module:   enabled=${adapterEnabled}`)
 
   console.log('verifying the plain owner execTransaction path still works…')
-  await execAsOwner(safe, owner, { to: safeAddress, data: '0x', operation: 0 })
+  await execSafeTransactionAsOwner(safe, owner, { chainId: CHAIN_ID, to: safeAddress, data: '0x', operation: 0 })
 
   if (!sessionsInstalled || !adapterEnabled || !accountId) {
     throw new Error('post-migration verification failed — see flags above')

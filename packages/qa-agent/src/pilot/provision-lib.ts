@@ -121,6 +121,34 @@ export function buildProvisionBatch(args: ProvisionBatchArgs): InnerTx[] {
   ]
 }
 
+/**
+ * Sign (EIP-712) and submit one owner execTransaction on a threshold-1 Safe.
+ * The owner EOA pays gas — the customer-side path, no relayer or bundler.
+ */
+export async function execSafeTransactionAsOwner(
+  safe: ethers.Contract,
+  owner: ethers.Wallet,
+  args: { chainId: number; to: string; data: string; operation: 0 | 1 },
+): Promise<ethers.TransactionReceipt> {
+  const nonce: bigint = await safe.nonce()
+  const typed = safeTxTypedData({
+    chainId: args.chainId,
+    safeAddress: await safe.getAddress(),
+    to: args.to,
+    data: args.data,
+    operation: args.operation,
+    nonce,
+  })
+  const signature = await owner.signTypedData(typed.domain, typed.types, typed.message)
+  const tx = await safe.execTransaction(
+    args.to, 0n, args.data, args.operation, 0n, 0n, 0n,
+    ethers.ZeroAddress, ethers.ZeroAddress, signature,
+  )
+  const receipt = await tx.wait()
+  if (!receipt || receipt.status !== 1) throw new Error('execTransaction reverted')
+  return receipt
+}
+
 /** EIP-712 payload for a Safe v1.4.1 transaction (chainId in the domain). */
 export function safeTxTypedData(args: {
   chainId: number

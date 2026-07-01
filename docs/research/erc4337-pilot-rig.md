@@ -141,6 +141,59 @@ pays for the deploy and the one owner tx, exactly like a migrating customer)
 plus optional `PILOT_RPC_URL` / `PILOT_SALT_NONCE`. Success evidence (Safe +
 migration-tx Basescan links) closes #721.
 
+## #722 — Haven's policy shape as Smart Sessions (+ enforcement suite)
+
+`npm run pilot:policies -w packages/qa-agent` answers the pilot's core
+question: does Smart Sessions express Haven's policy roadmap, and do the rules
+actually **stop** violations on-chain? The suite runs six cases against the
+provisioned pilot Safe — each policy proven in both directions (a rule that
+doesn't stop is not a rule):
+
+| # | Case | Expected |
+|---|---|---|
+| 1 | within caps → allowlisted recipient | executes |
+| 2 | non-allowlisted recipient | rejected at validation |
+| 3 | over the per-tx cap | rejected |
+| 4 | cumulative spend past the session limit | rejected (after two passes) |
+| 5 | session outside its validity window | rejected |
+| 6 | owner-revoked session | rejected |
+
+### The mapping (what fit)
+
+| Haven policy | Smart Sessions expression |
+|---|---|
+| recipient allowlist | UniversalActionPolicy ParamRule `EQUAL` on `to` (USDC.transfer, offset 0) |
+| per-tx cap | ParamRule `LESS_THAN_OR_EQUAL` on `amount` (offset 32) |
+| cumulative spending limit | same rule with `isLimited` + `usage.limit` (sums across uses) |
+| time bound / expiry | TimeFramePolicy as a userOp policy |
+| revoke / kill switch | owner tx `getRemoveSessionAction(permissionId)` |
+| session key binding | OwnableValidator (threshold 1, the "delegate" key) |
+
+### Honest findings (feed the #724 report)
+
+- **No native refill.** Haven's reset-period (allowance refills every N
+  minutes) has no direct policy — `usage.limit` is a lifetime cumulative for
+  the session. Closest mappings: **session rotation** (short `validUntil` +
+  periodic re-enable, an owner or executor action) or a custom policy
+  contract (own Solidity — the thing we've avoided). This is the biggest gap
+  and a #724 decision.
+- **One recipient per session.** ParamRules AND together, so a session
+  expresses a single allowed recipient; an N-address allowlist needs N
+  sessions or a custom policy. Fine for x402-style per-merchant scoping,
+  clumsy for a general contact allowlist.
+- **Paymaster must be permitted per session** (`permitERC4337Paymaster`) —
+  easy to miss; without it every sponsored UserOp fails validation.
+- **Byte-offset param addressing** (0, 32, …) is verified by the live run;
+  the unit tests pin structure and encoding, not on-chain semantics.
+
+### Operator run
+
+Same env as before plus `PILOT_SESSION_PRIVATE_KEY` (throwaway session key)
+and `PILOT_SAFE_ADDRESS` (from the `pilot:provision` output), and the pilot
+Safe funded with **≥ 0.15 test-USDC** (the two pass cases spend ~0.12 to the
+owner address; rejected cases move nothing). Paste the printed case table
+into #722 to close it.
+
 ## References
 
 - ADR: issue #719 (session-key policy layer)

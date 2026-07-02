@@ -12,7 +12,8 @@
     "test:watch": "npm --prefix ../sdk run build && vitest",
     "test:loop": "vitest run src/loop-harness",
     "test:payment": "tsx scripts/test-payment-flow.ts",
-    "agent:demo": "tsx scripts/agent-payment-demo.ts"
+    "agent:demo": "tsx scripts/agent-payment-demo.ts",
+    "pilot:rotate-live": "tsx scripts/rotate-session-live.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

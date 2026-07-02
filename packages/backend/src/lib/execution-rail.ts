@@ -58,6 +58,13 @@ export function resolveExecutionRail(state: ExecutionRailState): ExecutionRailDe
 /**
  * Load the rail state for an agent. LEFT JOIN so a missing Safe row yields
  * nulls → legacy (fail-closed), never an error.
+ *
+ * The join goes through `agents.safe_id` — the agent's bound Safe row — the
+ * same resolution agentAuthMiddleware uses. NOTE: `agents` has NO
+ * `safe_address` column (the AgentContext field is middleware-hydrated via
+ * this very join); an address-based join here 500s with "column does not
+ * exist" on the real schema, which mocked route tests cannot catch — found
+ * live on the first DoD run (#745).
  */
 export async function loadExecutionRailState(agent: {
   id: string
@@ -69,10 +76,7 @@ export async function loadExecutionRailState(agent: {
   }>(
     `SELECT us.execution_rail, a.session_permission_id
      FROM agents a
-     LEFT JOIN user_safes us
-       ON us.user_id = a.user_id
-      AND LOWER(us.safe_address) = LOWER(a.safe_address)
-      AND us.chain_id = a.chain_id
+     LEFT JOIN user_safes us ON us.id = a.safe_id
      WHERE a.id = $1`,
     [agent.id],
   )

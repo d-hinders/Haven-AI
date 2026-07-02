@@ -129,6 +129,17 @@ export function deserializeUserOp(stored: unknown): unknown {
 
 // ── Session-rail construction for a payment ────────────────────────────────
 
+/**
+ * Scrub vendor credentials from error text before it reaches API responses or
+ * the database. Viem/bundler errors echo the full request URL — which for
+ * hosted bundlers EMBEDS THE API KEY (`?apikey=…`). Found live during the
+ * #738 exhaustion test: the sponsorship decline leaked the key into the 502
+ * `details`. Every session-rail error surface must pass through this.
+ */
+export function redactVendorSecrets(message: string): string {
+  return message.replace(/apikey=[^&\s"'\\)]+/gi, 'apikey=REDACTED')
+}
+
 const SAFE_OWNERS_ABI = ['function getOwners() view returns (address[])']
 
 /**

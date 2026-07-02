@@ -6,6 +6,7 @@ vi.mock('../db.js', () => ({ default: { query: vi.fn() } }))
 const {
   deserializeUserOp,
   recoverSessionSigner,
+  redactVendorSecrets,
   resolveExecutionRail,
   serializeUserOp,
 } = await import('./execution-rail.js')
@@ -60,6 +61,21 @@ describe('serializeUserOp / deserializeUserOp', () => {
     // node-postgres parses JSONB columns — simulate: parse WITHOUT the reviver.
     const fromPg = JSON.parse(serializeUserOp(userOp))
     expect(deserializeUserOp(fromPg)).toEqual(userOp)
+  })
+})
+
+describe('redactVendorSecrets — bundler errors must never leak the API key', () => {
+  it('redacts apikey query params wherever they appear (found live, #738)', () => {
+    const viemStyle =
+      'Invalid parameters.\n\nURL: https://api.pimlico.io/v2/84532/rpc?apikey=pim_SECRETKEY123\n' +
+      'Request body: {"method":"pm_getPaymasterData"}\n\nDetails: sponsorshipPolicy not active'
+    const redacted = redactVendorSecrets(viemStyle)
+    expect(redacted).not.toContain('pim_SECRETKEY123')
+    expect(redacted).toContain('apikey=REDACTED')
+    expect(redacted).toContain('sponsorshipPolicy not active') // debuggability preserved
+    // Also inside JSON-escaped strings and with trailing delimiters:
+    expect(redactVendorSecrets('x?apikey=abc&other=1')).toBe('x?apikey=REDACTED&other=1')
+    expect(redactVendorSecrets('\\"url\\":\\"rpc?apikey=abc\\"')).toContain('apikey=REDACTED')
   })
 })
 

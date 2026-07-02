@@ -20,6 +20,7 @@ import {
   getSessionRailFor,
   loadExecutionRailState,
   recoverSessionSigner,
+  redactVendorSecrets,
   resolveExecutionRail,
   serializeUserOp,
 } from '../lib/execution-rail.js'
@@ -202,7 +203,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         // state is written. The session config IS the policy (ADR #719).
         return reply.code(502).send({
           error: 'Session-rail authorization failed (on-chain policy or bundler)',
-          details: err instanceof Error ? err.message : String(err),
+          // Bundler errors echo the request URL, which embeds the API key.
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
         })
       }
 
@@ -586,8 +588,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           to: intent.to_address,
         })
       } catch (err) {
-        // 6. Failure
-        const errorMsg = err instanceof Error ? err.message : String(err)
+        // 6. Failure. Session-rail (bundler) errors echo the request URL,
+        // which embeds the API key — scrub before persisting or responding.
+        const errorMsg = redactVendorSecrets(err instanceof Error ? err.message : String(err))
         await pool.query(
           `UPDATE payment_intents
            SET status = 'failed', error_message = $1

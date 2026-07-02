@@ -4,8 +4,11 @@ status: research
 covers:
   - packages/backend/src/lib/allowance-module.ts
   - packages/backend/src/lib/relayer.ts
+  - packages/backend/src/lib/session-rail.ts
+  - packages/backend/src/lib/execution-rail.ts
+  - packages/backend/src/lib/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-06-28"
+last-verified: "2026-07-02"
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -77,6 +80,21 @@ recorded, not implicit.
 relying on reviewer memory — exactly the "maintain evidence" the doc asks for,
 and the strongest possible answer to a CASP perimeter question. Zero UX, zero
 fund movement.
+
+### Session-key rail extension (#736, ADR #719 Stage 2)
+
+The ERC-4337 rail (Safe7579 + Smart Sessions) keeps the same perimeter —
+Haven constructs, the customer signs — and `non-custody.invariants.test.ts`
+pins the specific mechanisms:
+
+| # | Invariant | Pin |
+|---|---|---|
+| 5 | The Safe "owner" the rail derives accounts from cannot sign | `watchOnlyOwner` in `session-rail.ts` — every owner sign method bound to a loud refusal |
+| 6 | No viem key-derived signer server-side | `privateKeyToAccount` (and mnemonic/HD variants) absent from production `src/` |
+| 7 | Session UserOps carry client signatures only | `submitSessionTransfer` takes the signature as an argument; nothing in the rail produces one |
+| 8 | Session config is owner-signed, never relayer-submitted | `session-policies.ts` / `session-rotation.ts` / `execution-rail.ts` are signer-free and never reference the relayer |
+| 9 | The bundler credential has one auditable choke point | `SESSION_RAIL_BUNDLER_URL` read only in `execution-rail.ts` |
+| 10 | The paymaster sponsors gas, never value | Wired as a sponsorship client only; no token-paymaster surface |
 
 ## Part 2 — "Verify your control" (dashboard)
 

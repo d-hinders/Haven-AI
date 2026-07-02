@@ -281,6 +281,34 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(insert![1]).toContain(PERMISSION_ID)
   })
 
+  it('never leaks the bundler API key in session error details (found live, #738)', async () => {
+    const prepareSessionTransfer = vi.fn().mockRejectedValue(
+      new Error(
+        'Invalid parameters.\nURL: https://api.pimlico.io/v2/84532/rpc?apikey=pim_SUPERSECRET\nDetails: sponsorshipPolicy not active',
+      ),
+    )
+    sessionRailMocks.getSessionRailFor.mockResolvedValueOnce({ prepareSessionTransfer })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+      .mockResolvedValueOnce({
+        rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/payments',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.body).not.toContain('pim_SUPERSECRET')
+    expect(response.body).toContain('apikey=REDACTED')
+    expect(response.body).toContain('sponsorshipPolicy not active')
+  })
+
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)

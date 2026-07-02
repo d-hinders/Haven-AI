@@ -23,6 +23,7 @@ import { isAddress } from './address.js'
 import {
   getSessionRailFor,
   loadExecutionRailState,
+  redactVendorSecrets,
   resolveExecutionRail,
   serializeUserOp,
 } from './execution-rail.js'
@@ -837,7 +838,8 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
         statusCode: 502,
         body: {
           error: 'Session-rail authorization failed (on-chain policy or bundler)',
-          details: err instanceof Error ? err.message : String(err),
+          // Bundler errors echo the request URL, which embeds the API key.
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
         },
       }
     }

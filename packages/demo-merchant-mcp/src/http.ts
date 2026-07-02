@@ -159,6 +159,7 @@ async function getSession(
   const server = buildMerchantMcpServer({
     merchantAddress: options.merchantAddress,
     baseUrl: options.baseUrl,
+    buildPaymentRequired: options.paymentProcessor.buildPaymentRequired,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,

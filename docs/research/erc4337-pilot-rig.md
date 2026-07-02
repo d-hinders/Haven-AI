@@ -185,6 +185,17 @@ doesn't stop is not a rule):
   easy to miss; without it every sponsored UserOp fails validation.
 - **Byte-offset param addressing** (0, 32, …) is verified by the live run;
   the unit tests pin structure and encoding, not on-chain semantics.
+- **Session-key signature is EIP-191, not the raw hash.** The deployed
+  OwnableValidator recovers the signer over the personal-sign digest
+  (`toEthSignedMessageHash`), so the session key must
+  `signMessage({ message: { raw: userOpHash } })`, **not** `sign({ hash })`.
+  Signing the raw hash returns `validationData = 1` (SIG_VALIDATION_FAILED)
+  even when every policy passes — the failure looks like a policy problem but
+  isn't. Root-caused on an anvil Base Sepolia fork (real validator bytecode)
+  via `debug_traceCall` + `eth_call` on `validateUserOp`: raw hash →
+  authorizer `0x…01`, `signMessage` → authorizer `0x…00` (success). Fixed in
+  `session-rail.ts`; this is a generic OwnableValidator gotcha, not
+  pilot-specific.
 
 ### Operator run
 

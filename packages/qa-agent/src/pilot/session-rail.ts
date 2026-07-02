@@ -157,7 +157,15 @@ export async function createSessionRail(cfg: SessionRailConfig): Promise<Session
       entryPointVersion: '0.7',
       userOperation: { ...userOperation, sender: cfg.safeAddress },
     })
-    userOperation.signature = sessionSig(permissionId, await sessionKey.sign({ hash }))
+    // OwnableValidator (the session validator) recovers the signer over the
+    // EIP-191 personal-sign digest, not the raw userOpHash. Signing the raw hash
+    // yields SIG_VALIDATION_FAILED even when every policy passes — verified on a
+    // Base Sepolia fork: raw→authorizer 0x…01 (fail), signMessage({raw:hash})→
+    // authorizer 0x…00 (success). See docs/research/erc4337-pilot-rig.md (#722).
+    userOperation.signature = sessionSig(
+      permissionId,
+      await sessionKey.signMessage({ message: { raw: hash } }),
+    )
     const userOpHash = await client.sendUserOperation(userOperation)
     const receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
     if (!receipt.success) throw new Error('UserOp included but reverted')

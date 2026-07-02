@@ -22,6 +22,34 @@ export function signHash(privateKey: string, hash: string): string {
 }
 
 /**
+ * Sign a UserOperation hash for the session-key (Smart Sessions) rail.
+ *
+ * The deployed OwnableValidator recovers the signer over the **EIP-191**
+ * personal-sign digest (`"\x19Ethereum Signed Message:\n32" + hash`), NOT the
+ * raw hash. Signing the raw hash — as {@link signHash} does for the
+ * AllowanceModule rail — returns SIG_VALIDATION_FAILED even when every session
+ * policy passes (root-caused in #731). This function is intentionally separate
+ * from `signHash` so the two rails cannot be confused: raw ECDSA is for
+ * AllowanceModule, EIP-191 is for session keys.
+ *
+ * `wallet.signMessage(getBytes(hash))` produces the same EIP-191 signature the
+ * pilot verified on-chain via viem's `signMessage({ message: { raw: hash } })`.
+ */
+export async function signUserOpHashForSession(
+  privateKey: string,
+  userOpHash: string,
+): Promise<string> {
+  try {
+    const wallet = new ethers.Wallet(privateKey)
+    return await wallet.signMessage(ethers.getBytes(userOpHash))
+  } catch (err) {
+    throw new HavenSigningError(
+      `Failed to sign session UserOp hash: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
+/**
  * Derive the Ethereum address from a private key.
  */
 export function addressFromKey(privateKey: string): string {

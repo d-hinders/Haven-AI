@@ -63,7 +63,8 @@ describe('ingestDiscoveredCatalog', () => {
 
     expect(result).toMatchObject({ scanned: 1, candidates: 1, ingested: 1, failedProbe: 0 })
     expect(inserts).toHaveLength(1)
-    // name, description, category='api', resource_url, price_display, price_atomic, asset, network
+    // name, description, category='api', resource_url, price_display, price_atomic,
+    // asset, network, asset_transfer_methods
     expect(inserts[0]).toEqual([
       'Weather API',
       'Per-call forecast data.',
@@ -73,7 +74,33 @@ describe('ingestDiscoveredCatalog', () => {
       '20000',
       'USDC',
       'eip155:8453',
+      'eip3009',
     ])
+  })
+
+  it('persists erc7710 support discovered on the probed challenge', async () => {
+    const { db, inserts } = fakeDb()
+    const erc7710Body = {
+      x402Version: 2,
+      accepts: [
+        X402_BODY.accepts[0],
+        { ...X402_BODY.accepts[0], extra: { assetTransferMethod: 'erc7710' } },
+      ],
+    }
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/discovery/resources')) {
+        return bazaarPage([
+          { resource: 'https://api.smart.example/paid', type: 'http', accepts: X402_BODY.accepts,
+            serviceName: 'Smart Merchant' },
+        ])
+      }
+      return new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(erc7710Body) } })
+    })
+
+    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]?.[8]).toBe('eip3009,erc7710')
   })
 
   it('uses the current Bazaar shape (serviceName/description/tags) and maps tags to a BAS category', async () => {

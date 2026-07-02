@@ -29,6 +29,12 @@ export interface CatalogRow {
   status: 'active' | 'degraded' | 'delisted'
   verified_at: string | null
   consecutive_failures: number
+  /**
+   * Comma-separated set of x402 `assetTransferMethod`s the merchant advertises
+   * (e.g. `eip3009` or `eip3009,erc7710`). NULL until the first successful x402
+   * probe; MPP entries (not an x402 rail) stay NULL. See migration 037.
+   */
+  asset_transfer_methods: string | null
   created_at: string
   updated_at: string
 }
@@ -47,6 +53,12 @@ export interface ProbeResult {
   priceDisplay?: string
   asset?: string
   network?: string
+  /**
+   * Distinct x402 `assetTransferMethod`s advertised across all `accepts[]`
+   * options, in first-seen order (e.g. `['eip3009', 'erc7710']`). Undefined for
+   * non-x402 rails (MPP) and when the challenge carries no `accepts[]`.
+   */
+  assetTransferMethods?: string[]
 }
 
 interface X402Accept {
@@ -54,6 +66,29 @@ interface X402Accept {
   maxAmountRequired?: string
   asset?: string
   network?: string
+  extra?: { assetTransferMethod?: string }
+}
+
+/** x402 exact-EVM default when an `accepts[]` option omits the method. */
+const DEFAULT_ASSET_TRANSFER_METHOD = 'eip3009'
+
+/**
+ * The distinct `assetTransferMethod`s a merchant advertises across every
+ * `accepts[]` option, in first-seen order. Per the x402 exact-EVM spec an
+ * omitted method means EIP-3009, so a plain merchant reports `['eip3009']` and
+ * an ERC-7710-capable one that lists both reports `['eip3009', 'erc7710']`.
+ * Scanning all options (not just the first) matters because merchants keep the
+ * EIP-3009 option first for compatibility and add `erc7710` alongside it.
+ */
+function collectAssetTransferMethods(payload: unknown): string[] | undefined {
+  const accepts = (payload as { accepts?: unknown[] })?.accepts
+  if (!Array.isArray(accepts) || accepts.length === 0) return undefined
+  const methods: string[] = []
+  for (const entry of accepts) {
+    const method = (entry as X402Accept).extra?.assetTransferMethod ?? DEFAULT_ASSET_TRANSFER_METHOD
+    if (!methods.includes(method)) methods.push(method)
+  }
+  return methods.length > 0 ? methods : undefined
 }
 
 const TOKEN_DECIMALS: Record<string, number> = { USDC: 6, EURe: 18 }
@@ -160,6 +195,7 @@ export async function probeCatalogEntry(
     priceDisplay: formatPriceDisplay(atomic, symbol),
     asset: symbol,
     network: accept.network,
+    assetTransferMethods: collectAssetTransferMethods(payload),
   }
 }
 
@@ -191,10 +227,18 @@ export async function refreshCatalog(
         `UPDATE merchant_catalog
          SET price_atomic = $2, price_display = $3, asset = $4,
              network = COALESCE($5, network),
+             asset_transfer_methods = COALESCE($6, asset_transfer_methods),
              status = 'active', verified_at = now(),
              consecutive_failures = 0, updated_at = now()
          WHERE id = $1`,
-        [entry.id, result.priceAtomic, result.priceDisplay, result.asset, result.network ?? null],
+        [
+          entry.id,
+          result.priceAtomic,
+          result.priceDisplay,
+          result.asset,
+          result.network ?? null,
+          result.assetTransferMethods?.join(',') ?? null,
+        ],
       )
     } else {
       // Hysteresis: count the miss, but only degrade after a sustained streak

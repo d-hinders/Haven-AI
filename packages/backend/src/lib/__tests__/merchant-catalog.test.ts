@@ -52,6 +52,8 @@ describe('probeCatalogEntry', () => {
       priceDisplay: '$0.02 USDC',
       asset: 'USDC',
       network: 'eip155:8453',
+      // A plain merchant omits assetTransferMethod → EIP-3009 by the exact-EVM default.
+      assetTransferMethods: ['eip3009'],
     })
     expect(fetchMock).toHaveBeenCalledWith(X402_ENTRY.resource_url, { method: 'GET' })
   })
@@ -65,6 +67,55 @@ describe('probeCatalogEntry', () => {
     const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
     expect(result.ok).toBe(true)
     expect(result.priceAtomic).toBe('20000')
+  })
+
+  it('captures erc7710 alongside eip3009 when the merchant advertises both', async () => {
+    // Merchants keep the EIP-3009 option first for compatibility and add the
+    // ERC-7710 option second, so the probe must scan every accepts[] entry.
+    const body = {
+      x402Version: 2,
+      accepts: [
+        { ...X402_BODY.accepts[0] },
+        { ...X402_BODY.accepts[0], extra: { assetTransferMethod: 'erc7710' } },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'PAYMENT-REQUIRED': b64(body) },
+    }))
+
+    const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(result.assetTransferMethods).toEqual(['eip3009', 'erc7710'])
+  })
+
+  it('captures a single erc7710-only accepts option', async () => {
+    const body = {
+      x402Version: 2,
+      accepts: [{ ...X402_BODY.accepts[0], extra: { assetTransferMethod: 'erc7710' } }],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'PAYMENT-REQUIRED': b64(body) },
+    }))
+
+    const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(result.assetTransferMethods).toEqual(['erc7710'])
+  })
+
+  it('does not report transfer methods for an MPP merchant', async () => {
+    const challenge = {
+      amount: { display: '0.01', atomic: '10000' },
+      asset: { symbol: 'USDC' },
+      network: { chainId: 8453 },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 402,
+      headers: { 'MACHINE-PAYMENT-CHALLENGE': b64(challenge) },
+    }))
+
+    const result = await probeCatalogEntry(MPP_ENTRY, fetchMock as typeof fetch)
+    expect(result.ok).toBe(true)
+    expect(result.assetTransferMethods).toBeUndefined()
   })
 
   it('probes MCP merchants with a tools/call envelope', async () => {
@@ -127,6 +178,7 @@ describe('refreshCatalog', () => {
       resource_url: 'https://api.merchant.example/paid',
       rail: 'x402', protocol: 'http', tool_name: null,
       price_display: null, price_atomic: null, asset: null, network: null,
+      asset_transfer_methods: null,
       status: 'active', verified_at: null, consecutive_failures: 0,
       created_at: '', updated_at: '',
       ...overrides,
@@ -153,7 +205,8 @@ describe('refreshCatalog', () => {
 
     const liveUpdate = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-live')
     expect(liveUpdate?.[0]).toContain('consecutive_failures = 0')
-    expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '$0.02 USDC', 'USDC', 'eip155:8453'])
+    expect(liveUpdate?.[0]).toContain('asset_transfer_methods = COALESCE($6, asset_transfer_methods)')
+    expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '$0.02 USDC', 'USDC', 'eip155:8453', 'eip3009'])
   })
 
   it('does not degrade an entry on a single transient miss (hysteresis)', async () => {

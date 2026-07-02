@@ -1,5 +1,6 @@
 import pool from '../db.js'
 import { getBookTimeSekValue } from './fiat-values.js'
+import { getTokenBalance } from './allowance-module.js'
 import { quoteFee, recordSettledFee } from './fee/fee-module.js'
 import { feedSettledPaymentBestEffort } from './reporting/feed-orchestrator.js'
 
@@ -453,7 +454,74 @@ export async function attachMachinePaymentEvidence(
          AND event_type = 'merchant_retry_rejected_after_payment'`,
       [payment.id, input.agentId],
     )
+
+    // Post-settlement delegate reconciliation (#716, epic #713): a settle
+    // proof just arrived, so for standard x402 (funding went to the agent's
+    // own delegate EOA) that funding should have LEFT the delegate. Read the
+    // balance now and flag residue at payment time instead of leaving it for
+    // the sweep/monitor to discover later. Best-effort — a flaky RPC must
+    // never fail the proof attach.
+    if (
+      referenceColumnForPayment(payment) === 'payment_intent_id' &&
+      (payment.payment_rail ?? payment.source) === 'x402' &&
+      (proofStatus === 'protocol_receipt_attached' || proofStatus === 'merchant_response_observed')
+    ) {
+      try {
+        await reconcileDelegateResidueAfterSettlement(payment, input.agentId)
+      } catch {
+        // best-effort: the #714 balance monitor is the standing backstop
+      }
+    }
   }
 
   return evidence
+}
+
+/**
+ * Flag funds still sitting on the delegate right after a settle proof (#716).
+ * Only for standard x402 where the funding recipient IS the agent's own
+ * delegate EOA — anything else (merchant-direct payTo) is not ours to read.
+ * The threshold is THIS payment's amount: at/above it, this payment's funding
+ * very likely never settled; smaller balances are ambient dust, which the
+ * #714 monitor owns. Idempotent per (payment, event type); read-only apart
+ * from the flag row — recovery stays with the sweep.
+ */
+export async function reconcileDelegateResidueAfterSettlement(
+  payment: MachinePaymentEvidenceSource,
+  agentId: string,
+): Promise<void> {
+  const agentResult = await pool.query<{ delegate_address: string | null }>(
+    `SELECT delegate_address FROM agents WHERE id = $1`,
+    [agentId],
+  )
+  const delegate = agentResult.rows[0]?.delegate_address
+  if (!delegate || delegate.toLowerCase() !== payment.to_address.toLowerCase()) return
+
+  const balance = await getTokenBalance(payment.chain_id, delegate, payment.token_address)
+  if (balance < BigInt(payment.amount_raw)) return
+
+  await pool.query(
+    `INSERT INTO machine_payment_reconciliation_events (
+      agent_id, user_id, payment_intent_id, rail, event_type, tx_hash,
+      resource_url, merchant_address, reason, details
+    ) VALUES ($1, $2, $3, $4, 'delegate_residue_after_settlement', $5, $6, $7, $8, $9)
+    ON CONFLICT (payment_intent_id, event_type)
+      WHERE payment_intent_id IS NOT NULL
+    DO UPDATE SET details = EXCLUDED.details, updated_at = NOW()`,
+    [
+      agentId,
+      payment.user_id,
+      payment.id,
+      payment.payment_rail ?? payment.source ?? 'x402',
+      payment.tx_hash,
+      resourceUrlForPayment(payment),
+      payment.merchant_address ?? payment.x402_merchant_address ?? null,
+      'Delegate still holds at least the funded amount after the settle proof — funding may not have settled',
+      JSON.stringify({
+        observed_balance_atomic: balance.toString(),
+        payment_amount_raw: payment.amount_raw,
+        delegate_address: delegate,
+      }),
+    ],
+  )
 }

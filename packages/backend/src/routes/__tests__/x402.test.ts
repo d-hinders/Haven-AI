@@ -136,6 +136,7 @@ describe('x402 routes', () => {
           // Regression guard: stableStringify must serialize it to the ISO
           // string in the signed message, not the empty object {}.
           expires_at: new Date('2026-05-10T20:00:00.000Z'),
+          amount_raw: '20000', // NOT NULL in the real schema; read by the #716 guard
         }],
       })
 
@@ -220,7 +221,7 @@ describe('x402 routes', () => {
       .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
       .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
       .mockResolvedValueOnce({
-        rows: [{ id: '33333333-3333-3333-3333-333333333333', expires_at: new Date('2026-05-10T20:00:00.000Z') }],
+        rows: [{ id: '33333333-3333-3333-3333-333333333333', expires_at: new Date('2026-05-10T20:00:00.000Z'), amount_raw: '20000' }],
       })
 
     const response = await app.inject({
@@ -330,6 +331,93 @@ describe('x402 routes', () => {
       AGENT.id,
       expect.anything(),
     )
+  })
+
+  // #716 (epic #713): the funding leg must move EXACTLY the challenge amount —
+  // no padding or buffer may sneak between the request, the stored intent, and
+  // the on-chain transfer.
+  it('funds the delegate with EXACTLY the challenge amount (#716 invariant)', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.02, eur: 0.02 })
+    evidenceMocks.tryRecordMachinePaymentEvidenceBaseById.mockResolvedValueOnce(undefined)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({ rows: [pendingX402Intent()] })
+      .mockResolvedValueOnce({ rows: [{ id: '33333333-3333-3333-3333-333333333333' }] })
+      .mockResolvedValueOnce({ rows: [{ id: '33333333-3333-3333-3333-333333333333' }] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:test',
+        signature: '0xsig',
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    // The hash the delegate signs and the executed transfer both carry the
+    // exact atomic amount from the challenge:
+    expect(allowanceMocks.generateTransferHash.mock.calls[0][4]).toBe(20000n)
+    expect(allowanceMocks.executeAllowanceTransfer.mock.calls[0][4]).toBe(20000n)
+    // The stored intent records the same number:
+    const insert = mockQuery.mock.calls.find(([sql]) =>
+      /INSERT INTO payment_intents/.test(sql as string),
+    )
+    expect(insert![1]).toContain('20000')
+  })
+
+  it('rejects an idempotency replay whose amount differs from the stored intent (#716 guard)', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10' }] })
+      .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ cnt: '0' }] })
+      .mockResolvedValueOnce({ rows: [] }) // INSERT lost the idempotency race
+      .mockResolvedValueOnce({ rows: [pendingX402Intent()] }) // reload: stored amount 20000
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '30000', // != stored 20000
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:test',
+        signature: '0xsig',
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toContain('stored 20000, requested 30000')
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
   it('does not overwrite one-shot x402 terminal state after execution failures', async () => {

@@ -55,11 +55,19 @@ Recommended structure (per environment):
 | `prod-tier-standard` | per-sender (= per-Safe) limits | per-user-op max, per-sender monthly cap, start/end dates |
 | `prod-tier-high` | same, higher caps | — |
 
+**⚠️ Policies bind per REQUEST, not per API key.** Creating a policy in the
+dashboard does nothing by itself — the backend must send its id
+(`sponsorshipPolicyId`) with every sponsorship request. That id is configured
+as `SESSION_RAIL_SPONSORSHIP_POLICY_ID` (read at the same single choke point
+as the bundler URL); unset = unrestricted sponsorship against the key.
+
 Operator steps when onboarding a migrated account: assign its Safe to a tier
-policy (per-sender limits make one policy serve many accounts). Verify the
-exhaustion behavior once per policy: set a tiny cap on a test policy, spend
-past it, confirm the API answers 502 with the sponsorship decline in
-`details` and that a later retry (after the window resets) succeeds.
+policy (per-sender limits make one policy serve many accounts) and make sure
+the environment's `SESSION_RAIL_SPONSORSHIP_POLICY_ID` points at that policy.
+Verify the exhaustion behavior once per policy: set a tiny cap on a test
+policy, spend past it, confirm the API answers 502 with the sponsorship
+decline in `details` and that a later retry (after the window resets)
+succeeds.
 
 ## 3. Outage playbook — bundler down
 

@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { z } from 'zod'
 import { PRODUCTS, formatUsdc, type ProductId } from './products.js'
 import { generateInvoice, nextInvoiceNumber } from './invoice.js'
-import { buildPaymentRequired, type SettledPayment } from './x402.js'
+import { buildPaymentRequired, type SettledPayment, type X402PaymentProcessor } from './x402.js'
 import type { Address } from 'viem'
 
 const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
@@ -11,6 +11,10 @@ const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
 export interface MerchantConfig {
   merchantAddress: Address
   baseUrl: string
+  /** Requirements builder used for the in-band "payment required" tool text.
+   *  Pass the processor's builder so it advertises the same accepts entries
+   *  (e.g. the experimental erc7710 option) as the HTTP 402 challenge. */
+  buildPaymentRequired?: X402PaymentProcessor['buildPaymentRequired']
 }
 
 const completedPurchases = new WeakMap<SettledPayment, string>()
@@ -95,7 +99,7 @@ function completePurchase(config: MerchantConfig, productId: ProductId, descript
   const payment = paymentStorage.getStore()
 
   if (!payment || payment.productId !== productId) {
-    const requirements = buildPaymentRequired({
+    const requirements = (config.buildPaymentRequired ?? buildPaymentRequired)({
       merchantAddress: config.merchantAddress,
       amountUsdc: product.price_usdc,
       resource,

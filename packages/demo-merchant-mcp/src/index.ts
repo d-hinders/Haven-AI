@@ -35,11 +35,23 @@ if (!SETTLEMENT_PRIVATE_KEY) {
   process.exit(1)
 }
 
+// Experimental ERC-7710 rail (#747, epic #452) — testnet-only. Refuse to start
+// rather than silently ignore the flag: mainnet must never advertise erc7710.
+const ERC7710_ENABLED = ['1', 'true'].includes((process.env.MERCHANT_X402_ERC7710 ?? '').toLowerCase())
+if (ERC7710_ENABLED && CHAIN_ID !== 84532) {
+  console.error(
+    'MERCHANT_X402_ERC7710 is experimental and testnet-only.\n' +
+      `Set MERCHANT_CHAIN_ID=84532 (Base Sepolia) to enable it, or unset the flag. Got chain ${CHAIN_ID}.`,
+  )
+  process.exit(1)
+}
+
 const paymentProcessor = createX402PaymentProcessor(
   createViemSettlementClient({
     baseRpcUrl: BASE_RPC_URL,
     settlementPrivateKey: SETTLEMENT_PRIVATE_KEY,
   }),
+  { erc7710: ERC7710_ENABLED },
 )
 
 const server = createDemoMerchantServer({
@@ -54,7 +66,7 @@ server.listen(PORT, () => {
   console.log(`  Healthz:   ${BASE_URL}/healthz`)
   console.log(`  Merchant:  ${MERCHANT_ADDRESS}`)
   console.log(`  Network:   eip155:${CHAIN_ID}${CHAIN_ID === 84532 ? ' (Base Sepolia testnet)' : CHAIN_ID === 8453 ? ' (Base mainnet)' : ''}`)
-  console.log(`  Payment:   USDC via x402 EIP-3009`)
+  console.log(`  Payment:   USDC via x402 EIP-3009${ERC7710_ENABLED ? ' + experimental ERC-7710' : ''}`)
   console.log()
   console.log(
     `Products: vpn_basic $${formatUsdc(PRODUCTS.vpn_basic.price_usdc)} | ` +

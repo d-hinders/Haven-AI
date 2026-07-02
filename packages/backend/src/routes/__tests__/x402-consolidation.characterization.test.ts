@@ -190,7 +190,7 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
       .mockResolvedValueOnce({ rows: [{ max_x402_per_hour: 100 }] }) // rate cfg
       .mockResolvedValueOnce({ rows: [{ cnt: '0' }] }) // recent count
       .mockResolvedValueOnce({
-        rows: [{ id: 'intent-1', expires_at: new Date('2026-05-10T20:00:00.000Z') }],
+        rows: [{ id: 'intent-1', expires_at: new Date('2026-05-10T20:00:00.000Z'), amount_raw: '20000' }],
       }) // payment_intents INSERT
     return app.inject({
       method: 'POST',

@@ -82,6 +82,7 @@ describe('non-custody: the on-chain allowance is the final gate (Red Line #4)', 
     mockQuery
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce(dbAllowanceRow())
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({ rows: [{ id: 'approval-1', status: 'pending', expires_at: '2099-01-01T00:00:00.000Z' }] })
 
     const res = await app.inject({
@@ -105,6 +106,7 @@ describe('non-custody: the on-chain allowance is the final gate (Red Line #4)', 
     mockQuery
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce(dbAllowanceRow())
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({ rows: [{ id: 'intent-1', status: 'pending_signature', expires_at: '2099-01-01T00:00:00.000Z' }] })
 
     const res = await app.inject({

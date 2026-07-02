@@ -18,7 +18,10 @@ import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-
 import {
   deserializeUserOp,
   getSessionRailFor,
+  loadExecutionRailState,
   recoverSessionSigner,
+  resolveExecutionRail,
+  serializeUserOp,
 } from '../lib/execution-rail.js'
 import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
@@ -167,6 +170,90 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     if (dbAllowance.rows.length === 0) {
       return reply.code(403).send({
         error: `Agent is not configured for ${tokenConfig.symbol} payments`,
+      })
+    }
+
+    // ── Session-key rail (#745) — fail-closed; see lib/execution-rail.ts.
+    // Only a Safe explicitly marked migrated, whose agent has an enabled
+    // session, on an allowlisted chain, leaves the legacy path below.
+    const railDecision = resolveExecutionRail({
+      ...(await loadExecutionRailState(agent)),
+      chainId: agent.chain_id,
+    })
+    if (railDecision.rail === 'session_key') {
+      if (tokenAddress === ZERO_ADDRESS) {
+        return reply.code(400).send({
+          error: 'Native-token transfers are not supported on the session rail',
+        })
+      }
+
+      let prepared
+      try {
+        const sessionRail = await getSessionRailFor(agent.safe_address, agent.chain_id)
+        prepared = await sessionRail.prepareSessionTransfer(
+          railDecision.permissionId,
+          tokenAddress as `0x${string}`,
+          to.toLowerCase() as `0x${string}`,
+          amountRaw,
+        )
+      } catch (err) {
+        // The on-chain session policy (recipient / caps / expiry) is enforced
+        // during gas estimation — a violating payment fails here, before any
+        // state is written. The session config IS the policy (ADR #719).
+        return reply.code(502).send({
+          error: 'Session-rail authorization failed (on-chain policy or bundler)',
+          details: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      const sessionResult = await pool.query<PaymentIntentRow>(
+        `INSERT INTO payment_intents (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, delegate_address,
+          allowance_nonce, sign_hash,
+          execution_rail, session_permission_id, session_user_op,
+          status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+          'pending_signature', NOW() + interval '10 minutes')
+        RETURNING *`,
+        [
+          agent.id,
+          agent.user_id,
+          agent.safe_address,
+          agent.chain_id,
+          tokenConfig.symbol,
+          tokenAddress,
+          to.toLowerCase(),
+          amountRaw.toString(),
+          amount,
+          agent.delegate_address,
+          0, // AllowanceModule-only concept; unused on this rail
+          prepared.userOpHash,
+          'session_key',
+          railDecision.permissionId,
+          serializeUserOp(prepared.userOperation),
+        ],
+      )
+      const sessionIntent = sessionResult.rows[0]
+
+      return reply.code(201).send({
+        payment_id: sessionIntent.id,
+        status: sessionIntent.status,
+        expires_at: sessionIntent.expires_at,
+        sign_data: {
+          hash: prepared.userOpHash,
+          signature_scheme: 'eip191_userop',
+          components: {
+            safe: agent.safe_address,
+            token: tokenAddress,
+            to: to.toLowerCase(),
+            amount: amountRaw.toString(),
+          },
+          instructions:
+            'Sign the hash with your session (delegate) private key using EIP-191 personal-sign — ' +
+            'signUserOpHashForSession in @haven_ai/sdk, NOT raw ECDSA. ' +
+            `Then POST /payments/${sessionIntent.id}/sign with { signature } to execute.`,
+        },
       })
     }
 

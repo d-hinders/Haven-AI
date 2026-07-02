@@ -240,6 +240,72 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
+  it('POST /payments prepares a session UserOp for a migrated account', async () => {
+    const prepareSessionTransfer = vi.fn().mockResolvedValue({
+      userOperation: PREPARED_USER_OP,
+      userOpHash: USER_OP_HASH,
+    })
+    sessionRailMocks.getSessionRailFor.mockResolvedValueOnce({ prepareSessionTransfer })
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // token-config guard
+      .mockResolvedValueOnce({
+        rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
+      })
+      .mockResolvedValueOnce({ rows: [sessionIntentRow()] }) // INSERT RETURNING *
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/payments',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({
+      payment_id: PAYMENT_ID,
+      status: 'pending_signature',
+      sign_data: { hash: USER_OP_HASH, signature_scheme: 'eip191_userop' },
+    })
+    // The AllowanceModule flow never runs on this rail:
+    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    // The intent INSERT pins the rail, the permissionId, and the prepared UserOp:
+    const insert = mockQuery.mock.calls.find((c) =>
+      /INSERT INTO payment_intents/.test(c[0] as string),
+    )
+    expect(insert).toBeDefined()
+    expect(insert![0]).toContain('execution_rail')
+    expect(insert![1]).toContain('session_key')
+    expect(insert![1]).toContain(PERMISSION_ID)
+  })
+
+  it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(USER_OP_HASH)
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+      .mockResolvedValueOnce({ rows: [] }) // no rail state → legacy (fail-closed)
+      .mockResolvedValueOnce({ rows: [intentRow()] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/payments',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().sign_data.signature_scheme).toBeUndefined()
+    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
+    expect(allowanceMocks.generateTransferHash).toHaveBeenCalledOnce()
+  })
+
   it('fails closed when a session intent is missing its stored UserOperation', async () => {
     const signature = await sessionWallet.signMessage(getBytes(USER_OP_HASH))
 

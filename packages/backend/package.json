@@ -13,7 +13,8 @@
     "test:loop": "vitest run src/loop-harness",
     "test:payment": "tsx scripts/test-payment-flow.ts",
     "agent:demo": "tsx scripts/agent-payment-demo.ts",
-    "pilot:rotate-live": "tsx scripts/rotate-session-live.ts"
+    "pilot:rotate-live": "tsx scripts/rotate-session-live.ts",
+    "ops:check-attestation": "tsx scripts/check-attestation.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

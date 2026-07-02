@@ -20,10 +20,15 @@
  *   route through the Safe's fallback handler (installed one step earlier in
  *   this same batch). A direct call reads garbage calldata as the sender and
  *   reverts (surfaced as GS013).
- * - ERC-7484 registry gating is DISABLED here (zero registry, no attesters):
- *   no attestation exists yet for this Smart Sessions deployment, so any
- *   threshold > 0 reverts the install. Re-enabling it is gate #735; do not turn
- *   it on until an attestation is verified for the target chain.
+ * - ERC-7484 registry gating is DISABLED here (zero registry, no attesters) —
+ *   a DECISION, not an oversight (#735, verified on-chain 2026-07-02): the
+ *   Rhinestone attester has attested NO Smart Sessions deployment on any chain
+ *   checked (Base, Base Sepolia, Optimism, Arbitrum), while their other
+ *   modules ARE attested — so any threshold > 0 reverts every install, on
+ *   mainnet too. Compensating controls: the module addresses below are
+ *   source-pinned, installed only via this payload, and CI-guarded (#736
+ *   invariants). Standing re-check: `npm run ops:check-attestation` (#738
+ *   runbook) — enable gating in its own reviewed PR the day coverage appears.
  */
 
 import {

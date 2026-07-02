@@ -16,6 +16,16 @@ Accept one source:
 - a specified ready issue: ship that issue;
 - a quoted freeform task: first use [new-task](../new-task/SKILL.md), add `code-quality`, then ship the created issue.
 
+**Respect dependencies before number order.** An issue is BLOCKED — skip it and take the next candidate — when any of these hold:
+
+- a `Depends on` / `depends: #N` reference in its body points at an issue that is still open;
+- a build-order comment on the epic sequences it after something still open;
+- its scope presupposes code that does not exist yet (verify with a quick grep — an
+  acceptance gate for a subsystem cannot ship before the subsystem).
+
+If every remaining candidate is blocked, stop and report the dependency chain instead
+of forcing the lowest number.
+
 Before selecting new work, find any open pull request linked with `Closes #<issue>`.
 
 - If it is waiting on CI or has a fixable failure, finish that pull request.
@@ -86,13 +96,23 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 
 ## Merge Gate
 
-Classify a change as money-path when it touches:
+Classify a change as money-path when **either** the issue carries the `money-path`
+label **or** the diff touches any of:
 
 - `routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, or `routes/machine-payments.ts`;
 - `lib/machine-payments.ts`, `lib/payment-coverage.ts`, or `lib/allowance-module.ts`;
+- `lib/execution-rail.ts`, `lib/session-rail.ts`, `lib/session-policies.ts`,
+  `lib/session-rotation.ts`, or `lib/safe7579-provisioning.ts` (the session-key rail);
+- `packages/sdk/src/signer.ts` (signing schemes are spend authority);
 - `middleware/agentAuth.ts`;
 - `db/migrations/`;
 - `scripts/release-bump.mjs` or `.github/workflows/publish.yml`.
+
+The label matters because money-sensitive changes do not always touch listed files
+(a new signing scheme, a new rail); the file list matters because a diff can be
+money-sensitive without the issue being labeled. Union, never intersection.
+A comment-only diff in a listed file may be treated as non-money-path when the
+review confirms zero behavioral change — say so explicitly in the PR.
 
 Route the merge:
 
@@ -106,3 +126,19 @@ Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm a
 ## Closeout
 
 Leave the issue open until the pull request merges. Report the issue, pull request, gate result, risk, and merge mode, then stop. A caller may invoke the skill again for the next item.
+
+**Acceptance-criteria evidence.** When the issue body has acceptance-criteria
+checkboxes, the closing comment ticks each one with a link to its evidence (test
+name, PR, tx link, doc section). A criterion without evidence stays unticked and
+the issue stays open — never tick on assertion alone.
+
+**Operator-verify mode.** When the definition of done includes steps only a human
+operator can run (funded testnet keys, vendor dashboards, live end-to-end runs):
+
+1. Ship the code PR as usual — the merge is not blocked by the live step.
+2. Post a numbered, copy-pasteable operator checklist on the issue (exact commands,
+   env var names — never secret values — and the expected output of each step).
+3. Leave the issue OPEN in this state and say so in the report; do not close on
+   "code merged".
+4. When the operator confirms (or pastes the output), verify it matches the expected
+   evidence, tick the checklist, and close with the evidence links.

@@ -15,7 +15,7 @@ Read [`docs/regulatory/casp-risk-guardrails.md`](../../regulatory/casp-risk-guar
 
 ## 2. Characterization-tests-first
 
-For any change to **existing** money-path behavior (`routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, `routes/machine-payments.ts`, `lib/{machine-payments,payment-coverage,allowance-module}.ts`, `middleware/agentAuth.ts`, `db/migrations/`), pin the current behavior with a characterization test **before** changing it, as required by the canonical skill's [Implement section](../../../.agents/skills/ship-next/SKILL.md#implement). The test encodes the invariant the change must preserve.
+For any change to **existing** money-path behavior (`routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, `routes/machine-payments.ts`, `lib/{machine-payments,payment-coverage,allowance-module}.ts`, the session-key rail `lib/{execution-rail,session-rail,session-policies,session-rotation,safe7579-provisioning}.ts`, `packages/sdk/src/signer.ts`, `middleware/agentAuth.ts`, `db/migrations/`), pin the current behavior with a characterization test **before** changing it, as required by the canonical skill's [Implement section](../../../.agents/skills/ship-next/SKILL.md#implement). The test encodes the invariant the change must preserve.
 
 For other files in `casp-risk-guardrails.md`'s `covers:` list (e.g. `lib/relayer.ts`, `lib/safe-deployer.ts`, the passkeys / safe-deploy / user-safes routes), the §1 required reading still applies — §2 scopes only the characterization-test requirement.
 

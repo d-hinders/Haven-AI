@@ -795,6 +795,21 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'x402 payment already exists but could not be loaded' })
     }
 
+    // Exact-amount funding invariant (#716, epic #713): the funding transfer
+    // must move EXACTLY the intent's recorded amount — never the request's.
+    // On an idempotency replay the intent is reloaded from the DB, and without
+    // this guard a replay carrying a different `amount` would execute the
+    // request's number while the record says otherwise (padding/mutation
+    // sneaking past the ledger). Fail closed on any mismatch.
+    if (BigInt(intent.amount_raw) !== amountRaw) {
+      return reply.code(409).send({
+        payment_id: intent.id,
+        error:
+          'Amount does not match the existing payment for this idempotency key — ' +
+          `stored ${intent.amount_raw}, requested ${amountRaw.toString()}`,
+      })
+    }
+
     // 11. If signature provided, execute immediately (one-shot mode)
     if (signature) {
       // Verify signature

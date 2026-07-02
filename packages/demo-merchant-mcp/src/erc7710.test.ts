@@ -145,7 +145,7 @@ describe('demo merchant experimental erc7710 rail', () => {
   })
 
   it('advertises erc7710 alongside eip3009 when enabled, keeping eip3009 first', async () => {
-    const { url } = await startServer({ erc7710Client: mockErc7710Client(), options: { erc7710: true } })
+    const { url } = await startServer({ erc7710Client: mockErc7710Client(), options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
     const unpaid = await postBuyVpn(url)
     const paymentRequired = await unpaid.json() as PaymentRequired
 
@@ -162,7 +162,7 @@ describe('demo merchant experimental erc7710 rail', () => {
 
   it('verifies by simulation, settles via redeemDelegations, and invoices the delegator as payer', async () => {
     const erc7710Client = mockErc7710Client()
-    const { url } = await startServer({ erc7710Client, options: { erc7710: true } })
+    const { url } = await startServer({ erc7710Client, options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
     const unpaid = await postBuyVpn(url)
     const paymentRequired = await unpaid.json() as PaymentRequired
     const header = erc7710Header(paymentRequired)
@@ -193,7 +193,7 @@ describe('demo merchant experimental erc7710 rail', () => {
   it('rejects a failing redemption simulation without settling', async () => {
     const erc7710Client = mockErc7710Client()
     vi.mocked(erc7710Client.simulateRedeemDelegations).mockRejectedValue(new Error('AllowedTargetsEnforcer: reverted'))
-    const { url } = await startServer({ erc7710Client, options: { erc7710: true } })
+    const { url } = await startServer({ erc7710Client, options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
     const unpaid = await postBuyVpn(url)
     const paymentRequired = await unpaid.json() as PaymentRequired
 
@@ -206,9 +206,31 @@ describe('demo merchant experimental erc7710 rail', () => {
     expect(erc7710Client.submitRedeemDelegations).not.toHaveBeenCalled()
   })
 
+  it('rejects a delegationManager other than the pinned trusted contract, before simulating', async () => {
+    const erc7710Client = mockErc7710Client()
+    const { url } = await startServer({ erc7710Client, options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
+    const unpaid = await postBuyVpn(url)
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    // A valid-looking payload naming an attacker-deployed no-op "manager" must
+    // never reach simulation or settlement — simulating an untrusted contract
+    // proves nothing.
+    const rejected = await postBuyVpn(url, {
+      [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, {
+        delegationManager: '0x000000000000000000000000000000000000dEaD',
+      }),
+    }, 2)
+    const body = await rejected.json() as PaymentRequired
+
+    expect(rejected.status).toBe(402)
+    expect(body.error).toContain('not the delegation manager trusted by this merchant')
+    expect(erc7710Client.simulateRedeemDelegations).not.toHaveBeenCalled()
+    expect(erc7710Client.submitRedeemDelegations).not.toHaveBeenCalled()
+  })
+
   it('rejects malformed erc7710 payloads before simulating', async () => {
     const erc7710Client = mockErc7710Client()
-    const { url } = await startServer({ erc7710Client, options: { erc7710: true } })
+    const { url } = await startServer({ erc7710Client, options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
     const unpaid = await postBuyVpn(url)
     const paymentRequired = await unpaid.json() as PaymentRequired
 
@@ -229,7 +251,7 @@ describe('demo merchant experimental erc7710 rail', () => {
 
   it('settles a delegation once: duplicate retries are cached, other products are refused', async () => {
     const erc7710Client = mockErc7710Client()
-    const { url } = await startServer({ erc7710Client, options: { erc7710: true } })
+    const { url } = await startServer({ erc7710Client, options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
     const unpaid = await postBuyVpn(url)
     const paymentRequired = await unpaid.json() as PaymentRequired
     const header = erc7710Header(paymentRequired)
@@ -263,7 +285,7 @@ describe('demo merchant experimental erc7710 rail', () => {
   })
 
   it('rejects erc7710 payments when the settlement client has no erc7710 support', async () => {
-    const { url } = await startServer({ options: { erc7710: true } })
+    const { url } = await startServer({ options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
     const unpaid = await postBuyVpn(url)
     const paymentRequired = await unpaid.json() as PaymentRequired
 

@@ -1,7 +1,7 @@
 import { createDemoMerchantServer } from './http.js'
 import { createViemSettlementClient, createX402PaymentProcessor } from './x402.js'
 import { PRODUCTS, formatUsdc, CHAIN_ID } from './products.js'
-import type { Address } from 'viem'
+import { isAddress, type Address } from 'viem'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
 const BASE_URL = process.env.BASE_URL ?? `http://localhost:${PORT}`
@@ -45,13 +45,25 @@ if (ERC7710_ENABLED && CHAIN_ID !== 84532) {
   )
   process.exit(1)
 }
+const ERC7710_DELEGATION_MANAGER = process.env.MERCHANT_ERC7710_DELEGATION_MANAGER as Address | undefined
+if (ERC7710_ENABLED && (!ERC7710_DELEGATION_MANAGER || !isAddress(ERC7710_DELEGATION_MANAGER))) {
+  console.error(
+    'MERCHANT_ERC7710_DELEGATION_MANAGER env var is required when MERCHANT_X402_ERC7710 is set.\n' +
+      'Set it to the ONLY DelegationManager contract address this merchant trusts (e.g. the ' +
+      'MetaMask Delegation Framework DelegationManager on Base Sepolia). Payments naming any ' +
+      'other delegationManager are rejected.',
+  )
+  process.exit(1)
+}
 
 const paymentProcessor = createX402PaymentProcessor(
   createViemSettlementClient({
     baseRpcUrl: BASE_RPC_URL,
     settlementPrivateKey: SETTLEMENT_PRIVATE_KEY,
   }),
-  { erc7710: ERC7710_ENABLED },
+  ERC7710_ENABLED && ERC7710_DELEGATION_MANAGER
+    ? { erc7710: { delegationManager: ERC7710_DELEGATION_MANAGER } }
+    : {},
 )
 
 const server = createDemoMerchantServer({

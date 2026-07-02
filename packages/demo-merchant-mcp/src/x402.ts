@@ -179,7 +179,13 @@ export interface SettlementClient {
 export interface X402PaymentProcessorOptions {
   /** Advertise + accept the experimental erc7710 assetTransferMethod.
    *  Chain gating (Base Sepolia only) is enforced at the composition root. */
-  erc7710?: boolean
+  erc7710?: {
+    /** The only DelegationManager contract this merchant will simulate against
+     *  and settle through. The payload's delegationManager is attacker-supplied;
+     *  without pinning it, a no-op contract at that address would "verify" and
+     *  "settle" successfully while moving zero USDC. */
+    delegationManager: Address
+  }
 }
 
 export interface X402PaymentProcessor {
@@ -242,13 +248,13 @@ export function createX402PaymentProcessor(
     const existing = settled.get(productKey)
     if (existing) return existing.payment
     if ([...settled.keys()].some((key) => key.startsWith(`${paymentKey}:`))) {
-      throw new PaymentError('Payment authorization nonce has already settled a different product')
+      throw new PaymentError('Payment authorization has already settled a different product')
     }
 
     const attempt = attempts.get(paymentKey)
     if (attempt) {
       if (attempt.productId !== params.productId) {
-        throw new PaymentError('Payment authorization nonce is already settling a different product')
+        throw new PaymentError('Payment authorization is already settling a different product')
       }
       if (attempt.promise) {
         return (await attempt.promise).payment
@@ -353,7 +359,7 @@ export function createX402PaymentProcessor(
     expectedAmount: bigint
     paymentRequired: PaymentRequired
   }): Promise<VerifiedPayment> {
-    if (options.erc7710 !== true) {
+    if (!options.erc7710) {
       throw new PaymentError('ERC-7710 payments are not enabled on this merchant')
     }
     const erc7710Client = settlementClient.erc7710
@@ -375,6 +381,9 @@ export function createX402PaymentProcessor(
     )
     assertResourceMatches(params.payload, params.paymentRequired)
     const payment = parseErc7710Payload(params.payload.payload)
+    if (!sameAddress(payment.delegationManager, options.erc7710.delegationManager)) {
+      throw new PaymentError('Payment delegationManager is not the delegation manager trusted by this merchant')
+    }
     const redeemCall = buildRedeemCall(payment, params.merchantAddress, params.expectedAmount)
     try {
       await erc7710Client.simulateRedeemDelegations(redeemCall)
@@ -394,7 +403,7 @@ export function createX402PaymentProcessor(
   }
 
   return {
-    buildPaymentRequired: (params) => buildPaymentRequired({ ...params, erc7710: options.erc7710 === true }),
+    buildPaymentRequired: (params) => buildPaymentRequired({ ...params, erc7710: Boolean(options.erc7710) }),
     paymentRequiredHeader: encodePaymentRequiredHeader,
     paymentResponseHeader: encodePaymentResponseHeader,
 

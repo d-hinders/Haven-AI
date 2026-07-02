@@ -70,7 +70,12 @@ and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
 `MERCHANT_X402_ERC7710=1` enables the x402 exact-EVM `assetTransferMethod:
 'erc7710'` rail (#747, part of the epic #452 smart-account-settlement
 prototype). It is **testnet-only**: startup fails unless `MERCHANT_CHAIN_ID=84532`
-(Base Sepolia), so a mainnet deploy can never advertise it.
+(Base Sepolia), so a mainnet deploy can never advertise it. It also requires
+`MERCHANT_ERC7710_DELEGATION_MANAGER` — the single DelegationManager contract
+this merchant trusts. The payload's `delegationManager` is attacker-supplied,
+and simulating an untrusted contract proves nothing (a no-op contract would
+"succeed" without moving USDC), so payments naming any other contract are
+rejected before simulation.
 
 When enabled, the 402 challenge advertises a second `accepts` entry with
 `extra.assetTransferMethod: 'erc7710'` (the default EIP-3009 entry stays first

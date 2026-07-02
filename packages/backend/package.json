@@ -14,7 +14,8 @@
     "test:payment": "tsx scripts/test-payment-flow.ts",
     "agent:demo": "tsx scripts/agent-payment-demo.ts",
     "pilot:rotate-live": "tsx scripts/rotate-session-live.ts",
-    "ops:check-attestation": "tsx scripts/check-attestation.ts"
+    "ops:check-attestation": "tsx scripts/check-attestation.ts",
+    "ops:check-bundler": "tsx scripts/check-bundler.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

@@ -252,7 +252,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           instructions:
             'Sign the hash with your session (delegate) private key using EIP-191 personal-sign — ' +
             'signUserOpHashForSession in @haven_ai/sdk, NOT raw ECDSA. ' +
-            `Then POST /payments/${sessionIntent.id}/sign with { signature } to execute.`,
+            `Then POST /payments/${sessionIntent.id}/sign with { signature } — ` +
+            "Haven relays it for execution within your session's on-chain limits.",
         },
       })
     }

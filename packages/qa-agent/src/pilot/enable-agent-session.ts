@@ -88,18 +88,36 @@ async function main(): Promise<void> {
     data: enable.callData,
     operation: 0,
   })
+  // Print the tx BEFORE verification — if the read below fails, the operator
+  // still has the link (the tx itself already succeeded; execSafeTransaction
+  // throws on revert).
+  console.log(`tx confirmed:         https://sepolia.basescan.org/tx/${receipt.hash}`)
 
+  // Public Base Sepolia RPCs are load-balanced — a read right after the tx can
+  // hit a node that has not seen the block yet. Retry before declaring failure.
   const publicClient = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) })
-  const enabled = await isSessionEnabled({
-    account: getAccount({ address: safeAddress, type: 'safe' }),
-    client: publicClient as never,
-    permissionId,
-  })
-  if (!enabled) throw new Error('session did not verify as enabled — inspect the tx')
+  let enabled = false
+  for (let attempt = 1; attempt <= 6 && !enabled; attempt++) {
+    enabled = await isSessionEnabled({
+      account: getAccount({ address: safeAddress, type: 'safe' }),
+      client: publicClient as never,
+      permissionId,
+    })
+    if (!enabled) {
+      console.log(`   verify attempt ${attempt}/6 — RPC has not caught up, waiting 5 s…`)
+      await new Promise((resolve) => setTimeout(resolve, 5_000))
+    }
+  }
+  if (!enabled) {
+    throw new Error(
+      'session did not verify as enabled after 30 s — check the tx above on Basescan; ' +
+        'if it succeeded, re-run with PILOT_RPC_URL set to a dedicated RPC and note that ' +
+        're-running creates a NEW session (fresh salt), which is harmless.',
+    )
+  }
 
   console.log('')
   console.log('✅ session enabled and verified on-chain')
-  console.log(`   tx:           https://sepolia.basescan.org/tx/${receipt.hash}`)
   console.log(`   permissionId: ${permissionId}`)
   console.log(`   policy:       recipient=${allowedRecipient}, per-tx 0.05 USDC, lifetime 0.10 USDC, expires in ${VALIDITY_DAYS}d`)
   console.log('')

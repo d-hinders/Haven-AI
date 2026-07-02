@@ -5,6 +5,7 @@ import Fastify, { type FastifyError } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import { runMigrations } from './db/migrate.js'
+import { runDelegateBalanceMonitor } from './lib/delegate-balance-monitor.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './lib/chains.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
@@ -164,6 +165,7 @@ await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
 
 // --- Start ---
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
+const DELEGATE_MONITOR_INTERVAL_MS = 60 * 60 * 1000 // hourly (#714)
 
 const start = async () => {
   try {
@@ -198,6 +200,20 @@ const start = async () => {
     }
     void runCatalogRefresh()
     setInterval(runCatalogRefresh, CATALOG_REFRESH_INTERVAL_MS).unref()
+
+    // Delegate balance monitor (#714): hourly read-only scan of every active
+    // agent's delegate USDC balance — WARNs on lingering (sweepable) balances
+    // and on aggregate dust past the threshold. Best-effort: a failed scan
+    // logs and waits for the next tick. It never moves funds.
+    const runDelegateMonitor = async () => {
+      try {
+        await runDelegateBalanceMonitor(app.log)
+      } catch (err) {
+        app.log.warn({ err }, 'Delegate balance monitor scan failed')
+      }
+    }
+    void runDelegateMonitor()
+    setInterval(runDelegateMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
   } catch (err) {
     app.log.error(err)
     process.exit(1)

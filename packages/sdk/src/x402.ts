@@ -30,6 +30,23 @@ function optionAuthorizationAmount(option: X402PaymentOption): string {
   return option.maxAmountRequired ?? option.amount
 }
 
+/**
+ * Upper bound on the EIP-3009 authorization window (#715, epic #713). The
+ * x402 library sets `validBefore = now + maxTimeoutSeconds` straight from the
+ * MERCHANT's 402 challenge — without a cap, a malicious or sloppy merchant
+ * can request a year-long window and a leaked signed authorization stays
+ * spendable that whole time. 600 s is generous for any facilitator settle
+ * (typical is 30–60 s); we CLAMP rather than reject so payments keep flowing
+ * while exposure stays bounded. `validBefore` is a deadline, not a demand —
+ * settling earlier is always valid.
+ */
+export const X402_MAX_AUTHORIZATION_WINDOW_SECONDS = 600
+
+function clampAuthorizationWindow(seconds: number | undefined): number {
+  const requested = typeof seconds === 'number' && Number.isFinite(seconds) ? seconds : 30
+  return Math.min(Math.max(Math.floor(requested), 1), X402_MAX_AUTHORIZATION_WINDOW_SECONDS)
+}
+
 function normalizePaymentOption(value: unknown): X402PaymentOption | null {
   const candidate = value as Partial<X402PaymentOption> | null
   if (
@@ -72,7 +89,7 @@ function normalizePaymentOption(value: unknown): X402PaymentOption | null {
     mimeType: candidate.mimeType,
     asset: candidate.asset,
     payTo: candidate.payTo,
-    maxTimeoutSeconds: candidate.maxTimeoutSeconds ?? 30,
+    maxTimeoutSeconds: clampAuthorizationWindow(candidate.maxTimeoutSeconds),
     extra: candidate.extra,
   }
 }
@@ -349,7 +366,10 @@ export function toStandardPaymentRequirements(
       'application/octet-stream',
     payTo: option.payTo,
     asset: option.asset,
-    maxTimeoutSeconds: option.maxTimeoutSeconds,
+    // Second enforcement point (#715): the parse path clamps too, but this is
+    // the last stop before the x402 library turns the timeout into
+    // `validBefore` — options constructed without parsing are bounded here.
+    maxTimeoutSeconds: clampAuthorizationWindow(option.maxTimeoutSeconds),
     extra: option.extra,
   }
 }

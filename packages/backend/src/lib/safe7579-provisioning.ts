@@ -45,6 +45,8 @@ import { getChain } from './chains.js'
  * own run). Verify against the Safe7579 / Rhinestone docs before overriding.
  */
 export const SAFE7579_ADAPTER = getAddress('0x7579EE8307284F293B1927136486880611F20002')
+/** Safe7579 launchpad — used by permissionless' Safe account derivation. */
+export const ERC7579_LAUNCHPAD = getAddress('0x7579011aB74c46090561ea277Ba79D510c6C00ff')
 /** Smart Sessions validator (module-sdk `SMART_SESSIONS_ADDRESS`). */
 export const SMART_SESSIONS_VALIDATOR = getAddress('0x00000000008bDABA73cD9815d79069c247Eb4bDA')
 

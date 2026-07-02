@@ -577,7 +577,8 @@ describe('payment routes', () => {
 
       mockQuery
         .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // db allowance config
+        .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+        .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy // db allowance config
         .mockResolvedValueOnce({ rows: [{ id: 'appr-1', status: 'pending', expires_at: '2099-01-01T00:00:00.000Z' }] }) // approval INSERT
 
       const response = await app.inject({
@@ -604,6 +605,7 @@ describe('payment routes', () => {
       mockQuery
         .mockResolvedValueOnce(authRow())
         .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+        .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
         .mockResolvedValueOnce({ rows: [pendingIntent()] }) // payment_intents INSERT
 
       const response = await app.inject({
@@ -630,6 +632,7 @@ describe('payment routes', () => {
       mockQuery
         .mockResolvedValueOnce(authRow())
         .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+        .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
         .mockResolvedValueOnce({ rows: [pendingIntent()] })
 
       const response = await app.inject({

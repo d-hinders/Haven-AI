@@ -20,6 +20,12 @@ import {
 import { tryRecordMachinePaymentEvidenceBaseById } from './machine-payment-evidence.js'
 import { decideCoverage } from './payment-coverage.js'
 import { isAddress } from './address.js'
+import {
+  getSessionRailFor,
+  loadExecutionRailState,
+  resolveExecutionRail,
+  serializeUserOp,
+} from './execution-rail.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -78,6 +84,12 @@ export interface PaymentIntentRow {
   machine_idempotency_key: string | null
   machine_metadata: unknown
   expires_at: string
+  /** Execution rail pinned at authorize time; null = legacy AllowanceModule (#745). */
+  execution_rail?: string | null
+  /** Smart Sessions permissionId pinned at authorize time. */
+  session_permission_id?: string | null
+  /** Serialized prepared UserOperation for session-rail intents (see execution-rail.ts). */
+  session_user_op?: unknown
 }
 
 interface ApprovalRequestRow {
@@ -262,6 +274,25 @@ async function currentPaymentIntentStatus(id: string, agent: AgentContext): Prom
 }
 
 function signData(intent: PaymentIntentRow, hash = intent.sign_hash, nonce = intent.allowance_nonce) {
+  // Session-rail intents sign a UserOperation hash with EIP-191, not the
+  // AllowanceModule transfer hash with raw ECDSA (#745). Legacy intents keep
+  // the exact response shape they had before the session rail existed.
+  if (intent.execution_rail === 'session_key') {
+    return {
+      hash,
+      signature_scheme: 'eip191_userop' as const,
+      components: {
+        safe: intent.safe_address,
+        token: intent.token_address,
+        to: intent.to_address,
+        amount: intent.amount_raw,
+      },
+      instructions:
+        'Sign the hash with your session (delegate) private key using EIP-191 personal-sign — ' +
+        'signUserOpHashForSession in @haven_ai/sdk, NOT raw ECDSA. ' +
+        `Then POST /payments/${intent.id}/sign with { signature } to execute.`,
+    }
+  }
   return {
     hash,
     components: {
@@ -396,6 +427,20 @@ async function returnExistingIntent(
   }
 
   if (existing.status === 'pending_signature') {
+    // Session-rail intents sign a UserOperation hash that does not depend on
+    // the AllowanceModule nonce — return the stored sign_data as-is. If the
+    // prepared UserOp goes stale (gas), the intent expires and the client
+    // re-authorizes; there is no nonce-refresh equivalent here.
+    if (existing.execution_rail === 'session_key') {
+      return {
+        statusCode: 200,
+        body: {
+          ...machinePaymentResponse(existing, agent),
+          success: undefined,
+          sign_data: signData(existing),
+        },
+      }
+    }
     let existingHash = existing.sign_hash
     let existingNonce = existing.allowance_nonce
     const refreshedAllowance = await getTokenAllowance(
@@ -549,6 +594,12 @@ export interface CreatePaymentIntentInput {
   idempotencyKey: string | null
   /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
   metadata: unknown | null
+  /** Pin the intent to the session rail (#745). Omit for the legacy path. */
+  executionRail?: 'session_key'
+  /** The Smart Sessions permissionId pinned at authorize time. */
+  sessionPermissionId?: string
+  /** Pre-serialized prepared UserOperation (serializeUserOp) for session intents. */
+  sessionUserOp?: string
   /**
    * Which partial-unique index enforces idempotent dedup for this rail. x402
    * dedupes on `x402_idempotency_key`; MPP rails on `machine_idempotency_key`.
@@ -575,7 +626,8 @@ export async function createPaymentIntent(
   const {
     agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
     allowanceNonce, signHash, resourceUrl, category, merchantAddress,
-    challengeId, idempotencyKey, metadata, conflictTarget,
+    challengeId, idempotencyKey, metadata,
+    executionRail, sessionPermissionId, sessionUserOp, conflictTarget,
   } = input
 
   // conflictTarget is a strict union mapped through an allowlist — never raw
@@ -590,10 +642,11 @@ export async function createPaymentIntent(
       allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
       x402_merchant_address, x402_idempotency_key,
       payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
-      machine_idempotency_key, machine_metadata, expires_at
+      machine_idempotency_key, machine_metadata,
+      execution_rail, session_permission_id, session_user_op, expires_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, $22, $23, NOW() + interval '10 minutes')
+      $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW() + interval '10 minutes')
     ON CONFLICT (agent_id, ${conflictColumn})
       WHERE ${conflictColumn} IS NOT NULL
         AND status NOT IN ('failed', 'expired')
@@ -609,6 +662,7 @@ export async function createPaymentIntent(
       rail === 'x402' ? idempotencyKey ?? null : null,
       rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
       idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
+      executionRail ?? null, sessionPermissionId ?? null, sessionUserOp ?? null,
     ],
   )
 
@@ -740,6 +794,91 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
           retry_after_seconds: 60,
         },
       }
+    }
+  }
+
+  // ── Session-key rail (#745) ────────────────────────────────────────────────
+  // Fail-closed: only a Safe explicitly marked migrated, whose agent has an
+  // enabled session, on an allowlisted chain, leaves the legacy path. The
+  // legacy AllowanceModule flow below is untouched for everyone else.
+  const railDecision = resolveExecutionRail({
+    ...(await loadExecutionRailState(agent)),
+    chainId: agent.chain_id,
+  })
+  if (railDecision.rail === 'session_key') {
+    if (signature) {
+      return {
+        statusCode: 400,
+        body: {
+          error:
+            'Session-rail payments are two-step: authorize first, then sign the returned ' +
+            'UserOperation hash (EIP-191) and POST /payments/{id}/sign.',
+        },
+      }
+    }
+
+    let prepared
+    try {
+      const sessionRail = await getSessionRailFor(agent.safe_address, agent.chain_id)
+      prepared = await sessionRail.prepareSessionTransfer(
+        railDecision.permissionId,
+        tokenAddress as `0x${string}`,
+        payTo as `0x${string}`,
+        amountRaw,
+      )
+    } catch (err) {
+      // The session's on-chain policy (recipient / per-tx cap / cumulative
+      // limit / expiry) is enforced during gas estimation — a violating
+      // payment fails HERE, before any state is written or anything reaches
+      // the chain. There is no off-chain approval queue on this rail: the
+      // on-chain session config IS the policy (ADR #719).
+      return {
+        statusCode: 502,
+        body: {
+          error: 'Session-rail authorization failed (on-chain policy or bundler)',
+          details: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
+
+    const sessionIntent = await createPaymentIntent({
+      agent,
+      rail,
+      payTo,
+      tokenSymbol: tokenConfig.symbol,
+      tokenAddress,
+      amountRaw,
+      amountHuman,
+      allowanceNonce: 0, // AllowanceModule-only concept; unused on this rail
+      signHash: prepared.userOpHash,
+      resourceUrl,
+      category: category ?? null,
+      merchantAddress: merchantPayTo,
+      challengeId: challengeId ?? null,
+      idempotencyKey: idempotencyKey ?? null,
+      metadata: metadata ?? null,
+      executionRail: 'session_key',
+      sessionPermissionId: railDecision.permissionId,
+      sessionUserOp: serializeUserOp(prepared.userOperation),
+      conflictTarget: 'machine_idempotency_key',
+    })
+    if (!sessionIntent) {
+      const existing = await findExistingIntent(agent, rail, idempotencyKey, challengeId)
+      if (existing) return returnExistingIntent(existing, agent, rail)
+      return {
+        statusCode: 409,
+        body: { error: 'Machine payment already exists but could not be loaded' },
+      }
+    }
+
+    return {
+      statusCode: 201,
+      body: {
+        ...machinePaymentResponse(sessionIntent, agent),
+        success: undefined,
+        expires_at: sessionIntent.expires_at,
+        sign_data: signData(sessionIntent),
+      },
     }
   }
 

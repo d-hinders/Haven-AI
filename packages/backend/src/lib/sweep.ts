@@ -18,7 +18,17 @@ import { getRelayerWallet } from './allowance-module.js'
  * docs/archive/sweep-delegate-split-signer-gap.md.
  */
 
-/** How long a prepared authorization is valid for signing + relaying. */
+/**
+ * How long a prepared authorization is valid for signing + relaying.
+ *
+ * Window policy (#715, epic #713): a leaked signed sweep authorization is
+ * spendable until `validBefore`, so this must be as small as operationally
+ * safe. 300 s covers the whole prepared→client-signed→relayed→included path
+ * with margin for slow public RPCs and a relayer retry; anything meaningfully
+ * shorter starts failing legitimate sweeps on congested testnet RPCs. Bounded
+ * by a policy test (≤ 600 s, ≥ 60 s) so it cannot silently grow — widening it
+ * is an explicit, reviewed decision.
+ */
 export const SWEEP_VALIDITY_SECONDS = 300
 
 const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [

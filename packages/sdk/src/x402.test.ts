@@ -8,7 +8,9 @@ import {
   parsePaymentRequiredResponse,
   selectPaymentOption,
   selectStandardPaymentOption,
+  toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 
@@ -47,6 +49,48 @@ function decodeHeader(header: string): unknown {
 describe('x402 helpers', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  // #715 (epic #713): the merchant controls maxTimeoutSeconds, and the x402
+  // library turns it straight into the EIP-3009 `validBefore`. Without a cap
+  // a leaked signed authorization stays spendable for as long as the merchant
+  // asked. Both enforcement points are pinned here.
+  describe('authorization-window clamp (#715)', () => {
+    function responseWithTimeout(maxTimeoutSeconds: unknown): Response {
+      const body = {
+        ...paymentRequired,
+        accepts: [{ ...accepted, maxTimeoutSeconds }],
+      }
+      return new Response(null, {
+        status: 402,
+        headers: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(body)) },
+      })
+    }
+
+    it('clamps an absurd merchant-requested window at parse time', () => {
+      const parsed = parsePaymentRequired(responseWithTimeout(365 * 24 * 3600))
+      expect(parsed.accepts[0].maxTimeoutSeconds).toBe(X402_MAX_AUTHORIZATION_WINDOW_SECONDS)
+    })
+
+    it('keeps sane windows untouched and defaults a missing one to 30 s', () => {
+      expect(parsePaymentRequired(responseWithTimeout(60)).accepts[0].maxTimeoutSeconds).toBe(60)
+      expect(
+        parsePaymentRequired(responseWithTimeout(undefined)).accepts[0].maxTimeoutSeconds,
+      ).toBe(30)
+    })
+
+    it('floors nonsense (zero/negative) at 1 s instead of producing dead windows', () => {
+      expect(parsePaymentRequired(responseWithTimeout(-5)).accepts[0].maxTimeoutSeconds).toBe(1)
+      expect(parsePaymentRequired(responseWithTimeout(0)).accepts[0].maxTimeoutSeconds).toBe(1)
+    })
+
+    it('clamps again at the pre-sign choke point for unparsed options', () => {
+      const requirements = toStandardPaymentRequirements(paymentRequired, {
+        ...accepted,
+        maxTimeoutSeconds: 999_999,
+      })
+      expect(requirements.maxTimeoutSeconds).toBe(X402_MAX_AUTHORIZATION_WINDOW_SECONDS)
+    })
   })
 
   it('parses base64 PAYMENT-REQUIRED headers synchronously', () => {

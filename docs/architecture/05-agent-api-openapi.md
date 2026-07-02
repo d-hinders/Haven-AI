@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/lib/agent-payment-taxonomy.ts
   - packages/backend/src/lib/agent-payment-taxonomy.parity.test.ts
   - .github/workflows/ci.yml
-last-verified: "2026-06-29"
+last-verified: "2026-07-02"
 ---
 
 # Haven Agent API OpenAPI Contract

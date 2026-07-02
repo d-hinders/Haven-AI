@@ -53,6 +53,7 @@ function serialize(row: CatalogRow) {
     price_atomic: row.price_atomic,
     asset: row.asset,
     network: row.network,
+    asset_transfer_methods: row.asset_transfer_methods,
     status: row.status,
     verified_at: row.verified_at,
   }

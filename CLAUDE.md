@@ -21,7 +21,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-07-01"
+last-verified: "2026-07-02"
 ---
 
 # Haven — CLAUDE.md

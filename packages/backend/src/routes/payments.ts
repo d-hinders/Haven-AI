@@ -15,6 +15,11 @@ import {
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
+import {
+  deserializeUserOp,
+  getSessionRailFor,
+  recoverSessionSigner,
+} from '../lib/execution-rail.js'
 import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
 import { quoteFee } from '../lib/fee/fee-module.js'
@@ -84,6 +89,12 @@ interface PaymentIntentRow {
   submitted_at: string | null
   confirmed_at: string | null
   expires_at: string
+  /** Execution rail pinned at authorize time; null = legacy AllowanceModule (#745). */
+  execution_rail?: string | null
+  /** Smart Sessions permissionId pinned at authorize time. */
+  session_permission_id?: string | null
+  /** Serialized prepared UserOperation for session-rail intents. */
+  session_user_op?: unknown
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -347,10 +358,17 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         return reply.code(410).send({ error: 'Payment intent has expired' })
       }
 
-      // 2. Verify signature matches delegate
+      // 2. Verify signature matches delegate. Session-rail intents (#745) sign
+      // the UserOperation hash with EIP-191 (signUserOpHashForSession); legacy
+      // intents sign the AllowanceModule transfer hash with raw ECDSA. The
+      // intent's rail was pinned at authorize time, so a signature can never
+      // be checked against the wrong scheme.
+      const isSessionRail = intent.execution_rail === 'session_key'
       let recoveredAddress: string
       try {
-        recoveredAddress = recoverSigner(intent.sign_hash, signature)
+        recoveredAddress = isSessionRail
+          ? recoverSessionSigner(intent.sign_hash, signature)
+          : recoverSigner(intent.sign_hash, signature)
       } catch (err) {
         return reply.code(400).send({
           error: 'Invalid signature format',
@@ -405,19 +423,40 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         })
       }
 
-      // 4. Execute on-chain
+      // 4. Execute on-chain — on the rail the intent was authorized for.
       try {
-        const { txHash } = await executeAllowanceTransfer(
-          intent.chain_id,
-          intent.safe_address,
-          intent.token_address,
-          intent.to_address,
-          BigInt(intent.amount_raw),
-          ZERO_ADDRESS,
-          0n,
-          intent.delegate_address,
-          signature,
-        )
+        let txHash: string
+        if (isSessionRail) {
+          // Replay the exact prepared UserOperation whose hash the client
+          // signed; only the signature is stamped in. The Smart Sessions
+          // validator authorizes it on-chain — no owner or relayer key signs.
+          if (intent.session_user_op == null || !intent.session_permission_id) {
+            throw new Error('session-rail intent is missing its stored UserOperation state')
+          }
+          const sessionRail = await getSessionRailFor(intent.safe_address, intent.chain_id)
+          const result = await sessionRail.submitSessionTransfer(
+            {
+              userOperation: deserializeUserOp(intent.session_user_op),
+              userOpHash: intent.sign_hash as `0x${string}`,
+            },
+            intent.session_permission_id as `0x${string}`,
+            signature as `0x${string}`,
+          )
+          txHash = result.txHash
+        } else {
+          const result = await executeAllowanceTransfer(
+            intent.chain_id,
+            intent.safe_address,
+            intent.token_address,
+            intent.to_address,
+            BigInt(intent.amount_raw),
+            ZERO_ADDRESS,
+            0n,
+            intent.delegate_address,
+            signature,
+          )
+          txHash = result.txHash
+        }
 
         const fiatValues = await getFiatValuesForTokenAmount(
           intent.token_symbol,

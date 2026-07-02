@@ -365,6 +365,7 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({
         rows: [pendingIntent()],
       })
@@ -425,7 +426,7 @@ describe('machine payment routes', () => {
       3,
     )
 
-    const insertCall = mockQuery.mock.calls[4]
+    const insertCall = mockQuery.mock.calls[5]
     expect(insertCall[0]).toContain('payment_rail')
     expect(insertCall[0]).toContain('machine_challenge_id')
     expect(insertCall[0]).toContain('machine_idempotency_key')
@@ -537,6 +538,7 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
 
@@ -555,7 +557,7 @@ describe('machine payment routes', () => {
       sign_data: { hash: SIGN_HASH },
     })
 
-    const fallbackLookup = mockQuery.mock.calls[5]
+    const fallbackLookup = mockQuery.mock.calls[6]
     expect(fallbackLookup[0]).toContain('COALESCE(payment_rail, source) = $4')
     expect(fallbackLookup[1]).toEqual([
       AGENT.id,
@@ -726,6 +728,7 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({
         rows: [{
           id: 'approval-123',
@@ -773,7 +776,7 @@ describe('machine payment routes', () => {
       },
     })
 
-    const insertCall = mockQuery.mock.calls[4]
+    const insertCall = mockQuery.mock.calls[5]
     expect(insertCall[0]).toContain('machine_idempotency_key')
     expect(insertCall[1]).toContain('mpp_demo:test')
   })
@@ -914,6 +917,7 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
 
     const response = await app.inject({
@@ -944,6 +948,7 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
@@ -1008,6 +1013,7 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
       .mockResolvedValueOnce({ rows: [] })
@@ -1049,6 +1055,7 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
       .mockResolvedValueOnce({ rows: [] })

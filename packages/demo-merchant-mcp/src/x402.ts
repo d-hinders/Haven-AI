@@ -1,9 +1,12 @@
 import {
   createPublicClient,
   createWalletClient,
+  encodeFunctionData,
+  encodePacked,
   getAddress,
   http,
   isAddress,
+  keccak256,
   parseSignature,
   verifyTypedData,
   type Address,
@@ -26,6 +29,7 @@ export { USDC_ADDRESS }
 const NETWORK: `${string}:${string}` = `eip155:${CHAIN_ID}`
 const MAX_TIMEOUT_SECONDS = 300
 const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
+const HEX_BYTES_RE = /^0x(?:[0-9a-fA-F]{2})+$/
 const ZERO_TX_HASH = `0x${'0'.repeat(64)}` as Hex
 
 // Verify-without-settle test hook (#603). Product ids listed here are verified
@@ -81,6 +85,48 @@ const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [
   },
 ] as const
 
+// ── Experimental ERC-7710 rail (#747, epic #452) ─────────────────────────────
+// x402 exact-EVM `assetTransferMethod: 'erc7710'`: the payer is a smart account
+// that signed an ERC-7710 delegation; verification is by *simulating*
+// `delegationManager.redeemDelegations(...)` (no ECDSA recovery), and settlement
+// submits that same call from the settlement key — so the settlement key is the
+// redeemer and any redeemer caveat in the delegation must name it. Testnet-only:
+// the flag is enforced at the composition root (index.ts) to Base Sepolia.
+
+export const ERC7710_TRANSFER_METHOD = 'erc7710'
+
+// ERC-7579 "simple single call" execution mode (callType 0x00, execType 0x00).
+const ERC7579_SINGLE_CALL_MODE = `0x${'0'.repeat(64)}` as Hex
+
+const ERC20_TRANSFER_ABI = [
+  {
+    type: 'function',
+    name: 'transfer',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+    ],
+    outputs: [{ type: 'bool' }],
+  },
+] as const
+
+// ERC-7710: redeemDelegations(bytes[] _permissionContexts, ModeCode[] _modes,
+// bytes[] _executionCallDatas) where ModeCode is an ERC-7579 bytes32 mode.
+const DELEGATION_MANAGER_ABI = [
+  {
+    type: 'function',
+    name: 'redeemDelegations',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: '_permissionContexts', type: 'bytes[]' },
+      { name: '_modes', type: 'bytes32[]' },
+      { name: '_executionCallDatas', type: 'bytes[]' },
+    ],
+    outputs: [],
+  },
+] as const
+
 export interface Eip3009Authorization {
   from: string
   to: string
@@ -88,6 +134,28 @@ export interface Eip3009Authorization {
   validAfter: string
   validBefore: string
   nonce: string
+}
+
+/** Parsed erc7710 payment payload (x402 exact-EVM, assetTransferMethod 'erc7710'). */
+export interface Erc7710Payment {
+  delegator: Address
+  delegationManager: Address
+  permissionContext: Hex
+}
+
+/** One redeemDelegations invocation — shared by verification (simulate) and settlement (submit). */
+export interface Erc7710RedeemCall {
+  delegationManager: Address
+  permissionContext: Hex
+  mode: Hex
+  executionCallData: Hex
+}
+
+export interface Erc7710SettlementClient {
+  /** Verify by simulation per the x402 spec: must reject (throw) when the
+   *  delegation does not authorize the transfer or the delegator cannot fund it. */
+  simulateRedeemDelegations(call: Erc7710RedeemCall): Promise<void>
+  submitRedeemDelegations(call: Erc7710RedeemCall): Promise<Hex>
 }
 
 export interface SettledPayment {
@@ -104,6 +172,20 @@ export interface SettledPayment {
 export interface SettlementClient {
   submit(authorization: Eip3009Authorization, signature: Hex): Promise<Hex>
   waitForReceipt(txHash: Hex): Promise<void>
+  /** Present only when the experimental ERC-7710 rail is configured. */
+  erc7710?: Erc7710SettlementClient
+}
+
+export interface X402PaymentProcessorOptions {
+  /** Advertise + accept the experimental erc7710 assetTransferMethod.
+   *  Chain gating (Base Sepolia only) is enforced at the composition root. */
+  erc7710?: {
+    /** The only DelegationManager contract this merchant will simulate against
+     *  and settle through. The payload's delegationManager is attacker-supplied;
+     *  without pinning it, a no-op contract at that address would "verify" and
+     *  "settle" successfully while moving zero USDC. */
+    delegationManager: Address
+  }
 }
 
 export interface X402PaymentProcessor {
@@ -135,32 +217,44 @@ interface SettlementAttempt {
   promise?: Promise<SettledCacheEntry>
 }
 
-export function createX402PaymentProcessor(settlementClient: SettlementClient): X402PaymentProcessor {
+/** Rail-agnostic description of one verified payment, ready to settle exactly once. */
+interface VerifiedPayment {
+  /** In-process dedupe key. EIP-3009: payer + authorization nonce (on-chain replay
+   *  protection). erc7710: delegator + permissionContext hash — one redemption per
+   *  delegation in this demo; multi-redemption budget delegations are intentionally
+   *  not supported here, the on-chain caveats are the real enforcement. */
+  paymentKey: string
+  payer: Address
+  payTo: Address
+  nonce: Hex
+  submit: () => Promise<Hex>
+}
+
+export function createX402PaymentProcessor(
+  settlementClient: SettlementClient,
+  options: X402PaymentProcessorOptions = {},
+): X402PaymentProcessor {
   const attempts = new Map<string, SettlementAttempt>()
   const settled = new Map<string, SettledCacheEntry>()
 
   async function settleOnce(params: {
     productId: ProductId
-    payload: PaymentPayload
-    authorization: Eip3009Authorization
-    signature: Hex
+    verified: VerifiedPayment
     expectedAmount: bigint
-    merchantAddress: Address
-    paymentRequired: PaymentRequired
   }): Promise<SettledPayment> {
-    const paymentKey = `${getAddress(params.authorization.from).toLowerCase()}:${params.authorization.nonce.toLowerCase()}`
+    const { paymentKey } = params.verified
     const productKey = `${paymentKey}:${params.productId}`
 
     const existing = settled.get(productKey)
     if (existing) return existing.payment
     if ([...settled.keys()].some((key) => key.startsWith(`${paymentKey}:`))) {
-      throw new PaymentError('Payment authorization nonce has already settled a different product')
+      throw new PaymentError('Payment authorization has already settled a different product')
     }
 
     const attempt = attempts.get(paymentKey)
     if (attempt) {
       if (attempt.productId !== params.productId) {
-        throw new PaymentError('Payment authorization nonce is already settling a different product')
+        throw new PaymentError('Payment authorization is already settling a different product')
       }
       if (attempt.promise) {
         return (await attempt.promise).payment
@@ -179,7 +273,7 @@ export function createX402PaymentProcessor(settlementClient: SettlementClient): 
     const nextAttempt: SettlementAttempt = { productId: params.productId }
     attempts.set(paymentKey, nextAttempt)
     const promise = (async (): Promise<SettledCacheEntry> => {
-      const txHash = await settlementClient.submit(params.authorization, params.signature)
+      const txHash = await params.verified.submit()
       nextAttempt.txHash = txHash
       return confirmSubmittedPayment(params, productKey, txHash)
     })()
@@ -198,49 +292,133 @@ export function createX402PaymentProcessor(settlementClient: SettlementClient): 
   async function confirmSubmittedPayment(
     params: {
       productId: ProductId
-      authorization: Eip3009Authorization
+      verified: VerifiedPayment
       expectedAmount: bigint
     },
     productKey: string,
     txHash: Hex,
   ): Promise<SettledCacheEntry> {
     await settlementClient.waitForReceipt(txHash)
-    const response: SettleResponse = {
-      success: true,
-      payer: getAddress(params.authorization.from),
-      transaction: txHash,
-      network: NETWORK,
-      amount: params.expectedAmount.toString(),
-    }
-    const payment: SettledPayment = {
-      productId: params.productId,
-      from: getAddress(params.authorization.from),
-      to: getAddress(params.authorization.to),
-      value: params.expectedAmount,
-      nonce: params.authorization.nonce as Hex,
-      txHash,
-      paymentResponse: response,
-      paymentResponseHeader: encodePaymentResponseHeader(response),
-    }
+    const payment = buildSettledPayment(params, txHash)
     const entry = { productId: params.productId, payment }
     settled.set(productKey, entry)
     return entry
   }
 
+  function buildSettledPayment(
+    params: { productId: ProductId; verified: VerifiedPayment; expectedAmount: bigint },
+    txHash: Hex,
+  ): SettledPayment {
+    const response: SettleResponse = {
+      success: true,
+      payer: params.verified.payer,
+      transaction: txHash,
+      network: NETWORK,
+      amount: params.expectedAmount.toString(),
+    }
+    return {
+      productId: params.productId,
+      from: params.verified.payer,
+      to: params.verified.payTo,
+      value: params.expectedAmount,
+      nonce: params.verified.nonce,
+      txHash,
+      paymentResponse: response,
+      paymentResponseHeader: encodePaymentResponseHeader(response),
+    }
+  }
+
+  async function verifyEip3009Payment(params: {
+    payload: PaymentPayload
+    merchantAddress: Address
+    expectedAmount: bigint
+    paymentRequired: PaymentRequired
+  }): Promise<VerifiedPayment> {
+    const { authorization, signature } = parseExactEvmPayload(params.payload.payload)
+    assertPaymentOptionMatches(
+      params.payload.accepted,
+      params.paymentRequired.accepts[0],
+      params.merchantAddress,
+      params.expectedAmount,
+      'eip3009',
+    )
+    assertResourceMatches(params.payload, params.paymentRequired)
+    await verifyAuthorization(authorization, signature, params.merchantAddress, params.expectedAmount)
+    return {
+      paymentKey: `${getAddress(authorization.from).toLowerCase()}:${authorization.nonce.toLowerCase()}`,
+      payer: getAddress(authorization.from),
+      payTo: getAddress(authorization.to),
+      nonce: authorization.nonce as Hex,
+      submit: () => settlementClient.submit(authorization, signature),
+    }
+  }
+
+  async function verifyErc7710Payment(params: {
+    payload: PaymentPayload
+    merchantAddress: Address
+    expectedAmount: bigint
+    paymentRequired: PaymentRequired
+  }): Promise<VerifiedPayment> {
+    if (!options.erc7710) {
+      throw new PaymentError('ERC-7710 payments are not enabled on this merchant')
+    }
+    const erc7710Client = settlementClient.erc7710
+    if (!erc7710Client) {
+      throw new PaymentError('ERC-7710 settlement is not configured on this merchant')
+    }
+    const expectedOption = params.paymentRequired.accepts.find(
+      (option) => option.extra?.assetTransferMethod === ERC7710_TRANSFER_METHOD,
+    )
+    if (!expectedOption) {
+      throw new PaymentError('This merchant did not offer an erc7710 payment option')
+    }
+    assertPaymentOptionMatches(
+      params.payload.accepted,
+      expectedOption,
+      params.merchantAddress,
+      params.expectedAmount,
+      ERC7710_TRANSFER_METHOD,
+    )
+    assertResourceMatches(params.payload, params.paymentRequired)
+    const payment = parseErc7710Payload(params.payload.payload)
+    if (!sameAddress(payment.delegationManager, options.erc7710.delegationManager)) {
+      throw new PaymentError('Payment delegationManager is not the delegation manager trusted by this merchant')
+    }
+    const redeemCall = buildRedeemCall(payment, params.merchantAddress, params.expectedAmount)
+    try {
+      await erc7710Client.simulateRedeemDelegations(redeemCall)
+    } catch (err) {
+      throw new PaymentError(
+        `ERC-7710 delegation redemption simulation failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+    const contextHash = keccak256(payment.permissionContext)
+    return {
+      paymentKey: `erc7710:${payment.delegator.toLowerCase()}:${contextHash.toLowerCase()}`,
+      payer: payment.delegator,
+      payTo: getAddress(params.merchantAddress),
+      nonce: contextHash,
+      submit: () => erc7710Client.submitRedeemDelegations(redeemCall),
+    }
+  }
+
   return {
-    buildPaymentRequired,
+    buildPaymentRequired: (params) => buildPaymentRequired({ ...params, erc7710: Boolean(options.erc7710) }),
     paymentRequiredHeader: encodePaymentRequiredHeader,
     paymentResponseHeader: encodePaymentResponseHeader,
 
     async verifyAndSettle(params) {
       const payload = decodePayment(params.paymentHeader)
-      const accepted = payload.accepted
-      const paymentOption = params.paymentRequired.accepts[0]
-      const { authorization, signature } = parseExactEvmPayload(payload.payload)
+      const method = paymentMethod(payload.accepted)
 
-      assertPaymentOptionMatches(accepted, paymentOption, params.merchantAddress, params.expectedAmount)
-      assertResourceMatches(payload, params.paymentRequired)
-      await verifyAuthorization(authorization, signature, params.merchantAddress, params.expectedAmount)
+      let verified: VerifiedPayment
+      if (method === ERC7710_TRANSFER_METHOD) {
+        verified = await verifyErc7710Payment({ ...params, payload })
+      } else if (method === 'eip3009') {
+        verified = await verifyEip3009Payment({ ...params, payload })
+      } else {
+        throw new PaymentError(`Unsupported x402 assetTransferMethod: ${method}`)
+      }
 
       // Verify-without-settle test hook (#603 sweep-recovery QA). For products in
       // MERCHANT_SKIP_SETTLE_PRODUCT, verify the payment but do NOT submit the
@@ -248,33 +426,16 @@ export function createX402PaymentProcessor(settlementClient: SettlementClient): 
       // can be exercised deterministically. Off by default; per-product so the
       // normal x402 settle path is unaffected. Testnet/dev only.
       if (SKIP_SETTLE_PRODUCTS.has(params.productId)) {
-        const response: SettleResponse = {
-          success: true,
-          payer: getAddress(authorization.from),
-          transaction: ZERO_TX_HASH,
-          network: NETWORK,
-          amount: params.expectedAmount.toString(),
-        }
-        return {
-          productId: params.productId,
-          from: getAddress(authorization.from),
-          to: getAddress(authorization.to),
-          value: params.expectedAmount,
-          nonce: authorization.nonce as Hex,
-          txHash: ZERO_TX_HASH,
-          paymentResponse: response,
-          paymentResponseHeader: encodePaymentResponseHeader(response),
-        }
+        return buildSettledPayment(
+          { productId: params.productId, verified, expectedAmount: params.expectedAmount },
+          ZERO_TX_HASH,
+        )
       }
 
       return settleOnce({
         productId: params.productId,
-        payload,
-        authorization,
-        signature,
+        verified,
         expectedAmount: params.expectedAmount,
-        merchantAddress: params.merchantAddress,
-        paymentRequired: params.paymentRequired,
       })
     },
   }
@@ -325,6 +486,30 @@ export function createViemSettlementClient(params: {
         throw new PaymentError(`USDC settlement transaction failed: ${txHash}`)
       }
     },
+
+    erc7710: {
+      // Verification-by-simulation from the settlement (redeemer) account; a
+      // delegation that does not cover the transfer, or a delegator that cannot
+      // fund it, makes the simulated USDC transfer revert.
+      async simulateRedeemDelegations(call) {
+        await publicClient.simulateContract({
+          account,
+          address: call.delegationManager,
+          abi: DELEGATION_MANAGER_ABI,
+          functionName: 'redeemDelegations',
+          args: [[call.permissionContext], [call.mode], [call.executionCallData]],
+        })
+      },
+
+      async submitRedeemDelegations(call) {
+        return walletClient.writeContract({
+          address: call.delegationManager,
+          abi: DELEGATION_MANAGER_ABI,
+          functionName: 'redeemDelegations',
+          args: [[call.permissionContext], [call.mode], [call.executionCallData]],
+        })
+      },
+    },
   }
 }
 
@@ -333,7 +518,26 @@ export function buildPaymentRequired(params: {
   amountUsdc: bigint
   resource: string
   description: string
+  erc7710?: boolean
 }): PaymentRequired {
+  const eip3009Option: PaymentRequirements = {
+    scheme: 'exact',
+    network: NETWORK,
+    amount: params.amountUsdc.toString(),
+    payTo: params.merchantAddress,
+    maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
+    asset: USDC_ADDRESS,
+    extra: { name: USDC_DOMAIN_NAME, version: USDC_DOMAIN_VERSION },
+  }
+  // The EIP-3009 option stays accepts[0] — existing clients pick the first entry
+  // and the default (no assetTransferMethod) is 'eip3009' per the exact-EVM spec.
+  const accepts: PaymentRequirements[] = [eip3009Option]
+  if (params.erc7710 === true) {
+    accepts.push({
+      ...eip3009Option,
+      extra: { assetTransferMethod: ERC7710_TRANSFER_METHOD },
+    })
+  }
   return {
     x402Version: 2,
     resource: {
@@ -342,17 +546,7 @@ export function buildPaymentRequired(params: {
       mimeType: 'application/json',
       serviceName: 'Haven Demo Merchant',
     },
-    accepts: [
-      {
-        scheme: 'exact',
-        network: NETWORK,
-        amount: params.amountUsdc.toString(),
-        payTo: params.merchantAddress,
-        maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
-        asset: USDC_ADDRESS,
-        extra: { name: USDC_DOMAIN_NAME, version: USDC_DOMAIN_VERSION },
-      },
-    ],
+    accepts,
     error: 'Payment required',
   }
 }
@@ -363,6 +557,13 @@ function decodePayment(header: string): PaymentPayload {
   } catch {
     throw new PaymentError('Invalid payment header: could not decode base64/JSON x402 payload')
   }
+}
+
+function paymentMethod(accepted: PaymentRequirements): string {
+  const method = accepted.extra?.assetTransferMethod
+  if (method === undefined) return 'eip3009'
+  if (typeof method !== 'string') throw new PaymentError('Invalid payment header: assetTransferMethod must be a string')
+  return method
 }
 
 function parseExactEvmPayload(payload: Record<string, unknown>): {
@@ -385,11 +586,53 @@ function parseExactEvmPayload(payload: Record<string, unknown>): {
   return { authorization: authorization as Eip3009Authorization, signature: signature as Hex }
 }
 
+function parseErc7710Payload(payload: Record<string, unknown>): Erc7710Payment {
+  const { delegator, delegationManager, permissionContext } = payload
+  if (typeof delegator !== 'string' || !isAddress(delegator)) {
+    throw new PaymentError('Invalid erc7710 payment field: delegator must be an address')
+  }
+  if (typeof delegationManager !== 'string' || !isAddress(delegationManager)) {
+    throw new PaymentError('Invalid erc7710 payment field: delegationManager must be an address')
+  }
+  if (typeof permissionContext !== 'string' || !HEX_BYTES_RE.test(permissionContext)) {
+    throw new PaymentError('Invalid erc7710 payment field: permissionContext must be 0x-prefixed bytes')
+  }
+  return {
+    delegator: getAddress(delegator),
+    delegationManager: getAddress(delegationManager),
+    permissionContext: permissionContext as Hex,
+  }
+}
+
+function buildRedeemCall(
+  payment: Erc7710Payment,
+  merchantAddress: Address,
+  amount: bigint,
+): Erc7710RedeemCall {
+  const transferData = encodeFunctionData({
+    abi: ERC20_TRANSFER_ABI,
+    functionName: 'transfer',
+    args: [getAddress(merchantAddress), amount],
+  })
+  // ERC-7579 single-call execution calldata: packed (target, value, callData).
+  const executionCallData = encodePacked(
+    ['address', 'uint256', 'bytes'],
+    [USDC_ADDRESS, 0n, transferData],
+  )
+  return {
+    delegationManager: payment.delegationManager,
+    permissionContext: payment.permissionContext,
+    mode: ERC7579_SINGLE_CALL_MODE,
+    executionCallData,
+  }
+}
+
 function assertPaymentOptionMatches(
   accepted: PaymentRequirements,
   expected: PaymentRequirements,
   merchantAddress: Address,
   expectedAmount: bigint,
+  method: string,
 ): void {
   if (accepted.scheme !== 'exact') throw new PaymentError(`Unsupported x402 scheme: ${accepted.scheme}`)
   if (accepted.network !== NETWORK) throw new PaymentError(`Unsupported x402 network: ${accepted.network}`)
@@ -408,7 +651,11 @@ function assertPaymentOptionMatches(
   if (accepted.maxTimeoutSeconds !== expected.maxTimeoutSeconds) {
     throw new PaymentError('Payment accepted option does not match timeout')
   }
-  if (
+  if (method === ERC7710_TRANSFER_METHOD) {
+    if (accepted.extra?.assetTransferMethod !== ERC7710_TRANSFER_METHOD) {
+      throw new PaymentError('Payment accepted option does not echo assetTransferMethod erc7710')
+    }
+  } else if (
     (accepted.extra?.name ?? null) !== USDC_DOMAIN_NAME ||
     (accepted.extra?.version ?? null) !== USDC_DOMAIN_VERSION
   ) {

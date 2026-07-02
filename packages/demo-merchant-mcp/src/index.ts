@@ -1,7 +1,7 @@
 import { createDemoMerchantServer } from './http.js'
 import { createViemSettlementClient, createX402PaymentProcessor } from './x402.js'
 import { PRODUCTS, formatUsdc, CHAIN_ID } from './products.js'
-import type { Address } from 'viem'
+import { isAddress, type Address } from 'viem'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
 const BASE_URL = process.env.BASE_URL ?? `http://localhost:${PORT}`
@@ -35,11 +35,35 @@ if (!SETTLEMENT_PRIVATE_KEY) {
   process.exit(1)
 }
 
+// Experimental ERC-7710 rail (#747, epic #452) — testnet-only. Refuse to start
+// rather than silently ignore the flag: mainnet must never advertise erc7710.
+const ERC7710_ENABLED = ['1', 'true'].includes((process.env.MERCHANT_X402_ERC7710 ?? '').toLowerCase())
+if (ERC7710_ENABLED && CHAIN_ID !== 84532) {
+  console.error(
+    'MERCHANT_X402_ERC7710 is experimental and testnet-only.\n' +
+      `Set MERCHANT_CHAIN_ID=84532 (Base Sepolia) to enable it, or unset the flag. Got chain ${CHAIN_ID}.`,
+  )
+  process.exit(1)
+}
+const ERC7710_DELEGATION_MANAGER = process.env.MERCHANT_ERC7710_DELEGATION_MANAGER as Address | undefined
+if (ERC7710_ENABLED && (!ERC7710_DELEGATION_MANAGER || !isAddress(ERC7710_DELEGATION_MANAGER))) {
+  console.error(
+    'MERCHANT_ERC7710_DELEGATION_MANAGER env var is required when MERCHANT_X402_ERC7710 is set.\n' +
+      'Set it to the ONLY DelegationManager contract address this merchant trusts (e.g. the ' +
+      'MetaMask Delegation Framework DelegationManager on Base Sepolia). Payments naming any ' +
+      'other delegationManager are rejected.',
+  )
+  process.exit(1)
+}
+
 const paymentProcessor = createX402PaymentProcessor(
   createViemSettlementClient({
     baseRpcUrl: BASE_RPC_URL,
     settlementPrivateKey: SETTLEMENT_PRIVATE_KEY,
   }),
+  ERC7710_ENABLED && ERC7710_DELEGATION_MANAGER
+    ? { erc7710: { delegationManager: ERC7710_DELEGATION_MANAGER } }
+    : {},
 )
 
 const server = createDemoMerchantServer({
@@ -54,7 +78,7 @@ server.listen(PORT, () => {
   console.log(`  Healthz:   ${BASE_URL}/healthz`)
   console.log(`  Merchant:  ${MERCHANT_ADDRESS}`)
   console.log(`  Network:   eip155:${CHAIN_ID}${CHAIN_ID === 84532 ? ' (Base Sepolia testnet)' : CHAIN_ID === 8453 ? ' (Base mainnet)' : ''}`)
-  console.log(`  Payment:   USDC via x402 EIP-3009`)
+  console.log(`  Payment:   USDC via x402 EIP-3009${ERC7710_ENABLED ? ' + experimental ERC-7710' : ''}`)
   console.log()
   console.log(
     `Products: vpn_basic $${formatUsdc(PRODUCTS.vpn_basic.price_usdc)} | ` +

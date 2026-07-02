@@ -166,5 +166,8 @@ export async function getSessionRailFor(safeAddress: string, chainId: number): P
     chainId,
     safe7579AdapterAddress: SAFE7579_ADAPTER as `0x${string}`,
     erc7579LaunchpadAddress: ERC7579_LAUNCHPAD as `0x${string}`,
+    // The per-agent/tier gas budget (#738): a Pimlico sponsorship policy binds
+    // only when its id is passed per request. Unset = no policy (dev default).
+    sponsorshipPolicyId: process.env.SESSION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
   })
 }

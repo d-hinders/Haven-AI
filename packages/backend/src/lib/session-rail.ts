@@ -96,6 +96,13 @@ export interface SessionRailConfig {
   chainId: number
   safe7579AdapterAddress: Address
   erc7579LaunchpadAddress: Address
+  /**
+   * Pimlico sponsorship-policy id (`sp_…`) — the per-agent/tier gas budget
+   * (#738). Policies are NOT bound to the API key; they only apply when the
+   * client passes the id with each sponsorship request. Unset = unrestricted
+   * sponsorship against the key's account.
+   */
+  sponsorshipPolicyId?: string
 }
 
 export interface PreparedSessionTransfer {
@@ -156,6 +163,11 @@ export async function createSessionRail(cfg: SessionRailConfig): Promise<Session
     chain,
     bundlerTransport: http(cfg.bundlerUrl),
     paymaster: pimlico,
+    // The sponsorship policy (per-agent gas budget, #738) applies ONLY when
+    // its id rides along with each sponsorship request — see SessionRailConfig.
+    ...(cfg.sponsorshipPolicyId
+      ? { paymasterContext: { sponsorshipPolicyId: cfg.sponsorshipPolicyId } }
+      : {}),
     userOperation: {
       estimateFeesPerGas: async () => (await pimlico.getUserOperationGasPrice()).fast,
     },

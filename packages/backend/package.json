@@ -16,7 +16,8 @@
     "pilot:rotate-live": "tsx scripts/rotate-session-live.ts",
     "ops:check-attestation": "tsx scripts/check-attestation.ts",
     "ops:check-bundler": "tsx scripts/check-bundler.ts",
-    "ops:check-delegate-balances": "tsx scripts/check-delegate-balances.ts"
+    "ops:check-delegate-balances": "tsx scripts/check-delegate-balances.ts",
+    "db:schema-smoke": "tsx scripts/db-schema-smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

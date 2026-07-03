@@ -32,6 +32,20 @@ Before selecting new work, find any open pull request linked with `Closes #<issu
 - If it is waiting on a user decision, money-path approval, migration review, or UX decision, stop and report the blocker.
 - Start new work only when the selected source has no in-flight pull request.
 
+**Collision check — don't double-build parallel work.** The `Closes #<issue>`
+lookup only catches PRs bound to the *same* issue. A parallel session can be
+mid-flight on the same surface under a different issue (the demo-merchant half
+of #452 was built twice before this was caught). Before implementing, glance
+for overlap:
+
+- `gh pr list --state open` — any open PR on the candidate's `area:*` surface or
+  touching the files this issue implies;
+- recently pushed branches (`git ls-remote --heads origin` or `gh api` recent
+  branch activity) whose name references this issue or surface.
+
+On a real overlap, **report it and pause** rather than build a second copy —
+coordinate or pick the next candidate.
+
 Stop and ask the user if scope or acceptance is unsafe to infer. Never guess on money movement, authentication, authorization, or schema.
 
 ## Prepare

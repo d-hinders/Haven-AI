@@ -1,0 +1,82 @@
+name: Attestation watch
+
+# Standing re-check for Smart Sessions ERC-7484 attestation coverage (#779,
+# follow-up to the #735 C+A decision). Registry gating on the session-key rail
+# stays disabled until an attestation exists for the pinned Smart Sessions
+# module. This runs ops:check-attestation weekly against the public RPCs and
+# raises (or clears) a single alert issue when coverage appears — so gating
+# gets enabled promptly instead of waiting on someone remembering to run it.
+# Read-only: queries the registry, writes no chain, moves no funds.
+
+on:
+  schedule:
+    - cron: '27 7 * * 1'   # Mondays 07:27 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: attestation-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Check attestation coverage
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Smart Sessions attestation coverage
+        id: check
+        run: npm run ops:check-attestation -w packages/backend
+
+      - name: Raise or clear the coverage alert
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COVERAGE: ${{ steps.check.outputs.coverage_appeared }}
+          CONTROL_OK: ${{ steps.check.outputs.control_ok }}
+          CHAINS: ${{ steps.check.outputs.attested_chains }}
+        run: |
+          set -euo pipefail
+          ts=$(date -u +%FT%TZ)
+
+          gh label create attestation --color fbca04 \
+            --description "Smart Sessions attestation coverage watch (#735/#779)" --force >/dev/null 2>&1 || true
+
+          title="🔔 Smart Sessions attestation coverage available — enable registry gating (#735)"
+          num=$(gh issue list --label attestation --state open --json number --jq '.[0].number' || true)
+
+          # A failed positive control means the query itself may be broken —
+          # do not conclude "no coverage" and do not touch the alert.
+          if [ "${CONTROL_OK:-false}" != "true" ]; then
+            echo "positive control failed — inconclusive, leaving any existing alert as-is."
+            exit 0
+          fi
+
+          if [ "${COVERAGE:-false}" = "true" ]; then
+            body=$(printf '**Attestation coverage appeared** on: %s\n\nThe #735 C+A decision left ERC-7484 registry gating DISABLED because no attestation existed for the pinned Smart Sessions module anywhere. It now exists. Enable gating: set a non-zero registry + the Rhinestone attester + threshold ≥ 1 in `safe7579-provisioning.ts` (procedure in `scripts/check-attestation.ts` header), verify a provisioning on a fork, ship as its own reviewed PR.\n\n_Detected %s by the attestation-watch workflow._' "$CHAINS" "$ts")
+            if [ -n "${num:-}" ] && [ "$num" != "null" ]; then
+              gh issue edit "$num" --body "$body"
+            else
+              gh issue create --title "$title" --label attestation --body "$body"
+            fi
+          else
+            # No coverage — close a stale alert if one is somehow open; otherwise stay quiet.
+            if [ -n "${num:-}" ] && [ "$num" != "null" ]; then
+              gh issue comment "$num" --body "Coverage no longer detected as of ${ts} — closing. Re-opens automatically if it reappears."
+              gh issue close "$num"
+            fi
+            echo "status quo: no coverage. No alert."
+          fi

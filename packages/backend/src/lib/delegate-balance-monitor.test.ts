@@ -13,6 +13,8 @@ vi.mock('./allowance-module.js', () => ({
 
 const {
   classifyDelegateBalance,
+  computeAlerts,
+  newAlertState,
   runDelegateBalanceMonitor,
   scanDelegateBalances,
   sweepFloorAtomic,
@@ -140,5 +142,63 @@ describe('runDelegateBalanceMonitor — log-based alerting', () => {
 describe('sweepFloorAtomic', () => {
   it('derives from config.sweepMinUsdc (the #712 floor)', () => {
     expect(sweepFloorAtomic()).toBe(FLOOR)
+  })
+})
+
+describe('computeAlerts — edge-triggered, not spammy (#777)', () => {
+  function report(overrides: Record<string, unknown> = {}) {
+    return {
+      findings: [],
+      dustTotalAtomic: 0n,
+      dustAlert: false,
+      lingering: [],
+      scannedAt: '',
+      ...overrides,
+    } as never
+  }
+  function lingeringFinding(n: number) {
+    return {
+      agentId: `agent-${n}`,
+      agentName: `Agent ${n}`,
+      delegateAddress: `0x${String(n).repeat(2).padStart(2, '0')}${'ab'.repeat(19)}`,
+      chainId: 8453,
+      balanceAtomic: ethers.parseUnits('2', 6),
+      state: 'lingering',
+    }
+  }
+
+  it('pings a lingering finding once, stays silent while it persists', () => {
+    const r = report({ lingering: [lingeringFinding(1)] })
+    const first = computeAlerts(r, newAlertState())
+    expect(first.messages).toHaveLength(1)
+    expect(first.messages[0]).toContain('Lingering')
+    // same finding next scan → no new message
+    const second = computeAlerts(r, first.nextState)
+    expect(second.messages).toHaveLength(0)
+  })
+
+  it('re-pings after the balance clears and returns', () => {
+    const r = report({ lingering: [lingeringFinding(1)] })
+    const s1 = computeAlerts(r, newAlertState()).nextState
+    // cleared
+    const cleared = computeAlerts(report({ lingering: [] }), s1)
+    expect(cleared.messages).toHaveLength(0)
+    // returns → pings again
+    const back = computeAlerts(r, cleared.nextState)
+    expect(back.messages).toHaveLength(1)
+  })
+
+  it('pings the dust breach only on the below→above crossing', () => {
+    const breach = report({ dustAlert: true, dustTotalAtomic: ethers.parseUnits('30', 6) })
+    const cross = computeAlerts(breach, newAlertState())
+    expect(cross.messages.some((m: string) => m.includes('dust'))).toBe(true)
+    // still above → no repeat
+    const stay = computeAlerts(breach, cross.nextState)
+    expect(stay.messages).toHaveLength(0)
+  })
+
+  it('pings each distinct lingering delegate, dedupes on agent+chain', () => {
+    const r = report({ lingering: [lingeringFinding(1), lingeringFinding(2)] })
+    expect(computeAlerts(r, newAlertState()).messages).toHaveLength(2)
   })
 })

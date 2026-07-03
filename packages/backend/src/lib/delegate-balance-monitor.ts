@@ -216,5 +216,97 @@ export async function runDelegateBalanceMonitor(log: MonitorLogger): Promise<Del
     },
     'delegate balance scan complete',
   )
+
+  // Real alerting (#777) — best-effort, edge-triggered so an hourly re-scan of
+  // the same condition does not spam. Failure here never affects the scan.
+  await dispatchAlerts(report, log)
+
   return report
+}
+
+// ── Webhook alerting (#777) ─────────────────────────────────────────────────
+//
+// A lingering balance or an aggregate-dust breach is worth a real ping, not
+// just a log line. Alerts are edge-triggered against in-memory state: a
+// lingering finding pings once when it appears and again only after it clears
+// and returns; the dust breach pings on the below→above crossing. State is
+// per-process (resets on redeploy — an acceptable at-most-once re-ping); a
+// durable store is a later step if the channel needs guaranteed dedup.
+
+export interface AlertState {
+  /** Agent+chain keys currently in a lingering episode we have already pinged. */
+  lingeringKeys: Set<string>
+  /** Whether the dust breach is currently active (edge tracking). */
+  dustActive: boolean
+}
+
+export function newAlertState(): AlertState {
+  return { lingeringKeys: new Set(), dustActive: false }
+}
+
+const moduleAlertState = newAlertState()
+
+function lingeringKey(f: DelegateBalanceFinding): string {
+  return `${f.agentId}:${f.chainId}`
+}
+
+/**
+ * Pure alert decision: which messages to send this scan, and the next state.
+ * Edge-triggered — no message for a condition already alerted and still true.
+ */
+export function computeAlerts(
+  report: DelegateBalanceReport,
+  state: AlertState,
+): { messages: string[]; nextState: AlertState } {
+  const messages: string[] = []
+  const currentKeys = new Set(report.lingering.map(lingeringKey))
+
+  for (const f of report.lingering) {
+    if (!state.lingeringKeys.has(lingeringKey(f))) {
+      messages.push(
+        `🚨 Lingering delegate balance: ${usdc(f.balanceAtomic)} USDC on ${f.delegateAddress} ` +
+          `(agent "${f.agentName}", chain ${f.chainId}) — sweepable funds on a hot EOA. Run the sweep / check settlement.`,
+      )
+    }
+  }
+
+  if (report.dustAlert && !state.dustActive) {
+    messages.push(
+      `🟡 Delegate dust crossed the alert threshold: ${usdc(report.dustTotalAtomic)} USDC total ` +
+        `(threshold ${usdc(dustAlertThresholdAtomic())}). Consider a below-floor sweep pass.`,
+    )
+  }
+
+  return { messages, nextState: { lingeringKeys: currentKeys, dustActive: report.dustAlert } }
+}
+
+/** POST a plain `{ text }` payload (Slack-compatible). Best-effort. */
+async function sendWebhookAlert(url: string, text: string): Promise<void> {
+  await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+    signal: AbortSignal.timeout(10_000),
+  })
+}
+
+async function dispatchAlerts(report: DelegateBalanceReport, log: MonitorLogger): Promise<void> {
+  const { messages, nextState } = computeAlerts(report, moduleAlertState)
+  moduleAlertState.lingeringKeys = nextState.lingeringKeys
+  moduleAlertState.dustActive = nextState.dustActive
+
+  const url = process.env.DELEGATE_ALERT_WEBHOOK_URL
+  if (!url || messages.length === 0) return
+
+  for (const text of messages) {
+    try {
+      await sendWebhookAlert(url, text)
+    } catch (err) {
+      // Best-effort: a failed alert must never affect the scan or funds.
+      log.warn(
+        { scope: 'delegate-balance-monitor', err: err instanceof Error ? err.message : String(err) },
+        'delegate alert webhook failed (scan unaffected)',
+      )
+    }
+  }
 }

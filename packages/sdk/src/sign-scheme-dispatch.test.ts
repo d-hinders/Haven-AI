@@ -13,7 +13,7 @@ const DELEGATE = new ethers.Wallet(DELEGATE_KEY)
 const HASH = ethers.keccak256(ethers.toUtf8Bytes('sign-scheme-dispatch'))
 
 function client() {
-  return new HavenClient({ apiUrl: 'https://example.invalid', apiKey: 'sk_test', delegateKey: DELEGATE_KEY })
+  return new HavenClient({ baseUrl: 'https://example.invalid', apiKey: 'sk_test', delegateKey: DELEGATE_KEY })
 }
 
 // signForData is private — exercise it via a thin cast (unit-level intent).

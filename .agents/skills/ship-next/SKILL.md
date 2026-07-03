@@ -116,12 +116,20 @@ review confirms zero behavioral change — say so explicitly in the PR.
 
 Route the merge:
 
-- **Non-money-path:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge.
+- **Non-money-path:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening. GitHub then updates the branch and merges when required checks go green; do not sit in a poll loop waiting.
 - **Frontend UI:** if review flags any UX, copy, or design-system concern, ask the user before enabling auto-merge.
 - **Money-path, not migration:** present the pull-request link, scope, checks, and reviewer verdict; require in-session user approval before enabling squash auto-merge.
 - **Migration:** leave the pull request for independent code-owner approval and merge.
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
+
+### Waiting on CI — mechanics
+
+Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
+
+- **Non-money-path:** `--auto` (above) means there is nothing to wait for — GitHub merges when green. Move on; you are re-invoked when the merge lands.
+- **When a wait is genuinely needed** (holding a money-path PR for approval, or confirming a specific run): use `gh pr checks <pr> --watch --fail-fast` (blocks until checks resolve, exits non-zero on failure) rather than a hand-rolled poll, or arm a Monitor if the client supports it.
+- **BEHIND** resolves itself under `--auto` (GitHub updates the branch). Only run `gh pr update-branch` manually when not using `--auto` and the branch is genuinely behind.
 
 ## Closeout
 

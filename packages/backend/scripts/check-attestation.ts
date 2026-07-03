@@ -51,6 +51,7 @@ async function query(rpc: string, module: string): Promise<Attestation | null> {
 async function main(): Promise<void> {
   let anyAttested = false
   let controlOk = false
+  const attestedChains: string[] = []
 
   for (const chain of CHAINS) {
     console.log(`\n── ${chain.name} (${chain.chainId}) ──`)
@@ -63,6 +64,7 @@ async function main(): Promise<void> {
       const ss = await query(chain.rpc, SMART_SESSIONS)
       if (ss && ss.revocationTime === 0n) {
         anyAttested = true
+        attestedChains.push(`${chain.name} (${chain.chainId})`)
         console.log(`   ✅ Smart Sessions ATTESTED ${new Date(Number(ss.time) * 1000).toISOString()}`)
       } else if (ss) {
         console.log(`   ⚠️ Smart Sessions attestation REVOKED at ${ss.revocationTime}`)
@@ -75,12 +77,25 @@ async function main(): Promise<void> {
   }
 
   console.log('')
+
+  // Machine-readable signal for the scheduled watch workflow (#779). GitHub
+  // Actions reads key=value lines from the file at $GITHUB_OUTPUT.
+  if (process.env.GITHUB_OUTPUT) {
+    const { appendFileSync } = await import('node:fs')
+    appendFileSync(
+      process.env.GITHUB_OUTPUT,
+      `coverage_appeared=${anyAttested}\n` +
+        `control_ok=${controlOk}\n` +
+        `attested_chains=${attestedChains.join(', ')}\n`,
+    )
+  }
+
   if (!controlOk) {
     console.log('⚠️ positive control failed everywhere — the query itself may be broken; do not conclude anything.')
     process.exit(1)
   }
   if (anyAttested) {
-    console.log('🎉 Coverage appeared — time to enable registry gating. See the header of this script.')
+    console.log(`🎉 Coverage appeared on ${attestedChains.join(', ')} — time to enable registry gating. See the header of this script.`)
   } else {
     console.log('status quo: no coverage — gating stays disabled (decision on #735). Re-check next ops cycle.')
   }

@@ -271,6 +271,13 @@ jobs:
       - name: Type-check backend
         run: npm run typecheck -w packages/backend
 
+      - name: DB schema smoke (migrations + money-path query PREPARE, #773)
+        # Applies every migration to the real Postgres service, then PREPAREs the
+        # curated money-path queries so column/type drift fails here instead of
+        # in dev. Mocked route tests never validate SQL against the schema —
+        # this is how the agents.safe_address join reached dev (#757).
+        run: npm run db:schema-smoke -w packages/backend
+
       - name: OpenAPI drift check
         # Surfaces the openapi spec drift assertions as a named step so a
         # failure is immediately visible in the workflow summary. The same

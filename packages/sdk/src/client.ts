@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
 import { privateKeyToAccount } from 'viem/accounts'
-import { signHash, addressFromKey, verifySignature } from './signer.js'
+import { signHash, signUserOpHashForSession, addressFromKey, verifySignature } from './signer.js'
 import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
@@ -575,6 +575,37 @@ export class HavenClient {
   }
 
   /**
+   * Sign a payment's `sign_data` with the correct scheme for its rail.
+   *
+   * The backend tags session-rail intents with
+   * `sign_data.signature_scheme = 'eip191_userop'` — those must be signed with
+   * the EIP-191 personal-sign digest (the OwnableValidator recovers over it),
+   * NOT the raw-ECDSA scheme the AllowanceModule rail uses. Dispatching on the
+   * server-provided scheme means a caller never has to know which rail an
+   * account is on; an unknown scheme is a hard error, never a guessed signature.
+   */
+  private async signForData(signData: {
+    hash: string
+    signature_scheme?: string
+  }): Promise<string> {
+    if (!this.delegateKey) {
+      throw new HavenSigningError(
+        'Cannot sign without a delegateKey. Pass the private key in HavenClient config, or sign externally.',
+      )
+    }
+    const scheme = signData.signature_scheme
+    if (scheme === 'eip191_userop') {
+      return signUserOpHashForSession(this.delegateKey, signData.hash)
+    }
+    if (scheme === undefined) {
+      return signHash(this.delegateKey, signData.hash) // legacy AllowanceModule rail
+    }
+    throw new HavenSigningError(
+      `Unknown sign_data.signature_scheme '${scheme}' — refusing to guess a signing scheme. Update @haven_ai/sdk.`,
+    )
+  }
+
+  /**
    * Step 3: Submit a signature to execute the payment.
    *
    * The signature can come from `client.sign()` or from external signing.
@@ -1061,7 +1092,7 @@ export class HavenClient {
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
     }
-    const sig = signHash(this.delegateKey!, raw.sign_data.hash)
+    const sig = await this.signForData(raw.sign_data)
 
     // 4. Submit signature (reuse existing payments/:id/sign endpoint)
     const execResult = await this.post<RawSignResponse>(
@@ -1761,7 +1792,7 @@ export class HavenClient {
       throw new HavenApiError('No sign_hash returned from machine payment authorization', 500, raw)
     }
 
-    const sig = signHash(this.delegateKey!, raw.sign_data.hash)
+    const sig = await this.signForData(raw.sign_data)
     const execResult = await this.post<RawSignResponse>(
       `/payments/${raw.payment_id}/sign`,
       { signature: sig },

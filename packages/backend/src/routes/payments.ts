@@ -24,6 +24,10 @@ import {
   resolveExecutionRail,
   serializeUserOp,
 } from '../lib/execution-rail.js'
+import {
+  commitScheduleRollover,
+  resolveScheduledAuthorization,
+} from '../lib/session-schedule-wiring.js'
 import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
 import { quoteFee } from '../lib/fee/fee-module.js'
@@ -188,11 +192,24 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         })
       }
 
+      // Pre-signed schedule (#769): if this agent has an enabled schedule
+      // window covering the current period, prepare against the CURRENT
+      // period's deterministic session instead of the recorded one. No
+      // signature — the owner enabled every session in the window up front.
+      // Null = no applicable schedule → recorded session, #734 behavior.
+      const scheduled = await resolveScheduledAuthorization(
+        agent,
+        tokenAddress,
+        to.toLowerCase(),
+        Math.floor(Date.now() / 1000),
+      )
+      const activePermissionId = scheduled?.permissionId ?? railDecision.permissionId
+
       let prepared
       try {
         const sessionRail = await getSessionRailFor(agent.safe_address, agent.chain_id)
         prepared = await sessionRail.prepareSessionTransfer(
-          railDecision.permissionId,
+          activePermissionId,
           tokenAddress as `0x${string}`,
           to.toLowerCase() as `0x${string}`,
           amountRaw,
@@ -206,6 +223,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           // Bundler errors echo the request URL, which embeds the API key.
           details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
         })
+      }
+
+      // Lazy rollover flip — ONLY after prepare succeeded: bundler gas
+      // estimation exercised the real Smart Sessions config, which is the
+      // on-chain proof the scheduled session is enabled. Guarded + race-safe
+      // (recordRotatedSession); losing the race is fine, the winner flipped
+      // to the same deterministic id.
+      if (scheduled?.rolloverDue) {
+        await commitScheduleRollover(agent.id, scheduled)
       }
 
       const sessionResult = await pool.query<PaymentIntentRow>(
@@ -232,7 +258,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           0, // AllowanceModule-only concept; unused on this rail
           prepared.userOpHash,
           'session_key',
-          railDecision.permissionId,
+          activePermissionId,
           serializeUserOp(prepared.userOperation),
         ],
       )

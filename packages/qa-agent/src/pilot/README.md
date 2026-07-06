@@ -28,6 +28,7 @@ set on the dev backend.
 | `pilot:policies` (qa-agent) | The six-case on-chain enforcement suite: allowlist, per-tx cap, cumulative limit, expiry, revoke — each stopped both directions (#722). |
 | `pilot:compare` (qa-agent) | Session rail vs legacy relayer rail: latency, gas, and the concurrency probe (#723). |
 | `pilot:rotate-live` (backend) | Atomic session rotation on-chain (remove old + enable new in one owner tx) + the schedule/refill proof (#734). |
+| `pilot:schedule-live` (backend) | Pre-signed budget schedule (#769): N time-locked sessions in ONE owner signature, then the cross-period payment proof with zero further signatures. Needs `PILOT_AGENT_ID`. |
 | `pilot:x402-7710-buyer` (qa-agent) | ERC-7710 direct settlement: a smart account pays the merchant with no delegate funding leg (#452). Needs the demo merchant running with the erc7710 rail. |
 
 ## Standing ops checks (cadence)

@@ -27,15 +27,19 @@ interface RecipientRow {
   inherits_allowance: boolean
 }
 
+export interface RecipientToken {
+  address: string
+  symbol: string
+  decimals: number
+}
+
 interface Props {
   agentId: string
   safeAddress: string | null
   chainId: number
   safeDetails: SafeDetails | null
-  /** The agent's configured tokens (from its allowances) — new rows use the first. */
-  tokenAddress: string | null
-  tokenSymbol: string | null
-  tokenDecimals: number
+  /** The agent's configured tokens — a picker appears when there are several (#804). */
+  tokens: RecipientToken[]
 }
 
 function shortAddress(address: string): string {
@@ -59,9 +63,7 @@ export default function AgentRecipientsCard({
   safeAddress,
   chainId,
   safeDetails,
-  tokenAddress,
-  tokenSymbol,
-  tokenDecimals,
+  tokens,
 }: Props) {
   const [recipients, setRecipients] = useState<RecipientRow[] | null>(null)
   const [sessionRail, setSessionRail] = useState(false)
@@ -69,6 +71,9 @@ export default function AgentRecipientsCard({
   const [pendingApply, setPendingApply] = useState(false)
   const [address, setAddress] = useState('')
   const [label, setLabel] = useState('')
+  const [selectedToken, setSelectedToken] = useState<string>(tokens[0]?.address ?? '')
+  const tokenFor = (tokenAddress: string): RecipientToken | undefined =>
+    tokens.find((t) => t.address.toLowerCase() === tokenAddress.toLowerCase())
   const [saving, setSaving] = useState(false)
   const { apply, applying, ready } = useApplySchedule({ agentId, safeAddress, chainId, safeDetails })
   const { toast } = useToast()
@@ -92,12 +97,13 @@ export default function AgentRecipientsCard({
   }, [reload])
 
   const handleAdd = useCallback(async () => {
-    if (!tokenAddress || !isAddress(address)) return
+    const token = selectedToken || tokens[0]?.address
+    if (!token || !isAddress(address)) return
     setSaving(true)
     try {
       await api.post(`/agents/${agentId}/recipients`, {
         recipient_address: address,
-        token_address: tokenAddress,
+        token_address: token,
         label: label.trim() || null,
       })
       setAddress('')
@@ -110,7 +116,7 @@ export default function AgentRecipientsCard({
     } finally {
       setSaving(false)
     }
-  }, [address, agentId, label, reload, toast, tokenAddress])
+  }, [address, agentId, label, reload, selectedToken, toast, tokens])
 
   const handleRemove = useCallback(
     async (row: RecipientRow) => {
@@ -189,7 +195,8 @@ export default function AgentRecipientsCard({
               </div>
               <div className="flex shrink-0 items-center gap-3">
                 <span className="text-xs text-[var(--v2-ink-muted)]">
-                  {formatBudget(row.effective_budget, tokenDecimals)} {tokenSymbol ?? ''}
+                  {formatBudget(row.effective_budget, tokenFor(row.token_address)?.decimals ?? 18)}{' '}
+                  {tokenFor(row.token_address)?.symbol ?? ''}
                   {row.inherits_allowance ? ' (full budget)' : ''}
                 </span>
                 <Button size="sm" variant="ghost" onClick={() => handleRemove(row)}>
@@ -201,7 +208,7 @@ export default function AgentRecipientsCard({
         )}
       </Card.Section>
 
-      {tokenAddress ? (
+      {tokens.length > 0 ? (
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <Input
             value={address}
@@ -217,6 +224,20 @@ export default function AgentRecipientsCard({
             className="sm:w-44"
             aria-label="Recipient name"
           />
+          {tokens.length > 1 ? (
+            <select
+              value={selectedToken}
+              onChange={(e) => setSelectedToken(e.target.value)}
+              aria-label="Token"
+              className="h-10 rounded-md border border-[var(--v2-border)] bg-white px-3 text-sm text-[var(--v2-ink)] sm:w-28"
+            >
+              {tokens.map((t) => (
+                <option key={t.address} value={t.address}>
+                  {t.symbol}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <Button onClick={handleAdd} disabled={saving || !isAddress(address)}>
             {saving ? 'Saving…' : 'Add'}
           </Button>

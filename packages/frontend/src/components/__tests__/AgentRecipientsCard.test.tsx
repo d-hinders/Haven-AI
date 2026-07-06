@@ -25,9 +25,7 @@ const PROPS = {
   safeAddress: '0x' + 'cd'.repeat(20),
   chainId: 84532,
   safeDetails: { threshold: 1 } as never,
-  tokenAddress: USDC,
-  tokenSymbol: 'USDC',
-  tokenDecimals: 6,
+  tokens: [{ address: USDC, symbol: 'USDC', decimals: 6 }],
 }
 
 function mockApi(opts: { sessionRail?: boolean; recipients?: unknown[] } = {}) {
@@ -91,6 +89,68 @@ describe('AgentRecipientsCard (#796)', () => {
     await waitFor(() => expect(screen.getByText('Add')).toBeTruthy())
     fireEvent.change(screen.getByLabelText('Recipient address'), { target: { value: 'not-an-address' } })
     expect((screen.getByText('Add') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('shows a token picker only when the agent has more than one token (#804)', async () => {
+    mockApi()
+    const twoTokens = {
+      ...PROPS,
+      tokens: [
+        { address: USDC, symbol: 'USDC', decimals: 6 },
+        { address: '0x' + '99'.repeat(20), symbol: 'EURe', decimals: 18 },
+      ],
+    }
+    render(<AgentRecipientsCard {...twoTokens} />)
+    await waitFor(() => expect(screen.getByLabelText('Token')).toBeTruthy())
+    // enkel-token-fallet (grundprops) har ingen väljare:
+    mockApi()
+    const { container } = render(<AgentRecipientsCard {...PROPS} />)
+    await waitFor(() => expect(container.textContent).toContain('Add'))
+    expect(container.querySelector('select[aria-label="Token"]')).toBeNull()
+  })
+
+  it('adding with the picker sends the SELECTED token (#804)', async () => {
+    mockApi()
+    mockPost.mockResolvedValue({ id: 'row-2', applied_on_chain: false })
+    const EURE = '0x' + '99'.repeat(20)
+    const twoTokens = {
+      ...PROPS,
+      tokens: [
+        { address: USDC, symbol: 'USDC', decimals: 6 },
+        { address: EURE, symbol: 'EURe', decimals: 18 },
+      ],
+    }
+    render(<AgentRecipientsCard {...twoTokens} />)
+    await waitFor(() => expect(screen.getByLabelText('Token')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Token'), { target: { value: EURE } })
+    fireEvent.change(screen.getByLabelText('Recipient address'), {
+      target: { value: '0x' + 'ef'.repeat(20) },
+    })
+    fireEvent.click(screen.getByText('Add'))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    expect(mockPost.mock.calls[0][1]).toMatchObject({ token_address: EURE })
+  })
+
+  it('formats each row with its OWN token decimals and symbol (#804)', async () => {
+    const EURE = '0x' + '99'.repeat(20)
+    mockApi({
+      recipients: [
+        { recipient_address: RECIPIENT, token_address: USDC, label: 'USDC-mottagare',
+          effective_budget: '5000000', inherits_allowance: false },
+        { recipient_address: '0x' + 'ee'.repeat(20), token_address: EURE, label: 'EURe-mottagare',
+          effective_budget: '2000000000000000000', inherits_allowance: false },
+      ],
+    })
+    const twoTokens = {
+      ...PROPS,
+      tokens: [
+        { address: USDC, symbol: 'USDC', decimals: 6 },
+        { address: EURE, symbol: 'EURe', decimals: 18 },
+      ],
+    }
+    render(<AgentRecipientsCard {...twoTokens} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC/)).toBeTruthy())
+    expect(screen.getByText(/2 EURe/)).toBeTruthy()
   })
 
   it('sign-to-apply runs the shared apply flow and clears the pending state', async () => {

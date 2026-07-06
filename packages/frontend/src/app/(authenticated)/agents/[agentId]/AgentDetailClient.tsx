@@ -374,15 +374,18 @@ export default function AgentDetailClient({ agentId }: Props) {
       period: budgetPeriodLabel(allowance.reset_period_min),
     }
   })
-  // #796: recipients bind per token — new rows use the agent's first
-  // configured token (single-token agents are the common case).
-  const recipientTokenConfig = (() => {
-    const first = currentAgent.allowances[0]
-    if (!first || !chainConfig) return null
-    const cfg = Object.values(chainConfig.tokens).find((t) => t.symbol === first.token_symbol)
-    if (!cfg) return null
-    return { address: (cfg.address ?? first.token_address) as string, symbol: cfg.symbol, decimals: cfg.decimals }
-  })()
+  // #796/#804: recipients bind per token — the card gets EVERY configured
+  // token (a picker appears only when there is more than one).
+  const recipientTokens = currentAgent.allowances.flatMap((allowance) => {
+    if (!chainConfig) return []
+    const cfg = Object.values(chainConfig.tokens).find((t) => t.symbol === allowance.token_symbol)
+    if (!cfg) return []
+    return [{
+      address: (cfg.address ?? allowance.token_address) as string,
+      symbol: cfg.symbol,
+      decimals: cfg.decimals,
+    }]
+  })
   const approvalCopy =
     budgetLines.length === 0
       ? 'No automatic spending is configured for this agent.'
@@ -543,9 +546,7 @@ export default function AgentDetailClient({ agentId }: Props) {
         safeAddress={safeAddress}
         chainId={chainId}
         safeDetails={safeDetails}
-        tokenAddress={recipientTokenConfig?.address ?? null}
-        tokenSymbol={recipientTokenConfig?.symbol ?? null}
-        tokenDecimals={recipientTokenConfig?.decimals ?? 6}
+        tokens={recipientTokens}
       />
 
       {isPaused ? (

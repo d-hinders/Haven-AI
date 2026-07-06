@@ -30,6 +30,7 @@ import {
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
+import ScheduleRenewalBanner from '@/components/ScheduleRenewalBanner'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import {
@@ -519,6 +520,13 @@ export default function AgentDetailClient({ agentId }: Props) {
       {revokeBlockedByOtherDevice ? (
         <PasskeyOtherDeviceNotice className="mt-4" />
       ) : null}
+
+      <ScheduleRenewalBanner
+        agentId={agentId}
+        safeAddress={safeAddress}
+        chainId={chainId}
+        safeDetails={safeDetails}
+      />
 
       {isPaused ? (
         <div className="mt-4">

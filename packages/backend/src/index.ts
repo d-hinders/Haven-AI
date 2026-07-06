@@ -15,6 +15,7 @@ import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
+import agentScheduleRoutes from './routes/agent-schedule.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
@@ -143,6 +144,7 @@ await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
+await app.register(agentScheduleRoutes, { prefix: '/agents' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })

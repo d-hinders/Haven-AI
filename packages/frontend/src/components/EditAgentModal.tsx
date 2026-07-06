@@ -6,8 +6,10 @@ import { type Address, parseUnits } from 'viem'
 import {
   buildDeleteAllowanceTx,
   buildSetAllowanceTx,
+  buildSetAllowanceWithScheduleTx,
   RESET_PERIODS,
   type AllowanceInfo,
+  type ScheduleInnerTx,
 } from '@/lib/allowance-module'
 import ConfirmDialog from './ConfirmDialog'
 import { api } from '@/lib/api'
@@ -240,16 +242,45 @@ export default function EditAgentModal({
         const rawAmount = parseUnits(parsedAmount.amount, selectedTokenConfig.decimals)
         const token = (selectedTokenConfig.address ?? '0x0000000000000000000000000000000000000000') as Address
 
+        // #770: on an account whose agent pays from a pre-approved budget
+        // window, the SAME signature also renews that window — the backend
+        // returns plain inner calls to ride along. Any failure here falls
+        // open to the plain budget save (the window just isn't extended).
+        let schedule: {
+          inner_txs: ScheduleInnerTx[]
+          from_period: number
+          period_count: number
+          first_permission_id: string
+        } | null = null
+        try {
+          const state = await api.get<{ session_rail: boolean }>(`/agents/${agent.id}/schedule`)
+          if (state.session_rail) {
+            schedule = await api.post(`/agents/${agent.id}/schedule/build`, {})
+          }
+        } catch {
+          schedule = null
+        }
+
         // Build Safe tx
         const nonce = await getSafeNonce(publicClient, safeAddress as Address)
-        const safeTx = buildSetAllowanceTx(
-          agent.delegate_address as Address,
-          token,
-          rawAmount,
-          resetTimeMin,
-          nonce,
-          chainId,
-        )
+        const safeTx = schedule
+          ? buildSetAllowanceWithScheduleTx(
+              agent.delegate_address as Address,
+              token,
+              rawAmount,
+              resetTimeMin,
+              schedule.inner_txs,
+              nonce,
+              chainId,
+            )
+          : buildSetAllowanceTx(
+              agent.delegate_address as Address,
+              token,
+              rawAmount,
+              resetTimeMin,
+              nonce,
+              chainId,
+            )
 
         // Sign
         setExecStatus('signing')
@@ -295,6 +326,21 @@ export default function EditAgentModal({
             allowance_amount: rawAmount.toString(),
             reset_period_min: resetTimeMin,
           })
+
+        // Record the renewed schedule window — only after the tx executed
+        // (a proposed multi-sig tx records on a later save; the payment path
+        // is fail-closed either way, so a missed confirm cannot move money).
+        if (schedule && threshold <= 1) {
+          try {
+            await api.post(`/agents/${agent.id}/schedule/confirm`, {
+              from_period: schedule.from_period,
+              period_count: schedule.period_count,
+              first_permission_id: schedule.first_permission_id,
+            })
+          } catch (confirmErr) {
+            console.error('[Haven] Schedule confirm failed (window not recorded):', confirmErr)
+          }
+        }
       } else {
         setExecStatus('saving')
       }

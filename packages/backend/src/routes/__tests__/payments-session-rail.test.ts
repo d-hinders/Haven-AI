@@ -253,6 +253,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       .mockResolvedValueOnce({
         rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
       })
+      .mockResolvedValueOnce({ rows: [] }) // schedule-window lookup (#769) — no schedule
       .mockResolvedValueOnce({ rows: [sessionIntentRow()] }) // INSERT RETURNING *
 
     const response = await app.inject({
@@ -295,6 +296,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       .mockResolvedValueOnce({
         rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
       })
+      .mockResolvedValueOnce({ rows: [] }) // schedule-window lookup (#769) — no schedule
 
     const response = await app.inject({
       method: 'POST',
@@ -332,6 +334,106 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.json().sign_data.signature_scheme).toBeUndefined()
     expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(allowanceMocks.generateTransferHash).toHaveBeenCalledOnce()
+  })
+
+  it('schedule rollover (#769): prepares on the CURRENT period session and flips the record after success', async () => {
+    // A real schedule built with the production builders — the route recomputes
+    // it from the mocked DB rows, so the permissionIds must match bit-for-bit.
+    const { buildSessionSchedule } = await import('../../lib/session-schedule.js')
+    const RESET_MIN = 60
+    const FROM_PERIOD = 100
+    const schedule = buildSessionSchedule(
+      AGENT.id,
+      {
+        sessionKeyAddress: AGENT.delegate_address as `0x${string}`,
+        usdcAddress: USDC as `0x${string}`,
+        allowedRecipient: RECIPIENT as `0x${string}`,
+        budgetAtomic: 5_000_000n,
+        chainId: BigInt(AGENT.chain_id),
+      },
+      RESET_MIN,
+      FROM_PERIOD,
+      3,
+    )
+    const recordedId = schedule.entries[0].permissionId // period 100 on record
+    const expectedId = schedule.entries[1].permissionId // now is period 101
+    vi.useFakeTimers({ toFake: ['Date'] }) // only Date — Fastify needs real timers
+    vi.setSystemTime(new Date((FROM_PERIOD + 1) * RESET_MIN * 60 * 1000 + 90_000))
+
+    const prepareSessionTransfer = vi.fn().mockResolvedValue({
+      userOperation: PREPARED_USER_OP,
+      userOpHash: USER_OP_HASH,
+    })
+    sessionRailMocks.getSessionRailFor.mockResolvedValueOnce({ prepareSessionTransfer })
+
+    // Pattern-matched (#775): the schedule wiring adds queries mid-flow.
+    mockQuery.mockImplementation((sql: unknown) => {
+      const s = String(sql)
+      if (/session_schedule_from_period/.test(s)) {
+        return Promise.resolve({
+          rows: [{
+            session_schedule_from_period: FROM_PERIOD,
+            session_schedule_period_count: 3,
+            session_permission_id: recordedId,
+            delegate_address: AGENT.delegate_address,
+            reset_period_min: RESET_MIN,
+          }],
+        })
+      }
+      if (/FROM agent_recipients/.test(s)) {
+        return Promise.resolve({
+          rows: [{
+            recipient_address: RECIPIENT.toLowerCase(),
+            token_address: USDC,
+            label: null,
+            budget_amount: '5000000',
+            allowance_amount: '5000000',
+          }],
+        })
+      }
+      if (/us\.execution_rail/.test(s)) {
+        return Promise.resolve({
+          rows: [{ execution_rail: 'session_key', session_permission_id: recordedId }],
+        })
+      }
+      if (/INSERT INTO payment_intents/.test(s)) {
+        return Promise.resolve({ rows: [sessionIntentRow({ session_permission_id: expectedId })] })
+      }
+      if (/UPDATE agents/.test(s)) return Promise.resolve({ rows: [{ id: AGENT.id }] })
+      if (/FROM agent_allowances/.test(s)) {
+        return Promise.resolve({ rows: [{ allowance_amount: '5000000' }] })
+      }
+      return Promise.resolve(authRow())
+    })
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+      })
+
+      expect(response.statusCode).toBe(201)
+      // Prepared against the CURRENT period's scheduled session — not the record:
+      expect(prepareSessionTransfer).toHaveBeenCalledWith(
+        expectedId,
+        expect.anything(),
+        RECIPIENT.toLowerCase(),
+        expect.anything(),
+      )
+      // The guarded flip ran AFTER the successful prepare, old id as the guard:
+      const flip = mockQuery.mock.calls.find((c) => /UPDATE agents/.test(String(c[0])))
+      expect(flip).toBeDefined()
+      expect(flip![1]).toEqual([expectedId, AGENT.id, recordedId])
+      // The intent pins the scheduled id:
+      const insert = mockQuery.mock.calls.find((c) =>
+        /INSERT INTO payment_intents/.test(String(c[0])),
+      )
+      expect(insert![1]).toContain(expectedId)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('fails closed when a session intent is missing its stored UserOperation', async () => {

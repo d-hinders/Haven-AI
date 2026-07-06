@@ -94,6 +94,16 @@ const QUERIES: SmokeQuery[] = [
           WHERE r.agent_id = $1 AND LOWER(r.token_address) = LOWER($2)
           ORDER BY r.created_at, r.id`,
   },
+  {
+    name: 'schedule: window + policy inputs for lazy rollover (#769)',
+    sql: `SELECT a.session_schedule_from_period, a.session_schedule_period_count,
+                 a.session_permission_id, a.delegate_address,
+                 al.reset_period_min
+          FROM agents a
+          LEFT JOIN agent_allowances al
+            ON al.agent_id = a.id AND LOWER(al.token_address) = LOWER($2)
+          WHERE a.id = $1`,
+  },
 ]
 
 async function main(): Promise<void> {

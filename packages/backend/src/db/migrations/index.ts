@@ -38,6 +38,7 @@ import * as merchantCatalogSeedExpansion from './035_merchant_catalog_seed_expan
 import * as executionRail from './036_execution_rail.js'
 import * as merchantCatalogAssetTransferMethods from './037_merchant_catalog_asset_transfer_methods.js'
 import * as agentRecipients from './038_agent_recipients.js'
+import * as sessionScheduleWindow from './039_session_schedule_window.js'
 
 export interface Migration {
   version: string
@@ -89,4 +90,5 @@ export const migrations: Migration[] = [
   executionRail,
   merchantCatalogAssetTransferMethods,
   agentRecipients,
+  sessionScheduleWindow,
 ]

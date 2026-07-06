@@ -37,6 +37,7 @@ import * as baseDefaultChain from './034_base_default_chain.js'
 import * as merchantCatalogSeedExpansion from './035_merchant_catalog_seed_expansion.js'
 import * as executionRail from './036_execution_rail.js'
 import * as merchantCatalogAssetTransferMethods from './037_merchant_catalog_asset_transfer_methods.js'
+import * as agentRecipients from './038_agent_recipients.js'
 
 export interface Migration {
   version: string
@@ -87,4 +88,5 @@ export const migrations: Migration[] = [
   merchantCatalogSeedExpansion,
   executionRail,
   merchantCatalogAssetTransferMethods,
+  agentRecipients,
 ]

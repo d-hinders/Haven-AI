@@ -136,3 +136,31 @@ export async function commitScheduleRollover(
 ): Promise<boolean> {
   return recordRotatedSession(agentId, scheduled.recordedPermissionId, scheduled.permissionId)
 }
+
+/**
+ * Whether the agent is on the session rail with an enabled schedule window
+ * (#802): policy mutations on such an agent take on-chain effect only after
+ * the owner's next schedule signature — callers surface a warning so an
+ * unapplied edit does not silently stall payments (the recompute diverges
+ * from the enabled sessions and prepare fails, fail-closed).
+ */
+export async function agentHasEnabledSchedule(agentId: string): Promise<boolean> {
+  const result = await pool.query<{
+    execution_rail: string | null
+    session_schedule_from_period: number | null
+  }>(
+    `SELECT us.execution_rail, a.session_schedule_from_period
+     FROM agents a
+     LEFT JOIN user_safes us ON us.id = a.safe_id
+     WHERE a.id = $1`,
+    [agentId],
+  )
+  const row = result.rows[0]
+  return row?.execution_rail === 'session_key' && row.session_schedule_from_period != null
+}
+
+/** The warning text mutation responses carry when a schedule is enabled (#802). */
+export const SCHEDULE_APPLY_WARNING =
+  'This agent pays from a pre-approved budget schedule — the change takes effect ' +
+  'on-chain after your next budget signature (Update budget or Sign to apply). ' +
+  'Until then, payments continue on the previously signed policy.'

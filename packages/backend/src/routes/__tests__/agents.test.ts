@@ -271,6 +271,7 @@ describe('agent routes', () => {
           reset_period_min: 1440,
         }],
       })
+      .mockResolvedValueOnce({ rows: [] }) // schedule-state lookup (#802) — no schedule
 
     const response = await app.inject({
       method: 'POST',

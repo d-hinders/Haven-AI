@@ -128,6 +128,38 @@ describe('agent schedule API (#770)', () => {
     })
   })
 
+  describe('GET /agents/:id/schedule — drift detection (#802)', () => {
+    function activeWindowAgent() {
+      const nowPeriod = Math.floor(Date.now() / 1000 / (RESET_MIN * 60))
+      return agentRow({
+        session_schedule_from_period: nowPeriod - 1,
+        session_schedule_period_count: 10,
+      })
+    }
+
+    it('reports drift when the recomputed current session is NOT enabled on-chain', async () => {
+      mockDb({ agent: activeWindowAgent() })
+      mockIsSessionEnabled.mockResolvedValue(false)
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/schedule` })
+      expect(res.json()).toMatchObject({ enabled: true, drift_detected: true })
+      expect(res.json().drift_reason).toMatch(/re-applied/)
+    })
+
+    it('no drift when the chain confirms the recomputed session', async () => {
+      mockDb({ agent: activeWindowAgent() })
+      mockIsSessionEnabled.mockResolvedValue(true)
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/schedule` })
+      expect(res.json()).toMatchObject({ drift_detected: false, drift_reason: null })
+    })
+
+    it('RPC failure reports no drift (no false alarms — the payment seam enforces)', async () => {
+      mockDb({ agent: activeWindowAgent() })
+      mockIsSessionEnabled.mockRejectedValue(new Error('rpc down'))
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/schedule` })
+      expect(res.json()).toMatchObject({ enabled: true, drift_detected: false })
+    })
+  })
+
   describe('POST /agents/:id/schedule/build', () => {
     it('409 when the account is not on the session rail', async () => {
       mockDb({ agent: agentRow({ execution_rail: null }) })

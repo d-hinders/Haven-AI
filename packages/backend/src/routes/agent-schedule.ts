@@ -151,14 +151,46 @@ export default async function agentScheduleRoutes(app: FastifyInstance): Promise
     const currentPeriod = periodIndexAt(nowSec, resetPeriodMin)
     const lastPeriod = agent.session_schedule_from_period + agent.session_schedule_period_count - 1
     const periodsRemaining = Math.max(0, lastPeriod - currentPeriod + 1)
+    const windowActive = currentPeriod >= agent.session_schedule_from_period && periodsRemaining > 0
+
+    // Drift check (#802): the rollover recomputes sessions from the CURRENT
+    // stored policy — if a policy input changed after the owner signed (a
+    // budget edit without an apply), the recomputed current-period session is
+    // not enabled on-chain and payments stall fail-closed. Detect it here so
+    // the dashboard can say WHY instead of silently 502ing. One RPC per
+    // recipient policy; an RPC failure reports no drift (don't cry wolf —
+    // the payment path is the enforcing seam either way).
+    let driftDetected = false
+    let driftReason: string | null = null
+    if (windowActive && agent.safe_address) {
+      for (const { policy, resetPeriodMin: rpm } of policies) {
+        const expected = buildScheduledSession(agent.id, policy, rpm, periodIndexAt(nowSec, rpm))
+        const onChain = await checkEnabledOnChain(
+          agent.chain_id,
+          agent.safe_address,
+          expected.permissionId,
+        )
+        if (onChain === 'not_enabled') {
+          driftDetected = true
+          driftReason =
+            `The current policy for recipient ${policy.allowedRecipient} does not match ` +
+            'the signed schedule — payments to it will fail until the schedule is re-applied ' +
+            '(a budget or recipient change was saved without a signature).'
+          break
+        }
+      }
+    }
 
     return {
       session_rail: true,
-      enabled: currentPeriod >= agent.session_schedule_from_period && periodsRemaining > 0,
+      enabled: windowActive,
       period_min: resetPeriodMin,
       periods_remaining: periodsRemaining,
       /** The banner threshold the dashboard uses (#770: prompt at ≤2 left). */
       renewal_due: periodsRemaining <= 2,
+      /** #802: stored policy diverges from the signed on-chain schedule. */
+      drift_detected: driftDetected,
+      drift_reason: driftReason,
     }
   })
 

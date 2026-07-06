@@ -31,6 +31,7 @@ import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
 import ScheduleRenewalBanner from '@/components/ScheduleRenewalBanner'
+import AgentRecipientsCard from '@/components/AgentRecipientsCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import {
@@ -373,6 +374,15 @@ export default function AgentDetailClient({ agentId }: Props) {
       period: budgetPeriodLabel(allowance.reset_period_min),
     }
   })
+  // #796: recipients bind per token — new rows use the agent's first
+  // configured token (single-token agents are the common case).
+  const recipientTokenConfig = (() => {
+    const first = currentAgent.allowances[0]
+    if (!first || !chainConfig) return null
+    const cfg = Object.values(chainConfig.tokens).find((t) => t.symbol === first.token_symbol)
+    if (!cfg) return null
+    return { address: (cfg.address ?? first.token_address) as string, symbol: cfg.symbol, decimals: cfg.decimals }
+  })()
   const approvalCopy =
     budgetLines.length === 0
       ? 'No automatic spending is configured for this agent.'
@@ -526,6 +536,16 @@ export default function AgentDetailClient({ agentId }: Props) {
         safeAddress={safeAddress}
         chainId={chainId}
         safeDetails={safeDetails}
+      />
+
+      <AgentRecipientsCard
+        agentId={agentId}
+        safeAddress={safeAddress}
+        chainId={chainId}
+        safeDetails={safeDetails}
+        tokenAddress={recipientTokenConfig?.address ?? null}
+        tokenSymbol={recipientTokenConfig?.symbol ?? null}
+        tokenDecimals={recipientTokenConfig?.decimals ?? 6}
       />
 
       {isPaused ? (

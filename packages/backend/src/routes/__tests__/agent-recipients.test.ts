@@ -19,7 +19,7 @@ const AGENT_ID = '11111111-1111-1111-1111-111111111111'
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const RECIPIENT = '0x' + 'ab'.repeat(20)
 
-function mockDb(opts: { owns?: boolean; rows?: unknown[]; deleted?: number } = {}) {
+function mockDb(opts: { owns?: boolean; rows?: unknown[]; deleted?: number; scheduleEnabled?: boolean } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
     if (/SELECT id FROM agents/.test(s)) {
@@ -30,6 +30,14 @@ function mockDb(opts: { owns?: boolean; rows?: unknown[]; deleted?: number } = {
     }
     if (/DELETE FROM agent_recipients/.test(s)) {
       return Promise.resolve({ rows: Array((opts.deleted ?? 1)).fill({ id: 'row-1' }) })
+    }
+    if (/session_schedule_from_period/.test(s)) {
+      return Promise.resolve({
+        rows: [{
+          execution_rail: opts.scheduleEnabled ? 'session_key' : null,
+          session_schedule_from_period: opts.scheduleEnabled ? 100 : null,
+        }],
+      })
     }
     if (/FROM agent_recipients/.test(s)) {
       return Promise.resolve({ rows: opts.rows ?? [] })
@@ -102,7 +110,27 @@ describe('agent recipient CRUD (#796)', () => {
   it('DELETE removes and reports the on-chain caveat flag', async () => {
     mockDb({ deleted: 2 })
     const res = await app.inject({ method: 'DELETE', url: `/agents/${AGENT_ID}/recipients/${RECIPIENT}` })
-    expect(res.json()).toEqual({ removed: 2, applied_on_chain: false })
+    expect(res.json()).toMatchObject({ removed: 2, applied_on_chain: false })
+  })
+
+  it('mutations carry the schedule warning when a budget schedule is enabled (#802)', async () => {
+    mockDb({ scheduleEnabled: true })
+    const post = await app.inject({
+      method: 'POST',
+      url: `/agents/${AGENT_ID}/recipients`,
+      payload: { recipient_address: RECIPIENT, token_address: USDC },
+    })
+    expect(post.json().schedule_warning).toMatch(/budget signature/)
+    const del = await app.inject({ method: 'DELETE', url: `/agents/${AGENT_ID}/recipients/${RECIPIENT}` })
+    expect(del.json().schedule_warning).toMatch(/budget signature/)
+    // ... and stays null without a schedule:
+    mockDb({ scheduleEnabled: false })
+    const post2 = await app.inject({
+      method: 'POST',
+      url: `/agents/${AGENT_ID}/recipients`,
+      payload: { recipient_address: RECIPIENT, token_address: USDC },
+    })
+    expect(post2.json().schedule_warning).toBeNull()
   })
 
   it('DELETE 404s when nothing matched', async () => {

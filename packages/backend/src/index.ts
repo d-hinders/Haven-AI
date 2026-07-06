@@ -6,6 +6,7 @@ import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './lib/delegate-balance-monitor.js'
+import { runScheduleRenewalMonitor } from './lib/schedule-renewal-monitor.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './lib/chains.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
@@ -218,6 +219,19 @@ const start = async () => {
     }
     void runDelegateMonitor()
     setInterval(runDelegateMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
+
+    // Schedule-renewal notifications (#803): hourly, edge-triggered — pushes
+    // the renewal prompt (dashboard banner is pull-based) via webhook when a
+    // budget window is down to its last periods. At most two per window.
+    const runRenewalMonitor = async () => {
+      try {
+        await runScheduleRenewalMonitor(app.log)
+      } catch (err) {
+        app.log.warn({ err }, 'Schedule renewal monitor scan failed')
+      }
+    }
+    void runRenewalMonitor()
+    setInterval(runRenewalMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
   } catch (err) {
     app.log.error(err)
     process.exit(1)

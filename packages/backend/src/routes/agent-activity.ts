@@ -27,6 +27,8 @@ interface PaymentRow {
   merchant_address: string | null
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
+  execution_rail: string | null
+  session_permission_id: string | null
   created_at: string
   confirmed_at: string | null
 }
@@ -121,6 +123,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,
+              pi.execution_rail,
+              pi.session_permission_id,
               pi.created_at,
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
@@ -221,6 +225,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           safe_address: p.safe_address,
           safe_name: p.safe_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+          // #799: which on-chain mechanism moved the money, and (session rail)
+          // WHICH period-session the intent was pinned to — makes the #769
+          // lazy rollover observable to the owner without DB access.
+          execution_rail: p.execution_rail,
+          session_permission_id: p.session_permission_id,
           confirmed_at: p.confirmed_at,
           created_at: p.created_at,
         }
@@ -394,6 +403,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,
+              pi.execution_rail,
+              pi.session_permission_id,
               pi.created_at,
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
@@ -497,6 +508,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           safe_address: p.safe_address,
           safe_name: p.safe_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+          // #799: which on-chain mechanism moved the money, and (session rail)
+          // WHICH period-session the intent was pinned to — makes the #769
+          // lazy rollover observable to the owner without DB access.
+          execution_rail: p.execution_rail,
+          session_permission_id: p.session_permission_id,
           confirmed_at: p.confirmed_at,
           created_at: p.created_at,
         }

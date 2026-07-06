@@ -92,6 +92,39 @@ describe('agent activity routes', () => {
     mockQuery.mockReset()
   })
 
+  it('exposes execution_rail + pinned session_permission_id on payments (#799 rollover observability)', async () => {
+    const PID = `0x${'ab'.repeat(32)}`
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM agents')) return { rows: [{ id: 'agent-1' }] }
+      if (sql.includes('FROM payment_intents pi')) {
+        return { rows: [paymentRow({ execution_rail: 'session_key', session_permission_id: PID })] }
+      }
+      if (sql.includes('FROM approval_requests ar')) return { rows: [] }
+      if (sql.includes('FROM agent_tool_invocations')) return { rows: [] }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/agent-activity/agent-1/activity',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const payment = response.json().activity[0]
+    expect(payment).toMatchObject({
+      type: 'payment',
+      execution_rail: 'session_key',
+      session_permission_id: PID,
+    })
+    // The SELECT actually fetches the columns (schema-smoke guards the shape):
+    const paymentSql = String(
+      mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM payment_intents pi'))?.[0],
+    )
+    expect(paymentSql).toContain('pi.execution_rail')
+    expect(paymentSql).toContain('pi.session_permission_id')
+  })
+
   it('uses stored payment and approval Safe identity for a single agent activity feed', async () => {
     mockQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT id FROM agents')) {

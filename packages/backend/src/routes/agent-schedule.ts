@@ -23,12 +23,15 @@
  */
 
 import { FastifyInstance } from 'fastify'
-import type { Hex } from 'viem'
+import { createPublicClient, http, type Hex } from 'viem'
+import { getAccount, isSessionEnabled } from '@rhinestone/module-sdk'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getAddress } from 'ethers'
+import { getChain } from '../lib/chains.js'
 import { loadAgentRecipients } from '../lib/agent-recipients.js'
 import { getEnableSessionsAction, getRemoveSessionAction } from '../lib/session-policies.js'
+import { chainForId } from '../lib/session-rail.js'
 import { buildSessionSchedule, buildScheduledSession } from '../lib/session-schedule.js'
 import { periodIndexAt, type RotationPolicyArgs } from '../lib/session-rotation.js'
 
@@ -41,6 +44,7 @@ interface AgentPolicyRow {
   user_id: string
   delegate_address: string | null
   chain_id: number
+  safe_address: string | null
   execution_rail: string | null
   session_permission_id: string | null
   session_schedule_from_period: number | null
@@ -50,7 +54,7 @@ interface AgentPolicyRow {
 /** The agent joined to its Safe's rail — owner-scoped (user_id must match). */
 async function loadOwnedAgent(agentId: string, userId: string): Promise<AgentPolicyRow | null> {
   const result = await pool.query<AgentPolicyRow>(
-    `SELECT a.id, a.user_id, a.delegate_address, us.chain_id,
+    `SELECT a.id, a.user_id, a.delegate_address, us.chain_id, us.safe_address,
             us.execution_rail, a.session_permission_id,
             a.session_schedule_from_period, a.session_schedule_period_count
      FROM agents a
@@ -59,6 +63,31 @@ async function loadOwnedAgent(agentId: string, userId: string): Promise<AgentPol
     [agentId, userId],
   )
   return result.rows[0] ?? null
+}
+
+/**
+ * On-chain enablement check for a claimed window (#801, defense in depth).
+ * Returns 'enabled' | 'not_enabled' | 'unknown' — 'unknown' (RPC failure)
+ * falls back to the pre-#801 trust-the-client behavior: availability over
+ * strictness, since the payment path is already fail-closed (#769 verifies
+ * via prepare before any pointer flip).
+ */
+async function checkEnabledOnChain(
+  chainId: number,
+  safeAddress: string,
+  permissionId: Hex,
+): Promise<'enabled' | 'not_enabled' | 'unknown'> {
+  try {
+    const client = createPublicClient({
+      chain: chainForId(chainId),
+      transport: http(getChain(chainId).rpcUrl),
+    })
+    const account = getAccount({ address: safeAddress as `0x${string}`, type: 'safe' })
+    const enabled = await isSessionEnabled({ account, client: client as never, permissionId })
+    return enabled ? 'enabled' : 'not_enabled'
+  } catch {
+    return 'unknown'
+  }
 }
 
 interface RecipientPolicy {
@@ -225,8 +254,41 @@ export default async function agentScheduleRoutes(app: FastifyInstance): Promise
       return reply.code(400).send({ error: 'from_period, period_count and first_permission_id are required' })
     }
 
-    // Bookkeeping only — see the header: a recorded-but-not-enabled window
-    // cannot move money (the rollover verifies on-chain via prepare).
+    // Verification (#801, defense in depth — a bad record cannot move money,
+    // but it lies to the UI until a payment corrects the picture):
+    // (a) PURE: the claimed id must be one of THIS agent's deterministic
+    //     sessions for the claimed period — recording someone else's enabled
+    //     session, or a stale id after a policy edit, is rejected outright.
+    const policies = await loadRecipientPolicies(agent)
+    const expectedIds = policies.map(({ policy, resetPeriodMin }) =>
+      buildScheduledSession(agent.id, policy, resetPeriodMin, from_period as number)
+        .permissionId.toLowerCase(),
+    )
+    if (!expectedIds.includes(first_permission_id.toLowerCase())) {
+      return reply.code(409).send({
+        error:
+          'first_permission_id does not match any deterministic session for this ' +
+          'agent and period — stale policy inputs? Rebuild the schedule and retry.',
+      })
+    }
+    // (b) ON-CHAIN: the session must actually be enabled. One RPC; an RPC
+    //     failure falls back to recording (availability over strictness —
+    //     the payment path is fail-closed regardless).
+    if (agent.safe_address) {
+      const onChain = await checkEnabledOnChain(
+        agent.chain_id,
+        agent.safe_address,
+        first_permission_id as Hex,
+      )
+      if (onChain === 'not_enabled') {
+        return reply.code(409).send({
+          error:
+            'Session is not enabled on-chain — the schedule transaction has not ' +
+            'landed (or was never sent). Confirm after it executes.',
+        })
+      }
+    }
+
     await pool.query(
       `UPDATE agents
        SET session_schedule_from_period = $1,

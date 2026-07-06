@@ -74,7 +74,9 @@ export function buildScheduledSession(
     cumulativeLimitAtomic: budgetAtomic,
     validAfterSec,
     validUntilSec,
-    salt: rotationSalt(agentId, periodIndex),
+    // #805: the recipient is part of the session identity — without it, two
+    // recipients' sessions in the same period collide to ONE permissionId.
+    salt: rotationSalt(agentId, periodIndex, policy.allowedRecipient),
     chainId: policy.chainId,
   })
   return {

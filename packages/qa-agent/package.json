@@ -19,7 +19,8 @@
     "pilot:compare": "tsx src/pilot/compare-rails.ts",
     "pilot:enable-agent-session": "tsx src/pilot/enable-agent-session.ts",
     "pilot:dod-payment": "tsx src/pilot/dod-payment.ts",
-    "pilot:x402-7710-buyer": "tsx src/pilot/x402-7710-buyer.ts"
+    "pilot:x402-7710-buyer": "tsx src/pilot/x402-7710-buyer.ts",
+    "pilot:create-dod-agent": "tsx src/pilot/create-dod-agent.ts"
   },
   "keywords": [
     "haven",

@@ -84,6 +84,16 @@ const QUERIES: SmokeQuery[] = [
             WHERE payment_intent_id IS NOT NULL
           DO UPDATE SET details = EXCLUDED.details, updated_at = NOW()`,
   },
+  {
+    name: 'recipients: loadAgentRecipients with allowance-budget inheritance (#784)',
+    sql: `SELECT r.recipient_address, r.token_address, r.label, r.budget_amount,
+                 a.allowance_amount
+          FROM agent_recipients r
+          LEFT JOIN agent_allowances a
+            ON a.agent_id = r.agent_id AND a.token_address = r.token_address
+          WHERE r.agent_id = $1 AND LOWER(r.token_address) = LOWER($2)
+          ORDER BY r.created_at, r.id`,
+  },
 ]
 
 async function main(): Promise<void> {

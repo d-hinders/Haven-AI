@@ -5,7 +5,7 @@ import Fastify, { type FastifyError, type FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import rateLimit from '@fastify/rate-limit'
-import { createHash } from 'node:crypto'
+import { rateLimitKeyFor } from './middleware/rate-limit.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './lib/delegate-balance-monitor.js'
 import { runScheduleRenewalMonitor } from './lib/schedule-renewal-monitor.js'
@@ -102,20 +102,15 @@ await app.register(fastifyJwt, {
 
 // Rate limiting (#794): registered non-global — only routes that opt in via
 // `config.rateLimit` (money-path writes and the public demo reads) are
-// limited; dashboard reads stay unthrottled. Keyed by a hash of the Bearer
-// credential when present, so each agent gets its own bucket regardless of
-// network path; unauthenticated requests fall back to per-IP (behind
-// Railway's proxy that can collapse to the proxy IP — acceptable for the
-// public demo routes, where a shared throttle still beats an open faucet).
+// limited; dashboard reads stay unthrottled. Keyed per presented credential
+// (Authorization or X-API-Key — see rateLimitKeyFor) so each agent gets its
+// own bucket regardless of network path; unauthenticated requests fall back
+// to per-IP (behind Railway's proxy that can collapse to the proxy IP —
+// acceptable for the public demo routes, where a shared throttle still beats
+// an open faucet).
 await app.register(rateLimit, {
   global: false,
-  keyGenerator: (request: FastifyRequest) => {
-    const auth = request.headers.authorization
-    if (typeof auth === 'string' && auth.length > 0) {
-      return `cred:${createHash('sha256').update(auth).digest('hex').slice(0, 32)}`
-    }
-    return `ip:${request.ip}`
-  },
+  keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request),
 })
 
 await app.register(openapiRoutes)

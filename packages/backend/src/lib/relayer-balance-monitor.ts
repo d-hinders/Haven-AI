@@ -14,14 +14,10 @@
  * funds and never blocks a payment.
  */
 
-import { formatEther, parseEther } from 'ethers'
+import { formatEther } from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain, SUPPORTED_CHAIN_IDS } from './chains.js'
-import { getRelayer } from './relayer.js'
-
-// Same low-water mark as `warnIfRelayerLow` — enough for hundreds of
-// transfers on Gnosis/Base at typical fees.
-export const RELAYER_LOW_BALANCE_WEI = parseEther('0.01')
+import { getRelayer, RELAYER_LOW_BALANCE_WEI } from './relayer.js'
 
 export interface RelayerBalanceStatus {
   chainId: number

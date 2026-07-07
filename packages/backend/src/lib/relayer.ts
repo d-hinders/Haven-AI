@@ -89,9 +89,15 @@ export function getRelayer(chainId: number): Wallet {
   return relayer
 }
 
+/**
+ * Low-water mark shared with the relayer balance monitor — enough native
+ * balance for hundreds of transfers on Gnosis/Base at typical fees.
+ */
+export const RELAYER_LOW_BALANCE_WEI = parseEther('0.01')
+
 export async function warnIfRelayerLow(
   chainId: number,
-  minBalanceWei: bigint = parseEther('0.01'),
+  minBalanceWei: bigint = RELAYER_LOW_BALANCE_WEI,
 ): Promise<void> {
   const relayer = getRelayer(chainId)
   const provider = relayer.provider

@@ -31,7 +31,8 @@ export const LEADER_LOCK_KEYS = {
 
 export interface QueryableClientLike {
   query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>
-  release: () => void
+  /** pg semantics: a truthy argument destroys the connection instead of pooling it. */
+  release: (destroy?: boolean) => void
 }
 
 export interface PoolLike {
@@ -50,6 +51,7 @@ export async function runIfLeader(
   db: PoolLike = pool as unknown as PoolLike,
 ): Promise<boolean> {
   const client = await db.connect()
+  let destroyConnection = false
   try {
     const result = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [lockKey])
     if (result.rows[0]?.locked !== true) {
@@ -58,10 +60,19 @@ export async function runIfLeader(
     try {
       await fn()
     } finally {
-      await client.query('SELECT pg_advisory_unlock($1)', [lockKey])
+      try {
+        await client.query('SELECT pg_advisory_unlock($1)', [lockKey])
+      } catch {
+        // The session still holds the lock; pooling the connection again
+        // would leak leadership onto an idle-but-held session and leave the
+        // monitor leaderless cluster-wide. Destroy the connection instead —
+        // Postgres frees session advisory locks on disconnect. (A hard crash
+        // mid-tick is safe for the same reason.)
+        destroyConnection = true
+      }
     }
     return true
   } finally {
-    client.release()
+    client.release(destroyConnection || undefined)
   }
 }

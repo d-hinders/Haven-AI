@@ -62,6 +62,9 @@ vi.mock('../../db.js', () => ({
 vi.mock('../../lib/relayer.js', () => ({
   getRelayer: (...args: unknown[]) => mockGetRelayer(...args),
   warnIfRelayerLow: (...args: unknown[]) => mockWarnIfRelayerLow(...args),
+  // Pass-through: the per-chain send serialisation is covered by
+  // lib/relayer.test.ts; route tests only care that the submit runs.
+  withRelayerSendLock: (_chainId: number, fn: () => Promise<unknown>) => fn(),
 }))
 
 vi.mock('ethers', async () => {

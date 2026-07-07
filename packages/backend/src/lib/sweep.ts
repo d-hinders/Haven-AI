@@ -8,6 +8,7 @@ import {
   type SweepExpectedAuth,
 } from '@haven_ai/sdk'
 import { getRelayerWallet } from './allowance-module.js'
+import { withRelayerSendLock } from './relayer.js'
 
 /**
  * Gasless delegate-sweep helpers (EIP-3009 `transferWithAuthorization`).
@@ -117,14 +118,18 @@ export async function relaySweepAuthorization(
 ): Promise<{ txHash: string }> {
   const relayer = getRelayerWallet(auth.chainId)
   const usdc = new ethers.Contract(auth.token, USDC_TRANSFER_WITH_AUTHORIZATION_ABI, relayer)
-  const tx = await usdc.transferWithAuthorization(
-    auth.from,
-    auth.to,
-    BigInt(auth.value),
-    BigInt(auth.validAfter),
-    BigInt(auth.validBefore),
-    auth.nonce,
-    signature,
+  // Serialise the broadcast with every other relayer submission on this chain
+  // so the sweep can't race a payment for the same EOA nonce (#692/#718).
+  const tx = await withRelayerSendLock(auth.chainId, () =>
+    usdc.transferWithAuthorization(
+      auth.from,
+      auth.to,
+      BigInt(auth.value),
+      BigInt(auth.validAfter),
+      BigInt(auth.validBefore),
+      auth.nonce,
+      signature,
+    ),
   )
   // `tx.wait()` can return null (or race) on a lagging RPC even when the tx has
   // landed — which previously surfaced as a spurious "Sweep relay failed" while

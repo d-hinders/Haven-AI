@@ -4,7 +4,7 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
-import { getRelayer, warnIfRelayerLow } from '../lib/relayer.js'
+import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../lib/relayer.js'
 import { isAddress as isValidAddress } from '../lib/address.js'
 
 const HEX_RE = /^0x([0-9a-fA-F]{2})*$/
@@ -178,6 +178,7 @@ function getRelayExecGasLimit(estimatedGas: bigint | null): bigint {
 }
 
 async function ensurePasskeySignerDeployed(args: {
+  chainId: number
   relayer: ReturnType<typeof getRelayer>
   factoryAddress: string
   signerAddress: string
@@ -197,10 +198,14 @@ async function ensurePasskeySignerDeployed(args: {
     args.relayer,
   ) as unknown as PasskeySignerFactoryContract
 
-  const tx = await signerFactory.createSigner(
-    BigInt(args.x),
-    BigInt(args.y),
-    BigInt(args.verifierAddress),
+  // Broadcast under the per-chain send lock so the signer deploy can't race
+  // another relayer submission for the same EOA nonce (#692/#718).
+  const tx = await withRelayerSendLock(args.chainId, () =>
+    signerFactory.createSigner(
+      BigInt(args.x),
+      BigInt(args.y),
+      BigInt(args.verifierAddress),
+    ),
   )
   await tx.wait()
 }
@@ -275,6 +280,7 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       await warnIfRelayerLow(body.chain_id)
       const relayer = getRelayer(body.chain_id)
       await ensurePasskeySignerDeployed({
+        chainId: body.chain_id,
         relayer,
         factoryAddress: chain.passkey.factoryAddress,
         signerAddress: expectedSignerAddress,
@@ -364,9 +370,13 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       // Contract-signature validation plus module setup calls can be expensive.
       // Use the provider estimate when available, otherwise fall back to a high
       // explicit gas limit so relayed batched admin flows don't under-gas.
-      const tx = await safe.execTransaction(...execArgs, {
-        gasLimit: getRelayExecGasLimit(estimatedGas),
-      })
+      // Broadcast under the per-chain send lock so the exec can't race another
+      // relayer submission for the same EOA nonce (#692/#718).
+      const tx = await withRelayerSendLock(body.chain_id, () =>
+        safe.execTransaction(...execArgs, {
+          gasLimit: getRelayExecGasLimit(estimatedGas),
+        }),
+      )
       await tx.wait()
 
       return reply.code(201).send({

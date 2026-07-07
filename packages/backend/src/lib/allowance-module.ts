@@ -11,6 +11,7 @@ import { ethers } from 'ethers'
 import { config, relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from './chains.js'
 import { recordAllowanceNonce } from './allowance-nonce-coordinator.js'
+import { withRelayerSendLock, getRelayerFeeOverrides } from './relayer.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -266,15 +267,24 @@ export async function executeAllowanceTransfer(
     )
   }
 
-  const tx = await contract.executeAllowanceTransfer(...args)
-
-  // tx.wait() can return null on a lagging RPC even when the tx confirmed (#690);
-  // poll by hash with a timeout, then assert it didn't revert. The nonce is then
-  // confirmed-visible on this provider for the next transfer's read.
   const provider = relayer.provider
   if (!provider) {
     throw new Error(`Relayer provider not configured for chain ${chainId}`)
   }
+
+  // Broadcast under the per-chain send lock so concurrent transfers can't
+  // populate the same relayer EOA nonce (#692/#718). Explicit fee headroom so
+  // a base-fee spike can't strand the tx and block the nonce lane. The
+  // confirmation wait below stays OUTSIDE the lock — only the nonce-read→
+  // broadcast window is exclusive.
+  const tx = await withRelayerSendLock(chainId, async () => {
+    const feeOverrides = await getRelayerFeeOverrides(provider)
+    return contract.executeAllowanceTransfer(...args, feeOverrides)
+  })
+
+  // tx.wait() can return null on a lagging RPC even when the tx confirmed (#690);
+  // poll by hash with a timeout, then assert it didn't revert. The nonce is then
+  // confirmed-visible on this provider for the next transfer's read.
   const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
   if (!receipt) {
     throw new Error(`Allowance transfer ${tx.hash} not confirmed within 90s`)

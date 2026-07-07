@@ -3,6 +3,7 @@ import { ethers } from 'ethers'
 import { buildX402ExpectedMessage } from '@haven_ai/sdk'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
+import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../lib/agent-payment-taxonomy.js'
 import { getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
@@ -986,6 +987,6 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     })
   }
 
-  app.post<{ Body: X402AuthorizeBody }>('/', authorizeX402Handler)
-  app.post<{ Body: X402AuthorizeBody }>('/authorize', authorizeX402Handler)
+  app.post<{ Body: X402AuthorizeBody }>('/', { config: moneyPathRateLimit }, authorizeX402Handler)
+  app.post<{ Body: X402AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, authorizeX402Handler)
 }

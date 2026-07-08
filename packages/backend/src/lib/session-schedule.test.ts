@@ -70,6 +70,34 @@ describe('buildScheduledSession — the security property', () => {
   })
 })
 
+describe('session identity includes the recipient (#805 collision regression)', () => {
+  it('two recipients in the SAME period get DIFFERENT permissionIds', () => {
+    // Found live by the N×M matrix proof: Smart Sessions derives permissionId
+    // from the salt, not the policy content — without the recipient in the
+    // salt, both recipients' sessions collapsed to ONE on-chain session and
+    // only one policy actually existed.
+    const a = buildScheduledSession(AGENT, POLICY, RESET_MIN, 100)
+    const b = buildScheduledSession(
+      AGENT,
+      { ...POLICY, allowedRecipient: ('0x' + 'dd'.repeat(20)) as `0x${string}` },
+      RESET_MIN,
+      100,
+    )
+    expect(a.permissionId).not.toBe(b.permissionId)
+  })
+
+  it('identity is casing-insensitive on the recipient address', () => {
+    const lower = buildScheduledSession(AGENT, POLICY, RESET_MIN, 100)
+    const upper = buildScheduledSession(
+      AGENT,
+      { ...POLICY, allowedRecipient: POLICY.allowedRecipient.toUpperCase().replace('0X', '0x') as `0x${string}` },
+      RESET_MIN,
+      100,
+    )
+    expect(upper.permissionId).toBe(lower.permissionId)
+  })
+})
+
 describe('buildSessionSchedule — ONE signature for many periods', () => {
   it('enables N sessions in a single enableSessions call (no MultiSend)', () => {
     const schedule = buildSessionSchedule(AGENT, POLICY, RESET_MIN, 100, 90)

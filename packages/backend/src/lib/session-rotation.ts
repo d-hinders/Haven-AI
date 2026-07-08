@@ -75,9 +75,21 @@ export function periodIndexAt(nowSec: number, resetPeriodMin: number): number {
   return Math.floor(nowSec / (resetPeriodMin * 60))
 }
 
-/** Deterministic per-(agent, period) salt — see the design notes above. */
-export function rotationSalt(agentId: string, periodIndex: number): Hex {
-  return keccak256(toUtf8Bytes(`haven-session-rotation:${agentId}:${periodIndex}`)) as Hex
+/**
+ * Deterministic per-(agent, period, recipient) salt — see the design notes
+ * above. The RECIPIENT is part of the identity (#805): Smart Sessions derives
+ * permissionId from the salt, NOT from the policy content, so two sessions
+ * for different recipients in the same period would otherwise COLLIDE — only
+ * one of the policies would exist on-chain. Found live by the N×M matrix
+ * proof: both recipients' sessions computed identical permissionIds.
+ *
+ * `recipient` is lowercased before hashing so identity never depends on
+ * address casing. Omitting it keeps the legacy single-recipient #734 salts
+ * unchanged (existing enabled sessions stay valid).
+ */
+export function rotationSalt(agentId: string, periodIndex: number, recipient?: string): Hex {
+  const suffix = recipient ? `:${recipient.toLowerCase()}` : ''
+  return keccak256(toUtf8Bytes(`haven-session-rotation:${agentId}:${periodIndex}${suffix}`)) as Hex
 }
 
 /**

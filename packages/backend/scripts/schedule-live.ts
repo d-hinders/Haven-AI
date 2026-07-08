@@ -161,7 +161,7 @@ async function wireViaApi(base: string, jwt: string, w: WiringInputs): Promise<v
 function printSqlFallback(w: WiringInputs): void {
   console.log('── SQL fallback (Railway → Postgres → shell → psql $DATABASE_URL) ─')
   console.log(`INSERT INTO agent_recipients (agent_id, token_address, recipient_address, budget_amount)`)
-  console.log(`  VALUES ('${w.agentId}', '${SEPOLIA_USDC}', '${w.recipient.toLowerCase()}', '${w.budgetAtomic}')`)
+  console.log(`  VALUES ('${w.agentId}', '${SEPOLIA_USDC.toLowerCase()}', '${w.recipient.toLowerCase()}', '${w.budgetAtomic}')`)
   console.log(`  ON CONFLICT (agent_id, token_address, recipient_address)`)
   console.log(`  DO UPDATE SET budget_amount = '${w.budgetAtomic}';`)
   console.log(`UPDATE agent_allowances SET reset_period_min = ${w.periodMin}`)

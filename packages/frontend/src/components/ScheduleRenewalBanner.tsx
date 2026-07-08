@@ -33,7 +33,7 @@ interface Props {
 export default function ScheduleRenewalBanner({ agentId, safeAddress, chainId, safeDetails }: Props) {
   const [schedule, setSchedule] = useState<ScheduleState | null>(null)
   const [renewed, setRenewed] = useState(false)
-  const { apply, applying, ready } = useApplySchedule({ agentId, safeAddress, chainId, safeDetails })
+  const { apply, applying, awaitingCoOwners, ready } = useApplySchedule({ agentId, safeAddress, chainId, safeDetails })
   const { toast } = useToast()
 
   useEffect(() => {
@@ -56,11 +56,13 @@ export default function ScheduleRenewalBanner({ agentId, safeAddress, chainId, s
 
   const handleRenew = useCallback(async () => {
     const result = await apply()
-    if (result.ok) {
+    if (result.ok && 'proposed' in result) {
+      // Multi-sig (#800): signed and proposed; recording happens automatically
+      // once the co-owners execute (the backend verifies on-chain).
+      toast.info('Renewal signed — waiting for your co-owners to approve.')
+    } else if (result.ok) {
       setRenewed(true)
       toast.success('Agent budget renewed.')
-    } else if (result.reason === 'multisig') {
-      toast.error('Renewal needs your other owners — use Update budget instead.')
     } else if (result.reason === 'cancelled') {
       toast.error('Signature was cancelled.')
     } else {
@@ -81,9 +83,13 @@ export default function ScheduleRenewalBanner({ agentId, safeAddress, chainId, s
           Renew now so your agent keeps paying without interruption.
         </span>
         <div className="mt-2">
-          <Button size="sm" onClick={handleRenew} disabled={applying || !ready}>
-            {applying ? 'Renewing…' : 'Renew budget'}
-          </Button>
+          {awaitingCoOwners ? (
+            <span className="text-xs font-medium">Signed — waiting for your co-owners to approve.</span>
+          ) : (
+            <Button size="sm" onClick={handleRenew} disabled={applying || !ready}>
+              {applying ? 'Renewing…' : 'Renew budget'}
+            </Button>
+          )}
         </div>
       </ApprovalRequiredBanner>
     </div>

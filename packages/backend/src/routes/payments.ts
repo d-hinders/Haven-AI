@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
+import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from '../lib/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
@@ -126,7 +127,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   // ── POST / — Create payment intent ──────────────────────
 
-  app.post<{ Body: CreatePaymentBody }>('/', async (request, reply) => {
+  app.post<{ Body: CreatePaymentBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { token, amount, to } = request.body
 
@@ -434,6 +435,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   app.post<{ Params: { id: string }; Body: SignPaymentBody }>(
     '/:id/sign',
+    { config: moneyPathRateLimit },
     async (request, reply) => {
       const agent = request.agent as AgentContext
       const { id } = request.params

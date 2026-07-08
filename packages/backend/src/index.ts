@@ -1,12 +1,16 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
 
-import Fastify, { type FastifyError } from 'fastify'
+import Fastify, { type FastifyError, type FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
+import rateLimit from '@fastify/rate-limit'
+import { rateLimitKeyFor } from './middleware/rate-limit.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './lib/delegate-balance-monitor.js'
 import { runScheduleRenewalMonitor } from './lib/schedule-renewal-monitor.js'
+import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './lib/relayer-balance-monitor.js'
+import { runIfLeader, LEADER_LOCK_KEYS } from './lib/leader-lock.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './lib/chains.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
@@ -96,6 +100,19 @@ await app.register(fastifyJwt, {
   secret: config.jwtSecret,
 })
 
+// Rate limiting (#794): registered non-global — only routes that opt in via
+// `config.rateLimit` (money-path writes and the public demo reads) are
+// limited; dashboard reads stay unthrottled. Keyed per presented credential
+// (Authorization or X-API-Key — see rateLimitKeyFor) so each agent gets its
+// own bucket regardless of network path; unauthenticated requests fall back
+// to per-IP (behind Railway's proxy that can collapse to the proxy IP —
+// acceptable for the public demo routes, where a shared throttle still beats
+// an open faucet).
+await app.register(rateLimit, {
+  global: false,
+  keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request),
+})
+
 await app.register(openapiRoutes)
 
 // Capture X-Haven-MCP-Tool header and write an agent_tool_invocations row
@@ -113,6 +130,8 @@ registerAgentLastSeenHook(app)
 // --- Routes ---
 app.get('/health', async (_request, reply) => {
   const start = Date.now()
+  // Cached from the hourly relayer scan — never a live RPC read on a probe.
+  const relayer = getRelayerBalanceStatus()
   try {
     await pool.query('SELECT 1')
     const dbLatencyMs = Date.now() - start
@@ -120,6 +139,7 @@ app.get('/health', async (_request, reply) => {
       status: 'ok',
       timestamp: new Date().toISOString(),
       db: { status: 'ok', latencyMs: dbLatencyMs },
+      relayer,
     }
   } catch (err) {
     reply.status(503)
@@ -127,6 +147,7 @@ app.get('/health', async (_request, reply) => {
       status: 'degraded',
       timestamp: new Date().toISOString(),
       db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
+      relayer,
     }
   }
 })
@@ -180,25 +201,33 @@ const start = async () => {
     await app.listen({ port: config.port, host: '0.0.0.0' })
     app.log.info(`Haven backend running on port ${config.port}`)
 
+    // Every periodic tick below runs behind a Postgres advisory lock
+    // (runIfLeader) so a multi-replica deployment executes each scan exactly
+    // once per tick instead of once per replica — the monitors' edge-trigger
+    // alert state is per-process memory, so N replicas would otherwise send
+    // up to N copies of every webhook alert.
+
     // Catalog price verification: probe listed merchants hourly so the
     // catalog never advertises stale prices or dead endpoints. Best-effort —
     // a failed run logs and waits for the next tick.
     const runCatalogRefresh = async () => {
-      // Opt-in: pull fresh candidates from the x402 Bazaar and probe-ingest
-      // them before re-verifying the catalog, so newly discovered merchants are
-      // included in the same run. Best-effort — discovery failure never blocks
-      // the refresh of already-listed entries.
-      if (config.catalogDiscoveryEnabled) {
-        try {
-          const discovery = await ingestDiscoveredCatalog(pool as unknown as QueryableLike)
-          app.log.info(discovery, 'Merchant catalog discovery complete')
-        } catch (err) {
-          app.log.warn({ err }, 'Merchant catalog discovery failed')
-        }
-      }
       try {
-        const { verified, degraded } = await refreshCatalog()
-        app.log.info({ verified, degraded }, 'Merchant catalog refreshed')
+        await runIfLeader(LEADER_LOCK_KEYS.catalogRefresh, async () => {
+          // Opt-in: pull fresh candidates from the x402 Bazaar and probe-ingest
+          // them before re-verifying the catalog, so newly discovered merchants are
+          // included in the same run. Best-effort — discovery failure never blocks
+          // the refresh of already-listed entries.
+          if (config.catalogDiscoveryEnabled) {
+            try {
+              const discovery = await ingestDiscoveredCatalog(pool as unknown as QueryableLike)
+              app.log.info(discovery, 'Merchant catalog discovery complete')
+            } catch (err) {
+              app.log.warn({ err }, 'Merchant catalog discovery failed')
+            }
+          }
+          const { verified, degraded } = await refreshCatalog()
+          app.log.info({ verified, degraded }, 'Merchant catalog refreshed')
+        })
       } catch (err) {
         app.log.warn({ err }, 'Merchant catalog refresh failed')
       }
@@ -212,7 +241,9 @@ const start = async () => {
     // logs and waits for the next tick. It never moves funds.
     const runDelegateMonitor = async () => {
       try {
-        await runDelegateBalanceMonitor(app.log)
+        await runIfLeader(LEADER_LOCK_KEYS.delegateBalanceMonitor, async () => {
+          await runDelegateBalanceMonitor(app.log)
+        })
       } catch (err) {
         app.log.warn({ err }, 'Delegate balance monitor scan failed')
       }
@@ -225,13 +256,33 @@ const start = async () => {
     // budget window is down to its last periods. At most two per window.
     const runRenewalMonitor = async () => {
       try {
-        await runScheduleRenewalMonitor(app.log)
+        await runIfLeader(LEADER_LOCK_KEYS.scheduleRenewalMonitor, async () => {
+          await runScheduleRenewalMonitor(app.log)
+        })
       } catch (err) {
         app.log.warn({ err }, 'Schedule renewal monitor scan failed')
       }
     }
     void runRenewalMonitor()
     setInterval(runRenewalMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
+
+    // Relayer balance monitor: hourly read-only scan of the relayer EOA's
+    // native balance per served chain — structured warning + edge-triggered
+    // webhook alert below the low-water mark, cached status served by
+    // /health. The relayer going dry previously surfaced only as failing
+    // payments. Deliberately NOT behind runIfLeader: the scan result feeds
+    // each replica's own /health response, and the alert edge-trigger is the
+    // per-chain lowAlerted set inside the monitor, so duplicate alerts are
+    // bounded by replica count only on the low→ok→low transition.
+    const runRelayerMonitor = async () => {
+      try {
+        await runRelayerBalanceMonitor(app.log)
+      } catch (err) {
+        app.log.warn({ err }, 'Relayer balance monitor scan failed')
+      }
+    }
+    void runRelayerMonitor()
+    setInterval(runRelayerMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
   } catch (err) {
     app.log.error(err)
     process.exit(1)

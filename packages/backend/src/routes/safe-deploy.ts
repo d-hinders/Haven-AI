@@ -13,7 +13,7 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain, isDeployableChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
-import { getRelayer, warnIfRelayerLow } from '../lib/relayer.js'
+import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../lib/relayer.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 
 const SAFE_SETUP_ABI = [
@@ -118,6 +118,7 @@ function predictSafeProxyAddress(args: {
 }
 
 async function ensurePasskeySignerDeployed(args: {
+  chainId: number
   relayer: ReturnType<typeof getRelayer>
   factoryAddress: string
   signerAddress: string
@@ -137,10 +138,14 @@ async function ensurePasskeySignerDeployed(args: {
     args.relayer,
   ) as unknown as PasskeySignerFactoryContract
 
-  const tx = await signerFactory.createSigner(
-    BigInt(args.x),
-    BigInt(args.y),
-    BigInt(args.verifierAddress),
+  // Broadcast under the per-chain send lock so the signer deploy can't race
+  // another relayer submission for the same EOA nonce (#692/#718).
+  const tx = await withRelayerSendLock(args.chainId, () =>
+    signerFactory.createSigner(
+      BigInt(args.x),
+      BigInt(args.y),
+      BigInt(args.verifierAddress),
+    ),
   )
   await tx.wait()
 }
@@ -229,6 +234,7 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
       await warnIfRelayerLow(chain_id)
       const relayer = getRelayer(chain_id)
       await ensurePasskeySignerDeployed({
+        chainId: chain_id,
         relayer,
         factoryAddress: chain.passkey.factoryAddress,
         signerAddress: expectedSignerAddress,
@@ -259,10 +265,14 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         return reply.code(503).send({ error: 'Safe deployment collided; please try again later' })
       }
 
-      const tx = await factory.createProxyWithNonce(
-        chain.contracts.safeSingletonL2,
-        deploymentInitializer,
-        saltNonce,
+      // Broadcast under the per-chain send lock so the deploy can't race
+      // another relayer submission for the same EOA nonce (#692/#718).
+      const tx = await withRelayerSendLock(chain_id, () =>
+        factory.createProxyWithNonce(
+          chain.contracts.safeSingletonL2,
+          deploymentInitializer,
+          saltNonce,
+        ),
       )
       const receipt = await tx.wait()
       if (!receipt) {

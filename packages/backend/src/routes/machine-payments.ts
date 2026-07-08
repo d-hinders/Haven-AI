@@ -3,6 +3,7 @@ import { ethers } from 'ethers'
 import { config } from '../config.js'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
+import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import {
   authorizeMachinePayment,
   type MachinePaymentRail,
@@ -540,7 +541,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
   // ── POST /send — Plain transfer (asset/recipient naming convention) ─────────
 
-  app.post<{ Body: SendBody }>('/send', async (request, reply) => {
+  app.post<{ Body: SendBody }>('/send', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { asset, recipient, amount } = request.body
 
@@ -758,7 +759,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     })
   })
 
-  app.post<{ Body: AuthorizeBody }>('/authorize', async (request, reply) => {
+  app.post<{ Body: AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { challenge, signature } = request.body
 
@@ -791,13 +792,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         description: challenge.description,
       },
       signature,
-      // TODO: add a per-rail rate limit before exposing machine payments beyond this internal demo.
+      // Route-level per-credential rate limit added (#794, moneyPathRateLimit).
+      // A finer per-rail budget can layer on top if a rail ever needs its own cap.
     })
 
     return reply.code(result.statusCode).send(result.body)
   })
 
-  app.post<{ Body: EvidenceBody }>('/evidence', async (request, reply) => {
+  app.post<{ Body: EvidenceBody }>('/evidence', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const body = request.body
 
@@ -909,7 +911,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
   })
 
-  app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', async (request, reply) => {
+  app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const {
       paymentId,
@@ -1065,7 +1067,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   // TransferWithAuthorization (delegate → the agent's own Safe) plus Haven's
   // binding signature. The edge signer signs it; /sweep/submit relays it. The
   // delegate never needs ETH and the hosted server never holds the key.
-  app.post('/sweep/prepare', async (request, reply) => {
+  app.post('/sweep/prepare', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
 
     if (!isSweepableChain(agent.chain_id)) {
@@ -1166,7 +1168,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   // Trusts nothing from the client payload: the authorization is re-derived from
   // the prepared row, the delegate signature is verified off-chain, and the
   // balance is re-read before the relayer spends gas.
-  app.post<{ Body: SweepSubmitBody }>('/sweep/submit', async (request, reply) => {
+  app.post<{ Body: SweepSubmitBody }>('/sweep/submit', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const body = request.body ?? {}
     const signature = body.signature

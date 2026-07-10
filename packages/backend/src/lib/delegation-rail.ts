@@ -254,8 +254,16 @@ export interface TreasuryOpsConfig {
 export interface PreparedTreasuryOp {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   userOperation: any
-  /** The hash the treasury OWNER signs client-side. */
+  /** 4337 identifier — NOT what is signed. */
   userOpHash: Hex
+  /**
+   * What the treasury OWNER actually signs: EIP-712 typed data over the
+   * packed UserOperation (domain HybridDeleGator). The account validates
+   * exactly this — signing the bare hash reverts in validateUserOp (the
+   * #829 lesson; treasury ops share it).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  signingTypedData: any
   treasuryAddress: Address
 }
 
@@ -303,7 +311,12 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
       entryPointVersion: '0.7',
       userOperation: { ...userOperation, sender: account.address },
     })
-    return { userOperation, userOpHash, treasuryAddress: account.address }
+    return {
+      userOperation,
+      userOpHash,
+      signingTypedData: userOpTypedData(userOperation, account.address, cfg.chainId),
+      treasuryAddress: account.address,
+    }
   }
 
   async function submitCall(

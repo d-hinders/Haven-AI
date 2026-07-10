@@ -71,6 +71,8 @@ export const en = {
       backupDetail: 'Adding backup approvers is not available yet.',
       sessionsLabel: 'Active sessions',
       sessionsDetail: 'Review signed-in devices and revoke sessions.',
+      exitPathLabel: 'Your exit path',
+      exitPathDetail: 'Inspect and revoke your agent budgets directly on-chain — without Haven. Opens the independent exit page.',
     },
 
     data: {

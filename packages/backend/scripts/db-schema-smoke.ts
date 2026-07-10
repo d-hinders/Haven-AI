@@ -104,6 +104,12 @@ const QUERIES: SmokeQuery[] = [
             ON al.agent_id = a.id AND LOWER(al.token_address) = LOWER($2)
           WHERE a.id = $1`,
   },
+  {
+    name: 'hybrid accounts: provisioning insert with rail + type (#825)',
+    sql: `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail)
+          VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation')
+          RETURNING id, created_at`,
+  },
 ]
 
 async function main(): Promise<void> {

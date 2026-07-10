@@ -88,10 +88,12 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     const isFirst = firstCheck.rows[0]?.count === '0'
 
     const result = await pool.query<{ id: string; created_at: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail)
-       VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation')
+      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail, owner_address)
+       VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6)
        RETURNING id, created_at`,
-      [sub, accountAddress, chainId, name?.trim() || 'My account', isFirst],
+      // owner_address: the EOA owner for treasury ops (#828 revoke). A pure-
+      // passkey account has none — its owner signs via WebAuthn (#833).
+      [sub, accountAddress, chainId, name?.trim() || 'My account', isFirst, owner_address?.toLowerCase() ?? null],
     )
 
     return reply.code(201).send({

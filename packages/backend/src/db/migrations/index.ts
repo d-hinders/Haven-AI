@@ -40,6 +40,7 @@ import * as merchantCatalogAssetTransferMethods from './037_merchant_catalog_ass
 import * as agentRecipients from './038_agent_recipients.js'
 import * as sessionScheduleWindow from './039_session_schedule_window.js'
 import * as hybridAccounts from './041_hybrid_accounts.js'
+import * as agentDelegations from './042_agent_delegations.js'
 
 export interface Migration {
   version: string
@@ -93,4 +94,5 @@ export const migrations: Migration[] = [
   agentRecipients,
   sessionScheduleWindow,
   hybridAccounts,
+  agentDelegations,
 ]

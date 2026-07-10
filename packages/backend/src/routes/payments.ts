@@ -175,22 +175,33 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       return reply.code(400).send({ error: 'Amount must be greater than zero' })
     }
 
-    // 4. Policy check: verify agent has this token in their on-chain allowance config
-    const dbAllowance = await pool.query<{ allowance_amount: string }>(
-      `SELECT allowance_amount FROM agent_allowances
-       WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
-      [agent.id, tokenAddress],
-    )
-    if (dbAllowance.rows.length === 0) {
-      return reply.code(403).send({
-        error: `Agent is not configured for ${tokenConfig.symbol} payments`,
-      })
-    }
-
+    // 4. Resolve the execution rail first — the token-configuration gate is
+    // rail-specific.
+    //
     // ── Session-key rail (#745) — fail-closed; see lib/execution-rail.ts.
     // Only a Safe explicitly marked migrated, whose agent has an enabled
     // session, on an allowlisted chain, leaves the legacy path below.
     const railState = await loadExecutionRailState(agent)
+
+    // Policy check: session/legacy rails carry the per-token policy in
+    // agent_allowances (the AllowanceModule config), so a missing row means the
+    // token is not configured. The DELEGATION rail (#829) keeps NO allowance
+    // row — its authority is the signed budget delegation, checked in the
+    // delegation branch below (which returns its own 403 when no delegation
+    // authorizes this token/recipient). Applying the allowance gate there would
+    // wrongly reject a fully-configured delegation agent, so scope it out.
+    if (railState.safeExecutionRail !== 'delegation') {
+      const dbAllowance = await pool.query<{ allowance_amount: string }>(
+        `SELECT allowance_amount FROM agent_allowances
+         WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
+        [agent.id, tokenAddress],
+      )
+      if (dbAllowance.rows.length === 0) {
+        return reply.code(403).send({
+          error: `Agent is not configured for ${tokenConfig.symbol} payments`,
+        })
+      }
+    }
 
     // ── Delegation rail (#829, epic #821) ────────────────────────────────
     // The agent's signed delegation IS the policy: budget (with native

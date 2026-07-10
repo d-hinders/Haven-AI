@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-07-01"
+last-verified: "2026-07-10"
 ---
 
 # Haven
@@ -37,6 +37,17 @@ Safe AllowanceModule -> On-chain agent budget enforcement
 ```
 
 API auth is identity. Signature is authority. On-chain module state is enforcement.
+
+Haven runs **two on-chain policy rails**, both non-custodial. The line above is
+the **session/AllowanceModule rail** (existing accounts). New accounts are
+provisioned on the **delegation rail** (epic #821): the Haven wallet is a MetaMask
+Hybrid DeleGator smart account and the budget is a signed delegation with audited
+caveat enforcers (period budget with native refill, optional recipient pin,
+expiry) redeemed via the DelegationManager — funds move account→recipient
+directly, no funding leg and no approval queue. Same identity/authority split,
+different enforcement primitive. See
+[`docs/security/delegation-rail-security-model.md`](docs/security/delegation-rail-security-model.md)
+and your non-custody [exit path](docs/exit/README.md).
 
 ## What's in the Repo
 

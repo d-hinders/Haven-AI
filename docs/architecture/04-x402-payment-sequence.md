@@ -6,6 +6,8 @@ covers:
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/lib/agent-payment-status.ts
   - packages/backend/src/lib/payment-coverage.ts
+  - packages/backend/src/lib/x402-delegation.ts
+  - packages/backend/src/lib/delegation-rail.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
   - packages/mcp/src/tools.ts
@@ -13,7 +15,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-06-29"
+last-verified: "2026-07-10"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -30,6 +32,11 @@ Standard merchant x402 has two legs:
    execute a Safe funding transaction.
 2. Merchant leg: the agent signs the standard EIP-3009 `X-PAYMENT` header from
    the delegate wallet and retries the merchant/resource request.
+
+> **This doc describes the session/AllowanceModule rail** (existing accounts) with
+> its two-leg funding model. New accounts (`account_type='delegator_hybrid'`)
+> settle x402 in a **single direct leg** via ERC-7710 — see
+> [Delegation rail x402](#delegation-rail-x402-new-accounts) below.
 
 In SDK, local MCP, and generic hosted split flows, the agent retries the merchant
 request. For paid MCP tools, hosted MCP can proxy the HTTP/MCP request and
@@ -227,6 +234,35 @@ transport session; callers do not need to preserve the old session id.
 | Header sent to merchant | None | `X-PAYMENT` |
 | Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
 | Approval resume | Poll payment status | Poll status, then resume original x402 request |
+
+## Delegation rail x402 (new accounts)
+
+On the delegation rail (#830, epic #821) there is **no funding leg and no delegate
+EOA to strand**. The agent's budget delegation *is* the settlement instrument:
+funds move `account → merchant` directly, and the on-chain caveat enforcers meter
+the period budget as part of the settlement itself.
+
+The flow is a two-call variant of `/x402/authorize`:
+
+1. `POST /x402/authorize` resolves the account's rail from agent auth. For a
+   delegation account it builds a **settlement child delegation** and returns the
+   EIP-712 `typed_data` the agent must sign — not an AllowanceModule funding hash,
+   and it never queues an approval (over-budget/wrong-recipient reverts on-chain).
+2. The agent signs that typed data VERBATIM with its delegate key (the #829
+   lesson) and submits `{ signature }` to `POST /x402/:id/settle`.
+3. Haven assembles the merchant-facing `X-PAYMENT` header using MetaMask x402's
+   `erc7710` payload
+   (`{ delegationManager, permissionContext, delegator }`
+   — [`x402-delegation.ts`](../../packages/backend/src/lib/x402-delegation.ts)).
+   The agent retries the merchant with that header, and the merchant settles the
+   payment directly from the account through the DelegationManager.
+
+The intent moves to `submitted`; final settlement is observed through the
+merchant/receipt path. `POST /x402/:id/settle` is Base-only and, as of this
+writing, sits on the OpenAPI drift check's `KNOWN_UNDOCUMENTED_ROUTES` allowlist
+pending the epic docs sweep (#834). Operational detail (gas sponsorship, vendor
+dependencies): [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md);
+security model: [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 ## Guardrails
 

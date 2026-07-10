@@ -38,7 +38,7 @@ These are constraints, not suggestions. Every implementation decision must respe
 
 1. **Non-Custodial** — User funds live in Safe smart accounts. Haven NEVER holds unrestricted signing authority. If Haven is fully compromised, an attacker still cannot move user funds unilaterally.
 
-2. **Policy-First Execution** — Every financial action is evaluated against the agent's on-chain allowance before execution. The policy *is* the Safe AllowanceModule allowance: per-token amount and reset period. Anything that exceeds the remaining allowance is auto-queued for human approval; nothing executes outside that envelope.
+2. **Policy-First Execution** — Every financial action is evaluated against on-chain policy before execution, never an off-chain rules DSL. Haven runs **two policy rails**, both enforced on-chain: the **delegation rail** (the base for new accounts, epic #821) where the policy is a signed MetaMask delegation with audited caveat enforcers (period budget, recipient pin, expiry) enforced by the DelegationManager during redemption; and the **session/AllowanceModule rail** (existing accounts) where the policy *is* the Safe AllowanceModule allowance — per-token amount and reset period, with over-limit spend auto-queued for human approval. Nothing executes outside the account's on-chain envelope on either rail.
 
 3. **Agent-First Interaction** — Agents talk to Haven through high-level intents (e.g., "pay 50 USDC to 0xabc"), NOT raw blockchain transactions. Haven handles tx construction, encoding, gas, nonces, and execution routing.
 
@@ -88,7 +88,9 @@ Protocols → x402, Stripe MPP (agent payment standards)
 
 ## Agent Model
 
-An agent is a **permissioned actor** = identity + delegate address + a set of per-token on-chain allowances. Authority is enforced by the Safe AllowanceModule, not by an off-chain rules DSL.
+An agent is a **permissioned actor** = identity + delegate address + on-chain policy. Authority is enforced on-chain, not by an off-chain rules DSL. Which primitive holds the policy depends on the account's rail:
+- **Delegation rail (`account_type='delegator_hybrid'`, the base for new accounts):** authority is a signed budget delegation (period budget + optional recipient pin + expiry) redeemed through the DelegationManager. Budgets refill natively at the period boundary — no Haven cron, no approval queue, no schedule machinery. Managed via `/agents/:id/delegations/*` (#828) and the dashboard budget card (#833).
+- **Session/AllowanceModule rail (existing accounts):** authority is the set of per-token on-chain allowances described below.
 
 ```json
 {
@@ -122,6 +124,22 @@ Credentials are portable:
 
 ## Payment Flow
 
+The flow branches on the account's `execution_rail` (resolved from agent auth). Both keep the same agent-facing intent.
+
+**Delegation rail (`execution_rail='delegation'`, the base for new accounts):**
+```
+1. Agent creates intent → { action: "payment", asset: "USDC", amount: "100", recipient: "0xabc" }
+2. Haven authenticates the agent and selects its budget delegation for that token/recipient
+3. Haven prepares a redeeming UserOp; budget, recipient and expiry are enforced ON-CHAIN
+   by the caveat enforcers during gas estimation — over-budget/wrong-recipient reverts here,
+   no coverage arithmetic and no approval queue
+4. The agent signs the account's exact EIP-712 typed data VERBATIM (never a bare hash — the
+   #829 lesson); Haven submits the sponsored UserOp. Funds move account→recipient directly,
+   no funding leg
+5. Response → { status: "executed", tx }   (or a revert if it breached the on-chain policy)
+```
+
+**Session/AllowanceModule rail (existing accounts):**
 ```
 1. Agent creates intent → { action: "payment", asset: "USDC", amount: "100", recipient: "0xabc" }
 2. Haven authenticates the agent and looks up its on-chain allowance for the requested token

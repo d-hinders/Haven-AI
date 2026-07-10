@@ -266,10 +266,10 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
     mockQuery
       .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // token-config guard
       .mockResolvedValueOnce({
         rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
-      })
+      }) // rail resolved before the token-config guard (#835)
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // token-config guard
       .mockResolvedValueOnce({ rows: [] }) // schedule-window lookup (#769) — no schedule
       .mockResolvedValueOnce({ rows: [sessionIntentRow()] }) // INSERT RETURNING *
 
@@ -309,10 +309,10 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
     mockQuery
       .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
       .mockResolvedValueOnce({
         rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
       })
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
       .mockResolvedValueOnce({ rows: [] }) // schedule-window lookup (#769) — no schedule
 
     const response = await app.inject({
@@ -328,7 +328,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.body).toContain('sponsorshipPolicy not active')
   })
 
-  it('POST /payments on the delegation rail: prepares, pins the delegation, ships typed data (#829)', async () => {
+  it('POST /payments on the delegation rail: prepares, pins the delegation, ships typed data — WITHOUT an allowance row (#829, #835)', async () => {
     delegationMocks.prepareDelegationPayment.mockResolvedValueOnce({
       delegationHash: DELEGATION_HASH,
       prepared: {
@@ -338,9 +338,13 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
         delegateAccountAddress: '0x' + 'ee'.repeat(20),
       },
     })
+    // A delegation-rail agent has NO agent_allowances row — its authority is the
+    // signed delegation. The route must NOT run the token-config guard here:
+    // it 403'd a fully-configured delegation agent live until the guard was
+    // scoped to non-delegation rails (#835). So the chain is auth → rail state
+    // → INSERT, with no allowance lookup queued in between.
     mockQuery
       .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
       .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
       .mockResolvedValueOnce({ rows: [delegationIntentRow()] })
 
@@ -358,6 +362,8 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // Neither other rail is touched:
     expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    // The allowance guard never ran — no agent_allowances lookup (#835 fix):
+    expect(mockQuery.mock.calls.some((c) => /agent_allowances/.test(String(c[0])))).toBe(false)
     // The intent pins the rail + which delegation authorized it:
     const insert = mockQuery.mock.calls.find((c) => /INSERT INTO payment_intents/.test(String(c[0])))!
     expect(insert![1]).toContain('delegation')
@@ -368,7 +374,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     delegationMocks.prepareDelegationPayment.mockResolvedValueOnce(null)
     mockQuery
       .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
       .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
 
     const response = await app.inject({
@@ -388,7 +393,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     )
     mockQuery
       .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
       .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
 
     const response = await app.inject({
@@ -444,6 +448,28 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(delegationMocks.submitDelegationPayment).not.toHaveBeenCalled()
   })
 
+  it('POST /payments still 403s a NON-delegation agent with no allowance row (guard preserved, #835)', async () => {
+    // The #835 fix scopes the token-config guard OUT of the delegation rail —
+    // it must remain in force everywhere else. A legacy agent (no rail state)
+    // with no agent_allowances row is still rejected before anything executes.
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] }) // rail state: none → legacy
+      .mockResolvedValueOnce({ rows: [] }) // token-config guard: no allowance row
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/payments',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json().error).toMatch(/not configured for USDC/)
+    // Nothing was written:
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+  })
+
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
@@ -452,8 +478,8 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
     mockQuery
       .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
       .mockResolvedValueOnce({ rows: [] }) // no rail state → legacy (fail-closed)
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
       .mockResolvedValueOnce({ rows: [intentRow()] })
 
     const response = await app.inject({

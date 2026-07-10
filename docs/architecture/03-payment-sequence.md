@@ -7,7 +7,11 @@ covers:
   - packages/backend/src/lib/payment-coverage.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/approvals.ts
+  - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/lib/machine-payments.ts
+  - packages/backend/src/lib/delegation-rail.ts
+  - packages/backend/src/lib/delegation-policy.ts
+  - packages/backend/src/lib/delegation-authorization.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/lib/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
@@ -24,6 +28,12 @@ and user-authorized Safe execution).
 
 Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts) and
 [packages/backend/src/lib/allowance-module.ts](../../packages/backend/src/lib/allowance-module.ts).
+
+> **This diagram is the session/AllowanceModule rail** (existing accounts). New
+> accounts (`account_type='delegator_hybrid'`, `execution_rail='delegation'`) take
+> the [delegation-rail branch](#delegation-rail-new-accounts) at the bottom of this
+> doc — `POST /payments` resolves the rail from agent auth and either builds an
+> AllowanceModule transfer hash (below) or a redeeming UserOp (delegation rail).
 
 ```mermaid
 sequenceDiagram
@@ -114,6 +124,41 @@ sequenceDiagram
   signatures; `rejected` / `expired` are terminal alternatives. Approval does
   not reuse the delegate-relayer path: the wallet owner authorizes the Safe
   transaction and Haven records its result.
+
+## Delegation rail (new accounts)
+
+For `execution_rail='delegation'` accounts, `POST /payments` does not touch the
+AllowanceModule, compute a coverage envelope, or ever queue an approval. The
+policy is the agent's signed budget delegation, and it is enforced **on-chain** by
+audited caveat enforcers. The branch is a tight variant of the signature-ready
+path above:
+
+1. `POST /payments` authenticates the agent and selects its active budget
+   delegation for the requested token **and recipient** (native-token transfers
+   are not supported on this rail). With no matching delegation, it returns an
+   error — there is no approval-queue fallback.
+2. Haven prepares a redeeming sponsored UserOp; **budget (with native period
+   refill), recipient, and expiry are enforced on-chain during gas estimation**,
+   so an over-budget or wrong-recipient intent reverts here rather than being
+   queued. The response is `201` with `status`, `expires_at`, and
+   `sign_data: { signature_scheme: 'eip712_userop', typed_data }`.
+3. The agent signs the account's **exact EIP-712 `typed_data` VERBATIM** with its
+   delegate key — never a bare 4337 UserOp hash (the #829 lesson; the account
+   validates the typed data, not the raw hash). It submits `{ signature }` to
+   `POST /payments/:id/sign`, which Haven relays as the sponsored UserOp.
+4. Funds move **account→recipient directly** — no funding leg, no delegate EOA to
+   strand. The intent settles to `confirmed`, or reverts if it breached the
+   on-chain policy.
+
+Agent-facing intent shape and the `/payments/:id/sign` contract are identical to
+the session rail; only the `sign_data` scheme (`eip712_userop` vs the
+AllowanceModule transfer hash) and the enforcement mechanism differ. Delegation
+lifecycle (build/activate/revoke) is managed out of band via
+`/agents/:id/delegations/*`
+([agent delegations](../../packages/backend/src/routes/agent-delegations.ts)).
+Full security model and exit story:
+[`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md)
+([delegation authorization](../../packages/backend/src/lib/delegation-authorization.ts)).
 
 ## Related: x402 path
 

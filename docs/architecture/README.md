@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/lib/fee/fee-module.ts
-last-verified: "2026-07-02"
+last-verified: "2026-07-10"
 ---
 
 # Haven — Architecture
@@ -78,6 +78,17 @@ done
   x402 supports Base and Base Sepolia.
 - **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
   removed — it is no longer part of the codebase.)
+- **Two policy rails coexist.** Docs 1–5 primarily describe the
+  **session/AllowanceModule rail** (existing accounts). New accounts run on the
+  **delegation rail** (epic #821, `account_type='delegator_hybrid'`,
+  `execution_rail='delegation'`): a MetaMask Hybrid DeleGator smart account whose
+  budget is a signed delegation with audited caveat enforcers, redeemed via the
+  DelegationManager with no funding leg and no approval queue. Each of docs 1–5
+  now carries a scoped delegation-rail branch; the canonical deep docs are
+  [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md),
+  [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md),
+  and the [exit guarantee](../exit/README.md). The delegation rail is **Base-only**;
+  Gnosis is not in scope for it.
 - These docs and their mapped code are the implementation authority.
   [CLAUDE.md](../../CLAUDE.md) is current repository guidance, but broad claims
   must still be checked against implementation. Safe import does not prove

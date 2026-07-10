@@ -10,6 +10,10 @@ covers:
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/lib/delegation-rail.ts
+  - packages/backend/src/lib/delegation-policy.ts
   - packages/backend/src/routes/safe-exec.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/lib/allowance-module.ts
@@ -42,6 +46,14 @@ last-verified: "2026-07-10"
 The identities, keys, and credentials used by Haven's primary account and agent
 flows, plotted with the party that holds them. This is the diagram to consult
 when reasoning about blast radius: "if X is compromised, what can move?".
+
+> **Two rails.** The zones, diagram, and invariants below describe the
+> **session/AllowanceModule rail** (existing accounts). New accounts run on the
+> **delegation rail** (`account_type='delegator_hybrid'`, epic #821); its custody
+> semantics and the full invariant→invariant mapping are in
+> [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
+> The [delegation-rail custody](#delegation-rail-custody-new-accounts) subsection
+> below summarizes the differences that matter for blast-radius reasoning.
 
 The four custody zones:
 
@@ -178,3 +190,37 @@ flowchart TB
    sufficient only for a threshold-one Safe. Enough compromised owner
    credentials to meet the configured threshold can change owners, disable
    modules, or move funds directly. The Safe remains the root of trust.
+
+## Delegation rail custody (new accounts)
+
+On the delegation rail the Haven wallet is a MetaMask Hybrid DeleGator smart
+account, not a Safe + AllowanceModule, and the policy primitive is a **signed
+delegation the agent holds** rather than on-chain allowance state. The custody
+line is unchanged — Haven never holds a signer that can spend — but the blast
+radius shifts in a few ways worth mapping explicitly:
+
+- **Authority is a held object.** The agent receives a signed budget delegation
+  (period budget with native refill + optional recipient pin + expiry) through the
+  same credential channel as its API key. Haven stores a copy for reconstruction,
+  revocation targeting, and observability. It is **not key material**, but it is
+  spend-enabling *in combination with* the delegate key, so it is protected like
+  `api_key_hash`-class data: encrypted at rest, never logged.
+- **The delegate key alone still cannot spend**, and the delegation alone still
+  cannot spend. Full agent compromise (both) is bounded by the caveat stack:
+  ≤ one period's budget, only to pinned recipients, until expiry or the owner's
+  `disableDelegation` kill-switch. Blast radius is therefore **identical in kind**
+  to the session rail's per-period allowance.
+- **No funding leg, so no stranded delegate balance.** Payments move
+  account→recipient directly (invariant 5's "delegate-key exposure includes
+  delegate-held x402 funds" does not apply on this rail — there is no Safe→delegate
+  funding transfer).
+- **The account owner is watch-only in Haven**, and the DeleGator's UUPS upgrade
+  authority is the account's own signers — never Haven. Haven-side compromise can
+  construct malicious payloads but cannot sign grants, redemptions, or upgrades.
+
+Full invariant-by-invariant mapping (including the CI checks that enforce each
+one) and the independent exit/revocation story:
+[`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md)
+and [`docs/exit/README.md`](../exit/README.md)
+([delegation rail](../../packages/backend/src/lib/delegation-rail.ts),
+[delegation policy](../../packages/backend/src/lib/delegation-policy.ts)).

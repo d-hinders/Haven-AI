@@ -182,8 +182,17 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // ── Session-key rail (#745) — fail-closed; see lib/execution-rail.ts.
     // Only a Safe explicitly marked migrated, whose agent has an enabled
     // session, on an allowlisted chain, leaves the legacy path below.
+    const railState = await loadExecutionRailState(agent)
+    // #825 fail-closed: delegation-rail accounts block CLEANLY until #829
+    // wires their payment path — never fall through to a legacy rail that
+    // cannot serve a Hybrid account.
+    if (railState.safeExecutionRail === 'delegation') {
+      return reply.code(503).send({
+        error: 'This account uses the delegation rail, which is not enabled for payments yet',
+      })
+    }
     const railDecision = resolveExecutionRail({
-      ...(await loadExecutionRailState(agent)),
+      ...railState,
       chainId: agent.chain_id,
     })
     if (railDecision.rail === 'session_key') {

@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
-last-verified: "2026-07-01"
+last-verified: "2026-07-10"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer

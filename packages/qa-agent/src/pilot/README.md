@@ -31,6 +31,7 @@ set on the dev backend.
 | `pilot:schedule-live` (backend) | Pre-signed budget schedule (#769): N time-locked sessions in ONE owner signature, then the cross-period payment proof with zero further signatures. DB wiring runs over the dev API (#798) — zero manual SQL; agent resolved by delegate address. |
 | `pilot:x402-7710-buyer` (qa-agent) | ERC-7710 direct settlement: a smart account pays the merchant with no delegate funding leg (#452). Needs the demo merchant running with the erc7710 rail. |
 | `pilot:delegation-spike` (qa-agent) | Spike #820 (epic #821 gate G1): the #818 matrix on Hybrid DeleGator — period-budget caveats, observed zero-signature refill, recipient modes, revoke, sponsored redemption. Needs `PILOT_7710_DELEGATOR_PRIVATE_KEY` (throwaway) + a USDC-funded Hybrid. |
+| `pilot:provision-hybrid` (qa-agent) | #825: provisions Hybrid accounts through the production API (EOA + programmatic-P256 passkey variants, counterfactual), verifies API/local address determinism, then deploys with ONE sponsored UserOp. |
 
 ## Standing ops checks (cadence)
 

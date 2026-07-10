@@ -311,6 +311,28 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.body).toContain('sponsorshipPolicy not active')
   })
 
+  it('POST /payments blocks a delegation-rail account CLEANLY — 503, never legacy fallthrough (#825)', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+      .mockResolvedValueOnce({
+        rows: [{ execution_rail: 'delegation', session_permission_id: null }],
+      })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/payments',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json().error).toMatch(/delegation rail/)
+    // Neither rail was touched — no legacy attempt, no session prepare:
+    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
+    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+  })
+
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)

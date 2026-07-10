@@ -50,6 +50,41 @@ export async function signUserOpHashForSession(
 }
 
 /**
+ * Sign a delegation-rail payment (#829).
+ *
+ * The delegate SMART ACCOUNT validates an EIP-712 signature over the packed
+ * UserOperation — signing the bare 4337 hash would be rejected on-chain. The
+ * backend sends the exact typed data in `sign_data.typed_data`; we sign it
+ * verbatim and never reconstruct it (a second source of truth could drift
+ * from the account's own rules).
+ */
+export async function signUserOpTypedDataForDelegation(
+  privateKey: string,
+  typedData: {
+    domain: Record<string, unknown>
+    types: Record<string, unknown>
+    primaryType: string
+    message: Record<string, unknown>
+  },
+): Promise<string> {
+  try {
+    const wallet = new ethers.Wallet(privateKey)
+    // ethers derives EIP712Domain itself and rejects it in `types`.
+    const types = { ...typedData.types }
+    delete (types as Record<string, unknown>).EIP712Domain
+    return await wallet.signTypedData(
+      typedData.domain as never,
+      types as never,
+      typedData.message as never,
+    )
+  } catch (err) {
+    throw new HavenSigningError(
+      `Failed to sign delegation UserOperation: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
+/**
  * Derive the Ethereum address from a private key.
  */
 export function addressFromKey(privateKey: string): string {

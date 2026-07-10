@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
 import { privateKeyToAccount } from 'viem/accounts'
-import { signHash, signUserOpHashForSession, addressFromKey, verifySignature } from './signer.js'
+import { signHash, signUserOpHashForSession, signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
 import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
@@ -587,6 +587,7 @@ export class HavenClient {
   private async signForData(signData: {
     hash: string
     signature_scheme?: string
+    typed_data?: unknown
   }): Promise<string> {
     if (!this.delegateKey) {
       throw new HavenSigningError(
@@ -596,6 +597,14 @@ export class HavenClient {
     const scheme = signData.signature_scheme
     if (scheme === 'eip191_userop') {
       return signUserOpHashForSession(this.delegateKey, signData.hash)
+    }
+    if (scheme === 'eip712_userop') {
+      if (!signData.typed_data) {
+        throw new HavenSigningError(
+          'sign_data.signature_scheme is eip712_userop but typed_data is missing — refusing to sign the bare hash (the account would reject it).',
+        )
+      }
+      return signUserOpTypedDataForDelegation(this.delegateKey, signData.typed_data as never)
     }
     if (scheme === undefined) {
       return signHash(this.delegateKey, signData.hash) // legacy AllowanceModule rail

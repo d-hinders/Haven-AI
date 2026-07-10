@@ -27,8 +27,9 @@
 
 import { http, createPublicClient, type Address, type Hex, type LocalAccount } from 'viem'
 import { toAccount } from 'viem/accounts'
-import { entryPoint07Address } from 'viem/account-abstraction'
+import { entryPoint07Address, toPackedUserOperation } from 'viem/account-abstraction'
 import { getUserOperationHash } from 'viem/account-abstraction'
+import { SIGNABLE_USER_OP_TYPED_DATA } from '@metamask/smart-accounts-kit/utils'
 import { createSmartAccountClient } from 'permissionless'
 import { createPimlicoClient } from 'permissionless/clients/pimlico'
 import {
@@ -89,10 +90,39 @@ export interface DelegationRailConfig {
 export interface PreparedRedemption {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   userOperation: any
-  /** The hash the agent key signs client-side. */
+  /** The 4337 userOp hash — an identifier for logs/evidence, NOT what is signed. */
   userOpHash: Hex
+  /**
+   * What the agent key ACTUALLY signs: the account's EIP-712 typed data over
+   * the packed UserOperation. HybridDeleGator validates exactly this in
+   * `validateUserOp` — signing the bare 4337 hash would be rejected on-chain.
+   * All bigints are stringified so the payload survives JSON transport.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  signingTypedData: any
   /** The delegate smart account (counterfactual until first op). */
   delegateAccountAddress: Address
+}
+
+/** The account's typed data for a prepared UserOperation (see the interface). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function userOpTypedData(userOperation: any, accountAddress: Address, chainId: number): any {
+  const packed = toPackedUserOperation({ ...userOperation, signature: '0x' })
+  const message: Record<string, unknown> = { ...packed, entryPoint: entryPoint07Address }
+  for (const [key, value] of Object.entries(message)) {
+    if (typeof value === 'bigint') message[key] = value.toString()
+  }
+  return {
+    domain: {
+      chainId,
+      name: contracts.HybridDeleGator.constants.NAME,
+      version: contracts.HybridDeleGator.constants.DOMAIN_VERSION,
+      verifyingContract: accountAddress,
+    },
+    types: SIGNABLE_USER_OP_TYPED_DATA,
+    primaryType: 'PackedUserOperation',
+    message,
+  }
 }
 
 export interface RedemptionSubmitResult {
@@ -176,7 +206,12 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
       entryPointVersion: '0.7',
       userOperation: { ...userOperation, sender: account.address },
     })
-    return { userOperation, userOpHash, delegateAccountAddress: account.address }
+    return {
+      userOperation,
+      userOpHash,
+      signingTypedData: userOpTypedData(userOperation, account.address, cfg.chainId),
+      delegateAccountAddress: account.address,
+    }
   }
 
   async function submitRedemption(

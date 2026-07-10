@@ -21,7 +21,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-07-02"
+last-verified: "2026-07-10"
 ---
 
 # Haven — CLAUDE.md
@@ -79,6 +79,7 @@ Protocols → x402, Stripe MPP (agent payment standards)
 - **Safe AllowanceModule** — the on-chain policy primitive today. An agent has a `delegate_address`; the user grants per-token allowances to that delegate via the AllowanceModule, and the Haven backend executes spend-from-allowance transfers on the agent's behalf
 - Guards for transaction validation (future)
 - Session keys (future — temporary delegated keys)
+- **Delegation rail (epic #821, dark-launched):** new accounts can be provisioned as MetaMask Hybrid DeleGator smart accounts (`account_type='delegator_hybrid'`, `execution_rail='delegation'`) with policy as signed delegations + audited caveat enforcers. Fail-closed: payments on such accounts return a clean 503 until the payment rail lands (#829). Security model: `docs/security/delegation-rail-security-model.md`
 
 ### 5. Agents (External Actors)
 - Defined by: identity + credential + policy constraints

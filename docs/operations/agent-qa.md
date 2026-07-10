@@ -19,7 +19,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-07-01"
+last-verified: "2026-07-10"
 ---
 
 # Agent QA — run the automated QA layers against dev

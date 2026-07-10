@@ -37,7 +37,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-07-02"
+last-verified: "2026-07-10"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -124,6 +124,8 @@ Preserve these facts as non-negotiable implementation invariants:
 - Users can access their Safe through other Safe-compatible UIs.
 - Users can revoke or modify agent authority independently of Haven.
 - Haven cannot block users from transacting with their Safe outside Haven.
+
+**Delegation rail (epic #821, dark-launched 2026-07):** a second account type (MetaMask Hybrid DeleGator) is being introduced with the same custody posture — every invariant above maps one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two Safe-specific formulations generalise rather than weaken: "Safe-compatible UIs" becomes the independent exit path (#832 — a gate-level deliverable before any external user), and "Safe transactions approved by the user" becomes owner-signed delegations. Funds cannot move on the new rail at all until its payment path lands (#829); until then provisioning-only, payments fail closed.
 
 Any feature that weakens one of these assumptions needs legal and product review before implementation.
 

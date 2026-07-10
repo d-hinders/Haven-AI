@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: research
 covers:
   - packages/qa-agent/src/pilot/**
-last-verified: "2026-07-01"
+last-verified: "2026-07-10"
 ---
 
 # ERC-4337 pilot rig — bundler, paymaster & SDK decisions (#720)

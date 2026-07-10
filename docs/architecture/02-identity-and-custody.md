@@ -34,7 +34,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-06-29"
+last-verified: "2026-07-10"
 ---
 
 # Haven — Identity & Key/Credential Custody

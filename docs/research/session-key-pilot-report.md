@@ -4,7 +4,7 @@ status: research
 covers:
   - packages/qa-agent/src/pilot/**
   - docs/research/erc4337-pilot-rig.md
-last-verified: "2026-07-02"
+last-verified: "2026-07-10"
 ---
 
 # Session-key policy pilot — report & Stage 2 go/no-go (#724)

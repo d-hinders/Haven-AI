@@ -200,6 +200,98 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
   return { delegateAccountAddress: account.address, prepareRedemption, submitRedemption }
 }
 
+/**
+ * Treasury operations (#828): prepare/submit a sponsored UserOp FROM the
+ * user's treasury Hybrid — the same watch-only prepare/submit split as
+ * redemptions, but the OWNER signs the userOpHash client-side. Used for
+ * disableDelegation (revoke) and any future owner-executed account call.
+ * The backend still holds no key; sponsorship still cannot move value.
+ */
+export interface TreasuryOpsConfig {
+  /** The treasury account's owner (EOA today; passkey via #833's WebAuthn). */
+  ownerAddress: Address
+  chainId: number
+  bundlerUrl: string
+  rpcUrl: string
+  sponsorshipPolicyId?: string
+}
+
+export interface PreparedTreasuryOp {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  userOperation: any
+  /** The hash the treasury OWNER signs client-side. */
+  userOpHash: Hex
+  treasuryAddress: Address
+}
+
+export interface TreasuryOps {
+  treasuryAddress: Address
+  prepareCall(to: Address, data: Hex): Promise<PreparedTreasuryOp>
+  submitCall(prepared: PreparedTreasuryOp, signature: Hex): Promise<RedemptionSubmitResult>
+}
+
+export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<TreasuryOps> {
+  getDelegationContracts(cfg.chainId)
+  const chain = chainForId(cfg.chainId)
+  const publicClient = createPublicClient({ chain, transport: http(cfg.rpcUrl) })
+  const account = await toMetaMaskSmartAccount({
+    client: publicClient as never,
+    implementation: Implementation.Hybrid,
+    deployParams: [cfg.ownerAddress, [], [], []],
+    deploySalt: '0x',
+    signer: { account: watchOnlyDelegateOwner(cfg.ownerAddress) },
+  })
+  const pimlico = createPimlicoClient({
+    transport: http(cfg.bundlerUrl),
+    entryPoint: { address: entryPoint07Address, version: '0.7' },
+  })
+  const client = createSmartAccountClient({
+    account,
+    chain,
+    bundlerTransport: http(cfg.bundlerUrl),
+    paymaster: pimlico,
+    ...(cfg.sponsorshipPolicyId
+      ? { paymasterContext: { sponsorshipPolicyId: cfg.sponsorshipPolicyId } }
+      : {}),
+    userOperation: {
+      estimateFeesPerGas: async () => (await pimlico.getUserOperationGasPrice()).fast,
+    },
+  })
+
+  async function prepareCall(to: Address, data: Hex): Promise<PreparedTreasuryOp> {
+    const userOperation = await client.prepareUserOperation({
+      calls: [{ to, value: 0n, data }],
+    })
+    const userOpHash = getUserOperationHash({
+      chainId: cfg.chainId,
+      entryPointAddress: entryPoint07Address,
+      entryPointVersion: '0.7',
+      userOperation: { ...userOperation, sender: account.address },
+    })
+    return { userOperation, userOpHash, treasuryAddress: account.address }
+  }
+
+  async function submitCall(
+    prepared: PreparedTreasuryOp,
+    signature: Hex,
+  ): Promise<RedemptionSubmitResult> {
+    const userOpHash = await client.sendUserOperation({
+      ...prepared.userOperation,
+      signature,
+    })
+    const receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
+    if (!receipt.success) throw new Error('treasury UserOp included but reverted')
+    return {
+      txHash: receipt.receipt.transactionHash,
+      userOpHash,
+      actualGasUsed: receipt.actualGasUsed,
+      actualGasCost: receipt.actualGasCost,
+    }
+  }
+
+  return { treasuryAddress: account.address, prepareCall, submitCall }
+}
+
 /** Convenience mirror of getSessionRailFor — resolves env + pinned config. */
 export async function getDelegationRailFor(
   delegateOwnerAddress: Address,

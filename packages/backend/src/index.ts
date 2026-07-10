@@ -23,6 +23,7 @@ import agentRoutes from './routes/agents.js'
 import agentScheduleRoutes from './routes/agent-schedule.js'
 import agentRecipientRoutes from './routes/agent-recipients.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
+import agentDelegationRoutes from './routes/agent-delegations.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
@@ -171,6 +172,7 @@ await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(agentScheduleRoutes, { prefix: '/agents' })
 await app.register(agentRecipientRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
+await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })

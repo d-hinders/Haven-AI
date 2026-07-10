@@ -110,6 +110,22 @@ const QUERIES: SmokeQuery[] = [
           VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation')
           RETURNING id, created_at`,
   },
+  {
+    name: 'delegations: grant insert with lifecycle status (#828)',
+    sql: `INSERT INTO agent_delegations (
+            agent_id, chain_id, token_address, recipient_address, delegation_hash,
+            delegation_json, version, status, budget_atomic, period_seconds,
+            start_date, expires_at
+          ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11)
+          ON CONFLICT (delegation_hash) DO NOTHING`,
+  },
+  {
+    name: 'delegations: next version per (agent, token, recipient|open) (#813 identity)',
+    sql: `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
+          FROM agent_delegations
+          WHERE agent_id = $1 AND token_address = LOWER($2)
+            AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
+  },
 ]
 
 async function main(): Promise<void> {

@@ -29,6 +29,7 @@ interface PaymentRow {
   payment_reconciliation_event_type: string | null
   execution_rail: string | null
   session_permission_id: string | null
+  delegation_hash: string | null
   created_at: string
   confirmed_at: string | null
 }
@@ -125,6 +126,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.merchant_address,
               pi.execution_rail,
               pi.session_permission_id,
+              pi.delegation_hash,
               pi.created_at,
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
@@ -230,6 +232,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           // lazy rollover observable to the owner without DB access.
           execution_rail: p.execution_rail,
           session_permission_id: p.session_permission_id,
+          // #829: which delegation authorized a delegation-rail payment.
+          delegation_hash: p.delegation_hash,
           confirmed_at: p.confirmed_at,
           created_at: p.created_at,
         }
@@ -405,6 +409,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.merchant_address,
               pi.execution_rail,
               pi.session_permission_id,
+              pi.delegation_hash,
               pi.created_at,
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
@@ -513,6 +518,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           // lazy rollover observable to the owner without DB access.
           execution_rail: p.execution_rail,
           session_permission_id: p.session_permission_id,
+          // #829: which delegation authorized a delegation-rail payment.
+          delegation_hash: p.delegation_hash,
           confirmed_at: p.confirmed_at,
           created_at: p.created_at,
         }

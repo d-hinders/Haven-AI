@@ -126,6 +126,28 @@ const QUERIES: SmokeQuery[] = [
           WHERE agent_id = $1 AND token_address = LOWER($2)
             AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
   },
+  {
+    name: 'payments: delegation intent insert (rail + delegation pinned, #829)',
+    sql: `INSERT INTO payment_intents (
+            agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+            to_address, amount_raw, amount_human, delegate_address,
+            allowance_nonce, sign_hash,
+            execution_rail, delegation_hash, prepared_user_op,
+            status, expires_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+            'pending_signature', NOW() + interval '10 minutes')
+          RETURNING *`,
+  },
+  {
+    name: 'delegations: authorization selection (pinned wins over open, #829)',
+    sql: `SELECT delegation_hash, delegation_json, recipient_address
+          FROM agent_delegations
+          WHERE agent_id = $1
+            AND token_address = LOWER($2)
+            AND status = 'active'
+            AND (recipient_address = LOWER($3) OR recipient_address IS NULL)
+          ORDER BY (recipient_address IS NULL), created_at DESC`,
+  },
 ]
 
 async function main(): Promise<void> {

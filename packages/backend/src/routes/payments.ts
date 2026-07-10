@@ -29,6 +29,10 @@ import {
   commitScheduleRollover,
   resolveScheduledAuthorization,
 } from '../lib/session-schedule-wiring.js'
+import {
+  prepareDelegationPayment,
+  submitDelegationPayment,
+} from '../lib/delegation-authorization.js'
 import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
 import { quoteFee } from '../lib/fee/fee-module.js'
@@ -104,6 +108,10 @@ interface PaymentIntentRow {
   session_permission_id?: string | null
   /** Serialized prepared UserOperation for session-rail intents. */
   session_user_op?: unknown
+  /** Which delegation authorized a delegation-rail intent (#829). */
+  delegation_hash?: string | null
+  /** Serialized prepared redemption UserOperation for delegation intents. */
+  prepared_user_op?: unknown
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -183,14 +191,89 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // Only a Safe explicitly marked migrated, whose agent has an enabled
     // session, on an allowlisted chain, leaves the legacy path below.
     const railState = await loadExecutionRailState(agent)
-    // #825 fail-closed: delegation-rail accounts block CLEANLY until #829
-    // wires their payment path — never fall through to a legacy rail that
-    // cannot serve a Hybrid account.
+
+    // ── Delegation rail (#829, epic #821) ────────────────────────────────
+    // The agent's signed delegation IS the policy: budget (with native
+    // refill), recipient and expiry are enforced ON-CHAIN by audited caveat
+    // enforcers during gas estimation. An out-of-policy payment therefore
+    // fails during prepare — before any state is written and before the
+    // agent is asked for a signature. No coverage arithmetic, no approval
+    // queue, no schedule machinery: the chain rules.
     if (railState.safeExecutionRail === 'delegation') {
-      return reply.code(503).send({
-        error: 'This account uses the delegation rail, which is not enabled for payments yet',
+      if (tokenAddress === ZERO_ADDRESS) {
+        return reply.code(400).send({
+          error: 'Native-token transfers are not supported on the delegation rail',
+        })
+      }
+      let authorization
+      try {
+        authorization = await prepareDelegationPayment(
+          { id: agent.id, chain_id: agent.chain_id, delegate_address: agent.delegate_address },
+          tokenAddress,
+          to.toLowerCase(),
+          amountRaw,
+        )
+      } catch (err) {
+        // Caveat rejection (budget/recipient/expiry) or bundler failure —
+        // both land here, both leave the database untouched.
+        return reply.code(502).send({
+          error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        })
+      }
+      if (!authorization) {
+        return reply.code(403).send({
+          error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this recipient`,
+        })
+      }
+
+      const delegationResult = await pool.query<PaymentIntentRow>(
+        `INSERT INTO payment_intents (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, delegate_address,
+          allowance_nonce, sign_hash,
+          execution_rail, delegation_hash, prepared_user_op,
+          status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+          'pending_signature', NOW() + interval '10 minutes')
+        RETURNING *`,
+        [
+          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+          tokenConfig.symbol, tokenAddress, to.toLowerCase(),
+          amountRaw.toString(), amount, agent.delegate_address,
+          0, // AllowanceModule-only concept; unused on this rail
+          authorization.prepared.userOpHash,
+          'delegation',
+          authorization.delegationHash,
+          serializeUserOp(authorization.prepared.userOperation),
+        ],
+      )
+      const delegationIntent = delegationResult.rows[0]
+
+      return reply.code(201).send({
+        payment_id: delegationIntent.id,
+        status: delegationIntent.status,
+        expires_at: delegationIntent.expires_at,
+        sign_data: {
+          hash: authorization.prepared.userOpHash,
+          signature_scheme: 'eip712_userop',
+          // The account validates THIS typed data (not the bare 4337 hash).
+          typed_data: authorization.prepared.signingTypedData,
+          components: {
+            account: authorization.prepared.delegateAccountAddress,
+            token: tokenAddress,
+            to: to.toLowerCase(),
+            amount: amountRaw.toString(),
+          },
+          instructions:
+            'Sign sign_data.typed_data with your delegate (agent) key using EIP-712 ' +
+            '(signTypedData; @haven_ai/sdk does this automatically). Then POST ' +
+            `/payments/${delegationIntent.id}/sign with { signature } — Haven relays it; ` +
+            'your budget delegation authorizes it on-chain.',
+        },
       })
     }
+
     const railDecision = resolveExecutionRail({
       ...railState,
       chainId: agent.chain_id,
@@ -491,24 +574,40 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // intent's rail was pinned at authorize time, so a signature can never
       // be checked against the wrong scheme.
       const isSessionRail = intent.execution_rail === 'session_key'
-      let recoveredAddress: string
-      try {
-        recoveredAddress = isSessionRail
-          ? recoverSessionSigner(intent.sign_hash, signature)
-          : recoverSigner(intent.sign_hash, signature)
-      } catch (err) {
-        return reply.code(400).send({
-          error: 'Invalid signature format',
-          details: err instanceof Error ? err.message : String(err),
-        })
-      }
+      const isDelegationRail = intent.execution_rail === 'delegation'
 
-      if (recoveredAddress.toLowerCase() !== intent.delegate_address.toLowerCase()) {
-        return reply.code(403).send({
-          error: 'Signature does not match delegate address',
-          expected: intent.delegate_address,
-          recovered: recoveredAddress,
-        })
+      // Delegation-rail intents sign the prepared UserOperation with the
+      // ACCOUNT's EIP-712 scheme, which the delegate smart account itself
+      // validates in `validateUserOp`. That on-chain check IS the signature
+      // verification — strictly stronger than a local recover, and it cannot
+      // drift from the account's own rules. A bad signature is rejected by
+      // the bundler at submit; nothing moves. We therefore only shape-check
+      // here (a local EIP-712 reconstruction would add a second, weaker
+      // source of truth that could false-reject valid signatures).
+      if (isDelegationRail) {
+        if (!/^0x[0-9a-fA-F]{100,}$/.test(signature)) {
+          return reply.code(400).send({ error: 'Invalid signature format' })
+        }
+      } else {
+        let recoveredAddress: string
+        try {
+          recoveredAddress = isSessionRail
+            ? recoverSessionSigner(intent.sign_hash, signature)
+            : recoverSigner(intent.sign_hash, signature)
+        } catch (err) {
+          return reply.code(400).send({
+            error: 'Invalid signature format',
+            details: err instanceof Error ? err.message : String(err),
+          })
+        }
+
+        if (recoveredAddress.toLowerCase() !== intent.delegate_address.toLowerCase()) {
+          return reply.code(403).send({
+            error: 'Signature does not match delegate address',
+            expected: intent.delegate_address,
+            recovered: recoveredAddress,
+          })
+        }
       }
 
       // 3. Atomically claim the pending intent before any on-chain execution.
@@ -553,7 +652,20 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // 4. Execute on-chain — on the rail the intent was authorized for.
       try {
         let txHash: string
-        if (isSessionRail) {
+        if (isDelegationRail) {
+          // Replay the exact prepared redemption whose hash the agent signed;
+          // only the signature is stamped in. The caveat enforcers authorize
+          // it on-chain — no owner, relayer, or Haven key signs anything.
+          if (intent.prepared_user_op == null || !intent.delegation_hash) {
+            throw new Error('delegation-rail intent is missing its prepared UserOperation state')
+          }
+          const result = await submitDelegationPayment(
+            { chain_id: intent.chain_id, delegate_address: intent.delegate_address },
+            deserializeUserOp(intent.prepared_user_op),
+            signature as `0x${string}`,
+          )
+          txHash = result.txHash
+        } else if (isSessionRail) {
           // Replay the exact prepared UserOperation whose hash the client
           // signed; only the signature is stamped in. The Smart Sessions
           // validator authorizes it on-chain — no owner or relayer key signs.

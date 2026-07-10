@@ -67,7 +67,7 @@ export interface SignData {
   hash: string
 
   /** 'eip191_userop' = session rail (EIP-191); absent = legacy AllowanceModule (raw ECDSA). */
-  signature_scheme?: 'eip191_userop'
+  signature_scheme?: 'eip191_userop' | 'eip712_userop'
 
   /** Breakdown of values that were hashed — useful for debugging */
   components: {
@@ -938,7 +938,7 @@ export interface RawMachinePaymentAuthorizeResponse {
   sign_data?: {
     hash: string
     /** 'eip191_userop' = session rail (EIP-191); absent = legacy AllowanceModule (raw ECDSA). */
-    signature_scheme?: 'eip191_userop'
+    signature_scheme?: 'eip191_userop' | 'eip712_userop'
     components: {
       safe: string
       token: string
@@ -989,7 +989,7 @@ export interface RawX402AuthorizeResponse {
   sign_data?: {
     hash: string
     /** 'eip191_userop' = session rail (EIP-191); absent = legacy AllowanceModule (raw ECDSA). */
-    signature_scheme?: 'eip191_userop'
+    signature_scheme?: 'eip191_userop' | 'eip712_userop'
     components: {
       safe: string
       token: string
@@ -1020,7 +1020,7 @@ export interface RawCreateResponse {
   sign_data: {
     hash: string
     /** 'eip191_userop' = session rail (EIP-191); absent = legacy AllowanceModule (raw ECDSA). */
-    signature_scheme?: 'eip191_userop'
+    signature_scheme?: 'eip191_userop' | 'eip712_userop'
     components: {
       safe: string
       token: string

@@ -16,7 +16,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet, getBytes } from 'ethers'
 
-const { mockQuery, allowanceMocks, fiatMocks, sessionRailMocks } = vi.hoisted(() => ({
+const { mockQuery, allowanceMocks, fiatMocks, sessionRailMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
@@ -35,6 +35,10 @@ const { mockQuery, allowanceMocks, fiatMocks, sessionRailMocks } = vi.hoisted(()
   sessionRailMocks: {
     getSessionRailFor: vi.fn(),
   },
+  delegationMocks: {
+    prepareDelegationPayment: vi.fn(),
+    submitDelegationPayment: vi.fn(),
+  },
 }))
 
 vi.mock('../../db.js', () => ({
@@ -47,6 +51,8 @@ vi.mock('../../lib/execution-rail.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/execution-rail.js')>()
   return { ...actual, getSessionRailFor: sessionRailMocks.getSessionRailFor }
 })
+// Only the network seams of the delegation rail are mocked.
+vi.mock('../../lib/delegation-authorization.js', () => delegationMocks)
 
 const paymentRoutes = (await import('../payments.js')).default
 const { serializeUserOp } = await import('../../lib/execution-rail.js')
@@ -70,6 +76,7 @@ const RECIPIENT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const USER_OP_HASH = `0x${'cd'.repeat(32)}`
 const PERMISSION_ID = `0x${'ab'.repeat(32)}`
 const TX_HASH = `0x${'ef'.repeat(32)}`
+const DELEGATION_HASH = `0x${'12'.repeat(32)}`
 
 const PREPARED_USER_OP = {
   sender: AGENT.safe_address,
@@ -114,6 +121,15 @@ function intentRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function delegationIntentRow(overrides: Record<string, unknown> = {}) {
+  return intentRow({
+    execution_rail: 'delegation',
+    delegation_hash: DELEGATION_HASH,
+    prepared_user_op: JSON.parse(serializeUserOp(PREPARED_USER_OP)),
+    ...overrides,
+  })
+}
+
 function sessionIntentRow(overrides: Record<string, unknown> = {}) {
   return intentRow({
     execution_rail: 'session_key',
@@ -141,6 +157,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
     sessionRailMocks.getSessionRailFor.mockReset()
+    for (const mock of Object.values(delegationMocks)) mock.mockReset()
   })
 
   it('CHARACTERIZATION: legacy intents never touch the session rail', async () => {
@@ -311,26 +328,120 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.body).toContain('sponsorshipPolicy not active')
   })
 
-  it('POST /payments blocks a delegation-rail account CLEANLY — 503, never legacy fallthrough (#825)', async () => {
+  it('POST /payments on the delegation rail: prepares, pins the delegation, ships typed data (#829)', async () => {
+    delegationMocks.prepareDelegationPayment.mockResolvedValueOnce({
+      delegationHash: DELEGATION_HASH,
+      prepared: {
+        userOperation: PREPARED_USER_OP,
+        userOpHash: USER_OP_HASH,
+        signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
+        delegateAccountAddress: '0x' + 'ee'.repeat(20),
+      },
+    })
     mockQuery
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
-      .mockResolvedValueOnce({
-        rows: [{ execution_rail: 'delegation', session_permission_id: null }],
-      })
+      .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
+      .mockResolvedValueOnce({ rows: [delegationIntentRow()] })
 
     const response = await app.inject({
-      method: 'POST',
-      url: '/payments',
+      method: 'POST', url: '/payments',
       headers: { authorization: 'Bearer sk_agent_test' },
       payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
     })
 
-    expect(response.statusCode).toBe(503)
-    expect(response.json().error).toMatch(/delegation rail/)
-    // Neither rail was touched — no legacy attempt, no session prepare:
+    expect(response.statusCode).toBe(201)
+    const body = response.json()
+    expect(body.sign_data.signature_scheme).toBe('eip712_userop')
+    // The account validates typed data, not the bare hash — ship it:
+    expect(body.sign_data.typed_data.domain.name).toBe('HybridDeleGator')
+    // Neither other rail is touched:
     expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    // The intent pins the rail + which delegation authorized it:
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO payment_intents/.test(String(c[0])))!
+    expect(insert![1]).toContain('delegation')
+    expect(insert![1]).toContain(DELEGATION_HASH)
+  })
+
+  it('POST /payments 403s when the agent has no active delegation for the recipient', async () => {
+    delegationMocks.prepareDelegationPayment.mockResolvedValueOnce(null)
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+      .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
+
+    const response = await app.inject({
+      method: 'POST', url: '/payments',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+    })
+    expect(response.statusCode).toBe(403)
+    expect(response.json().error).toMatch(/no active budget delegation/)
+    // Nothing written:
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+  })
+
+  it('POST /payments: caveat rejection fails BEFORE any write, credential redacted (#829)', async () => {
+    delegationMocks.prepareDelegationPayment.mockRejectedValueOnce(
+      new Error('ERC20PeriodTransferEnforcer:transfer-amount-exceeded at https://api.pimlico.io/v2?apikey=pim_SECRET'),
+    )
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
+      .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
+
+    const response = await app.inject({
+      method: 'POST', url: '/payments',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
+    })
+    expect(response.statusCode).toBe(502)
+    expect(response.body).toContain('transfer-amount-exceeded')
+    expect(response.body).not.toContain('pim_SECRET')
+    expect(response.body).toContain('apikey=REDACTED')
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+  })
+
+  it('POST /:id/sign on a delegation intent: replays the prepared op, never touches other rails (#829)', async () => {
+    delegationMocks.submitDelegationPayment.mockResolvedValueOnce({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '0.01', eur: '0.01' })
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [delegationIntentRow()] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST', url: `/payments/${PAYMENT_ID}/sign`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: '0x' + 'ab'.repeat(97) }, // EIP-712 sig shape
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ status: 'confirmed', tx_hash: TX_HASH })
+    expect(delegationMocks.submitDelegationPayment).toHaveBeenCalledOnce()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
+    // The legacy recover was NOT used — the chain validates this scheme:
+    expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
+  })
+
+  it('POST /:id/sign fails closed when a delegation intent lost its prepared op', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [delegationIntentRow({ prepared_user_op: null })] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+
+    const response = await app.inject({
+      method: 'POST', url: `/payments/${PAYMENT_ID}/sign`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: '0x' + 'ab'.repeat(97) },
+    })
+    expect(response.statusCode).toBe(502)
+    expect(delegationMocks.submitDelegationPayment).not.toHaveBeenCalled()
   })
 
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {

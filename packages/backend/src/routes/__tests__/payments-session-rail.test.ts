@@ -502,6 +502,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // Pattern-matched (#775): the schedule wiring adds queries mid-flow.
     mockQuery.mockImplementation((sql: unknown) => {
       const s = String(sql)
+      if (/api_key_hash/.test(s)) return Promise.resolve(authRow())
       if (/session_schedule_from_period/.test(s)) {
         return Promise.resolve({
           rows: [{

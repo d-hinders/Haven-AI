@@ -103,6 +103,13 @@ const KNOWN_UNDOCUMENTED_ROUTES: Array<{
     path: '/transactions/{safeAddress}',
     because: 'Dashboard-only per-Safe view using dashboard JWT auth.',
   },
+  {
+    method: 'POST',
+    path: '/x402/{id}/settle',
+    because:
+      'Delegation-rail x402 settlement (#830, epic #821). Behind the /x402 ' +
+      'darkened rail; documented in the OpenAPI spec in the epic docs sweep (#834).',
+  },
 ]
 
 function isKnownUndocumented(method: string, path: string): boolean {

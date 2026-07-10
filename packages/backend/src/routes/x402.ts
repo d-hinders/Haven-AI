@@ -32,6 +32,15 @@ import {
   agentPaymentStatusHttpCode,
   getAgentPaymentStatus,
 } from '../lib/agent-payment-status.js'
+import { redactVendorSecrets } from '../lib/execution-rail.js'
+import { selectDelegation } from '../lib/delegation-authorization.js'
+import { computeHybridAccountAddress } from '../lib/hybrid-provisioning.js'
+import {
+  buildSettlementDelegation,
+  assembleSettlementPayload,
+  encodeXPaymentHeader,
+} from '../lib/x402-delegation.js'
+import { serializeUserOp, deserializeUserOp } from '../lib/execution-rail.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -254,6 +263,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       description,
       category,
       idempotencyKey,
+      maxTimeoutSeconds,
       signature,
     } = request.body
     let { payTo } = request.body
@@ -319,6 +329,97 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
     // Human-readable amount for storage
     const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
+
+    // ── Delegation rail (#830, epic #821) — DIRECT settlement ──────────────
+    // The agent's budget delegation IS the settlement instrument: the delegate
+    // account re-delegates a narrowed slice (exact amount, payee pin, short
+    // expiry) to the merchant, who redeems the [child, budget] chain. The
+    // period budget is metered by the settlement itself — no funding leg, no
+    // delegate hot balance, no sweep (epic #713's class is gone on this rail).
+    if (agent.execution_rail === 'delegation') {
+      if (tokenAddress === ZERO_ADDRESS) {
+        return reply.code(400).send({ error: 'Native-token x402 is not supported on the delegation rail' })
+      }
+      const budget = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
+      if (!budget) {
+        return reply.code(403).send({
+          error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this merchant`,
+        })
+      }
+      let built
+      let delegateAccountAddress
+      try {
+        delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+          ownerAddress: agent.delegate_address as `0x${string}`,
+        })
+        built = buildSettlementDelegation({
+          chainId: agent.chain_id,
+          delegateAccountAddress: delegateAccountAddress as `0x${string}`,
+          budgetDelegation: JSON.parse(budget.delegation_json),
+          asset: tokenAddress as `0x${string}`,
+          amountAtomic: amountRaw,
+          payTo: payTo.toLowerCase() as `0x${string}`,
+          maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
+        })
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'Could not build the settlement delegation',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        })
+      }
+
+      const intent = await createPaymentIntent({
+        agent,
+        rail: 'x402',
+        payTo,
+        tokenSymbol: tokenConfig.symbol,
+        tokenAddress,
+        amountRaw,
+        amountHuman,
+        allowanceNonce: 0,
+        signHash: built.childHash,
+        resourceUrl: url,
+        category: category ?? null,
+        merchantAddress: (merchantPayTo ?? payTo).toLowerCase(),
+        challengeId: null,
+        idempotencyKey: idempotencyKey ?? null,
+        metadata: null,
+        executionRail: 'delegation',
+        delegationHash: built.childHash,
+        preparedUserOp: serializeUserOp({
+          child: built.child,
+          budget: JSON.parse(budget.delegation_json),
+          delegateAccountAddress,
+          network,
+        }),
+        conflictTarget: 'x402_idempotency_key',
+      })
+      if (!intent) {
+        return reply.code(409).send({ error: 'Idempotent replay in progress — retry the original request' })
+      }
+
+      return reply.code(201).send({
+        payment_id: intent.id,
+        status: intent.status,
+        expires_at: intent.expires_at,
+        sign_data: {
+          hash: built.childHash,
+          signature_scheme: 'eip712_delegation',
+          typed_data: built.signingPayload,
+          components: {
+            account: delegateAccountAddress,
+            token: tokenAddress,
+            to: payTo.toLowerCase(),
+            amount: amountRaw.toString(),
+          },
+          instructions:
+            'Sign sign_data.typed_data with your delegate (agent) key (EIP-712; ' +
+            '@haven_ai/sdk signUserOpTypedDataForDelegation-style). Then POST ' +
+            `/x402/${intent.id}/settle with { signature } to receive the X-PAYMENT ` +
+            'header, and retry the merchant with it. The merchant settles directly.',
+        },
+      })
+    }
 
     if (idempotencyKey) {
       const existingResult = await pool.query(
@@ -989,4 +1090,84 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: X402AuthorizeBody }>('/', { config: moneyPathRateLimit }, authorizeX402Handler)
   app.post<{ Body: X402AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, authorizeX402Handler)
+
+  // ── POST /x402/:id/settle — delegation rail (#830) ───────────────────────
+  // The agent has signed the settlement child (EIP-712). Assemble the
+  // X-PAYMENT header and hand it back; the MERCHANT redeems the [child,
+  // budget] chain — Haven submits nothing, holds no key. The intent flips to
+  // 'submitted'; final settlement is observed via the merchant/receipt path.
+  app.post<{ Params: { id: string }; Body: { signature?: string } }>(
+    '/:id/settle',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const { id } = request.params
+      const { signature } = request.body ?? {}
+      if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+        return reply.code(400).send({ error: 'A delegate EIP-712 signature is required' })
+      }
+
+      const row = await pool.query<{
+        id: string
+        status: string
+        execution_rail: string | null
+        prepared_user_op: unknown
+        chain_id: number
+        x402_resource_url: string | null
+      }>(
+        `SELECT id, status, execution_rail, prepared_user_op, chain_id, x402_resource_url
+         FROM payment_intents
+         WHERE id = $1 AND agent_id = $2`,
+        [id, agent.id],
+      )
+      const intent = row.rows[0]
+      if (!intent) return reply.code(404).send({ error: 'Payment not found' })
+      if (intent.execution_rail !== 'delegation') {
+        return reply.code(409).send({ error: 'This payment is not a delegation-rail x402 settlement' })
+      }
+      if (intent.status !== 'pending_signature') {
+        return reply.code(409).send({ error: `Payment is ${intent.status}, expected pending_signature` })
+      }
+      if (intent.prepared_user_op == null) {
+        return reply.code(502).send({ error: 'Settlement state was lost — re-authorize' })
+      }
+
+      try {
+        const state = deserializeUserOp(intent.prepared_user_op) as {
+          child: Parameters<typeof assembleSettlementPayload>[1]
+          budget: Parameters<typeof assembleSettlementPayload>[3]
+          delegateAccountAddress: `0x${string}`
+          network: string
+        }
+        const payload = assembleSettlementPayload(
+          intent.chain_id,
+          state.child,
+          signature as `0x${string}`,
+          state.budget,
+          state.delegateAccountAddress,
+        )
+        const header = encodeXPaymentHeader(state.network, payload)
+
+        await pool.query(
+          `UPDATE payment_intents
+           SET status = 'submitted', signature = $1, signed_at = NOW(), submitted_at = NOW()
+           WHERE id = $2 AND agent_id = $3 AND status = 'pending_signature'`,
+          [signature, id, agent.id],
+        )
+        return reply.code(200).send({
+          payment_id: id,
+          status: 'submitted',
+          // Retry the merchant with this header; it settles directly from your
+          // budget delegation (no funding leg).
+          payment_header: header,
+          resource_url: intent.x402_resource_url,
+        })
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'Could not assemble the settlement payload',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        })
+      }
+    },
+  )
 }

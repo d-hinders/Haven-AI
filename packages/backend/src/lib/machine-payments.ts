@@ -596,12 +596,16 @@ export interface CreatePaymentIntentInput {
   idempotencyKey: string | null
   /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
   metadata: unknown | null
-  /** Pin the intent to the session rail (#745). Omit for the legacy path. */
-  executionRail?: 'session_key'
+  /** Pin the intent to a non-legacy rail (#745/#830). Omit for legacy. */
+  executionRail?: 'session_key' | 'delegation'
   /** The Smart Sessions permissionId pinned at authorize time. */
   sessionPermissionId?: string
   /** Pre-serialized prepared UserOperation (serializeUserOp) for session intents. */
   sessionUserOp?: string
+  /** The delegation authorizing a delegation-rail intent (#829/#830). */
+  delegationHash?: string
+  /** Pre-serialized prepared redemption/settlement state for delegation intents. */
+  preparedUserOp?: string
   /**
    * Which partial-unique index enforces idempotent dedup for this rail. x402
    * dedupes on `x402_idempotency_key`; MPP rails on `machine_idempotency_key`.
@@ -629,7 +633,8 @@ export async function createPaymentIntent(
     agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
     allowanceNonce, signHash, resourceUrl, category, merchantAddress,
     challengeId, idempotencyKey, metadata,
-    executionRail, sessionPermissionId, sessionUserOp, conflictTarget,
+    executionRail, sessionPermissionId, sessionUserOp,
+    delegationHash, preparedUserOp, conflictTarget,
   } = input
 
   // conflictTarget is a strict union mapped through an allowlist — never raw
@@ -645,10 +650,11 @@ export async function createPaymentIntent(
       x402_merchant_address, x402_idempotency_key,
       payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
       machine_idempotency_key, machine_metadata,
-      execution_rail, session_permission_id, session_user_op, expires_at
+      execution_rail, session_permission_id, session_user_op,
+      delegation_hash, prepared_user_op, expires_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW() + interval '10 minutes')
+      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, NOW() + interval '10 minutes')
     ON CONFLICT (agent_id, ${conflictColumn})
       WHERE ${conflictColumn} IS NOT NULL
         AND status NOT IN ('failed', 'expired')
@@ -665,6 +671,7 @@ export async function createPaymentIntent(
       rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
       idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
       executionRail ?? null, sessionPermissionId ?? null, sessionUserOp ?? null,
+      delegationHash ?? null, preparedUserOp ?? null,
     ],
   )
 

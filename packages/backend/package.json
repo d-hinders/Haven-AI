@@ -26,6 +26,7 @@
     "@fastify/jwt": "^10.1.0",
     "@fastify/rate-limit": "^11.1.0",
     "@haven_ai/sdk": "*",
+    "@metamask/smart-accounts-kit": "^1.6.0",
     "@rhinestone/module-sdk": "^0.4.0",
     "@safe-global/protocol-kit": "^5.1.0",
     "bcrypt": "^6.0.0",

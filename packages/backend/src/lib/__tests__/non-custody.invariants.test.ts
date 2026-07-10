@@ -132,13 +132,15 @@ describe('non-custody invariants — session-key rail (#736)', () => {
   })
 
   // Invariant 9 — the bundler credential (URL embeds the API key) has exactly
-  // one production choke point, keeping it auditable and un-loggable by
-  // construction elsewhere.
-  it('reads the bundler credential in exactly one place', () => {
+  // ONE production choke point PER RAIL, keeping it auditable and un-loggable
+  // by construction elsewhere. The delegation rail's accessor (#826) reads
+  // SESSION_RAIL_BUNDLER_URL only as its documented fallback — still a single
+  // named accessor for that rail (delegationRailBundlerUrl).
+  it('reads the bundler credential in exactly one place per rail', () => {
     const holders = productionFiles().filter((f) =>
-      /SESSION_RAIL_BUNDLER_URL/.test(readFileSync(f, 'utf8')),
+      /SESSION_RAIL_BUNDLER_URL|DELEGATION_RAIL_BUNDLER_URL/.test(readFileSync(f, 'utf8')),
     )
-    expect(holders.map(rel)).toEqual(['lib/execution-rail.ts'])
+    expect(holders.map(rel).sort()).toEqual(['lib/delegation-rail.ts', 'lib/execution-rail.ts'])
   })
 
   // Invariant 10 — the paymaster sponsors GAS, never value: no ERC-20 value

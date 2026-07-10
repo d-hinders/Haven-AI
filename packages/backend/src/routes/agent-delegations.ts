@@ -293,12 +293,14 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         })
         const prepared = await treasury.prepareCall(revocation.to, revocation.data)
         return {
-          user_op_hash: prepared.userOpHash,
+          // The owner signs THIS typed data (the account validates it), not
+          // the bare hash — same scheme as delegation payments (#829).
+          signing_payload: prepared.signingTypedData,
           user_operation: JSON.parse(
             JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
           ),
           treasury_address: prepared.treasuryAddress,
-          instructions: 'Sign user_op_hash with the treasury owner key, then POST /revoke/submit',
+          instructions: 'Sign signing_payload (EIP-712) with the treasury owner key, then POST /revoke/submit',
         }
       } catch (err) {
         return reply.code(502).send({ error: 'Could not prepare the revocation', details: safeDetails(err) })
@@ -341,7 +343,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
       )
       const result = await treasury.submitCall(
-        { userOperation: revived, userOpHash: '0x' as Hex, treasuryAddress: treasury.treasuryAddress },
+        { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
         signature as Hex,
       )
       await pool.query(

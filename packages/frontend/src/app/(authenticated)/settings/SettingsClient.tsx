@@ -256,6 +256,20 @@ export default function SettingsClient() {
             detail={t.settings.recovery.sessionsDetail}
             action={<StatusPill>{t.common.comingSoon}</StatusPill>}
           />
+          <SettingRow
+            label={t.settings.recovery.exitPathLabel}
+            detail={t.settings.recovery.exitPathDetail}
+            action={
+              <a
+                href="/exit/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-[var(--v2-brand)] hover:underline"
+              >
+                {t.settings.recovery.exitPathLabel} →
+              </a>
+            }
+          />
         </Section>
 
         <Section

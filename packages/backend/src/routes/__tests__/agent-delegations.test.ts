@@ -207,14 +207,16 @@ describe('delegation lifecycle API (#828)', () => {
         prepareCall: vi.fn().mockResolvedValue({
           userOperation: { nonce: 1n, sender: TREASURY },
           userOpHash: `0x${'ef'.repeat(32)}`,
+          // The owner signs THIS typed data — not the bare hash (#829 lesson).
+          signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
           treasuryAddress: TREASURY,
         }),
         submitCall: vi.fn(),
       })
       const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
       expect(res.statusCode).toBe(200)
-      expect(res.json().user_op_hash).toMatch(/^0x[0-9a-f]{64}$/i)
-      expect(res.json().instructions).toMatch(/Sign user_op_hash/)
+      expect(res.json().signing_payload.domain.name).toBe('HybridDeleGator')
+      expect(res.json().instructions).toMatch(/Sign signing_payload/)
       // Nothing was submitted, nothing marked revoked yet:
       expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
     })

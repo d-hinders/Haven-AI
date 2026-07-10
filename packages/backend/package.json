@@ -15,8 +15,10 @@
     "agent:demo": "tsx scripts/agent-payment-demo.ts",
     "pilot:rotate-live": "tsx scripts/rotate-session-live.ts",
     "pilot:schedule-live": "tsx scripts/schedule-live.ts",
+    "pilot:delegation-rail-smoke": "tsx scripts/delegation-rail-smoke.ts",
     "ops:check-attestation": "tsx scripts/check-attestation.ts",
     "ops:check-bundler": "tsx scripts/check-bundler.ts",
+    "ops:check-delegation": "tsx scripts/check-delegation-contracts.ts",
     "ops:check-delegate-balances": "tsx scripts/check-delegate-balances.ts",
     "db:schema-smoke": "tsx scripts/db-schema-smoke.ts"
   },

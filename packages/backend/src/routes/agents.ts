@@ -130,6 +130,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const agentResult = await pool.query<AgentRow>(
       `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
+              us.account_type,
               a.api_key_prefix, a.status, a.created_at,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(

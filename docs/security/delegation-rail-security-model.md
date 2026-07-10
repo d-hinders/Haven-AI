@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-07-10"
+last-verified: "2026-07-11"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -39,7 +39,7 @@ enforcers referenced below — all Consensys Diligence-audited (Aug 2024 / Apr
    third-party UI. On this stack it must be **rebuilt and demonstrated**
    (§4) before any external user touches the rail.
 
-## 2. Invariant mapping (implemented in #831)
+## 2. Invariant mapping (implemented — `non-custody.invariants.test.ts`, #831)
 
 Every invariant in `non-custody.invariants.test.ts` maps as follows. "CI"
 means a named check in the delegation-rail invariant suite; nothing is

@@ -154,3 +154,85 @@ describe('non-custody invariants — session-key rail (#736)', () => {
     expect(sessionRail).not.toMatch(/paymasterTokens|payInERC20|tokenPaymaster/i)
   })
 })
+
+describe('non-custody invariants — delegation rail (#831, mapping: docs/security/delegation-rail-security-model.md §2)', () => {
+  const read = (...p: string[]) => readFileSync(join(SRC, ...p), 'utf8')
+
+  // Invariant 5-d — every account the rail derives (delegate, treasury,
+  // provisioning) is constructed WATCH-ONLY and refuses to sign, loudly.
+  it('keeps delegation-rail account owners watch-only (refuse, loudly)', () => {
+    for (const [file, marker] of [
+      ['delegation-rail.ts', 'non-custody: the backend cannot sign as the agent delegate'],
+      ['hybrid-provisioning.ts', 'non-custody: provisioning is watch-only and cannot sign'],
+    ] as const) {
+      const src = read('lib', file)
+      expect(src, `${file} watch-only marker`).toContain(marker)
+      for (const method of ['signMessage', 'signTransaction', 'signTypedData']) {
+        expect(src, `${file} binds ${method} to refusal`).toMatch(new RegExp(`${method}: refuse`))
+      }
+    }
+  })
+
+  // Invariant 7-d — redemptions and treasury ops carry CLIENT signatures
+  // only: submit takes the signature as an argument; nothing in production
+  // source calls the kit's signing entry points.
+  it('submits redemptions/treasury ops with a caller-provided signature only', () => {
+    const rail = read('lib', 'delegation-rail.ts')
+    expect(rail).toMatch(/submitRedemption\(\s*\n?\s*prepared[\s\S]{0,120}signature:\s*Hex/)
+    const signers = productionFiles().filter((f) =>
+      /\bsignDelegation\s*\(|\bsignUserOperation\s*\(/.test(readFileSync(f, 'utf8')),
+    )
+    expect(
+      signers.map(rel),
+      'kit signing entry points take a PRIVATE KEY — client-side only (#824 invariant 12)',
+    ).toEqual([])
+  })
+
+  // Invariant 8-d — the authority lifecycle (compile / grant / revoke
+  // routes) is pure construction plus bookkeeping: no signer construction,
+  // no relayer reach.
+  it('keeps delegation lifecycle modules signer-free and relayer-free', () => {
+    for (const file of [
+      join('lib', 'delegation-policy.ts'),
+      join('lib', 'delegation-contracts.ts'),
+      join('routes', 'agent-delegations.ts'),
+      join('routes', 'hybrid-accounts.ts'),
+    ]) {
+      const src = readFileSync(join(SRC, file), 'utf8')
+      expect(src, `${file} must not construct signers`).not.toMatch(
+        /new Wallet\(|privateKeyToAccount|signingKey/,
+      )
+      expect(src, `${file} must not reach for the relayer`).not.toMatch(/getRelayerWallet/)
+    }
+  })
+
+  // Invariant 11 (NEW, #824) — Haven's codebase contains NO path to the
+  // account's UUPS upgrade surface: upgrade authority is the account's own
+  // signers, never code Haven ships.
+  it('contains no UUPS upgrade call path', () => {
+    const offenders = productionFiles().filter((f) =>
+      /upgradeToAndCall|upgradeTo\s*\(|proxiableUUID/.test(readFileSync(f, 'utf8')),
+    )
+    expect(offenders.map(rel), 'UUPS upgrade authority = account signers ONLY').toEqual([])
+  })
+
+  // Invariant 12 (NEW, #824) — delegations are client-signed only: the
+  // EIP-712 payload leaves the backend unsigned (delegationSigningPayload),
+  // and no production code holds a key that could sign one (see 7-d for the
+  // call-site scan; this pins the payload shape).
+  it('ships delegation signing payloads unsigned, for the owner to sign', () => {
+    const policy = read('lib', 'delegation-policy.ts')
+    expect(policy).toMatch(/delegationSigningPayload/)
+    const route = read('routes', 'agent-delegations.ts')
+    expect(route).toMatch(/signing_payload/)
+    // The activate step receives the signature from the client:
+    expect(route).toMatch(/signature.*required/i)
+  })
+
+  // Invariant 10-d — sponsorship pays gas only, on this rail too.
+  it('gives the delegation-rail paymaster no value-transfer surface', () => {
+    const rail = read('lib', 'delegation-rail.ts')
+    expect(rail).toMatch(/paymaster:\s*pimlico/)
+    expect(rail).not.toMatch(/paymasterTokens|payInERC20|tokenPaymaster/i)
+  })
+})

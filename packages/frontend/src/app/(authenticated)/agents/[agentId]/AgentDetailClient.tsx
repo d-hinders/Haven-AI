@@ -32,6 +32,7 @@ import { useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
 import ScheduleRenewalBanner from '@/components/ScheduleRenewalBanner'
 import AgentRecipientsCard from '@/components/AgentRecipientsCard'
+import DelegationBudgetCard from '@/components/DelegationBudgetCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import {
@@ -534,20 +535,30 @@ export default function AgentDetailClient({ agentId }: Props) {
         <PasskeyOtherDeviceNotice className="mt-4" />
       ) : null}
 
-      <ScheduleRenewalBanner
-        agentId={agentId}
-        safeAddress={safeAddress}
-        chainId={chainId}
-        safeDetails={safeDetails}
-      />
+      {currentAgent.account_type === 'delegator_hybrid' ? (
+        <DelegationBudgetCard
+          agentId={agentId}
+          chainId={chainId}
+          tokens={recipientTokens}
+        />
+      ) : (
+        <>
+          <ScheduleRenewalBanner
+            agentId={agentId}
+            safeAddress={safeAddress}
+            chainId={chainId}
+            safeDetails={safeDetails}
+          />
 
-      <AgentRecipientsCard
-        agentId={agentId}
-        safeAddress={safeAddress}
-        chainId={chainId}
-        safeDetails={safeDetails}
-        tokens={recipientTokens}
-      />
+          <AgentRecipientsCard
+            agentId={agentId}
+            safeAddress={safeAddress}
+            chainId={chainId}
+            safeDetails={safeDetails}
+            tokens={recipientTokens}
+          />
+        </>
+      )}
 
       {isPaused ? (
         <div className="mt-4">

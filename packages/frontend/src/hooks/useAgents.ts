@@ -22,6 +22,8 @@ export interface Agent {
   safe_address: string | null
   safe_name: string | null
   safe_chain_id?: number | null
+  /** 'delegator_hybrid' = delegation rail (#821). */
+  account_type?: string | null
   api_key?: string | null
   api_key_prefix?: string | null
   status: AgentStatus

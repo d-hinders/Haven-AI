@@ -55,7 +55,7 @@ covers:
   - docs/architecture/07-edge-signer.md
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-07-10"
+last-verified: "2026-07-11"
 ---
 
 # Haven — Architecture Overview
@@ -108,11 +108,11 @@ on-chain agent rules in Haven → the agent can pay. Current contracts:
 
 - **Safe + AllowanceModule** — custody and on-chain policy enforcement
   ([identity & custody](02-identity-and-custody.md)).
-- **Hybrid DeleGator (dark-launched, epic #821)** — a second account type for
-  new accounts (`account_type='delegator_hybrid'`): MetaMask's audited smart
-  account with policy as delegations + caveat enforcers. Provisioning only so
-  far; payments fail closed (503) until the delegation payment rail lands
-  (#829). See `docs/security/delegation-rail-security-model.md`.
+- **Hybrid DeleGator (epic #821)** — a second account type for new accounts
+  (`account_type='delegator_hybrid'`): MetaMask's audited smart account with
+  policy as delegations + caveat enforcers. Payments redeem the agent's
+  budget delegation via sponsored UserOps (#829); budgets refill natively
+  on-chain. See `docs/security/delegation-rail-security-model.md`.
 - **PostgreSQL** — users, wallets, agents, allowances, payments, approvals,
   receipts, catalog/reporting state, and audit records.
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)

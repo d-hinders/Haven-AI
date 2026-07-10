@@ -12,6 +12,9 @@ export interface AgentContext {
   safe_address: string
   chain_id: number
   status: string
+  /** The account's execution rail (#821): 'delegation' routes to the new rail. */
+  execution_rail?: string | null
+  account_type?: string | null
 }
 
 // Extend Fastify request
@@ -120,11 +123,14 @@ export async function agentAuthMiddleware(
     safe_address: string | null
     chain_id: number
     status: string
+    execution_rail: string | null
+    account_type: string | null
   }>(
     `SELECT a.id, a.user_id, a.name, a.delegate_address,
             a.status,
             COALESCE(us.safe_address, u.safe_address) as safe_address,
-            COALESCE(us.chain_id, 8453) as chain_id
+            COALESCE(us.chain_id, 8453) as chain_id,
+            us.execution_rail, us.account_type
      FROM agents a
      JOIN users u ON a.user_id = u.id
      LEFT JOIN user_safes us ON a.safe_id = us.id
@@ -170,5 +176,7 @@ export async function agentAuthMiddleware(
     safe_address: row.safe_address,
     chain_id: row.chain_id,
     status: row.status,
+    execution_rail: row.execution_rail ?? null,
+    account_type: row.account_type ?? null,
   }
 }

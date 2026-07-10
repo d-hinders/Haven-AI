@@ -75,7 +75,7 @@ export default function AgentRecipientsCard({
   const tokenFor = (tokenAddress: string): RecipientToken | undefined =>
     tokens.find((t) => t.address.toLowerCase() === tokenAddress.toLowerCase())
   const [saving, setSaving] = useState(false)
-  const { apply, applying, ready } = useApplySchedule({ agentId, safeAddress, chainId, safeDetails })
+  const { apply, applying, awaitingCoOwners, ready } = useApplySchedule({ agentId, safeAddress, chainId, safeDetails })
   const { toast } = useToast()
 
   const reload = useCallback(async () => {
@@ -136,11 +136,14 @@ export default function AgentRecipientsCard({
 
   const handleApply = useCallback(async () => {
     const result = await apply()
-    if (result.ok) {
+    if (result.ok && 'proposed' in result) {
+      // Multi-sig (#800): recording happens automatically once co-owners
+      // execute — the backend verifies on-chain before recording.
+      setPendingApply(false)
+      toast.info('Signed — waiting for your co-owners to approve.')
+    } else if (result.ok) {
       setPendingApply(false)
       toast.success('Recipient changes applied.')
-    } else if (result.reason === 'multisig') {
-      toast.error('Applying needs your other owners — use Update budget instead.')
     } else if (result.reason === 'cancelled') {
       toast.error('Signature was cancelled.')
     } else {
@@ -161,7 +164,11 @@ export default function AgentRecipientsCard({
             Who this agent can pay. Each recipient spends within the agent budget.
           </p>
         </div>
-        {pendingApply && scheduleEnabled ? (
+        {awaitingCoOwners ? (
+          <span className="text-xs font-medium text-[var(--v2-ink-muted)]">
+            Waiting for co-owners
+          </span>
+        ) : pendingApply && scheduleEnabled ? (
           <Button size="sm" onClick={handleApply} disabled={applying || !ready}>
             {applying ? 'Applying…' : 'Sign to apply'}
           </Button>

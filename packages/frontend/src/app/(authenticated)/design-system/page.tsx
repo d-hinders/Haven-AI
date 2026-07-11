@@ -132,6 +132,16 @@ export default function DesignSystemPage() {
               Copy section near the bottom for the user-facing language rules (we say <em>account</em>, not
               <em> Safe</em>; sentence case for modal titles, etc.).
             </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">5. CI enforces this.</span> The design-lint
+              gate (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">npm run design:lint -w packages/frontend</code>)
+              {' '}fails a PR that introduces raw Tailwind palette classes, hardcoded hex colours, or new{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">text-[10px]</code>/<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">text-[11px]</code>.
+              Existing debt lives in a shrink-only baseline
+              (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">design-lint-baseline.json</code>) —
+              counts may only go down. Route colours through{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">var(--v2-…)</code> tokens instead.
+            </li>
           </ol>
         </Card>
       </Section>

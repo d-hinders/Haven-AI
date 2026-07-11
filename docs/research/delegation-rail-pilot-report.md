@@ -40,7 +40,7 @@ route layer — and that difference is exactly what caught the bug in §3.
 | # | Proof | Status | Evidence |
 |---|---|---|---|
 | 1 | Fresh account provisioned | ✅ live (prod) | `POST /accounts/hybrid` → `0x8B9bfeC4B58ffF2c830c49F1F0b57daa8a4BCac1`; delegator deployed `0x38f15757a43a5d06f95c63bdf5a6d7ee754117ae2f3a694df335b0b0a728da70` |
-| 2 | One-signature budget grant | ✅ live (prod) | `build`→owner signs the account's exact EIP-712 typed data→`activate`; 1 signature, 0 tx |
+| 2 | One-signature budget grant | ✅ live (prod) | `build`→owner signs the account's exact EIP-712 typed data→`activate`; 1 owner signature, 0 owner tx (activate relayer-deploys a counterfactual delegator, #860) |
 | 3 | Within-budget payment | ✅ live (prod) | direct account→recipient, no funding leg — `0x1b85de04cacf2828ecfa539c471097fe38813ca70ca548b8c387a9465cd52756` |
 | 4 | Overspend reverts | ✅ live (prod) | second in-period spend rejected on-chain; no funds moved |
 | 5 | **Zero-signature refill** | ✅ live (prod) | spend to cap → period boundary → spend again, **no signature, no Haven cron** — `0x5eacf0130006af7f31212aec44b3901d49e18ec597c5a6bcb5303d492ff3727f` |
@@ -85,9 +85,12 @@ from earlier pilot runs.
 Deploying the treasury by hand (a sponsored no-op `createTreasuryOps` op,
 owner-signed — `scripts/deploy-treasury.ts`, tx `0x38f15757…`) unblocked the
 entire matrix above, so the mechanics are correct; only the lifecycle step is
-missing. Fix options (deploy-on-grant / deploy-on-provision / ERC-6492) are in
-[#860](https://github.com/d-hinders/Haven-AI/issues/860) — a design call, since
-options 1–2 add a second owner signature and option 3 needs a 6492 spike.
+missing. **Fixed by #860:** a 4337 factory deploy is permissionless, so grant
+activation now deploys the delegator via the RELAYER's plain factory call —
+no owner signature, no owner transaction; the one-signature grant UX is
+preserved and non-custody is unchanged (the deployed account's signers are
+the owner's keys). ERC-6492 was ruled out (no support in the kit/manager);
+deploy-at-provisioning was ruled out (gas for accounts that may never grant).
 
 ## Gas / latency vs the session rail it replaces
 

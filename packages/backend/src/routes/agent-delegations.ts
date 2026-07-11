@@ -2,7 +2,9 @@
  * Delegation lifecycle API (#828, epic #821 Phase 2) — owner-facing.
  *
  * Signature economics (the honest accounting):
- * - GRANT   = ONE offline EIP-712 signature, ZERO transactions — the
+ * - GRANT   = ONE offline EIP-712 owner signature, zero OWNER transactions
+ *   (if the delegator account is still counterfactual, activate deploys it
+ *   via the relayer's permissionless factory call, #860) — the
  *             flagship UX: build → owner signs client-side → activate.
  * - REVOKE  = ONE signature: a sponsored treasury UserOp executing
  *             disableDelegation (prepare → owner signs hash → submit).
@@ -30,7 +32,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '../lib/address.js'
 import { getChain } from '../lib/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
-import { computeHybridAccountAddress } from '../lib/hybrid-provisioning.js'
+import { computeHybridAccountAddress, ensureHybridDeployed } from '../lib/hybrid-provisioning.js'
 import {
   buildBudgetDelegation,
   buildRevocation,
@@ -223,6 +225,41 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if (!pending) return reply.code(404).send({ error: 'Delegation not found' })
       if (pending.status !== 'pending') {
         return reply.code(409).send({ error: `Delegation is ${pending.status}, not pending` })
+      }
+
+      // ── Deploy the delegator account if still counterfactual (#860) ──
+      // The DelegationManager validates the delegation's signature via
+      // EIP-1271, which reverts against an account with no code — found live
+      // by the #835 DoD. A 4337 factory deploy is permissionless, so the
+      // relayer deploys WITHOUT any owner signature (one-signature grant UX
+      // preserved; non-custody unchanged — the account's signers are the
+      // owner's keys). Fail-closed: no activation on a failed deploy, the
+      // grant stays pending and activate can be retried.
+      const ownerRow = await pool.query<{ owner_address: string | null }>(
+        `SELECT owner_address FROM user_safes
+         WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)`,
+        [sub, agent.treasury_address],
+      )
+      const ownerAddress = ownerRow.rows[0]?.owner_address
+      if (!ownerAddress) {
+        return reply.code(409).send({
+          error: 'Treasury owner identity unknown — passkey-owned deploys land with #836',
+        })
+      }
+      try {
+        const deployed = await ensureHybridDeployed(agent.chain_id, {
+          ownerAddress: ownerAddress as Address,
+        })
+        if (deployed.address.toLowerCase() !== String(agent.treasury_address).toLowerCase()) {
+          // The stored owner no longer derives the stored account — refuse
+          // rather than activate a grant the chain can never honour.
+          return reply.code(500).send({ error: 'Account derivation mismatch — contact support' })
+        }
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'Could not deploy the account for this budget — try again',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        })
       }
 
       const signed = { ...JSON.parse(pending.delegation_json), signature }

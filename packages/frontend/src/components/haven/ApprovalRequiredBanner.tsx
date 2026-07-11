@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { Info, TriangleAlert } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 export function ApprovalRequiredBanner({
   title = 'Payments above budget need approval',
@@ -28,21 +30,7 @@ export function ApprovalRequiredBanner({
             neutral ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-warning)] shadow-[var(--v2-shadow-card)]'
           }`}
         >
-          <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            {neutral ? (
-              <>
-                <circle cx="8" cy="8" r="5.75" />
-                <path d="M8 7.25v3.25" strokeLinecap="round" />
-                <path d="M8 5.25h.01" strokeLinecap="round" />
-              </>
-            ) : (
-              <>
-                <path d="M8 4.5v4" strokeLinecap="round" />
-                <path d="M8 11.25h.01" strokeLinecap="round" />
-                <path d="M7.1 2.1 1.9 11.2A1.8 1.8 0 0 0 3.5 14h9a1.8 1.8 0 0 0 1.6-2.8L8.9 2.1a1.05 1.05 0 0 0-1.8 0Z" strokeLinejoin="round" />
-              </>
-            )}
-          </svg>
+          <Icon icon={neutral ? Info : TriangleAlert} className="h-3.5 w-3.5" />
         </div>
         <div>
           <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>

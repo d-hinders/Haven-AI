@@ -1,5 +1,7 @@
 'use client'
 
+import { Bot, ChevronRight, CircleAlert, CirclePause, Clock, Copy, LoaderCircle, Plus, TriangleAlert } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, useMemo, useEffect, useCallback, useRef, type KeyboardEvent, type MouseEvent } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
@@ -98,10 +100,7 @@ function timeUntil(date: Date): string {
 
 function BotIcon({ size = 15 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="5" y="8" width="14" height="10" rx="3" />
-      <path d="M12 5v3M9.5 12h.01M14.5 12h.01M9 16h6" />
-    </svg>
+    <Icon icon={Bot} size={size} className="flex-shrink-0" />
   )
 }
 
@@ -408,11 +407,7 @@ function AgentCard({
 
       {isPaused && (
         <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-warning)] flex-shrink-0 mt-0.5">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M10 15V9" />
-            <path d="M14 15V9" />
-          </svg>
+          <Icon icon={CirclePause} className="h-[13px] w-[13px] text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-medium text-[var(--v2-warning)]">Paused in Haven</p>
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
@@ -424,11 +419,7 @@ function AgentCard({
 
       {agent.has_stranded_funds && (
         <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-warning)] flex-shrink-0 mt-0.5">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-            <line x1="12" y1="9" x2="12" y2="13" />
-            <line x1="12" y1="17" x2="12.01" y2="17" />
-          </svg>
+          <Icon icon={TriangleAlert} className="h-[13px] w-[13px] text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-[var(--v2-warning)]">Stranded funds on delegate</p>
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
@@ -643,17 +634,7 @@ function UnmanagedDelegateCard({
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className={`w-9 h-9 rounded-xl bg-white flex items-center justify-center ${accentText}`}>
-            {pendingHavenSetup ? (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v5l3 2" />
-              </svg>
-            ) : (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 9v4M12 17h.01" />
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-              </svg>
-            )}
+            <Icon icon={pendingHavenSetup ? Clock : TriangleAlert} className="h-[17px] w-[17px]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -685,10 +666,7 @@ function UnmanagedDelegateCard({
             className={`ml-2 transition-colors hover:text-[var(--v2-ink)] ${accentText}`}
             title="Copy address"
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
+            <Icon icon={Copy} className="h-[11px] w-[11px]" />
           </button>
         </p>
       </div>
@@ -1090,11 +1068,7 @@ export default function AgentPanel() {
           <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-white px-4 py-3 shadow-[var(--v2-shadow-modal)]">
             <div className="flex items-center gap-2">
               <div className="w-5 h-5 rounded-full bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] flex items-center justify-center flex-shrink-0">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
+                <Icon icon={CircleAlert} className="h-3 w-3" />
               </div>
               <p className="text-sm font-medium text-[var(--v2-ink)]">{toastMessage}</p>
             </div>
@@ -1117,10 +1091,7 @@ export default function AgentPanel() {
             onClick={() => setConnect2Open(true)}
             size="sm"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
+            <Icon icon={Plus} className="h-3.5 w-3.5" />
             Connect agent
           </Button>
         </div>
@@ -1157,17 +1128,8 @@ export default function AgentPanel() {
         <EmptyState
           tone="neutral"
           icon={
-            <svg
-              className="animate-spin"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
-              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-            </svg>
+            /* Heavier stroke: matches the original spinner's 3px ring weight. */
+            <Icon icon={LoaderCircle} className="h-[18px] w-[18px] animate-spin" strokeWidth={3} />
           }
           title="Finalizing your agent…"
           body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
@@ -1185,20 +1147,7 @@ export default function AgentPanel() {
           <EmptyState
             tone="warning"
             icon={
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v5l3 2" />
-              </svg>
+              <Icon icon={Clock} className="h-[22px] w-[22px]" />
             }
             title="Your agent is taking longer than expected"
             body="Haven is still confirming the new rules on-chain. This can take a little longer under load — check again in a moment."
@@ -1274,19 +1223,10 @@ export default function AgentPanel() {
                 onClick={() => setShowRevokedAgents((prev) => !prev)}
                 className="inline-flex items-center gap-2 text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
               >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={`transition-transform ${showRevokedAgents ? 'rotate-90' : ''}`}
-                >
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
+                <Icon
+                  icon={ChevronRight}
+                  className={`h-3 w-3 transition-transform ${showRevokedAgents ? 'rotate-90' : ''}`}
+                />
                 {showRevokedAgents ? 'Hide revoked agents' : 'Show revoked agents'}
                 <span className="text-[var(--v2-ink-3)] v2-tabular">({revokedAgents.length})</span>
               </button>

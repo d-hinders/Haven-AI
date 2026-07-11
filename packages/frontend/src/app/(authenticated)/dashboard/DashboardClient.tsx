@@ -1,5 +1,7 @@
 'use client'
 
+import { ArrowLeftRight, Bot, ChevronRight, DollarSign, ShieldCheck, Wallet } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { Address } from 'viem'
@@ -195,9 +197,7 @@ function ConnectedAgentsSection({
                 }
                 subtitle={buildSpendSummary(agent)}
                 trailing={
-                  <svg className="w-4 h-4 text-[var(--v2-ink-3)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
+                  <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)]" />
                 }
                 className="h-[72px] px-5"
               />
@@ -420,34 +420,25 @@ function MetricCard({
 
 function AgentMarkIcon() {
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <rect x="5" y="8" width="14" height="10" rx="3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v3M9.5 12h.01M14.5 12h.01M9 16h6" />
-    </svg>
+    <Icon icon={Bot} className="w-full h-full" />
   )
 }
 
 function SpendIcon() {
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m4-9.5c0-1.38-1.79-2.5-4-2.5s-4 1.12-4 2.5 1.79 2.5 4 2.5 4 1.12 4 2.5-1.79 2.5-4 2.5-4-1.12-4-2.5" />
-    </svg>
+    <Icon icon={DollarSign} className="w-full h-full" />
   )
 }
 
 function CheckIcon() {
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-    </svg>
+    <Icon icon={ShieldCheck} className="w-full h-full" />
   )
 }
 
 function WalletIcon() {
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9v3m13.5 3.75h.008v.008H16.5v-.008z" />
-    </svg>
+    <Icon icon={Wallet} className="w-full h-full" />
   )
 }
 
@@ -455,9 +446,7 @@ function EmptyTransactionsIcon() {
   // Arrows-in-out icon — mirrors the sidebar's "transactions" mark so the
   // empty state belongs to the same visual family.
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 7.5h11.25m0 0L15.75 4.5m3 3l-3 3M16.5 16.5H5.25m0 0l3-3m-3 3l3 3" />
-    </svg>
+    <Icon icon={ArrowLeftRight} className="w-full h-full" />
   )
 }
 

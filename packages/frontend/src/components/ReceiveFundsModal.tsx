@@ -11,6 +11,8 @@ import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useToast } from '@/components/ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 interface Props {
   open: boolean
@@ -92,9 +94,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
             aria-label="Close"
             className="-mr-1 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon icon={X} className="h-5 w-5" />
           </button>
         </div>
 

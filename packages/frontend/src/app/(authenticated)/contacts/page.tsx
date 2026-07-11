@@ -1,5 +1,7 @@
 'use client'
 
+import { Check, Copy, Info, Pencil, Search, Trash2, Users } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, type FormEvent, type MouseEvent } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { useContactChains } from '@/hooks/useContactChains'
@@ -38,13 +40,7 @@ function chainName(chainId: number): string {
 
 function ContactIcon() {
   return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M15 19.128A8.97 8.97 0 0 0 18 19.5a8.96 8.96 0 0 0 4.121-.997 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003A6.374 6.374 0 0 0 12.75 14.25M15 19.128A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12.75 14.25A3.375 3.375 0 1 0 6 14.25a3.375 3.375 0 0 0 6.75 0Zm8.25-6a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
-      />
-    </svg>
+    <Icon icon={Users} className="h-5 w-5" />
   )
 }
 
@@ -169,18 +165,7 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
             role="status"
             className="flex items-start gap-2 text-xs leading-relaxed text-[var(--v2-ink-3)]"
           >
-            <svg
-              aria-hidden="true"
-              className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.75}
-            >
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 11v5" strokeLinecap="round" />
-              <circle cx="12" cy="8" r="0.6" fill="currentColor" />
-            </svg>
+            <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
             <span>
               This address is already saved as{' '}
               <span className="font-medium text-[var(--v2-ink-2)]">{duplicateContact.name}</span>.
@@ -259,14 +244,9 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
           {copied ? (
-            <svg className="h-4 w-4 text-[var(--v2-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
+            <Icon icon={Check} className="h-4 w-4 text-[var(--v2-success)]" />
           ) : (
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 8.25V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.25" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8Z" />
-            </svg>
+            <Icon icon={Copy} className="h-4 w-4" />
           )}
         </button>
 
@@ -277,9 +257,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           title="Edit contact"
           className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
-          </svg>
+          <Icon icon={Pencil} className="h-4 w-4" />
         </button>
 
         <button
@@ -289,9 +267,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           title="Delete contact"
           className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75v7.5m4.5-7.5v7.5M4.5 6.75h15m-12 0 .75 12A2.25 2.25 0 0 0 10.5 21h3a2.25 2.25 0 0 0 2.25-2.25l.75-12m-6-3h3a1.5 1.5 0 0 1 1.5 1.5v1.5h-6v-1.5a1.5 1.5 0 0 1 1.5-1.5Z" />
-          </svg>
+          <Icon icon={Trash2} className="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -401,15 +377,7 @@ export default function ContactsPage() {
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1">
             <label htmlFor="contacts-search" className="sr-only">Search contacts</label>
-            <svg
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--v2-ink-3)]"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-            </svg>
+            <Icon icon={Search} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--v2-ink-3)]" />
             <Input
               id="contacts-search"
               type="text"

@@ -1,4 +1,6 @@
 import type { InputHTMLAttributes, ReactNode } from 'react'
+import { Copy } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 // ── MaxButton ────────────────────────────────────────────────────────
 export function MaxButton({
@@ -48,17 +50,7 @@ export function PasteButton({
       disabled={disabled}
       className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 disabled:opacity-40 disabled:pointer-events-none transition-colors"
     >
-      <svg
-        className="w-3.5 h-3.5"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        aria-hidden="true"
-      >
-        <path strokeLinecap="round" strokeLinejoin="round" d="M8 8.25V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.25" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8Z" />
-      </svg>
+      <Icon icon={Copy} className="w-3.5 h-3.5" />
       Paste
     </button>
   )

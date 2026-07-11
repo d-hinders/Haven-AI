@@ -1,5 +1,7 @@
 'use client'
 
+import { Check, ChevronRight, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Address, parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -604,10 +606,7 @@ export default function ConnectAgent2Modal({
             aria-label="Close"
             className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <Icon icon={X} className="h-4 w-4" />
           </button>
         </div>
 
@@ -1298,16 +1297,7 @@ function LocalConnectionReady({
         footer={
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-[12px] text-[var(--v2-ink-2)]">
-              <svg
-                aria-hidden="true"
-                className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2.5}
-              >
-                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <Icon icon={Check} className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]" />
               <span>
                 Local connection verified
                 {verifiedAddressShort ? ` · ${verifiedAddressShort}` : ''}
@@ -1316,16 +1306,7 @@ function LocalConnectionReady({
             {(status?.delegate_address || install || safeThreshold > 1) && (
               <details className="group text-[12px]">
                 <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]">
-                  <svg
-                    aria-hidden="true"
-                    className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                  >
-                    <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <Icon icon={ChevronRight} className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
                   Verification details
                 </summary>
                 <dl className="mt-2 space-y-2 border-l border-[var(--v2-border)] pl-3">

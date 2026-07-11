@@ -3,6 +3,8 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useAccount, useSwitchChain } from 'wagmi'
 import { getChainConfig } from '@/lib/chains'
+import { Info } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 interface NetworkGateProps {
   requiredChainId: number
@@ -74,18 +76,7 @@ export default function NetworkGate({
         role="status"
         className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
       >
-        <svg
-          aria-hidden="true"
-          className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.75}
-        >
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 11v5" strokeLinecap="round" />
-          <circle cx="12" cy="8" r="0.6" fill="currentColor" />
-        </svg>
+        <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
         <span>Your wallet is on a different network than this account.</span>
       </p>
       <button

@@ -1,5 +1,7 @@
 'use client'
 
+import { ChevronRight, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useRef } from 'react'
 import { getChainConfig } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -48,9 +50,7 @@ export default function DashboardActionPickerModal({
             aria-label="Close"
             className="p-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon icon={X} className="w-5 h-5" />
           </button>
         </div>
 
@@ -75,9 +75,7 @@ export default function DashboardActionPickerModal({
                     {getChainConfig(safe.chain_id).name}
                   </p>
                 </div>
-                <svg className="w-4 h-4 text-[var(--v2-ink-3)] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] flex-shrink-0" />
               </div>
             </button>
           ))}

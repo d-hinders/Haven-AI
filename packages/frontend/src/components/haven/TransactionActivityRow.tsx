@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { DirectionMark } from './DirectionMark'
+import { ExternalLink } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
 export type AmountTone = 'success' | 'debit' | 'danger' | 'neutral'
@@ -113,9 +115,7 @@ export function ExternalDetailsLink({ href, label = 'Open externally' }: { href:
       title={label}
       className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
     >
-      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H18m0 0v4.5M18 6l-7.5 7.5M10.5 6H6.75A2.25 2.25 0 004.5 8.25v9A2.25 2.25 0 006.75 19.5h9A2.25 2.25 0 0018 17.25V13.5" />
-      </svg>
+      <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
     </a>
   )
 }

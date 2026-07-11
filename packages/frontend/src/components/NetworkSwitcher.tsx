@@ -1,5 +1,7 @@
 'use client'
 
+import { Check, ChevronDown } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useActiveChainId } from '@/hooks/useActiveChain'
@@ -69,18 +71,7 @@ export default function NetworkSwitcher() {
         <span className="max-w-[140px] truncate">{activeSafe.name}</span>
         <span className="text-[var(--v2-ink-3)]">·</span>
         <span className="text-[var(--v2-ink-2)]">{chainName(activeChainId)}</span>
-        <svg
-          aria-hidden="true"
-          className="h-3 w-3 text-[var(--v2-ink-3)]"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.75}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M4 6l4 4 4-4" />
-        </svg>
+        <Icon icon={ChevronDown} className="h-3 w-3 text-[var(--v2-ink-3)]" />
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="left">
@@ -90,18 +81,7 @@ export default function NetworkSwitcher() {
             <span className="flex-1 truncate">{safe.name}</span>
             <span className="text-xs text-[var(--v2-ink-3)]">{chainName(safe.chain_id)}</span>
             {safe.id === activeSafe.id && (
-              <svg
-                aria-hidden="true"
-                className="h-3.5 w-3.5 flex-shrink-0 text-[var(--v2-brand)]"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M3.5 8.5l3 3 6-7" />
-              </svg>
+              <Icon icon={Check} className="h-3.5 w-3.5 flex-shrink-0 text-[var(--v2-brand)]" />
             )}
           </DropdownMenuItem>
         ))}

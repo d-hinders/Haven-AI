@@ -1,5 +1,7 @@
 'use client'
 
+import { Check, ChevronLeft, ChevronRight, CircleAlert, CreditCard, FlaskConical, Link as LinkIcon, Plus, Star, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
@@ -147,9 +149,7 @@ function AddSafeModal({
                 onClick={() => { setMode('choose'); setError(''); setDeployStep('name') }}
                 className="p-1 -ml-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                </svg>
+                <Icon icon={ChevronLeft} className="w-4 h-4" />
               </button>
             )}
             <h2 className="text-lg font-semibold text-[var(--v2-ink)]">
@@ -164,9 +164,7 @@ function AddSafeModal({
             aria-label="Close"
             className="p-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon icon={X} className="w-4 h-4" />
           </button>
         </div>
 
@@ -182,34 +180,26 @@ function AddSafeModal({
                 className="w-full flex items-center gap-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)] transition-all group text-left"
               >
                 <div className="w-10 h-10 rounded-lg bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--v2-brand-soft)] transition-colors">
-                  <svg className="w-5 h-5 text-[var(--v2-brand)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
+                  <Icon icon={Plus} className="w-5 h-5 text-[var(--v2-brand)]" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <span className="block text-sm font-medium text-[var(--v2-ink)] transition-colors">Create Haven account</span>
                   <span className="block text-xs text-[var(--v2-ink-3)] mt-0.5">Create a new account on Base</span>
                 </div>
-                <svg className="w-4 h-4 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                </svg>
+                <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors flex-shrink-0" />
               </button>
               <button
                 onClick={() => setMode('import')}
                 className="w-full flex items-center gap-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)] transition-all group text-left"
               >
                 <div className="w-10 h-10 rounded-lg bg-[var(--v2-surface-2)] border border-[var(--v2-border)] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--v2-surface-2)] transition-colors">
-                  <svg className="w-5 h-5 text-[var(--v2-ink-2)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.07-9.07l-1.757 1.757a4.5 4.5 0 010 6.364l-4.5 4.5" />
-                  </svg>
+                  <Icon icon={LinkIcon} className="w-5 h-5 text-[var(--v2-ink-2)]" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <span className="block text-sm font-medium text-[var(--v2-ink)] transition-colors">Import existing account</span>
                   <span className="block text-xs text-[var(--v2-ink-3)] mt-0.5">Link an account you already use by its address</span>
                 </div>
-                <svg className="w-4 h-4 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                </svg>
+                <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors flex-shrink-0" />
               </button>
             </div>
           )}
@@ -325,9 +315,7 @@ function AddSafeModal({
             <div className="space-y-4">
               <div className="flex items-center gap-3 mb-2">
                 <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)]">
-                  <svg className="h-5 w-5 text-[var(--v2-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
+                  <Icon icon={Check} className="h-5 w-5 text-[var(--v2-success)]" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-[var(--v2-ink)]">{name || 'My account'}</p>
@@ -510,9 +498,7 @@ function SafeCard({
             className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             aria-label={`Set ${safe.name} as default`}
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
-            </svg>
+            <Icon icon={Star} className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
@@ -595,9 +581,7 @@ function SafeCard({
       {/* Footer chip row — agent count + Open affordance */}
       <div className="flex items-center justify-between gap-3 border-t border-[var(--v2-border)] pt-3 text-xs text-[var(--v2-ink-3)]">
         <span className="flex items-center gap-1.5">
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
-          </svg>
+          <Icon icon={FlaskConical} className="h-3.5 w-3.5" />
           {agentCount} agent{agentCount !== 1 ? 's' : ''}
         </span>
         <span className="font-medium text-[var(--v2-brand)] opacity-70 transition-opacity group-hover:opacity-100">
@@ -648,10 +632,7 @@ export default function AccountsOverviewClient() {
       {/* Orphaned agents warning */}
       {orphanedAgents.length > 0 && (
         <div className="flex items-center gap-2 px-4 py-3 mb-6 rounded-lg bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[var(--v2-warning)] flex-shrink-0">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 8v4M12 16h.01" />
-          </svg>
+          <Icon icon={CircleAlert} className="h-4 w-4 text-[var(--v2-warning)] flex-shrink-0" />
           <span className="text-sm text-[var(--v2-warning)]">
             {orphanedAgents.length} agent{orphanedAgents.length !== 1 ? 's have' : ' has'} no linked account. Reassign them in the Agents page.
           </span>
@@ -661,9 +642,8 @@ export default function AccountsOverviewClient() {
       {/* Safe cards grid */}
       {safes.length === 0 ? (
         <div className="rounded-lg border border-dashed border-[var(--v2-border)] py-16 text-center">
-          <svg className="mx-auto mb-4 h-12 w-12 text-[var(--v2-ink-3)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
-          </svg>
+          {/* Lighter stroke: 48px empty-state hero reads too heavy at the 1.5 default. */}
+          <Icon icon={CreditCard} className="mx-auto mb-4 h-12 w-12 text-[var(--v2-ink-3)]" strokeWidth={1} />
           <p className="mb-4 text-sm text-[var(--v2-ink-3)]">No Haven accounts yet</p>
           <Button onClick={() => setAddModalOpen(true)}>Add your first account</Button>
         </div>

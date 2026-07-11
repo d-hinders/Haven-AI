@@ -3,11 +3,15 @@
  * their own inline copy of these — any divergence between them was a bug.
  */
 
-/** `0xabcd…wxyz` — 6 + 4 convention used everywhere in the app. */
+/**
+ * `0x1234…abcd` — the ONE address truncation rule (6 + ellipsis + 4).
+ * Render addresses through `<Address>` (components/haven) where possible;
+ * this is the underlying rule for plain-string contexts (#853).
+ */
 export function truncate(addr: string): string {
   if (!addr) return ''
   if (addr.length <= 10) return addr
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
 export function isValidAddress(addr: string): boolean {

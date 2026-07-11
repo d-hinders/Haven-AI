@@ -25,7 +25,9 @@ import { useToast } from '@/components/ui/Toast'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import {
   AgentBudgetCard,
+  Address,
   AgentRulesSummary,
+  Amount,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
   DirectionMark,
@@ -443,6 +445,33 @@ export default function DesignSystemPage() {
             <Row title="Travel planner" subtitle="0.10 ETH per day" trailing={<StatusBadge tone="warning">Paused</StatusBadge>} />
           </Card.Section>
         </Card>
+      </Section>
+
+      <Section
+        title="Amount & Address — the two core display objects"
+        description="Render money through <Amount> and on-chain addresses through <Address> — never hand-roll signs, tone classes, or slice(0, 6) truncation. Amount encodes the calm-money rule structurally: neutral ink by default, success only for incoming, danger only for failed; callers pass facts (direction, failed), never colours. Address applies the one truncation rule (0x1234…abcd), monospace, the full value in a tooltip, and optional copy / explorer-link affordances."
+      >
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">Amount</p>
+            <div className="mt-3 space-y-2 text-sm">
+              <p><Amount value="250.00" symbol="USDC" /> <span className="text-xs text-[var(--v2-ink-3)]">— signless figure (budgets, balances)</span></p>
+              <p><Amount value="12.00" symbol="USDC" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
+              <p><Amount value="12.00" symbol="USDC" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— outgoing stays neutral; direction colour lives in DirectionMark</span></p>
+              <p><Amount value="80.00" symbol="USDC" direction="out" failed /> <span className="text-xs text-[var(--v2-ink-3)]">— failed: the only red money gets</span></p>
+              <p><Amount value="320.00" symbol="USDC" direction="out" size="lg" /> <span className="text-xs text-[var(--v2-ink-3)]">— size=&quot;lg&quot; for detail-panel headlines</span></p>
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">Address</p>
+            <div className="mt-3 space-y-2 text-sm text-[var(--v2-ink-2)]">
+              <p><Address value={sampleAddress} /> <span className="text-xs text-[var(--v2-ink-3)]">— hover for the full address</span></p>
+              <p><Address value={sampleAddress} copy /> <span className="text-xs text-[var(--v2-ink-3)]">— with check-pop copy</span></p>
+              <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link with ↗</span></p>
+              <p className="break-all text-xs"><Address value={sampleAddress} truncate={false} /> <span className="text-[var(--v2-ink-3)]">— full form for receive surfaces</span></p>
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section
@@ -942,7 +971,8 @@ export default function DesignSystemPage() {
               direction="out"
               title="x402 payment"
               description={<MovementExample from="Research assistant" to="API provider" />}
-              amount="-12.00 USDC"
+              value="12.00"
+              asset="USDC"
               status="Sent"
               statusTone="neutral"
             />
@@ -950,7 +980,8 @@ export default function DesignSystemPage() {
               direction="out"
               title="Approval request"
               description={<MovementExample from="Research assistant" to="Cloud vendor" />}
-              amount="-320.00 USDC"
+              value="320.00"
+              asset="USDC"
               status="Needs approval"
               statusTone="warning"
             />
@@ -958,8 +989,9 @@ export default function DesignSystemPage() {
               direction="out"
               title="Payment rejected"
               description={<MovementExample from="Research assistant" to="Unknown vendor" />}
-              amount="-80.00 USDC"
-              amountTone="danger"
+              value="80.00"
+              asset="USDC"
+              failed
               status="Failed"
               statusTone="danger"
             />

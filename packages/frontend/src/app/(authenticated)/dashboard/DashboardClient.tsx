@@ -594,10 +594,9 @@ function TransactionsSection({
                 <TransactionActivityRow
                   title={transactionTitle(tx)}
                   description={transactionMovement(tx, resolveAddress)}
-                  amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
-                  amountTone={
-                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
-                  }
+                  value={tx.valueFormatted}
+                  asset={tx.asset}
+                  failed={tx.isError}
                   status={recovery?.label ?? lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
                   statusTone={recovery?.tone ?? lifecycle?.tone ?? (
                     tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'

@@ -19,6 +19,7 @@ import {
   type SendParams,
 } from '@/lib/safe-tx'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { Address as AddressDisplay } from '@/components/haven'
 import { timeAgo, timeUntil } from '@/lib/format'
 import { useActiveSigner } from '@/lib/signer'
 import {
@@ -246,27 +247,17 @@ function ApprovalCard({
                 <div className="space-y-1.5">
                   <p className="text-xs text-[var(--v2-ink-3)]">
                     Agent spending wallet:{' '}
-                    <a
+                    <AddressDisplay
+                      value={approval.to_address}
                       href={getExplorerUrl(approval.chain_id, 'address', approval.to_address)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="v2-tabular font-medium text-[var(--v2-brand)] hover:underline"
-                    >
-                      {approval.to_address.slice(0, 6)}&hellip;{approval.to_address.slice(-4)}{' '}
-                      <span aria-hidden="true">↗</span>
-                    </a>
+                    />
                   </p>
                   <p className="text-xs text-[var(--v2-ink-3)]">
                     Merchant:{' '}
-                    <a
+                    <AddressDisplay
+                      value={approval.merchant_address!}
                       href={getExplorerUrl(approval.chain_id, 'address', approval.merchant_address!)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="v2-tabular font-medium text-[var(--v2-brand)] hover:underline"
-                    >
-                      {approval.merchant_address!.slice(0, 6)}&hellip;{approval.merchant_address!.slice(-4)}{' '}
-                      <span aria-hidden="true">↗</span>
-                    </a>
+                    />
                   </p>
                 </div>
               </div>

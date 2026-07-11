@@ -1,4 +1,6 @@
 export { AgentBudgetCard } from './AgentBudgetCard'
+export { Amount, type AmountDirection } from './Amount'
+export { Address, truncateAddress } from './Address'
 export {
   ExternalDetailsLink,
   TransactionActivityRow,

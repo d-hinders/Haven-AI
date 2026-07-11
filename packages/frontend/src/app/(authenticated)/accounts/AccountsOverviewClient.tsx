@@ -21,6 +21,7 @@ import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 // ── Add Safe Modal ──────────────────────────────────────────────────
 
@@ -248,10 +249,7 @@ function AddSafeModal({
 
               {/* Wallet connection */}
               {!isConnected ? (
-                <div className="flex flex-col items-center gap-3 p-4 rounded-lg border border-dashed border-[var(--v2-border)]">
-                  <p className="text-xs text-[var(--v2-ink-3)]">Connect a wallet to deploy</p>
-                  <ConnectButton />
-                </div>
+                <EmptyState size="compact" title="Connect a wallet to deploy" action={<ConnectButton />} />
               ) : (
                 <div className="p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
                   <div className="flex items-center justify-between">
@@ -642,12 +640,12 @@ export default function AccountsOverviewClient() {
 
       {/* Safe cards grid */}
       {safes.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-[var(--v2-border)] py-16 text-center">
-          {/* Lighter stroke: 48px empty-state hero reads too heavy at the 1.5 default. */}
-          <Icon icon={CreditCard} className="mx-auto mb-4 h-12 w-12 text-[var(--v2-ink-3)]" strokeWidth={1} />
-          <p className="mb-4 text-sm text-[var(--v2-ink-3)]">No Haven accounts yet</p>
-          <Button onClick={() => setAddModalOpen(true)}>Add your first account</Button>
-        </div>
+        <EmptyState
+          icon={<Icon icon={CreditCard} className="h-5 w-5" />}
+          tone="neutral"
+          title="No Haven accounts yet"
+          action={<Button onClick={() => setAddModalOpen(true)}>Add your first account</Button>}
+        />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {safes.map((safe, index) => (

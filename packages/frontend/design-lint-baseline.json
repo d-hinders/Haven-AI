@@ -1,0 +1,140 @@
+{
+  "src/app/(authenticated)/accounting/page.tsx": {
+    "hex-color": 2
+  },
+  "src/app/(authenticated)/accounts/AccountsOverviewClient.tsx": {
+    "hex-color": 1,
+    "micro-font": 3
+  },
+  "src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx": {
+    "hex-color": 3
+  },
+  "src/app/(authenticated)/contacts/page.tsx": {
+    "hex-color": 5,
+    "micro-font": 2
+  },
+  "src/app/(authenticated)/custody/page.tsx": {
+    "hex-color": 2,
+    "micro-font": 2
+  },
+  "src/app/(authenticated)/design-system/page.tsx": {
+    "micro-font": 27
+  },
+  "src/app/(authenticated)/reporting/page.tsx": {
+    "micro-font": 1
+  },
+  "src/app/(authenticated)/transactions/TransactionsClient.tsx": {
+    "hex-color": 1
+  },
+  "src/app/how-it-works/page.tsx": {
+    "hex-color": 3,
+    "micro-font": 10
+  },
+  "src/app/investor-briefing/page.tsx": {
+    "hex-color": 7,
+    "micro-font": 8,
+    "raw-palette": 2
+  },
+  "src/app/onboarding/OnboardingClient.tsx": {
+    "hex-color": 1,
+    "micro-font": 1
+  },
+  "src/app/onboarding/PasskeyEnrollFlow.tsx": {
+    "micro-font": 1
+  },
+  "src/app/page.tsx": {
+    "hex-color": 7,
+    "raw-palette": 3
+  },
+  "src/app/protocols/mpp/page.tsx": {
+    "hex-color": 3,
+    "micro-font": 1
+  },
+  "src/app/protocols/page.tsx": {
+    "hex-color": 2,
+    "raw-palette": 2
+  },
+  "src/app/protocols/x402/page.tsx": {
+    "hex-color": 3
+  },
+  "src/app/providers.tsx": {
+    "hex-color": 2
+  },
+  "src/components/AgentPanel.tsx": {
+    "micro-font": 3
+  },
+  "src/components/AgentRecipientsCard.tsx": {
+    "hex-color": 4
+  },
+  "src/components/ApprovalNotifications.tsx": {
+    "micro-font": 3
+  },
+  "src/components/CatalogPanel.tsx": {
+    "hex-color": 2,
+    "micro-font": 6
+  },
+  "src/components/DashboardOnboardingGuide.tsx": {
+    "micro-font": 3
+  },
+  "src/components/DelegationBudgetCard.tsx": {
+    "hex-color": 2
+  },
+  "src/components/EditAgentModal.tsx": {
+    "hex-color": 1
+  },
+  "src/components/EnvBadge.tsx": {
+    "micro-font": 1
+  },
+  "src/components/NetworkPill.tsx": {
+    "micro-font": 2,
+    "raw-palette": 8
+  },
+  "src/components/NetworkSwitcher.tsx": {
+    "hex-color": 6
+  },
+  "src/components/ReceiveFundsModal.tsx": {
+    "hex-color": 2
+  },
+  "src/components/ScheduleRenewalBanner.tsx": {
+    "hex-color": 3
+  },
+  "src/components/WalletButton.tsx": {
+    "hex-color": 18
+  },
+  "src/components/haven/Address.tsx": {
+    "hex-color": 2
+  },
+  "src/components/haven/Amount.tsx": {
+    "hex-color": 2
+  },
+  "src/components/haven/WalletIdentityBlock.tsx": {
+    "micro-font": 1
+  },
+  "src/components/marketing/FlowCard.tsx": {
+    "micro-font": 4
+  },
+  "src/components/marketing/ProtocolPlayground.tsx": {
+    "micro-font": 3
+  },
+  "src/components/marketing/StepList.tsx": {
+    "raw-palette": 1
+  },
+  "src/components/sidebar/Sidebar.tsx": {
+    "micro-font": 1
+  },
+  "src/components/transactions/FilterBar.tsx": {
+    "micro-font": 2
+  },
+  "src/components/transactions/TransactionsTable.tsx": {
+    "micro-font": 1
+  },
+  "src/components/ui/CodeBlock.tsx": {
+    "micro-font": 1
+  },
+  "src/components/ui/Input.tsx": {
+    "micro-font": 2
+  },
+  "src/components/ui/StatusBadge.tsx": {
+    "micro-font": 1
+  }
+}

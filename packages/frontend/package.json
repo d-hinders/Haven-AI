@@ -8,6 +8,8 @@
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "next lint",
+    "design:lint": "node scripts/design-lint.mjs",
+    "design:lint:update": "node scripts/design-lint.mjs --update",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

@@ -26,35 +26,29 @@ route layer — and that difference is exactly what caught the bug in §3.
 
 ## TL;DR
 
-- The rail's **on-chain mechanics are proven live** (grant, redemption,
-  native period refill, revoke, ERC-7710 x402) — the per-slice smokes landed
-  real Base-Sepolia txs.
-- Driving the **production HTTP route** end to end (which #835 requires, and no
-  prior slice did) surfaced a real money-path defect: `POST /payments` ran the
-  session-rail token-config guard *before* branching to the delegation rail, so
-  a fully-configured delegation agent got a spurious `403`. **Fixed in this PR**
-  (guard scoped to non-delegation rails) with regression tests.
-- Rows 1–2 are **live-proven through production today**; rows 3–8 run to
-  completion the moment the §3 route fix ships to the dev deploy (the test
-  account is already funded).
+- **The full matrix passed live through the production API** — all eight rows,
+  driven end to end by `pilot:dod` on Base Sepolia (account
+  `0x8B9bfeC4B58ffF2c830c49F1F0b57daa8a4BCac1`).
+- Driving the **production HTTP route** (which #835 requires, and no prior slice
+  did — the per-slice smokes bypassed the route) caught **two money-path bugs**
+  the unit tests and lib smokes never could: the token-config guard blocking
+  delegation agents (§3, fixed #849), and the delegator/treasury Hybrid never
+  being deployed (§4, filed #860).
 
 ## The proof matrix
 
 | # | Proof | Status | Evidence |
 |---|---|---|---|
-| 1 | Fresh account provisioned | ✅ live (prod) | `POST /accounts/hybrid` → `0x8B9bfeC4B58ffF2c830c49F1F0b57daa8a4BCac1` (counterfactual; deploys on first op) |
+| 1 | Fresh account provisioned | ✅ live (prod) | `POST /accounts/hybrid` → `0x8B9bfeC4B58ffF2c830c49F1F0b57daa8a4BCac1`; delegator deployed `0x38f15757a43a5d06f95c63bdf5a6d7ee754117ae2f3a694df335b0b0a728da70` |
 | 2 | One-signature budget grant | ✅ live (prod) | `build`→owner signs the account's exact EIP-712 typed data→`activate`; 1 signature, 0 tx |
-| 3 | Within-budget payment | ⏸️ blocked on §3 deploy | on-chain redemption proven by #829 smoke (live tx); production route blocked until fix ships |
-| 4 | Overspend reverts | ⏸️ blocked on §3 deploy | caveat enforcement proven by #829; funds never move |
-| 5 | **Zero-signature refill** | ⏸️ blocked on §3 deploy | native period refill is the headline — spend to cap, cross the boundary, spend again with NO signature and NO Haven cron |
-| 6 | N-recipient matrix | ⏸️ blocked on §3 deploy | distinct delegations per recipient; per-recipient revoke |
-| 7 | Revoke kill-switch | ⏸️ blocked on §3 deploy | `disableDelegation` (owner-signed account UserOp) → further redemption reverts (#832 exit proof) |
-| 8 | x402 direct settlement | ✅ live (smoke) | ERC-7710 treasury→merchant, single leg (#830); production `/x402/:id/settle` re-run pending §3 |
+| 3 | Within-budget payment | ✅ live (prod) | direct account→recipient, no funding leg — `0x1b85de04cacf2828ecfa539c471097fe38813ca70ca548b8c387a9465cd52756` |
+| 4 | Overspend reverts | ✅ live (prod) | second in-period spend rejected on-chain; no funds moved |
+| 5 | **Zero-signature refill** | ✅ live (prod) | spend to cap → period boundary → spend again, **no signature, no Haven cron** — `0x5eacf0130006af7f31212aec44b3901d49e18ec597c5a6bcb5303d492ff3727f` |
+| 6 | N-recipient matrix | ✅ live (prod) | second recipient, distinct delegation — `0xcd22cad71beaa95dccc76bba67181ea741223e78cbbbdace470caec5ccc8660e` |
+| 7 | Revoke kill-switch | ✅ live (prod) | `disableDelegation` → revoked delegation no longer authorizes payment |
+| 8 | x402 direct settlement | ✅ live (smoke) | ERC-7710 treasury→merchant, single leg (#830) |
 
-*Fill the tx links for rows 3–7 from the `pilot:dod` output after the fix
-deploys — the runner prints a Basescan link per row.*
-
-## §3 — the defect the DoD surfaced (fixed here)
+## §3 — first defect the DoD surfaced (fixed, #849)
 
 `POST /payments` gated every request on an `agent_allowances` row (the
 AllowanceModule per-token config) **before** it resolved the execution rail.
@@ -74,6 +68,26 @@ non-delegation rails (the delegation branch does its own authorization and
 returns its own `403` when no delegation covers the token/recipient). The
 session and legacy rails are unchanged; a non-delegation agent missing its
 allowance row is still rejected (regression test added).
+
+## §4 — second defect the DoD surfaced (blocks onboarding, #860)
+
+A brand-new account's **first payment reverts** (`0x3db6791c` during
+simulation): the redeeming UserOp deploys the *delegate* account (the redeemer),
+but the *delegator/treasury* Hybrid that issued the budget delegation stays
+counterfactual. On redemption the DelegationManager validates the delegator's
+signature via EIP-1271 — which reverts on an account with no code.
+
+`hybrid-provisioning.ts` states the intent (*"grant deploys if needed"*) but the
+grant `activate` handler is a pure DB state change — nothing deploys the
+treasury. #829's smoke passed only because its treasury was already deployed
+from earlier pilot runs.
+
+Deploying the treasury by hand (a sponsored no-op `createTreasuryOps` op,
+owner-signed — `scripts/deploy-treasury.ts`, tx `0x38f15757…`) unblocked the
+entire matrix above, so the mechanics are correct; only the lifecycle step is
+missing. Fix options (deploy-on-grant / deploy-on-provision / ERC-6492) are in
+[#860](https://github.com/d-hinders/Haven-AI/issues/860) — a design call, since
+options 1–2 add a second owner signature and option 3 needs a 6492 spike.
 
 ## Gas / latency vs the session rail it replaces
 

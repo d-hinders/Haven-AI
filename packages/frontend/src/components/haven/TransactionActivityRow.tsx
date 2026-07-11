@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Amount } from './Amount'
 import { DirectionMark } from './DirectionMark'
 import { ExternalLink } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
-export type AmountTone = 'success' | 'debit' | 'danger' | 'neutral'
 export type TransactionActivityDirection = 'in' | 'out' | 'neutral'
 type Density = 'comfortable' | 'compact'
 
@@ -14,18 +14,12 @@ export interface TransactionActivityDetail {
   value: ReactNode
 }
 
-const AMOUNT_TONE_CLASS: Record<AmountTone, string> = {
-  success: 'text-[var(--v2-success)]',
-  debit: 'text-[var(--v2-debit)]',
-  danger: 'text-[var(--v2-danger)]',
-  neutral: 'text-[var(--v2-ink)]',
-}
-
 export function TransactionActivityRow({
   title,
   description,
-  amount,
-  amountTone = 'neutral',
+  value,
+  asset,
+  failed = false,
   status,
   statusTone = 'neutral',
   timestamp,
@@ -36,8 +30,10 @@ export function TransactionActivityRow({
 }: {
   title: string
   description?: ReactNode
-  amount: string
-  amountTone?: AmountTone
+  /** Formatted, unsigned amount — sign and tone come from `direction`/`failed` via <Amount>. */
+  value: string
+  asset?: string
+  failed?: boolean
   status?: string
   statusTone?: StatusTone
   timestamp?: string
@@ -88,8 +84,13 @@ export function TransactionActivityRow({
 
       <div className="flex items-center justify-between gap-3 pl-11 sm:block sm:pl-0 sm:text-right">
         <div>
-          <p className={`text-sm font-semibold v2-tabular ${AMOUNT_TONE_CLASS[amountTone]}`}>
-            {amount}
+          <p>
+            <Amount
+              value={value}
+              symbol={asset}
+              direction={direction === 'neutral' ? undefined : direction}
+              failed={failed}
+            />
           </p>
           {(timestamp || action) && !isCompact ? (
             <div className="mt-1 flex items-center justify-end gap-2 text-xs text-[var(--v2-ink-3)]">

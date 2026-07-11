@@ -2,6 +2,7 @@
 
 import { type ReactNode } from 'react'
 import { SidePanel } from '@/components/ui/SidePanel'
+import { Amount } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { getExplorerUrl } from '@/lib/chains'
 import { truncate } from '@/lib/format'
@@ -127,9 +128,6 @@ export default function TransactionDetailPanel({
     machinePaymentLifecyclePresentation(tx) ??
     tx.statusBadge ??
     (tx.isError ? { label: 'Failed', tone: 'danger' as const } : { label: 'Executed', tone: 'success' as const })
-  const sign = tx.direction === 'in' ? '+' : '-'
-  const amountTone =
-    tx.isError ? 'text-[var(--v2-danger)]' : tx.direction === 'in' ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink)]'
 
   const addr = (address: string) => (
     <AddressValue
@@ -148,9 +146,13 @@ export default function TransactionDetailPanel({
       subtitle={`${tx.safeName} · ${new Date(tx.timestamp * 1000).toLocaleString()}`}
     >
       <div className="mb-5 flex items-center justify-between gap-3">
-        <span className={`v2-tabular text-2xl font-semibold ${amountTone}`}>
-          {sign}{tx.valueFormatted} {tx.asset}
-        </span>
+        <Amount
+          value={tx.valueFormatted}
+          symbol={tx.asset}
+          direction={tx.direction}
+          failed={tx.isError}
+          size="lg"
+        />
         <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
       </div>
 

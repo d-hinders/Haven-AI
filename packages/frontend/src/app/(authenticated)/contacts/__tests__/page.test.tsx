@@ -114,7 +114,7 @@ describe('ContactsPage', () => {
     render(<ContactsPage />)
 
     expect(screen.getByText('Acme Services')).toBeInTheDocument()
-    expect(screen.getByText('0x2222...2222')).toBeInTheDocument()
+    expect(screen.getByText('0x2222…2222')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy address' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit Acme Services' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Delete Acme Services' })).toBeInTheDocument()

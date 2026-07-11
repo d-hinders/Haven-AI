@@ -8,7 +8,8 @@ import { useContactChains } from '@/hooks/useContactChains'
 import { useChainScope } from '@/hooks/useActiveChain'
 import { getChainConfig } from '@/lib/chains'
 import { ApiRequestError } from '@/lib/api'
-import { truncate, isValidAddress } from '@/lib/format'
+import { isValidAddress } from '@/lib/format'
+import { Address } from '@/components/haven'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
@@ -16,7 +17,6 @@ import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { Tooltip } from '@/components/ui/Tooltip'
 
 // Per-chain dot colour for the "Used on" badges (Base blue, Gnosis teal,
 // Base Sepolia amber to flag the testnet).
@@ -215,9 +215,9 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
-        <Tooltip label={contact.address} mono>
-          <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
-        </Tooltip>
+        <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+          <Address value={contact.address} />
+        </p>
         {chains.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="text-[10px] uppercase tracking-wide text-[var(--v2-ink-3)]">Used on</span>
@@ -311,9 +311,9 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
         </p>
         <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
           <p className="text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
-          <Tooltip label={contact.address} mono>
-            <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
-          </Tooltip>
+          <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+            <Address value={contact.address} />
+          </p>
         </div>
         {error && (
           <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">

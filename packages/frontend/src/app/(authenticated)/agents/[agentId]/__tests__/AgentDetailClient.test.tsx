@@ -320,7 +320,7 @@ describe('AgentDetailClient last-activity metadata', () => {
 
     render(<AgentDetailClient agentId="agent-1" />)
 
-    expect(screen.getAllByText('Haven wallet 0x4444...4444').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Haven wallet 0x4444…4444').length).toBeGreaterThan(0)
   })
 
   it('uses stored agent wallet chain when the wallet is missing from auth state', () => {

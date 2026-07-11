@@ -19,10 +19,10 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { ChevronDown } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Amount } from '@/components/haven'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AmountTone = 'success' | 'debit' | 'danger' | 'neutral'
 type SortColumn = 'date' | 'amount'
 type SortDirection = 'asc' | 'desc'
 
@@ -99,17 +99,6 @@ interface TransactionsTableProps {
    * like dashboard previews, where rows stay non-interactive.
    */
   onSelect?: (tx: AggregatedTransaction) => void
-}
-
-// ─── Amount tone map ──────────────────────────────────────────────────────────
-
-// Outgoing amounts adopt the sibling `--v2-debit` colour so incoming + outgoing
-// read as a symmetric pair (green / sky) instead of green / neutral.
-const AMOUNT_TONE_CLASS: Record<AmountTone, string> = {
-  success: 'text-[var(--v2-success)]',
-  debit: 'text-[var(--v2-debit)]',
-  danger: 'text-[var(--v2-danger)]',
-  neutral: 'text-[var(--v2-ink)]',
 }
 
 // ─── Chevron sort indicator ────────────────────────────────────────────────────
@@ -400,15 +389,6 @@ export default function TransactionsTable({
           </tr>
         ) : (
           sorted.map((tx, index) => {
-            // Outgoing amounts intentionally stay neutral ink — the sky
-            // `--v2-debit` colour is reserved for the direction icon so
-            // the row reads as a calm number with a coloured marker,
-            // rather than a busy two-colour line.
-            const amountTone: AmountTone = tx.isError
-              ? 'danger'
-              : tx.direction === 'in'
-                ? 'success'
-                : 'neutral'
             const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
             const initiator = transactionInitiator(tx)
             const lifecycleBadge = machinePaymentLifecyclePresentation(tx)
@@ -483,11 +463,12 @@ export default function TransactionsTable({
 
                 {showCol('amount') ? (
                   <td className={`w-[110px] px-4 ${padY} text-right`}>
-                    <span
-                      className={`v2-tabular text-sm font-semibold ${AMOUNT_TONE_CLASS[amountTone]}`}
-                    >
-                      {transactionAmount(tx)}
-                    </span>
+                    <Amount
+                      value={tx.valueFormatted}
+                      symbol={tx.asset}
+                      direction={tx.direction}
+                      failed={tx.isError}
+                    />
                   </td>
                 ) : null}
 
@@ -508,11 +489,4 @@ export default function TransactionsTable({
       </tbody>
     </table>
   )
-}
-
-// ─── Helper functions ─────────────────────────────────────────────────────────
-
-function transactionAmount(tx: AggregatedTransaction): string {
-  const sign = tx.direction === 'in' ? '+' : '-'
-  return `${sign}${tx.valueFormatted} ${tx.asset}`
 }

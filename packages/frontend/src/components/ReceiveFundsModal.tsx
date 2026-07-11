@@ -7,6 +7,7 @@ import { truncate } from '@/lib/format'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { UserSafe } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
+import { Address } from '@/components/haven'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useToast } from '@/components/ui/Toast'
@@ -120,9 +121,9 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
 
           <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>
-            <code className="mt-2 block break-all font-mono text-sm text-[var(--v2-ink)]">
-              {safeAddress}
-            </code>
+            <p className="mt-2 break-all text-sm text-[var(--v2-ink)]">
+              <Address value={safeAddress} truncate={false} />
+            </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button onClick={copyAddress} size="sm">
                 {copied ? 'Address copied' : 'Copy address'}

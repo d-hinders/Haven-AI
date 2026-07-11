@@ -10,6 +10,9 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/lib/delegation-rail.ts
   - packages/backend/src/routes/demo-mpp.ts
   - packages/backend/src/routes/reporting.ts
   - packages/backend/src/routes/catalog.ts
@@ -69,6 +72,16 @@ merchant payments are signed locally and bound to exact payment context. One
 line holds the security model:
 **API auth = identity, signature = authority, on-chain AllowanceModule state =
 enforcement for automatic Safe funding.**
+
+That line describes the **session/AllowanceModule rail** (existing accounts).
+Haven now runs **two on-chain policy rails**. New accounts are provisioned on the
+**delegation rail** (epic #821, `account_type='delegator_hybrid'`,
+`execution_rail='delegation'`), where the same identity/authority split holds but
+enforcement is a signed MetaMask delegation with audited caveat enforcers (period
+budget with native refill, optional recipient pin, expiry) redeemed via the
+DelegationManager as a sponsored UserOp — funds move account→recipient directly,
+with no funding leg and no approval queue. Deep dive:
+[`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 ## Components
 

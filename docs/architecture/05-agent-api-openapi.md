@@ -11,6 +11,8 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/routes/transactions.ts
   - packages/sdk/src/x402.ts
   - packages/sdk/src/client.ts
@@ -153,3 +155,22 @@ private key. Dashboard JWT and setup-token operations cannot create signatures
 or bypass the user-approved on-chain budget. `GET /payments/{id}/resume_state`
 returns stored context only; it does not sign, execute, relay, or expand payment
 authority.
+
+### Delegation rail
+
+The enforcement clause above (`on-chain Safe allowance = enforcement`) is the
+**session/AllowanceModule rail**. On the **delegation rail** (new accounts,
+`account_type='delegator_hybrid'`, epic #821) the `API key = identity` and
+`delegate signature = authority` clauses are identical, but enforcement is a
+signed MetaMask delegation redeemed via the DelegationManager with audited caveat
+enforcers (period budget, recipient pin, expiry) — not a Safe allowance. The
+agent-facing contract is the same `POST /payments` → `POST /payments/{id}/sign`
+shape; only the returned `sign_data` scheme differs (`eip712_userop` typed data
+the account validates verbatim, vs an AllowanceModule transfer hash). Delegation
+lifecycle lives under `/agents/{id}/delegations/*` (build/activate/revoke) and
+account provisioning under `POST /accounts/hybrid`.
+
+Not all delegation-rail routes are in the OpenAPI spec yet: the x402 settlement
+route `POST /x402/{id}/settle` (#830) currently sits on the drift check's
+`KNOWN_UNDOCUMENTED_ROUTES` allowlist pending the epic docs sweep (#834). Deep
+model: [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).

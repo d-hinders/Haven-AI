@@ -9,6 +9,10 @@ covers:
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
+  - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/lib/delegation-rail.ts
+  - packages/backend/src/lib/delegation-policy.ts
   - packages/backend/src/routes/safe-exec.ts
   - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/middleware/agentAuth.ts
@@ -33,6 +37,14 @@ temporarily fund the agent-controlled delegate EOA. Owner authority remains
 with the user. Haven operates the web app, backend, hosted MCP, and gas relayers,
 but does not hold user or agent spending keys. The agent's delegate key stays in
 its local signer or fully local MCP runtime.
+
+> **Two rails.** The diagram and notes below describe the **session/AllowanceModule
+> rail** (existing accounts). New accounts run on the **delegation rail** (epic
+> #821, `account_type='delegator_hybrid'`), where the Haven wallet is a MetaMask
+> Hybrid DeleGator smart account and the policy is a signed delegation with caveat
+> enforcers instead of an AllowanceModule allowance. See the delegation-rail note
+> below and
+> [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 ```mermaid
 flowchart LR
@@ -156,6 +168,20 @@ flowchart LR
   or perform discretionary merchant settlement
   ([x402 authorization](../../packages/backend/src/routes/x402.ts),
   [signer tools](../../packages/signer/src/tools.ts)).
+- **Delegation rail (new accounts) keeps the same custody boundary with a
+  different primitive.** On `account_type='delegator_hybrid'` there is no Safe
+  AllowanceModule and no Safe→delegate funding leg. The agent holds a signed
+  budget delegation (period budget + optional recipient pin + expiry); Haven
+  constructs a redeeming sponsored UserOp and the agent signs the account's exact
+  EIP-712 typed data with its delegate key. Funds move account→recipient directly,
+  metered on-chain by audited caveat enforcers during gas estimation — Haven never
+  holds a DeleGator signer, and the account owner is watch-only. x402 on this rail
+  settles treasury→merchant directly via ERC-7710 (no funding leg). This rail is
+  **Base-only** (Base 8453, Base Sepolia 84532); Gnosis is not in scope. Details:
+  [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md),
+  [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md)
+  ([delegation rail](../../packages/backend/src/lib/delegation-rail.ts),
+  [agent auth](../../packages/backend/src/middleware/agentAuth.ts)).
 - **Supported chains are Base (8453), Gnosis Chain (100), and Base Sepolia
   (84532).** Base is the primary production network; Base Sepolia is the dev/QA
   testnet. RPC endpoints, token addresses, Safe contracts, and relayer

@@ -18,6 +18,7 @@
     "pilot:delegation-rail-smoke": "tsx scripts/delegation-rail-smoke.ts",
     "pilot:delegation-payment-smoke": "tsx scripts/delegation-payment-smoke.ts",
     "pilot:exit-proof": "tsx scripts/exit-acceptance-proof.ts",
+    "pilot:dod": "tsx scripts/delegation-dod-matrix.ts",
     "ops:check-attestation": "tsx scripts/check-attestation.ts",
     "ops:check-bundler": "tsx scripts/check-bundler.ts",
     "ops:check-delegation": "tsx scripts/check-delegation-contracts.ts",

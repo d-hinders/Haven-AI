@@ -48,7 +48,7 @@ All tokens live as CSS custom properties at `:root` in `packages/frontend/src/ap
 |---|---|---|
 | `--v2-ink` | `#1a1f36` | Headings, primary text, amounts |
 | `--v2-ink-2` | `#525f7f` | Body text, secondary information |
-| `--v2-ink-3` | `#8898aa` | Tertiary text, eyebrows, captions |
+| `--v2-ink-3` | `#5d6c85` | Tertiary text, eyebrows, captions — AA-safe (≥4.5:1) on white and all tinted surfaces |
 | `--v2-ink-on-brand` | `#ffffff` | Text on brand‑colored or dark surfaces |
 
 ### Borders
@@ -73,11 +73,14 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 
 | Token | Value | Soft variant | Use |
 |---|---|---|---|
-| `--v2-success` | `#0e9f6e` | `--v2-success-soft` `#ecfdf5` | Settled, confirmed, incoming |
+| `--v2-success` | `#047857` | `--v2-success-soft` `#ecfdf5` | Settled, confirmed, incoming |
+| `--v2-debit` | `#0369a1` | `--v2-debit-soft` `#f0f9ff` | Outgoing / sent money (sibling to success; never a warning) |
 | `--v2-warning` | `#b54708` | `--v2-warning-soft` `#fef3c7` | 402 Payment Required, pending review |
 | `--v2-danger` | `#b42318` | `--v2-danger-soft` `#fef2f2` | Failed, destructive |
 
 Same rule as v1: **never repurpose a semantic color**.
+
+**Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover). Guarded by `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, that test tells you whether it still clears the bar.
 
 ### Radii
 

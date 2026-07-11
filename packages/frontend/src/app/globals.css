@@ -10,7 +10,9 @@
 
   --v2-ink: #1a1f36;
   --v2-ink-2: #525f7f;
-  --v2-ink-3: #8898aa;
+  /* AA-safe tertiary text: ≥4.5:1 on white AND the tinted surfaces
+     (--v2-surface / -2 / hover). Checked by token-contrast.test.ts. */
+  --v2-ink-3: #5d6c85;
   --v2-ink-on-brand: #ffffff;
 
   --v2-border: #e6ebf1;
@@ -20,12 +22,12 @@
   --v2-brand-strong: #4338ca;
   --v2-brand-soft: #eef2ff;
 
-  --v2-success: #0e9f6e;
+  --v2-success: #047857;
   --v2-success-soft: #ecfdf5;
   /* Sky / debit — used for outgoing transactions (send / debit) globally.
      Sibling to success on the cool side of the spectrum so incoming /
      outgoing read as a symmetric pair without clashing with brand-indigo. */
-  --v2-debit: #0284c7;
+  --v2-debit: #0369a1;
   --v2-debit-soft: #f0f9ff;
   --v2-warning: #b54708;
   --v2-warning-soft: #fef3c7;
@@ -65,7 +67,7 @@
      so the transactions surfaces (history page, Safe detail, agent detail)
      read as one primitive. */
   --v2-table-header-bg: #f6f9fc;
-  --v2-table-header-ink: #8898aa;
+  --v2-table-header-ink: #5d6c85;
   --v2-table-row-border: #e6ebf1;
   --v2-table-row-hover: #f0f4f9;
 

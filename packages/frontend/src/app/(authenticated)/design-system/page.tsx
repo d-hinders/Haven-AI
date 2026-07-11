@@ -621,7 +621,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Empty states"
-        description="Pick a tone that matches the meaning (brand for default, warning for attention, success after a completed flow). The leading icon sits in a soft tinted circle with a faint halo — gives the surface a focal point without illustration overhead."
+        description="One component, three sizes — never hand-roll a dashed tile. `default` for page/section-level empties (icon halo, roomy). `compact` for in-card previews and side columns. `inline` for a one-line placeholder inside dense content (title only). Pick a tone that matches the meaning (brand for default, warning for attention, success after a completed flow). Dashed borders on non-empty content (draft forms, status callouts) are a different pattern and stay hand-rolled."
       >
         <div className="grid gap-5 lg:grid-cols-3">
           <EmptyState
@@ -644,6 +644,21 @@ export default function DesignSystemPage() {
             title="You're all caught up"
             body="No pending approvals. Agents will keep working within their budgets."
           />
+        </div>
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">size=&quot;compact&quot; — in-card previews</p>
+            <EmptyState
+              size="compact"
+              title="Activity preview unavailable"
+              body="Haven could not refresh recent payments right now."
+              action={<Button variant="ghost" size="sm">Try again</Button>}
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">size=&quot;inline&quot; — dense content</p>
+            <EmptyState size="inline" title="No budget set yet" />
+          </div>
         </div>
       </Section>
 

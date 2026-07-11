@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Trash2 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
@@ -49,11 +50,7 @@ export function AgentBudgetCard({
 
       <div className={`${compact ? 'mt-2 space-y-1.5' : 'mt-4 space-y-2'}`}>
         {isEmpty ? (
-          <div
-            className={`flex items-center justify-center rounded-lg border border-dashed border-[var(--v2-border)] bg-[var(--v2-surface)] ${compact ? 'px-3 py-2 text-xs' : 'px-3 py-3 text-sm'} text-[var(--v2-ink-3)]`}
-          >
-            {emptyLabel}
-          </div>
+          <EmptyState size="inline" title={emptyLabel} />
         ) : (
           budgets.map((row) => (
             <div

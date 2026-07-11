@@ -143,7 +143,8 @@ function ConnectedAgentsSection({
         </div>
       ) : unavailable ? (
         <div className="p-6">
-          <EmptyPreview
+          <EmptyState
+            size="compact"
             title="Agent preview unavailable"
             body="Haven could not verify which agents are connected right now."
             action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
@@ -151,34 +152,35 @@ function ConnectedAgentsSection({
         </div>
       ) : agents.length === 0 ? (
         <div className="p-6">
-          <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
-            <p className="text-sm text-[var(--v2-ink)]">
-              {hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
-            </p>
-            <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
-              {!hasAccounts
+          <EmptyState
+            size="compact"
+            title={hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
+            body={
+              !hasAccounts
                 ? 'Create a Haven account before connecting agents.'
                 : hasAnyAgents
                 ? 'Reconnect or create an agent to bring automated spending back online.'
-                : 'Create your first agent to give it payment credentials and spend limits.'}
-            </p>
-            <div className="mt-4 flex items-center justify-center gap-3">
-              {hasAccounts ? (
-                <>
-                  <Button onClick={onConnectAgent} size="sm">
-                    Connect agent
-                  </Button>
-                  <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-                    Go to Agents
+                : 'Create your first agent to give it payment credentials and spend limits.'
+            }
+            action={
+              <div className="flex items-center justify-center gap-3">
+                {hasAccounts ? (
+                  <>
+                    <Button onClick={onConnectAgent} size="sm">
+                      Connect agent
+                    </Button>
+                    <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+                      Go to Agents
+                    </Link>
+                  </>
+                ) : (
+                  <Link href="/accounts" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+                    Go to Accounts
                   </Link>
-                </>
-              ) : (
-                <Link href="/accounts" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-                  Go to Accounts
-                </Link>
-              )}
-            </div>
-          </div>
+                )}
+              </div>
+            }
+          />
         </div>
       ) : (
         <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
@@ -552,7 +554,8 @@ function TransactionsSection({
         </div>
       ) : unavailable ? (
         <div className="p-6">
-          <EmptyPreview
+          <EmptyState
+            size="compact"
             title="Activity preview unavailable"
             body="Haven could not refresh recent payments right now."
             action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
@@ -610,24 +613,6 @@ function TransactionsSection({
           })}
         </div>
       )}
-    </div>
-  )
-}
-
-function EmptyPreview({
-  title,
-  body,
-  action,
-}: {
-  title: string
-  body: string
-  action?: ReactNode
-}) {
-  return (
-    <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
-      <p className="text-sm text-[var(--v2-ink)]">{title}</p>
-      <p className="mt-2 text-xs text-[var(--v2-ink-2)]">{body}</p>
-      {action ? <div className="mt-4">{action}</div> : null}
     </div>
   )
 }

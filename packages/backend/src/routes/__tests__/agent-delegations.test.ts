@@ -6,10 +6,11 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const { mockQuery, mockCompute, mockTreasury } = vi.hoisted(() => ({
+const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockCompute: vi.fn(),
   mockTreasury: vi.fn(),
+  mockEnsureDeployed: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 vi.mock('../../middleware/auth.js', () => ({
@@ -19,7 +20,11 @@ vi.mock('../../middleware/auth.js', () => ({
 }))
 vi.mock('../../lib/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/hybrid-provisioning.js')>()
-  return { ...actual, computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a) }
+  return {
+    ...actual,
+    computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a),
+    ensureHybridDeployed: (...a: unknown[]) => mockEnsureDeployed(...a),
+  }
 })
 vi.mock('../../lib/delegation-rail.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/delegation-rail.js')>()
@@ -95,7 +100,10 @@ describe('delegation lifecycle API (#828)', () => {
     mockQuery.mockReset()
     mockCompute.mockReset()
     mockTreasury.mockReset()
+    mockEnsureDeployed.mockReset()
     mockCompute.mockResolvedValue(DELEGATE_ACCOUNT)
+    // Default: the delegator account is (or becomes) deployed at the stored address.
+    mockEnsureDeployed.mockResolvedValue({ address: TREASURY, alreadyDeployed: true })
   })
 
   describe('POST /:id/delegations/build — grant step 1', () => {
@@ -171,6 +179,50 @@ describe('delegation lifecycle API (#828)', () => {
   })
 
   describe('POST /:id/delegations/:hash/activate — grant step 2', () => {
+    it('deploys the counterfactual delegator via the relayer before activating (#860)', async () => {
+      mockDb({})
+      mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: false, txHash: '0x' + '11'.repeat(32) })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, { ownerAddress: OWNER })
+    })
+
+    it('502s WITHOUT activating when the deploy fails — grant stays pending, retryable (#860)', async () => {
+      mockDb({})
+      mockEnsureDeployed.mockRejectedValueOnce(new Error('relayer out of gas at https://rpc?apikey=pim_SECRET'))
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(502)
+      expect(res.body).not.toContain('pim_SECRET')
+      expect(mockQuery.mock.calls.some((c) => /SET\s+status = 'active'/.test(String(c[0])))).toBe(false)
+    })
+
+    it('409s a passkey-only account (no owner identity) instead of a confusing failure (#860)', async () => {
+      mockDb({ owner: null })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(mockEnsureDeployed).not.toHaveBeenCalled()
+    })
+
+    it('500s on owner→address derivation mismatch rather than activating an unusable grant (#860)', async () => {
+      mockDb({})
+      mockEnsureDeployed.mockResolvedValueOnce({ address: '0x' + 'ff'.repeat(20), alreadyDeployed: false })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(500)
+      expect(mockQuery.mock.calls.some((c) => /SET\s+status = 'active'/.test(String(c[0])))).toBe(false)
+    })
+
     it('stores the owner signature and marks the previous grant replaced', async () => {
       mockDb({})
       const res = await app.inject({

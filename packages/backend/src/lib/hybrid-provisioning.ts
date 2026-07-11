@@ -3,9 +3,10 @@
  *
  * Computes the COUNTERFACTUAL account address for a new Hybrid DeleGator —
  * no transaction, no deployment: the address is deterministic from the
- * owner configuration, and actual on-chain deployment happens with the first
- * sponsored operation (the grant flow, #828 — a delegation's EIP-1271
- * signature needs deployed code, so grant deploys if needed).
+ * owner configuration. Actual deployment happens at grant activation
+ * (ensureHybridDeployed, #860): a delegation's EIP-1271 signature needs
+ * deployed code, and the relayer's factory call is permissionless — no
+ * owner signature, no owner transaction.
  *
  * Non-custody: address derivation uses a WATCH-ONLY owner (the session-rail
  * pattern) — this module can never sign anything, loudly (#824 invariant 5).
@@ -50,15 +51,7 @@ function watchOnly(address: Address): LocalAccount {
   })
 }
 
-/**
- * The deterministic account address for an owner configuration. Read-only:
- * one RPC to derive via the pinned factory. Throws on a chain without pinned
- * delegation contracts (fail-closed, #825).
- */
-export async function computeHybridAccountAddress(
-  chainId: number,
-  owner: HybridOwnerConfig,
-): Promise<Address> {
+async function buildWatchOnlyAccount(chainId: number, owner: HybridOwnerConfig) {
   getDelegationContracts(chainId) // fail-closed on unpinned chains
 
   const eoa = owner.ownerAddress ?? zeroAddress
@@ -83,5 +76,72 @@ export async function computeHybridAccountAddress(
     deploySalt: '0x',
     signer: { account: watchOnly(eoa === zeroAddress ? '0x0000000000000000000000000000000000000001' : eoa) },
   })
+  return { account, client }
+}
+
+/**
+ * The deterministic account address for an owner configuration. Read-only:
+ * one RPC to derive via the pinned factory. Throws on a chain without pinned
+ * delegation contracts (fail-closed, #825).
+ */
+export async function computeHybridAccountAddress(
+  chainId: number,
+  owner: HybridOwnerConfig,
+): Promise<Address> {
+  const { account } = await buildWatchOnlyAccount(chainId, owner)
   return account.address
+}
+
+export interface EnsureDeployedResult {
+  address: Address
+  alreadyDeployed: boolean
+  txHash?: string
+}
+
+/**
+ * Deploy the counterfactual Hybrid if it has no code yet (#860).
+ *
+ * A 4337 factory deploy is PERMISSIONLESS — it instantiates the account with
+ * the owner configuration baked into the deterministic address and grants the
+ * deployer nothing. Haven's relayer therefore deploys the delegator account
+ * without any owner signature, preserving the grant flow's one-signature UX.
+ * This must happen before the first redemption: the DelegationManager
+ * validates the delegator's delegation signature via EIP-1271, which reverts
+ * against an account with no code (found live by the #835 DoD).
+ *
+ * Non-custody unchanged: the relayer signs a plain transaction to the audited
+ * factory; the deployed account's signers are the owner's keys, never Haven's.
+ */
+export async function ensureHybridDeployed(
+  chainId: number,
+  owner: HybridOwnerConfig,
+): Promise<EnsureDeployedResult> {
+  const { account, client } = await buildWatchOnlyAccount(chainId, owner)
+
+  const code = await client.getBytecode({ address: account.address })
+  if (code && code !== '0x') {
+    return { address: account.address, alreadyDeployed: true }
+  }
+
+  const { factory, factoryData } = await account.getFactoryArgs()
+  if (!factory || !factoryData) {
+    throw new Error('hybrid provisioning: account reports no factory args to deploy with')
+  }
+
+  // Lazy import: the relayer wiring pulls ethers + env config; keep the pure
+  // derivation path (compute…) free of it for tests and scripts.
+  const { getRelayer, getRelayerFeeOverrides, withRelayerSendLock } = await import('./relayer.js')
+  const relayer = getRelayer(chainId)
+  if (!relayer.provider) {
+    throw new Error('hybrid provisioning: relayer has no provider')
+  }
+  const overrides = await getRelayerFeeOverrides(relayer.provider)
+  const tx = await withRelayerSendLock(chainId, () =>
+    relayer.sendTransaction({ to: factory, data: factoryData, ...overrides }),
+  )
+  const receipt = await tx.wait()
+  if (!receipt || receipt.status !== 1) {
+    throw new Error(`hybrid deploy transaction reverted (${tx.hash})`)
+  }
+  return { address: account.address, alreadyDeployed: false, txHash: tx.hash }
 }

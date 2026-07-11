@@ -131,16 +131,33 @@ export default function Sidebar() {
       : {}),
   }
 
-  const mainNav: NavItem[] = [
-    baseNavItems[0], // Dashboard
-    baseNavItems[1], // Accounts
-    baseNavItems[2], // Transactions
-    baseNavItems[3], // Agents
-    approvalsItem,   // Approvals (dynamic)
-    baseNavItems[4], // Catalog
-    baseNavItems[5], // Contacts
-    baseNavItems[6], // Accounting
-    baseNavItems[7], // Custody
+  // Labeled clusters (#858): the core money loop first, tools and admin
+  // after — same routes, same order within each cluster as before.
+  const navGroups: Array<{ label: string; items: NavItem[] }> = [
+    {
+      label: 'Money',
+      items: [
+        baseNavItems[0], // Dashboard
+        baseNavItems[1], // Accounts
+        baseNavItems[2], // Transactions
+        baseNavItems[3], // Agents
+        approvalsItem, // Approvals (dynamic badge)
+      ],
+    },
+    {
+      label: 'Agent tools',
+      items: [
+        baseNavItems[4], // Catalog
+        baseNavItems[5], // Contacts
+      ],
+    },
+    {
+      label: 'Admin',
+      items: [
+        baseNavItems[6], // Reporting
+        baseNavItems[7], // Custody
+      ],
+    },
   ]
 
   // Outside-click to close kebab popover
@@ -217,19 +234,28 @@ export default function Sidebar() {
           </Link>
         </div>
 
-        {/* Main nav */}
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {mainNav.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(item.href + '/')
-            return (
-              <NavLink
-                key={item.href}
-                item={item}
-                active={active}
-                onClick={() => setCollapsed(true)}
-              />
-            )
-          })}
+        {/* Main nav — labeled clusters, core money loop first (#858) */}
+        <nav className="flex-1 px-3 py-4 overflow-y-auto">
+          {navGroups.map((group, groupIndex) => (
+            <div key={group.label} className={groupIndex > 0 ? 'mt-5' : ''}>
+              <p className="v2-text-meta px-3 pb-1 uppercase tracking-wider text-[var(--v2-ink-3)]">
+                {group.label}
+              </p>
+              <div className="space-y-1">
+                {group.items.map((item) => {
+                  const active = pathname === item.href || pathname.startsWith(item.href + '/')
+                  return (
+                    <NavLink
+                      key={item.href}
+                      item={item}
+                      active={active}
+                      onClick={() => setCollapsed(true)}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* Bottom section */}

@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, Circle, EllipsisVertical, Info, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, TriangleAlert, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
+import { Table } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { CodeBlock } from '@/components/ui/CodeBlock'
@@ -1147,49 +1148,22 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="The full transaction route uses a semantic sortable table. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
+        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
       >
         <Card hover={false} className="overflow-hidden">
-          <table className="w-full border-separate border-spacing-0">
-            <thead className="hidden md:table-header-group">
+          <Table>
+            <Table.Head>
               <tr>
-                <th className="w-10 border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3" scope="col">
-                  <span className="sr-only">Direction</span>
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
-                  Activity
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
-                  Initiator
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
-                  From / To
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="descending">
-                  <button
-                    type="button"
-                    aria-label="Sort by Date, currently descending"
-                    className="inline-flex items-center gap-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-                  >
-                    Date
-                    <Icon icon={ChevronDown} className="h-3 w-3" />
-                  </button>
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-right text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="none">
-                  <button
-                    type="button"
-                    aria-label="Sort by Amount, currently unsorted"
-                    className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-                  >
-                    Amount
-                  </button>
-                </th>
-                <th className="w-8 border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3" scope="col">
-                  <span className="sr-only">External details</span>
-                </th>
+                <Table.HeaderCell srLabel="Direction" className="w-10" />
+                <Table.HeaderCell align="left">Activity</Table.HeaderCell>
+                <Table.HeaderCell align="left" hideBelowMd>Initiator</Table.HeaderCell>
+                <Table.HeaderCell align="left" hideBelowMd>From / To</Table.HeaderCell>
+                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} hideBelowMd />
+                <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" />
+                <Table.HeaderCell srLabel="External details" className="w-8" />
               </tr>
-            </thead>
-            <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
+            </Table.Head>
+            <Table.Body>
               {[
                 {
                   title: 'Received payment',
@@ -1197,8 +1171,7 @@ export default function DesignSystemPage() {
                   to: 'Operating wallet',
                   initiator: 'You',
                   date: '12m ago',
-                  amount: '+500.00 USDC',
-                  amountClass: 'text-[var(--v2-success)]',
+                  value: '500.00',
                   direction: 'in' as const,
                   failed: false,
                 },
@@ -1208,8 +1181,7 @@ export default function DesignSystemPage() {
                   to: 'API provider',
                   initiator: 'Research assistant',
                   date: '1h ago',
-                  amount: '-12.00 USDC',
-                  amountClass: 'text-[var(--v2-ink)]',
+                  value: '12.00',
                   direction: 'out' as const,
                   failed: false,
                 },
@@ -1219,8 +1191,7 @@ export default function DesignSystemPage() {
                   to: 'unknown.vendor',
                   initiator: 'Research assistant',
                   date: '2h ago',
-                  amount: '-25.00 USDC',
-                  amountClass: 'text-[var(--v2-danger)]',
+                  value: '25.00',
                   direction: 'out' as const,
                   failed: true,
                 },
@@ -1248,7 +1219,9 @@ export default function DesignSystemPage() {
                     {row.date}
                   </td>
                   <td className="px-4 py-4 align-middle text-right">
-                    <p className={`text-sm font-semibold v2-tabular ${row.amountClass}`}>{row.amount}</p>
+                    <p>
+                      <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
+                    </p>
                     <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
                   </td>
                   <td className="px-4 py-4 align-middle text-right">
@@ -1256,8 +1229,8 @@ export default function DesignSystemPage() {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </Table.Body>
+          </Table>
         </Card>
       </Section>
 

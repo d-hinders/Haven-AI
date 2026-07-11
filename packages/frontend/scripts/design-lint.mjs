@@ -43,7 +43,11 @@ export const RULES = [
   {
     id: 'hex-color',
     describe: 'hardcoded hex colour — use a var(--v2-…) token',
-    regex: /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b/g,
+    // 3/4-char forms must contain a letter: all-digit short matches are far
+    // more often issue references (#857) than colours, and any real colour
+    // also exists in its 6-digit form. Line comments are skipped in scanSource.
+    regex:
+      /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|(?=[0-9a-fA-F]{0,3}[a-fA-F])[0-9a-fA-F]{4}|(?=[0-9a-fA-F]{0,2}[a-fA-F])[0-9a-fA-F]{3})\b/g,
     exempt: (file) =>
       file.includes('components/brand/') || file.includes('components/marketing/'),
   },
@@ -74,8 +78,12 @@ export function scanSource(relFile, source) {
   const lines = source.split('\n')
   for (const rule of RULES) {
     if (rule.exempt(relFile)) continue
-    lines.forEach((text, i) => {
-      if (text.includes('design-lint-disable-line')) return
+    lines.forEach((raw, i) => {
+      if (raw.includes('design-lint-disable-line')) return
+      // Strip line-comment content — issue refs (#857) and colour names in
+      // comments are prose, not styles. Block-comment bodies starting with *
+      // are skipped the same way.
+      const text = raw.replace(/\/\/.*$/, '').replace(/^\s*\*.*$/, '')
       for (const m of text.matchAll(rule.regex)) {
         hits.push({ rule: rule.id, line: i + 1, match: m[0] })
       }

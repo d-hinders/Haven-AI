@@ -35,6 +35,14 @@ describe('design-lint scanner (#855)', () => {
     expect(scan('src/components/X.tsx', src)).toEqual([])
   })
 
+  it('does not treat issue references or comment prose as hex colours', () => {
+    // All-digit short forms (#857) are issue refs, and line comments are prose.
+    const src = 'const a = 1 // epic #859 uses #1a2332\nconst b = "#857"'
+    expect(scan('src/components/X.tsx', src)).toEqual([])
+    // …but a real short hex WITH a letter still counts:
+    expect(scan('src/components/X.tsx', 'const c = "#fa3"')).toHaveLength(1)
+  })
+
   it('flags micro font sizes', () => {
     const hits = scan('src/components/X.tsx', '<p className="text-[10px]" /><p className="text-[11px]" />')
     expect(hits.map((h) => h.match)).toEqual(['text-[10px]', 'text-[11px]'])

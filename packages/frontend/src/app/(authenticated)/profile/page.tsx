@@ -1,5 +1,6 @@
 'use client'
 
+import { Card } from '@/components/ui/Card'
 import dynamic from 'next/dynamic'
 import { Skeleton } from '@/components/ui/Skeleton'
 
@@ -18,10 +19,10 @@ const ProfileClient = dynamic(() => import('./ProfileClient'), {
         <Skeleton variant="text" className="h-5 w-full max-w-md" />
       </div>
       <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
-        <div className="space-y-2 border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-6 py-5">
+        <Card.Header padding="spacious" className="space-y-2">
           <Skeleton variant="text" className="h-5 w-40" />
           <Skeleton variant="text" className="h-4 w-full max-w-sm" />
-        </div>
+        </Card.Header>
         <div className="space-y-4 px-6 py-5">
           <Skeleton variant="text" className="h-4 w-16" />
           <Skeleton variant="text" className="h-5 w-48" />

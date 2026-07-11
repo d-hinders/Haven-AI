@@ -429,6 +429,23 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Card.Header — the titled grey band"
+        description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. Parent Card needs `overflow-hidden` (or add `rounded-t-[10px]` via className)."
+      >
+        <Card hover={false} className="max-w-xl overflow-hidden">
+          <Card.Header
+            title="Connected agents"
+            description="Agents that can request payments from this account."
+            actions={<Button variant="ghost" size="sm">View all</Button>}
+          />
+          <Card.Section divided>
+            <Row title="Research assistant" subtitle="250 USDC per day" trailing={<StatusBadge tone="brand">Connected</StatusBadge>} />
+            <Row title="Travel planner" subtitle="0.10 ETH per day" trailing={<StatusBadge tone="warning">Paused</StatusBadge>} />
+          </Card.Section>
+        </Card>
+      </Section>
+
+      <Section
         title="Card.Section — nested content without grey-on-white"
         description="When you need to group content inside a card, use Card.Section instead of a grey inner wrapper. Renders a hairline top border that bleeds to the card's edges — the canonical way to subsection a card. Pass `divided` for a row list (auto row dividers, no horizontal padding so child rows own theirs)."
       >
@@ -728,7 +745,7 @@ export default function DesignSystemPage() {
       >
         <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
           <Card hover={false} className="overflow-hidden border-[var(--v2-warning)]/25">
-            <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+            <Card.Header>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge tone="warning">Needs approval</StatusBadge>
@@ -736,7 +753,7 @@ export default function DesignSystemPage() {
                 </div>
                 <span className="text-xs text-[var(--v2-ink-3)]">Expires in 1 hour</span>
               </div>
-            </div>
+            </Card.Header>
             <div className="space-y-5 p-5">
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.9fr)]">
                 <div>
@@ -835,17 +852,15 @@ export default function DesignSystemPage() {
         description="Recipient surfaces show names first, keep wallet addresses subordinate, and preserve direct address entry for one-off payments."
       >
         <Card hover={false} className="max-w-xl overflow-hidden p-0">
-          <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Saved recipients</h3>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Use names for people and services you pay often. Confirm the network in Send.</p>
-              </div>
+          <Card.Header
+            title="Saved recipients"
+            description="Use names for people and services you pay often. Confirm the network in Send."
+            actions={
               <Button size="sm" className="flex-shrink-0 whitespace-nowrap">
                 Add contact
               </Button>
-            </div>
-          </div>
+            }
+          />
           {[
             ['Acme Services', '0x7a58...91c2'],
             ['Research API', '0x31bc...8d04'],
@@ -922,9 +937,7 @@ export default function DesignSystemPage() {
           />
 
           <Card hover={false} className="overflow-hidden">
-            <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recent agent activity</h3>
-            </div>
+            <Card.Header title="Recent agent activity" />
             <TransactionActivityRow
               direction="out"
               title="x402 payment"

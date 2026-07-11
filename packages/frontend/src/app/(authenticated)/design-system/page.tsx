@@ -16,6 +16,11 @@ import {
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { Select } from '@/components/ui/Select'
+import { SidePanel } from '@/components/ui/SidePanel'
+import { StepProgress } from '@/components/ui/StepProgress'
+import { CodeBlock } from '@/components/ui/CodeBlock'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -87,6 +92,8 @@ function DotIcon() {
 
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [sampleAmount, setSampleAmount] = useState('')
   const { toast } = useToast()
 
@@ -222,6 +229,49 @@ export default function DesignSystemPage() {
             surfaces. Guarded by <code className="rounded bg-[var(--v2-surface)] px-1">token-contrast.test.ts</code> —
             change a token and the test tells you if it still clears the bar.
           </p>
+        </Card>
+      </Section>
+
+      <Section
+        title="Typography"
+        description="The type ramp lives in globals.css as v2-text-* utility classes (size + leading + weight + tracking in one class). Rule: page and section headings go through the ramp; within components, body copy uses Tailwind's text-sm and metadata uses text-xs — those two map to the ramp's body and meta steps. Ad-hoc pixel sizes (text-[Npx]) are off-system; the design-lint gate blocks new ones."
+      >
+        <Card hover={false} className="space-y-4 p-5">
+          {[
+            { cls: 'v2-text-display', label: 'v2-text-display · 40/48 — hero numbers (dashboard balance)' },
+            { cls: 'v2-text-h1', label: 'v2-text-h1 · 28/34 — page titles (PageHeader)' },
+            { cls: 'v2-text-h2', label: 'v2-text-h2 · 20/28 — section titles' },
+            { cls: 'v2-text-h3', label: 'v2-text-h3 · 16/24 — card titles' },
+            { cls: 'v2-text-body', label: 'v2-text-body · 14/22 — body copy (= text-sm)' },
+            { cls: 'v2-text-meta', label: 'v2-text-meta · 12/18 — metadata, captions (= text-xs)' },
+          ].map((t) => (
+            <div key={t.cls} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+              <span className={`${t.cls} text-[var(--v2-ink)]`}>Pay 50 USDC</span>
+              <span className="text-xs text-[var(--v2-ink-3)]">{t.label}</span>
+            </div>
+          ))}
+        </Card>
+      </Section>
+
+      <Section
+        title="Spacing & radius"
+        description="The implicit scale, made explicit. Radius: cards and inner tiles are 10px (rounded-[10px]); marketing heroes 24px; buttons, inputs and selects rounded-md; badges/pills rounded-full. Card padding: p-5 default, p-6 for page-level section cards (Card.Header uses px-5 py-4 / spacious px-6 py-5). Vertical rhythm: space-y-10 between page sections, gap-4/gap-5 inside grids, mt-2 title→body, mt-4/mt-5 body→action."
+      >
+        <Card hover={false} className="p-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-5 text-center">
+              <p className="text-sm font-medium text-[var(--v2-ink)]">rounded-[10px]</p>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">cards, tiles, tables</p>
+            </div>
+            <div className="rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] p-5 text-center">
+              <p className="text-sm font-medium text-[var(--v2-ink)]">rounded-md</p>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">buttons, inputs, selects</p>
+            </div>
+            <div className="rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] p-5 text-center">
+              <p className="text-sm font-medium text-[var(--v2-ink)]">rounded-full</p>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">badges, pills, icon halos</p>
+            </div>
+          </div>
         </Card>
       </Section>
 
@@ -593,6 +643,77 @@ export default function DesignSystemPage() {
             </p>
           </div>
         </Card>
+      </Section>
+
+      <Section
+        title="Select"
+        description="The styled native <select>. Same height, radius, border and focus ring as Input so mixed form rows align. Passes through all native select attributes."
+      >
+        <Card hover={false} className="max-w-sm p-5">
+          <div className="space-y-3">
+            <Select defaultValue="week" aria-label="Budget period">
+              <option value="day">per day</option>
+              <option value="week">per week</option>
+              <option value="month">per month</option>
+            </Select>
+            <Select disabled defaultValue="usdc" aria-label="Token (disabled)">
+              <option value="usdc">USDC</option>
+            </Select>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="SidePanel"
+        description="Right-hand detail drawer — used for transaction details. Title + optional subtitle header, Escape/backdrop dismiss, focus trapped while open. Reach for it when a Row click needs more detail than a modal question."
+      >
+        <Card hover={false} className="p-5">
+          <Button variant="ghost" onClick={() => setPanelOpen(true)}>Open side panel</Button>
+        </Card>
+      </Section>
+
+      <Section
+        title="StepProgress"
+        description="Thin step indicator for multi-step flows (connect agent, onboarding). 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
+      >
+        <Card hover={false} className="max-w-sm space-y-4 p-5">
+          <StepProgress totalSteps={3} currentStep={0} />
+          <StepProgress totalSteps={3} currentStep={1} />
+          <StepProgress totalSteps={3} currentStep={3} />
+        </Card>
+      </Section>
+
+      <Section
+        title="ConfirmDialog"
+        description="Styled replacement for window.confirm. Defaults to tone danger (destructive actions: revoke, delete, disconnect); tone primary for consequential-but-safe confirmations. Supports confirmDisabled while the action runs and confirmButtonWrapper for guards like network switching."
+      >
+        <Card hover={false} className="p-5">
+          <Button variant="ghost" onClick={() => setConfirmOpen(true)}>Open confirm dialog</Button>
+        </Card>
+      </Section>
+
+      <Section
+        title="Toast"
+        description="Transient feedback via useToast() — success for completed user actions, error for failures the user must know about, info for neutral notices. One line, no actions inside the toast; anything requiring a decision belongs in a dialog. Toaster mounts once in the app shell."
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap gap-3">
+            <Button variant="ghost" size="sm" onClick={() => toast.success('Budget set — it refills itself every period.')}>toast.success</Button>
+            <Button variant="ghost" size="sm" onClick={() => toast.error('Could not stop the budget. Try again.')}>toast.error</Button>
+            <Button variant="ghost" size="sm" onClick={() => toast.info('Agent reconnected.')}>toast.info</Button>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="CodeBlock"
+        description="Dark monospace block for terminal commands and credential snippets. Optional filename header row with a check-pop copy button; onCopy fires only when the clipboard write succeeded (used for handoff telemetry)."
+      >
+        <div className="max-w-xl">
+          <CodeBlock filename="Terminal" onCopy={() => toast.success('Command copied')}>
+            npx @haven_ai/connect@alpha
+          </CodeBlock>
+        </div>
       </Section>
 
       <Section
@@ -1354,6 +1475,29 @@ export default function DesignSystemPage() {
         Confirm the agent budget before connecting your agent. Requests above the remaining
         budget will wait for approval.
       </Modal>
+
+      <SidePanel
+        open={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        title="x402 payment"
+        subtitle="Operating wallet · just now"
+      >
+        <p className="text-sm text-[var(--v2-ink-2)]">
+          Detail content goes here — the transactions route uses this panel for per-transaction
+          breakdowns (amount, movement, initiator, receipts).
+        </p>
+      </SidePanel>
+
+      {confirmOpen ? (
+        <ConfirmDialog
+          open
+          title="Stop this budget?"
+          body="The agent will no longer be able to pay from this budget. You can set a new one at any time."
+          confirmLabel="Stop budget"
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={() => setConfirmOpen(false)}
+        />
+      ) : null}
     </div>
   )
 }

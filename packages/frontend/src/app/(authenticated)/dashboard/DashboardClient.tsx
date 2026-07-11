@@ -119,12 +119,15 @@ function ConnectedAgentsSection({
 }) {
   return (
     <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Connected agents</h2>
-        <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-          View all
-        </Link>
-      </div>
+      <Card.Header
+        as="h2"
+        title="Connected agents"
+        actions={
+          <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+            View all
+          </Link>
+        }
+      />
 
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading connected agents">
@@ -522,12 +525,15 @@ function TransactionsSection({
 }) {
   return (
     <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Recent transactions</h2>
-        <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-          View all
-        </Link>
-      </div>
+      <Card.Header
+        as="h2"
+        title="Recent transactions"
+        actions={
+          <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+            View all
+          </Link>
+        }
+      />
 
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">

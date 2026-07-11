@@ -160,7 +160,7 @@ function ApprovalCard({
       hover={false}
       className={`overflow-hidden ${actionable ? 'border-[var(--v2-warning)]/25' : ''}`}
     >
-      <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+      <Card.Header>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -180,7 +180,7 @@ function ApprovalCard({
             </p>
           ) : null}
         </div>
-      </div>
+      </Card.Header>
 
       <div className="space-y-5 p-5">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.9fr)] lg:items-start">

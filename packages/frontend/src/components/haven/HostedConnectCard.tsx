@@ -660,11 +660,11 @@ function DestinationPathBlock({ paths }: { paths: { label: string; path: string 
       className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white"
       aria-label="Where to save"
     >
-      <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-1.5">
+      <Card.Header padding="none" className="px-3 py-1.5">
         <span className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
           {isMulti ? 'Save to one of' : 'Save to'}
         </span>
-      </div>
+      </Card.Header>
       <ul className="divide-y divide-[var(--v2-border)]">
         {paths.map((p) => (
           <DestinationPathRow key={`${p.label}-${p.path}`} path={p} showLabel={isMulti} />

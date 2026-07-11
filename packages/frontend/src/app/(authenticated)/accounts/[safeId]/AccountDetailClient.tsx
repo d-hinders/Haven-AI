@@ -307,7 +307,7 @@ export default function AccountDetailClient() {
       />
 
       <Card hover={false} elevation="raised" className="overflow-hidden">
-        <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-5 sm:px-6">
+        <Card.Header padding="none" className="px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]">Total balance</p>
@@ -327,7 +327,7 @@ export default function AccountDetailClient() {
               Sum of all tokens held by this Haven wallet, converted to {currency}.
             </p>
           </div>
-        </div>
+        </Card.Header>
 
         <div className="p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">

@@ -122,7 +122,7 @@ export default function ProfileClient() {
       />
 
       <Card hover={false} className="overflow-hidden">
-        <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-6 py-5">
+        <Card.Header padding="spacious">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="v2-text-h3 text-[var(--v2-ink)]">Personal profile</h2>
             <StatusBadge tone="brand">Haven account</StatusBadge>
@@ -130,7 +130,7 @@ export default function ProfileClient() {
           <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
             Keep your name recognizable for account notices and support.
           </p>
-        </div>
+        </Card.Header>
 
         <form
           onSubmit={(event) => {

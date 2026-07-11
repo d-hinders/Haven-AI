@@ -147,6 +147,7 @@ function AddSafeModal({
             {mode !== 'choose' && deployStep !== 'done' && (
               <button
                 onClick={() => { setMode('choose'); setError(''); setDeployStep('name') }}
+                aria-label="Back"
                 className="p-1 -ml-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
               >
                 <Icon icon={ChevronLeft} className="w-4 h-4" />

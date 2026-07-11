@@ -204,6 +204,12 @@ export default function DesignSystemPage() {
             the colour. Outgoing amount text stays neutral ink so the row reads calm — only the icon
             carries the signal.
           </p>
+          <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+            <span className="font-medium text-[var(--v2-ink-2)]">Contrast guarantee:</span> every ink and
+            semantic text token meets WCAG AA (≥4.5:1) on white, its own soft fill, and the tinted
+            surfaces. Guarded by <code className="rounded bg-[var(--v2-surface)] px-1">token-contrast.test.ts</code> —
+            change a token and the test tells you if it still clears the bar.
+          </p>
         </Card>
       </Section>
 

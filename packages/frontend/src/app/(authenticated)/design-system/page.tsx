@@ -1,5 +1,7 @@
 'use client'
 
+import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, Circle, EllipsisVertical, Info, TriangleAlert, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
@@ -76,13 +78,9 @@ function MovementExample({ from, to }: { from: string; to: string }) {
   return <TransactionMovement from={from} to={to} />
 }
 
-/** Generic placeholder icon for demos — 1.5 stroke, currentColor. */
+/** Generic placeholder icon for demos — the shared Icon convention. */
 function DotIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-      <circle cx="12" cy="12" r="6" />
-    </svg>
-  )
+  return <Icon icon={Circle} className="h-full w-full" />
 }
 
 export default function DesignSystemPage() {
@@ -188,9 +186,7 @@ export default function DesignSystemPage() {
                   aria-hidden="true"
                   className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[10px] border ${token.swatch}`}
                 >
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
-                    <circle cx="12" cy="12" r="6" />
-                  </svg>
+                  <Icon icon={Circle} className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
                   <p className="font-mono text-xs font-medium text-[var(--v2-ink)]">{token.name}</p>
@@ -208,6 +204,56 @@ export default function DesignSystemPage() {
             the colour. Outgoing amount text stays neutral ink so the row reads calm — only the icon
             carries the signal.
           </p>
+        </Card>
+      </Section>
+
+      <Section
+        title="Icons"
+        description="One icon family, one weight. Every UI icon is a lucide-react glyph rendered through the shared `Icon` wrapper (`@/components/ui/Icon`) — stroke 1.5, decorative by default (`aria-hidden`), sized via className. Never inline a raw `<svg>`; the only exemptions are brand marks in `components/brand` and marketing pages."
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap items-center gap-5">
+            {[
+              { icon: Bot, name: 'Bot' },
+              { icon: ArrowDown, name: 'ArrowDown' },
+              { icon: ArrowUp, name: 'ArrowUp' },
+              { icon: Check, name: 'Check' },
+              { icon: X, name: 'X' },
+              { icon: Info, name: 'Info' },
+              { icon: TriangleAlert, name: 'TriangleAlert' },
+              { icon: EllipsisVertical, name: 'EllipsisVertical' },
+            ].map((entry) => (
+              <div key={entry.name} className="flex flex-col items-center gap-1.5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)]">
+                  <Icon icon={entry.icon} className="h-4 w-4" />
+                </span>
+                <p className="font-mono text-[11px] text-[var(--v2-ink-3)]">{entry.name}</p>
+              </div>
+            ))}
+          </div>
+          <ul className="mt-4 space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">Usage:</span>{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">{'<Icon icon={Check} className="h-4 w-4" />'}</code>{' '}
+              — size with className (or the numeric <code className="rounded bg-[var(--v2-surface)] px-1">size</code> prop
+              where a pixel value is passed through), colour with a text token on the icon or its parent.
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">Stroke:</span> 1.5 everywhere. Overriding{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">strokeWidth</code> requires a comment at the call
+              site explaining why (e.g. a large empty-state hero that reads too heavy at 1.5).
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">Accessibility:</span> icons are decorative by default.
+              Pass <code className="rounded bg-[var(--v2-surface)] px-1">label</code> only when the icon is the sole
+              carrier of meaning and the surrounding control has no <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>.
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">Adding a glyph:</span> pick the closest lucide icon —
+              do not draw a custom SVG. If a concept genuinely has no lucide glyph, raise it in the PR rather than
+              inlining markup.
+            </li>
+          </ul>
         </Card>
       </Section>
 
@@ -463,11 +509,7 @@ export default function DesignSystemPage() {
                 aria-label="Account options"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                  <circle cx="12" cy="5" r="1.25" />
-                  <circle cx="12" cy="12" r="1.25" />
-                  <circle cx="12" cy="19" r="1.25" />
-                </svg>
+                <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => toast.info('Edit agent')}>Edit agent</DropdownMenuItem>
@@ -933,9 +975,7 @@ export default function DesignSystemPage() {
                     className="inline-flex items-center gap-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
                   >
                     Date
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
+                    <Icon icon={ChevronDown} className="h-3 w-3" />
                   </button>
                 </th>
                 <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-right text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="none">
@@ -1080,18 +1120,7 @@ export default function DesignSystemPage() {
                 role="status"
                 className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
               >
-                <svg
-                  aria-hidden="true"
-                  className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.75}
-                >
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 11v5" strokeLinecap="round" />
-                  <circle cx="12" cy="8" r="0.6" fill="currentColor" />
-                </svg>
+                <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                 <span>Connect a wallet to update this agent budget.</span>
               </p>
               <div className="flex gap-3">

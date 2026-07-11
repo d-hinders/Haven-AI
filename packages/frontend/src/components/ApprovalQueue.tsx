@@ -1,5 +1,7 @@
 'use client'
 
+import { ChevronRight } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useMemo, useState, useCallback, type ReactNode } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
@@ -223,14 +225,10 @@ function ApprovalCard({
               aria-expanded={disclosureOpen}
               onClick={toggleDisclosure}
             >
-              <svg
+              <Icon
+                icon={ChevronRight}
                 className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${disclosureOpen ? 'rotate-90' : ''}`}
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              />
               Where does the money go?
             </button>
             {disclosureOpen ? (

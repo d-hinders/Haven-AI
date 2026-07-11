@@ -1,5 +1,7 @@
 'use client'
 
+import { Check, ChevronLeft, Copy } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
@@ -34,17 +36,12 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? (
         <>
-          <svg className="h-3 w-3 text-[var(--v2-success)]" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path d="M3 8l3.5 3.5L13 4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <Icon icon={Check} className="h-3 w-3 text-[var(--v2-success)]" />
           Copied
         </>
       ) : (
         <>
-          <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            <rect x="5" y="5" width="8" height="8" rx="1" />
-            <path d="M11 5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2" />
-          </svg>
+          <Icon icon={Copy} className="h-3 w-3" />
           Copy
         </>
       )}
@@ -81,9 +78,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
           href={`/agents/${agentId}`}
           className="inline-flex items-center gap-1.5 text-sm text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
         >
-          <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            <path d="M10 4L6 8l4 4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <Icon icon={ChevronLeft} className="h-3.5 w-3.5" />
           Back to agent
         </Link>
       </div>

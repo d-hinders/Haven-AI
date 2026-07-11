@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Trash2 } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 export type AgentBudgetRow = {
   id?: string
@@ -69,12 +71,7 @@ export function AgentBudgetCard({
                     aria-label={`Remove ${row.tokenSymbol} budget`}
                     className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
                   >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-1 14H6L5 6" />
-                      <path d="M10 11v6M14 11v6" />
-                      <path d="M9 6V4h6v2" />
-                    </svg>
+                    <Icon icon={Trash2} className="h-[13px] w-[13px]" />
                   </button>
                 )}
               </div>

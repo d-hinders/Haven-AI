@@ -1,5 +1,7 @@
 'use client'
 
+import { ChevronDown } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { getChainConfig } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
@@ -324,15 +326,10 @@ export default function FilterBar({
 
 function Chevron({ open }: { open: boolean }) {
   return (
-    <svg
+    <Icon
+      icon={ChevronDown}
       className={`h-3 w-3 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-    </svg>
+    />
   )
 }
 

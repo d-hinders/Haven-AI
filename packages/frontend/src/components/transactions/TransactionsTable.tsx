@@ -17,6 +17,8 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { DirectionMark, ExternalDetailsLink } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { ChevronDown } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -114,16 +116,10 @@ const AMOUNT_TONE_CLASS: Record<AmountTone, string> = {
 
 function SortChevron({ active, ascending }: { active: boolean; ascending: boolean }) {
   return (
-    <svg
+    <Icon
+      icon={ChevronDown}
       className={`ml-1 inline-block h-3 w-3 flex-shrink-0 transition-transform ${active ? 'opacity-100' : 'opacity-30'} ${active && ascending ? 'rotate-180' : ''}`}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      aria-hidden="true"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-    </svg>
+    />
   )
 }
 

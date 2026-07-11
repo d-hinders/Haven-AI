@@ -1,5 +1,7 @@
 'use client'
 
+import { Check } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -473,15 +475,8 @@ export default function OnboardingClient() {
                   />
                 </div>
                 <div className="animate-check-pop relative flex h-14 w-14 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-[var(--v2-brand)]/25 shadow-[var(--v2-shadow-button)]">
-                  <svg
-                    className="h-7 w-7 text-[var(--v2-brand)]"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2.4}
-                  >
-                    <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  {/* Heavier stroke: the 56px success bloom check reads too light at 1.5. */}
+                  <Icon icon={Check} className="h-7 w-7 text-[var(--v2-brand)]" strokeWidth={2.4} />
                 </div>
               </div>
 

@@ -1,5 +1,7 @@
 'use client'
 
+import { ChevronLeft, ChevronRight, MoveDown, MoveRight, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -37,17 +39,13 @@ export function Arrow({ direction = 'down' }: { direction?: 'down' | 'right' }) 
   if (direction === 'right') {
     return (
       <div className="flex items-center justify-center px-1">
-        <svg width="20" height="12" viewBox="0 0 20 12" fill="none" className="text-[var(--v2-ink-3)]">
-          <path d="M0 6h16M12 1l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Icon icon={MoveRight} className="h-3 w-5 text-[var(--v2-ink-3)]" />
       </div>
     )
   }
   return (
     <div className="flex items-center justify-center py-1">
-      <svg width="12" height="20" viewBox="0 0 12 20" fill="none" className="text-[var(--v2-ink-3)]">
-        <path d="M6 0v16M1 12l5 5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <Icon icon={MoveDown} className="h-5 w-3 text-[var(--v2-ink-3)]" />
     </div>
   )
 }
@@ -170,10 +168,7 @@ export default function InfoModal({ open, onClose, pages }: Props) {
             aria-label="Close"
             className="p-1.5 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <Icon icon={X} className="h-4 w-4" />
           </button>
         </div>
 
@@ -207,9 +202,7 @@ export default function InfoModal({ open, onClose, pages }: Props) {
               disabled={isFirst}
               className="text-sm text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] disabled:opacity-0 disabled:cursor-default transition-colors flex items-center gap-1"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
+              <Icon icon={ChevronLeft} className="h-3.5 w-3.5" />
               Previous
             </button>
 
@@ -230,9 +223,7 @@ export default function InfoModal({ open, onClose, pages }: Props) {
                 className="text-sm text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors flex items-center gap-1"
               >
                 Next
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
+                <Icon icon={ChevronRight} className="h-3.5 w-3.5" />
               </button>
             )}
           </div>

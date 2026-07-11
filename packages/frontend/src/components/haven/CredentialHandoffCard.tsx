@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Check, FileText } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 export function CredentialHandoffCard({
   title = 'Credential file',
@@ -41,16 +43,7 @@ export function CredentialHandoffCard({
             saved ? 'text-[var(--v2-success)]' : 'text-[var(--v2-brand)]'
           }`}
         >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            {saved ? (
-              <path d="m5 12.5 4.25 4.25L19 7" strokeLinecap="round" strokeLinejoin="round" />
-            ) : (
-              <>
-                <path d="M7 3.75h7.25L18 7.5v12.75H7V3.75Z" strokeLinejoin="round" />
-                <path d="M14.25 3.75V7.5H18M9.5 13.25h5M9.5 16h5M9.5 10.5h2" strokeLinecap="round" strokeLinejoin="round" />
-              </>
-            )}
-          </svg>
+          <Icon icon={saved ? Check : FileText} className="h-4 w-4" />
         </div>
       </div>
 

@@ -1,3 +1,5 @@
+import { ArrowDown, ArrowUp, Clock } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import type { TransactionActivityDirection } from './TransactionActivityRow'
 
 type Density = 'comfortable' | 'compact'
@@ -35,18 +37,10 @@ export function DirectionMark({
       aria-hidden="true"
       className={`flex flex-shrink-0 items-center justify-center rounded-[10px] border ${sizeClass} ${classes}`}
     >
-      <svg className={iconSizeClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        {direction === 'in' ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
-        ) : direction === 'out' ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0l-5 5m5-5l5 5" />
-        ) : (
-          <>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l2.5 2.5" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </>
-        )}
-      </svg>
+      <Icon
+        icon={direction === 'in' ? ArrowDown : direction === 'out' ? ArrowUp : Clock}
+        className={iconSizeClass}
+      />
     </span>
   )
 }

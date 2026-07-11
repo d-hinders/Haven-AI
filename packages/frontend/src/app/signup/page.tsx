@@ -1,5 +1,7 @@
 'use client'
 
+import { Check } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -33,9 +35,7 @@ function TrustRow({
       style={{ ['--v2-stagger-delay' as string]: `${delayMs}ms` }}
     >
       <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] ring-1 ring-inset ring-[var(--v2-brand)]/20">
-        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path d="M3.5 8.5 6.5 11.5 12.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Icon icon={Check} className="h-3.5 w-3.5" />
       </div>
       <div>
         <p className="text-sm font-medium text-[var(--v2-ink)]">{title}</p>

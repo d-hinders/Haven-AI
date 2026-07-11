@@ -1,5 +1,7 @@
 'use client'
 
+import { ArrowRight, EllipsisVertical } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useMemo, useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
@@ -475,18 +477,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                   disabled={pendingAction !== null}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <svg
-                    className="h-4 w-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    aria-hidden="true"
-                  >
-                    <circle cx="12" cy="5" r="1.25" />
-                    <circle cx="12" cy="12" r="1.25" />
-                    <circle cx="12" cy="19" r="1.25" />
-                  </svg>
+                  <Icon icon={EllipsisVertical} className="h-4 w-4" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                   <DropdownMenuItem onSelect={openEditAgent}>Edit agent</DropdownMenuItem>
@@ -586,9 +577,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 aria-label="Recover funds to your Haven wallet"
               >
                 Recover funds
-                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                  <path d="M3.5 8h9M8.5 4l4.5 4-4.5 4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <Icon icon={ArrowRight} className="h-3 w-3" />
               </a>
             </div>
           </ApprovalRequiredBanner>

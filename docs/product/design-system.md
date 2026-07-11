@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-06-28"
+last-verified: "2026-07-11"
 ---
 
 # Haven Design System
@@ -293,10 +293,12 @@ Animated, cycling state machine showing one payment lifecycle (Intent → Policy
 
 ## 5. Iconography
 
-- 14 / 16 / 20 px exactly (matches v1 rule).
-- Inline SVGs, `stroke-width="1.5"` for line icons, currentColor.
+- One family: **lucide-react**, rendered through the shared `Icon` wrapper (`components/ui/Icon.tsx`) — never a hand-rolled inline `<svg>`. Exemptions: brand marks in `components/brand` and marketing pages.
+- 14 / 16 / 20 px exactly (matches v1 rule); size via className (`h-4 w-4`) or the wrapper's numeric `size` prop.
+- `stroke-width` 1.5 everywhere, currentColor. Overrides require a call-site comment (see `/design-system` → Icons).
+- Decorative by default (`aria-hidden`); pass `label` only when the icon is the sole carrier of meaning.
 - No emoji in product UI or marketing.
-- Arrow chevrons (`→`) drawn in SVG, not unicode, so they animate consistently.
+- Arrow chevrons (`→`) come from lucide, not unicode, so they animate consistently.
 
 ---
 

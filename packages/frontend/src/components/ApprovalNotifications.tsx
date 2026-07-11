@@ -1,5 +1,7 @@
 'use client'
 
+import { ArrowRight, Bell, CircleCheck } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApprovals } from '@/hooks/useApprovals'
@@ -60,10 +62,7 @@ export default function ApprovalNotifications() {
             : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]'
         }`}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
-          <path d="M9 17a3 3 0 0 0 6 0" />
-        </svg>
+        <Icon icon={Bell} className="h-4 w-4" />
         {actionableCount > 0 && (
           <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[var(--v2-warning)] text-white text-[10px] font-bold flex items-center justify-center shadow-[var(--v2-shadow-button)] v2-tabular">
             {actionableCount > 99 ? '99+' : actionableCount}
@@ -117,10 +116,7 @@ export default function ApprovalNotifications() {
           ) : pendingApprovals.length === 0 ? (
             <div className="relative px-5 py-8 text-center bg-[var(--v2-surface)]">
               <div className="w-11 h-11 rounded-2xl bg-[var(--v2-success-soft)] text-[var(--v2-success)] flex items-center justify-center mx-auto mb-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 12l2 2 4-4" />
-                  <circle cx="12" cy="12" r="10" />
-                </svg>
+                <Icon icon={CircleCheck} className="h-5 w-5" />
               </div>
               <p className="text-sm font-medium text-[var(--v2-ink)]">
                 {actionableCount > 0 ? 'Open approvals for the full queue' : "You're all caught up"}
@@ -192,10 +188,7 @@ export default function ApprovalNotifications() {
                   className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
                 >
                   View all approvals
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 12h14" />
-                    <path d="m12 5 7 7-7 7" />
-                  </svg>
+                  <Icon icon={ArrowRight} className="h-3 w-3" />
                 </Link>
               </div>
             </>

@@ -1,0 +1,61 @@
+name: Design-system coupling gate
+
+# #898 (epic #904). On every PR, flags shared primitives added under
+# components/ui/** or components/haven/** whose symbol never appears on the
+# /design-system reference page. Advisory only — it posts a sticky comment and
+# never fails the build (the script exits 0 without --strict; ship-next runs it
+# with --strict as a hard definition-of-done step).
+# See docs/contributing/ship-playbooks/frontend.md §2.
+
+on:
+  pull_request:
+
+concurrency:
+  group: design-system-coupling-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coupling:
+    name: Design-system coupling
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Find primitives missing from /design-system
+        id: gate
+        # The script exits 0 without --strict, but continue-on-error makes the
+        # non-blocking guarantee hold even against a load failure before main().
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          node packages/frontend/scripts/design-system-coupling.mjs
+          --out=design-system-coupling-comment.md
+
+      - name: Post advisory comment (when primitives are undocumented)
+        if: steps.gate.outputs.has_findings == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: design-system-coupling
+          recreate: true
+          path: design-system-coupling-comment.md
+
+      - name: Clear stale comment (when nothing is undocumented)
+        if: steps.gate.outputs.has_findings != 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: design-system-coupling
+          delete: true

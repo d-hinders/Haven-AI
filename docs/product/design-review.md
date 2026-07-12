@@ -12,7 +12,7 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/app/**
   - packages/frontend/src/components/**
-last-verified: "2026-06-29"
+last-verified: "2026-07-13"
 ---
 
 # Haven AI UX Review
@@ -106,6 +106,11 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 
 - Inspect `/design-system` when adding or changing shared UI patterns.
 - Check at least one desktop and one mobile viewport for changed screens.
+- Capture rendered-screen evidence for any diff touching a rendered route or a
+  shared primitive: `npm run screenshot -w packages/frontend -- <routes>`
+  (desktop + mobile PNGs; attach to the PR or reference them in Browser
+  Verification). `/design-system` itself is pixel-guarded by the blocking
+  visual-regression CI job.
 - Run relevant frontend tests or `npm run build -w packages/frontend` when practical.
 - Run the matching Captain Self-Check Preflight items before final review.
 - If browser verification is skipped, record why and name the headless-equivalent
@@ -114,6 +119,9 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   the changed surface affects them.
 - Run `haven-reviewer` for user-facing, money, authority, shared-behavior, or
   meaningful-risk changes.
+- Run `haven-design-reviewer` over the screenshots for `area:frontend` diffs —
+  the rendered-UX pass alongside the code review; a finding from either pauses
+  auto-merge (frontend ship-playbook §5–6).
 - Run `haven-doc-reviewer` when changed paths match document `covers:` mappings,
   and resolve stale claims before the PR.
 - Report changed surfaces, workflow/agents used, CI, local checks, browser or

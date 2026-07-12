@@ -62,11 +62,12 @@ Apply these guardrails to generated artifacts too: SDK examples, credential file
 
 Before completing UI work:
 
-- Reuse shared primitives and Haven-domain components where possible.
+- Reuse shared primitives and Haven-domain components where possible. If the diff writes the same markup shape a second time, extract it into a `ui/`/`haven/` primitive and add a `/design-system` entry in the same PR (the coupling gate checks this).
 - Check mobile and desktop layouts.
 - Include empty, loading, error, and success states when the screen can enter them.
-- Review copy against `docs/product/copy-guidelines.md`.
+- Review copy against `docs/product/copy-guidelines.md` (the blocking copy-lint gate catches banned multi-word terms; review tone and clarity by hand).
 - Review the changed UX against `docs/product/design-review.md`.
+- Capture rendered-screen evidence (`npm run screenshot -w packages/frontend -- <routes>`) for any diff touching a rendered route or shared primitive, and run the `haven-design-reviewer` rendered pass alongside the code review.
 - Run relevant frontend tests or build checks when practical.
 - Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches (numeric formatters, counter/summary stats, conditional copy, animations, inline gates, cross-surface values, paginated-list-derived progress).
 - If browser verification is skipped (preview environment unavailable, slow, flaky), add at least one **headless equivalent** in vitest:

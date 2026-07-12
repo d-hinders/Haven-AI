@@ -97,6 +97,31 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     return { delegations: result.rows }
   })
 
+  // ── GET /:id/account-signers — the treasury's signer set (#887) ───────────
+  // The dashboard builds the account's WebAuthn signer from this (kit
+  // deployParams must match EXACTLY what provisioning derived the address
+  // from). Owner-scoped; public-key material only — nothing secret.
+  app.get<{ Params: { id: string } }>('/:id/account-signers', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const agent = await loadOwnedDelegationAgent(request.params.id, sub)
+    if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    if (agent.account_type !== 'delegator_hybrid' || !agent.treasury_address) {
+      return reply.code(409).send({ error: 'Agent account is not on the delegation rail' })
+    }
+    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address)
+    if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+    return {
+      account_address: agent.treasury_address,
+      chain_id: agent.chain_id,
+      owner_address: owner.config.ownerAddress ?? null,
+      passkeys: (owner.config.passkeys ?? []).map((p) => ({
+        key_id: p.keyId,
+        x: `0x${p.x.toString(16)}`,
+        y: `0x${p.y.toString(16)}`,
+      })),
+    }
+  })
+
   // ── POST /:id/delegations/build — grant step 1 (nothing signed yet) ───────
   app.post<{
     Params: { id: string }
@@ -209,8 +234,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const agent = await loadOwnedDelegationAgent(request.params.id, sub)
       if (!agent) return reply.code(404).send({ error: 'Agent not found' })
       const { signature } = request.body ?? {}
-      if (!signature || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
-        return reply.code(400).send({ error: 'A 65-byte owner signature is required' })
+      // EOA signatures are 65 bytes (130 hex); a passkey account's delegation
+      // signature is an ABI-encoded WebAuthn assertion — longer (#887). The
+      // REAL validator is EIP-1271 at redemption; this is a shape check only.
+      if (!signature || !/^0x[0-9a-fA-F]{130,}$/.test(signature) || signature.length % 2 !== 0) {
+        return reply.code(400).send({ error: 'An owner signature is required (65-byte ECDSA or WebAuthn assertion)' })
       }
       if (!HASH_RE.test(request.params.hash)) {
         return reply.code(400).send({ error: 'Invalid delegation hash' })

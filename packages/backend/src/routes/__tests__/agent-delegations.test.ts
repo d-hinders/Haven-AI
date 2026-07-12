@@ -187,7 +187,60 @@ describe('delegation lifecycle API (#828)', () => {
     })
   })
 
+  describe('GET /:id/account-signers (#887)', () => {
+    it('returns the signer set for a passkey account — public key material only', async () => {
+      mockDb({ owner: null, passkeys: [{ key_id: '0x' + '11'.repeat(32), public_key_x: '0xaa', public_key_y: '0xbb' }] })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/account-signers` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({
+        account_address: TREASURY,
+        chain_id: 84532,
+        owner_address: null,
+        passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0xaa', y: '0xbb' }],
+      })
+    })
+
+    it('returns the EOA owner with an empty passkey list', async () => {
+      mockDb({})
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/account-signers` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().owner_address).toBe(OWNER)
+      expect(res.json().passkeys).toEqual([])
+    })
+
+    it('409s when no signer configuration exists', async () => {
+      mockDb({ owner: null })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/account-signers` })
+      expect(res.statusCode).toBe(409)
+    })
+  })
+
   describe('POST /:id/delegations/:hash/activate — grant step 2', () => {
+    it('accepts a WebAuthn-length signature (ABI-encoded assertion, >65 bytes) (#887)', async () => {
+      mockDb({
+        owner: null,
+        passkeys: [{ key_id: 'cred-1', public_key_x: '0x11', public_key_y: '0x22' }],
+      })
+      mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: true })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(300) }, // WebAuthn assertion scale
+      })
+      expect(res.statusCode).toBe(200)
+    })
+
+    it('still rejects a too-short or odd-length signature', async () => {
+      mockDb({})
+      for (const bad of ['0xdead', '0x' + 'ab'.repeat(64) + 'a']) {
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: bad },
+        })
+        expect(res.statusCode).toBe(400)
+      }
+    })
+
+
     it('deploys the counterfactual delegator via the relayer before activating (#860)', async () => {
       mockDb({})
       mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: false, txHash: '0x' + '11'.repeat(32) })

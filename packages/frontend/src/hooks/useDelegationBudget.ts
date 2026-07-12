@@ -5,15 +5,19 @@
  *
  * The owner-facing counterpart of the delegation lifecycle API (#828): grant a
  * budget with ONE signature, list budgets with status, revoke with ONE
- * signature. The wallet signs the EIP-712 typed data the backend returns
+ * signature. An EOA owner signs the EIP-712 typed data the backend returns
  * VERBATIM — never a reconstructed payload, never a bare hash (the #829/#832
- * lesson; the account validates exactly that typed data). Haven signs nothing.
+ * lesson; the account validates exactly that typed data). A PASSKEY-owned
+ * account signs through the kit's WebAuthn path instead (#887): delegations
+ * via account.signDelegation, treasury ops via account.signUserOperation —
+ * the exact encoding the #884 spike proved on-chain. Haven signs nothing.
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import type { Address } from 'viem'
 import { api } from '@/lib/api'
 import { useActiveSigner } from '@/lib/signer'
+import type { AccountSigners, DelegationMessage } from '@/lib/delegationPasskeySigner'
 
 export interface DelegationBudget {
   id: string
@@ -34,7 +38,9 @@ interface BuildResponse {
 }
 
 interface RevokePrepare {
-  signing_payload: TypedDataPayload
+  signature_scheme?: 'eip712_userop' | 'webauthn_userop'
+  signing_payload?: TypedDataPayload
+  user_op_hash?: string
   user_operation: unknown
 }
 
@@ -77,6 +83,7 @@ async function signTyped(
 
 export function useDelegationBudget(agentId: string, chainId: number) {
   const [budgets, setBudgets] = useState<DelegationBudget[] | null>(null)
+  const [signers, setSigners] = useState<AccountSigners | null>(null)
   const [busy, setBusy] = useState(false)
   const signer = useActiveSigner({ chainId })
 
@@ -91,11 +98,19 @@ export function useDelegationBudget(agentId: string, chainId: number) {
 
   useEffect(() => {
     void reload()
-  }, [reload])
+    // The account's signer set decides HOW the owner signs (#887): a
+    // passkey-only account signs via WebAuthn; anything with an EOA owner
+    // keeps the connected-wallet EIP-712 path.
+    void api
+      .get<AccountSigners>(`/agents/${agentId}/account-signers`)
+      .then(setSigners)
+      .catch(() => setSigners(null))
+  }, [agentId, reload])
+
+  const passkeyOnly = !!signers && !signers.owner_address && signers.passkeys.length > 0
 
   const grant = useCallback(
     async (input: GrantInput): Promise<BudgetResult> => {
-      if (!signer) return { ok: false, reason: 'failed' }
       setBusy(true)
       try {
         const built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
@@ -104,7 +119,19 @@ export function useDelegationBudget(agentId: string, chainId: number) {
           budget_atomic: input.budgetAtomic,
           period_seconds: input.periodSeconds,
         })
-        const signature = await signTyped(signer, built.signing_payload)
+        let signature: string
+        if (passkeyOnly && signers) {
+          // ONE passkey ceremony — the kit signs the delegation itself; the
+          // typed-data message IS the delegation (#828's payload).
+          const { signDelegationWithPasskey } = await import('@/lib/delegationPasskeySigner')
+          signature = await signDelegationWithPasskey(
+            signers,
+            built.signing_payload.message as unknown as DelegationMessage,
+          )
+        } else {
+          if (!signer) return { ok: false, reason: 'failed' }
+          signature = await signTyped(signer, built.signing_payload)
+        }
         await api.post(`/agents/${agentId}/delegations/${built.delegation_hash}/activate`, { signature })
         await reload()
         return { ok: true }
@@ -114,16 +141,27 @@ export function useDelegationBudget(agentId: string, chainId: number) {
         setBusy(false)
       }
     },
-    [agentId, reload, signer],
+    [agentId, passkeyOnly, reload, signer, signers],
   )
 
   const revoke = useCallback(
     async (delegationHash: string): Promise<BudgetResult> => {
-      if (!signer) return { ok: false, reason: 'failed' }
       setBusy(true)
       try {
         const prep = await api.post<RevokePrepare>(`/agents/${agentId}/delegations/${delegationHash}/revoke`, {})
-        const signature = await signTyped(signer, prep.signing_payload)
+        let signature: string
+        if (prep.signature_scheme === 'webauthn_userop') {
+          if (!signers) return { ok: false, reason: 'failed' }
+          // ONE passkey ceremony — the account signs its own UserOperation.
+          const { signUserOpWithPasskey } = await import('@/lib/delegationPasskeySigner')
+          signature = await signUserOpWithPasskey(
+            signers,
+            prep.user_operation as Record<string, unknown>,
+          )
+        } else {
+          if (!signer || !prep.signing_payload) return { ok: false, reason: 'failed' }
+          signature = await signTyped(signer, prep.signing_payload)
+        }
         await api.post(`/agents/${agentId}/delegations/${delegationHash}/revoke/submit`, {
           signature,
           user_operation: prep.user_operation,
@@ -136,10 +174,12 @@ export function useDelegationBudget(agentId: string, chainId: number) {
         setBusy(false)
       }
     },
-    [agentId, reload, signer],
+    [agentId, reload, signer, signers],
   )
 
-  return { budgets, grant, revoke, busy, ready: signer?.type === 'eoa', reload }
+  // Ready: a passkey-only account signs with its passkey (no wallet needed);
+  // an EOA-owned account still needs the connected owner wallet.
+  return { budgets, grant, revoke, busy, ready: passkeyOnly || signer?.type === 'eoa', reload }
 }
 
 function cancelled(err: unknown): boolean {

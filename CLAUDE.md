@@ -60,7 +60,7 @@ Protocols → x402, Stripe MPP (agent payment standards)
 - Holds funds, executes transactions
 - Multi-owner / threshold security
 - **Base** (chain ID 8453) is the **primary / default network**; **Gnosis Chain** (chain ID 100) is also supported
-- Two onboarding paths: **in-app deployment** during signup (passkey-owned Safe via `POST /safe/deploy`, or EOA-owned via the connected-wallet flow) and **import** of an existing Safe (`POST /user/safes`)
+- Two onboarding paths: **in-app deployment** during signup (passkey-owned Safe via `POST /safe/deploy`, or EOA-owned via the connected-wallet flow) and **import** of an existing Safe (`POST /user/safes`). On the delegation rail, signup instead provisions a passkey-owned **Hybrid DeleGator** via `POST /accounts/hybrid` (counterfactual, zero tx — dark-launched, #886)
 - Interaction is via direct contract calls with `ethers.js` against Safe + the AllowanceModule (no `@safe-global/protocol-kit` yet — see Tech Stack)
 
 ### 2. Haven Control Layer
@@ -80,6 +80,7 @@ Protocols → x402, Stripe MPP (agent payment standards)
 - Guards for transaction validation (future)
 - **Session rail (retired, #834):** the Smart Sessions / ERC-7579 session-key rail is retired outright — its backend modules are deleted, and accounts still marked `execution_rail='session_key'` get HTTP 410 (fail-closed, nothing written) from `POST /payments` and the x402 machine-payment path. New accounts onboard on the delegation rail below. The typed rail seam (`lib/execution-rail.ts`) stays for reversibility
 - **Delegation rail (epic #821):** new accounts can be provisioned as MetaMask Hybrid DeleGator smart accounts (`account_type='delegator_hybrid'`, `execution_rail='delegation'`) with policy as signed delegations + audited caveat enforcers. Payments redeem the agent's budget delegation via sponsored UserOps (#829): budget (with native period refill), recipient and expiry are enforced ON-CHAIN during gas estimation — no coverage arithmetic, no approval queue, no schedule machinery on this rail. Grant = 1 owner signature, 0 owner tx (activation relayer-deploys the counterfactual delegator, #860). Security model: `docs/security/delegation-rail-security-model.md`
+- **Passkey accounts + recovery (epic #836, shipped):** delegation-rail accounts can be pure-passkey (P256/WebAuthn, no EOA anywhere) — onboarding is one Face ID prompt with zero transactions (dark-launched: `NEXT_PUBLIC_DELEGATION_ONBOARDING=1`), budget grants/revokes sign via WebAuthn, and the account's **signer set** is user-managed (`/agents/:id/account-signers/*`: enroll a backup passkey/EOA, remove — every change signed by an EXISTING signer, never Haven). Recovery = the backup enrolls a replacement and removes the lost key; a removed key's delegations die with it (EIP-1271). The account enforces ≥2 signers on-chain; single-signer accounts have NO recovery. Mainnet gate: `#908`. User docs: `docs/product/account-recovery.md`
 
 > **Owner decision (#834, recorded verbatim):** "Legacy AllowanceModule stays as an IMPORT-ONLY path for existing Safes (dev-pilot); no new accounts get it. Sweep machinery and the delegate-balance monitor stay while any funding-leg rail lives. Session rail retired outright — zero external customers, retirement not migration. Decided by the owner in-session 2026-07-12."
 

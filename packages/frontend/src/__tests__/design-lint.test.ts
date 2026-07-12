@@ -24,10 +24,26 @@ describe('design-lint scanner (#855)', () => {
     expect(hits).toEqual([{ rule: 'hex-color', line: 2, match: '#1a2332' }])
   })
 
-  it('exempts brand and marketing from the hex rule only', () => {
-    const src = 'const c = "#1a2332"; const cls = "text-amber-500"'
-    const hits = scan('src/components/marketing/Hero.tsx', src)
-    expect(hits.map((h) => h.rule)).toEqual(['raw-palette'])
+  it('exempts marketing/landing surfaces from ALL rules (#874)', () => {
+    const src = 'const c = "#1a2332"; const cls = "text-amber-500 text-[10px]"'
+    for (const file of [
+      'src/components/marketing/Hero.tsx',
+      'src/components/brand/Logo.tsx',
+      'src/app/page.tsx',
+      'src/app/protocols/x402/page.tsx',
+      'src/app/investor-briefing/page.tsx',
+      'src/app/how-it-works/page.tsx',
+    ]) {
+      expect(scan(file, src)).toEqual([])
+    }
+    // …while product-app files stay fully gated:
+    expect(scan('src/components/X.tsx', src).map((h) => h.rule).sort()).toEqual([
+      'hex-color',
+      'micro-font',
+      'raw-palette',
+    ])
+    // …and a nested product page named page.tsx is NOT the landing page:
+    expect(scan('src/app/(authenticated)/dashboard/page.tsx', src)).toHaveLength(3)
   })
 
   it('does not treat 0x addresses or route anchors as hex colours', () => {

@@ -272,7 +272,7 @@ Five packages are published to npm: `@haven_ai/sdk`, `@haven_ai/signer`, `@haven
 
 No nested filled cards. To group content inside a `Card`, use `Card.Section` (white-on-white hairline) or `Card.Section divided` (row list); for list items use the `Row` primitive. Tinted surfaces (`--v2-surface`, `--v2-surface-2`) are reserved for callouts/banners, table headers (`--v2-table-header-bg`), the `anchor` Card elevation, chips and code blocks, and overlay surfaces (tooltips, popovers, dropdowns, modal subgrids). Don't reach for a grey inner wrapper to "group" siblings — it creates a phantom surface tier and fights the parent Card's lift. See `/design-system` → "Surface hierarchy" for the ❌/✅ comparison.
 
-**Design-lint gate (#855):** frontend CI fails on NEW raw Tailwind palette classes (`text-amber-500`, …), hardcoded hex colours (outside `components/brand`/`components/marketing`), and new `text-[10px]`/`text-[11px]`. Existing debt is ratcheted in `packages/frontend/design-lint-baseline.json` (shrink-only). Route colours through `var(--v2-…)` tokens; check locally with `npm run design:lint -w packages/frontend`.
+**Design-lint gate (#855):** frontend CI fails on NEW raw Tailwind palette classes (`text-amber-500`, …), hardcoded hex colours, and new `text-[10px]`/`text-[11px]` in product-app surfaces. Marketing/landing surfaces (`components/brand`, `components/marketing`, the landing page, `/protocols`, `/investor-briefing`, `/how-it-works`) are intentionally bespoke and exempt from all three rules (#874). Existing debt is ratcheted in `packages/frontend/design-lint-baseline.json` (shrink-only). Route colours through `var(--v2-…)` tokens; check locally with `npm run design:lint -w packages/frontend`.
 
 ## Agentic Development Workflow
 

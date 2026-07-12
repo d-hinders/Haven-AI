@@ -145,7 +145,9 @@ export default function DesignSystemPage() {
               gate (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">npm run design:lint -w packages/frontend</code>)
               {' '}fails a PR that introduces raw Tailwind palette classes, hardcoded hex colours, or new{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">text-[10px]</code>/<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">text-[11px]</code>. {/* prose mention, not a use — design-lint-disable-line */}
-              Existing debt lives in a shrink-only baseline
+              Marketing/landing surfaces (brand, marketing, the landing page, protocols,
+              investor-briefing, how-it-works) are intentionally bespoke and exempt; the
+              product app and this page stay fully gated. Existing debt lives in a shrink-only baseline
               (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">design-lint-baseline.json</code>) —
               counts may only go down. Route colours through{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">var(--v2-…)</code> tokens instead.

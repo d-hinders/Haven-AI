@@ -5,9 +5,12 @@
  * Fails CI when a PR introduces NEW violations in src/{app,components}:
  *   1. raw-palette   — Tailwind palette colour classes (text-amber-500, …)
  *                      instead of var(--v2-…) tokens
- *   2. hex-color     — hardcoded hex colours outside components/brand and
- *                      components/marketing
+ *   2. hex-color     — hardcoded hex colours
  *   3. micro-font    — new text-[10px] / text-[11px]
+ *
+ * Marketing/landing surfaces are exempt from ALL rules (#874, owner decision
+ * 2026-07-12): they are intentionally bespoke and do not count against the
+ * baseline. Product-app surfaces and /design-system stay fully gated.
  *
  * A committed baseline (design-lint-baseline.json) ratchets: existing debt
  * passes, counts may only shrink. Growing a count, or violations in a file
@@ -33,12 +36,28 @@ const PALETTE =
 const UTILITIES =
   'text|bg|border|ring|divide|from|to|via|fill|stroke|outline|decoration|shadow|accent|caret|placeholder'
 
+// Marketing/landing surfaces — intentionally bespoke, exempt from every rule
+// (#874). Everything else in src/{app,components} stays gated.
+const MARKETING_SURFACES = [
+  'components/brand/',
+  'components/marketing/',
+  'src/app/page.tsx',
+  'src/app/protocols/',
+  'src/app/investor-briefing/',
+  'src/app/how-it-works/',
+]
+export function isMarketingSurface(file) {
+  return MARKETING_SURFACES.some((m) =>
+    m.endsWith('.tsx') ? file.endsWith(m) : file.includes(m),
+  )
+}
+
 export const RULES = [
   {
     id: 'raw-palette',
     describe: 'raw Tailwind palette class — use a var(--v2-…) token',
     regex: new RegExp(`\\b(?:${UTILITIES})-(?:${PALETTE})-\\d{2,3}\\b`, 'g'),
-    exempt: () => false,
+    exempt: isMarketingSurface,
   },
   {
     id: 'hex-color',
@@ -48,14 +67,13 @@ export const RULES = [
     // also exists in its 6-digit form. Line comments are skipped in scanSource.
     regex:
       /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|(?=[0-9a-fA-F]{0,3}[a-fA-F])[0-9a-fA-F]{4}|(?=[0-9a-fA-F]{0,2}[a-fA-F])[0-9a-fA-F]{3})\b/g,
-    exempt: (file) =>
-      file.includes('components/brand/') || file.includes('components/marketing/'),
+    exempt: isMarketingSurface,
   },
   {
     id: 'micro-font',
     describe: 'micro font size — use the typography ramp (v2-text-*)',
     regex: /text-\[1[01]px\]/g,
-    exempt: () => false,
+    exempt: isMarketingSurface,
   },
 ]
 

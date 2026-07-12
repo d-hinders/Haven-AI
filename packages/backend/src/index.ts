@@ -19,7 +19,6 @@ import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
-import agentRecipientRoutes from './routes/agent-recipients.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
@@ -167,7 +166,6 @@ await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
-await app.register(agentRecipientRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })

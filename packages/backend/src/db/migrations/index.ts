@@ -43,6 +43,7 @@ import * as hybridAccounts from './041_hybrid_accounts.js'
 import * as agentDelegations from './042_agent_delegations.js'
 import * as delegationIntents from './043_delegation_intents.js'
 import * as hybridAccountPasskeys from './044_hybrid_account_passkeys.js'
+import * as dropSessionRailTables from './045_drop_session_rail_tables.js'
 
 export interface Migration {
   version: string
@@ -99,4 +100,5 @@ export const migrations: Migration[] = [
   agentDelegations,
   delegationIntents,
   hybridAccountPasskeys,
+  dropSessionRailTables,
 ]

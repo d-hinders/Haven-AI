@@ -85,26 +85,6 @@ const QUERIES: SmokeQuery[] = [
           DO UPDATE SET details = EXCLUDED.details, updated_at = NOW()`,
   },
   {
-    name: 'recipients: loadAgentRecipients with allowance-budget inheritance (#784)',
-    sql: `SELECT r.recipient_address, r.token_address, r.label, r.budget_amount,
-                 a.allowance_amount
-          FROM agent_recipients r
-          LEFT JOIN agent_allowances a
-            ON a.agent_id = r.agent_id AND a.token_address = r.token_address
-          WHERE r.agent_id = $1 AND LOWER(r.token_address) = LOWER($2)
-          ORDER BY r.created_at, r.id`,
-  },
-  {
-    name: 'schedule: window + policy inputs for lazy rollover (#769)',
-    sql: `SELECT a.session_schedule_from_period, a.session_schedule_period_count,
-                 a.session_permission_id, a.delegate_address,
-                 al.reset_period_min
-          FROM agents a
-          LEFT JOIN agent_allowances al
-            ON al.agent_id = a.id AND LOWER(al.token_address) = LOWER($2)
-          WHERE a.id = $1`,
-  },
-  {
     name: 'hybrid accounts: provisioning insert with rail + type (#825)',
     sql: `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail)
           VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation')

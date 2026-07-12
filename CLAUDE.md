@@ -112,7 +112,7 @@ An agent is a **permissioned actor** = identity + delegate address + on-chain po
 
 - `allowance_amount` and `reset_period_min` map directly to the on-chain AllowanceModule.
 - Payments that fit within the remaining on-chain allowance auto-execute; payments that exceed it are queued for the user to approve manually. There is no separate off-chain `requires_approval_above` knob and no monthly/per-tx limit on the agent itself.
-- **Recipient allowlist (#784) — orphaned by the session-rail retirement (#834):** `agent_recipients` rows (one per agent+token+recipient, optional label, optional per-recipient budget) were the input the retired session rail built its on-chain sessions from. No rail reads this table anymore — it is metadata only, pending cleanup. On the delegation rail, recipient pinning lives in the delegation's caveat enforcers instead.
+- **Recipient pinning:** on the delegation rail, an agent's allowed recipient lives in the delegation's caveat enforcers (per-budget recipient pin), not a separate table. The session-rail `agent_recipients` table + route were dropped in #880 (dead after the #834 retirement).
 - Category-based / protocol-based / per-hour-rate policies (x402, MPP categories, etc.) are **future work** (Phase 2), not implemented today.
 
 Credentials are portable:

@@ -35,6 +35,27 @@
   --v2-danger-soft: #fef2f2;
   --v2-modal-backdrop: rgba(26, 31, 54, 0.66);
 
+  /* ── Chain identity ─────────────────────────────────────────────────
+     Brand/identity colours that tell networks apart in NetworkPill and
+     NetworkSwitcher. Deliberately OUTSIDE the semantic-colour rule — they
+     identify a chain, they are not success/warning/etc. Values are preserved
+     exactly from the pre-token components (#875). NetworkSwitcher uses the
+     solid brand dot; NetworkPill uses a lighter tinted-pill treatment, so
+     Base carries both a brand dot (#0052FF) and a softer sky pill — unifying
+     the two into one Base hue is a deliberate follow-up, not done here. */
+  --v2-chain-base: #0052ff; /* NetworkSwitcher solid dot — Coinbase Base blue */
+  --v2-chain-gnosis: #3e9b8f; /* NetworkSwitcher solid dot — Gnosis teal */
+  --v2-chain-testnet: #f59e0b; /* Base Sepolia — amber, flags a testnet (dot, both surfaces) */
+  /* NetworkPill soft-pill — Base (sky family) */
+  --v2-chain-base-dot: #0ea5e9;
+  --v2-chain-base-fg: #0369a1;
+  --v2-chain-base-border: #bae6fd;
+  --v2-chain-base-bg: #f0f9ff;
+  /* NetworkPill soft-pill — testnet (amber family; dot reuses --v2-chain-testnet) */
+  --v2-chain-testnet-fg: #b45309;
+  --v2-chain-testnet-border: #fde68a;
+  --v2-chain-testnet-bg: #fffbeb;
+
   --v2-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
   --v2-shadow-card-raised: 0 2px 4px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.08);
   --v2-shadow-button: 0 1px 1px rgba(16, 24, 40, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.12);

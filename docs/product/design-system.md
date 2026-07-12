@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-07-11"
+last-verified: "2026-07-12"
 ---
 
 # Haven Design System
@@ -81,6 +81,10 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 Same rule as v1: **never repurpose a semantic color**.
 
 **Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover). Guarded by `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, that test tells you whether it still clears the bar.
+
+### Chain identity
+
+`--v2-chain-*` (Base, Gnosis, testnet, plus `NetworkPill`'s sky/amber soft-pill scale) tells networks apart in `NetworkPill` and `NetworkSwitcher`. These are **identity** colours — deliberately outside the semantic rule above. Never reuse a chain colour to carry success/warning meaning, and never route money tone through them. Live swatches on `/design-system` → "Colour tokens".
 
 ### Radii
 

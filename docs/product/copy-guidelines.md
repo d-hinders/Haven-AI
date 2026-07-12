@@ -17,7 +17,7 @@ covers:
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/frontend/src/lib/passkey.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-06-29"
+last-verified: "2026-07-12"
 ---
 
 # Haven UX Copy Guidelines
@@ -362,6 +362,14 @@ Use this mapping when replacing technical language with product-facing language.
 | Safe address in primary account UI | Account address / Haven wallet address |
 | Agent delegate address | Agent wallet address (advanced and recovery copy) |
 | Connected or recipient wallet address | Wallet address when the control or destination distinction matters |
+
+## Enforcement
+
+These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**`) for the unambiguous **multi-word** banned phrases in the mapping above and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero.
+
+- **Ratcheting baseline.** Existing debt is captured in `packages/frontend/copy-lint-baseline.json` (file → phrase → count); counts may only **shrink**. A new banned term, or growth of an existing count, fails. After cleaning some up, run `npm run lint:copy:update` to tighten the ratchet. Do the same — with reviewer sign-off — for a genuinely intentional addition.
+- **Escape hatch.** For a legitimate advanced/developer-facing surface where the technical term is correct, add `// copy-lint-ignore` on the offending line (or the line directly above). Use it sparingly; it is for developer surfaces, not a way around writing good user copy.
+- Docs under `docs/product` are separately checked by the Vale `Haven.Terminology` rule (`.vale.ini`).
 
 ## Writing rules
 

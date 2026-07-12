@@ -24,6 +24,7 @@
     "docs:new": "node scripts/docs/new-doc.mjs",
     "docs:test": "node --test scripts/docs/*.test.mjs",
     "lint:copy": "node scripts/frontend-copy-lint.mjs",
+    "lint:copy:update": "node scripts/frontend-copy-lint.mjs --update",
     "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs"
   },
   "overrides": {

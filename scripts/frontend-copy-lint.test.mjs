@@ -2,7 +2,7 @@
 // Run with: node --test scripts/frontend-copy-lint.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { findCopyIssues } from './frontend-copy-lint.mjs'
+import { findCopyIssues, newViolations } from './frontend-copy-lint.mjs'
 
 test('flags a banned multi-word phrase (case-insensitive)', () => {
   const r = findCopyIssues('const label = "Set your Spending Policy"\n')
@@ -42,4 +42,32 @@ test('does not double-report a plural against its singular (session keys)', () =
 
 test('clean copy yields no findings', () => {
   assert.equal(findCopyIssues('Set agent rules and budgets for your Haven account\n').length, 0)
+})
+
+// ── Ratcheting baseline (#902) ────────────────────────────────────────────────
+
+test('newViolations: a new banned term (no baseline entry) fails', () => {
+  const f = newViolations({ 'a.tsx': { 'smart account': 1 } }, {})
+  assert.deepEqual(f, [{ file: 'a.tsx', phrase: 'smart account', count: 1, allowed: 0 }])
+})
+
+test('newViolations: matching or shrinking the baseline passes', () => {
+  const baseline = { 'a.tsx': { 'policy engine': 2 } }
+  assert.equal(newViolations({ 'a.tsx': { 'policy engine': 2 } }, baseline).length, 0) // equal
+  assert.equal(newViolations({ 'a.tsx': { 'policy engine': 1 } }, baseline).length, 0) // shrank
+  assert.equal(newViolations({}, baseline).length, 0) // fully removed
+})
+
+test('newViolations: growth of an existing baselined count fails', () => {
+  const f = newViolations({ 'a.tsx': { 'policy engine': 3 } }, { 'a.tsx': { 'policy engine': 2 } })
+  assert.deepEqual(f, [{ file: 'a.tsx', phrase: 'policy engine', count: 3, allowed: 2 }])
+})
+
+test('newViolations: a baselined term in a DIFFERENT file is not grandfathered', () => {
+  // The baseline is per-file — the same phrase newly appearing elsewhere fails.
+  const f = newViolations(
+    { 'b.tsx': { 'smart account': 1 } },
+    { 'a.tsx': { 'smart account': 1 } },
+  )
+  assert.deepEqual(f, [{ file: 'b.tsx', phrase: 'smart account', count: 1, allowed: 0 }])
 })

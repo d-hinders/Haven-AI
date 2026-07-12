@@ -18,6 +18,7 @@ import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { useToast } from './ui/Toast'
+import { truncateAddress } from '@/components/haven'
 
 interface TokenOption {
   address: string
@@ -36,10 +37,6 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
   { label: 'per week', seconds: 604_800 },
   { label: 'per month', seconds: 2_592_000 },
 ]
-
-function shortAddr(a: string): string {
-  return `${a.slice(0, 6)}…${a.slice(-4)}`
-}
 
 export default function DelegationBudgetCard({ agentId, chainId, tokens }: Props) {
   const { budgets, grant, revoke, busy, ready } = useDelegationBudget(agentId, chainId)
@@ -186,7 +183,7 @@ function BudgetRow({
           {amount} {t?.symbol ?? ''} {periodLabel}
         </p>
         <p className="truncate text-xs text-[var(--v2-ink-muted)]">
-          {budget.recipient_address ? `to ${shortAddr(budget.recipient_address)}` : 'to any recipient'}
+          {budget.recipient_address ? `to ${truncateAddress(budget.recipient_address)}` : 'to any recipient'}
         </p>
       </div>
       <Button size="sm" variant="ghost" onClick={() => onRevoke(budget.delegation_hash)} disabled={busy || !ready}>

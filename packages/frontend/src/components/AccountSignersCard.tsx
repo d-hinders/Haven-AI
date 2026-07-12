@@ -137,6 +137,34 @@ export default function AccountSignersCard({ agentId, chainId, userEmail }: Prop
           Connect your account owner wallet to change how this account is approved.
         </p>
       ) : null}
+
+      <Card.Section className="mt-4">
+        <details className="group">
+          <summary className="cursor-pointer list-none text-sm font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+            Lost a device?
+          </summary>
+          <div className="mt-2 space-y-2 text-sm leading-relaxed text-[var(--v2-ink-muted)]">
+            <p>
+              Open Haven on a device that still has a working approval — a backup Face ID, or the
+              wallet you added. Add a replacement for the device you lost so you&apos;re back to two
+              ways to approve, then remove the lost one above.
+            </p>
+            <p>
+              Haven can&apos;t do this for you: every change is approved by a signer you already
+              hold. If an account ever has just one way to approve and that&apos;s lost, it can&apos;t
+              be recovered — by you or by us. That&apos;s why the backup above matters.{' '}
+              <a
+                href="https://docs.haven.xyz/product/account-recovery"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
+              >
+                How recovery works
+              </a>
+            </p>
+          </div>
+        </details>
+      </Card.Section>
     </Card>
   )
 }

@@ -17,6 +17,7 @@
     "pilot:delegation-payment-smoke": "tsx scripts/delegation-payment-smoke.ts",
     "pilot:exit-proof": "tsx scripts/exit-acceptance-proof.ts",
     "pilot:dod": "tsx scripts/delegation-dod-matrix.ts",
+    "pilot:passkey-spike": "tsx scripts/passkey-hybrid-spike.ts",
     "ops:check-bundler": "tsx scripts/check-bundler.ts",
     "ops:check-delegation": "tsx scripts/check-delegation-contracts.ts",
     "ops:check-delegate-balances": "tsx scripts/check-delegate-balances.ts",

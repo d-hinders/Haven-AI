@@ -12,7 +12,7 @@ covers:
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/components/NetworkGate.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
-last-verified: "2026-06-30"
+last-verified: "2026-07-12"
 ---
 
 # AI Review Patterns
@@ -66,6 +66,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 ## Shared UI And Cross-Surface Consistency
 
 - If the same movement, transaction row, status badge, contact row, or money summary appears in multiple places, prefer one shared component or utility.
+- **Pattern absorption (2nd occurrence, not the 12th).** When a diff writes the same markup shape a *second* time — a header band, badge, row, empty-state, inline `<svg>`, address slice — or re-creates something a `ui/`/`haven/` primitive already covers, extract it into a primitive and add a `/design-system` entry in that same PR. Catching the second occurrence is what prevents the debt clusters #859 cleaned retroactively; the new primitive trips the design-system coupling gate (#898) by design. Flag a diff that duplicates a shape instead of absorbing it — unless the author states the two uses will genuinely diverge.
 - Keep dashboard, account detail, agent detail, transaction history, approvals, and design-system examples aligned after changing shared presentation.
 - If a temporary frontend shim or preview backfill is added, label it clearly and avoid letting it redefine backend-owned totals or durable semantics.
 

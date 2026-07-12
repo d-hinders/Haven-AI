@@ -16,6 +16,7 @@ import { HavenMark } from '@/components/brand/HavenMark'
 import { StepProgress } from '@/components/ui/StepProgress'
 import PasskeyEnrollFlow from './PasskeyEnrollFlow'
 import HybridEnrollFlow from './HybridEnrollFlow'
+import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
 import type { User } from '@/context/AuthContext'
 
 type Step = 'choose-signer' | 'connect' | 'deploy' | 'done'
@@ -548,6 +549,12 @@ export default function OnboardingClient() {
                   </div>
                 )}
               </div>
+
+              {delegationOnboarding && signerMode === 'passkey' ? (
+                <div className="v2-animate-stagger" style={{ ['--v2-stagger-delay' as string]: '300ms' }}>
+                  <RecoveryNudge />
+                </div>
+              ) : null}
 
               <button
                 onClick={handleSetUpFirstAgent}

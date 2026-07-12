@@ -68,6 +68,14 @@ describe('AccountSignersCard (#888)', () => {
     await waitFor(() => expect(removePasskey).toHaveBeenCalledWith('0x' + '11'.repeat(32)))
   })
 
+  it('surfaces the honest "Lost a device?" recovery explainer', async () => {
+    mockUseSigners.mockReturnValue(base())
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText('Lost a device?')).toBeTruthy()
+    expect(screen.getByText(/Haven can.t do this for you/)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'How recovery works' }).getAttribute('href')).toContain('/product/account-recovery')
+  })
+
   it('renders nothing while signers are loading (null)', () => {
     mockUseSigners.mockReturnValue(base({ signers: null }))
     const { container } = render(<AccountSignersCard {...PROPS} />)

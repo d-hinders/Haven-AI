@@ -53,36 +53,61 @@ function isPrimitiveFile(file) {
   if (!PRIMITIVE_DIRS.some((d) => file.startsWith(d))) return false
   if (!/\.tsx?$/.test(file)) return false
   if (/\.test\.tsx?$/.test(file)) return false
-  if (file.endsWith('/index.ts')) return false // the barrel re-exports, not the source
+  if (/\.stories\.tsx?$/.test(file)) return false // stories showcase, not a primitive
+  if (/\/index\.tsx?$/.test(file)) return false // the barrel re-exports, not the source
   return true
 }
 
+// A PascalCase identifier, optionally aliased (`Foo as Bar` → the alias is the
+// export). `type`-prefixed members are not components.
+function pascalMember(part) {
+  part = part.trim()
+  if (!part || part.startsWith('type ')) return null
+  const name = part.split(/\s+as\s+/).pop().trim()
+  return /^[A-Z][A-Za-z0-9]*$/.test(name) ? name : null
+}
+
 /**
- * Extract exported COMPONENT symbols from a single added source line.
- * Components are PascalCase; `type`-only re-exports and lowercase helper
- * exports (e.g. entityCardStyles) are ignored. Handles:
+ * Extract exported COMPONENT symbols from a single line of CODE (comments must
+ * already be stripped — see codeOf). Components are PascalCase; `type`-only
+ * re-exports and lowercase helper exports (e.g. entityCardStyles) are ignored.
+ *
+ * The `export` keyword is ANCHORED to the start of the (trimmed) line so a
+ * `export const …` sitting inside a string literal or mid-line never counts —
+ * only a real top-level export declaration does. Handles:
  *   export const Foo = …            export function Foo(…)     export class Foo
- *   export { Foo, Bar as Baz }      (re-export lists; `as` alias is the export)
- * Scoped to NAMED exports by repo convention — ui/ and haven/ primitives are
- * always named (the barrel re-exports them, the page imports them by name); a
- * `export default` primitive would be off-convention and is intentionally not
- * matched.
+ *   export { Foo, Bar as Baz }      (single-line re-export lists)
+ * Multi-line `export { … }` lists are handled by addedExportsFromDiff's brace
+ * state, not here. Scoped to NAMED exports by repo convention — ui/ and haven/
+ * primitives are always named; a `export default` primitive would be
+ * off-convention and is intentionally not matched.
  */
 export function exportedComponentsInLine(line) {
   const names = new Set()
-  const decl = line.match(/export\s+(?:const|function|class)\s+([A-Z][A-Za-z0-9]*)/)
+  const decl = line.match(/^\s*export\s+(?:const|function|class)\s+([A-Z][A-Za-z0-9]*)/)
   if (decl) names.add(decl[1])
-  const list = line.match(/export\s*\{([^}]*)\}/)
+  const list = line.match(/^\s*export\s*\{([^}]*)\}/)
   if (list) {
-    for (let part of list[1].split(',')) {
-      part = part.trim()
-      if (!part || part.startsWith('type ')) continue
-      const name = part.split(/\s+as\s+/).pop().trim()
-      if (/^[A-Z][A-Za-z0-9]*$/.test(name)) names.add(name)
+    for (const part of list[1].split(',')) {
+      const name = pascalMember(part)
+      if (name) names.add(name)
     }
   }
   return [...names]
 }
+
+// Strip a trailing line comment and a JSDoc/block gutter so `export …` text
+// living in a comment is never read as code. Returns '' for a pure comment
+// line (leading `//` or `*` gutter), which yields no exports.
+function codeOf(line) {
+  const trimmed = line.trimStart()
+  if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return ''
+  return line.replace(/\/\/.*$/, '')
+}
+
+// The exempt opt-out must be a real trailing comment marker, not any substring
+// mention of the token elsewhere on the line.
+const EXEMPT_RE = new RegExp(`//[^\\n]*\\b${EXEMPT_MARK}:`)
 
 /**
  * Pure core: given the ADDED exports discovered in the diff (each
@@ -109,24 +134,53 @@ export function undocumentedPrimitives(addedExports, pageSource) {
 /**
  * Parse a unified diff into added component exports. Tracks the current +++
  * target file across hunks; only added lines (`+`, not `+++`) in primitive
- * files are considered. An export line carrying the exempt marker opts out.
+ * files are considered. Comment text is stripped before matching (so an
+ * `export …` inside a comment or string never counts), the exempt opt-out must
+ * be a real trailing `// design-system-exempt:` marker, and a multi-line
+ * `export { … }` list is collected across its added member lines via brace
+ * state — reset whenever the diff run breaks (a non-added line or a new file).
  */
 export function addedExportsFromDiff(diff) {
   const added = []
   let file = null
+  let inBrace = false // mid multi-line `export { … }` for the current file
+  const breakRun = () => {
+    inBrace = false
+  }
   for (const raw of diff.split('\n')) {
     if (raw.startsWith('+++ ')) {
       const p = raw.slice(4).replace(/^b\//, '').trim()
       file = p === '/dev/null' ? null : pkgRelative(p)
+      breakRun()
       continue
     }
-    if (!file || !raw.startsWith('+') || raw.startsWith('+++')) continue
-    if (!isPrimitiveFile(file)) continue
+    // Any line that isn't a content addition breaks a multi-line export run.
+    if (!raw.startsWith('+') || raw.startsWith('+++')) {
+      breakRun()
+      continue
+    }
+    if (!file || !isPrimitiveFile(file)) {
+      breakRun()
+      continue
+    }
     const line = raw.slice(1)
-    const exempt = line.includes(EXEMPT_MARK)
-    for (const symbol of exportedComponentsInLine(line)) {
+    const exempt = EXEMPT_RE.test(line)
+    const code = codeOf(line)
+
+    if (inBrace) {
+      for (const part of code.split(',')) {
+        const name = pascalMember(part)
+        if (name) added.push({ file, symbol: name, exempt })
+      }
+      if (code.includes('}')) inBrace = false
+      continue
+    }
+
+    for (const symbol of exportedComponentsInLine(code)) {
       added.push({ file, symbol, exempt })
     }
+    // Enter brace mode on an opening `export {` with no closing `}` on the line.
+    if (/^\s*export\s*\{/.test(code) && !code.includes('}')) inBrace = true
   }
   return added
 }

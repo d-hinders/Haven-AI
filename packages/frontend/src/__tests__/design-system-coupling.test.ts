@@ -80,4 +80,40 @@ describe('design-system coupling gate (#898)', () => {
     )
     expect(added).toEqual([{ file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }])
   })
+
+  it('ignores export text living in comments or string literals (not real exports)', () => {
+    const f = 'src/components/ui/Gauge.tsx'
+    // JSDoc gutter line, plain line comment, and a code-sample string literal:
+    expect(fromDiff(diff(f, ' *   export const MyButton = styled(Button)'))).toEqual([])
+    expect(fromDiff(diff(f, '// export const Legacy = () => null'))).toEqual([])
+    expect(fromDiff(diff(f, 'const code = `export const Demo = 1`'))).toEqual([])
+    // …but a real export on the same file still registers:
+    expect(fromDiff(diff(f, 'export const Gauge = () => null')).map((a) => a.symbol)).toEqual([
+      'Gauge',
+    ])
+  })
+
+  it('collects a multi-line export { … } list across its added member lines', () => {
+    const added = fromDiff(
+      diff('src/components/haven/kit.tsx', 'export {', '  Gauge,', '  Meter as Dial,', '} from "./x"'),
+    )
+    expect(added.map((a) => a.symbol).sort()).toEqual(['Dial', 'Gauge'])
+  })
+
+  it('only exempts on a real trailing // design-system-exempt: marker', () => {
+    const f = 'src/components/ui/Gauge.tsx'
+    // A loose prose mention without the colon marker does NOT exempt:
+    const loose = fromDiff(diff(f, 'export const Gauge = () => null // per design-system-exempt convention'))
+    expect(loose[0].exempt).toBe(false)
+    // The real marker does:
+    const real = fromDiff(diff(f, 'export const Gauge = () => null // design-system-exempt: internal'))
+    expect(real[0].exempt).toBe(true)
+  })
+
+  it('excludes .stories and index files as primitive sources', () => {
+    expect(fromDiff(diff('src/components/ui/Gauge.stories.tsx', 'export const Primary = () => null'))).toEqual(
+      [],
+    )
+    expect(fromDiff(diff('src/components/haven/index.tsx', 'export const Gauge = () => null'))).toEqual([])
+  })
 })

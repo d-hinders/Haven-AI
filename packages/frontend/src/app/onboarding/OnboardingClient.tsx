@@ -15,6 +15,7 @@ import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { StepProgress } from '@/components/ui/StepProgress'
 import PasskeyEnrollFlow from './PasskeyEnrollFlow'
+import HybridEnrollFlow from './HybridEnrollFlow'
 import type { User } from '@/context/AuthContext'
 
 type Step = 'choose-signer' | 'connect' | 'deploy' | 'done'
@@ -37,6 +38,12 @@ export default function OnboardingClient() {
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
   const [selectedChainId, setSelectedChainId] = useState(DEFAULT_CHAIN_ID)
+  // Delegation-rail onboarding (#886): dark-launched behind a flag, and only
+  // on chains where the rail is live (Base Sepolia during the pilot). When
+  // active, the passkey path creates a Hybrid account (counterfactual, zero
+  // tx) instead of deploying a Safe.
+  const delegationOnboarding =
+    process.env.NEXT_PUBLIC_DELEGATION_ONBOARDING === '1' && selectedChainId === 84532
 
   // Only offer chains the backend actually serves deploys on (#679). If the
   // current selection isn't served (e.g. the default is mainnet but this env
@@ -133,6 +140,15 @@ export default function OnboardingClient() {
       setDeploying(false)
       setDeployStage(null)
     }
+  }
+
+  async function handleHybridComplete(args: { accountAddress: `0x${string}` }) {
+    setError('')
+    setSafeAddress(args.accountAddress)
+    setTxHash(EMPTY_TX_HASH) // counterfactual — deploys with the first budget (#860)
+    updateUser({ safe_address: args.accountAddress, wallet_address: null })
+    await refreshUser()
+    setStep('done')
   }
 
   async function handlePasskeyComplete(args: {
@@ -445,14 +461,25 @@ export default function OnboardingClient() {
 
           {step === 'deploy' && signerMode === 'passkey' && (
             <div key="deploy-passkey" className="v2-animate-step-rise">
-              <PasskeyEnrollFlow
-                user={user}
-                selectedChainId={selectedChainId}
-                onComplete={(args) => {
-                  void handlePasskeyComplete(args)
-                }}
-                onError={setError}
-              />
+              {delegationOnboarding ? (
+                <HybridEnrollFlow
+                  user={user}
+                  selectedChainId={selectedChainId}
+                  onComplete={(args) => {
+                    void handleHybridComplete(args)
+                  }}
+                  onError={setError}
+                />
+              ) : (
+                <PasskeyEnrollFlow
+                  user={user}
+                  selectedChainId={selectedChainId}
+                  onComplete={(args) => {
+                    void handlePasskeyComplete(args)
+                  }}
+                  onError={setError}
+                />
+              )}
             </div>
           )}
 

@@ -45,16 +45,24 @@ export function Table({ children, className = '' }: { children: ReactNode; class
 function Head({
   children,
   sticky = false,
+  collapseBelowMd = true,
   className = '',
 }: {
   children: ReactNode
   /** Pin the header while the page scrolls (dedicated table routes). */
   sticky?: boolean
+  /**
+   * Headers collapse below md by default — mobile rows carry their own
+   * labels. Pass `false` for dense admin tables whose rows don't (pair the
+   * table with an `overflow-x-auto` wrapper so mobile scrolls horizontally).
+   */
+  collapseBelowMd?: boolean
   className?: string
 }) {
-  // Headers collapse below md — mobile rows carry their own labels.
   return (
-    <thead className={`hidden md:table-header-group ${sticky ? STICKY_HEAD : ''} ${className}`.trim()}>
+    <thead
+      className={`${collapseBelowMd ? 'hidden md:table-header-group' : 'table-header-group'} ${sticky ? STICKY_HEAD : ''} ${className}`.trim()}
+    >
       {children}
     </thead>
   )

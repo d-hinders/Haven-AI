@@ -61,6 +61,32 @@ describe('Table (#857)', () => {
     expect(screen.getByRole('columnheader').className).toContain('hidden md:table-cell')
   })
 
+  it('Head collapses below md by default and stays visible with collapseBelowMd={false}', () => {
+    const { container, rerender } = render(
+      <Table>
+        <Table.Head>
+          <tr>
+            <Table.HeaderCell>Token</Table.HeaderCell>
+          </tr>
+        </Table.Head>
+      </Table>,
+    )
+    expect(container.querySelector('thead')!.className).toContain('hidden md:table-header-group')
+
+    rerender(
+      <Table>
+        <Table.Head collapseBelowMd={false}>
+          <tr>
+            <Table.HeaderCell>Token</Table.HeaderCell>
+          </tr>
+        </Table.Head>
+      </Table>,
+    )
+    const thead = container.querySelector('thead')!
+    expect(thead.className).not.toContain('hidden')
+    expect(thead.className).toContain('table-header-group')
+  })
+
   it('Body carries the single row-border rule', () => {
     const { container } = render(
       <Table>

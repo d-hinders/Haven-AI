@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ethers } from 'ethers'
-import { addressFromKey, signHash, signUserOpHashForSession } from './signer.js'
+import { addressFromKey, signHash } from './signer.js'
 import { HavenSigningError } from './types.js'
 
 // Throwaway well-known test key (Hardhat account #1). Never a real key.
@@ -22,27 +22,6 @@ describe('signHash — raw ECDSA (AllowanceModule rail)', () => {
   })
 })
 
-describe('signUserOpHashForSession — EIP-191 (session-key rail)', () => {
-  it('recovers via the EIP-191 personal-sign digest (what OwnableValidator checks)', async () => {
-    const sig = await signUserOpHashForSession(PRIVATE_KEY, HASH)
-    expect(ethers.verifyMessage(ethers.getBytes(HASH), sig).toLowerCase()).toBe(
-      ADDRESS.toLowerCase(),
-    )
-  })
-
-  it('is distinct from the raw-ECDSA signature — the two rails cannot be confused (#731)', async () => {
-    const sessionSig = await signUserOpHashForSession(PRIVATE_KEY, HASH)
-    const rawSig = signHash(PRIVATE_KEY, HASH)
-    expect(sessionSig).not.toBe(rawSig)
-    // Recovering the session signature as if it were raw ECDSA yields the wrong
-    // address — exactly the SIG_VALIDATION_FAILED failure mode if the AllowanceModule
-    // path is used for a session UserOp.
-    expect(ethers.recoverAddress(HASH, sessionSig).toLowerCase()).not.toBe(ADDRESS.toLowerCase())
-  })
-
-  it('throws HavenSigningError on an invalid key', async () => {
-    await expect(signUserOpHashForSession('not-a-key', HASH)).rejects.toBeInstanceOf(
-      HavenSigningError,
-    )
-  })
-})
+// signUserOpHashForSession (EIP-191, session rail) was REMOVED in #881 — the
+// session rail is retired (#834) and the backend refuses its intents with 410.
+// The client-side dispatch regression lives in client.test.ts.

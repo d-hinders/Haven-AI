@@ -1,6 +1,6 @@
 export { HavenClient } from './client.js'
 export { havenTools } from './tools.js'
-export { signHash, signUserOpHashForSession,
+export { signHash,
   signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
 
 export { verifyPaymentReceipt, RECEIPT_VERSION } from './receipt.js'

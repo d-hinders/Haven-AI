@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
 import { privateKeyToAccount } from 'viem/accounts'
-import { signHash, signUserOpHashForSession, signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
+import { signHash, signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
 import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
@@ -577,12 +577,11 @@ export class HavenClient {
   /**
    * Sign a payment's `sign_data` with the correct scheme for its rail.
    *
-   * The backend tags session-rail intents with
-   * `sign_data.signature_scheme = 'eip191_userop'` — those must be signed with
-   * the EIP-191 personal-sign digest (the OwnableValidator recovers over it),
-   * NOT the raw-ECDSA scheme the AllowanceModule rail uses. Dispatching on the
-   * server-provided scheme means a caller never has to know which rail an
-   * account is on; an unknown scheme is a hard error, never a guessed signature.
+   * Dispatching on the server-provided scheme means a caller never has to
+   * know which rail an account is on; an unknown scheme is a hard error,
+   * never a guessed signature. The session rail's 'eip191_userop' is retired
+   * (#834) — the backend refuses those intents with HTTP 410 before any
+   * sign_data reaches a client, so encountering it here is a hard error too.
    */
   private async signForData(signData: {
     hash: string
@@ -596,7 +595,9 @@ export class HavenClient {
     }
     const scheme = signData.signature_scheme
     if (scheme === 'eip191_userop') {
-      return signUserOpHashForSession(this.delegateKey, signData.hash)
+      throw new HavenSigningError(
+        "The session rail is retired — 'eip191_userop' intents can no longer be signed. Re-onboard the account on the delegation rail.",
+      )
     }
     if (scheme === 'eip712_userop') {
       if (!signData.typed_data) {

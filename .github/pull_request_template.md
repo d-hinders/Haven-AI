@@ -28,6 +28,7 @@
 ## Browser Or Headless Verification
 
 - Browser verification:
+- **Rendered-screen evidence** (required for rendered-route / shared-primitive diffs — `npm run screenshot -w packages/frontend -- <routes>`, attach or link desktop + mobile PNGs):
 - If skipped, reason:
 - Headless equivalent, if browser verification was skipped:
 

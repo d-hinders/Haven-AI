@@ -81,6 +81,10 @@ describe('POST /accounts/hybrid (#825)', () => {
     expect(mockCompute).toHaveBeenCalledWith(84532, expect.objectContaining({
       passkeys: [expect.objectContaining({ keyId: 'cred-1' })],
     }))
+    // #885: the passkey set is persisted so the config round-trips for deploy/revoke.
+    const pkInsert = mockQuery.mock.calls.find((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))!
+    expect(pkInsert, 'passkey set must be persisted').toBeDefined()
+    expect(pkInsert[1]).toEqual(['acct-1', 'cred-1', '0x' + '11'.repeat(32), '0x' + '22'.repeat(32)])
   })
 
   it.each([

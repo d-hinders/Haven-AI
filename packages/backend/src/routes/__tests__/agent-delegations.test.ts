@@ -63,6 +63,7 @@ function mockDb(opts: {
   version?: number
   stored?: Record<string, unknown> | null
   owner?: string | null
+  passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
 } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
@@ -72,8 +73,16 @@ function mockDb(opts: {
     if (/COALESCE\(MAX\(version\)/.test(s)) {
       return Promise.resolve({ rows: [{ next_version: opts.version ?? 1 }] })
     }
-    if (/SELECT owner_address FROM user_safes/.test(s)) {
-      return Promise.resolve({ rows: [{ owner_address: opts.owner === null ? null : opts.owner ?? OWNER }] })
+    // loadHybridOwnerConfig (#885): the account row, then its passkey set.
+    if (/SELECT id, owner_address FROM user_safes/.test(s)) {
+      // owner === null AND no passkeys → account row still exists (so the
+      // config loader can look up passkeys); a truly-missing row is opts.owner
+      // === undefined with no passkeys handled below via the null return.
+      const ownerAddr = opts.owner === undefined ? OWNER : opts.owner
+      return Promise.resolve({ rows: [{ id: 'safe-1', owner_address: ownerAddr }] })
+    }
+    if (/FROM hybrid_account_passkeys/.test(s)) {
+      return Promise.resolve({ rows: opts.passkeys ?? [] })
     }
     if (/SELECT delegation_json, status/.test(s) || /SELECT id, delegation_json/.test(s)) {
       return Promise.resolve({ rows: opts.stored === null ? [] : [opts.stored ?? {
@@ -202,14 +211,32 @@ describe('delegation lifecycle API (#828)', () => {
       expect(mockQuery.mock.calls.some((c) => /SET\s+status = 'active'/.test(String(c[0])))).toBe(false)
     })
 
-    it('409s a passkey-only account (no owner identity) instead of a confusing failure (#860)', async () => {
-      mockDb({ owner: null })
+    it('409s when the account has NO signer config at all (neither owner nor passkey)', async () => {
+      mockDb({ owner: null }) // no owner_address, no passkeys
       const res = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
         payload: { signature: '0x' + 'ab'.repeat(65) },
       })
       expect(res.statusCode).toBe(409)
       expect(mockEnsureDeployed).not.toHaveBeenCalled()
+    })
+
+    it('activates a PURE-PASSKEY account — deploys with its passkey config, no 409 (#885)', async () => {
+      mockDb({
+        owner: null,
+        passkeys: [{ key_id: 'cred-1', public_key_x: '0x11', public_key_y: '0x22' }],
+      })
+      mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: false, txHash: '0x' + '33'.repeat(32) })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(200)
+      // The relayer deploys from the stored passkey set — the #885 unblock.
+      expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, {
+        ownerAddress: undefined,
+        passkeys: [{ keyId: 'cred-1', x: 0x11n, y: 0x22n }],
+      })
     })
 
     it('500s on owner→address derivation mismatch rather than activating an unusable grant (#860)', async () => {
@@ -273,7 +300,36 @@ describe('delegation lifecycle API (#828)', () => {
       expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
     })
 
-    it('409s an unknown treasury owner (passkey account before #833)', async () => {
+    it('prepares a WebAuthn userOpHash for a PURE-PASSKEY account (#885)', async () => {
+      mockDb({
+        stored: { delegation_json: JSON.stringify({ delegate: DELEGATE_ACCOUNT, delegator: TREASURY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1', signature: '0x' + 'cd'.repeat(65) }), status: 'active' },
+        owner: null,
+        passkeys: [{ key_id: 'cred-1', public_key_x: '0x11', public_key_y: '0x22' }],
+      })
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn().mockResolvedValue({
+          userOperation: { nonce: 1n, sender: TREASURY },
+          userOpHash: `0x${'ef'.repeat(32)}`,
+          signingTypedData: null,
+          treasuryAddress: TREASURY,
+        }),
+        submitCall: vi.fn(),
+      })
+      const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
+      expect(res.statusCode).toBe(200)
+      // Passkey accounts get the userOpHash to WebAuthn-sign — not EIP-712 typed data.
+      expect(res.json().signature_scheme).toBe('webauthn_userop')
+      expect(res.json().user_op_hash).toBe(`0x${'ef'.repeat(32)}`)
+      expect(res.json().instructions).toMatch(/WebAuthn/)
+      // createTreasuryOps was built from the passkey set, not an EOA owner:
+      expect(mockTreasury.mock.calls[0][0]).toMatchObject({
+        ownerAddress: undefined,
+        passkeys: [{ keyId: 'cred-1', x: 0x11n, y: 0x22n }],
+      })
+    })
+
+    it('409s when the account has no signer config at all', async () => {
       mockDb({ stored: { delegation_json: '{}', status: 'active' }, owner: null })
       const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
       expect(res.statusCode).toBe(409)

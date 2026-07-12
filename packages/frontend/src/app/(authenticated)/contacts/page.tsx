@@ -21,9 +21,9 @@ import { Skeleton } from '@/components/ui/Skeleton'
 // Per-chain dot colour for the "Used on" badges (Base blue, Gnosis teal,
 // Base Sepolia amber to flag the testnet).
 const CHAIN_DOT: Record<number, string> = {
-  8453: '#0052FF',
-  84532: '#F59E0B',
-  100: '#3E9B8F',
+  8453: 'var(--v2-chain-base)',
+  84532: 'var(--v2-chain-testnet)',
+  100: 'var(--v2-chain-gnosis)',
 }
 
 function chainDotColor(chainId: number): string {

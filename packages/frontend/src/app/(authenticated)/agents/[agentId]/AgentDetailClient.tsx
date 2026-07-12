@@ -33,6 +33,7 @@ import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
 import DelegationBudgetCard from '@/components/DelegationBudgetCard'
+import AccountSignersCard from '@/components/AccountSignersCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import {
@@ -525,11 +526,14 @@ export default function AgentDetailClient({ agentId }: Props) {
       ) : null}
 
       {currentAgent.account_type === 'delegator_hybrid' ? (
-        <DelegationBudgetCard
-          agentId={agentId}
-          chainId={chainId}
-          tokens={recipientTokens}
-        />
+        <>
+          <DelegationBudgetCard
+            agentId={agentId}
+            chainId={chainId}
+            tokens={recipientTokens}
+          />
+          <AccountSignersCard agentId={agentId} chainId={chainId} userEmail={user?.email ?? ''} />
+        </>
       ) : null}
       {/* Session-rail banner + recipients card retired with the rail (#834);
           legacy AllowanceModule accounts manage budgets via EditAgentModal. */}

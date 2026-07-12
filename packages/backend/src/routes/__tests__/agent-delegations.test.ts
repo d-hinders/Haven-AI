@@ -187,6 +187,111 @@ describe('delegation lifecycle API (#828)', () => {
     })
   })
 
+  describe('signer management (#888)', () => {
+    const PK1 = { key_id: '0x' + '11'.repeat(32), public_key_x: '0xaa', public_key_y: '0xbb' }
+    const PK2 = { key_id: '0x' + '22'.repeat(32), public_key_x: '0xcc', public_key_y: '0xdd' }
+    const NEW_PK = { key_id: '0x' + '33'.repeat(32), x: '0x1', y: '0x2' }
+
+    function mockPrepared() {
+      mockTreasury.mockResolvedValueOnce({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn().mockResolvedValue({
+          userOperation: { sender: TREASURY, nonce: 1n, callData: '0xffff' },
+          userOpHash: '0x' + 'ee'.repeat(32),
+          signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
+        }),
+        submitCall: vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32) }),
+      })
+    }
+
+    it('prepare add_passkey on a passkey account returns the WebAuthn scheme', async () => {
+      mockDb({ owner: null, passkeys: [PK1, PK2] })
+      mockPrepared()
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/prepare`,
+        payload: { action: 'add_passkey', passkey: NEW_PK },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().signature_scheme).toBe('webauthn_userop')
+      expect(res.json().user_op_hash).toBeTruthy()
+    })
+
+    it('refuses removing a passkey that would leave fewer than two signers (the #884 on-chain guard, mirrored)', async () => {
+      mockDb({ owner: null, passkeys: [PK1, PK2] })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/prepare`,
+        payload: { action: 'remove_passkey', passkey: { key_id: PK1.key_id } },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error).toMatch(/fewer than two ways to approve/)
+    })
+
+    it('allows removal when two signers remain', async () => {
+      mockDb({ owner: OWNER, passkeys: [PK1, PK2] }) // 3 signers → 2 after
+      mockPrepared()
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/prepare`,
+        payload: { action: 'remove_passkey', passkey: { key_id: PK1.key_id } },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().signature_scheme).toBe('eip712_userop')
+    })
+
+    it('refuses enrolling a duplicate passkey and a second EOA owner', async () => {
+      mockDb({ owner: OWNER, passkeys: [PK1] })
+      const dup = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/prepare`,
+        payload: { action: 'add_passkey', passkey: { key_id: PK1.key_id, x: '0x1', y: '0x2' } },
+      })
+      expect(dup.statusCode).toBe(409)
+      const secondOwner = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/prepare`,
+        payload: { action: 'add_owner', owner_address: '0x' + '99'.repeat(20) },
+      })
+      expect(secondOwner.statusCode).toBe(409)
+      expect(secondOwner.json().error).toMatch(/already has a wallet owner/)
+    })
+
+    it('submit pins the DB sync to the SIGNED calldata — a mismatched user_operation is refused', async () => {
+      mockDb({ owner: null, passkeys: [PK1, PK2] })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/submit`,
+        payload: {
+          action: 'add_passkey', passkey: NEW_PK,
+          signature: '0x' + 'ab'.repeat(80),
+          user_operation: { sender: TREASURY, callData: '0xdeadbeef' }, // does NOT contain addKey(NEW_PK)
+        },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/does not match/)
+      expect(mockQuery.mock.calls.some((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))).toBe(false)
+    })
+
+    it('submit add_passkey syncs storage after the on-chain op succeeds', async () => {
+      mockDb({ owner: null, passkeys: [PK1, PK2] })
+      mockPrepared()
+      // Build the REAL expected calldata so the pinning check passes.
+      const { encodeFunctionData } = await import('viem')
+      const inner = encodeFunctionData({
+        abi: [{ name: 'addKey', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: '_keyId', type: 'string' }, { name: '_x', type: 'uint256' }, { name: '_y', type: 'uint256' }], outputs: [] }],
+        functionName: 'addKey',
+        args: [NEW_PK.key_id, 1n, 2n],
+      })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/submit`,
+        payload: {
+          action: 'add_passkey', passkey: NEW_PK,
+          signature: '0x' + 'ab'.repeat(80),
+          user_operation: { sender: TREASURY, callData: '0x1111' + inner.slice(2) },
+        },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ updated: true })
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))!
+      expect(insert[1]).toEqual(['safe-1', NEW_PK.key_id, NEW_PK.x, NEW_PK.y])
+    })
+  })
+
   describe('GET /:id/account-signers (#887)', () => {
     it('returns the signer set for a passkey account — public key material only', async () => {
       mockDb({ owner: null, passkeys: [{ key_id: '0x' + '11'.repeat(32), public_key_x: '0xaa', public_key_y: '0xbb' }] })

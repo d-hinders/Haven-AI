@@ -160,7 +160,7 @@ export default function FilterBar({
                 >
                   <div className="min-w-0 text-left">
                     <div className="truncate font-medium">{safe.name}</div>
-                    <div className="text-[10px] text-[var(--v2-ink-3)]">
+                    <div className="text-xs text-[var(--v2-ink-3)]">
                       {chainLabel(safe.chainId)}
                     </div>
                   </div>
@@ -215,7 +215,7 @@ export default function FilterBar({
                       <div className={`truncate font-medium ${agentStatusClass(agent.status)}`}>
                         {agent.name}
                       </div>
-                      <div className="text-[10px] uppercase tracking-wide text-[var(--v2-ink-3)]">
+                      <div className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
                         {status.label}
                       </div>
                     </div>

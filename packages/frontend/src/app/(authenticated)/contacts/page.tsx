@@ -220,9 +220,9 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
         </p>
         {chains.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[10px] uppercase tracking-wide text-[var(--v2-ink-3)]">Used on</span>
+            <span className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">Used on</span>
             {chains.map((id) => (
-              <span key={id} className="inline-flex items-center gap-1 text-[11px] text-[var(--v2-ink-2)]">
+              <span key={id} className="inline-flex items-center gap-1 text-xs text-[var(--v2-ink-2)]">
                 <span
                   aria-hidden="true"
                   className="inline-block h-1.5 w-1.5 rounded-full"

@@ -110,11 +110,11 @@ function CatalogCard({
           <p className="mt-0.5 line-clamp-2 text-xs text-[var(--v2-ink-3)]">{entry.description}</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--v2-ink-2)]">
+          <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-2)]">
             {entry.rail}
           </span>
           {degraded ? (
-            <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--v2-warning)]">
+            <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
               Limited availability
             </span>
           ) : null}
@@ -125,7 +125,7 @@ function CatalogCard({
         <span className="v2-tabular text-base font-semibold text-[var(--v2-ink)]">
           {entry.price_display ?? 'Price on request'}
         </span>
-        <span className="text-[11px] text-[var(--v2-ink-3)]">{freshness(entry.verified_at)}</span>
+        <span className="text-xs text-[var(--v2-ink-3)]">{freshness(entry.verified_at)}</span>
       </div>
 
       {budget !== null && (
@@ -141,17 +141,17 @@ function CatalogCard({
       )}
 
       {degraded ? (
-        <p className="text-[11px] text-[var(--v2-ink-3)]">
+        <p className="text-xs text-[var(--v2-ink-3)]">
           Recently unreachable on our checks — a payment may need a retry until it recovers.
         </p>
       ) : null}
 
       <div className="rounded-lg bg-[var(--v2-surface-2)] px-3 py-2">
         <div className="flex items-center justify-between gap-2">
-          <code className="min-w-0 truncate text-[11px] text-[var(--v2-ink-2)]">{instruction}</code>
+          <code className="min-w-0 truncate text-xs text-[var(--v2-ink-2)]">{instruction}</code>
           <button
             onClick={copy}
-            className="shrink-0 rounded px-2 py-0.5 text-[11px] font-medium text-[var(--v2-brand)] transition-colors hover:bg-white"
+            className="shrink-0 rounded px-2 py-0.5 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:bg-white"
             aria-label={`Copy agent instruction for ${entry.name}`}
           >
             {copied ? 'Copied' : 'Copy'}

@@ -422,7 +422,7 @@ export default function OnboardingClient() {
                           }`}
                         >
                           <div
-                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium shrink-0 ${
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium shrink-0 ${
                               isActive
                                 ? 'bg-white text-[var(--v2-brand)]'
                                 : isDone

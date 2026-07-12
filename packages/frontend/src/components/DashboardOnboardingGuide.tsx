@@ -124,7 +124,7 @@ export default function DashboardOnboardingGuide({
     <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--v2-brand)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--v2-brand)]">
             Get started
           </p>
           <h2 className="mt-1 text-lg font-semibold tracking-tight text-[var(--v2-ink)]">
@@ -205,7 +205,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-[11px] font-semibold text-white v2-tabular"
+        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-xs font-semibold text-white v2-tabular"
       >
         {number}
       </span>
@@ -214,7 +214,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-border-strong)] text-[11px] font-semibold text-[var(--v2-ink-3)] v2-tabular"
+      className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-border-strong)] text-xs font-semibold text-[var(--v2-ink-3)] v2-tabular"
     >
       {number}
     </span>

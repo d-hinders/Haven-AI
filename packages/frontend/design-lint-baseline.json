@@ -1,14 +1,1 @@
-{
-  "src/app/(authenticated)/contacts/page.tsx": {
-    "hex-color": 3
-  },
-  "src/app/(authenticated)/design-system/page.tsx": {
-    "micro-font": 22
-  },
-  "src/app/providers.tsx": {
-    "hex-color": 1
-  },
-  "src/components/ReceiveFundsModal.tsx": {
-    "hex-color": 2
-  }
-}
+{}

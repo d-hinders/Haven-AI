@@ -53,7 +53,7 @@ export default function Providers({ children }: { children: ReactNode }) {
             <QueryClientProvider client={queryClient}>
               <RainbowKitProvider
                 theme={lightTheme({
-                  accentColor: '#4f46e5',
+                  accentColor: '#4f46e5', // RainbowKit derives shades from a literal hex; mirrors --v2-brand — design-lint-disable-line
                   accentColorForeground: 'white',
                   borderRadius: 'medium',
                   overlayBlur: 'small',

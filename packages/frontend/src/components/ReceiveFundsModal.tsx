@@ -46,7 +46,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
     QRCode.toDataURL(safe.safe_address, {
       margin: 1,
       width: 220,
-      color: { dark: '#1A2140', light: '#FFFFFF' },
+      color: { dark: '#1A2140', light: '#FFFFFF' }, // QR encoder needs literal hex for module colours — design-lint-disable-line
     })
       .then((url) => {
         if (!cancelled) setQrDataUrl(url)

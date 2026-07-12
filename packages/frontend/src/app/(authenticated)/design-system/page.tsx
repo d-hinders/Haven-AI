@@ -212,7 +212,7 @@ export default function DesignSystemPage() {
                 </span>
                 <div className="min-w-0">
                   <p className="font-mono text-xs font-medium text-[var(--v2-ink)]">{token.name}</p>
-                  <p className="font-mono text-[11px] text-[var(--v2-ink-3)]">{token.soft}</p>
+                  <p className="font-mono text-xs text-[var(--v2-ink-3)]">{token.soft}</p>
                   <p className="mt-1 text-xs leading-snug text-[var(--v2-ink-2)]">{token.use}</p>
                 </div>
               </div>
@@ -327,7 +327,7 @@ export default function DesignSystemPage() {
                 <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)]">
                   <Icon icon={entry.icon} className="h-4 w-4" />
                 </span>
-                <p className="font-mono text-[11px] text-[var(--v2-ink-3)]">{entry.name}</p>
+                <p className="font-mono text-xs text-[var(--v2-ink-3)]">{entry.name}</p>
               </div>
             ))}
           </div>
@@ -426,7 +426,7 @@ export default function DesignSystemPage() {
 
         <div className="grid gap-5 lg:grid-cols-3">
           <Card hover={false} className="p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Flat (default)</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Flat (default)</p>
             <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Standard card</p>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
               The default. One page can have many flat cards. Hover lift on interactive variants.
@@ -434,7 +434,7 @@ export default function DesignSystemPage() {
           </Card>
 
           <Card hover={false} elevation="anchor" className="p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
             <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Secondary focal point</p>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
               Use for the second-most-important surface on a page (pending approvals, agent status). Cooler off-white background, brand-tinted hairline.
@@ -442,7 +442,7 @@ export default function DesignSystemPage() {
           </Card>
 
           <Card hover={false} elevation="raised" className="p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Raised</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Raised</p>
             <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
               $4,280.35
             </p>
@@ -576,7 +576,7 @@ export default function DesignSystemPage() {
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base · 0x8f4F…6f4C</p>
           </div>
           <Card.Section className="mt-5 pt-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Holdings</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Holdings</p>
             <dl className="mt-2 grid grid-cols-2 gap-y-2 text-sm">
               <dt className="text-[var(--v2-ink-2)]">USDC</dt>
               <dd className="text-right v2-tabular text-[var(--v2-ink)]">4,280.35</dd>
@@ -585,7 +585,7 @@ export default function DesignSystemPage() {
             </dl>
           </Card.Section>
           <Card.Section className="mt-5 pt-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approvers</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approvers</p>
             <p className="mt-2 text-sm text-[var(--v2-ink-2)]">2 of 3 approvers required</p>
           </Card.Section>
         </Card>
@@ -976,11 +976,11 @@ export default function DesignSystemPage() {
                   <TransactionMovement from="Operating wallet" to="api.vendor.com" />
                   <dl className="mt-4 grid gap-3 sm:grid-cols-2">
                     <div>
-                      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Agent</dt>
+                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Agent</dt>
                       <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Research assistant</dd>
                     </div>
                     <div>
-                      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Network</dt>
+                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
                       <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
                     </div>
                   </dl>
@@ -1026,20 +1026,20 @@ export default function DesignSystemPage() {
             <TransactionMovement from="Operating wallet" to="Acme Services" />
             <dl className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
-                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Operating wallet</dd>
               </div>
               <div>
-                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Recipient</dt>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Recipient</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Acme Services</dd>
-                <dd className="mt-0.5 font-mono text-[11px] text-[var(--v2-ink-3)]">0x7a58...91c2</dd>
+                <dd className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">0x7a58...91c2</dd>
               </div>
               <div>
-                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Network</dt>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
               </div>
               <div>
-                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Approve with</dt>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Approve with</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Device approval</dd>
               </div>
             </dl>
@@ -1349,8 +1349,8 @@ export default function DesignSystemPage() {
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Account, not Safe</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 Users see <span className="font-medium">account</span>. The Safe contract abstraction stays
-                in code (<code className="text-[11px]">safeId</code>,{' '}
-                <code className="text-[11px]">UserSafe</code>, etc.). The word <em>Safe</em> should not
+                in code (<code className="text-xs">safeId</code>,{' '}
+                <code className="text-xs">UserSafe</code>, etc.). The word <em>Safe</em> should not
                 appear in any rendered string.
               </p>
             </div>
@@ -1380,7 +1380,7 @@ export default function DesignSystemPage() {
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Confirm destructive actions</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 Anything that can&apos;t be reversed (revoke, remove account, remove token budget, delete
-                agent) opens a <code className="text-[11px]">ConfirmDialog</code> with a clear destructive
+                agent) opens a <code className="text-xs">ConfirmDialog</code> with a clear destructive
                 button label. Reversible actions (pause / resume) don&apos;t need confirmation.
               </p>
             </div>
@@ -1417,9 +1417,9 @@ export default function DesignSystemPage() {
           </ul>
           <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
             <span className="font-medium text-[var(--v2-ink-2)]">Don&apos;t inline 11px helper text</span> —
-            grep the codebase: if you see <code className="text-[11px]">text-[10px]</code> or{' '}
-            <code className="text-[11px]">text-[11px]</code> inside a modal, it&apos;s probably a missed
-            migration. Bump to <code className="text-[11px]">text-xs</code> or compose with the helpers.
+            grep the codebase: if you see <code className="text-xs">text-[10px]</code> or{' '}{/* literal examples shown to the reader — design-lint-disable-line */}
+            <code className="text-xs">text-[11px]</code>{/* design-lint-disable-line */} inside a modal, it&apos;s probably a missed
+            migration. Bump to <code className="text-xs">text-xs</code> or compose with the helpers.
           </p>
         </Card>
       </Section>

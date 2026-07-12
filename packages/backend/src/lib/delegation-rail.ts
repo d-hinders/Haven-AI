@@ -52,9 +52,13 @@ const ERC20_ABI = parseAbi(['function transfer(address to, uint256 amount) retur
  * URLs embed the API key). Falls back to the session rail's credential (same
  * Pimlico account on Base Sepolia); a dedicated var lets ops split vendors
  * per rail later without code changes. Never logged, never persisted.
+ * Session rail retired (#834) → this is the single delegation-rail bundler var.
  */
 export function delegationRailBundlerUrl(chainId: number): string {
-  const url = process.env.DELEGATION_RAIL_BUNDLER_URL || process.env.SESSION_RAIL_BUNDLER_URL
+  // The session rail is retired (#834) and both Railway environments migrated
+  // to the dedicated var (#882), so the legacy SESSION_RAIL_BUNDLER_URL
+  // fallback is gone: this reads DELEGATION_RAIL_BUNDLER_URL only, fail-closed.
+  const url = process.env.DELEGATION_RAIL_BUNDLER_URL
   if (!url) {
     throw new Error('DELEGATION_RAIL_BUNDLER_URL is not configured — delegation rail unavailable')
   }

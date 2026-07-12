@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-07-12"
+last-verified: "2026-07-13"
 ---
 
 # Haven Design System
@@ -382,3 +382,19 @@ The authenticated app has migrated from the old dark surface system onto the lig
 | `shadow-black/*` | `shadow-modal` or `shadow-card` | Use token shadows rather than black glow |
 
 Semantic colors keep their meaning: emerald/success, amber/warning, red/danger. Prefer the v2 semantic tokens (`success`, `warning`, `danger`) for new work.
+
+---
+
+## 9. Enforcement
+
+This system is enforced by automated gates (epic [#904](https://github.com/d-hinders/Haven-AI/issues/904)), not just documented. The authoritative process description lives in the [frontend ship-playbook](../contributing/ship-playbooks/frontend.md); in brief:
+
+| Gate | Catches | Posture |
+|---|---|---|
+| **design-lint** (`npm run design:lint -w packages/frontend`) | Token bypass (raw palette classes, hex colours, micro-fonts) **and** structural bypass (hand-rolled header bands, raw `<table>`/`<svg>`, address slices) | Blocking CI; shrink-only baseline |
+| **Visual regression** (`/design-system` snapshot suite) | Unreviewed pixel drift in any shared primitive | Blocking CI; Linux baselines |
+| **Design-system coupling** (`npm run design:coupling -w packages/frontend`) | A new `ui/`/`haven/` primitive missing from `/design-system` | Advisory PR comment; hard gate under ship-next (`--strict`) |
+| **copy-lint** (`npm run lint:copy`) | Banned multi-word technical terms in user-facing copy | Blocking CI; shrink-only baseline |
+| **haven-design-reviewer** | Rendered-UX issues (visual weight, spacing rhythm, states, touch targets) reviewed from the screenshot evidence | Review pass; any finding pauses auto-merge |
+
+Marketing/landing surfaces are exempt from the lint gates (intentionally bespoke); the product app and `/design-system` stay fully gated.

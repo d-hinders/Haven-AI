@@ -24,9 +24,10 @@ describe('delegationRailBundlerUrl — one credential choke point (#824 invarian
     expect(() => delegationRailBundlerUrl(84532)).toThrow(/not configured/)
   })
 
-  it('prefers the dedicated var, falls back to the session-rail credential', () => {
+  it('reads the dedicated var only — the session-rail fallback is retired (#882)', () => {
+    // The legacy var is no longer consulted, even if present.
     process.env.SESSION_RAIL_BUNDLER_URL = 'https://bundler.example/session?apikey=s'
-    expect(delegationRailBundlerUrl(84532)).toContain('session')
+    expect(() => delegationRailBundlerUrl(84532)).toThrow(/not configured/)
     process.env.DELEGATION_RAIL_BUNDLER_URL = 'https://bundler.example/delegation?apikey=d'
     expect(delegationRailBundlerUrl(84532)).toContain('delegation')
   })

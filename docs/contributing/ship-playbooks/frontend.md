@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-06-30"
+last-verified: "2026-07-12"
 ---
 
 # Frontend playbook
@@ -32,6 +32,8 @@ Run the matching items from the **Captain Self-Check Preflight** in [`../ai-agen
 ## 4. Verification
 
 Verify the change in the **browser**, or — when the browser path is unavailable/flaky — add a **named headless equivalent** (vitest) that covers the skipped animation, layout, routing, loading, or interaction risk. Include empty, loading, error, and success states when the screen can enter them; check mobile and desktop.
+
+**Rendered-screen evidence is REQUIRED** for any diff that touches a rendered route or a shared UI primitive (`components/ui/*`, `components/haven/*`). Run `npm run screenshot -w packages/frontend -- <routes>` (see [#896](https://github.com/d-hinders/Haven-AI/issues/896)); it captures desktop (1280) + mobile (390) PNGs of `/design-system` plus the routes you pass, using a known auth/data fixture and the pre-installed browser. **Attach the PNGs to the PR, or reference them in the Browser Verification section** — "browser or headless equivalent" is no longer sufficient on its own for a visual surface. A primitive change means shooting `/design-system` (where it's documented) *and* a route that consumes it. Screenshots live in the gitignored `.screenshots/`; the fixture is documented at the top of `scripts/screenshot.mjs`.
 
 ## 5. Review (advisory design pass)
 

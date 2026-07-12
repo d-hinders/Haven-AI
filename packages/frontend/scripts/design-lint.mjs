@@ -2,11 +2,24 @@
 /**
  * Design-system drift gate (#855, epic #859).
  *
- * Fails CI when a PR introduces NEW violations in src/{app,components}:
+ * Fails CI when a PR introduces NEW violations in src/{app,components}.
+ *
+ * Token rules — a value bypassed the design tokens:
  *   1. raw-palette   — Tailwind palette colour classes (text-amber-500, …)
  *                      instead of var(--v2-…) tokens
  *   2. hex-color     — hardcoded hex colours
  *   3. micro-font    — new text-[10px] / text-[11px]
+ *
+ * Structural rules (#899) — a COMPONENT was re-hand-rolled instead of using the
+ * shared primitive (the exact debt epic #859 cleaned; token rules can't see it):
+ *   4. header-band       — a grey header band (border-b + --v2-surface fill)
+ *                          hand-rolled instead of Card.Header
+ *   5. raw-table         — a raw <table> instead of the Table primitive
+ *   6. raw-svg           — an inline <svg> instead of Icon + a lucide glyph
+ *   7. address-truncation — a hand-rolled `${a.slice(0,6)}…${a.slice(-4)}`
+ *                          instead of <Address> (or lib/format truncate)
+ * Each structural rule exempts its own primitive's home file (Table.tsx,
+ * Card.tsx, Address.tsx) so the canonical implementation is never self-flagged.
  *
  * Marketing/landing surfaces are exempt from ALL rules (#874, owner decision
  * 2026-07-12): they are intentionally bespoke and do not count against the
@@ -74,6 +87,34 @@ export const RULES = [
     describe: 'micro font size — use the typography ramp (v2-text-*)',
     regex: /text-\[1[01]px\]/g,
     exempt: isMarketingSurface,
+  },
+  // ── Structural rules (#899): catch COMPONENT bypass — re-hand-rolling the
+  // exact debt epic #859 cleaned. The token rules above can't see these.
+  {
+    id: 'header-band',
+    describe: 'hand-rolled grey header band — use the Card.Header primitive',
+    // A border-b co-occurring with the surface fill inside one className.
+    regex: /(border-b[^"'`]*bg-\[var\(--v2-surface\)\]|bg-\[var\(--v2-surface\)\][^"'`]*border-b)/g,
+    exempt: (file) => isMarketingSurface(file) || file.includes('components/ui/Card.tsx'),
+  },
+  {
+    id: 'raw-table',
+    describe: 'raw <table> — use the Table primitive (components/ui/Table)',
+    regex: /<table[\s>]/g,
+    exempt: (file) => isMarketingSurface(file) || file.includes('components/ui/Table.tsx'),
+  },
+  {
+    id: 'raw-svg',
+    describe: 'inline <svg> — use Icon + a lucide glyph',
+    regex: /<svg[\s>]/g,
+    // brand/marketing already exempt via isMarketingSurface; nothing else.
+    exempt: isMarketingSurface,
+  },
+  {
+    id: 'address-truncation',
+    describe: 'hand-rolled address slice — use <Address> (or lib/format truncate)',
+    regex: /\.slice\(\s*0,\s*6\s*\)|\.slice\(\s*-4\s*\)/g,
+    exempt: (file) => isMarketingSurface(file) || file.includes('components/haven/Address.tsx'),
   },
 ]
 

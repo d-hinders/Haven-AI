@@ -1,1 +1,23 @@
-{}
+{
+  "src/app/(authenticated)/accounts/AccountsOverviewClient.tsx": {
+    "address-truncation": 2
+  },
+  "src/app/onboarding/OnboardingClient.tsx": {
+    "address-truncation": 2
+  },
+  "src/components/AccountSignersCard.tsx": {
+    "address-truncation": 2
+  },
+  "src/components/DelegationBudgetCard.tsx": {
+    "address-truncation": 2
+  },
+  "src/components/EditAgentModal.tsx": {
+    "address-truncation": 2
+  },
+  "src/components/SendModal.tsx": {
+    "address-truncation": 2
+  },
+  "src/components/WalletButton.tsx": {
+    "address-truncation": 2
+  }
+}

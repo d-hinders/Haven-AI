@@ -65,6 +65,25 @@ describe('design-lint scanner (#855)', () => {
     expect(hits[0].rule).toBe('micro-font')
   })
 
+  it('flags structural component bypass (#899): raw table/svg, header band, address slice', () => {
+    expect(scan('src/components/X.tsx', '<table className="w-full">').map((h) => h.rule)).toContain('raw-table')
+    expect(scan('src/components/X.tsx', '<svg viewBox="0 0 4 4" />').map((h) => h.rule)).toContain('raw-svg')
+    expect(scan('src/components/X.tsx', 'const c = "border-b bg-[var(--v2-surface)]"').map((h) => h.rule)).toContain('header-band')
+    expect(scan('src/components/X.tsx', 'return `${a.slice(0, 6)}…${a.slice(-4)}`').filter((h) => h.rule === 'address-truncation')).toHaveLength(2)
+  })
+
+  it('structural rules honour the primitive-home + marketing exemptions', () => {
+    // The primitives themselves are where these patterns legitimately live:
+    expect(scan('src/components/ui/Table.tsx', '<table>')).toEqual([])
+    expect(scan('src/components/ui/Card.tsx', 'border-b bg-[var(--v2-surface)]')).toEqual([])
+    expect(scan('src/components/haven/Address.tsx', 'a.slice(0, 6)')).toEqual([])
+    // Marketing/brand may hand-roll SVGs and headers:
+    expect(scan('src/components/brand/Logo.tsx', '<svg />')).toEqual([])
+    expect(scan('src/app/page.tsx', '<table>')).toEqual([])
+    // …but a product component may not:
+    expect(scan('src/components/Dash.tsx', '<svg />').map((h) => h.rule)).toEqual(['raw-svg'])
+  })
+
   it('honours design-lint-disable-line for reviewed exceptions', () => {
     const src = '<p className="text-[10px]" /> {/* design-lint-disable-line */}'
     expect(scan('src/components/X.tsx', src)).toEqual([])

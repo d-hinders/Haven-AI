@@ -143,14 +143,22 @@ export default function DesignSystemPage() {
             <li>
               <span className="font-medium text-[var(--v2-ink)]">5. CI enforces this.</span> The design-lint
               gate (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">npm run design:lint -w packages/frontend</code>)
-              {' '}fails a PR that introduces raw Tailwind palette classes, hardcoded hex colours, or new{' '}
+              {' '}fails a PR across two rule families. <em>Token rules</em> catch a bypassed token: raw Tailwind
+              palette classes, hardcoded hex colours, or new{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">text-[10px]</code>/<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">text-[11px]</code>. {/* prose mention, not a use — design-lint-disable-line */}
-              Marketing/landing surfaces (brand, marketing, the landing page, protocols,
-              investor-briefing, how-it-works) are intentionally bespoke and exempt; the
+              {' '}<em>Structural rules</em> catch a re-hand-rolled component: a hand-rolled grey header band
+              (use <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Card.Header</code>), a raw table
+              element (use the <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Table</code> primitive),
+              an inline SVG element (use <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Icon</code>{' '}
+              + a lucide glyph), or a hand-rolled address slice (use{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;Address&gt;</code>) — each exempts
+              its own primitive's home file. Marketing/landing surfaces (brand, marketing, the landing page,
+              protocols, investor-briefing, how-it-works) are intentionally bespoke and exempt; the
               product app and this page stay fully gated. Existing debt lives in a shrink-only baseline
               (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">design-lint-baseline.json</code>) —
               counts may only go down. Route colours through{' '}
-              <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">var(--v2-…)</code> tokens instead.
+              <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">var(--v2-…)</code> tokens and reach
+              for the shared primitive instead.
             </li>
           </ol>
         </Card>
@@ -309,7 +317,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Icons"
-        description="One icon family, one weight. Every UI icon is a lucide-react glyph rendered through the shared `Icon` wrapper (`@/components/ui/Icon`) — stroke 1.5, decorative by default (`aria-hidden`), sized via className. Never inline a raw `<svg>`; the only exemptions are brand marks in `components/brand` and marketing pages."
+        description="One icon family, one weight. Every UI icon is a lucide-react glyph rendered through the shared `Icon` wrapper (`@/components/ui/Icon`) — stroke 1.5, decorative by default (`aria-hidden`), sized via className. Never inline a raw SVG element; the only exemptions are brand marks in `components/brand` and marketing pages."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-5">

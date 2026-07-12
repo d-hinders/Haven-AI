@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:visual": "VISUAL_REGRESSION=1 playwright test e2e/design-system.visual.spec.ts --project=chromium-desktop",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
     "test:e2e:desktop": "playwright test --project=chromium-desktop",
     "test:e2e:full": "playwright test",

@@ -1,0 +1,63 @@
+# Regenerate the /design-system visual baselines (#897) on a branch.
+#
+# Baselines MUST be Linux-rendered (CI is the judge; macOS fonts differ), so
+# intended visual changes are accepted by dispatching this workflow on the PR
+# branch: it rebuilds, reruns the visual spec with --update-snapshots, and
+# commits the new baselines back to the branch — where they show up as a
+# reviewable image diff in the PR. This is also how the very first baseline
+# set was bootstrapped.
+name: Update visual baselines
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    name: Regenerate /design-system baselines
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend (standalone)
+        run: npm run build -w packages/frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: packages/frontend
+
+      - name: Regenerate baselines
+        run: npm run test:visual -w packages/frontend -- --update-snapshots
+        env:
+          CI: 1
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Commit baselines to the branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/frontend/e2e/__screenshots__
+          if git diff --cached --quiet; then
+            echo "Baselines unchanged — nothing to commit."
+          else
+            git commit -m "chore: regenerate /design-system visual baselines (Linux-rendered)"
+            git push
+          fi

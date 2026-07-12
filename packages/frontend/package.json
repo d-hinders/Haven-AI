@@ -10,6 +10,7 @@
     "lint": "next lint",
     "design:lint": "node scripts/design-lint.mjs",
     "design:lint:update": "node scripts/design-lint.mjs --update",
+    "design:coupling": "node scripts/design-system-coupling.mjs",
     "screenshot": "node scripts/screenshot.mjs",
     "test": "vitest run",
     "test:watch": "vitest",

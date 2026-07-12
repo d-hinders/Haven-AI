@@ -25,6 +25,8 @@ If a `/design-system` route exists, inspect it before editing UX.
 
 Inspect `packages/frontend/src/components/ui` (primitives) and `packages/frontend/src/components/haven` (domain components) before adding UI. Prefer composition; do **not** invent new card styles, spacing, shadows, radius, or typography unless the existing system genuinely can't express the need. Use the v2 tokens in `globals.css` and the Tailwind aliases.
 
+**A new primitive must land on `/design-system` in the same PR ([#898](https://github.com/d-hinders/Haven-AI/issues/898)).** The design-system coupling gate flags any exported component added under `components/ui/**` or `components/haven/**` whose symbol never appears on `app/(authenticated)/design-system/page.tsx` — posting an advisory PR comment for everyone, and (see §6) a **hard definition-of-done step under ship-next**. Add a showcase entry (usage + variants) alongside the primitive, or — for a genuinely internal export, not a reusable primitive — mark the export line `// design-system-exempt: <reason>`. Check locally with `node packages/frontend/scripts/design-system-coupling.mjs` (add `--strict` to mirror the ship-next gate's exit code).
+
 ## 3. Captain Self-Check Preflight
 
 Run the matching items from the **Captain Self-Check Preflight** in [`../ai-agent-workflow.md`](../ai-agent-workflow.md) for the traps the diff touches — e.g. numeric formatters, counter/summary buckets, conditional copy predicates, async hook generations, signer-readiness gates, animation discipline, inline-gate placement, cross-surface display drift, loading-state inference. Each is one grep or one quick read. Do this **before** review so the reviewer finds fewer issues.
@@ -44,3 +46,5 @@ Run `haven-reviewer` with UI context, checking the diff against [`product/design
 ## 6. Merge policy (UI)
 
 A non-money frontend PR **auto-merges** on green CI + verification **unless** the design-review / `haven-reviewer` UI pass flags a UX, copy, or design-system issue (**even a nit-level one**) — then **pause and ask the user** (UX is subjective; a flagged finding is a human call). This is the `area:frontend` case of the canonical skill's [Merge Gate](../../../.agents/skills/ship-next/SKILL.md#merge-gate). Money-path UI still follows the `money.md` human gate.
+
+**Hard definition-of-done for a diff that adds a primitive ([#898](https://github.com/d-hinders/Haven-AI/issues/898)):** before opening the PR, run `node packages/frontend/scripts/design-system-coupling.mjs --strict`. A non-zero exit (a new `ui/`/`haven/` export missing from `/design-system` and not `// design-system-exempt`-marked) blocks the merge exactly like a failing test — document the primitive on the reference page first. The plain (advisory) run posts the same finding as a PR comment for human authors.

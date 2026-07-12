@@ -37,7 +37,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-07-11"
+last-verified: "2026-07-12"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -113,6 +113,10 @@ Preserve these facts as non-negotiable implementation invariants:
 
 - User treasury funds are held in the user's Safe. An agent-held delegate EOA may also have a pre-existing, newly funded, or residual balance used for a standard x402 merchant payment; Haven controls neither account.
 - Haven never holds user private keys, agent private keys, or seed phrases.
+  Passkey-owned delegation-rail accounts store only PUBLIC key material
+  (`hybrid_account_passkeys`: credential id + P256 x/y coordinates) — the
+  private key never leaves the user's authenticator, and public coordinates
+  grant no signing or spending authority.
 - Haven never operates an unrestricted server-side signer.
 - Haven cannot unilaterally move funds.
 - Haven cannot bypass Safe owners, Safe modules, Safe guards, or on-chain constraints.

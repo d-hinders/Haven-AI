@@ -4,7 +4,7 @@ status: current
 covers:
   - .agents/skills/ship-next/SKILL.md
   - .github/labels.yml
-last-verified: "2026-06-30"
+last-verified: "2026-07-12"
 ---
 
 # Ship-next playbooks

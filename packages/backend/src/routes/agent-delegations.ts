@@ -214,6 +214,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
           passkeys: owner.config.passkeys,
+          accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
           rpcUrl: getChain(agent.chain_id).rpcUrl,
@@ -273,6 +274,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
           passkeys: owner.config.passkeys,
+          accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
           rpcUrl: getChain(agent.chain_id).rpcUrl,
@@ -463,7 +465,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         })
       }
       try {
-        const deployed = await ensureHybridDeployed(agent.chain_id, owner.config)
+        const deployed = await ensureHybridDeployed(
+          agent.chain_id,
+          owner.config,
+          agent.treasury_address as Address,
+        )
         if (deployed.address.toLowerCase() !== String(agent.treasury_address).toLowerCase()) {
           // The stored owner no longer derives the stored account — refuse
           // rather than activate a grant the chain can never honour.
@@ -534,6 +540,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
           passkeys: owner.config.passkeys,
+          accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
           rpcUrl: getChain(agent.chain_id).rpcUrl,
@@ -592,6 +599,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
         passkeys: owner.config.passkeys,
+        accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
         rpcUrl: getChain(agent.chain_id).rpcUrl,

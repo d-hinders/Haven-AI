@@ -253,6 +253,14 @@ export interface TreasuryOpsConfig {
   ownerAddress?: Address
   /** P256 signer set for a pure-passkey account (#885). */
   passkeys?: TreasuryPasskey[]
+  /**
+   * The account's DEPLOYED address (#891 fix). Treasury ops only exist after
+   * the account is deployed (the grant deploys it, #860), and the signer set
+   * can have EVOLVED since provisioning (addKey/removeKey, #888) — deriving
+   * the address from the CURRENT set would derive a different, wrong account.
+   * With the address pinned, deployParams play no role in ops.
+   */
+  accountAddress?: Address
   chainId: number
   bundlerUrl: string
   rpcUrl: string
@@ -293,39 +301,44 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
   // Passkey accounts sign the userOpHash via WebAuthn (#887); the prepare here
   // never signs, so the WebAuthn signer's getFn is a stub that must not be
   // called server-side. EOA accounts keep the watch-only owner-signer.
-  const account = isPasskey
-    ? await toMetaMaskSmartAccount({
-        client: publicClient as never,
-        implementation: Implementation.Hybrid,
-        deployParams: [
-          zeroAddress,
-          passkeys.map((p) => p.keyId),
-          passkeys.map((p) => p.x),
-          passkeys.map((p) => p.y),
-        ],
-        deploySalt: '0x',
-        signer: {
-          webAuthnAccount: toWebAuthnAccount({
-            credential: {
-              id: passkeys[0].keyId,
-              publicKey: `0x04${passkeys[0].x.toString(16).padStart(64, '0')}${passkeys[0].y
-                .toString(16)
-                .padStart(64, '0')}` as Hex,
-            },
-            getFn: async () => {
-              throw new Error('non-custody: treasury prepare is watch-only and cannot sign')
-            },
-          }),
-          keyId: passkeys[0].keyId as Hex,
-        },
-      })
-    : await toMetaMaskSmartAccount({
-        client: publicClient as never,
-        implementation: Implementation.Hybrid,
-        deployParams: [cfg.ownerAddress as Address, [], [], []],
-        deploySalt: '0x',
-        signer: { account: watchOnlyDelegateOwner(cfg.ownerAddress as Address) },
-      })
+  // Address pinned when known (post-deploy, the only time treasury ops run);
+  // deployParams-derivation only as a legacy fallback for callers that
+  // predate the pin.
+  const location = cfg.accountAddress
+    ? ({ address: cfg.accountAddress } as const)
+    : isPasskey
+      ? ({
+          deployParams: [
+            zeroAddress,
+            passkeys.map((p) => p.keyId),
+            passkeys.map((p) => p.x),
+            passkeys.map((p) => p.y),
+          ],
+          deploySalt: '0x',
+        } as const)
+      : ({ deployParams: [cfg.ownerAddress as Address, [], [], []], deploySalt: '0x' } as const)
+  const signerConfig = isPasskey
+    ? {
+        webAuthnAccount: toWebAuthnAccount({
+          credential: {
+            id: passkeys[0].keyId,
+            publicKey: `0x04${passkeys[0].x.toString(16).padStart(64, '0')}${passkeys[0].y
+              .toString(16)
+              .padStart(64, '0')}` as Hex,
+          },
+          getFn: async () => {
+            throw new Error('non-custody: treasury prepare is watch-only and cannot sign')
+          },
+        }),
+        keyId: passkeys[0].keyId as Hex,
+      }
+    : { account: watchOnlyDelegateOwner(cfg.ownerAddress as Address) }
+  const account = await toMetaMaskSmartAccount({
+    client: publicClient as never,
+    implementation: Implementation.Hybrid,
+    ...location,
+    signer: signerConfig,
+  } as never)
   const pimlico = createPimlicoClient({
     transport: http(cfg.bundlerUrl),
     entryPoint: { address: entryPoint07Address, version: '0.7' },

@@ -17,7 +17,7 @@
  * Heavy deps (the kit) load lazily so this stays out of the main bundle.
  */
 
-import { createPublicClient, http, zeroAddress, type Address, type Hex } from 'viem'
+import { createPublicClient, http, type Address, type Hex } from 'viem'
 import { base, baseSepolia, gnosis } from 'viem/chains'
 import { base64UrlEncode } from './passkey'
 
@@ -78,24 +78,15 @@ async function buildAccount(signers: AccountSigners) {
   const webAuthnAccount = toWebAuthnAccount({ credential })
 
   const client = createPublicClient({ chain, transport: http(rpc) })
+  // The address is PINNED, never derived (#891 fix): the signer set can have
+  // evolved since provisioning (backup enrolled, key removed — #888), and
+  // deriving from the current set would derive a different, wrong account.
   const account = await toMetaMaskSmartAccount({
     client: client as never,
     implementation: Implementation.Hybrid,
-    deployParams: [
-      (signers.owner_address ?? zeroAddress) as Address,
-      signers.passkeys.map((p) => p.key_id),
-      signers.passkeys.map((p) => BigInt(p.x)),
-      signers.passkeys.map((p) => BigInt(p.y)),
-    ],
-    deploySalt: '0x',
+    address: signers.account_address as Address,
     signer: { webAuthnAccount, keyId: signWith.key_id as Hex },
-  })
-
-  if (account.address.toLowerCase() !== signers.account_address.toLowerCase()) {
-    // Signing as a different account would produce signatures the chain
-    // rejects — refuse loudly instead.
-    throw new Error('Account derivation mismatch — the stored signer set does not match this account')
-  }
+  } as never)
   return account
 }
 

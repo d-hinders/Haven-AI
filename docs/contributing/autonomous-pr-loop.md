@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-07-01"
+last-verified: "2026-07-12"
 ---
 
 # Autonomous PR loop

@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-06-30"
+last-verified: "2026-07-12"
 ---
 
 # Backlogs moved to GitHub Issues

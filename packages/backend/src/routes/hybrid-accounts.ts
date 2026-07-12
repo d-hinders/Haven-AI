@@ -92,12 +92,25 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
        VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6)
        RETURNING id, created_at`,
       // owner_address: the EOA owner for treasury ops (#828 revoke). A pure-
-      // passkey account has none — its owner signs via WebAuthn (#833).
+      // passkey account has none — its config lives in hybrid_account_passkeys.
       [sub, accountAddress, chainId, name?.trim() || 'My account', isFirst, owner_address?.toLowerCase() ?? null],
     )
+    const userSafeId = result.rows[0].id
+
+    // Persist the passkey signer set (#885): the account address was derived
+    // from EXACTLY these coordinates, so activation (#860 deploy) and revoke
+    // can reconstruct the owner config for a pure-passkey account.
+    for (const pk of parsedPasskeys) {
+      await pool.query(
+        `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_safe_id, key_id) DO NOTHING`,
+        [userSafeId, pk.keyId, `0x${pk.x.toString(16)}`, `0x${pk.y.toString(16)}`],
+      )
+    }
 
     return reply.code(201).send({
-      id: result.rows[0].id,
+      id: userSafeId,
       account_address: accountAddress,
       chain_id: chainId,
       account_type: 'delegator_hybrid',

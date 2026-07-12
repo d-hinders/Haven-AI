@@ -25,9 +25,9 @@
  * docs/operations/delegation-rail-vendor-ops.md.
  */
 
-import { http, createPublicClient, type Address, type Hex, type LocalAccount } from 'viem'
+import { http, createPublicClient, zeroAddress, type Address, type Hex, type LocalAccount } from 'viem'
 import { toAccount } from 'viem/accounts'
-import { entryPoint07Address, toPackedUserOperation } from 'viem/account-abstraction'
+import { entryPoint07Address, toPackedUserOperation, toWebAuthnAccount } from 'viem/account-abstraction'
 import { getUserOperationHash } from 'viem/account-abstraction'
 import { SIGNABLE_USER_OP_TYPED_DATA } from '@metamask/smart-accounts-kit/utils'
 import { createSmartAccountClient } from 'permissionless'
@@ -242,9 +242,17 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
  * disableDelegation (revoke) and any future owner-executed account call.
  * The backend still holds no key; sponsorship still cannot move value.
  */
+export interface TreasuryPasskey {
+  keyId: string
+  x: bigint
+  y: bigint
+}
+
 export interface TreasuryOpsConfig {
-  /** The treasury account's owner (EOA today; passkey via #833's WebAuthn). */
-  ownerAddress: Address
+  /** EOA owner — omit for a pure-passkey account (provide `passkeys`). */
+  ownerAddress?: Address
+  /** P256 signer set for a pure-passkey account (#885). */
+  passkeys?: TreasuryPasskey[]
   chainId: number
   bundlerUrl: string
   rpcUrl: string
@@ -277,13 +285,47 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
   getDelegationContracts(cfg.chainId)
   const chain = chainForId(cfg.chainId)
   const publicClient = createPublicClient({ chain, transport: http(cfg.rpcUrl) })
-  const account = await toMetaMaskSmartAccount({
-    client: publicClient as never,
-    implementation: Implementation.Hybrid,
-    deployParams: [cfg.ownerAddress, [], [], []],
-    deploySalt: '0x',
-    signer: { account: watchOnlyDelegateOwner(cfg.ownerAddress) },
-  })
+  const passkeys = cfg.passkeys ?? []
+  const isPasskey = !cfg.ownerAddress && passkeys.length > 0
+  if (!cfg.ownerAddress && !isPasskey) {
+    throw new Error('treasury ops: an EOA owner or at least one passkey is required')
+  }
+  // Passkey accounts sign the userOpHash via WebAuthn (#887); the prepare here
+  // never signs, so the WebAuthn signer's getFn is a stub that must not be
+  // called server-side. EOA accounts keep the watch-only owner-signer.
+  const account = isPasskey
+    ? await toMetaMaskSmartAccount({
+        client: publicClient as never,
+        implementation: Implementation.Hybrid,
+        deployParams: [
+          zeroAddress,
+          passkeys.map((p) => p.keyId),
+          passkeys.map((p) => p.x),
+          passkeys.map((p) => p.y),
+        ],
+        deploySalt: '0x',
+        signer: {
+          webAuthnAccount: toWebAuthnAccount({
+            credential: {
+              id: passkeys[0].keyId,
+              publicKey: `0x04${passkeys[0].x.toString(16).padStart(64, '0')}${passkeys[0].y
+                .toString(16)
+                .padStart(64, '0')}` as Hex,
+            },
+            getFn: async () => {
+              throw new Error('non-custody: treasury prepare is watch-only and cannot sign')
+            },
+          }),
+          keyId: passkeys[0].keyId as Hex,
+        },
+      })
+    : await toMetaMaskSmartAccount({
+        client: publicClient as never,
+        implementation: Implementation.Hybrid,
+        deployParams: [cfg.ownerAddress as Address, [], [], []],
+        deploySalt: '0x',
+        signer: { account: watchOnlyDelegateOwner(cfg.ownerAddress as Address) },
+      })
   const pimlico = createPimlicoClient({
     transport: http(cfg.bundlerUrl),
     entryPoint: { address: entryPoint07Address, version: '0.7' },

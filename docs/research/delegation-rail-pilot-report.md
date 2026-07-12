@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/lib/delegation-rail.ts
   - packages/backend/src/lib/delegation-authorization.ts
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
 
 # Delegation rail — definition-of-done report (#835, epic #821)
@@ -113,6 +113,13 @@ session rail needed: coverage arithmetic, the approval queue, and the schedule
 machinery for refills (#769/#770/#796) — the budget refills itself on-chain.
 Retiring that code is [#834](https://github.com/d-hinders/Haven-AI/issues/834),
 gated on this report.
+
+## Post-script (epic #836)
+
+After this closeout, the rail gained passkey-owned treasuries: delegation-rail.ts
+accepts a WebAuthn signer set (`TreasuryPasskey`), and the #884 spike proved
+passkey-signed grants redeem through the same DelegationManager path measured
+here. Nothing in this report's measurements or conclusions changes.
 
 ## Running it
 

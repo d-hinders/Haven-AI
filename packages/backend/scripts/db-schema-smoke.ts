@@ -111,6 +111,19 @@ const QUERIES: SmokeQuery[] = [
           RETURNING id, created_at`,
   },
   {
+    name: 'hybrid accounts: passkey signer persist (#885)',
+    sql: `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (user_safe_id, key_id) DO NOTHING`,
+  },
+  {
+    name: 'hybrid accounts: owner config round-trip — account row + passkey set (#885)',
+    sql: `SELECT key_id, public_key_x, public_key_y
+          FROM hybrid_account_passkeys
+          WHERE user_safe_id = $1
+          ORDER BY created_at ASC`,
+  },
+  {
     name: 'delegations: grant insert with lifecycle status (#828)',
     sql: `INSERT INTO agent_delegations (
             agent_id, chain_id, token_address, recipient_address, delegation_hash,

@@ -33,6 +33,7 @@ import { isAddress as isValidAddress } from '../lib/address.js'
 import { getChain } from '../lib/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../lib/hybrid-provisioning.js'
+import { loadHybridOwnerConfig, isPasskeyOnly } from '../lib/hybrid-account-config.js'
 import {
   buildBudgetDelegation,
   buildRevocation,
@@ -235,21 +236,14 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       // preserved; non-custody unchanged — the account's signers are the
       // owner's keys). Fail-closed: no activation on a failed deploy, the
       // grant stays pending and activate can be retried.
-      const ownerRow = await pool.query<{ owner_address: string | null }>(
-        `SELECT owner_address FROM user_safes
-         WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)`,
-        [sub, agent.treasury_address],
-      )
-      const ownerAddress = ownerRow.rows[0]?.owner_address
-      if (!ownerAddress) {
+      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string)
+      if (!owner) {
         return reply.code(409).send({
-          error: 'Treasury owner identity unknown — passkey-owned deploys land with #836',
+          error: 'Account signer configuration unknown — cannot deploy this account',
         })
       }
       try {
-        const deployed = await ensureHybridDeployed(agent.chain_id, {
-          ownerAddress: ownerAddress as Address,
-        })
+        const deployed = await ensureHybridDeployed(agent.chain_id, owner.config)
         if (deployed.address.toLowerCase() !== String(agent.treasury_address).toLowerCase()) {
           // The stored owner no longer derives the stored account — refuse
           // rather than activate a grant the chain can never honour.
@@ -304,38 +298,49 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         return reply.code(409).send({ error: 'Already revoked' })
       }
 
-      // Owner identity for the treasury account: today's Hybrid treasuries are
-      // EOA-owned (#825's EOA variant); passkey owners sign via #833. Check
-      // this BEFORE building — a cheap 409 beats a confusing 502.
-      const ownerRow = await pool.query<{ owner_address: string | null }>(
-        `SELECT owner_address FROM user_safes
-         WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)`,
-        [sub, agent.treasury_address],
-      )
-      const ownerAddress = ownerRow.rows[0]?.owner_address
-      if (!ownerAddress) {
+      // Reconstruct the treasury's owner config (#885): an EOA account signs
+      // the EIP-712 typed data; a pure-passkey account signs the userOpHash via
+      // WebAuthn (#887). Check BEFORE building — a cheap 409 beats a 502.
+      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string)
+      if (!owner) {
         return reply.code(409).send({
-          error: 'Treasury owner identity unknown — revoke via the exit path (docs) until #833 lands',
+          error: 'Account signer configuration unknown — revoke via the exit path (docs)',
         })
       }
 
       try {
         const revocation = buildRevocation(JSON.parse(target.delegation_json), agent.chain_id)
+        const passkeyOnly = isPasskeyOnly(owner.config)
         const treasury = await createTreasuryOps({
-          ownerAddress: ownerAddress as Address,
+          ownerAddress: owner.config.ownerAddress,
+          passkeys: owner.config.passkeys,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
           rpcUrl: getChain(agent.chain_id).rpcUrl,
           sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
         })
         const prepared = await treasury.prepareCall(revocation.to, revocation.data)
+        const user_operation = JSON.parse(
+          JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
+        )
+        if (passkeyOnly) {
+          // Passkey accounts: the owner signs the userOpHash with the account
+          // passkey (WebAuthn) — the frontend slice, #887. No EIP-712 payload.
+          return {
+            signature_scheme: 'webauthn_userop',
+            user_op_hash: prepared.userOpHash,
+            user_operation,
+            treasury_address: prepared.treasuryAddress,
+            instructions:
+              'Sign user_op_hash with the account passkey (WebAuthn), then POST /revoke/submit',
+          }
+        }
         return {
-          // The owner signs THIS typed data (the account validates it), not
-          // the bare hash — same scheme as delegation payments (#829).
+          // The EOA owner signs THIS typed data (the account validates it),
+          // not the bare hash — same scheme as delegation payments (#829).
+          signature_scheme: 'eip712_userop',
           signing_payload: prepared.signingTypedData,
-          user_operation: JSON.parse(
-            JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
-          ),
+          user_operation,
           treasury_address: prepared.treasuryAddress,
           instructions: 'Sign signing_payload (EIP-712) with the treasury owner key, then POST /revoke/submit',
         }
@@ -360,17 +365,13 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     if (!user_operation || typeof user_operation !== 'object') {
       return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
     }
-    const ownerRow = await pool.query<{ owner_address: string | null }>(
-      `SELECT owner_address FROM user_safes
-       WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)`,
-      [sub, agent.treasury_address],
-    )
-    const ownerAddress = ownerRow.rows[0]?.owner_address
-    if (!ownerAddress) return reply.code(409).send({ error: 'Treasury owner identity unknown' })
+    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string)
+    if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
     try {
       const treasury = await createTreasuryOps({
-        ownerAddress: ownerAddress as Address,
+        ownerAddress: owner.config.ownerAddress,
+        passkeys: owner.config.passkeys,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
         rpcUrl: getChain(agent.chain_id).rpcUrl,

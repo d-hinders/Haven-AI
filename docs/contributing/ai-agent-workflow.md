@@ -10,7 +10,7 @@ covers:
   - AGENTS.md
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
-last-verified: "2026-07-01"
+last-verified: "2026-07-12"
 ---
 
 # Haven AI Agent Workflow

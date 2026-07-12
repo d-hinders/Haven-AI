@@ -27,20 +27,10 @@ describe('sign_data.signature_scheme dispatch (#776)', () => {
     expect(ethers.recoverAddress(HASH, sig).toLowerCase()).toBe(DELEGATE.address.toLowerCase())
   })
 
-  it("'eip191_userop' -> EIP-191, recovers over the personal-sign digest", async () => {
-    const sig = await signFor(client(), { hash: HASH, signature_scheme: 'eip191_userop' })
-    expect(ethers.verifyMessage(ethers.getBytes(HASH), sig).toLowerCase()).toBe(
-      DELEGATE.address.toLowerCase(),
-    )
-    // and is NOT a valid raw-ECDSA signature (the two rails stay distinct)
-    expect(ethers.recoverAddress(HASH, sig).toLowerCase()).not.toBe(DELEGATE.address.toLowerCase())
-  })
-
-  it('the two schemes produce different signatures for the same hash', async () => {
-    const c = client()
-    const legacy = await signFor(c, { hash: HASH })
-    const session = await signFor(c, { hash: HASH, signature_scheme: 'eip191_userop' })
-    expect(legacy).not.toBe(session)
+  it("'eip191_userop' throws — the session rail is retired (#881), never a guessed signature", async () => {
+    await expect(
+      signFor(client(), { hash: HASH, signature_scheme: 'eip191_userop' }),
+    ).rejects.toThrow(/session rail is retired/)
   })
 
   it('an unknown scheme throws — never a guessed signature', async () => {

@@ -73,3 +73,18 @@ export function getDelegationContracts(chainId: number): DelegationContracts {
   }
   return contracts
 }
+
+// ── viem chain lookup ────────────────────────────────────────────────────────
+// Moved here from session-rail.ts when the session rail retired (#834); the
+// delegation rail and hybrid provisioning are the remaining consumers.
+import { base, baseSepolia, gnosis, type Chain } from 'viem/chains'
+
+const VIEM_CHAINS: Record<number, Chain> = { 8453: base, 84532: baseSepolia, 100: gnosis }
+
+export function chainForId(chainId: number): Chain {
+  const chain = VIEM_CHAINS[chainId]
+  if (!chain) {
+    throw new Error(`unsupported chainId ${chainId}`)
+  }
+  return chain
+}

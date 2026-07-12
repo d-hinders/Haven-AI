@@ -4,11 +4,10 @@ status: research
 covers:
   - packages/backend/src/lib/allowance-module.ts
   - packages/backend/src/lib/relayer.ts
-  - packages/backend/src/lib/session-rail.ts
   - packages/backend/src/lib/execution-rail.ts
   - packages/backend/src/lib/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
-last-verified: "2026-07-02"
+last-verified: "2026-07-12"
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -83,9 +82,14 @@ fund movement.
 
 ### Session-key rail extension (#736, ADR #719 Stage 2)
 
-The ERC-4337 rail (Safe7579 + Smart Sessions) keeps the same perimeter —
+> **Historical (#834):** the session rail is retired and the modules named
+> below are deleted. Invariants 5–10 live on in their delegation-rail
+> equivalents — see the mapping table in
+> [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
+
+The ERC-4337 rail (Safe7579 + Smart Sessions) kept the same perimeter —
 Haven constructs, the customer signs — and `non-custody.invariants.test.ts`
-pins the specific mechanisms:
+pinned the specific mechanisms:
 
 | # | Invariant | Pin |
 |---|---|---|

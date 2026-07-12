@@ -15,7 +15,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -33,10 +33,12 @@ Standard merchant x402 has two legs:
 2. Merchant leg: the agent signs the standard EIP-3009 `X-PAYMENT` header from
    the delegate wallet and retries the merchant/resource request.
 
-> **This doc describes the session/AllowanceModule rail** (existing accounts) with
-> its two-leg funding model. New accounts (`account_type='delegator_hybrid'`)
-> settle x402 in a **single direct leg** via ERC-7710 — see
-> [Delegation rail x402](#delegation-rail-x402-new-accounts) below.
+> **This doc describes the legacy AllowanceModule rail** (import-only, existing
+> accounts) with its two-leg funding model. New accounts
+> (`account_type='delegator_hybrid'`) settle x402 in a **single direct leg** via
+> ERC-7710 — see [Delegation rail x402](#delegation-rail-x402-new-accounts)
+> below. The Smart Sessions **session rail is retired** (#834): the machine-payment
+> path answers HTTP 410 for `session_key` accounts, fail-closed.
 
 In SDK, local MCP, and generic hosted split flows, the agent retries the merchant
 request. For paid MCP tools, hosted MCP can proxy the HTTP/MCP request and

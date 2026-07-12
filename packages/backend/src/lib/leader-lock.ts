@@ -25,7 +25,6 @@ import pool from '../db.js'
 export const LEADER_LOCK_KEYS = {
   catalogRefresh: 811001,
   delegateBalanceMonitor: 811002,
-  scheduleRenewalMonitor: 811003,
   relayerBalanceMonitor: 811004,
 } as const
 

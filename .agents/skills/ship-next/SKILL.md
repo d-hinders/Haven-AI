@@ -115,8 +115,9 @@ label **or** the diff touches any of:
 
 - `routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, or `routes/machine-payments.ts`;
 - `lib/machine-payments.ts`, `lib/payment-coverage.ts`, or `lib/allowance-module.ts`;
-- `lib/execution-rail.ts`, `lib/session-rail.ts`, `lib/session-policies.ts`,
-  `lib/session-rotation.ts`, or `lib/safe7579-provisioning.ts` (the session-key rail);
+- `lib/execution-rail.ts` (the rail seam);
+- `lib/delegation-*.ts`, `lib/hybrid-provisioning.ts`, or `routes/agent-delegations.ts`
+  (the delegation rail);
 - `packages/sdk/src/signer.ts` (signing schemes are spend authority);
 - `middleware/agentAuth.ts`;
 - `db/migrations/`;

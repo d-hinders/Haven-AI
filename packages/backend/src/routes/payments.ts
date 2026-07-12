@@ -18,17 +18,11 @@ import {
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 import {
   deserializeUserOp,
-  getSessionRailFor,
   loadExecutionRailState,
-  recoverSessionSigner,
   redactVendorSecrets,
   resolveExecutionRail,
   serializeUserOp,
 } from '../lib/execution-rail.js'
-import {
-  commitScheduleRollover,
-  resolveScheduledAuthorization,
-} from '../lib/session-schedule-wiring.js'
 import {
   prepareDelegationPayment,
   submitDelegationPayment,
@@ -290,103 +284,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       chainId: agent.chain_id,
     })
     if (railDecision.rail === 'session_key') {
-      if (tokenAddress === ZERO_ADDRESS) {
-        return reply.code(400).send({
-          error: 'Native-token transfers are not supported on the session rail',
-        })
-      }
-
-      // Pre-signed schedule (#769): if this agent has an enabled schedule
-      // window covering the current period, prepare against the CURRENT
-      // period's deterministic session instead of the recorded one. No
-      // signature — the owner enabled every session in the window up front.
-      // Null = no applicable schedule → recorded session, #734 behavior.
-      const scheduled = await resolveScheduledAuthorization(
-        agent,
-        tokenAddress,
-        to.toLowerCase(),
-        Math.floor(Date.now() / 1000),
-      )
-      const activePermissionId = scheduled?.permissionId ?? railDecision.permissionId
-
-      let prepared
-      try {
-        const sessionRail = await getSessionRailFor(agent.safe_address, agent.chain_id)
-        prepared = await sessionRail.prepareSessionTransfer(
-          activePermissionId,
-          tokenAddress as `0x${string}`,
-          to.toLowerCase() as `0x${string}`,
-          amountRaw,
-        )
-      } catch (err) {
-        // The on-chain session policy (recipient / caps / expiry) is enforced
-        // during gas estimation — a violating payment fails here, before any
-        // state is written. The session config IS the policy (ADR #719).
-        return reply.code(502).send({
-          error: 'Session-rail authorization failed (on-chain policy or bundler)',
-          // Bundler errors echo the request URL, which embeds the API key.
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-        })
-      }
-
-      // Lazy rollover flip — ONLY after prepare succeeded: bundler gas
-      // estimation exercised the real Smart Sessions config, which is the
-      // on-chain proof the scheduled session is enabled. Guarded + race-safe
-      // (recordRotatedSession); losing the race is fine, the winner flipped
-      // to the same deterministic id.
-      if (scheduled?.rolloverDue) {
-        await commitScheduleRollover(agent.id, scheduled)
-      }
-
-      const sessionResult = await pool.query<PaymentIntentRow>(
-        `INSERT INTO payment_intents (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, delegate_address,
-          allowance_nonce, sign_hash,
-          execution_rail, session_permission_id, session_user_op,
-          status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-          'pending_signature', NOW() + interval '10 minutes')
-        RETURNING *`,
-        [
-          agent.id,
-          agent.user_id,
-          agent.safe_address,
-          agent.chain_id,
-          tokenConfig.symbol,
-          tokenAddress,
-          to.toLowerCase(),
-          amountRaw.toString(),
-          amount,
-          agent.delegate_address,
-          0, // AllowanceModule-only concept; unused on this rail
-          prepared.userOpHash,
-          'session_key',
-          activePermissionId,
-          serializeUserOp(prepared.userOperation),
-        ],
-      )
-      const sessionIntent = sessionResult.rows[0]
-
-      return reply.code(201).send({
-        payment_id: sessionIntent.id,
-        status: sessionIntent.status,
-        expires_at: sessionIntent.expires_at,
-        sign_data: {
-          hash: prepared.userOpHash,
-          signature_scheme: 'eip191_userop',
-          components: {
-            safe: agent.safe_address,
-            token: tokenAddress,
-            to: to.toLowerCase(),
-            amount: amountRaw.toString(),
-          },
-          instructions:
-            'Sign the hash with your session (delegate) private key using EIP-191 personal-sign — ' +
-            'signUserOpHashForSession in @haven_ai/sdk, NOT raw ECDSA. ' +
-            `Then POST /payments/${sessionIntent.id}/sign with { signature } — ` +
-            "Haven relays it for execution within your session's on-chain limits.",
-        },
+      // ── Session rail RETIRED (#834, epic #821) ─────────────────────────
+      // The typed seam stays for reversibility, but no session machinery
+      // remains behind it: schedules, rotation, and Smart Sessions prepare/
+      // submit are deleted. Accounts still marked session_key re-onboard on
+      // the delegation rail. Fail-closed: refuse loudly, write nothing.
+      return reply.code(410).send({
+        error:
+          'The session rail is retired — re-onboard this account on the delegation rail ' +
+          '(POST /accounts/hybrid, then grant a budget) to keep paying.',
       })
     }
 
@@ -579,12 +485,19 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         return reply.code(410).send({ error: 'Payment intent has expired' })
       }
 
-      // 2. Verify signature matches delegate. Session-rail intents (#745) sign
-      // the UserOperation hash with EIP-191 (signUserOpHashForSession); legacy
-      // intents sign the AllowanceModule transfer hash with raw ECDSA. The
-      // intent's rail was pinned at authorize time, so a signature can never
-      // be checked against the wrong scheme.
-      const isSessionRail = intent.execution_rail === 'session_key'
+      // 2. Verify signature matches delegate. Delegation-rail intents sign the
+      // account's EIP-712 typed data; legacy intents sign the AllowanceModule
+      // transfer hash with raw ECDSA. The intent's rail was pinned at
+      // authorize time, so a signature can never be checked against the wrong
+      // scheme. Session-rail intents are RETIRED (#834): any still-pending
+      // one is refused before anything is verified or written.
+      if (intent.execution_rail === 'session_key') {
+        return reply.code(410).send({
+          error:
+            'The session rail is retired — this intent can no longer execute. ' +
+            'Re-onboard the account on the delegation rail and authorize again.',
+        })
+      }
       const isDelegationRail = intent.execution_rail === 'delegation'
 
       // Delegation-rail intents sign the prepared UserOperation with the
@@ -602,9 +515,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       } else {
         let recoveredAddress: string
         try {
-          recoveredAddress = isSessionRail
-            ? recoverSessionSigner(intent.sign_hash, signature)
-            : recoverSigner(intent.sign_hash, signature)
+          recoveredAddress = recoverSigner(intent.sign_hash, signature)
         } catch (err) {
           return reply.code(400).send({
             error: 'Invalid signature format',
@@ -673,23 +584,6 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           const result = await submitDelegationPayment(
             { chain_id: intent.chain_id, delegate_address: intent.delegate_address },
             deserializeUserOp(intent.prepared_user_op),
-            signature as `0x${string}`,
-          )
-          txHash = result.txHash
-        } else if (isSessionRail) {
-          // Replay the exact prepared UserOperation whose hash the client
-          // signed; only the signature is stamped in. The Smart Sessions
-          // validator authorizes it on-chain — no owner or relayer key signs.
-          if (intent.session_user_op == null || !intent.session_permission_id) {
-            throw new Error('session-rail intent is missing its stored UserOperation state')
-          }
-          const sessionRail = await getSessionRailFor(intent.safe_address, intent.chain_id)
-          const result = await sessionRail.submitSessionTransfer(
-            {
-              userOperation: deserializeUserOp(intent.session_user_op),
-              userOpHash: intent.sign_hash as `0x${string}`,
-            },
-            intent.session_permission_id as `0x${string}`,
             signature as `0x${string}`,
           )
           txHash = result.txHash

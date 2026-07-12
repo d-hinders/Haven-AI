@@ -42,8 +42,8 @@ import {
 } from '@metamask/smart-accounts-kit'
 import { encodeFunctionData, parseAbi } from 'viem'
 import { getChain } from './chains.js'
-import { chainForId } from './session-rail.js'
-import { getDelegationContracts, DELEGATION_RAIL_CHAIN_IDS } from './delegation-contracts.js'
+
+import { getDelegationContracts, DELEGATION_RAIL_CHAIN_IDS, chainForId } from './delegation-contracts.js'
 
 const ERC20_ABI = parseAbi(['function transfer(address to, uint256 amount) returns (bool)'])
 

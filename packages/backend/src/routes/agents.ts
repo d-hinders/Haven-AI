@@ -1,5 +1,4 @@
 import { FastifyInstance } from 'fastify'
-import { agentHasEnabledSchedule, SCHEDULE_APPLY_WARNING } from '../lib/session-schedule-wiring.js'
 import crypto from 'crypto'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
@@ -562,10 +561,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     return {
       ...result.rows[0],
       // #802: with an enabled budget schedule, this edit takes effect on-chain
-      // only after the owner's next schedule signature — warn so an unapplied
-      // change does not silently stall payments (the rollover recompute
-      // diverges from the signed sessions and fails closed).
-      schedule_warning: (await agentHasEnabledSchedule(id)) ? SCHEDULE_APPLY_WARNING : null,
+      // Session schedules are retired (#834); the warning slot stays null for
+      // response-shape compatibility until clients drop it.
+      schedule_warning: null,
     }
   })
 

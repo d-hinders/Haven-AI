@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/lib/fee/fee-module.ts
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
 
 # Haven — Architecture
@@ -47,7 +47,7 @@ Forward-looking investigations (not current architecture) live in
 the spike to remove the delegate funding leg, and the
 [ERC-4337 pilot rig](../research/erc4337-pilot-rig.md) (ADR #719: session-key
 policy layer — rig, one-owner-tx migration recipe, and policy-enforcement
-suite).
+suite; superseded — the session rail it piloted is retired, #834).
 
 ## Regenerating exports
 
@@ -79,7 +79,9 @@ done
 - **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
   removed — it is no longer part of the codebase.)
 - **Two policy rails coexist.** Docs 1–5 primarily describe the
-  **session/AllowanceModule rail** (existing accounts). New accounts run on the
+  **legacy AllowanceModule rail** (import-only, existing accounts). The Smart
+  Sessions **session rail is retired** (#834): `session_key` accounts get
+  HTTP 410 from the payment paths. New accounts run on the
   **delegation rail** (epic #821, `account_type='delegator_hybrid'`,
   `execution_rail='delegation'`): a MetaMask Hybrid DeleGator smart account whose
   budget is a signed delegation with audited caveat enforcers, redeemed via the

@@ -45,7 +45,7 @@ describe('runIfLeader', () => {
     const { pool, query, release } = fakePool(true)
 
     await expect(
-      runIfLeader(LEADER_LOCK_KEYS.scheduleRenewalMonitor, async () => {
+      runIfLeader(LEADER_LOCK_KEYS.delegateBalanceMonitor, async () => {
         throw new Error('scan failed')
       }, pool),
     ).rejects.toThrow('scan failed')

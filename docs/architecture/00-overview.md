@@ -58,7 +58,7 @@ covers:
   - docs/architecture/07-edge-signer.md
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-07-11"
+last-verified: "2026-07-12"
 ---
 
 # Haven — Architecture Overview
@@ -73,8 +73,11 @@ line holds the security model:
 **API auth = identity, signature = authority, on-chain AllowanceModule state =
 enforcement for automatic Safe funding.**
 
-That line describes the **session/AllowanceModule rail** (existing accounts).
-Haven now runs **two on-chain policy rails**. New accounts are provisioned on the
+That line describes the **legacy AllowanceModule rail** (import-only, existing
+accounts). Haven runs **two on-chain policy rails** — the Smart Sessions
+**session rail is retired** (#834; accounts still marked
+`execution_rail='session_key'` get HTTP 410 from the payment paths).
+New accounts are provisioned on the
 **delegation rail** (epic #821, `account_type='delegator_hybrid'`,
 `execution_rail='delegation'`), where the same identity/authority split holds but
 enforcement is a signed MetaMask delegation with audited caveat enforcers (period

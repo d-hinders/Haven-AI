@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Wallet, getBytes } from 'ethers'
 
 vi.mock('../db.js', () => ({ default: { query: vi.fn() } }))
 
 const {
   deserializeUserOp,
-  recoverSessionSigner,
   redactVendorSecrets,
   resolveExecutionRail,
   serializeUserOp,
@@ -79,22 +77,4 @@ describe('redactVendorSecrets — bundler errors must never leak the API key', (
   })
 })
 
-describe('recoverSessionSigner — EIP-191, never raw ECDSA', () => {
-  const wallet = new Wallet('0x' + '11'.repeat(32))
-  const hash = ('0x' + 'cd'.repeat(32)) as `0x${string}`
 
-  it('recovers the signer of an EIP-191 personal-sign over the hash', async () => {
-    // Exactly what signUserOpHashForSession (@haven_ai/sdk, #741) produces.
-    const signature = await wallet.signMessage(getBytes(hash))
-    expect(recoverSessionSigner(hash, signature).toLowerCase()).toBe(
-      wallet.address.toLowerCase(),
-    )
-  })
-
-  it('does NOT recover the signer of a raw-ECDSA signature (the #731 footgun)', () => {
-    const raw = wallet.signingKey.sign(hash).serialized
-    expect(recoverSessionSigner(hash, raw).toLowerCase()).not.toBe(
-      wallet.address.toLowerCase(),
-    )
-  })
-})

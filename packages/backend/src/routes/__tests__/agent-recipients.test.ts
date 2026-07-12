@@ -113,24 +113,16 @@ describe('agent recipient CRUD (#796)', () => {
     expect(res.json()).toMatchObject({ removed: 2, applied_on_chain: false })
   })
 
-  it('mutations carry the schedule warning when a budget schedule is enabled (#802)', async () => {
+  it('schedule_warning is always null — schedules are retired, slot kept for shape (#834)', async () => {
     mockDb({ scheduleEnabled: true })
     const post = await app.inject({
       method: 'POST',
       url: `/agents/${AGENT_ID}/recipients`,
       payload: { recipient_address: RECIPIENT, token_address: USDC },
     })
-    expect(post.json().schedule_warning).toMatch(/budget signature/)
+    expect(post.json().schedule_warning).toBeNull()
     const del = await app.inject({ method: 'DELETE', url: `/agents/${AGENT_ID}/recipients/${RECIPIENT}` })
-    expect(del.json().schedule_warning).toMatch(/budget signature/)
-    // ... and stays null without a schedule:
-    mockDb({ scheduleEnabled: false })
-    const post2 = await app.inject({
-      method: 'POST',
-      url: `/agents/${AGENT_ID}/recipients`,
-      payload: { recipient_address: RECIPIENT, token_address: USDC },
-    })
-    expect(post2.json().schedule_warning).toBeNull()
+    expect(del.json().schedule_warning).toBeNull()
   })
 
   it('DELETE 404s when nothing matched', async () => {

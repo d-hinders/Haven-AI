@@ -1,12 +1,20 @@
 ---
 owner: "@d-hinders"
-status: current
-covers:
-  - packages/backend/src/lib/execution-rail.ts
-  - packages/backend/scripts/check-attestation.ts
-  - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-07-02"
+status: archived
+covers: []  # retired runbook — historical record (#834); live ops: delegation-rail-vendor-ops.md
+last-verified: "2026-07-12"
 ---
+
+> **Retired (#834, 2026-07-12):** the session rail is retired — its backend
+> modules and the `ops:check-attestation` script are deleted, and `session_key`
+> accounts get HTTP 410 from the payment paths. The **delegation rail is the
+> only sponsored rail**; the live bundler/paymaster runbook is
+> [`delegation-rail-vendor-ops.md`](delegation-rail-vendor-ops.md).
+> Env cleanup: `SESSION_RAIL_SPONSORSHIP_POLICY_ID` and
+> `SCHEDULE_RENEWAL_WEBHOOK_URL` are dead. `SESSION_RAIL_BUNDLER_URL` survives
+> ONLY as the fallback for `delegationRailBundlerUrl` — operator step: set
+> `DELEGATION_RAIL_BUNDLER_URL` in every deployed env, then drop the
+> `SESSION_RAIL_*` variables. Kept below as historical record.
 
 # Session-rail vendor ops — bundler/paymaster runbook (#738)
 

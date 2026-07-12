@@ -16,7 +16,7 @@ covers:
   - packages/backend/src/lib/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
 
 # Haven — Payment Execution Sequence
@@ -29,11 +29,14 @@ and user-authorized Safe execution).
 Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts) and
 [packages/backend/src/lib/allowance-module.ts](../../packages/backend/src/lib/allowance-module.ts).
 
-> **This diagram is the session/AllowanceModule rail** (existing accounts). New
-> accounts (`account_type='delegator_hybrid'`, `execution_rail='delegation'`) take
-> the [delegation-rail branch](#delegation-rail-new-accounts) at the bottom of this
+> **This diagram is the legacy AllowanceModule rail** (import-only, existing
+> accounts). New accounts (`account_type='delegator_hybrid'`,
+> `execution_rail='delegation'`) take the
+> [delegation-rail branch](#delegation-rail-new-accounts) at the bottom of this
 > doc — `POST /payments` resolves the rail from agent auth and either builds an
 > AllowanceModule transfer hash (below) or a redeeming UserOp (delegation rail).
+> The Smart Sessions **session rail is retired** (#834): accounts still marked
+> `execution_rail='session_key'` get HTTP 410 (fail-closed, nothing written).
 
 ```mermaid
 sequenceDiagram
@@ -151,8 +154,8 @@ path above:
    on-chain policy.
 
 Agent-facing intent shape and the `/payments/:id/sign` contract are identical to
-the session rail; only the `sign_data` scheme (`eip712_userop` vs the
-AllowanceModule transfer hash) and the enforcement mechanism differ. Delegation
+the legacy AllowanceModule rail's; only the `sign_data` scheme (`eip712_userop`
+vs the AllowanceModule transfer hash) and the enforcement mechanism differ. Delegation
 lifecycle (build/activate/revoke) is managed out of band via
 `/agents/:id/delegations/*`
 ([agent delegations](../../packages/backend/src/routes/agent-delegations.ts)).

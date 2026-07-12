@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/lib/agent-payment-taxonomy.ts
   - packages/backend/src/lib/agent-payment-taxonomy.parity.test.ts
   - .github/workflows/ci.yml
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -159,7 +159,9 @@ authority.
 ### Delegation rail
 
 The enforcement clause above (`on-chain Safe allowance = enforcement`) is the
-**session/AllowanceModule rail**. On the **delegation rail** (new accounts,
+**legacy AllowanceModule rail** (import-only, existing accounts; the Smart
+Sessions session rail is retired, #834 — `session_key` accounts get HTTP 410
+from `POST /payments`). On the **delegation rail** (new accounts,
 `account_type='delegator_hybrid'`, epic #821) the `API key = identity` and
 `delegate signature = authority` clauses are identical, but enforcement is a
 signed MetaMask delegation redeemed via the DelegationManager with audited caveat

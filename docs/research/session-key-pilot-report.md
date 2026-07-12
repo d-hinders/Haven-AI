@@ -4,8 +4,13 @@ status: research
 covers:
   - packages/qa-agent/src/pilot/**
   - docs/research/erc4337-pilot-rig.md
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
+
+> **Superseded (#834, 2026-07-12):** the session rail this report piloted is
+> retired; the delegation rail (epic #821, see
+> [delegation-rail-pilot-report.md](delegation-rail-pilot-report.md)) replaced
+> it. Kept as historical record.
 
 # Session-key policy pilot — report & Stage 2 go/no-go (#724)
 

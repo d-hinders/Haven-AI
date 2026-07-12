@@ -36,6 +36,6 @@ Run an exploratory **UI** QA pass as the agent, using **this session's own model
 
 9. Copy `docs/bug-reports/_run-report-template.md` to a unique UTC/run-id path such as `docs/bug-reports/2026-07-01T143022Z-browser-exploration-dev.md`.
 10. Fill in run metadata (mode = browser exploration, the frontend URL/build SHA, runtime/browser), the surfaces visited, and every finding in the **Friction, Bugs, And Infrastructure Failures** table (severity, surface, expected vs actual, reproducibility, evidence). Complete the secret review before committing the report or any screenshots.
-11. File each concrete UI bug as its own issue and link it from the report. Leave **Notes for the coding agent** with UX gaps worth feeding back.
+11. File each concrete UI bug as its own issue and link it from the report. Leave **Notes for the coding agent** with UX gaps worth feeding back. When this pass runs on the recurring cadence, follow the triage rules in [`docs/operations/qa-explore-ui-cadence.md`](../../docs/operations/qa-explore-ui-cadence.md) → "Finding → backlog → ship-next loop" (dedupe against open issues, `/new-task` backlog-only, `area:frontend`).
 
 The findings report (not a pass/fail check) is the deliverable — this layer's value is the UX and visual friction it surfaces, and it never blocks a promotion.

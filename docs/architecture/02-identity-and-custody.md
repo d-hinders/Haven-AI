@@ -219,6 +219,14 @@ radius shifts in a few ways worth mapping explicitly:
 - **The account owner is watch-only in Haven**, and the DeleGator's UUPS upgrade
   authority is the account's own signers — never Haven. Haven-side compromise can
   construct malicious payloads but cannot sign grants, redemptions, or upgrades.
+- **The signer set is user-managed and can be pure-passkey (#836).** An account
+  holds one or more P256 passkeys and/or an EOA owner; enrolling or removing a
+  signer (`addKey`/`removeKey`/`transferOwnership`) is prepared by Haven and
+  signed by an EXISTING signer — WebAuthn or EOA per the account's kind. Haven
+  stores only PUBLIC key material (`hybrid_account_passkeys`), synced to chain
+  state after the op confirms and pinned to the signed calldata. Recovery and
+  the ≥2-signer floor: [account-recovery](../../docs/product/account-recovery.md)
+  and the security model §6.
 
 Full invariant-by-invariant mapping (including the CI checks that enforce each
 one) and the independent exit/revocation story:

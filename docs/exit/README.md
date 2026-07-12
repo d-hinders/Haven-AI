@@ -4,7 +4,7 @@ status: current
 covers:
   - packages/frontend/public/exit/index.html
   - packages/backend/scripts/exit-acceptance-proof.ts
-last-verified: "2026-07-11"
+last-verified: "2026-07-12"
 ---
 
 # Your exit path — inspect and revoke agent budgets without Haven
@@ -70,8 +70,9 @@ call to the manager reverts. Two backend-independent ways to do it:
 
 **a. Owner-signed UserOp.** Build a UserOp whose call is
 `account.execute(disableDelegation(delegation))`, sign it with your owner key
-(the account validates an EIP-712 signature over the packed UserOp — domain
-`HybridDeleGator`), and submit it via the EntryPoint. You can submit through any
+(an EOA owner signs EIP-712 typed data over the packed UserOp — domain
+`HybridDeleGator`; a **passkey account** signs the userOpHash with a WebAuthn
+assertion from any enrolled passkey), and submit it via the EntryPoint. You can submit through any
 public bundler, or call `EntryPoint.handleOps([userOp], you)` directly from any
 EOA and pay the gas yourself — neither involves Haven. `disableDelegation` takes
 the `Delegation` tuple:

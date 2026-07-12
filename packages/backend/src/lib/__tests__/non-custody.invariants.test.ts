@@ -168,6 +168,26 @@ describe('non-custody invariants — delegation rail (#831, mapping: docs/securi
     expect(route).toMatch(/signature.*required/i)
   })
 
+  // Invariant 13 (NEW, #888/#890) — signer-management (enroll/remove backup)
+  // is client-signed: the route PREPARES addKey/removeKey/transferOwnership
+  // ops and returns an unsigned payload; the signature arrives from the
+  // client, and no production code holds a key that could authorize a signer
+  // change. Every account-authority change is signed by an EXISTING signer.
+  it('prepares signer changes for the owner to sign — Haven signs none', () => {
+    const route = read('routes', 'agent-delegations.ts')
+    // The prepare step returns a payload, never a signature:
+    expect(route).toMatch(/account-signers\/prepare/)
+    expect(route).toMatch(/signature_scheme/)
+    // The submit step requires a client signature and pins it to the op:
+    expect(route).toMatch(/account-signers\/submit/)
+    expect(route).toMatch(/signature is required/i)
+    expect(route).toMatch(/does not match the requested signer change/)
+    // The config loader that the deploy/sign paths rebuild from is a pure
+    // read — no signing surface:
+    const cfg = read('lib', 'hybrid-account-config.ts')
+    expect(cfg).not.toMatch(/privateKeyToAccount|new Wallet\(|signMessage|signTypedData\(/)
+  })
+
   // Invariant 10-d — sponsorship pays gas only, on this rail too.
   it('gives the delegation-rail paymaster no value-transfer surface', () => {
     const rail = read('lib', 'delegation-rail.ts')

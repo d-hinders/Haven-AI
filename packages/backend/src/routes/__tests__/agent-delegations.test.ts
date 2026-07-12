@@ -354,7 +354,7 @@ describe('delegation lifecycle API (#828)', () => {
         payload: { signature: '0x' + 'ab'.repeat(65) },
       })
       expect(res.statusCode).toBe(200)
-      expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, { ownerAddress: OWNER })
+      expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, { ownerAddress: OWNER }, TREASURY)
     })
 
     it('502s WITHOUT activating when the deploy fails — grant stays pending, retryable (#860)', async () => {
@@ -394,7 +394,7 @@ describe('delegation lifecycle API (#828)', () => {
       expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, {
         ownerAddress: undefined,
         passkeys: [{ keyId: 'cred-1', x: 0x11n, y: 0x22n }],
-      })
+      }, TREASURY)
     })
 
     it('500s on owner→address derivation mismatch rather than activating an unusable grant (#860)', async () => {

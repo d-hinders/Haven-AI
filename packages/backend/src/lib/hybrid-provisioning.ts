@@ -115,7 +115,25 @@ export interface EnsureDeployedResult {
 export async function ensureHybridDeployed(
   chainId: number,
   owner: HybridOwnerConfig,
+  /**
+   * The account's KNOWN address, when the caller has one (#891 fix). Checked
+   * FIRST: a deployed account short-circuits before any derivation — the
+   * signer set may have evolved since provisioning (addKey/removeKey, #888),
+   * in which case deriving from the CURRENT set would derive a different,
+   * wrong address and deploy a spurious account.
+   */
+  expectedAddress?: Address,
 ): Promise<EnsureDeployedResult> {
+  if (expectedAddress) {
+    const client = createPublicClient({
+      chain: chainForId(chainId),
+      transport: http(getChain(chainId).rpcUrl),
+    })
+    const existing = await client.getBytecode({ address: expectedAddress })
+    if (existing && existing !== '0x') {
+      return { address: expectedAddress, alreadyDeployed: true }
+    }
+  }
   const { account, client } = await buildWatchOnlyAccount(chainId, owner)
 
   const code = await client.getBytecode({ address: account.address })

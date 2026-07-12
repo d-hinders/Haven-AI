@@ -33,7 +33,7 @@ function resetLabel(mins: number): string {
 
 function OnChainBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-success-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-success)]">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-success-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-success)]">
       🔒 on-chain
     </span>
   )
@@ -41,7 +41,7 @@ function OnChainBadge() {
 
 function AdvisoryBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-3)]">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-3)]">
       ⓘ not on-chain
     </span>
   )

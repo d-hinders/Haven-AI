@@ -19,7 +19,7 @@ const STATUS: Record<ReportingSyncStatus, { label: string; cls: string }> = {
 
 function StatusChip({ status }: { status: ReportingSyncStatus }) {
   const s = STATUS[status]
-  return <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${s.cls}`}>{s.label}</span>
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>
 }
 
 export default function ReportingPage() {

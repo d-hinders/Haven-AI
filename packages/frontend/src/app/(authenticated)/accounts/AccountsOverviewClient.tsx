@@ -484,7 +484,7 @@ function SafeCard({
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetActive() }}
-            className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            className="rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             aria-label={`Set ${safe.name} as active`}
           >
             Set active
@@ -506,13 +506,13 @@ function SafeCard({
       <div className="mb-2 flex items-center gap-2 pr-12">
         <h3 className="truncate text-base font-semibold text-[var(--v2-ink)]">{safe.name}</h3>
         {showActiveBadge && (
-          <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-[var(--v2-success-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--v2-success)]">
+          <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-[var(--v2-success-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-success)]">
             <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--v2-success)]" />
             Active
           </span>
         )}
         {showDefaultBadge && (
-          <span className="flex-shrink-0 rounded bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--v2-brand)]">
+          <span className="flex-shrink-0 rounded bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-brand)]">
             default
           </span>
         )}

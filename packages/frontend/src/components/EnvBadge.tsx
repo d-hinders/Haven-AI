@@ -16,7 +16,7 @@ export default function EnvBadge() {
   return (
     <span
       title={`Haven ${env} environment — not production`}
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]"
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]"
     >
       {env}
     </span>

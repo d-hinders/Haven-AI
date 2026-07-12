@@ -51,7 +51,7 @@ export function CodeBlock({
           </span>
           <div className="flex items-center gap-3">
             {filename && (
-              <span className="uppercase tracking-wider text-[10px] text-white/40 font-mono">
+              <span className="uppercase tracking-wider text-xs text-white/40 font-mono">
                 {language}
               </span>
             )}

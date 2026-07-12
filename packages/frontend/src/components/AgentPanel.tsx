@@ -154,7 +154,7 @@ function AllowanceBar({
           {symbol}
           {nearLimit && (
             <span
-              className="inline-flex items-center gap-1 rounded bg-[var(--v2-danger-soft)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--v2-danger)] animate-pending-pulse"
+              className="inline-flex items-center gap-1 rounded bg-[var(--v2-danger-soft)] px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-[var(--v2-danger)] animate-pending-pulse"
               title={`${pct}% of allowance spent`}
             >
               <span className="w-1 h-1 rounded-full bg-[var(--v2-danger)]" />
@@ -374,7 +374,7 @@ function AgentCard({
               </h3>
               {!isActive ? (
                 <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                  className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
                     isPaused
                       ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
                       : agent.status === 'revoked'
@@ -641,7 +641,7 @@ function UnmanagedDelegateCard({
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
                 {pendingHavenSetup ? 'Finishing agent setup' : 'Unmanaged Delegate'}
               </h3>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-white ${accentText}`}>
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium bg-white ${accentText}`}>
                 {pendingHavenSetup ? 'confirming' : 'network only'}
               </span>
             </div>

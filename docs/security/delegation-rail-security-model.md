@@ -2,6 +2,9 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/lib/hybrid-account-config.ts
+  - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
 last-verified: "2026-07-12"
 ---
@@ -63,6 +66,7 @@ dropped.
 | 10 | Paymaster has no value-transfer surface | Unchanged — sponsorship pays gas only; proven in the spike (agent key held zero ETH and zero USDC) | CI + spike evidence |
 | 11 | *(new)* **No upgrade path from Haven code** | Haven's codebase contains no call site that can reach the account's UUPS upgrade function; upgrade authority = account signers only | CI (ABI/selector scan for `upgradeToAndCall` against DeleGator targets) |
 | 12 | *(new)* **Delegations are client-signed only** | No Haven code path calls `signDelegation`/EIP-712 delegation signing with a server-held key (pilot scripts with throwaway testnet keys excepted, path-scoped) | CI (import + call-site scan) |
+| 13 | *(new, #888)* **Signer changes are client-signed only** | Enrolling/removing a backup signer (`addKey`/`removeKey`/`transferOwnership`) is PREPARED by Haven and signed by an EXISTING account signer; the submit step pins the DB sync to the signed calldata. Haven holds no key that can change an account's signer set | CI (route + config-loader scan) |
 
 **Monitored-not-enforced:** enforcer/manager *contract immutability* is a
 property of the deployed bytecode, not our code — covered by pinning exact
@@ -137,9 +141,48 @@ further redemption fails. Recorded as a walkthrough with tx links.
 - The exit path is a **published feature**, referenced from the dashboard
   ("your exit path") — not fine print.
 
-## 6. Deferred by owner decision (recorded)
+## 6. Recovery & the signer-set model (shipped, epic #836)
 
-**Passkey recovery / backup signers: single-passkey accounts have no recovery
-path yet** — deferred to the recovery epic (#836), which gates any mainnet
-launch. Until then, dev/test onboarding SHOULD enroll the optional EOA owner
-alongside the passkey where practical, and copy must not promise recovery.
+The interim single-passkey stance is retired — recovery shipped.
+
+**The model.** An account's authority is its **signer set**: one or more passkeys
+(P256) and/or one EOA owner. Any enrolled signer can add or remove others
+(`addKey` / `removeKey` / `transferOwnership` on the Hybrid). A **backup signer
+is the entire recovery story**: lose the device holding your primary passkey,
+and the backup removes the lost one and enrols a replacement. The user-facing
+walkthrough is [account-recovery.md](../product/account-recovery.md); the
+independent-of-Haven path is [exit/README.md](../exit/README.md).
+
+**Recovery invariants (non-custody preserved through recovery):**
+
+- **Haven can never change an account's signer set.** Every `addKey`/`removeKey`/
+  `transferOwnership` is prepared by Haven and **signed by an existing signer**
+  (WebAuthn or EOA). Haven holds no key that can add, remove, or use a signer —
+  invariant 13, CI-enforced.
+- **The account enforces ≥1 signer on-chain** (`CannotRemoveLastSigner`, proven
+  in the #884 spike). Haven mirrors a **≥2** floor in the API as a clean refusal
+  so a user is nudged to add a backup before they can strip redundancy — the UI
+  never lets you approach a no-recovery state silently.
+- **Storage tracks the chain, not the reverse.** The stored signer set (which the
+  deploy/sign paths rebuild the account config from) is synced only *after* the
+  on-chain op confirms, and the submit step **pins the sync to the signed
+  calldata** — the DB can never record a signer the owner didn't actually sign.
+- **UUPS upgrade authority stays with the signers** (invariant 11); recovery
+  changes signers, never the implementation.
+
+**The honest limit, stated plainly:** a **single-signer account has no recovery**
+— if its only signer is lost, the account is unreachable by the user *and* by
+Haven. This is inherent to self-custody, not a Haven policy. Mitigation is
+structural: onboarding nudges a backup, the account blocks dropping below the
+safe floor, and copy never promises recovery Haven cannot deliver.
+
+## 7. Mainnet-gate criterion (recorded)
+
+Before any account holds **mainnet** funds:
+
+> **No mainnet delegation-rail account may operate with fewer than two enrolled
+> signers**, unless the owner has explicitly acknowledged the single-signer
+> risk (a recorded, signed-off "I understand losing my only device loses this
+> account"). The enrollment nudge is not sufficient on its own for mainnet —
+> the ≥2 floor (or the explicit waiver) is a launch gate, tracked on the
+> mainnet decision issue (#908).

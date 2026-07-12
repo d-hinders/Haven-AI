@@ -19,7 +19,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-07-10"
+last-verified: "2026-07-13"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -419,7 +419,7 @@ Layer 2b it is **never a deploy gate**; it is **read-oriented** exploration (no
 money movement beyond what the existing testnet flows already cover) that files a
 findings report under [`bug-reports/`](../bug-reports/).
 
-- **When to run:** before a promotion, or after a risky change to the dashboard UI.
+- **When to run:** before a promotion, or after a risky change to the dashboard UI — **and on a recurring weekly cadence** as the design system's UX-discovery heartbeat, where each material finding becomes a deduped `/new-task` backlog issue for `/ship-next`. That cadence and its finding→backlog→ship-next loop are specified in [`qa-explore-ui-cadence.md`](qa-explore-ui-cadence.md) (#903).
 - **Target:** a **non-production** Vercel deployment (`NEXT_PUBLIC_HAVEN_ENV=dev`)
   re-pointed at the shared dev backend with `?apiBaseUrl=` — same convention as the
   [live UI smoke](#live-deployed-ui-smoke). A production build ignores the override

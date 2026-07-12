@@ -17,3 +17,6 @@ coupling-comment.md
 # Agent worktrees — transient per-agent checkouts, never committed
 # (tracked .claude config like agents/ and skills/ is intentionally NOT ignored)
 .claude/worktrees/
+
+# Local session reports (never commit)
+haven-*.pdf

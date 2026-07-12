@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-07-11"
+last-verified: "2026-07-12"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -13,7 +13,11 @@ MetaMask Delegation Framework) changes Haven's security model in three ways
 the Safe/session stack did not have; this doc names them, maps every existing
 non-custody invariant to its delegation-rail equivalent, fixes the custody
 semantics of the delegation object itself, and specifies the independent exit
-story with an acceptance test. The implementation issues are #831 (CI
+story with an acceptance test. (Since #834 the Smart Sessions **session rail
+is retired** — `session_key` accounts get HTTP 410 from the payment paths —
+so the "Safe/session stack" comparisons below are the mapping's historical
+baseline; the only other live rail is the legacy AllowanceModule path,
+import-only for existing Safes.) The implementation issues are #831 (CI
 invariants) and #832 (exit tool); this doc is their contract.
 
 Contracts in scope (Base Sepolia; mainnet addresses pinned at #825): 
@@ -45,7 +49,7 @@ Every invariant in `non-custody.invariants.test.ts` maps as follows. "CI"
 means a named check in the delegation-rail invariant suite; nothing is
 dropped.
 
-| # | Session/legacy invariant | Delegation-rail equivalent | Enforcement |
+| # | Session/legacy invariant (baseline; session rail retired, #834) | Delegation-rail equivalent | Enforcement |
 |---|---|---|---|
 | 1 | No private-key/seed columns in the schema | Unchanged, plus: **no delegation-signing key columns** | CI (schema scan) |
 | 2 | Agent secrets stored hashed | Unchanged | CI (existing) |
@@ -85,8 +89,8 @@ surfaces.
 | Haven fully compromised | Constructs malicious payloads but **cannot sign** grants, redemptions, or upgrades (invariants 3/5/7/11/12); worst case = denial of service | The perimeter this doc exists to prove |
 
 Blast radius on full agent compromise is therefore **identical in kind** to
-the session rail (one period's budget per recipient) — with revocation one
-`disableDelegation` away.
+the retired session rail's (one period's budget per recipient) — with
+revocation one `disableDelegation` away.
 
 ## 4. Exit story — design + acceptance test (#832's contract)
 

@@ -21,7 +21,6 @@ import { tryRecordMachinePaymentEvidenceBaseById } from './machine-payment-evide
 import { decideCoverage } from './payment-coverage.js'
 import { isAddress } from './address.js'
 import {
-  getSessionRailFor,
   loadExecutionRailState,
   redactVendorSecrets,
   resolveExecutionRail,
@@ -275,26 +274,8 @@ async function currentPaymentIntentStatus(id: string, agent: AgentContext): Prom
 }
 
 function signData(intent: PaymentIntentRow, hash = intent.sign_hash, nonce = intent.allowance_nonce) {
-  // Session-rail intents sign a UserOperation hash with EIP-191, not the
-  // AllowanceModule transfer hash with raw ECDSA (#745). Legacy intents keep
-  // the exact response shape they had before the session rail existed.
-  if (intent.execution_rail === 'session_key') {
-    return {
-      hash,
-      signature_scheme: 'eip191_userop' as const,
-      components: {
-        safe: intent.safe_address,
-        token: intent.token_address,
-        to: intent.to_address,
-        amount: intent.amount_raw,
-      },
-      instructions:
-        'Sign the hash with your session (delegate) private key using EIP-191 personal-sign — ' +
-        'signUserOpHashForSession in @haven_ai/sdk, NOT raw ECDSA. ' +
-        `Then POST /payments/${intent.id}/sign with { signature } — ` +
-        "Haven relays it for execution within your session's on-chain limits.",
-    }
-  }
+  // Legacy AllowanceModule shape (import-only accounts, #834 owner decision).
+  // Session-rail intents are retired and refused before sign_data is built.
   return {
     hash,
     components: {
@@ -429,17 +410,15 @@ async function returnExistingIntent(
   }
 
   if (existing.status === 'pending_signature') {
-    // Session-rail intents sign a UserOperation hash that does not depend on
-    // the AllowanceModule nonce — return the stored sign_data as-is. If the
-    // prepared UserOp goes stale (gas), the intent expires and the client
-    // re-authorizes; there is no nonce-refresh equivalent here.
+    // Session-rail intents are retired (#834) — a still-pending one can no
+    // longer execute; the client must re-authorize on the delegation rail.
     if (existing.execution_rail === 'session_key') {
       return {
-        statusCode: 200,
+        statusCode: 410,
         body: {
-          ...machinePaymentResponse(existing, agent),
-          success: undefined,
-          sign_data: signData(existing),
+          error:
+            'The session rail is retired — this intent can no longer execute. ' +
+            'Re-onboard the account on the delegation rail and authorize again.',
         },
       }
     }
@@ -815,79 +794,15 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     chainId: agent.chain_id,
   })
   if (railDecision.rail === 'session_key') {
-    if (signature) {
-      return {
-        statusCode: 400,
-        body: {
-          error:
-            'Session-rail payments are two-step: authorize first, then sign the returned ' +
-            'UserOperation hash (EIP-191) and POST /payments/{id}/sign.',
-        },
-      }
-    }
-
-    let prepared
-    try {
-      const sessionRail = await getSessionRailFor(agent.safe_address, agent.chain_id)
-      prepared = await sessionRail.prepareSessionTransfer(
-        railDecision.permissionId,
-        tokenAddress as `0x${string}`,
-        payTo as `0x${string}`,
-        amountRaw,
-      )
-    } catch (err) {
-      // The session's on-chain policy (recipient / per-tx cap / cumulative
-      // limit / expiry) is enforced during gas estimation — a violating
-      // payment fails HERE, before any state is written or anything reaches
-      // the chain. There is no off-chain approval queue on this rail: the
-      // on-chain session config IS the policy (ADR #719).
-      return {
-        statusCode: 502,
-        body: {
-          error: 'Session-rail authorization failed (on-chain policy or bundler)',
-          // Bundler errors echo the request URL, which embeds the API key.
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-        },
-      }
-    }
-
-    const sessionIntent = await createPaymentIntent({
-      agent,
-      rail,
-      payTo,
-      tokenSymbol: tokenConfig.symbol,
-      tokenAddress,
-      amountRaw,
-      amountHuman,
-      allowanceNonce: 0, // AllowanceModule-only concept; unused on this rail
-      signHash: prepared.userOpHash,
-      resourceUrl,
-      category: category ?? null,
-      merchantAddress: merchantPayTo,
-      challengeId: challengeId ?? null,
-      idempotencyKey: idempotencyKey ?? null,
-      metadata: metadata ?? null,
-      executionRail: 'session_key',
-      sessionPermissionId: railDecision.permissionId,
-      sessionUserOp: serializeUserOp(prepared.userOperation),
-      conflictTarget: 'machine_idempotency_key',
-    })
-    if (!sessionIntent) {
-      const existing = await findExistingIntent(agent, rail, idempotencyKey, challengeId)
-      if (existing) return returnExistingIntent(existing, agent, rail)
-      return {
-        statusCode: 409,
-        body: { error: 'Machine payment already exists but could not be loaded' },
-      }
-    }
-
+    // ── Session rail RETIRED (#834, epic #821) ──────────────────────────
+    // The typed seam stays for reversibility; the machinery behind it is
+    // deleted. Fail-closed: refuse loudly, write nothing.
     return {
-      statusCode: 201,
+      statusCode: 410,
       body: {
-        ...machinePaymentResponse(sessionIntent, agent),
-        success: undefined,
-        expires_at: sessionIntent.expires_at,
-        sign_data: signData(sessionIntent),
+        error:
+          'The session rail is retired — re-onboard this account on the delegation rail ' +
+          '(POST /accounts/hybrid, then grant a budget) to keep paying.',
       },
     }
   }

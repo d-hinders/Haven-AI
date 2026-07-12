@@ -8,7 +8,6 @@ import rateLimit from '@fastify/rate-limit'
 import { rateLimitKeyFor } from './middleware/rate-limit.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './lib/delegate-balance-monitor.js'
-import { runScheduleRenewalMonitor } from './lib/schedule-renewal-monitor.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './lib/relayer-balance-monitor.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './lib/leader-lock.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './lib/chains.js'
@@ -20,7 +19,6 @@ import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
-import agentScheduleRoutes from './routes/agent-schedule.js'
 import agentRecipientRoutes from './routes/agent-recipients.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
@@ -169,7 +167,6 @@ await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
-await app.register(agentScheduleRoutes, { prefix: '/agents' })
 await app.register(agentRecipientRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
@@ -254,21 +251,6 @@ const start = async () => {
     }
     void runDelegateMonitor()
     setInterval(runDelegateMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
-
-    // Schedule-renewal notifications (#803): hourly, edge-triggered — pushes
-    // the renewal prompt (dashboard banner is pull-based) via webhook when a
-    // budget window is down to its last periods. At most two per window.
-    const runRenewalMonitor = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.scheduleRenewalMonitor, async () => {
-          await runScheduleRenewalMonitor(app.log)
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Schedule renewal monitor scan failed')
-      }
-    }
-    void runRenewalMonitor()
-    setInterval(runRenewalMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
 
     // Relayer balance monitor: hourly read-only scan of the relayer EOA's
     // native balance per served chain — structured warning + edge-triggered

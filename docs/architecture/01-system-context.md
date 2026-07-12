@@ -25,7 +25,7 @@ covers:
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
 
 # Haven — System Context
@@ -38,12 +38,14 @@ with the user. Haven operates the web app, backend, hosted MCP, and gas relayers
 but does not hold user or agent spending keys. The agent's delegate key stays in
 its local signer or fully local MCP runtime.
 
-> **Two rails.** The diagram and notes below describe the **session/AllowanceModule
-> rail** (existing accounts). New accounts run on the **delegation rail** (epic
-> #821, `account_type='delegator_hybrid'`), where the Haven wallet is a MetaMask
-> Hybrid DeleGator smart account and the policy is a signed delegation with caveat
-> enforcers instead of an AllowanceModule allowance. See the delegation-rail note
-> below and
+> **Two rails.** The diagram and notes below describe the **legacy AllowanceModule
+> rail** (import-only, existing accounts). New accounts run on the **delegation
+> rail** (epic #821, `account_type='delegator_hybrid'`), where the Haven wallet is
+> a MetaMask Hybrid DeleGator smart account and the policy is a signed delegation
+> with caveat enforcers instead of an AllowanceModule allowance. The Smart Sessions
+> **session rail is retired** (#834): accounts still marked
+> `execution_rail='session_key'` get HTTP 410 from the payment paths. See the
+> delegation-rail note below and
 > [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 ```mermaid

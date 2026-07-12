@@ -5,15 +5,18 @@ covers:
   - packages/backend/src/lib/delegation-rail.ts
   - packages/backend/src/lib/delegation-contracts.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-07-10"
+  - packages/backend/scripts/check-bundler.ts
+last-verified: "2026-07-12"
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
 
 Operational contract for the delegation rail's external dependencies: the
 bundler/paymaster (Pimlico) and MetaMask's deployed Delegation Framework
-contracts + SDK. Companion to the session-rail runbook while both rails
-exist; the security model lives in
+contracts + SDK. Since the session rail's retirement (#834) this is the
+**only sponsored rail** and the only live bundler/paymaster runbook (the
+[session-rail runbook](session-rail-vendor-ops.md) is archived); the security
+model lives in
 [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 ## 1. Who pays gas, and what that buys
@@ -27,23 +30,27 @@ it has no value-transfer surface.
 **Measured cost** (Base Sepolia, #820 + the production-lib smoke 2026-07-10):
 direct-EOA redemption 209–307k gas; sponsored delegate-account path
 **584k cold** (includes the delegate account's one-time deployment) and
-**303k warm** (steady state) at 5–8 s bundler latency. The premium over a session-rail UserOp is the redemption
+**303k warm** (steady state) at 5–8 s bundler latency. The premium over a UserOp
+on the retired session rail was the redemption
 indirection; the offset is that budgets refill natively (no schedule
 machinery to execute).
 
 ## 2. Credentials & policies
 
 - `DELEGATION_RAIL_BUNDLER_URL` — SECRET (embeds the API key). Falls back to
-  `SESSION_RAIL_BUNDLER_URL`; the dedicated var exists so ops can split
-  vendors per rail without a deploy. Read in exactly ONE place
+  `SESSION_RAIL_BUNDLER_URL`, which survives the session rail's retirement
+  (#834) ONLY as this fallback. **Operator step:** set
+  `DELEGATION_RAIL_BUNDLER_URL` in every deployed env, then drop the
+  `SESSION_RAIL_*` variables (`SESSION_RAIL_SPONSORSHIP_POLICY_ID` and
+  `SCHEDULE_RENEWAL_WEBHOOK_URL` are already dead). Read in exactly ONE place
   (`delegationRailBundlerUrl`); every error surface passes
   `redactVendorSecrets` (bundler errors echo the URL — the #764 incident).
 - `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` — Pimlico policies bind **per
   request**, not per API key (#738): an unset id means unrestricted
   sponsorship against the key's account. Set it in every deployed env.
-- Key rotation: same procedure as the session rail (new key in the vendor
-  dashboard → update env → redeploy → delete old key). One credential, two
-  env names — rotate BOTH vars if the dedicated one is set.
+- Key rotation: new key in the vendor dashboard → update env → redeploy →
+  delete old key (the #738 procedure). One credential, two
+  env names — rotate BOTH vars if the fallback is still set.
 
 ## 3. Failure modes & the degradation contract
 
@@ -55,8 +62,8 @@ error. There is no fallback signer, no retry-with-Haven-funds path, and none
 may be added (red line — see the security model).
 
 Probes:
-- `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle (shared
-  with the session rail; same vendor account).
+- `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle (inherited
+  from the retired session rail's runbook; same vendor account).
 - `ops:check-delegation` — every PINNED contract (manager, entry point,
   factory, Hybrid impl, 8 enforcers) is live bytecode on every enabled
   chain. Run on deploy and daily; exit 1 = stop before any rail use.

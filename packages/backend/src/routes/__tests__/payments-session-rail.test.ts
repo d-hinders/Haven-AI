@@ -190,25 +190,11 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
   })
 
-  it('session intents verify EIP-191 and submit the stored UserOperation', async () => {
-    const submitSessionTransfer = vi.fn().mockResolvedValue({
-      txHash: TX_HASH,
-      userOpHash: USER_OP_HASH,
-      actualGasUsed: 100_000n,
-      actualGasCost: 1_000_000n,
-    })
-    sessionRailMocks.getSessionRailFor.mockResolvedValueOnce({ submitSessionTransfer })
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '0.01', eur: '0.01' })
-
-    // A REAL EIP-191 signature — what signUserOpHashForSession (#741) produces.
+  it('POST /:id/sign REFUSES a session intent — the rail is retired (#834)', async () => {
     const signature = await sessionWallet.signMessage(getBytes(USER_OP_HASH))
-
     mockQuery
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [sessionIntentRow()] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [] })
 
     const response = await app.inject({
       method: 'POST',
@@ -217,103 +203,21 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       payload: { signature },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({ status: 'confirmed', tx_hash: TX_HASH })
-    // The AllowanceModule path is never touched:
-    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
-    expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
-    // The EXACT prepared UserOperation is replayed, bigints revived, with the
-    // permissionId pinned at authorize time:
-    expect(sessionRailMocks.getSessionRailFor).toHaveBeenCalledWith(
-      AGENT.safe_address,
-      AGENT.chain_id,
-    )
-    expect(submitSessionTransfer).toHaveBeenCalledWith(
-      { userOperation: PREPARED_USER_OP, userOpHash: USER_OP_HASH },
-      PERMISSION_ID,
-      signature,
-    )
-  })
-
-  it('rejects a raw-ECDSA signature on a session intent (the #731 footgun, fail-closed)', async () => {
-    // The WRONG scheme: raw ECDSA over the hash — valid for the AllowanceModule
-    // rail, but recovers a different address under EIP-191.
-    const rawSignature = sessionWallet.signingKey.sign(USER_OP_HASH).serialized
-
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [sessionIntentRow()] })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/payments/${PAYMENT_ID}/sign`,
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { signature: rawSignature },
-    })
-
-    expect(response.statusCode).toBe(403)
-    expect(response.json()).toMatchObject({ error: 'Signature does not match delegate address' })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/session rail is retired/)
+    // Nothing verified, claimed, or executed:
     expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls.some((c) => /SET signature/.test(String(c[0])))).toBe(false)
   })
 
-  it('POST /payments prepares a session UserOp for a migrated account', async () => {
-    const prepareSessionTransfer = vi.fn().mockResolvedValue({
-      userOperation: PREPARED_USER_OP,
-      userOpHash: USER_OP_HASH,
-    })
-    sessionRailMocks.getSessionRailFor.mockResolvedValueOnce({ prepareSessionTransfer })
-
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
-      }) // rail resolved before the token-config guard (#835)
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // token-config guard
-      .mockResolvedValueOnce({ rows: [] }) // schedule-window lookup (#769) — no schedule
-      .mockResolvedValueOnce({ rows: [sessionIntentRow()] }) // INSERT RETURNING *
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/payments',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
-    })
-
-    expect(response.statusCode).toBe(201)
-    expect(response.json()).toMatchObject({
-      payment_id: PAYMENT_ID,
-      status: 'pending_signature',
-      sign_data: { hash: USER_OP_HASH, signature_scheme: 'eip191_userop' },
-    })
-    // The AllowanceModule flow never runs on this rail:
-    expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
-    expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
-    // The intent INSERT pins the rail, the permissionId, and the prepared UserOp:
-    const insert = mockQuery.mock.calls.find((c) =>
-      /INSERT INTO payment_intents/.test(c[0] as string),
-    )
-    expect(insert).toBeDefined()
-    expect(insert![0]).toContain('execution_rail')
-    expect(insert![1]).toContain('session_key')
-    expect(insert![1]).toContain(PERMISSION_ID)
-  })
-
-  it('never leaks the bundler API key in session error details (found live, #738)', async () => {
-    const prepareSessionTransfer = vi.fn().mockRejectedValue(
-      new Error(
-        'Invalid parameters.\nURL: https://api.pimlico.io/v2/84532/rpc?apikey=pim_SUPERSECRET\nDetails: sponsorshipPolicy not active',
-      ),
-    )
-    sessionRailMocks.getSessionRailFor.mockResolvedValueOnce({ prepareSessionTransfer })
-
+  it('POST /payments REFUSES a session-rail account — the rail is retired (#834)', async () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({
         rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
       })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
-      .mockResolvedValueOnce({ rows: [] }) // schedule-window lookup (#769) — no schedule
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // token-config guard
 
     const response = await app.inject({
       method: 'POST',
@@ -322,10 +226,11 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
     })
 
-    expect(response.statusCode).toBe(502)
-    expect(response.body).not.toContain('pim_SUPERSECRET')
-    expect(response.body).toContain('apikey=REDACTED')
-    expect(response.body).toContain('sponsorshipPolicy not active')
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/delegation rail/)
+    // Fail-closed: no session machinery invoked, nothing written:
+    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
   })
 
   it('POST /payments on the delegation rail: prepares, pins the delegation, ships typed data — WITHOUT an allowance row (#829, #835)', async () => {
@@ -495,115 +400,12 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(allowanceMocks.generateTransferHash).toHaveBeenCalledOnce()
   })
 
-  it('schedule rollover (#769): prepares on the CURRENT period session and flips the record after success', async () => {
-    // A real schedule built with the production builders — the route recomputes
-    // it from the mocked DB rows, so the permissionIds must match bit-for-bit.
-    const { buildSessionSchedule } = await import('../../lib/session-schedule.js')
-    const RESET_MIN = 60
-    const FROM_PERIOD = 100
-    const schedule = buildSessionSchedule(
-      AGENT.id,
-      {
-        sessionKeyAddress: AGENT.delegate_address as `0x${string}`,
-        usdcAddress: USDC as `0x${string}`,
-        allowedRecipient: RECIPIENT as `0x${string}`,
-        budgetAtomic: 5_000_000n,
-        chainId: BigInt(AGENT.chain_id),
-      },
-      RESET_MIN,
-      FROM_PERIOD,
-      3,
-    )
-    const recordedId = schedule.entries[0].permissionId // period 100 on record
-    const expectedId = schedule.entries[1].permissionId // now is period 101
-    vi.useFakeTimers({ toFake: ['Date'] }) // only Date — Fastify needs real timers
-    vi.setSystemTime(new Date((FROM_PERIOD + 1) * RESET_MIN * 60 * 1000 + 90_000))
-
-    const prepareSessionTransfer = vi.fn().mockResolvedValue({
-      userOperation: PREPARED_USER_OP,
-      userOpHash: USER_OP_HASH,
-    })
-    sessionRailMocks.getSessionRailFor.mockResolvedValueOnce({ prepareSessionTransfer })
-
-    // Pattern-matched (#775): the schedule wiring adds queries mid-flow.
-    mockQuery.mockImplementation((sql: unknown) => {
-      const s = String(sql)
-      if (/api_key_hash/.test(s)) return Promise.resolve(authRow())
-      if (/session_schedule_from_period/.test(s)) {
-        return Promise.resolve({
-          rows: [{
-            session_schedule_from_period: FROM_PERIOD,
-            session_schedule_period_count: 3,
-            session_permission_id: recordedId,
-            delegate_address: AGENT.delegate_address,
-            reset_period_min: RESET_MIN,
-          }],
-        })
-      }
-      if (/FROM agent_recipients/.test(s)) {
-        return Promise.resolve({
-          rows: [{
-            recipient_address: RECIPIENT.toLowerCase(),
-            token_address: USDC,
-            label: null,
-            budget_amount: '5000000',
-            allowance_amount: '5000000',
-          }],
-        })
-      }
-      if (/us\.execution_rail/.test(s)) {
-        return Promise.resolve({
-          rows: [{ execution_rail: 'session_key', session_permission_id: recordedId }],
-        })
-      }
-      if (/INSERT INTO payment_intents/.test(s)) {
-        return Promise.resolve({ rows: [sessionIntentRow({ session_permission_id: expectedId })] })
-      }
-      if (/UPDATE agents/.test(s)) return Promise.resolve({ rows: [{ id: AGENT.id }] })
-      if (/FROM agent_allowances/.test(s)) {
-        return Promise.resolve({ rows: [{ allowance_amount: '5000000' }] })
-      }
-      return Promise.resolve(authRow())
-    })
-
-    try {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/payments',
-        headers: { authorization: 'Bearer sk_agent_test' },
-        payload: { token: 'USDC', amount: '0.01', to: RECIPIENT },
-      })
-
-      expect(response.statusCode).toBe(201)
-      // Prepared against the CURRENT period's scheduled session — not the record:
-      expect(prepareSessionTransfer).toHaveBeenCalledWith(
-        expectedId,
-        expect.anything(),
-        RECIPIENT.toLowerCase(),
-        expect.anything(),
-      )
-      // The guarded flip ran AFTER the successful prepare, old id as the guard:
-      const flip = mockQuery.mock.calls.find((c) => /UPDATE agents/.test(String(c[0])))
-      expect(flip).toBeDefined()
-      expect(flip![1]).toEqual([expectedId, AGENT.id, recordedId])
-      // The intent pins the scheduled id:
-      const insert = mockQuery.mock.calls.find((c) =>
-        /INSERT INTO payment_intents/.test(String(c[0])),
-      )
-      expect(insert![1]).toContain(expectedId)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('fails closed when a session intent is missing its stored UserOperation', async () => {
+  it('a session intent with missing stored state is refused the same way (410, #834)', async () => {
     const signature = await sessionWallet.signMessage(getBytes(USER_OP_HASH))
 
     mockQuery
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [sessionIntentRow({ session_user_op: null })] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] }) // failed-status update
 
     const response = await app.inject({
       method: 'POST',
@@ -612,7 +414,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       payload: { signature },
     })
 
-    expect(response.statusCode).toBe(502)
+    expect(response.statusCode).toBe(410)
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 })

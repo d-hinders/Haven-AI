@@ -3,8 +3,13 @@ owner: "@d-hinders"
 status: research
 covers:
   - packages/qa-agent/src/pilot/**
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
+
+> **Superseded (#834, 2026-07-12):** the session rail this report piloted is
+> retired; the delegation rail (epic #821, see
+> [delegation-rail-pilot-report.md](delegation-rail-pilot-report.md)) replaced
+> it. Kept as historical record.
 
 # ERC-4337 pilot rig — bundler, paymaster & SDK decisions (#720)
 

@@ -21,7 +21,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-07-11"
+last-verified: "2026-07-12"
 ---
 
 # Haven — CLAUDE.md
@@ -38,7 +38,7 @@ These are constraints, not suggestions. Every implementation decision must respe
 
 1. **Non-Custodial** — User funds live in Safe smart accounts. Haven NEVER holds unrestricted signing authority. If Haven is fully compromised, an attacker still cannot move user funds unilaterally.
 
-2. **Policy-First Execution** — Every financial action is evaluated against on-chain policy before execution, never an off-chain rules DSL. Haven runs **two policy rails**, both enforced on-chain: the **delegation rail** (the base for new accounts, epic #821) where the policy is a signed MetaMask delegation with audited caveat enforcers (period budget, recipient pin, expiry) enforced by the DelegationManager during redemption; and the **session/AllowanceModule rail** (existing accounts) where the policy *is* the Safe AllowanceModule allowance — per-token amount and reset period, with over-limit spend auto-queued for human approval. Nothing executes outside the account's on-chain envelope on either rail.
+2. **Policy-First Execution** — Every financial action is evaluated against on-chain policy before execution, never an off-chain rules DSL. Haven runs **two policy rails**, both enforced on-chain: the **delegation rail** (the base for new accounts, epic #821) where the policy is a signed MetaMask delegation with audited caveat enforcers (period budget, recipient pin, expiry) enforced by the DelegationManager during redemption; and the **legacy AllowanceModule rail** (import-only, existing Safes) where the policy *is* the Safe AllowanceModule allowance — per-token amount and reset period, with over-limit spend auto-queued for human approval. (The Smart Sessions **session rail is retired**, #834 — see Execution Primitives.) Nothing executes outside the account's on-chain envelope on either rail.
 
 3. **Agent-First Interaction** — Agents talk to Haven through high-level intents (e.g., "pay 50 USDC to 0xabc"), NOT raw blockchain transactions. Haven handles tx construction, encoding, gas, nonces, and execution routing.
 
@@ -76,10 +76,12 @@ Protocols → x402, Stripe MPP (agent payment standards)
 - Receipt management
 
 ### 4. Execution Primitives
-- **Safe AllowanceModule** — the on-chain policy primitive today. An agent has a `delegate_address`; the user grants per-token allowances to that delegate via the AllowanceModule, and the Haven backend executes spend-from-allowance transfers on the agent's behalf
+- **Safe AllowanceModule (legacy, import-only)** — the on-chain policy primitive for existing imported Safes (dev-pilot); no new accounts get it. An agent has a `delegate_address`; the user grants per-token allowances to that delegate via the AllowanceModule, and the Haven backend executes spend-from-allowance transfers on the agent's behalf
 - Guards for transaction validation (future)
-- Session keys (future — temporary delegated keys)
-- **Delegation rail (epic #821):** new accounts can be provisioned as MetaMask Hybrid DeleGator smart accounts (`account_type='delegator_hybrid'`, `execution_rail='delegation'`) with policy as signed delegations + audited caveat enforcers. Payments redeem the agent's budget delegation via sponsored UserOps (#829): budget (with native period refill), recipient and expiry are enforced ON-CHAIN during gas estimation — no coverage arithmetic, no approval queue, no schedule machinery on this rail. Security model: `docs/security/delegation-rail-security-model.md`
+- **Session rail (retired, #834):** the Smart Sessions / ERC-7579 session-key rail is retired outright — its backend modules are deleted, and accounts still marked `execution_rail='session_key'` get HTTP 410 (fail-closed, nothing written) from `POST /payments` and the x402 machine-payment path. New accounts onboard on the delegation rail below. The typed rail seam (`lib/execution-rail.ts`) stays for reversibility
+- **Delegation rail (epic #821):** new accounts can be provisioned as MetaMask Hybrid DeleGator smart accounts (`account_type='delegator_hybrid'`, `execution_rail='delegation'`) with policy as signed delegations + audited caveat enforcers. Payments redeem the agent's budget delegation via sponsored UserOps (#829): budget (with native period refill), recipient and expiry are enforced ON-CHAIN during gas estimation — no coverage arithmetic, no approval queue, no schedule machinery on this rail. Grant = 1 owner signature, 0 owner tx (activation relayer-deploys the counterfactual delegator, #860). Security model: `docs/security/delegation-rail-security-model.md`
+
+> **Owner decision (#834, recorded verbatim):** "Legacy AllowanceModule stays as an IMPORT-ONLY path for existing Safes (dev-pilot); no new accounts get it. Sweep machinery and the delegate-balance monitor stay while any funding-leg rail lives. Session rail retired outright — zero external customers, retirement not migration. Decided by the owner in-session 2026-07-12."
 
 ### 5. Agents (External Actors)
 - Defined by: identity + credential + policy constraints
@@ -90,7 +92,7 @@ Protocols → x402, Stripe MPP (agent payment standards)
 
 An agent is a **permissioned actor** = identity + delegate address + on-chain policy. Authority is enforced on-chain, not by an off-chain rules DSL. Which primitive holds the policy depends on the account's rail:
 - **Delegation rail (`account_type='delegator_hybrid'`, the base for new accounts):** authority is a signed budget delegation (period budget + optional recipient pin + expiry) redeemed through the DelegationManager. Budgets refill natively at the period boundary — no Haven cron, no approval queue, no schedule machinery. Managed via `/agents/:id/delegations/*` (#828) and the dashboard budget card (#833).
-- **Session/AllowanceModule rail (existing accounts):** authority is the set of per-token on-chain allowances described below.
+- **Legacy AllowanceModule rail (import-only, existing accounts):** authority is the set of per-token on-chain allowances described below. No new accounts get this rail.
 
 ```json
 {
@@ -109,7 +111,7 @@ An agent is a **permissioned actor** = identity + delegate address + on-chain po
 
 - `allowance_amount` and `reset_period_min` map directly to the on-chain AllowanceModule.
 - Payments that fit within the remaining on-chain allowance auto-execute; payments that exceed it are queued for the user to approve manually. There is no separate off-chain `requires_approval_above` knob and no monthly/per-tx limit on the agent itself.
-- **Recipient allowlist (#784, session rail only):** an agent MAY have stored recipients in `agent_recipients` (one row per agent+token+recipient, optional label, optional per-recipient budget — NULL inherits the token allowance). Default-empty: no rows = no stored recipient policy, today's behavior unchanged. The session rail builds its on-chain sessions from these (one recipient per session; budgets never aggregate across sessions — the on-chain truth is the per-row figure). The legacy AllowanceModule path does not read this table.
+- **Recipient allowlist (#784) — orphaned by the session-rail retirement (#834):** `agent_recipients` rows (one per agent+token+recipient, optional label, optional per-recipient budget) were the input the retired session rail built its on-chain sessions from. No rail reads this table anymore — it is metadata only, pending cleanup. On the delegation rail, recipient pinning lives in the delegation's caveat enforcers instead.
 - Category-based / protocol-based / per-hour-rate policies (x402, MPP categories, etc.) are **future work** (Phase 2), not implemented today.
 
 Credentials are portable:
@@ -124,7 +126,7 @@ Credentials are portable:
 
 ## Payment Flow
 
-The flow branches on the account's `execution_rail` (resolved from agent auth). Both keep the same agent-facing intent.
+The flow branches on the account's `execution_rail` (resolved from agent auth). Both live rails keep the same agent-facing intent. Accounts still marked `execution_rail='session_key'` get **HTTP 410** ("the session rail is retired — re-onboard on the delegation rail") from `POST /payments` and the x402 machine-payment path — fail-closed, nothing written (#834).
 
 **Delegation rail (`execution_rail='delegation'`, the base for new accounts):**
 ```
@@ -139,7 +141,7 @@ The flow branches on the account's `execution_rail` (resolved from agent auth). 
 5. Response → { status: "executed", tx }   (or a revert if it breached the on-chain policy)
 ```
 
-**Session/AllowanceModule rail (existing accounts):**
+**Legacy AllowanceModule rail (import-only, existing accounts):**
 ```
 1. Agent creates intent → { action: "payment", asset: "USDC", amount: "100", recipient: "0xabc" }
 2. Haven authenticates the agent and looks up its on-chain allowance for the requested token
@@ -175,7 +177,7 @@ For standard merchant x402, the AllowanceModule transfer is `Safe → delegate E
 ## Tech Stack Guidance
 
 - **Chain:** **Base (chain ID 8453) is the primary / default network**; Gnosis Chain (chain ID 100) is also supported (see the registry in `lib/chains.ts`). Multi-chain later. Note: some DB column defaults and route fallbacks still default `chain_id` to `100` (Gnosis) — see migrations and `?? 100` fallbacks; align these to Base if/when Base should be the runtime default for new agents, not just the documented one
-- **Smart Accounts:** Safe + AllowanceModule, accessed via direct contract calls with `ethers.js`. Adopting `@safe-global/protocol-kit` is a possible future cleanup, not a current convention
+- **Smart Accounts:** MetaMask Hybrid DeleGator (delegation rail, new accounts) via `@metamask/smart-accounts-kit` + `permissionless`/`viem`; Safe + AllowanceModule (legacy, import-only) accessed via direct contract calls with `ethers.js`. Adopting `@safe-global/protocol-kit` is a possible future cleanup, not a current convention. Smart Sessions / ERC-7579 is retired (#834) — do not add code against it
 - **Language:** TypeScript throughout
 - **Backend Framework:** Fastify (Node.js)
 - **Database:** PostgreSQL (agents, allowances, payments, audit trail)
@@ -241,7 +243,7 @@ Multiple independent layers, all need to be compromised for funds to be at risk:
 - Safe docs: https://docs.safe.global
 - Safe modules: https://docs.safe.global/advanced/smart-account-modules
 - Safe guards: https://docs.safe.global/advanced/smart-account-guards
-- Session keys: https://docs.rhinestone.dev/home/concepts/session-keys
+- Session keys (Rhinestone Smart Sessions — retired rail, #834; historical reference only): https://docs.rhinestone.dev/home/concepts/session-keys
 - x402 protocol: HTTP 402-based internet-native payments by Coinbase
 - Stripe MPP: Machine Payment Protocol for agent-to-merchant payments
 

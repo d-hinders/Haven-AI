@@ -15,7 +15,6 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '../lib/address.js'
-import { agentHasEnabledSchedule, SCHEDULE_APPLY_WARNING } from '../lib/session-schedule-wiring.js'
 
 const MAX_UINT96 = (1n << 96n) - 1n
 const MAX_LABEL_LENGTH = 255
@@ -116,11 +115,8 @@ export default async function agentRecipientRoutes(app: FastifyInstance): Promis
       id: result.rows[0].id,
       // The row alone moves no money — the owner's schedule signature applies it.
       applied_on_chain: false,
-      // #802: with an enabled schedule, an unapplied edit means the recompute
-      // diverges from the signed sessions — warn instead of stalling silently.
-      schedule_warning: (await agentHasEnabledSchedule(request.params.id))
-        ? SCHEDULE_APPLY_WARNING
-        : null,
+      // Session schedules are retired (#834); slot kept for shape compatibility.
+      schedule_warning: null,
     })
   })
 
@@ -161,9 +157,7 @@ export default async function agentRecipientRoutes(app: FastifyInstance): Promis
     return {
       removed: result.rows.length,
       applied_on_chain: false,
-      schedule_warning: (await agentHasEnabledSchedule(request.params.id))
-        ? SCHEDULE_APPLY_WARNING
-        : null,
+      schedule_warning: null,
     }
   })
 }

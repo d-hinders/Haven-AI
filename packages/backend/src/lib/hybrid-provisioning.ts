@@ -21,8 +21,8 @@ import { http, createPublicClient, zeroAddress, type Address, type LocalAccount 
 import { toAccount } from 'viem/accounts'
 import { Implementation, toMetaMaskSmartAccount } from '@metamask/smart-accounts-kit'
 import { getChain } from './chains.js'
-import { chainForId } from './session-rail.js'
-import { getDelegationContracts } from './delegation-contracts.js'
+
+import { getDelegationContracts, chainForId } from './delegation-contracts.js'
 
 export interface PasskeySigner {
   /** WebAuthn credential id (hex or base64url-derived hex, per the kit). */

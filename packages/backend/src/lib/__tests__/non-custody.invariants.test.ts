@@ -87,22 +87,7 @@ describe('non-custody invariants', () => {
  * a failure means a change would give the backend signing authority over the
  * session path. Stop and get the review the guardrails require.
  */
-describe('non-custody invariants — session-key rail (#736)', () => {
-  const read = (...p: string[]) => readFileSync(join(SRC, ...p), 'utf8')
-
-  // Invariant 5 — the Safe "owner" the rail derives accounts from cannot sign.
-  it('keeps the session rail owner watch-only (refuses to sign, loudly)', () => {
-    const sessionRail = read('lib', 'session-rail.ts')
-    expect(sessionRail).toMatch(/watchOnlyOwner\(/)
-    expect(sessionRail).toContain('non-custody: the backend cannot sign as the Safe owner')
-    // Every owner sign method must be bound to the refusal — no real signer.
-    for (const method of ['signMessage', 'signTransaction', 'signTypedData']) {
-      expect(sessionRail).toMatch(new RegExp(`${method}: refuse`))
-    }
-  })
-
-  // Invariant 6 — no viem key-derived signer anywhere in production source.
-  // (The ethers equivalent is pinned by "exactly one server-side signer".)
+describe('non-custody invariants — delegation rail (#831, mapping: docs/security/delegation-rail-security-model.md §2)', () => {
   it('creates no viem key-based signers server-side', () => {
     const offenders = productionFiles().filter((f) =>
       /privateKeyToAccount|mnemonicToAccount|hdKeyToAccount/.test(readFileSync(f, 'utf8')),
@@ -110,52 +95,6 @@ describe('non-custody invariants — session-key rail (#736)', () => {
     expect(offenders.map(rel), 'viem signer from key material — see Red Line #1/#2').toEqual([])
   })
 
-  // Invariant 7 — session UserOps carry CLIENT signatures only: the submit
-  // step takes the signature as an argument and stamps it in; nothing in the
-  // rail produces one.
-  it('submits session UserOps with a caller-provided signature only', () => {
-    const sessionRail = read('lib', 'session-rail.ts')
-    expect(sessionRail).toMatch(/sessionSignature:\s*Hex/)
-  })
-
-  // Invariant 8 — session config (enable / remove / rotate) is pure
-  // construction: no signing, and never submitted by the relayer. The owner
-  // signs these payloads (the /safe-exec pattern).
-  it('keeps session-config modules signer-free and relayer-free', () => {
-    for (const file of ['session-policies.ts', 'session-rotation.ts', 'execution-rail.ts']) {
-      const src = read('lib', file)
-      expect(src, `${file} must not sign`).not.toMatch(
-        /signMessage|signTransaction|signTypedData|signingKey|new Wallet\(/,
-      )
-      expect(src, `${file} must not reach for the relayer`).not.toMatch(/getRelayerWallet/)
-    }
-  })
-
-  // Invariant 9 — the bundler credential (URL embeds the API key) has exactly
-  // ONE production choke point PER RAIL, keeping it auditable and un-loggable
-  // by construction elsewhere. The delegation rail's accessor (#826) reads
-  // SESSION_RAIL_BUNDLER_URL only as its documented fallback — still a single
-  // named accessor for that rail (delegationRailBundlerUrl).
-  it('reads the bundler credential in exactly one place per rail', () => {
-    const holders = productionFiles().filter((f) =>
-      /SESSION_RAIL_BUNDLER_URL|DELEGATION_RAIL_BUNDLER_URL/.test(readFileSync(f, 'utf8')),
-    )
-    expect(holders.map(rel).sort()).toEqual(['lib/delegation-rail.ts', 'lib/execution-rail.ts'])
-  })
-
-  // Invariant 10 — the paymaster sponsors GAS, never value: no ERC-20 value
-  // ever routes through the paymaster config; the rail's only transfer
-  // construction is the intent's own `transfer(to, amount)` calldata.
-  it('gives the paymaster no value-transfer surface', () => {
-    const sessionRail = read('lib', 'session-rail.ts')
-    // The paymaster is wired as a sponsorship client only — assert the config
-    // never passes token/value fields to it.
-    expect(sessionRail).toMatch(/paymaster:\s*pimlico/)
-    expect(sessionRail).not.toMatch(/paymasterTokens|payInERC20|tokenPaymaster/i)
-  })
-})
-
-describe('non-custody invariants — delegation rail (#831, mapping: docs/security/delegation-rail-security-model.md §2)', () => {
   const read = (...p: string[]) => readFileSync(join(SRC, ...p), 'utf8')
 
   // Invariant 5-d — every account the rail derives (delegate, treasury,

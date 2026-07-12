@@ -15,12 +15,8 @@
  * signed, even if account state changes in between.
  */
 
-import { Contract, getBytes, verifyMessage } from 'ethers'
 import pool from '../db.js'
 import { getChain } from './chains.js'
-import { getProvider } from './allowance-module.js'
-import { ERC7579_LAUNCHPAD, SAFE7579_ADAPTER } from './safe7579-provisioning.js'
-import { createSessionRail, type SessionRail } from './session-rail.js'
 
 /**
  * Chains the session rail may execute on. Base Sepolia only until the Stage 2
@@ -88,17 +84,6 @@ export async function loadExecutionRailState(agent: {
   }
 }
 
-/**
- * Recover the signer of a session UserOp hash. The session rail signs the
- * EIP-191 personal-sign digest (`signUserOpHashForSession` in @haven_ai/sdk,
- * #741) — NOT the raw-ECDSA scheme the AllowanceModule rail uses. Keeping the
- * two recovery functions separate mirrors the split signer API, so a
- * signature can never be verified against the wrong scheme (#731).
- */
-export function recoverSessionSigner(userOpHash: string, signature: string): string {
-  return verifyMessage(getBytes(userOpHash), signature)
-}
-
 // ── Prepared-UserOp persistence ─────────────────────────────────────────────
 //
 // The prepared UserOperation (permissionless) carries bigints, which JSON
@@ -127,7 +112,7 @@ export function deserializeUserOp(stored: unknown): unknown {
   )
 }
 
-// ── Session-rail construction for a payment ────────────────────────────────
+// ── Error-surface hygiene ───────────────────────────────────────────────────
 
 /**
  * Scrub vendor credentials from error text before it reaches API responses or
@@ -138,47 +123,4 @@ export function deserializeUserOp(stored: unknown): unknown {
  */
 export function redactVendorSecrets(message: string): string {
   return message.replace(/apikey=[^&\s"'\\)]+/gi, 'apikey=REDACTED')
-}
-
-const SAFE_OWNERS_ABI = ['function getOwners() view returns (address[])']
-
-/**
- * Bundler endpoint per chain. The URL is a SECRET (hosted bundlers embed the
- * API key) — env-only, never logged, never persisted.
- */
-export function sessionRailBundlerUrl(chainId: number): string {
-  const url = process.env.SESSION_RAIL_BUNDLER_URL
-  if (!url) {
-    throw new Error('SESSION_RAIL_BUNDLER_URL is not configured — session rail unavailable')
-  }
-  if (!SESSION_RAIL_CHAIN_IDS.has(chainId)) {
-    throw new Error(`session rail: chain ${chainId} is not enabled`)
-  }
-  return url
-}
-
-/**
- * Build the session rail for an intent's Safe. The Safe's owner address is
- * read on-chain (first owner) — used only for account derivation; the backend
- * never signs as the owner (see watchOnlyOwner in session-rail.ts).
- */
-export async function getSessionRailFor(safeAddress: string, chainId: number): Promise<SessionRail> {
-  const provider = getProvider(chainId)
-  const safe = new Contract(safeAddress, SAFE_OWNERS_ABI, provider)
-  const owners = (await safe.getOwners()) as string[]
-  if (!owners.length) {
-    throw new Error(`session rail: Safe ${safeAddress} has no owners on chain ${chainId}`)
-  }
-  return createSessionRail({
-    safeAddress: safeAddress as `0x${string}`,
-    ownerAddress: owners[0] as `0x${string}`,
-    bundlerUrl: sessionRailBundlerUrl(chainId),
-    rpcUrl: getChain(chainId).rpcUrl,
-    chainId,
-    safe7579AdapterAddress: SAFE7579_ADAPTER as `0x${string}`,
-    erc7579LaunchpadAddress: ERC7579_LAUNCHPAD as `0x${string}`,
-    // The per-agent/tier gas budget (#738): a Pimlico sponsorship policy binds
-    // only when its id is passed per request. Unset = no policy (dev default).
-    sponsorshipPolicyId: process.env.SESSION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
-  })
 }

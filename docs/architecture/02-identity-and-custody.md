@@ -38,7 +38,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-07-10"
+last-verified: "2026-07-12"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -48,7 +48,9 @@ flows, plotted with the party that holds them. This is the diagram to consult
 when reasoning about blast radius: "if X is compromised, what can move?".
 
 > **Two rails.** The zones, diagram, and invariants below describe the
-> **session/AllowanceModule rail** (existing accounts). New accounts run on the
+> **legacy AllowanceModule rail** (import-only, existing accounts). The Smart
+> Sessions **session rail is retired** (#834): `session_key` accounts get
+> HTTP 410 from the payment paths. New accounts run on the
 > **delegation rail** (`account_type='delegator_hybrid'`, epic #821); its custody
 > semantics and the full invariant→invariant mapping are in
 > [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
@@ -209,7 +211,7 @@ radius shifts in a few ways worth mapping explicitly:
   cannot spend. Full agent compromise (both) is bounded by the caveat stack:
   ≤ one period's budget, only to pinned recipients, until expiry or the owner's
   `disableDelegation` kill-switch. Blast radius is therefore **identical in kind**
-  to the session rail's per-period allowance.
+  to the retired session rail's per-period allowance.
 - **No funding leg, so no stranded delegate balance.** Payments move
   account→recipient directly (invariant 5's "delegate-key exposure includes
   delegate-held x402 funds" does not apply on this rail — there is no Safe→delegate

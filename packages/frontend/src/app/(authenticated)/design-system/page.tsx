@@ -232,6 +232,35 @@ export default function DesignSystemPage() {
             surfaces. Guarded by <code className="rounded bg-[var(--v2-surface)] px-1">token-contrast.test.ts</code> —
             change a token and the test tells you if it still clears the bar.
           </p>
+          <div className="mt-4 border-t border-[var(--v2-border)] pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">
+              Chain identity
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">--v2-chain-*</code> tells networks
+              apart (Base, Gnosis, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>{' '}
+              and <code className="rounded bg-[var(--v2-surface)] px-1">NetworkSwitcher</code>. These are{' '}
+              <span className="font-medium text-[var(--v2-ink)]">identity</span> colours, deliberately outside the
+              semantic rules — never reuse a chain colour for success/warning meaning, and never route money
+              tone through them.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-4">
+              {[
+                { label: 'Base', dot: 'var(--v2-chain-base)' },
+                { label: 'Gnosis', dot: 'var(--v2-chain-gnosis)' },
+                { label: 'Testnet', dot: 'var(--v2-chain-testnet)' },
+              ].map((chain) => (
+                <span key={chain.label} className="inline-flex items-center gap-1.5 text-xs text-[var(--v2-ink-2)]">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: chain.dot }}
+                  />
+                  {chain.label}
+                </span>
+              ))}
+            </div>
+          </div>
         </Card>
       </Section>
 

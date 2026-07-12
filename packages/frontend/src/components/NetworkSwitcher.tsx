@@ -25,9 +25,9 @@ import {
 // Per-chain dot colour (display only). Base blue, Gnosis teal, Sepolia amber to
 // flag it as a testnet.
 const CHAIN_DOT: Record<number, string> = {
-  8453: '#0052FF',
-  84532: '#F59E0B',
-  100: '#3E9B8F',
+  8453: 'var(--v2-chain-base)',
+  84532: 'var(--v2-chain-testnet)',
+  100: 'var(--v2-chain-gnosis)',
 }
 
 function chainDotColor(chainId: number): string {

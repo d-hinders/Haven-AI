@@ -21,13 +21,17 @@ function shortAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
+// Generative identicon gradient stops — decorative art hashed from an address
+// for visual variety, NOT design-system colour. These are data, not UI chrome,
+// so they legitimately stay literal (design-lint-disable-line per row) rather
+// than becoming ~18 meaningless tokens. See /design-system → "How to use this page".
 const AVATAR_PALETTES = [
-  ['#4f46e5', '#06b6d4', '#14b8a6'],
-  ['#0f766e', '#22c55e', '#facc15'],
-  ['#7c3aed', '#ec4899', '#f97316'],
-  ['#2563eb', '#8b5cf6', '#f43f5e'],
-  ['#0891b2', '#0ea5e9', '#6366f1'],
-  ['#059669', '#84cc16', '#06b6d4'],
+  ['#4f46e5', '#06b6d4', '#14b8a6'], // design-lint-disable-line
+  ['#0f766e', '#22c55e', '#facc15'], // design-lint-disable-line
+  ['#7c3aed', '#ec4899', '#f97316'], // design-lint-disable-line
+  ['#2563eb', '#8b5cf6', '#f43f5e'], // design-lint-disable-line
+  ['#0891b2', '#0ea5e9', '#6366f1'], // design-lint-disable-line
+  ['#059669', '#84cc16', '#06b6d4'], // design-lint-disable-line
 ] as const
 
 function hashAddress(address: string): number {

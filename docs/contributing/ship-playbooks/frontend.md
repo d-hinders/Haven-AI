@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-06-30"
+last-verified: "2026-07-12"
 ---
 
 # Frontend playbook
@@ -32,6 +32,16 @@ Run the matching items from the **Captain Self-Check Preflight** in [`../ai-agen
 ## 4. Verification
 
 Verify the change in the **browser**, or — when the browser path is unavailable/flaky — add a **named headless equivalent** (vitest) that covers the skipped animation, layout, routing, loading, or interaction risk. Include empty, loading, error, and success states when the screen can enter them; check mobile and desktop.
+
+### Screenshot evidence (required for visual surfaces)
+
+Any diff that touches a **rendered route** or a **shared UI primitive** (`components/ui`, `components/haven`) must carry rendered-screen evidence — "browser or headless equivalent" is no longer sufficient on its own for visual surfaces. Capture it with:
+
+```
+npm run screenshot -w packages/frontend -- <route> [<route> …]
+```
+
+`scripts/screenshot.mts` boots the app against the same mocked auth/data fixture the e2e suite uses (`e2e/fixtures/haven-api.ts` — deterministic `testUser` / `testSafe` / `testAgent`, no live backend or wallet) and writes desktop (1280) + mobile (390) PNGs of `/design-system` plus each route you pass into a gitignored `packages/frontend/.screenshots/`. Attach the relevant PNGs to the PR, or reference them in the **Browser Or Headless Verification** section of the PR body. Always include `/design-system` when you changed a primitive it renders. This is the foundation the visual-regression job (#897) and the design-reviewer pass (§5, #900) build on.
 
 ## 5. Review (advisory design pass)
 

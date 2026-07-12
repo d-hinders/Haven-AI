@@ -30,6 +30,7 @@
 - Browser verification:
 - If skipped, reason:
 - Headless equivalent, if browser verification was skipped:
+- Screenshot evidence (rendered-route / shared-primitive diffs): attach or link desktop + mobile PNGs from `npm run screenshot -w packages/frontend -- <route>` (see `docs/contributing/ship-playbooks/frontend.md` §4)
 
 ## Intentionally Left Out
 

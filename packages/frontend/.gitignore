@@ -1,0 +1,3 @@
+# Screenshot evidence captured by `npm run screenshot` (#896) — local/CI artifact,
+# never committed. Attach to PRs or feed to the visual-regression job instead.
+.screenshots/

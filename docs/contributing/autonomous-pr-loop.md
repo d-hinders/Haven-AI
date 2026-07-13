@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-07-12"
+last-verified: "2026-07-13"
 ---
 
 # Autonomous PR loop
@@ -191,13 +191,24 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    - **"Haven automerge rules"** — ☑ **Require status checks to pass** on
      **Detect changed surfaces** plus every per-surface quality check: **Backend
      checks**, **Frontend checks**, **SDK checks**, **CLI checks**, **MCP server
-     checks**, **MCP checks**, **Connect checks**, **Signer checks**. (Optionally
-     also the smoke checks **Install-path smoke** and **Frontend browser smoke**.)
+     checks**, **MCP checks**, **Connect checks**, **Signer checks** — and the
+     blocking design-quality gates **Design visual regression** (#897) and
+     **Banned product-copy terms** (#902). (Optionally also the smoke checks
+     **Install-path smoke** and **Frontend browser smoke**.)
      These are safe to require even though they're conditional: on a PR that
      doesn't touch a surface, that surface's check reports `skipped`, which GitHub
      counts as satisfied — so requiring all of them gates every surface the loop
      might touch without ever deadlocking. Do **not** require **Vercel Preview
      Comments** — it isn't a quality gate.
+
+     > **A "blocking" CI job only gates auto-merge if it's in this list.** A job
+     > that fails its workflow but isn't a required check is advisory in
+     > practice: auto-merge fires as soon as the *required* checks are green.
+     > This bit for real on 2026-07-13 — *Design visual regression* was red
+     > across two auto-merged PRs before anyone noticed, because it wasn't in
+     > the ruleset yet. **When a new blocking CI job is added, add it to this
+     > ruleset in the same change** (an owner/admin step — agents don't edit
+     > rulesets).
    - **"Dev gate"** (targets `main` only) — enforces the **`gate`** check from
      `.github/workflows/dev-gate.yml`, which only lets `dev` or `hotfix/*` merge
      into `main`. This is why the loop targets `dev`, never `main`.

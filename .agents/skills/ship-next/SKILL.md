@@ -140,6 +140,8 @@ Route the merge:
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
 
+**Merged ≠ all green.** Auto-merge waits only for the checks the rulesets *require*; a workflow-blocking job outside that list (see the ruleset inventory in [autonomous-pr-loop.md](../../../docs/contributing/autonomous-pr-loop.md)) can still be running — or red — when the merge lands. Before reporting the PR shipped, confirm the blocking jobs' conclusions on the **head SHA** (`gh api repos/<o>/<r>/commits/<sha>/check-runs`), not just the PR's merged state. A red post-merge job is your failure to hand off: fix or revert before taking new work.
+
 ### Waiting on CI — mechanics
 
 Do not burn fixed-timeout `sleep` loops against `gh pr checks`.

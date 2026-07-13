@@ -5,17 +5,14 @@ name: Frontend copy lint
 # components/), beyond the shrink-only baseline
 # (packages/frontend/copy-lint-baseline.json). Existing debt passes; growth
 # fails. See docs/contributing/ship-playbooks/frontend.md.
+#
+# NO paths filter, on purpose: this check is required by the "Haven automerge
+# rules" ruleset, and a paths-filtered workflow never runs — so never reports —
+# on a non-matching PR, which deadlocks auto-merge waiting for it (bit on
+# #936). The run costs ~10s; always report instead.
 
 on:
   pull_request:
-    paths:
-      - 'packages/frontend/src/app/**'
-      - 'packages/frontend/src/components/**'
-      - 'scripts/frontend-copy-lint.mjs'
-      - 'scripts/frontend-copy-lint.test.mjs'
-      - 'packages/frontend/copy-lint-baseline.json'
-      - 'docs/product/copy-guidelines.md'
-      - '.github/workflows/frontend-copy-lint.yml'
 
 permissions:
   contents: read

@@ -12,11 +12,16 @@
  */
 import { expect, test } from '@playwright/test'
 import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, so the
+// screenshot evidence (#896) and this pixel gate always render the same widths.
+import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
 
-const VIEWPORTS = [
-  { name: 'desktop', width: 1280, height: 800 },
-  { name: 'mobile', width: 390, height: 844 },
-] as const
+const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
+  name: string
+  width: number
+  height: number
+}>
 
 test.describe('design-system visual regression', () => {
   test.skip(

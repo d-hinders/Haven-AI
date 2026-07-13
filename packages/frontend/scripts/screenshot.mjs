@@ -39,6 +39,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { VIEWPORTS } from './evidence-viewports.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, '.screenshots')
@@ -46,10 +47,13 @@ const PORT = Number(process.env.SCREENSHOT_PORT ?? 3111)
 const BASE_URL = process.env.SCREENSHOT_BASE_URL ?? `http://127.0.0.1:${PORT}`
 const OWN_SERVER = !process.env.SCREENSHOT_BASE_URL
 
-const VIEWPORTS = [
-  { name: 'desktop', width: 1280, height: 800 },
-  { name: 'mobile', width: 390, height: 844 },
-]
+
+// Exported for the parity test against src/lib/auth-storage.ts — a key rename
+// there must fail a test here, not silently capture logged-out screenshots.
+export const SEED_STORAGE_KEYS = {
+  token: 'haven_token',
+  activeSafe: 'haven_active_safe_id',
+}
 
 // Always shoot the design system; add caller routes (comma-separated).
 const extra = (process.argv[2] ?? '')
@@ -293,10 +297,10 @@ async function main() {
       })
 
       // Auth fixture: seed the token before any app code runs.
-      await context.addInitScript(() => {
-        window.localStorage.setItem('haven_token', 'screenshot-fixture-token')
-        window.localStorage.setItem('haven_active_safe_id', 'safe-fixture')
-      })
+      await context.addInitScript((keys) => {
+        window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
+        window.localStorage.setItem(keys.activeSafe, 'safe-fixture')
+      }, SEED_STORAGE_KEYS)
 
       // Data fixture: resolve the authenticated session (so the app shell
       // renders), serve the route-keyed populated dataset, and answer anything

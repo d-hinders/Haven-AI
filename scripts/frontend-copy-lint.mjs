@@ -17,10 +17,14 @@
 //   node scripts/frontend-copy-lint.mjs --update   # rewrite the baseline (shrink
 //                                                   # or a reviewed, intentional add)
 
-import { readFile, readdir, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { readFile, readdir } from 'node:fs/promises'
 import { join, dirname, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { newViolations, hasShrunk, writeBaseline, readBaseline } from './lib/ratchet.mjs'
+
+// Re-exported so tests and any future consumer use the SHARED ratchet engine
+// (scripts/lib/ratchet.mjs) — the same implementation design-lint uses.
+export { newViolations }
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BASELINE_PATH = join(REPO_ROOT, 'packages', 'frontend', 'copy-lint-baseline.json')
@@ -90,23 +94,6 @@ export function findCopyIssues(text) {
   return out
 }
 
-/**
- * Pure core: given scanned counts ({file: {phrase: n}}) and a ratcheting
- * baseline of the same shape, return the failures — file/phrase pairs whose
- * count EXCEEDS what the baseline allows (a new term, or growth of an existing
- * one). Shrinking or matching the baseline passes. Testable without the tree.
- */
-export function newViolations(counts, baseline) {
-  const failures = []
-  for (const [file, phrases] of Object.entries(counts)) {
-    for (const [phrase, count] of Object.entries(phrases)) {
-      const allowed = baseline[file]?.[phrase] ?? 0
-      if (count > allowed) failures.push({ file, phrase, count, allowed })
-    }
-  }
-  return failures
-}
-
 async function walk(dir, out = []) {
   let entries
   try {
@@ -146,31 +133,23 @@ async function main() {
   const { counts, details, fileCount } = await scanAll()
 
   if (update) {
-    const sorted = Object.fromEntries(
-      Object.keys(counts)
-        .sort()
-        .map((f) => [f, Object.fromEntries(Object.entries(counts[f]).sort())]),
-    )
-    await writeFile(BASELINE_PATH, JSON.stringify(sorted, null, 2) + '\n')
+    writeBaseline(BASELINE_PATH, counts)
     console.log(`copy-lint: baseline written (${details.length} existing occurrence(s) ratcheted).`)
     return
   }
 
-  const baseline = existsSync(BASELINE_PATH)
-    ? JSON.parse(await readFile(BASELINE_PATH, 'utf8'))
-    : {}
-
+  const baseline = readBaseline(BASELINE_PATH)
   const failures = newViolations(counts, baseline)
 
   if (failures.length > 0) {
     console.log('✗ NEW banned product-copy terms (beyond the ratcheting baseline):\n')
     for (const f of failures) {
-      const suggestion = BANNED.find(([p]) => p === f.phrase)?.[1] ?? ''
+      const suggestion = BANNED.find(([p]) => p === f.key)?.[1] ?? ''
       console.log(
-        `  ${f.file} — "${f.phrase}": ${f.count} found, baseline allows ${f.allowed}` +
+        `  ${f.file} — "${f.key}": ${f.count} found, baseline allows ${f.allowed}` +
           (suggestion ? ` → prefer "${suggestion}"` : ''),
       )
-      for (const d of details.filter((d) => d.file === f.file && d.phrase === f.phrase)) {
+      for (const d of details.filter((d) => d.file === f.file && d.phrase === f.key)) {
         console.log(`    ${f.file}:${d.line}:${d.col}`)
       }
     }
@@ -182,17 +161,12 @@ async function main() {
     process.exit(1)
   }
 
-  // Shrink-only nudge: invite tightening the ratchet when debt has gone down.
-  let shrunk = false
-  for (const [file, phrases] of Object.entries(baseline)) {
-    for (const [phrase, allowed] of Object.entries(phrases)) {
-      if ((counts[file]?.[phrase] ?? 0) < allowed) shrunk = true
-    }
-  }
   console.log(
     `✓ No new banned product-copy terms in ${fileCount} frontend source files ` +
       `(${details.length} baselined occurrence(s) remain).` +
-      (shrunk ? ' Debt shrank — run `npm run lint:copy:update` to tighten the ratchet.' : ''),
+      (hasShrunk(counts, baseline)
+        ? ' Debt shrank — run `npm run lint:copy:update` to tighten the ratchet.'
+        : ''),
   )
 }
 

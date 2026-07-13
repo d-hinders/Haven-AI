@@ -48,7 +48,7 @@ test('clean copy yields no findings', () => {
 
 test('newViolations: a new banned term (no baseline entry) fails', () => {
   const f = newViolations({ 'a.tsx': { 'smart account': 1 } }, {})
-  assert.deepEqual(f, [{ file: 'a.tsx', phrase: 'smart account', count: 1, allowed: 0 }])
+  assert.deepEqual(f, [{ file: 'a.tsx', key: 'smart account', count: 1, allowed: 0 }])
 })
 
 test('newViolations: matching or shrinking the baseline passes', () => {
@@ -60,7 +60,7 @@ test('newViolations: matching or shrinking the baseline passes', () => {
 
 test('newViolations: growth of an existing baselined count fails', () => {
   const f = newViolations({ 'a.tsx': { 'policy engine': 3 } }, { 'a.tsx': { 'policy engine': 2 } })
-  assert.deepEqual(f, [{ file: 'a.tsx', phrase: 'policy engine', count: 3, allowed: 2 }])
+  assert.deepEqual(f, [{ file: 'a.tsx', key: 'policy engine', count: 3, allowed: 2 }])
 })
 
 test('newViolations: a baselined term in a DIFFERENT file is not grandfathered', () => {
@@ -69,5 +69,5 @@ test('newViolations: a baselined term in a DIFFERENT file is not grandfathered',
     { 'b.tsx': { 'smart account': 1 } },
     { 'a.tsx': { 'smart account': 1 } },
   )
-  assert.deepEqual(f, [{ file: 'b.tsx', phrase: 'smart account', count: 1, allowed: 0 }])
+  assert.deepEqual(f, [{ file: 'b.tsx', key: 'smart account', count: 1, allowed: 0 }])
 })

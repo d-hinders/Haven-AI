@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs script; typed via the cast below
-import { fixtureFor } from '../../scripts/screenshot.mjs'
+import { fixtureFor, SEED_STORAGE_KEYS } from '../../scripts/screenshot.mjs'
+import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
 
 const fx = fixtureFor as (apiPath: string, mode?: string) => Record<string, unknown> | null
 
@@ -45,5 +46,14 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   it('unkeyed endpoints fall through (null → generic empty shape)', () => {
     expect(fx('/agents/agent-1/delegations')).toBeNull()
     expect(fx('/reporting/summary')).toBeNull()
+  })
+
+  it('seeds the SAME localStorage keys the app reads (parity with auth-storage)', () => {
+    // A key rename in src/lib/auth-storage.ts must fail HERE — not silently
+    // capture logged-out screenshots as PR evidence.
+    expect(SEED_STORAGE_KEYS).toEqual({
+      token: AUTH_TOKEN_STORAGE_KEY,
+      activeSafe: ACTIVE_SAFE_STORAGE_KEY,
+    })
   })
 })

@@ -38,9 +38,12 @@ function changedFiles() {
   }
   const base = process.env.BASE_SHA
   const head = process.env.HEAD_SHA || 'HEAD'
-  const range = base ? [`${base}`, `${head}`] : ['origin/dev...HEAD']
+  // THREE-DOT (merge-base): a two-dot diff against a moving base branch lists
+  // files the PR never touched as "changed" (same flaw fixed in the
+  // design-system coupling gate, code review 2026-07-13).
+  const range = base ? `${base}...${head}` : 'origin/dev...HEAD'
   try {
-    const out = execFileSync('git', ['diff', '--name-only', ...range], {
+    const out = execFileSync('git', ['diff', '--name-only', range], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
     })

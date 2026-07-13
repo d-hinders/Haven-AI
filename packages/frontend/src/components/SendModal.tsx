@@ -769,7 +769,7 @@ export default function SendModal({
                                 {contact.name}
                               </p>
                               <p className="font-mono text-xs text-[var(--v2-ink-3)]">
-                                {contact.address.slice(0, 6)}...{contact.address.slice(-4)}
+                                {truncate(contact.address)}
                               </p>
                             </div>
                             {isSelected && (

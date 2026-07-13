@@ -18,6 +18,7 @@ import PasskeyEnrollFlow from './PasskeyEnrollFlow'
 import HybridEnrollFlow from './HybridEnrollFlow'
 import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
 import type { User } from '@/context/AuthContext'
+import { truncateAddress } from '@/components/haven'
 
 type Step = 'choose-signer' | 'connect' | 'deploy' | 'done'
 type SignerMode = 'passkey' | 'eoa' | null
@@ -326,7 +327,7 @@ export default function OnboardingClient() {
                   <div>
                     <span className="block text-xs text-[var(--v2-ink-3)] mb-1">Connected wallet</span>
                     <span className="text-sm font-mono text-[var(--v2-ink)]">
-                      {address?.slice(0, 6)}...{address?.slice(-4)}
+                      {address ? truncateAddress(address) : ''}
                     </span>
                   </div>
                   <ConnectButton.Custom>

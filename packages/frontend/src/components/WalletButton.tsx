@@ -16,10 +16,7 @@ import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { useActiveSigner } from '@/lib/signer'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
-
-function shortAddress(addr: string): string {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
-}
+import { truncateAddress } from '@/components/haven'
 
 // Generative identicon gradient stops — decorative art hashed from an address
 // for visual variety, NOT design-system colour. These are data, not UI chrome,
@@ -165,7 +162,7 @@ function WalletPopover({
             </div>
           ) : null}
           <span className="text-sm font-mono text-[var(--v2-ink)]">
-            {shortAddress(section.address)}
+            {truncateAddress(section.address)}
           </span>
         </div>
         <button
@@ -452,7 +449,7 @@ export default function WalletButton() {
                 <AddressAvatar address={account.address} />
               )}
               <span className={accountAlias ? undefined : 'font-mono'}>
-                {accountAlias ?? account.ensName ?? shortAddress(account.address)}
+                {accountAlias ?? account.ensName ?? truncateAddress(account.address)}
               </span>
             </button>
 

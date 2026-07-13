@@ -22,6 +22,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { truncateAddress } from '@/components/haven'
 
 // ── Add Safe Modal ──────────────────────────────────────────────────
 
@@ -256,7 +257,7 @@ function AddSafeModal({
                     <div>
                       <span className="block text-xs text-[var(--v2-ink-3)] mb-1">Connected wallet</span>
                       <span className="text-sm font-mono text-[var(--v2-ink)]">
-                        {walletAddress?.slice(0, 6)}...{walletAddress?.slice(-4)}
+                        {walletAddress ? truncateAddress(walletAddress) : ''}
                       </span>
                     </div>
                     <ConnectButton.Custom>

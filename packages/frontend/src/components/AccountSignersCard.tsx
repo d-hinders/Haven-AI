@@ -17,15 +17,12 @@ import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { useToast } from './ui/Toast'
+import { truncateAddress } from '@/components/haven'
 
 interface Props {
   agentId: string
   chainId: number
   userEmail: string
-}
-
-function shortAddr(a: string): string {
-  return `${a.slice(0, 6)}…${a.slice(-4)}`
 }
 
 export default function AccountSignersCard({ agentId, chainId, userEmail }: Props) {
@@ -74,7 +71,7 @@ export default function AccountSignersCard({ agentId, chainId, userEmail }: Prop
           <div className="flex items-center justify-between gap-3 py-3">
             <div className="min-w-0">
               <p className="text-sm font-medium text-[var(--v2-ink)]">A connected wallet</p>
-              <p className="truncate text-xs text-[var(--v2-ink-muted)]">{shortAddr(signers.owner_address)}</p>
+              <p className="truncate text-xs text-[var(--v2-ink-muted)]">{truncateAddress(signers.owner_address)}</p>
             </div>
           </div>
         ) : null}
@@ -84,7 +81,7 @@ export default function AccountSignersCard({ agentId, chainId, userEmail }: Prop
               <p className="text-sm font-medium text-[var(--v2-ink)]">
                 {i === 0 ? 'Face ID / Touch ID' : `Backup ${i}`}
               </p>
-              <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">{shortAddr(pk.key_id)}</p>
+              <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">{truncateAddress(pk.key_id)}</p>
             </div>
             <Button
               size="sm"

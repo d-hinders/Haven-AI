@@ -36,6 +36,7 @@ import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { useToast } from './ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { truncateAddress } from '@/components/haven'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -834,7 +835,7 @@ function tokenSymbolFromAddr(addr: string, cId: number): string {
   for (const [symbol, cfg] of Object.entries(tokens)) {
     if (cfg.address && cfg.address.toLowerCase() === lower) return symbol
   }
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
+  return truncateAddress(addr)
 }
 
 function tokenDecimalsFromAddr(addr: string, cId: number): number {

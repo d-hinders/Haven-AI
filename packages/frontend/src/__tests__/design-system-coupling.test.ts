@@ -73,6 +73,27 @@ describe('design-system coupling gate (#898)', () => {
     )
   })
 
+  it('collects members on the OPENING line of a multi-line export list', () => {
+    // Regression (code review 2026-07-13): NewGauge was dropped because brace
+    // mode was only entered after member extraction had already failed.
+    const added = fromDiff(
+      diff('src/components/ui/kit.tsx', 'export { NewGauge,', '  Dial,', "} from './gauges'"),
+    )
+    expect(added.map((a) => a.symbol).sort()).toEqual(['Dial', 'NewGauge'])
+  })
+
+  it('matches export-default primitives (named and anonymous)', () => {
+    // Six existing ui/ primitives are export-default (Input, Row, Skeleton,
+    // PageHeader, Toast, Tooltip) — the style MUST be gated.
+    const named = fromDiff(diff('src/components/ui/Gauge.tsx', 'export default function Gauge() {'))
+    expect(named.map((a) => a.symbol)).toEqual(['Gauge'])
+    const ref = fromDiff(diff('src/components/ui/Gauge.tsx', 'export default Gauge'))
+    expect(ref.map((a) => a.symbol)).toEqual(['Gauge'])
+    // Anonymous default → the file basename IS the primitive name:
+    const anon = fromDiff(diff('src/components/ui/Meter.tsx', 'export default () => null'))
+    expect(anon.map((a) => a.symbol)).toEqual(['Meter'])
+  })
+
   it('normalises the repo-root prefix git emits from the package cwd', () => {
     // `git diff` run in packages/frontend still prints repo-root-relative paths.
     const added = fromDiff(

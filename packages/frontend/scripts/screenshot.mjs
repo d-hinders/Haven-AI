@@ -65,7 +65,7 @@ const ROUTES = ['/design-system', ...extra]
 
 // Authenticated-session fixture — mirrors the e2e `testUser` shape so
 // `/auth/me` resolves and the app shell renders. No secrets, no live backend.
-const FIXTURE_SAFE = {
+export const FIXTURE_SAFE = {
   id: 'safe-fixture',
   name: 'Operating wallet',
   safe_address: '0x1111111111111111111111111111111111111111',
@@ -73,7 +73,7 @@ const FIXTURE_SAFE = {
   is_default: true,
   created_at: '2026-05-01T10:00:00.000Z',
 }
-const FIXTURE_USER = {
+export const FIXTURE_USER = {
   id: 'user-fixture',
   name: 'Screenshot Fixture',
   email: 'fixture@haven.test',
@@ -117,7 +117,7 @@ const tx = (i, over = {}) => ({
   safeName: FIXTURE_SAFE.name,
   ...over,
 })
-const FIXTURE_TXS = [
+export const FIXTURE_TXS = [
   tx(1, { agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports' }),
   tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_SAFE.safe_address, valueFormatted: '150.00', value: '150000000' }),
   tx(3, { agentName: 'Ops agent' }),
@@ -126,7 +126,7 @@ const FIXTURE_TXS = [
   tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_SAFE.safe_address, valueFormatted: '75.50', value: '75500000' }),
 ]
 
-const FIXTURE_AGENTS = [
+export const FIXTURE_AGENTS = [
   {
     id: 'agent-research', name: 'Research agent',
     description: 'Pays for x402 research APIs within a weekly budget',
@@ -163,7 +163,7 @@ const FIXTURE_AGENTS = [
   },
 ]
 
-const FIXTURE_APPROVALS = [{
+export const FIXTURE_APPROVALS = [{
   id: 'appr-1', agent_id: 'agent-ops', agent_name: 'Ops agent',
   safe_address: FIXTURE_SAFE.safe_address, chain_id: FIXTURE_SAFE.chain_id,
   token_symbol: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
@@ -172,7 +172,7 @@ const FIXTURE_APPROVALS = [{
   source: 'api', x402_resource_url: null, merchant_address: null,
   payment_rail: null, payment_resource_url: null,
   status: 'pending', created_at: '2026-07-10T07:45:00.000Z',
-  expires_at: '2026-07-11T07:45:00.000Z',
+  expires_at: '2026-07-11T07:45:00.000Z', tx_hash: null, reviewed_at: null,
 }]
 
 const FIXTURE_PORTFOLIO = {
@@ -188,7 +188,7 @@ const FIXTURE_BALANCES = {
     { symbol: 'ETH', address: null, balance: '250000000000000000', formatted: '0.25', decimals: 18, chainId: FIXTURE_SAFE.chain_id },
   ],
 }
-const FIXTURE_OVERVIEW = {
+export const FIXTURE_OVERVIEW = {
   totals: { usd: 12_640.55, eur: 11_690.21 },
   change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7 },
   metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, successfulTransactions: 37, activeAccounts: 1 },

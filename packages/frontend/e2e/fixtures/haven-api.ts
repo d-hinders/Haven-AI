@@ -24,7 +24,7 @@ export const testUser = {
   created_at: '2026-05-01T10:00:00.000Z',
 }
 
-const testAgent = {
+export const testAgent = {
   id: 'agent-e2e',
   name: 'Research agent',
   description: 'Runs paid research with a fixed allowance.',
@@ -47,7 +47,7 @@ const testAgent = {
   ],
 }
 
-const dashboardTransaction = {
+export const dashboardTransaction = {
   hash: `0x${'ab'.repeat(32)}`,
   type: 'erc20',
   from: testSafeAddress,
@@ -83,7 +83,7 @@ const balances = [
   },
 ]
 
-const dashboardOverview = {
+export const dashboardOverview = {
   totals: {
     usd: 1250,
     eur: 1138,
@@ -127,7 +127,7 @@ const dashboardOverview = {
   transactions: [dashboardTransaction],
 }
 
-const approval = {
+export const testApproval = {
   id: 'approval-e2e',
   agent_id: testAgent.id,
   agent_name: testAgent.name,
@@ -380,7 +380,7 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path === '/approvals') {
       await fulfillJson(route, {
-        approvals: [approval],
+        approvals: [testApproval],
         // Dashboard reads actionable_count first, while older callers may
         // still fall back to pending_count.
         actionable_count: 1,

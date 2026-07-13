@@ -94,7 +94,10 @@ export const RULES = [
     id: 'header-band',
     describe: 'hand-rolled grey header band — use the Card.Header primitive',
     // A border-b co-occurring with the surface fill inside one className.
-    regex: /(border-b[^"'`]*bg-\[var\(--v2-surface\)\]|bg-\[var\(--v2-surface\)\][^"'`]*border-b)/g,
+    // `border-b` is boundary-guarded: it must not match inside `border-black`
+    // (a letter follows) but must still match `border-b` and `border-b-2`.
+    regex:
+      /(border-b(?![a-zA-Z])[^"'`]*bg-\[var\(--v2-surface\)\]|bg-\[var\(--v2-surface\)\][^"'`]*border-b(?![a-zA-Z]))/g,
     exempt: (file) => isMarketingSurface(file) || file.includes('components/ui/Card.tsx'),
   },
   {
@@ -113,7 +116,11 @@ export const RULES = [
   {
     id: 'address-truncation',
     describe: 'hand-rolled address slice — use <Address> (or lib/format truncate)',
-    regex: /\.slice\(\s*0,\s*6\s*\)|\.slice\(\s*-4\s*\)/g,
+    // The PAIRED idiom only: `…slice(0, 6)…slice(-4)…` on one line. A lone
+    // slice(0, 6) is usually an array preview (agents.slice(0, 6)) and a lone
+    // slice(-4) a generic suffix — neither is address truncation, and matching
+    // them separately also double-counted every real occurrence.
+    regex: /\.slice\(\s*0,\s*6\s*\)[^\n]*\.slice\(\s*-4\s*\)/g,
     exempt: (file) => isMarketingSurface(file) || file.includes('components/haven/Address.tsx'),
   },
 ]

@@ -69,7 +69,18 @@ describe('design-lint scanner (#855)', () => {
     expect(scan('src/components/X.tsx', '<table className="w-full">').map((h) => h.rule)).toContain('raw-table')
     expect(scan('src/components/X.tsx', '<svg viewBox="0 0 4 4" />').map((h) => h.rule)).toContain('raw-svg')
     expect(scan('src/components/X.tsx', 'const c = "border-b bg-[var(--v2-surface)]"').map((h) => h.rule)).toContain('header-band')
-    expect(scan('src/components/X.tsx', 'return `${a.slice(0, 6)}…${a.slice(-4)}`').filter((h) => h.rule === 'address-truncation')).toHaveLength(2)
+    // The PAIRED idiom counts as exactly ONE occurrence (was double-counted).
+    expect(scan('src/components/X.tsx', 'return `${a.slice(0, 6)}…${a.slice(-4)}`').filter((h) => h.rule === 'address-truncation')).toHaveLength(1)
+    // border-b-2 is still a bottom border:
+    expect(scan('src/components/X.tsx', 'const c = "border-b-2 bg-[var(--v2-surface)]"').map((h) => h.rule)).toContain('header-band')
+  })
+
+  it('structural rules do not false-positive on lookalikes (code review 2026-07-13)', () => {
+    // border-black is NOT a bottom border — `border-b` must not match inside it:
+    expect(scan('src/components/X.tsx', '<div className="border-black/10 bg-[var(--v2-surface)] rounded" />')).toEqual([])
+    // Array previews and generic suffixes are NOT address truncation:
+    expect(scan('src/components/X.tsx', 'const preview = agents.slice(0, 6)')).toEqual([])
+    expect(scan('src/components/X.tsx', 'const last = id.slice(-4)')).toEqual([])
   })
 
   it('structural rules honour the primitive-home + marketing exemptions', () => {

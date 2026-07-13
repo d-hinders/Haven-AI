@@ -21,6 +21,9 @@ permissions:
 jobs:
   coupling:
     name: Design-system coupling
+    # Repo guard: on fork PRs GITHUB_TOKEN is read-only regardless of the
+    # permissions block, so the sticky-comment steps would 403.
+    if: github.repository == 'd-hinders/Haven-AI'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -47,6 +50,7 @@ jobs:
 
       - name: Post advisory comment (when primitives are undocumented)
         if: steps.gate.outputs.has_findings == 'true'
+        continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: design-system-coupling
@@ -55,6 +59,7 @@ jobs:
 
       - name: Clear stale comment (when nothing is undocumented)
         if: steps.gate.outputs.has_findings != 'true'
+        continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: design-system-coupling

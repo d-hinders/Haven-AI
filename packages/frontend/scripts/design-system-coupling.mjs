@@ -76,17 +76,27 @@ function pascalMember(part) {
  * `export const …` sitting inside a string literal or mid-line never counts —
  * only a real top-level export declaration does. Handles:
  *   export const Foo = …            export function Foo(…)     export class Foo
+ *   export default function Foo     export default Foo
+ *   export default () => …          (anonymous — caller falls back to filename)
  *   export { Foo, Bar as Baz }      (single-line re-export lists)
- * Multi-line `export { … }` lists are handled by addedExportsFromDiff's brace
- * state, not here. Scoped to NAMED exports by repo convention — ui/ and haven/
- * primitives are always named; a `export default` primitive would be
- * off-convention and is intentionally not matched.
+ *   export { Foo,                   (opening line of a multi-line list — its
+ *                                    members ARE collected; the rest via
+ *                                    addedExportsFromDiff's brace state)
+ * For `export default`, six existing ui/ primitives use that style (Input,
+ * Row, Skeleton, PageHeader, Toast, Tooltip), so it MUST be matched — an
+ * anonymous default (`export default () => …`) yields the sentinel
+ * DEFAULT_EXPORT and the diff parser substitutes the file's basename.
  */
+export const DEFAULT_EXPORT = Symbol('default-export')
 export function exportedComponentsInLine(line) {
   const names = new Set()
   const decl = line.match(/^\s*export\s+(?:const|function|class)\s+([A-Z][A-Za-z0-9]*)/)
   if (decl) names.add(decl[1])
-  const list = line.match(/^\s*export\s*\{([^}]*)\}/)
+  const dflt = line.match(/^\s*export\s+default\b\s*(?:function\s+)?([A-Z][A-Za-z0-9]*)?/)
+  if (dflt) names.add(dflt[1] ?? DEFAULT_EXPORT)
+  // Single-line list — or the OPENING line of a multi-line one: members on the
+  // opening line must be collected here (brace state only covers later lines).
+  const list = line.match(/^\s*export\s*\{([^}]*)(\}|$)/)
   if (list) {
     for (const part of list[1].split(',')) {
       const name = pascalMember(part)
@@ -177,7 +187,11 @@ export function addedExportsFromDiff(diff) {
     }
 
     for (const symbol of exportedComponentsInLine(code)) {
-      added.push({ file, symbol, exempt })
+      // Anonymous `export default` → the primitive IS the file; use its
+      // basename (ui/haven files are named after their component).
+      const resolved =
+        symbol === DEFAULT_EXPORT ? path.basename(file).replace(/\.tsx?$/, '') : symbol
+      added.push({ file, symbol: resolved, exempt })
     }
     // Enter brace mode on an opening `export {` with no closing `}` on the line.
     if (/^\s*export\s*\{/.test(code) && !code.includes('}')) inBrace = true
@@ -185,20 +199,28 @@ export function addedExportsFromDiff(diff) {
   return added
 }
 
+/**
+ * Compute the diff. Always THREE-DOT (merge-base) — a two-dot diff against a
+ * moving base branch shows base-side drift as phantom `+` lines, so a stale PR
+ * would be blamed for exports it never touched. Returns null when git fails:
+ * the caller decides — fatal under --strict (a hard gate must not silently
+ * pass on an unreadable diff), warn-and-exit-0 in advisory mode.
+ */
 function getDiff() {
   const fromFile = arg('changed-diff')
   if (fromFile) return readFileSync(fromFile, 'utf8')
   const base = process.env.BASE_SHA
   const head = process.env.HEAD_SHA || 'HEAD'
-  const range = base ? [`${base}`, `${head}`] : ['origin/dev...HEAD']
+  const range = base ? `${base}...${head}` : 'origin/dev...HEAD'
   try {
-    return execFileSync('git', ['diff', '--unified=0', ...range, '--', ...PRIMITIVE_DIRS], {
+    return execFileSync('git', ['diff', '--unified=0', range, '--', ...PRIMITIVE_DIRS], {
       cwd: ROOT,
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
     })
-  } catch {
-    return ''
+  } catch (err) {
+    console.error(`design-system coupling: could not compute the diff (${range}):`, err.message)
+    return null
   }
 }
 
@@ -207,7 +229,20 @@ function main() {
   const outPath = arg('out') || 'design-system-coupling-comment.md'
   const pageSource = readFileSync(path.join(ROOT, PAGE), 'utf8')
 
-  const added = addedExportsFromDiff(getDiff())
+  const diff = getDiff()
+  if (diff === null) {
+    if (strict) {
+      console.error('--strict: refusing to pass on an uncomputable diff — fetch the base and retry.')
+      process.exit(1)
+    }
+    console.log('design-system coupling: skipped (diff unavailable; advisory mode).')
+    if (process.env.GITHUB_OUTPUT) {
+      appendFileSync(process.env.GITHUB_OUTPUT, 'has_findings=false\n')
+    }
+    return
+  }
+
+  const added = addedExportsFromDiff(diff)
   const findings = undocumentedPrimitives(added, pageSource)
   const hasFindings = findings.length > 0
 

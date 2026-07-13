@@ -21,6 +21,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join, dirname, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { newViolations, hasShrunk, writeBaseline, readBaseline } from './lib/ratchet.mjs'
+import { isEscaped } from './lib/lint-escapes.mjs'
 
 // Re-exported so tests and any future consumer use the SHARED ratchet engine
 // (scripts/lib/ratchet.mjs) — the same implementation design-lint uses.
@@ -72,8 +73,7 @@ export function findCopyIssues(text) {
   const ordered = [...BANNED].sort((a, b) => b[0].length - a[0].length)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (line.includes(IGNORE)) continue
-    if (i > 0 && lines[i - 1].includes(IGNORE)) continue
+    if (isEscaped(lines, i, IGNORE)) continue
     const lower = line.toLowerCase()
     const claimed = [] // [start, end) spans already reported on this line
     for (const [phrase, suggestion] of ordered) {

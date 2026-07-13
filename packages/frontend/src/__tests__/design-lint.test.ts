@@ -98,5 +98,9 @@ describe('design-lint scanner (#855)', () => {
   it('honours design-lint-disable-line for reviewed exceptions', () => {
     const src = '<p className="text-[10px]" /> {/* design-lint-disable-line */}'
     expect(scan('src/components/X.tsx', src)).toEqual([])
+    // Shared escape semantics: the line ABOVE also works (same rule as
+    // copy-lint-ignore — one convention across the lint gates).
+    const above = '{/* design-lint-disable-line */}\n<p className="text-[10px]" />'
+    expect(scan('src/components/X.tsx', above)).toEqual([])
   })
 })

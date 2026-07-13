@@ -478,6 +478,26 @@ Build the workspace SDK:
 npm run build -w packages/sdk
 ```
 
+### `No compatible payment option found in x402 requirements` (x402-settle / x402-sweep-recovery)
+
+First suspect the **SDK resolution**, not the merchant. `packages/qa-agent`
+must depend on `"@haven_ai/sdk": "*"` so npm links the **workspace** SDK — an
+exact version pin silently flips to the stale **npm registry tarball** the
+moment `release:bump` moves the workspace version past the pin, and the
+published SDK (built from `main`) can lag dev by weeks. That exact failure hit
+the scheduled run on 2026-07-13: the registry matcher predated Base-Sepolia
+(`eip155:84532`) support, so the dev merchant's perfectly valid challenge
+matched nothing. Verify what qa-agent actually resolves:
+
+```bash
+node -e "console.log(require.resolve('@haven_ai/sdk', { paths: ['./packages/qa-agent'] }))"
+# must print …/packages/sdk/dist/…, never …/node_modules/@haven_ai/sdk/…
+```
+
+If the resolution is right, then check the merchant's 402 challenge itself
+(`curl -i -X POST <merchant>/mcp …` — the `accepts` array should advertise
+`scheme: exact`, `network: eip155:84532`, the Base-Sepolia USDC address).
+
 ### `Missing required QA env`
 
 The dotenv file was not sourced, a variable is commented out, or the shell was

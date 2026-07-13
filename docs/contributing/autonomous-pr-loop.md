@@ -209,6 +209,17 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      > the ruleset yet. **When a new blocking CI job is added, add it to this
      > ruleset in the same change** (an owner/admin step — agents don't edit
      > rulesets).
+     >
+     > **And the corollary: a required check's workflow must NOT be
+     > `paths:`-filtered.** A paths-filtered workflow never runs — so never
+     > reports — on a non-matching PR, and the required check waits forever:
+     > auto-merge deadlocks with everything else green (bit the same day on
+     > #936, a qa-agent-only PR, when *Banned product-copy terms* was first
+     > required — fixed in #937 by dropping the filter). Conditional **jobs
+     > inside `ci.yml`** are fine: they always report at least a `skipped`,
+     > which GitHub counts as satisfied. Either make the workflow
+     > unconditional (fine for ~10s checks) or gate at the job level, never
+     > at the workflow `paths:` level.
    - **"Dev gate"** (targets `main` only) — enforces the **`gate`** check from
      `.github/workflows/dev-gate.yml`, which only lets `dev` or `hotfix/*` merge
      into `main`. This is why the loop targets `dev`, never `main`.

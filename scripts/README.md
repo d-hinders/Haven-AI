@@ -35,6 +35,14 @@ Missing any edit caused bugs in production — e.g. connect shipping a stale run
 
 `release-bump.mjs` atomically applies all of these in one command.
 
+**Private workspace consumers are intentionally NOT in this table.** `backend`
+and `qa-agent` depend on `@haven_ai/*` with `"*"` so npm always links the
+workspace package — they must test dev's code, not a published tarball. Never
+"tidy" them to an exact version: the pin holds only until the next bump moves
+the workspace version past it, after which `npm ci` silently resolves the
+stale npm registry tarball instead (this broke the scheduled money-flow QA on
+2026-07-13).
+
 ### Usage
 
 ```sh

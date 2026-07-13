@@ -34,7 +34,8 @@
  *   node scripts/design-lint.mjs --update   # rewrite the baseline (shrink or
  *                                           # intentional, reviewed growth)
  */
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'fs'
+import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
+import { newViolations, hasShrunk, writeBaseline, readBaseline } from '../../../scripts/lib/ratchet.mjs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -183,40 +184,18 @@ function main() {
   const { counts, details } = scanAll()
 
   if (update) {
-    const sorted = Object.fromEntries(
-      Object.keys(counts)
-        .sort()
-        .map((f) => [f, Object.fromEntries(Object.entries(counts[f]).sort())]),
-    )
-    writeFileSync(BASELINE_PATH, JSON.stringify(sorted, null, 2) + '\n')
-    const total = details.length
-    console.log(`design-lint: baseline written (${total} existing violations ratcheted).`)
+    writeBaseline(BASELINE_PATH, counts)
+    console.log(`design-lint: baseline written (${details.length} existing violations ratcheted).`)
     return
   }
 
-  const baseline = existsSync(BASELINE_PATH)
-    ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
-    : {}
-
-  const failures = []
-  for (const [file, rules] of Object.entries(counts)) {
-    for (const [rule, count] of Object.entries(rules)) {
-      const allowed = baseline[file]?.[rule] ?? 0
-      if (count > allowed) failures.push({ file, rule, count, allowed })
-    }
-  }
+  const baseline = readBaseline(BASELINE_PATH)
+  const failures = newViolations(counts, baseline)
 
   if (failures.length === 0) {
-    // Shrink-only nudge: if debt went down, invite tightening the ratchet.
-    let shrunk = false
-    for (const [file, rules] of Object.entries(baseline)) {
-      for (const [rule, allowed] of Object.entries(rules)) {
-        if ((counts[file]?.[rule] ?? 0) < allowed) shrunk = true
-      }
-    }
     console.log(
       `design-lint: OK (${details.length} baselined violations remain).` +
-        (shrunk
+        (hasShrunk(counts, baseline)
           ? ' Debt shrank — run `npm run design:lint:update -w packages/frontend` to tighten the ratchet.'
           : ''),
     )
@@ -225,11 +204,11 @@ function main() {
 
   console.error('design-lint: NEW design-system drift detected.\n')
   for (const f of failures) {
-    const rule = RULES.find((r) => r.id === f.rule)
+    const rule = RULES.find((r) => r.id === f.key)
     console.error(
-      `  ${f.file} — ${f.rule}: ${f.count} found, baseline allows ${f.allowed} (${rule.describe})`,
+      `  ${f.file} — ${f.key}: ${f.count} found, baseline allows ${f.allowed} (${rule.describe})`,
     )
-    for (const d of details.filter((d) => d.file === f.file && d.rule === f.rule)) {
+    for (const d of details.filter((d) => d.file === f.file && d.rule === f.key)) {
       console.error(`    ${f.file}:${d.line}  ${d.match}`)
     }
   }

@@ -1,0 +1,50 @@
+name: Advisory gate comment
+description: >-
+  Run an advisory gate script (docs-coupling / design-system-coupling shape)
+  and post/clear its sticky PR comment. The script must append
+  `has_findings=true|false` to $GITHUB_OUTPUT and write the comment body to
+  the given out-file when there are findings. Never fails the build — the
+  gate step is continue-on-error and the comment steps tolerate token
+  failures (fork PRs have a read-only GITHUB_TOKEN).
+
+inputs:
+  script:
+    description: Path to the gate script (node), repo-relative
+    required: true
+  header:
+    description: Sticky-comment header key (stable per gate)
+    required: true
+  out-file:
+    description: File the script writes the comment body to
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Run the gate script
+      id: gate
+      # The scripts exit 0 themselves, but continue-on-error makes the
+      # non-blocking guarantee hold even against a load failure before main().
+      continue-on-error: true
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: node "${{ inputs.script }}" --out="${{ inputs.out-file }}"
+
+    - name: Post advisory comment (when the gate has findings)
+      if: steps.gate.outputs.has_findings == 'true'
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: ${{ inputs.header }}
+        recreate: true
+        path: ${{ inputs.out-file }}
+
+    - name: Clear stale comment (when the gate is clean)
+      if: steps.gate.outputs.has_findings != 'true'
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: ${{ inputs.header }}
+        delete: true

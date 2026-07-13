@@ -5,7 +5,8 @@ name: Design-system coupling gate
 # /design-system reference page. Advisory only — it posts a sticky comment and
 # never fails the build (the script exits 0 without --strict; ship-next runs it
 # with --strict as a hard definition-of-done step).
-# See docs/contributing/ship-playbooks/frontend.md §2.
+# Plumbing lives in .github/actions/advisory-gate-comment (shared with
+# docs-coupling.yml). See docs/contributing/ship-playbooks/frontend.md §2.
 
 on:
   pull_request:
@@ -36,31 +37,8 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
-      - name: Find primitives missing from /design-system
-        id: gate
-        # The script exits 0 without --strict, but continue-on-error makes the
-        # non-blocking guarantee hold even against a load failure before main().
-        continue-on-error: true
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: >-
-          node packages/frontend/scripts/design-system-coupling.mjs
-          --out=design-system-coupling-comment.md
-
-      - name: Post advisory comment (when primitives are undocumented)
-        if: steps.gate.outputs.has_findings == 'true'
-        continue-on-error: true
-        uses: marocchino/sticky-pull-request-comment@v2
+      - uses: ./.github/actions/advisory-gate-comment
         with:
+          script: packages/frontend/scripts/design-system-coupling.mjs
           header: design-system-coupling
-          recreate: true
-          path: design-system-coupling-comment.md
-
-      - name: Clear stale comment (when nothing is undocumented)
-        if: steps.gate.outputs.has_findings != 'true'
-        continue-on-error: true
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: design-system-coupling
-          delete: true
+          out-file: design-system-coupling-comment.md

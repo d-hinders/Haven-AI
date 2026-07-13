@@ -36,6 +36,7 @@
  */
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
 import { newViolations, hasShrunk, writeBaseline, readBaseline } from '../../../scripts/lib/ratchet.mjs'
+import { isEscaped } from '../../../scripts/lib/lint-escapes.mjs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -146,7 +147,8 @@ export function scanSource(relFile, source) {
   for (const rule of RULES) {
     if (rule.exempt(relFile)) continue
     lines.forEach((raw, i) => {
-      if (raw.includes('design-lint-disable-line')) return
+      // Escape on the offending line or the line above (shared semantics).
+      if (isEscaped(lines, i, 'design-lint-disable-line')) return
       // Strip line-comment content — issue refs (#857) and colour names in
       // comments are prose, not styles. Block-comment bodies starting with *
       // are skipped the same way.

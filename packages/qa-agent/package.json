@@ -31,7 +31,7 @@
   ],
   "license": "UNLICENSED",
   "dependencies": {
-    "@haven_ai/sdk": "0.1.17-alpha.0",
+    "@haven_ai/sdk": "*",
     "@metamask/smart-accounts-kit": "^1.6.0",
     "@metamask/x402": "^0.2.0",
     "@rhinestone/module-sdk": "^0.4.0",

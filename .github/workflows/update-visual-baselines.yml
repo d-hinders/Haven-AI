@@ -21,9 +21,16 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # GITHUB_TOKEN pushes do NOT trigger pull_request workflows — on an
+      # already-open PR the regenerated-baseline commit would become a head
+      # SHA with ZERO check runs, deadlocking every required check
+      # ("Expected — waiting for status"). A PAT/app token in
+      # BASELINE_PUSH_TOKEN makes the push trigger CI like a human push;
+      # without it we fall back to GITHUB_TOKEN and warn (see the commit step).
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+          token: ${{ secrets.BASELINE_PUSH_TOKEN || github.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -60,4 +67,12 @@ jobs:
           else
             git commit -m "chore: regenerate /design-system visual baselines (Linux-rendered)"
             git push
+            if [ -z "${BASELINE_PUSH_TOKEN}" ]; then
+              echo "::warning::Pushed with GITHUB_TOKEN — this commit will NOT trigger PR workflows." \
+                "If a PR is already open on this branch, its required checks will wait forever;" \
+                "push an empty commit (git commit --allow-empty && git push) or set the" \
+                "BASELINE_PUSH_TOKEN secret (a PAT with contents:write) to fix this permanently."
+            fi
           fi
+        env:
+          BASELINE_PUSH_TOKEN: ${{ secrets.BASELINE_PUSH_TOKEN }}

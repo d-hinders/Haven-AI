@@ -283,6 +283,7 @@ async function main() {
   })
   const captured = []
   const consoleErrors = []
+  const gotoFailures = []
   try {
     for (const vp of VIEWPORTS) {
       const context = await browser.newContext({
@@ -344,7 +345,15 @@ async function main() {
       })
       for (const routePath of ROUTES) {
         currentRoute = routePath
-        await page.goto(`${BASE_URL}${routePath}`, { waitUntil: 'networkidle', timeout: 30_000 }).catch(() => {})
+        // A swallowed navigation failure would screenshot the PREVIOUS route's
+        // content under this route's filename — record it and mark the run.
+        const navError = await page
+          .goto(`${BASE_URL}${routePath}`, { waitUntil: 'networkidle', timeout: 30_000 })
+          .then(() => null, (err) => err)
+        if (navError) {
+          gotoFailures.push({ route: routePath, viewport: vp.name, text: `goto failed: ${String(navError.message ?? navError).slice(0, 200)}` })
+          continue // never write a mislabeled PNG
+        }
         await page.waitForTimeout(400) // settle late paints
         const file = path.join(OUT_DIR, `${slug(routePath)}-${vp.name}.png`)
         await page.screenshot({ path: file, fullPage: true })
@@ -359,12 +368,18 @@ async function main() {
 
   console.log(`\nscreenshot: wrote ${captured.length} PNGs to .screenshots/`)
   for (const f of captured) console.log(`  ${f}`)
+  if (gotoFailures.length > 0) {
+    console.error(`\n✗ ${gotoFailures.length} route(s) FAILED to load — their PNGs were NOT written:`)
+    for (const e of gotoFailures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
+  }
   if (consoleErrors.length > 0) {
     console.log(`\n⚠ ${consoleErrors.length} console error(s) during capture — the PNGs may show broken screens:`)
     for (const e of consoleErrors) console.log(`  [${e.route} · ${e.viewport}] ${e.text}`)
     console.log('  (a fixture-shape gap or a real client bug — fix before trusting these screenshots)')
   }
   console.log('\nAttach these to the PR (or reference them in the Browser Verification section).')
+  // Broken evidence must not exit 0 — a failed navigation means missing PNGs.
+  if (gotoFailures.length > 0) process.exit(1)
 }
 
 // Run only as a CLI (fixtureFor is imported by tests).

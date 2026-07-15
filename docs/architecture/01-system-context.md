@@ -9,6 +9,7 @@ covers:
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
+  - packages/backend/src/lib/x402-delegation.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/lib/delegation-rail.ts
@@ -25,7 +26,7 @@ covers:
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-07-12"
+last-verified: "2026-07-15"
 ---
 
 # Haven — System Context
@@ -178,7 +179,11 @@ flowchart LR
   EIP-712 typed data with its delegate key. Funds move account→recipient directly,
   metered on-chain by audited caveat enforcers during gas estimation — Haven never
   holds a DeleGator signer, and the account owner is watch-only. x402 on this rail
-  settles treasury→merchant directly via ERC-7710 (no funding leg). This rail is
+  settles treasury→merchant directly via ERC-7710 (no funding leg) — but that path
+  needs facilitator-side erc7710 support, which is still thin, so EIP-3009-only
+  merchants are not yet reachable on this rail; the decided bridge is an EIP-3009
+  fallback (a bounded, transient two-leg — RFC #791 §18 / #946, not yet built).
+  This rail is
   **Base-only** (Base 8453, Base Sepolia 84532); Gnosis is not in scope. Details:
   [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md),
   [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md)

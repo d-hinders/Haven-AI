@@ -15,7 +15,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-07-12"
+last-verified: "2026-07-15"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -265,6 +265,32 @@ writing, sits on the OpenAPI drift check's `KNOWN_UNDOCUMENTED_ROUTES` allowlist
 pending the epic docs sweep (#834). Operational detail (gas sponsorship, vendor
 dependencies): [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md);
 security model: [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
+
+### Settlement-scheme reality and the EIP-3009 bridge
+
+The direct erc7710 path is elegant, but it is currently the **only** x402
+settlement scheme on the delegation rail — and that is a merchant-reach problem,
+not a solved settlement story. Redeeming the `[child, budget]` chain requires
+**facilitator-side erc7710 support**, and adoption is still thin: as of the
+2026-07 catalog probe, ≈every real x402 merchant is **EIP-3009-only**. So a
+delegation-rail account (the default for new accounts) currently has **no route
+to most merchants**, and `routes/x402.ts` has no EIP-3009 branch for
+`execution_rail = 'delegation'` — it forks unconditionally to erc7710 and even
+rejects native-token x402.
+
+The decided answer is an **EIP-3009 fallback on the delegation rail**, chosen per
+payment (prefer erc7710 when the facilitator supports it, fall back to 3009).
+EIP-3009 (`transferWithAuthorization`) is ECDSA-based — the fund-holder must be an
+**EOA** that signs (USDC rejects EIP-1271 for it), which neither Hybrid can do —
+so 3009-mode redeems the budget delegation to **transiently fund the agent EOA**,
+which then signs the standard header. One budget delegation meters direct
+transfers, erc7710 settlement, and 3009 funding: revoke once, everything stops.
+This is a deliberate, temporary interop bridge that **reintroduces a bounded
+funding leg** (transient hot balance + sweep) — accepted because an agent that can
+pay with a short-lived hot balance beats one that cannot pay at all; erc7710 stays
+the long-term goal. Design of record: **RFC [#791](https://github.com/d-hinders/Haven-AI/issues/791)
+§18 (B4-D)**; scoped build: **[#946](https://github.com/d-hinders/Haven-AI/issues/946)**
+(not yet built).
 
 ## Guardrails
 

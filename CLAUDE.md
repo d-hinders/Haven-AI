@@ -21,7 +21,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-07-12"
+last-verified: "2026-07-15"
 ---
 
 # Haven — CLAUDE.md
@@ -154,6 +154,22 @@ The flow branches on the account's `execution_rail` (resolved from agent auth). 
 ```
 
 ### x402 Payment Flow
+
+x402 settlement branches on the account's rail, and the merchant-facing scheme differs per rail.
+
+**Delegation rail (new accounts) — ERC-7710 direct settlement:**
+```
+Agent encounters HTTP 402 → POST /x402/authorize (rail resolved from agent auth) →
+Haven builds a settlement CHILD delegation (exact amount, payee pin, short expiry)
+  re-delegated from the agent's budget delegation → agent signs the EIP-712 typed data →
+POST /x402/:id/settle → Haven assembles the merchant X-PAYMENT header (MetaMask x402
+  `erc7710` payload) → agent retries → merchant redeems the [child, budget] chain and
+  settles account→merchant DIRECTLY (no funding leg, no delegate hot balance, no sweep) →
+Haven logs receipt
+```
+The period budget is metered by the settlement itself; over-budget/wrong-recipient reverts on-chain (`lib/x402-delegation.ts`, `routes/x402.ts`). **Caveat — merchant reach:** erc7710 requires facilitator-side support to redeem the chain, and adoption is still thin (≈every real x402 merchant is EIP-3009-only), so delegation-rail accounts currently have **no route to most merchants**. The decided fix is an **EIP-3009 fallback on the delegation rail** — a delegation-metered two-leg (redeem the budget to transiently fund the agent EOA, which signs the standard header), chosen per payment (prefer erc7710, fall back to 3009). It is a deliberate, temporary interop bridge that reintroduces a bounded funding leg: **RFC #791 §18 / issue #946** (not yet built).
+
+**Legacy AllowanceModule rail (import-only) — EIP-3009 two-leg:**
 ```
 Agent encounters HTTP 402 → forwards to Haven →
 Haven policy engine evaluates → Haven funds the delegate wallet from the Safe →
@@ -162,7 +178,7 @@ Agent retries with X-PAYMENT → merchant facilitator settles to merchant →
 Haven logs receipt
 ```
 
-For standard merchant x402, the AllowanceModule transfer is `Safe → delegate EOA`; the merchant-facing settlement is then `delegate EOA → merchant` through EIP-3009. This keeps merchant verification protocol-native, but it means the delegate can briefly hold liquid Base USDC. Treat delegate keys as hot payment keys: rotate them after suspected exposure, keep x402 allowances small and reset-bound, and reconcile/sweep stranded delegate balances when a merchant verifies but does not settle before authorization expiry.
+For legacy-rail merchant x402, the AllowanceModule transfer is `Safe → delegate EOA`; the merchant-facing settlement is then `delegate EOA → merchant` through EIP-3009. This keeps merchant verification protocol-native, but it means the delegate can briefly hold liquid Base USDC. Treat delegate keys as hot payment keys: rotate them after suspected exposure, keep x402 allowances small and reset-bound, and reconcile/sweep stranded delegate balances when a merchant verifies but does not settle before authorization expiry. (The same hot-balance/sweep discipline applies to the #946 EIP-3009 bridge when it lands on the delegation rail.)
 
 ## API Surface (POC)
 

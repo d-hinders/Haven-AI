@@ -47,6 +47,13 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     if (owner_address !== undefined && !isValidAddress(owner_address)) {
       return reply.code(400).send({ error: 'owner_address must be a valid address' })
     }
+    // The zero address is the Hybrid derivation's "no EOA owner" encoding —
+    // {owner_address: 0x0, passkeys: [A]} derives the SAME account as pure-
+    // passkey {passkeys: [A]} but would count as a second signer, silently
+    // bypassing the #908 mainnet floor. Found by the money-path review.
+    if (owner_address !== undefined && /^0x0{40}$/i.test(owner_address)) {
+      return reply.code(400).send({ error: 'owner_address must not be the zero address' })
+    }
     const parsedPasskeys: PasskeySigner[] = []
     for (const pk of passkeys ?? []) {
       if (!pk.key_id || typeof pk.key_id !== 'string') {
@@ -59,6 +66,12 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     }
     if (!owner_address && parsedPasskeys.length === 0) {
       return reply.code(400).send({ error: 'at least one owner (owner_address or passkeys) is required' })
+    }
+    // Duplicate key_ids collapse to ONE on-chain key (and the passkey table's
+    // ON CONFLICT dedupes) — they must not inflate the #908 signer count.
+    const uniqueKeyIds = new Set(parsedPasskeys.map((pk) => pk.keyId.toLowerCase()))
+    if (uniqueKeyIds.size !== parsedPasskeys.length) {
+      return reply.code(400).send({ error: 'duplicate passkey key_id' })
     }
 
     // ── #908 mainnet signer floor — BEFORE the contract-availability check,

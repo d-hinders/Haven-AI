@@ -208,5 +208,13 @@ moment a delegation becomes live spend authority. Properties:
   cheap as before — the floor is a mainnet launch criterion, not a general
   restriction.
 
+Two honest limits of the mechanism (review-noted): the signer count is
+**DB-sourced** — an owner can change the signer set directly on-chain without
+Haven's sync, so the floor protects the owner from themselves rather than
+proving on-chain state (the on-chain `CannotRemoveLastSigner` guard is the
+hard backstop). And a provisioning-time EOA owner is **not signature-verified**
+— the floor counts enrolled signers, it cannot prove each is usable (the zero
+address, which provably is NOT a signer, is rejected at every entry point).
+
 Remaining for the UI (when mainnet onboarding opens): a first-class backup
 step or an explicit waiver screen — the API refuses either way.

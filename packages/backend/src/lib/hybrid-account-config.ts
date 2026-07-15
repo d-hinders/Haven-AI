@@ -25,11 +25,18 @@ export interface StoredPasskey {
 export async function loadHybridOwnerConfig(
   userId: string,
   safeAddress: string,
+  chainId: number,
 ): Promise<{ config: HybridOwnerConfig; userSafeId: string } | null> {
+  // chain_id is part of the row identity: the same owner config derives the
+  // same address on EVERY chain, so a user can hold rows for one address on
+  // both testnet and mainnet. Without the bind, rows[0] of an unordered
+  // result could return the OTHER chain's signer set — found by the #908
+  // money-path review (a testnet row's backup passkey must never satisfy the
+  // mainnet signer floor).
   const safeRow = await pool.query<{ id: string; owner_address: string | null }>(
     `SELECT id, owner_address FROM user_safes
-     WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)`,
-    [userId, safeAddress],
+     WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`,
+    [userId, safeAddress, chainId],
   )
   const safe = safeRow.rows[0]
   if (!safe) return null

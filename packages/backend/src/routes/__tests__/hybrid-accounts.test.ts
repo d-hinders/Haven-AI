@@ -213,6 +213,26 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     expect(res.statusCode).toBe(403)
   })
 
+  it('rejects the zero address as owner (the "no owner" encoding must not count as a signer)', async () => {
+    mockDb({})
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { chain_id: 8453, owner_address: '0x' + '0'.repeat(40), passkeys: [PASSKEY] },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/zero address/)
+  })
+
+  it('rejects duplicate passkey key_ids (they collapse to one on-chain key)', async () => {
+    mockDb({})
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { chain_id: 8453, passkeys: [PASSKEY, { ...PASSKEY }] },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/duplicate passkey/)
+  })
+
   it('unknown chains fail closed: gated like mainnet', async () => {
     mockDb({})
     const res = await app.inject({

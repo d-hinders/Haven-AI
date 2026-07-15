@@ -438,6 +438,22 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.statusCode).toBe(200)
     })
 
+    it('#908: a zero-address owner does NOT count toward the floor (legacy-row defense)', async () => {
+      // 0x0 is the Hybrid "no owner" encoding — an older row carrying it must
+      // not satisfy the mainnet floor as a phantom second signer.
+      mockDb({
+        agent: agentRow({ chain_id: 8453 }),
+        owner: '0x' + '0'.repeat(40),
+        passkeys: [{ key_id: 'cred-1', public_key_x: '0x11', public_key_y: '0x22' }],
+      })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(403)
+      expect(mockEnsureDeployed).not.toHaveBeenCalled()
+    })
+
     it('#908 CHARACTERIZATION: testnet activation is untouched by the floor', async () => {
       mockDb({}) // chain 84532, owner only = 1 signer, no waiver
       mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: true })

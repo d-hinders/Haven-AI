@@ -17,6 +17,7 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '../lib/address.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
+import { isValueBearingChain, signerFloorError } from '../lib/mainnet-gate.js'
 import { computeHybridAccountAddress, type PasskeySigner } from '../lib/hybrid-provisioning.js'
 
 interface CreateHybridBody {
@@ -24,6 +25,13 @@ interface CreateHybridBody {
   name?: string
   owner_address?: string
   passkeys?: Array<{ key_id?: string; x?: string; y?: string }>
+  /**
+   * #908 mainnet gate: explicit acknowledgment that a single-signer account
+   * has no recovery — "losing my only device loses this account". Required
+   * to provision a value-bearing-chain account with fewer than two signers;
+   * ignored on testnets. Recorded durably (user_safes.single_signer_waiver_at).
+   */
+  single_signer_waiver?: { acknowledged?: boolean }
 }
 
 const HEX_COORD_RE = /^0x[0-9a-fA-F]{1,64}$/
@@ -33,15 +41,9 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
 
   app.post<{ Body: CreateHybridBody }>('/hybrid', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { chain_id, name, owner_address, passkeys } = request.body ?? {}
+    const { chain_id, name, owner_address, passkeys, single_signer_waiver } = request.body ?? {}
 
     const chainId = chain_id ?? 84532
-    if (!DELEGATION_RAIL_CHAIN_IDS.has(chainId)) {
-      return reply.code(400).send({
-        error: `Hybrid accounts are not available on chain ${chainId} yet`,
-        supported: [...DELEGATION_RAIL_CHAIN_IDS],
-      })
-    }
     if (owner_address !== undefined && !isValidAddress(owner_address)) {
       return reply.code(400).send({ error: 'owner_address must be a valid address' })
     }
@@ -57,6 +59,23 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     }
     if (!owner_address && parsedPasskeys.length === 0) {
       return reply.code(400).send({ error: 'at least one owner (owner_address or passkeys) is required' })
+    }
+
+    // ── #908 mainnet signer floor — BEFORE the contract-availability check,
+    // so adding a mainnet entry to the pinned registry can never, on its own,
+    // open mainnet provisioning without this gate.
+    const signerCount = parsedPasskeys.length + (owner_address ? 1 : 0)
+    const waiverAcknowledged = single_signer_waiver?.acknowledged === true
+    const floorBlock = signerFloorError({ chainId, signerCount, waiverAcknowledged })
+    if (floorBlock) {
+      return reply.code(403).send({ error: floorBlock })
+    }
+
+    if (!DELEGATION_RAIL_CHAIN_IDS.has(chainId)) {
+      return reply.code(400).send({
+        error: `Hybrid accounts are not available on chain ${chainId} yet`,
+        supported: [...DELEGATION_RAIL_CHAIN_IDS],
+      })
     }
 
     let accountAddress: string
@@ -87,13 +106,19 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     )
     const isFirst = firstCheck.rows[0]?.count === '0'
 
+    // Record the waiver ONLY when it actually gated something: a value-bearing
+    // chain below the signer floor (#908 — "recorded, signed-off"). Testnet
+    // requests and ≥2-signer accounts never carry one.
+    const recordWaiver =
+      waiverAcknowledged && isValueBearingChain(chainId) && signerCount < 2
+
     const result = await pool.query<{ id: string; created_at: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail, owner_address)
-       VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6)
+      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail, owner_address, single_signer_waiver_at)
+       VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6, $7)
        RETURNING id, created_at`,
       // owner_address: the EOA owner for treasury ops (#828 revoke). A pure-
       // passkey account has none — its config lives in hybrid_account_passkeys.
-      [sub, accountAddress, chainId, name?.trim() || 'My account', isFirst, owner_address?.toLowerCase() ?? null],
+      [sub, accountAddress, chainId, name?.trim() || 'My account', isFirst, owner_address?.toLowerCase() ?? null, recordWaiver ? new Date().toISOString() : null],
     )
     const userSafeId = result.rows[0].id
 

@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-07-12"
+last-verified: "2026-07-14"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -177,7 +177,7 @@ Haven. This is inherent to self-custody, not a Haven policy. Mitigation is
 structural: onboarding nudges a backup, the account blocks dropping below the
 safe floor, and copy never promises recovery Haven cannot deliver.
 
-## 7. Mainnet-gate criterion (recorded)
+## 7. Mainnet-gate criterion (recorded — and enforced)
 
 Before any account holds **mainnet** funds:
 
@@ -187,3 +187,26 @@ Before any account holds **mainnet** funds:
 > account"). The enrollment nudge is not sufficient on its own for mainnet —
 > the ≥2 floor (or the explicit waiver) is a launch gate, tracked on the
 > mainnet decision issue (#908).
+
+**The mechanism (implemented, #908):** `lib/mainnet-gate.ts` enforces the floor
+at both authority moments — **provisioning** (`POST /accounts/hybrid`) and
+**grant activation** (`POST /agents/:id/delegations/:hash/activate`), the
+moment a delegation becomes live spend authority. Properties:
+
+- **Fail-closed chain classification:** a chain is value-bearing unless it is a
+  *known testnet* — an unregistered chain id inherits the mainnet floor rather
+  than slipping past it.
+- **Registry-independent ordering:** the routes run the floor *before* the
+  pinned-contracts availability check, so adding Base mainnet to
+  `delegation-contracts.ts` can never, on its own, open mainnet without the
+  floor.
+- **The waiver is recorded, not implied:** provisioning below the floor on a
+  value-bearing chain requires `single_signer_waiver: { acknowledged: true }`
+  in the request and stamps `user_safes.single_signer_waiver_at` (migration
+  046); activation reads that column back. Testnet accounts never carry one.
+- **Testnets are untouched:** single-signer dev/QA accounts remain exactly as
+  cheap as before — the floor is a mainnet launch criterion, not a general
+  restriction.
+
+Remaining for the UI (when mainnet onboarding opens): a first-class backup
+step or an explicit waiver screen — the API refuses either way.

@@ -64,6 +64,7 @@ function mockDb(opts: {
   stored?: Record<string, unknown> | null
   owner?: string | null
   passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
+  waiverAt?: string | null
 } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
@@ -83,6 +84,10 @@ function mockDb(opts: {
     }
     if (/FROM hybrid_account_passkeys/.test(s)) {
       return Promise.resolve({ rows: opts.passkeys ?? [] })
+    }
+    // #908 activation gate: the recorded single-signer waiver lookup.
+    if (/single_signer_waiver_at/.test(s)) {
+      return Promise.resolve({ rows: [{ single_signer_waiver_at: opts.waiverAt ?? null }] })
     }
     if (/SELECT delegation_json, status/.test(s) || /SELECT id, delegation_json/.test(s)) {
       return Promise.resolve({ rows: opts.stored === null ? [] : [opts.stored ?? {
@@ -395,6 +400,52 @@ describe('delegation lifecycle API (#828)', () => {
         ownerAddress: undefined,
         passkeys: [{ keyId: 'cred-1', x: 0x11n, y: 0x22n }],
       }, TREASURY)
+    })
+
+    it('#908: blocks activation for a single-signer MAINNET account without a recorded waiver', async () => {
+      mockDb({ agent: agentRow({ chain_id: 8453 }) }) // owner only = 1 signer
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(403)
+      expect(res.json().error).toMatch(/at least 2 enrolled signers/)
+      // Fail-closed BEFORE any chain interaction and before activation:
+      expect(mockEnsureDeployed).not.toHaveBeenCalled()
+      expect(mockQuery.mock.calls.some((c) => /SET\s+status = 'active'/.test(String(c[0])))).toBe(false)
+    })
+
+    it('#908: a recorded waiver lets a single-signer mainnet account activate', async () => {
+      mockDb({ agent: agentRow({ chain_id: 8453 }), waiverAt: '2026-07-14T00:00:00Z' })
+      mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: true })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(200)
+    })
+
+    it('#908: two signers (owner + passkey) activate on mainnet with no waiver', async () => {
+      mockDb({
+        agent: agentRow({ chain_id: 8453 }),
+        passkeys: [{ key_id: 'cred-1', public_key_x: '0x11', public_key_y: '0x22' }],
+      })
+      mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: true })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(200)
+    })
+
+    it('#908 CHARACTERIZATION: testnet activation is untouched by the floor', async () => {
+      mockDb({}) // chain 84532, owner only = 1 signer, no waiver
+      mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: true })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(200)
     })
 
     it('500s on owner→address derivation mismatch rather than activating an unusable grant (#860)', async () => {

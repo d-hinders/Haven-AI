@@ -35,6 +35,7 @@ import { getChain } from '../lib/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../lib/hybrid-provisioning.js'
 import { loadHybridOwnerConfig, isPasskeyOnly } from '../lib/hybrid-account-config.js'
+import { signerFloorError } from '../lib/mainnet-gate.js'
 import {
   buildBudgetDelegation,
   buildRevocation,
@@ -464,6 +465,28 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           error: 'Account signer configuration unknown — cannot deploy this account',
         })
       }
+
+      // ── #908 mainnet signer floor at the AUTHORITY moment ──
+      // Provisioning gates new rows, but activation is where a delegation
+      // becomes live spend authority — enforce the floor here too so accounts
+      // created by older code (or any other path) cannot operate under-floor
+      // on a value-bearing chain without a recorded waiver.
+      const signerCount =
+        (owner.config.passkeys?.length ?? 0) + (owner.config.ownerAddress ? 1 : 0)
+      const waiverRow = await pool.query<{ single_signer_waiver_at: string | null }>(
+        `SELECT single_signer_waiver_at FROM user_safes
+         WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`,
+        [sub, agent.treasury_address, agent.chain_id],
+      )
+      const floorBlock = signerFloorError({
+        chainId: agent.chain_id,
+        signerCount,
+        waiverAcknowledged: waiverRow.rows[0]?.single_signer_waiver_at != null,
+      })
+      if (floorBlock) {
+        return reply.code(403).send({ error: floorBlock })
+      }
+
       try {
         const deployed = await ensureHybridDeployed(
           agent.chain_id,

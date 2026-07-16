@@ -2,16 +2,17 @@
 owner: "@d-hinders"
 status: research
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-06-28"
+last-verified: "2026-07-16"
 ---
 
 # Spike — Fortnox non-asserting feed mechanism (#494)
 
-> Status: **spike / design decision.** Resolves *how* Haven feeds a settled agent
-> payment into Fortnox as a non-asserting transaction (epic #491). Recommendation
-> below is high-confidence on ranking, but the final pick must be validated
-> against a Fortnox sandbox — that live step needs a Fortnox developer app and
-> can't be done from here.
+> Status: **VALIDATED LIVE 2026-07-16** against a Fortnox test environment
+> (developer app "Haven", sandbox company "Haven") via
+> `npm run pilot:fortnox` — the pilot runs the PRODUCTION connector code
+> (#496, `lib/reporting/fortnox-connector.ts`). Verdicts on every open
+> question are recorded at the bottom. The supplier-invoice recommendation
+> HELD.
 
 ## The question
 
@@ -109,6 +110,27 @@ ReportingTransaction {
 4. **Scopes** required (supplier invoice + file connection) on top of the existing
    Bookkeeping scope.
 5. Receipt **file-connection** flow end-to-end (`Inbox_v` upload → connect Id).
+
+## Sandbox verdicts (2026-07-16 — closes the open questions)
+
+1. **Unattested: CONFIRMED.** The API-created supplier invoice lands with
+   `Booked: false`, `VoucherNumber: null` — nothing is asserted until a human
+   attests and bookkeeps. The non-asserting invariant holds live.
+2. **Already-paid semantics: option (b), accepted.** The invoice carries an
+   open AP `Balance` (10.42 in the probe); the accountant reconciles the
+   payment leg when coding. `DueDate = InvoiceDate` and the comment says
+   "already settled on-chain". No dedicated "externally paid" creation path
+   surfaced; revisit only if accountants report friction.
+3. **Idempotency ref: CONFIRMED.** `ExternalInvoiceNumber = HAVEN-<paymentId>`
+   round-trips exactly on read-back. (The dedup ledger #497 remains the
+   idempotency guarantee; this is the belt to its braces.)
+4. **Scopes: CONFIRMED.** `bookkeeping supplierinvoice supplier archive` all
+   granted through consent (archive is pre-staged for #498 receipts).
+5. **Live gotcha (found by the probe, fixed in the adapter):** Fortnox rejects
+   several non-alphanumeric characters in `Comments` — middle dots and `://`
+   both trip error 2000359 ("Värdet innehåller ej tillåtna tecken"). The
+   adapter's `feedDescription` emits plain ASCII sentences and the resource
+   HOST rather than the full URL.
 
 ## References
 

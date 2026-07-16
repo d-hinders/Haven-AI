@@ -121,10 +121,14 @@ describe('FortnoxConnector (#496)', () => {
     const tx = toReportingTransaction({
       ...TX,
       settledAt: new Date('2026-07-16T09:24:00.000Z') as unknown as string,
+      fxAt: new Date('2026-07-16T09:24:00.000Z') as unknown as string,
       counterparty: TX.counterparty,
       resourceUrl: TX.resourceUrl,
       account: null,
     } as never)
+    // fxAt is the same pg passthrough — normalized at the boundary too, so the
+    // #498 underlag renders ISO timestamps, not JS Date strings.
+    expect(tx.fxAt).toBe('2026-07-16T09:24:00.000Z')
     const res = await new FortnoxConnector(impl).pushTransaction('u1', tx)
     expect(res.status).toBe('pushed')
     const payload = JSON.parse(
@@ -215,6 +219,18 @@ describe('FortnoxConnector (#496)', () => {
     expect(JSON.parse(String(connect.init?.body))).toEqual({
       SupplierInvoiceFileConnection: { SupplierInvoiceNumber: '777', FileId: 'file-abc' },
     })
+  })
+
+  it('a failed receipt LOOKUP degrades to its own note — never "no receipt exists" (#498)', async () => {
+    mockLoadUnderlag.mockRejectedValue(new Error('db down'))
+    const { impl } = fetchStub({
+      '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '42', Name: 'NordShield VPN' }] } }),
+      '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 777 } } }),
+    })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
+    expect(res.status).toBe('pushed')
+    expect(res.externalRef).toBe('fortnox:supplierinvoice:777')
+    expect(res.note).toBe('receipt lookup failed: db down')
   })
 
   it('a failed attachment NEVER fails the push — degrades to a note (#498)', async () => {

@@ -187,7 +187,9 @@ async function main() {
 
   console.log('\n── Q5 (#498): is the receipt underlag connected to the invoice? ──')
   console.log(`push note: ${result.note ?? '(none — attachment succeeded)'}`)
-  const connRes = await fetch(`${FORTNOX_API_BASE}/supplierinvoicefileconnections`, {
+  // limit=500 (Fortnox max) — default page size is 100, and a false
+  // NOT ATTACHED from pagination would be a misleading verdict.
+  const connRes = await fetch(`${FORTNOX_API_BASE}/supplierinvoicefileconnections?limit=500`, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
   })
   const connBody = (await connRes.json()) as {

@@ -107,10 +107,12 @@ describe('loadReceiptUnderlag', () => {
     expect(params).toEqual(['evidence-1', 'u1'])
   })
 
-  it('returns null (never throws) when the evidence row is missing or the query fails', async () => {
+  it('returns null when the evidence row is missing, but THROWS on a query failure', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] })
     expect(await loadReceiptUnderlag('u1', TX)).toBeNull()
+    // A DB blip must not masquerade as "no receipt exists" — the caller turns
+    // the throw into a distinct 'receipt lookup failed' note.
     mockQuery.mockRejectedValueOnce(new Error('db down'))
-    expect(await loadReceiptUnderlag('u1', TX)).toBeNull()
+    await expect(loadReceiptUnderlag('u1', TX)).rejects.toThrow('db down')
   })
 })

@@ -235,9 +235,17 @@ export class FortnoxConnector implements AccountingConnector {
     if (!accessToken) {
       return { externalRef: null, status: 'skipped', reason: 'not_connected' }
     }
-    // Resolve the underlag up front (never throws — null degrades to a note).
-    const underlag = await loadReceiptUnderlag(userId, tx)
-    return this.pushWithToken(accessToken, tx, underlag)
+    // Resolve the underlag up front. A lookup FAILURE must not read as "no
+    // receipt exists" in the audit trail — carry the real reason as the note.
+    let underlag: ReceiptUnderlag | null = null
+    let lookupNote: string | undefined
+    try {
+      underlag = await loadReceiptUnderlag(userId, tx)
+    } catch (err) {
+      lookupNote = `receipt lookup failed: ${err instanceof Error ? err.message : String(err)}`
+    }
+    const result = await this.pushWithToken(accessToken, tx, underlag)
+    return lookupNote && result.status === 'pushed' ? { ...result, note: lookupNote } : result
   }
 
   /**

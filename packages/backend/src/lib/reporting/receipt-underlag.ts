@@ -116,7 +116,9 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
   ]
   return {
     // ASCII-only filename; Fortnox rejects exotic characters in metadata too.
-    filename: `haven-receipt-${data.paymentId.replace(/[^A-Za-z0-9._-]/g, '_')}.pdf`.slice(0, 100),
+    // Cap the id part, never the extension — an extensionless upload risks
+    // rejection at the inbox.
+    filename: `haven-receipt-${data.paymentId.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80)}.pdf`,
     pdf: receiptPdf(lines),
   }
 }
@@ -134,43 +136,41 @@ interface UnderlagSourceRow {
  * Load + render the underlag for a feed transaction. `receiptRef` is the
  * `machine_payment_evidence` row id (see `AccountingEntry.receiptRef`);
  * authorization details join in from the payment intent when there is one.
- * Returns null (never throws) when the evidence row is missing — the caller
- * degrades to feeding without an attachment and records that.
+ * Returns null when the evidence row genuinely does not exist. A query
+ * failure THROWS — the caller must degrade with a "lookup failed" note, not a
+ * false "no receipt exists" diagnosis (the attachment is unrecoverable once
+ * the invoice is posted, so the audit trail must state the real reason).
  */
 export async function loadReceiptUnderlag(
   userId: string,
   tx: ReportingTransaction,
 ): Promise<ReceiptUnderlag | null> {
-  try {
-    const result = await pool.query<UnderlagSourceRow>(
-      `SELECT mpe.tx_hash, mpe.chain_id, mpe.merchant_address,
-              pi.sign_hash, pi.signature, pi.delegate_address
-       FROM machine_payment_evidence mpe
-       LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
-       WHERE mpe.id = $1 AND mpe.user_id = $2`,
-      [tx.receiptRef, userId],
-    )
-    const row = result.rows[0]
-    if (!row) return null
-    return underlagFromData({
-      paymentId: tx.paymentId,
-      settledAt: tx.settledAt,
-      token: tx.token,
-      amountAtomic: tx.amountAtomic,
-      amountSek: tx.amountSek,
-      fxRate: tx.fxRate,
-      fxSource: tx.fxSource,
-      fxAt: tx.fxAt,
-      merchantName: tx.counterparty.name,
-      merchantAddress: tx.counterparty.address ?? row.merchant_address,
-      resourceUrl: tx.resourceUrl,
-      chainId: row.chain_id,
-      txHash: row.tx_hash,
-      delegate: row.delegate_address,
-      signHash: row.sign_hash,
-      signature: row.signature,
-    })
-  } catch {
-    return null
-  }
+  const result = await pool.query<UnderlagSourceRow>(
+    `SELECT mpe.tx_hash, mpe.chain_id, mpe.merchant_address,
+            pi.sign_hash, pi.signature, pi.delegate_address
+     FROM machine_payment_evidence mpe
+     LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
+     WHERE mpe.id = $1 AND mpe.user_id = $2`,
+    [tx.receiptRef, userId],
+  )
+  const row = result.rows[0]
+  if (!row) return null
+  return underlagFromData({
+    paymentId: tx.paymentId,
+    settledAt: tx.settledAt,
+    token: tx.token,
+    amountAtomic: tx.amountAtomic,
+    amountSek: tx.amountSek,
+    fxRate: tx.fxRate,
+    fxSource: tx.fxSource,
+    fxAt: tx.fxAt,
+    merchantName: tx.counterparty.name,
+    merchantAddress: tx.counterparty.address ?? row.merchant_address,
+    resourceUrl: tx.resourceUrl,
+    chainId: row.chain_id,
+    txHash: row.tx_hash,
+    delegate: row.delegate_address,
+    signHash: row.sign_hash,
+    signature: row.signature,
+  })
 }

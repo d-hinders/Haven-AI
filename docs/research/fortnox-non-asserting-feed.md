@@ -154,14 +154,21 @@ Semantics locked by tests:
   returned as `PushResult.note` and recorded by the orchestrator on the
   (pushed) sync row's `error` column — observable in the Reporting UI, but not
   retryable (a retry would double-post the invoice).
-- **Scope:** requires `inbox` (portal permission "Inkorg") — `FORTNOX_SCOPE`
-  widened; connections consented before the widening degrade to note-only
-  attachment until the user reconnects.
+- **Scope:** requires `inbox` (portal permission "Inkorg") AND `connectfile`
+  — proven live 2026-07-16: with only `supplierinvoice`+`inbox` the inbox
+  upload succeeds but the file-connection POST fails 400 "Har inte behörighet
+  för scope" [2000663], settling the API docs' ambiguity (they list supplier
+  invoice file connections under both scopes). `FORTNOX_SCOPE` widened;
+  connections consented before the widening degrade to note-only attachment
+  until the user reconnects.
 - **ASCII discipline** (gotcha 5) extends to the PDF text and filename.
 
-Live validation: `npm run pilot:fortnox` now proves Q5 (attach + read-back of
-the file connection) alongside Q1–Q4. Status: **pending its live sandbox run**
-(needs "Inkorg" ticked on the integration + re-consent).
+Live validation: **Q5 CONFIRMED 2026-07-16** — `npm run pilot:fortnox` pushed
+an invoice with the underlag PDF attached and read the file connection back
+(`FileId` + filename on the invoice; visible under Bilagor in the sandbox UI).
+The same day's first run (before the `connectfile` grant) also proved the
+degradation semantics live: invoice pushed, attachment blocked, actionable
+note on the result — exactly the designed failure mode.
 
 ## References
 

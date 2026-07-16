@@ -34,7 +34,12 @@ export interface ReportingTransaction {
 export function toReportingTransaction(entry: AccountingEntry): ReportingTransaction {
   return {
     paymentId: entry.paymentId,
-    settledAt: entry.settledAt,
+    // The type says ISO string, but the entry builder hands through pg's
+    // timestamptz values, which arrive as Date objects at runtime — found
+    // live on the first real feed (tx.settledAt.slice is not a function).
+    // Normalize at this boundary so every connector downstream gets the
+    // contract the type promises.
+    settledAt: new Date(entry.settledAt).toISOString(),
     direction: entry.direction,
     counterparty: { address: entry.counterparty.address, name: entry.counterparty.name },
     resourceUrl: entry.resourceUrl,

@@ -67,7 +67,10 @@ export function supplierNameFor(tx: ReportingTransaction): string {
   if (tx.counterparty.name) return tx.counterparty.name.slice(0, 100)
   if (tx.counterparty.address) {
     const a = tx.counterparty.address
-    return `Merchant ${a.slice(0, 6)}…${a.slice(-4)}`
+    // ASCII hyphen, NOT the app's canonical … ellipsis: Fortnox rejects it in
+    // the supplier Name too (error 2000359 — found live on the first real
+    // feed, 2026-07-16, same class as the Comments gotcha).
+    return `Merchant ${a.slice(0, 6)}-${a.slice(-4)}`
   }
   return 'Unknown merchant'
 }

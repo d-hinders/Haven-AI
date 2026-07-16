@@ -185,9 +185,10 @@ describe('helpers', () => {
 
   it('supplierNameFor falls back from name to truncated address to unknown', () => {
     expect(supplierNameFor(TX)).toBe('NordShield VPN')
-    expect(supplierNameFor({ ...TX, counterparty: { name: null, address: '0x' + 'ab'.repeat(20) } })).toMatch(
-      /^Merchant 0xabab/,
-    )
+    const fallback = supplierNameFor({ ...TX, counterparty: { name: null, address: '0x' + 'ab'.repeat(20) } })
+    expect(fallback).toMatch(/^Merchant 0xabab/)
+    // Fortnox-safe: no Unicode ellipsis in the Name field (live gotcha 2000359).
+    expect(fallback).not.toMatch(/…/)
     expect(supplierNameFor({ ...TX, counterparty: { name: null, address: null } })).toBe('Unknown merchant')
   })
 })

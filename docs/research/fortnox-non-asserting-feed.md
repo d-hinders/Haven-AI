@@ -163,10 +163,12 @@ Semantics locked by tests:
   until the user reconnects.
 - **ASCII discipline** (gotcha 5) extends to the PDF text and filename.
 
-Live validation: `npm run pilot:fortnox` proves Q5 (attach + read-back of the
-file connection) alongside Q1–Q4. The 2026-07-16 run also proved the
-degradation semantics live: invoice pushed, attachment blocked on the missing
-scope, actionable note on the result — exactly the designed failure mode.
+Live validation: **Q5 CONFIRMED 2026-07-16** — `npm run pilot:fortnox` pushed
+an invoice with the underlag PDF attached and read the file connection back
+(`FileId` + filename on the invoice; visible under Bilagor in the sandbox UI).
+The same day's first run (before the `connectfile` grant) also proved the
+degradation semantics live: invoice pushed, attachment blocked, actionable
+note on the result — exactly the designed failure mode.
 
 ## References
 

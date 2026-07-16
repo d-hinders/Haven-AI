@@ -100,6 +100,28 @@ describe('FortnoxConnector (#496)', () => {
     expect(payload.Comments).toMatch(/pay-123/)
   })
 
+  it('handles a Date-typed settledAt (pg timestamptz reality, found live)', async () => {
+    const { impl, calls } = fetchStub({
+      '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '42', Name: 'NordShield VPN' }] } }),
+      '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 780 } } }),
+    })
+    // Simulate the orchestrator boundary: pg hands Date, the boundary normalizes.
+    const { toReportingTransaction } = await import('../reporting-transaction.js')
+    const tx = toReportingTransaction({
+      ...TX,
+      settledAt: new Date('2026-07-16T09:24:00.000Z') as unknown as string,
+      counterparty: TX.counterparty,
+      resourceUrl: TX.resourceUrl,
+      account: null,
+    } as never)
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', tx)
+    expect(res.status).toBe('pushed')
+    const payload = JSON.parse(
+      String(calls.find((c) => c.url.includes('/supplierinvoices'))!.init?.body),
+    ).SupplierInvoice
+    expect(payload.InvoiceDate).toBe('2026-07-16')
+  })
+
   it('creates the supplier when no exact-name match exists', async () => {
     const { impl, calls } = fetchStub({
       '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '9', Name: 'Other Co' }] } }),

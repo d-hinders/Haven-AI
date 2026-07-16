@@ -5,17 +5,21 @@ covers:
   - packages/backend/src/lib/accounting-entry.ts
   - packages/backend/src/lib/fortnox-connection.ts
   - packages/backend/src/lib/reporting/reporting-transaction.ts
-last-verified: "2026-06-28"
+last-verified: "2026-07-16"
 ---
 
 # Architecture — accounting data feed (Fortnox-first, hosted add-on)
 
-> Status: **design proposal.** Forward-looking; tracked by epic
-> [#491](https://github.com/d-hinders/Haven-AI/issues/491). Re-aims the
-> bookkeeping work in [`bookkeeping-ready-export.md`](./bookkeeping-ready-export.md)
-> (#462) from *asserting finished books* to *feeding clean transaction data* the
-> accountant codes. Reuses the data layer already shipped; changes the output and
-> the packaging.
+> Status: **BUILT & LIVE-PROVEN (2026-07-16).** Epic
+> [#491](https://github.com/d-hinders/Haven-AI/issues/491) is fully shipped —
+> all ten sub-issues closed, and the whole chain proven against a real Fortnox
+> sandbox: a live x402 agent payment auto-fed as an unattested supplier
+> invoice **with the receipt underlag attached** (#496/#498; verdicts in
+> [`fortnox-non-asserting-feed.md`](./fortnox-non-asserting-feed.md)). This doc
+> re-aimed the bookkeeping work in
+> [`bookkeeping-ready-export.md`](./bookkeeping-ready-export.md) (#462) from
+> *asserting finished books* to *feeding clean transaction data* the
+> accountant codes; it now serves as the architecture record.
 
 ## 1. TL;DR / recommendation
 
@@ -226,7 +230,9 @@ short-circuits any re-push. (Issue #497.)
 **Built (#498):** the verifiable receipt (#486) is rendered as a small PDF
 (`lib/reporting/receipt-underlag.ts`) and attached to the supplier invoice via
 Fortnox inbox upload + `supplierinvoicefileconnections` (requires the `inbox`
-scope). Strictly best-effort: a missing receipt or failed attachment never
+AND `connectfile` scopes — the latter proven live, see
+`fortnox-non-asserting-feed.md`). Strictly best-effort: a missing receipt or
+failed attachment never
 blocks the feed — the invoice still pushes, and the degradation is recorded as
 a note on the (pushed) sync row, visible in the Reporting UI. See
 `fortnox-non-asserting-feed.md` §"Receipt attachment".

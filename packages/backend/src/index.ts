@@ -40,6 +40,9 @@ import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
 import fortnoxRoutes from './routes/fortnox.js'
 import reportingRoutes from './routes/reporting.js'
+import { registerConnector } from './lib/reporting/connector.js'
+import { FortnoxConnector } from './lib/reporting/fortnox-connector.js'
+import { fortnoxConfigured } from './lib/fortnox-connection.js'
 import { refreshCatalog, type QueryableLike } from './lib/merchant-catalog.js'
 import { ingestDiscoveredCatalog } from './lib/catalog-discovery.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
@@ -185,6 +188,13 @@ await app.register(analyticsRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
 await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
 await app.register(reportingRoutes, { prefix: '/accounting/reporting' })
+// #496: the live Fortnox feed adapter. Registering it flips hasLiveConnector()
+// → true, which removes the Reporting page's "preview" banner. Gated on env:
+// deployments without Fortnox credentials keep the feed inert (no-op), same
+// posture as before this landed.
+if (fortnoxConfigured()) {
+  registerConnector(new FortnoxConnector())
+}
 // Public demo — no auth hook, registered separately
 await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
 

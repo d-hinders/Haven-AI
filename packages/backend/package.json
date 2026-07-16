@@ -22,7 +22,8 @@
     "ops:check-bundler": "tsx scripts/check-bundler.ts",
     "ops:check-delegation": "tsx scripts/check-delegation-contracts.ts",
     "ops:check-delegate-balances": "tsx scripts/check-delegate-balances.ts",
-    "db:schema-smoke": "tsx scripts/db-schema-smoke.ts"
+    "db:schema-smoke": "tsx scripts/db-schema-smoke.ts",
+    "pilot:fortnox": "tsx scripts/fortnox-sandbox-validation.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

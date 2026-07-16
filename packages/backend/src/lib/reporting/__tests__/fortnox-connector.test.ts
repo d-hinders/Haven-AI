@@ -5,15 +5,19 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockGetToken, mockGetConn, mockConfigured } = vi.hoisted(() => ({
+const { mockGetToken, mockGetConn, mockConfigured, mockLoadUnderlag } = vi.hoisted(() => ({
   mockGetToken: vi.fn(),
   mockGetConn: vi.fn(),
   mockConfigured: vi.fn(),
+  mockLoadUnderlag: vi.fn(),
 }))
 vi.mock('../../fortnox-connection.js', () => ({
   getValidFortnoxAccessToken: (...a: unknown[]) => mockGetToken(...a),
   getFortnoxConnection: (...a: unknown[]) => mockGetConn(...a),
   fortnoxConfigured: () => mockConfigured(),
+}))
+vi.mock('../receipt-underlag.js', () => ({
+  loadReceiptUnderlag: (...a: unknown[]) => mockLoadUnderlag(...a),
 }))
 
 const {
@@ -60,8 +64,10 @@ beforeEach(() => {
   mockGetToken.mockReset()
   mockGetConn.mockReset()
   mockConfigured.mockReset()
+  mockLoadUnderlag.mockReset()
   mockGetToken.mockResolvedValue('token-1')
   mockConfigured.mockReturnValue(true)
+  mockLoadUnderlag.mockResolvedValue(null)
 })
 
 describe('FortnoxConnector (#496)', () => {
@@ -80,7 +86,12 @@ describe('FortnoxConnector (#496)', () => {
       '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 777 } } }),
     })
     const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
-    expect(res).toEqual({ externalRef: 'fortnox:supplierinvoice:777', status: 'pushed' })
+    // No underlag resolved → pushed with an observable degradation note (#498).
+    expect(res).toEqual({
+      externalRef: 'fortnox:supplierinvoice:777',
+      status: 'pushed',
+      note: 'receipt not attached: no receipt available for this payment',
+    })
 
     const post = calls.find((c) => c.url.includes('/supplierinvoices'))!
     const payload = JSON.parse(String(post.init?.body)).SupplierInvoice
@@ -110,10 +121,14 @@ describe('FortnoxConnector (#496)', () => {
     const tx = toReportingTransaction({
       ...TX,
       settledAt: new Date('2026-07-16T09:24:00.000Z') as unknown as string,
+      fxAt: new Date('2026-07-16T09:24:00.000Z') as unknown as string,
       counterparty: TX.counterparty,
       resourceUrl: TX.resourceUrl,
       account: null,
     } as never)
+    // fxAt is the same pg passthrough — normalized at the boundary too, so the
+    // #498 underlag renders ISO timestamps, not JS Date strings.
+    expect(tx.fxAt).toBe('2026-07-16T09:24:00.000Z')
     const res = await new FortnoxConnector(impl).pushTransaction('u1', tx)
     expect(res.status).toBe('pushed')
     const payload = JSON.parse(
@@ -182,6 +197,55 @@ describe('FortnoxConnector (#496)', () => {
     ).SupplierInvoice
     expect(payload).not.toHaveProperty('Account')
     expect(payload.YourReference).toBe('suggested account 6540')
+  })
+
+  it('attaches the receipt underlag: inbox upload + file connection (#498)', async () => {
+    mockLoadUnderlag.mockResolvedValue({ filename: 'haven-receipt-pay-123.pdf', pdf: Buffer.from('%PDF-fake') })
+    const { impl, calls } = fetchStub({
+      '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '42', Name: 'NordShield VPN' }] } }),
+      '/supplierinvoicefileconnections': () => ({ body: {} }),
+      '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 777 } } }),
+      '/inbox': () => ({ body: { File: { Id: 'file-abc' } } }),
+    })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
+    // Fully attached — no degradation note.
+    expect(res).toEqual({ externalRef: 'fortnox:supplierinvoice:777', status: 'pushed' })
+
+    const upload = calls.find((c) => c.url.endsWith('/inbox'))!
+    expect(upload.init?.method).toBe('POST')
+    expect(upload.init?.body).toBeInstanceOf(FormData)
+
+    const connect = calls.find((c) => c.url.includes('/supplierinvoicefileconnections'))!
+    expect(JSON.parse(String(connect.init?.body))).toEqual({
+      SupplierInvoiceFileConnection: { SupplierInvoiceNumber: '777', FileId: 'file-abc' },
+    })
+  })
+
+  it('a failed receipt LOOKUP degrades to its own note — never "no receipt exists" (#498)', async () => {
+    mockLoadUnderlag.mockRejectedValue(new Error('db down'))
+    const { impl } = fetchStub({
+      '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '42', Name: 'NordShield VPN' }] } }),
+      '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 777 } } }),
+    })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
+    expect(res.status).toBe('pushed')
+    expect(res.externalRef).toBe('fortnox:supplierinvoice:777')
+    expect(res.note).toBe('receipt lookup failed: db down')
+  })
+
+  it('a failed attachment NEVER fails the push — degrades to a note (#498)', async () => {
+    mockLoadUnderlag.mockResolvedValue({ filename: 'haven-receipt-pay-123.pdf', pdf: Buffer.from('%PDF-fake') })
+    const { impl } = fetchStub({
+      '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '42', Name: 'NordShield VPN' }] } }),
+      '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 777 } } }),
+      // Pre-widening consent without the inbox scope lands exactly here.
+      '/inbox': () => ({ status: 403, body: { ErrorInformation: { message: 'missing scope', code: 2000663 } } }),
+    })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
+    expect(res.status).toBe('pushed')
+    expect(res.externalRef).toBe('fortnox:supplierinvoice:777')
+    expect(res.note).toMatch(/receipt attachment failed/)
+    expect(res.note).toMatch(/missing scope/)
   })
 })
 

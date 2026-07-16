@@ -67,7 +67,7 @@ describe('feed orchestrator (#499)', () => {
     const c = connectInMemory()
     await feedSettledPayment(USER, PID)
     expect(c.pushed).toHaveLength(1)
-    expect(mocks.markPushed).toHaveBeenCalledWith(USER, 'memory', PID, `mem:${USER}:${PID}`)
+    expect(mocks.markPushed).toHaveBeenCalledWith(USER, 'memory', PID, `mem:${USER}:${PID}`, null)
   })
 
   it('skips (no claim) when book-time SEK is missing', async () => {

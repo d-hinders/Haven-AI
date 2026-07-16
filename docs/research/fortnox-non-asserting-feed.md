@@ -130,7 +130,38 @@ ReportingTransaction {
    several non-alphanumeric characters in `Comments` — middle dots and `://`
    both trip error 2000359 ("Värdet innehåller ej tillåtna tecken"). The
    adapter's `feedDescription` emits plain ASCII sentences and the resource
-   HOST rather than the full URL.
+   HOST rather than the full URL. The same restriction applies to the supplier
+   `Name` field (found on the first real feed — the app's canonical `…`
+   ellipsis in the address fallback tripped it; ASCII hyphen now).
+
+## Receipt attachment — the underlag (#498, built 2026-07-16)
+
+The mechanism chosen: render the **verifiable payment receipt** (#486) as a
+small dependency-free PDF (`lib/reporting/receipt-underlag.ts` — payment,
+book-time SEK + FX provenance, merchant, on-chain tx hash, authorization
+signature, and a pointer to independent verification via
+`verifyPaymentReceipt` in `@haven_ai/sdk`), then in the connector after the
+invoice is created:
+
+1. `POST /3/inbox` (multipart) — upload the PDF to the Fortnox Inbox.
+2. `POST /3/supplierinvoicefileconnections` — connect the returned `File.Id`
+   to the invoice's `GivenNumber`.
+
+Semantics locked by tests:
+
+- **Strictly best-effort.** The invoice is the delivered value; a missing
+  receipt or failed upload/connection NEVER fails the push. The degradation is
+  returned as `PushResult.note` and recorded by the orchestrator on the
+  (pushed) sync row's `error` column — observable in the Reporting UI, but not
+  retryable (a retry would double-post the invoice).
+- **Scope:** requires `inbox` (portal permission "Inkorg") — `FORTNOX_SCOPE`
+  widened; connections consented before the widening degrade to note-only
+  attachment until the user reconnects.
+- **ASCII discipline** (gotcha 5) extends to the PDF text and filename.
+
+Live validation: `npm run pilot:fortnox` now proves Q5 (attach + read-back of
+the file connection) alongside Q1–Q4. Status: **pending its live sandbox run**
+(needs "Inkorg" ticked on the integration + re-consent).
 
 ## References
 

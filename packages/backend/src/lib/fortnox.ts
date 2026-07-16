@@ -17,10 +17,14 @@ export const FORTNOX_API_BASE = 'https://api.fortnox.se/3'
 // rather than vouchers, and #498 attaches the receipt underlag via the INBOX
 // (upload + supplierinvoicefileconnections). Scopes must match the
 // integration's registered permissions in the developer portal (Bokföring,
-// Leverantörsfaktura, Leverantör, Arkivplats, Inkorg). Widening the scope
-// requires existing connections to re-consent; pre-widening connections
-// degrade to note-only attachment (see fortnox-connector.ts).
-export const FORTNOX_SCOPE = 'bookkeeping supplierinvoice supplier archive inbox'
+// Leverantörsfaktura, Leverantör, Arkivplats, Inkorg, Koppla filer).
+// `connectfile` is REQUIRED for supplierinvoicefileconnections — proven live
+// 2026-07-16: with only `supplierinvoice`+`inbox` the upload succeeds but the
+// connection POST fails 400 "Har inte behörighet för scope" [2000663].
+// Widening the scope requires existing connections to re-consent;
+// pre-widening connections degrade to note-only attachment
+// (see fortnox-connector.ts).
+export const FORTNOX_SCOPE = 'bookkeeping supplierinvoice supplier archive inbox connectfile'
 export const FORTNOX_VOUCHER_SERIES = 'A'
 
 export interface FortnoxCredentials {

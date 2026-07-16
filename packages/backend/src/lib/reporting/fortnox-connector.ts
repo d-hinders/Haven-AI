@@ -9,6 +9,7 @@ import {
 } from '../fortnox-connection.js'
 import type { AccountingConnector, PushResult } from './connector.js'
 import type { ReportingTransaction } from './reporting-transaction.js'
+import { loadReceiptUnderlag, type ReceiptUnderlag } from './receipt-underlag.js'
 
 /**
  * Fortnox feed adapter (epic #491, P1 #496) — the first live
@@ -34,7 +35,15 @@ import type { ReportingTransaction } from './reporting-transaction.js'
  * carries `HAVEN-<paymentId>` so a duplicate is also *detectable* in Fortnox
  * itself (best-effort belt to the ledger's braces).
  *
- * Receipt attachment (the underlag) is #498 — not in this adapter yet.
+ * Receipt attachment (the underlag, #498): after the invoice is created the
+ * verifiable receipt is rendered as a small PDF (`receipt-underlag.ts`),
+ * uploaded to the Fortnox **Inbox** and connected to the invoice via
+ * `supplierinvoicefileconnections`. Attachment is strictly best-effort — a
+ * missing receipt or a failed upload NEVER fails the push (the invoice is
+ * already the delivered value); the degradation is carried back on
+ * `PushResult.note` and recorded on the sync row for observability. Requires
+ * the `inbox` OAuth scope — connections consented before the scope widened
+ * degrade to note-only until the user reconnects.
  */
 
 /** Fortnox supplier invoices identify our feed rows. Max 50 chars per API. */
@@ -149,6 +158,40 @@ async function fortnoxPost<T>(
   return (await res.json()) as T
 }
 
+/** Upload a PDF to the Fortnox Inbox; returns the file id to connect with. */
+async function fortnoxUploadPdf(
+  accessToken: string,
+  underlag: ReceiptUnderlag,
+  fetchImpl: typeof fetch,
+): Promise<string> {
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(underlag.pdf)], { type: 'application/pdf' }), underlag.filename)
+  let res: Response
+  try {
+    // No explicit Content-Type: fetch sets the multipart boundary itself.
+    res = await fetchImpl(`${FORTNOX_API_BASE}/inbox`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+      body: form,
+    })
+  } catch (err) {
+    throw new FortnoxError(`Could not reach Fortnox: ${err instanceof Error ? err.message : String(err)}`, 0)
+  }
+  if (!res.ok) {
+    const detail = await res
+      .json()
+      .then((b) => (b as { ErrorInformation?: { message?: string; code?: number } }).ErrorInformation)
+      .catch(() => undefined)
+    throw new FortnoxError(
+      `Fortnox inbox upload failed (HTTP ${res.status}${detail?.message ? `: ${detail.message}` : ''}${detail?.code ? ` [${detail.code}]` : ''}).`,
+      res.status,
+    )
+  }
+  const body = (await res.json()) as { File?: { Id?: string } }
+  if (!body.File?.Id) throw new FortnoxError('Fortnox inbox upload returned no file id.', 0)
+  return body.File.Id
+}
+
 export class FortnoxConnector implements AccountingConnector {
   provider = 'fortnox'
 
@@ -192,7 +235,9 @@ export class FortnoxConnector implements AccountingConnector {
     if (!accessToken) {
       return { externalRef: null, status: 'skipped', reason: 'not_connected' }
     }
-    return this.pushWithToken(accessToken, tx)
+    // Resolve the underlag up front (never throws — null degrades to a note).
+    const underlag = await loadReceiptUnderlag(userId, tx)
+    return this.pushWithToken(accessToken, tx, underlag)
   }
 
   /**
@@ -200,7 +245,11 @@ export class FortnoxConnector implements AccountingConnector {
    * validation pilot (scripts/fortnox-sandbox-validation.ts), so the live
    * round-trip exercises EXACTLY the production payload construction.
    */
-  async pushWithToken(accessToken: string, tx: ReportingTransaction): Promise<PushResult> {
+  async pushWithToken(
+    accessToken: string,
+    tx: ReportingTransaction,
+    underlag: ReceiptUnderlag | null = null,
+  ): Promise<PushResult> {
     // The orchestrator gates on FX-ready, but the connector re-checks: a feed
     // row without a book-time SEK amount cannot be a usable source document.
     if (tx.amountSek == null) {
@@ -239,9 +288,37 @@ export class FortnoxConnector implements AccountingConnector {
       this.fetchImpl,
     )
     const givenNumber = created.SupplierInvoice?.GivenNumber
+
+    // #498: attach the receipt underlag — strictly best-effort. The invoice is
+    // the delivered value; any attachment problem becomes an observable note.
+    let note: string | undefined
+    if (givenNumber == null) {
+      note = 'receipt not attached: Fortnox returned no invoice number'
+    } else if (!underlag) {
+      note = 'receipt not attached: no receipt available for this payment'
+    } else {
+      try {
+        const fileId = await fortnoxUploadPdf(accessToken, underlag, this.fetchImpl)
+        await fortnoxPost(
+          accessToken,
+          '/supplierinvoicefileconnections',
+          {
+            SupplierInvoiceFileConnection: {
+              SupplierInvoiceNumber: String(givenNumber),
+              FileId: fileId,
+            },
+          },
+          this.fetchImpl,
+        )
+      } catch (err) {
+        note = `receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`
+      }
+    }
+
     return {
       externalRef: givenNumber != null ? `fortnox:supplierinvoice:${givenNumber}` : null,
       status: 'pushed',
+      ...(note ? { note } : {}),
     }
   }
 }

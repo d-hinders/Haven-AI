@@ -39,6 +39,14 @@ describe('feed-sync dedup ledger (#497)', () => {
     await markPushed('u1', 'fortnox', 'pi1', 'voucher-42')
     expect(mockQuery.mock.calls[0][0]).toContain("status = 'pushed'")
     expect((mockQuery.mock.calls[0][1] as unknown[])[3]).toBe('voucher-42')
+    expect((mockQuery.mock.calls[0][1] as unknown[])[4]).toBeNull()
+
+    // #498: a non-fatal note (e.g. failed receipt attachment) rides the error
+    // column on a PUSHED row — observable, but never retryable.
+    mockQuery.mockReset().mockResolvedValue({ rows: [] })
+    await markPushed('u1', 'fortnox', 'pi1', 'voucher-42', 'receipt attachment failed: x')
+    expect(mockQuery.mock.calls[0][0]).toContain("status = 'pushed'")
+    expect((mockQuery.mock.calls[0][1] as unknown[])[4]).toBe('receipt attachment failed: x')
 
     mockQuery.mockReset().mockResolvedValue({ rows: [] })
     await markFailed('u1', 'fortnox', 'pi1', 'boom')

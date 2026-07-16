@@ -20,9 +20,9 @@ export default async function reportingRoutes(app: FastifyInstance): Promise<voi
   // GET /accounting/reporting/status
   app.get('/status', async (request) => {
     const { sub } = request.user as { sub: string }
-    // `liveSyncReady` is false until the live Fortnox adapter (#496/#498) is
-    // registered — the UI uses it to flag that sync is a preview that does not
-    // yet deliver to an external tool. See lib/reporting/connector.ts.
+    // `liveSyncReady` is true when the live Fortnox adapter (#496/#498) is
+    // registered (i.e. Fortnox is configured) — false flags the UI that sync
+    // is a preview not delivering anywhere. See lib/reporting/connector.ts.
     const base = {
       hosted: config.hosted,
       flagEnabled: config.reportingFeedEnabled,

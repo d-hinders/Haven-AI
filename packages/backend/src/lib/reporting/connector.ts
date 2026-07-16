@@ -14,6 +14,12 @@ export interface PushResult {
   externalRef: string | null
   status: 'pushed' | 'skipped'
   reason?: string
+  /**
+   * Non-fatal degradation on a successful push (#498) — e.g. the receipt
+   * attachment failed or no receipt existed. Recorded on the sync row so the
+   * state is observable; the push itself still counts as delivered.
+   */
+  note?: string
 }
 
 export interface AccountingConnector {
@@ -26,18 +32,15 @@ export interface AccountingConnector {
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 //
-// NOTE — live integration is intentionally NOT wired up yet (epic #491).
-// No production `AccountingConnector` is registered: the Fortnox feed adapter
-// (#496) and its receipt attachment (#498) are deferred to a follow-up because
-// validating the non-asserting push + the "already-paid supplier invoice"
-// semantics requires a live Fortnox sandbox / developer app (see the open
-// questions in `docs/research/fortnox-non-asserting-feed.md`).
+// The live Fortnox adapter (#496, receipt attachment #498) is registered at
+// startup when Fortnox is configured — see `registerConnector` in
+// `src/index.ts`. Sandbox-validated live 2026-07-16
+// (`docs/research/fortnox-non-asserting-feed.md`, "Sandbox verdicts").
 //
-// Until a real connector is registered here, `hasLiveConnector()` returns false,
-// the orchestrator (`getActiveConnector`) finds nothing, and the Reporting UI
-// shows a "preview — not yet delivering to Fortnox" notice. Everything around
-// the connector (gating, dedup ledger, orchestration, UI) is built and tested
-// against the `InMemoryConnector`; only the live adapter is outstanding.
+// If no real connector is registered (Fortnox not configured),
+// `hasLiveConnector()` returns false, the orchestrator (`getActiveConnector`)
+// finds nothing, and the Reporting UI shows a "preview — not yet delivering
+// to Fortnox" notice.
 
 const registry = new Map<string, AccountingConnector>()
 

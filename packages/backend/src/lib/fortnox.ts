@@ -14,11 +14,13 @@ export const FORTNOX_AUTHORIZE_URL = 'https://apps.fortnox.se/oauth-v1/auth'
 export const FORTNOX_TOKEN_URL = 'https://apps.fortnox.se/oauth-v1/token'
 export const FORTNOX_API_BASE = 'https://api.fortnox.se/3'
 // #496: the feed adapter creates unattested SUPPLIER INVOICES (+ suppliers)
-// rather than vouchers, and #498 will attach receipts via the archive. Scopes
-// must match the integration's registered permissions in the developer portal
-// (Bokföring, Leverantörsfaktura, Leverantör, Arkivplats). Widening the scope
-// requires existing connections to re-consent.
-export const FORTNOX_SCOPE = 'bookkeeping supplierinvoice supplier archive'
+// rather than vouchers, and #498 attaches the receipt underlag via the INBOX
+// (upload + supplierinvoicefileconnections). Scopes must match the
+// integration's registered permissions in the developer portal (Bokföring,
+// Leverantörsfaktura, Leverantör, Arkivplats, Inkorg). Widening the scope
+// requires existing connections to re-consent; pre-widening connections
+// degrade to note-only attachment (see fortnox-connector.ts).
+export const FORTNOX_SCOPE = 'bookkeeping supplierinvoice supplier archive inbox'
 export const FORTNOX_VOUCHER_SERIES = 'A'
 
 export interface FortnoxCredentials {

@@ -8,6 +8,10 @@
  *   Q2  Already-paid semantics: what state does the invoice land in?
  *   Q3  Is ExternalInvoiceNumber a usable idempotency ref (readable back)?
  *   Q4  Are the widened scopes (supplierinvoice, supplier, archive) granted?
+ *   Q5  (#498) Does the receipt-underlag PDF attach via inbox upload +
+ *       supplierinvoicefileconnections? Requires the `inbox` scope — tick
+ *       "Inkorg" on the integration in the developer portal and re-consent
+ *       (--serve) before running.
  *
  * Usage (tokens live in ~/.haven/fortnox-sandbox.json — never in the repo):
  *   npm run pilot:fortnox -- --authorize          # print the consent URL
@@ -29,6 +33,7 @@ import {
   FORTNOX_API_BASE,
 } from '../src/lib/fortnox.js'
 import { FortnoxConnector, externalInvoiceNumber } from '../src/lib/reporting/fortnox-connector.js'
+import { underlagFromData } from '../src/lib/reporting/receipt-underlag.js'
 import type { ReportingTransaction } from '../src/lib/reporting/reporting-transaction.js'
 
 const TOKEN_PATH = path.join(homedir(), '.haven', 'fortnox-sandbox.json')
@@ -129,8 +134,29 @@ async function main() {
     suggestedAccount: '6540',
   }
 
-  console.log('── Push via the PRODUCTION connector path ──')
-  const result = await connector.pushWithToken(accessToken, tx)
+  // #498: the underlag PDF, rendered exactly as production does (synthetic
+  // on-chain fields — this is a sandbox validation payment, not a real one).
+  const underlag = underlagFromData({
+    paymentId,
+    settledAt: tx.settledAt,
+    token: tx.token,
+    amountAtomic: tx.amountAtomic,
+    amountSek: tx.amountSek,
+    fxRate: tx.fxRate,
+    fxSource: tx.fxSource,
+    fxAt: tx.fxAt,
+    merchantName: tx.counterparty.name,
+    merchantAddress: tx.counterparty.address,
+    resourceUrl: tx.resourceUrl,
+    chainId: 84532,
+    txHash: '0x' + 'cd'.repeat(32),
+    delegate: '0x' + 'ef'.repeat(20),
+    signHash: '0x' + '12'.repeat(32),
+    signature: '0x' + '34'.repeat(65),
+  })
+
+  console.log('── Push via the PRODUCTION connector path (with receipt underlag) ──')
+  const result = await connector.pushWithToken(accessToken, tx, underlag)
   console.log('push result:', result)
   if (result.status !== 'pushed' || !result.externalRef) process.exit(1)
   const givenNumber = result.externalRef.split(':').pop()
@@ -158,6 +184,21 @@ async function main() {
   const rerun = await connector.pushWithToken(accessToken, tx)
   console.log('rerun result:', rerun, '(a second invoice is EXPECTED here — the dedup ledger,')
   console.log(' not the connector, is the idempotency guarantee; this proves supplier find-or-create)')
+
+  console.log('\n── Q5 (#498): is the receipt underlag connected to the invoice? ──')
+  console.log(`push note: ${result.note ?? '(none — attachment succeeded)'}`)
+  const connRes = await fetch(`${FORTNOX_API_BASE}/supplierinvoicefileconnections`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+  })
+  const connBody = (await connRes.json()) as {
+    SupplierInvoiceFileConnections?: Array<{ SupplierInvoiceNumber?: string; FileId?: string }>
+  }
+  const attached = (connBody.SupplierInvoiceFileConnections ?? []).filter(
+    (c) => String(c.SupplierInvoiceNumber) === String(givenNumber),
+  )
+  console.log(JSON.stringify(attached, null, 2))
+  console.log(`Q5 verdict: ${attached.length > 0 ? 'ATTACHED' : 'NOT ATTACHED'} — invoice ${givenNumber} has ${attached.length} file connection(s)`)
+  console.log('Open the invoice in the sandbox UI to see the PDF under Bilagor.')
 
   console.log('\nDone. Record the verdicts on #496 and in docs/research/fortnox-non-asserting-feed.md.')
 }

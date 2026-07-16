@@ -223,10 +223,13 @@ short-circuits any re-push. (Issue #497.)
 
 ### 9.3 Receipt / underlag attachment
 
-Attach the verifiable receipt (#486) to the fed transaction when the chosen
-mechanism supports it; otherwise include a stable receipt **link** in the
-reference and record the degradation. A missing receipt (e.g. FX/receipt not yet
-available) never blocks the feed — the sync stays retryable. (Issue #498.)
+**Built (#498):** the verifiable receipt (#486) is rendered as a small PDF
+(`lib/reporting/receipt-underlag.ts`) and attached to the supplier invoice via
+Fortnox inbox upload + `supplierinvoicefileconnections` (requires the `inbox`
+scope). Strictly best-effort: a missing receipt or failed attachment never
+blocks the feed — the invoice still pushes, and the degradation is recorded as
+a note on the (pushed) sync row, visible in the Reporting UI. See
+`fortnox-non-asserting-feed.md` §"Receipt attachment".
 
 ## 10. Dashboard — "Reporting"
 

@@ -48,7 +48,7 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
   try {
     const result = await connector.pushTransaction(userId, tx)
     if (result.status === 'pushed' || result.status === 'skipped') {
-      await markPushed(userId, connector.provider, paymentId, result.externalRef)
+      await markPushed(userId, connector.provider, paymentId, result.externalRef, result.note ?? null)
     } else {
       await markFailed(userId, connector.provider, paymentId, result.reason ?? 'push_failed')
     }

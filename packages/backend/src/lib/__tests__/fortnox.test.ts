@@ -46,9 +46,9 @@ describe('buildFortnoxAuthorizeUrl', () => {
     const url = new URL(buildFortnoxAuthorizeUrl(CREDS, 'state123'))
     expect(url.searchParams.get('client_id')).toBe('cid')
     expect(url.searchParams.get('redirect_uri')).toBe('https://app/cb')
-    // #496 widened the scope: the feed adapter needs supplier invoices +
-    // suppliers, and #498 will need the archive for receipt attachment.
-    expect(url.searchParams.get('scope')).toBe('bookkeeping supplierinvoice supplier archive')
+    // #496 widened the scope (supplier invoices + suppliers), and #498 added
+    // the inbox for receipt attachment (upload + file connection).
+    expect(url.searchParams.get('scope')).toBe('bookkeeping supplierinvoice supplier archive inbox')
     expect(url.searchParams.get('state')).toBe('state123')
     expect(url.searchParams.get('response_type')).toBe('code')
     expect(url.searchParams.get('access_type')).toBe('offline')

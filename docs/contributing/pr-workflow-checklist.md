@@ -6,7 +6,8 @@ covers:
   - .github/pull_request_template.md
   - package.json
   - .agents/skills/haven-agent-workflow/references/reviewer.md
-last-verified: "2026-06-30"
+  - .agents/skills/haven-agent-workflow/references/design-reviewer.md
+last-verified: "2026-07-18"
 ---
 
 # PR Workflow Checklist
@@ -79,6 +80,8 @@ Good split examples:
 - Include a merge-readiness section using the template below for non-trivial PRs.
 - Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches.
 - If browser verification is skipped for UI, routing, modal, setup-flow, or animation work, add the smallest headless equivalent that covers the skipped risk and name it in the PR.
+- For frontend diffs touching a rendered route or a shared primitive, attach rendered-screen evidence (`npm run screenshot -w packages/frontend -- <routes>`, desktop + mobile PNGs) and get a `haven-design-reviewer` pass over the screenshots in addition to `haven-reviewer` — a finding from either pauses auto-merge (`ship-playbooks/frontend.md`).
+- If the PR adds a `ui/` or `haven/` primitive, document it on `/design-system` in the same PR — the design-system coupling gate flags a missing showcase entry (advisory PR comment; hard gate under ship-next via `npm run design:coupling -w packages/frontend -- --strict`; escape: `// design-system-exempt: <reason>`).
 - If SDK/API behavior, credential semantics, x402/MPP behavior, setup prompts, or product language changes, review generated credential files, `.env` examples, SDK snippets, demo scripts, and skill bundles.
 - Use `haven-reviewer` before requesting review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
 - If this PR includes a follow-up commit that fixes a bug the original commits introduced, the fix commit must include the smallest regression test (typically a vitest case) that would have caught it. If no such test is practical, document why in the commit body. Every recent "Address reviewer findings" commit that compounded into durable quality landed 2–4 targeted vitest cases alongside the fix.
@@ -90,7 +93,8 @@ Good split examples:
 - Re-run the relevant local checks if the branch changed after review.
 - If the PR started stacked, re-open or retarget it so the final merge path is into `dev`.
 - Verify that merging this PR will trigger the expected deployment branch.
-- For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green.
+- For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green. `money-path` PRs shipped through `ship-next` additionally require in-session user approval before merge (`ship-playbooks/money.md`); DB migrations are hard-gated by a code-owner review.
+- If the PR intentionally changes what `/design-system` renders, regenerate the visual-regression baselines via the *Update visual baselines* workflow_dispatch on the PR branch (never commit macOS-rendered baselines), and confirm the *Design visual regression* check is green on the head SHA before calling the PR shipped.
 
 ## Merge Readiness Report
 
@@ -115,10 +119,10 @@ Use the smallest reliable set that matches the change.
 
 | Change type | Commands |
 | --- | --- |
-| Docs, prompts, or PR template only | `git diff --check` |
+| Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment) |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
 | Backend/API | `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` |
-| Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
+| Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, and `npm run build -w packages/sdk` |
 | Cross-package or release-risk | `npm run quality` |
 | Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:desktop -w packages/frontend` when the local Playwright server is working |
@@ -127,7 +131,9 @@ Notes:
 
 - `npm run quality` means typecheck, unit tests, and builds across workspaces.
 - Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with one exception: editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Editing `.github/workflows/*.yml` triggers full workflow checks.
-- Frontend lint is not a required gate yet because `next lint` currently prompts for ESLint setup. Add lint only after a dedicated non-interactive lint migration.
+- Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only.
+- Auto-merge is gated by the required checks in the **"Haven automerge rules"** ruleset (per-surface checks plus *Design visual regression* and *Banned product-copy terms*) — see `docs/contributing/autonomous-pr-loop.md` §One-time setup. A "blocking" job not in that list is advisory in practice.
+- Every PR also gets two advisory sticky comments: doc↔code coupling (docs whose `covers:` match changed code the PR didn't touch — update the flagged doc in the same PR) and design-system coupling.
 - Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.
 
 ## Team Habits That Help

@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-07-10"
+last-verified: "2026-07-18"
 ---
 
 # Haven
@@ -39,7 +39,8 @@ Safe AllowanceModule -> On-chain agent budget enforcement
 API auth is identity. Signature is authority. On-chain module state is enforcement.
 
 Haven runs **two on-chain policy rails**, both non-custodial. The line above is
-the **session/AllowanceModule rail** (existing accounts). New accounts are
+the **legacy AllowanceModule rail** (import-only, existing accounts; the Smart
+Sessions session rail is retired, #834). New accounts are
 provisioned on the **delegation rail** (epic #821): the Haven wallet is a MetaMask
 Hybrid DeleGator smart account and the budget is a signed delegation with audited
 caveat enforcers (period budget with native refill, optional recipient pin,
@@ -55,13 +56,15 @@ This is a TypeScript monorepo:
 
 | Package | Description |
 |---|---|
-| `packages/backend` | Fastify API for auth, Haven wallets, agents, approvals, payments, x402/MPP demos, receipts, and OpenAPI |
+| `packages/backend` | Fastify API for auth, Haven wallets, agents, approvals, payments, x402/MPP demos, receipts, the Fortnox reporting feed, and OpenAPI |
 | `packages/frontend` | Next.js dashboard for Haven accounts, Haven wallets, agent rules, connect-agent handoff, approvals, and activity |
 | `packages/sdk` | `@haven_ai/sdk` for direct agent integrations, tool definitions, x402/MPP quote/pay/resume helpers, and payment state handling |
 | `packages/mcp` | `@haven_ai/mcp` local stdio MCP server that reads a local credential file and signs locally |
 | `packages/mcp-server` | `@haven_ai/mcp-server` hosted/keyless Streamable HTTP MCP server that constructs and relays but never signs |
 | `packages/signer` | `@haven_ai/signer` local edge signer used with hosted MCP; it holds the delegate key locally and exposes sign-only tools |
+| `packages/cli` | `@haven_ai/cli` terminal-native, scriptable parallel to the dashboard (login, reads, backend-only management) |
 | `packages/demo-merchant-mcp` | Internal x402 demo merchant MCP server for Base USDC test purchases and Swedish invoice output |
+| `packages/qa-agent` | Internal QA harness for the dev environment: deterministic money-flow scenarios and dev seeding (not published) |
 
 ## Team Docs
 
@@ -423,7 +426,7 @@ Response on success:
 | Command | What it does |
 |---|---|
 | `npm run dev` | Start backend + frontend in dev mode |
-| `npm run build` | Build SDK, MCP packages, signer, backend, and frontend |
+| `npm run build` | Build SDK, connect, MCP packages, signer, CLI, backend, and frontend |
 | `npm run test` | Run workspace tests where configured |
 | `npm run typecheck` | Run workspace type checks |
 | `npm run quality` | Run typecheck, tests, and full build |
@@ -451,7 +454,9 @@ Haven-AI/
 |   |-- mcp/                   # Local stdio MCP server; signs locally from a credential file
 |   |-- mcp-server/            # Hosted/keyless Streamable HTTP MCP server
 |   |-- signer/                # Local edge signer paired with hosted MCP
-|   `-- demo-merchant-mcp/     # Internal x402 merchant MCP demo
+|   |-- cli/                   # @haven_ai/cli terminal parallel to the dashboard
+|   |-- demo-merchant-mcp/     # Internal x402 merchant MCP demo
+|   `-- qa-agent/              # Internal QA harness (not published)
 |-- .env.example               # Environment variable template
 `-- docker-compose.yml         # PostgreSQL for local dev
 ```
@@ -479,7 +484,8 @@ Haven-AI/
 - **Fastify** — backend API
 - **Next.js 15** — frontend dashboard
 - **PostgreSQL** — agents, policies, payment intents, approvals, receipts, audit trail
-- **Safe SDK + AllowanceModule** — smart account + on-chain spending limits
+- **Safe SDK + AllowanceModule** — smart account + on-chain spending limits (legacy rail)
+- **MetaMask smart-accounts-kit + permissionless** — Hybrid DeleGator delegation rail
 - **wagmi + viem** — wallet connection + blockchain interaction
 - **ethers v6** — backend blockchain operations
 - **Model Context Protocol** — local and hosted agent tool connections
@@ -489,7 +495,7 @@ Haven-AI/
 
 ## Contributing — Hosted Setup & Dev Workflow
 
-Haven runs in production on **Vercel** (frontend) and **Railway** (backend + Postgres). Two long-lived branches deploy: **`dev`** auto-deploys to the shared **dev environment**, and **`main`** auto-deploys to **production**. The four published npm packages (`@haven_ai/sdk`, `signer`, `mcp`, `connect`) are also published automatically from `main` on a version bump — see [Releasing npm packages](#releasing-npm-packages). For the dev environment's setup and env vars, see [`docs/operations/dev-environment.md`](docs/operations/dev-environment.md).
+Haven runs in production on **Vercel** (frontend) and **Railway** (backend + Postgres). Two long-lived branches deploy: **`dev`** auto-deploys to the shared **dev environment**, and **`main`** auto-deploys to **production**. The five published npm packages (`@haven_ai/sdk`, `signer`, `mcp`, `connect`, `cli`) are also published automatically from `main` on a version bump — see [Releasing npm packages](#releasing-npm-packages). For the dev environment's setup and env vars, see [`docs/operations/dev-environment.md`](docs/operations/dev-environment.md).
 
 ### Repository workflow
 
@@ -536,7 +542,7 @@ If you need an env var changed in Railway or a secret rotated, ping the project 
 
 ### Releasing npm packages
 
-The four npx-installed packages — `@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect` — are published to npm automatically. **You never run `npm publish` by hand.**
+The five npx-installed packages — `@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect`, `@haven_ai/cli` — are published to npm automatically. **You never run `npm publish` by hand.**
 
 ```bash
 # 1. Bump all published packages atomically (versions, cross-package pins,
@@ -550,7 +556,7 @@ On merge, the **Publish packages** workflow (`.github/workflows/publish.yml`) re
 
 - **Trigger model:** version bump = the gate. npm rejects republishing an existing version, so a normal (non-bump) commit is a no-op.
 - **Auth:** [npm Trusted Publishing (OIDC)](https://docs.npmjs.com/trusted-publishers) — there is **no `NPM_TOKEN` secret**. The workflow grants the job `id-token: write` and upgrades npm to ≥ 11.5.1; npm then authenticates the short-lived GitHub Actions OIDC token against a *trusted publisher* configured per package on npm (pointing at `d-hinders/Haven-AI` + workflow `publish.yml`). Nothing to leak or rotate, and it's exempt from the 2FA one-time-password prompt that blocks token-based publishes.
-- **Provenance:** Trusted Publishing auto-generates a signed [sigstore provenance](https://docs.npmjs.com/generating-provenance-statements) statement. npm rejects the upload (`E422`) unless each `package.json` declares a `repository.url` (with the monorepo `directory`) matching the repo — all four packages carry this.
+- **Provenance:** Trusted Publishing auto-generates a signed [sigstore provenance](https://docs.npmjs.com/generating-provenance-statements) statement. npm rejects the upload (`E422`) unless each `package.json` declares a `repository.url` (with the monorepo `directory`) matching the repo — each published package must carry this.
 - **Adding a new published package?** Before its first release, (1) configure a trusted publisher for it on npm (package → Settings → Trusted Publisher → GitHub Actions: `d-hinders` / `Haven-AI` / `publish.yml`), and (2) give its `package.json` a `repository` block. Skipping either makes the first publish fail — on auth (`EOTP`/OIDC) or provenance (`E422`) respectively.
 - **Not published this way:** `mcp-server` (Docker → Railway), `backend`, and `frontend` (Vercel/Railway) deploy from branches directly — `main` to production and `dev` to the shared dev environment.
 - Full details, the dist-wipe rationale, and a manual fallback live in [`scripts/README.md`](scripts/README.md).

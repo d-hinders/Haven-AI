@@ -12,7 +12,7 @@ covers:
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-07-01"
+last-verified: "2026-07-18"
 ---
 
 # Loop Harness Index

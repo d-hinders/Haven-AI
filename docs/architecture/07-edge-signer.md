@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-07-10"
+last-verified: "2026-07-18"
 ---
 
 # Haven — Edge Signer
@@ -182,6 +182,14 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
 
 ## Scope Notes
 
+- The edge-signer surface serves the **legacy AllowanceModule rail**.
+  Delegation-rail payments (#829/#830) sign the account's EIP-712 typed data
+  verbatim via the SDK — `HavenClient` dispatches on
+  `sign_data.signature_scheme` (`eip712_userop` for payments,
+  `eip712_delegation` for x402 settlement) to
+  `signUserOpTypedDataForDelegation` — and are not exposed as edge-signer or
+  hosted-MCP tools today. The retired session rail's `eip191_userop` scheme is
+  refused (#834).
 - Regular payment/AllowanceModule-hash signing is chain-neutral; the
   backend-provided payload and on-chain wallet rules define the transfer.
 - Standard merchant-verifiable x402 is exact-scheme USDC on Base and Base

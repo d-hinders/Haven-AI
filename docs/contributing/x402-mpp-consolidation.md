@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-07-01"
+last-verified: "2026-07-18"
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)
@@ -46,6 +46,13 @@ conditional-heavy common handler.
 
 Delegate balance is coverage for an approval request, not permission to bypass
 the configured allowance.
+
+Both strategies apply to the legacy AllowanceModule rail only. Delegation-rail
+requests (#830) branch before coverage: they reuse `createPaymentIntent` (with
+`execution_rail='delegation'` and a prepared settlement delegation) but skip
+`decideCoverage` entirely — budget, recipient, and expiry are enforced on-chain
+by the caveat enforcers, with no approval queue. Retired session-rail intents
+get HTTP 410 before any coverage decision (#834).
 
 ## Deliberate boundaries
 

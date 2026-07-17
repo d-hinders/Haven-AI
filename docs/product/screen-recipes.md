@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/lib/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-06-29"
+last-verified: "2026-07-18"
 ---
 
 # Haven Screen Recipes
@@ -87,7 +87,7 @@ Structure:
 2. Primary configuration card for the agent name, Haven wallet, token, amount, and reset period.
 3. Agent rules summary showing the budget in human terms.
 4. Risk explainer that states when Haven will ask for approval.
-5. Primary action: `Review agent rules`.
+5. Primary action: `Review agent rules` for creation or `Review changes` for edits.
 
 Money and risk clarity:
 - Show the selected Haven wallet before the user reviews.
@@ -110,8 +110,8 @@ Structure:
 2. Summary card answering who can spend, from which Haven wallet, how much, and how often.
 3. Approval note explaining what will happen when a request exceeds the budget.
 4. Secondary technical disclosure only if needed, collapsed or visually subordinate.
-5. Primary action: `Create setup prompt` for creation or `Save changes` for
-   edits.
+5. Primary action: `Create setup prompt` for creation; for edits, `Update
+   budget`/`Add budget` when the budget changed or `Save details` otherwise.
 
 Money and risk clarity:
 - Show whether the agent can make payments automatically within the budget.

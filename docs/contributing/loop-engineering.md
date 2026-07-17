@@ -9,12 +9,12 @@ covers:
   - .github/workflows/ci.yml
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/code-quality-loop.md
-last-verified: "2026-07-01"
+last-verified: "2026-07-18"
 ---
 
 # Loop Engineering (oracle-grounded automated loops)
 
-Last updated: 2026-07-01
+Last updated: 2026-07-18
 
 > **Disambiguation.** Haven uses “loop” in three ways:
 > [`code-quality-loop.md`](./code-quality-loop.md) is a human-curated discovery
@@ -90,6 +90,9 @@ loop-harness/
   <thing>-differential.test.ts   # equivalence ratchet + regression guards
 ```
 
+(The frontend copy keeps the differential test under `loop-harness/__tests__/`
+per that package's test-layout convention; the shape is otherwise identical.)
+
 - **Reference model** — the smallest faithful port of the intended behavior,
   derived independently from the source of truth (e.g. the contract). Document
   where it comes from. Note honestly if it is not machine-certified against the
@@ -115,8 +118,11 @@ can be verified. Therefore:
 
 - Generate cases from a **seed**, never `Math.random()`.
 - Do **not** anchor generated inputs to wall-clock time. Use a fixed epoch
-  constant (see `generators.ts` `BASE_NOW_MIN`) so a reported `seed` reproduces
-  the same case months later.
+  constant (see `BASE_NOW_MIN` in the frontend harness's `generators.ts`) so a
+  reported `seed` reproduces the same case months later. (Known deviation: the
+  backend harness's generator still derives its case base from `Date.now()`, so
+  a backend seed is only stable within a run — worth aligning to the frontend's
+  fixed-epoch approach.)
 - Surface the `seed` (and the minimal inputs) in the failure message.
 
 ## 6. Convergence model

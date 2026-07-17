@@ -58,7 +58,7 @@ covers:
   - docs/architecture/07-edge-signer.md
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-07-12"
+last-verified: "2026-07-18"
 ---
 
 # Haven — Architecture Overview
@@ -90,7 +90,7 @@ with no funding leg and no approval queue. Deep dive:
 
 | Package | One-liner |
 |---|---|
-| `@haven/backend` | Fastify API: auth, Haven wallets/Safes, agents, allowances, approvals, payments, x402/MPP, receipts, catalog, reporting, and [OpenAPI](05-agent-api-openapi.md). |
+| `@haven/backend` | Fastify API: auth, Haven wallets/Safes, agents, allowances, approvals, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `lib/reporting/`), and [OpenAPI](05-agent-api-openapi.md). |
 | `@haven/frontend` | Next.js dashboard: onboarding, wallets, agent rules, approvals, activity, custody/recovery, catalog, and guarded reporting. |
 | `@haven_ai/sdk` | TypeScript agent client plus shared signing, x402, sweep, and payment-state primitives used by direct integrations and the MCP/signer packages. |
 | `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven for wallet approval. |
@@ -134,7 +134,9 @@ on-chain agent rules in Haven → the agent can pay. Current contracts:
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)
   is the dev/QA testnet; **Gnosis Chain** (100) remains supported for existing
   configured Safe flows. Standard merchant x402 is exact-scheme USDC on Base
-  and Base Sepolia ([x402 sequence](04-x402-payment-sequence.md)).
+  and Base Sepolia; delegation-rail accounts settle x402 via ERC-7710 direct
+  settlement (merchant reach still thin — EIP-3009 fallback decided, #946)
+  ([x402 sequence](04-x402-payment-sequence.md)).
 
 For trust boundaries and who-talks-to-who, start at
 [system context](01-system-context.md).

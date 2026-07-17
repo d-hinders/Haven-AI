@@ -11,6 +11,9 @@ covers:
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/reporting.ts
   - packages/backend/src/routes/accounting.ts
+  - packages/backend/src/routes/fortnox.ts
+  - packages/backend/src/lib/fortnox.ts
+  - packages/backend/src/lib/fortnox-connection.ts
   - packages/backend/src/lib/allowance-module.ts
   - packages/backend/src/lib/accounting-entry.ts
   - packages/backend/src/lib/catalog-discovery.ts
@@ -38,7 +41,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-07-12"
+last-verified: "2026-07-18"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -287,6 +290,17 @@ Preferred pattern:
 - Label categories and account mappings as suggestions.
 - Require the user or accountant to review, code, and confirm entries in the accounting system.
 - Obtain separate product and regulatory review before enabling a live connector or any asserted accounting judgment.
+
+**Current state (2026-07, epic #491):** the live Fortnox feed (#496/#498) follows
+the preferred pattern — each settled payment is pushed as an **unattested
+supplier invoice** carrying no account, no VAT, and no voucher rows
+(`assertNonAsserting()` in `lib/reporting/fortnox-connector.ts` makes the
+non-asserting payload a runtime invariant), with the Haven-generated
+payment-evidence PDF attached as underlag. Nothing is booked until a human
+attests it in Fortnox. The earlier asserting voucher-push surface
+(`POST /accounting/fortnox/push`) is disabled by default behind
+`config.legacyBookkeepingEnabled` and returns 410 when off; re-enabling it is a
+review trigger under this red line.
 
 ### 10. Fiat And Card Rails
 

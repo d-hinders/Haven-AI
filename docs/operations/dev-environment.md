@@ -1,6 +1,7 @@
 ---
 owner: "@d-hinders"
 status: current
+contract: true
 covers:
   - .github/workflows/**
   - .env.dev.example

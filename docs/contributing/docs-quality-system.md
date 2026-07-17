@@ -50,6 +50,8 @@ Every doc under `docs/` plus the root gravity files (`CLAUDE.md`, `AGENTS.md`,
 ---
 owner: "@handle"           # who keeps this doc honest
 status: current            # current | research | archived
+contract: true             # OPTIONAL (Phase 4): promotes the coupling gate
+                           # from advisory to BLOCKING for this doc
 covers:                    # repo globs of the code this doc describes
   - packages/backend/src/routes/payments.ts
 last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
@@ -158,8 +160,25 @@ agentic workflow (`ai-agent-workflow.md`) and the autonomous loop
 doc reviewer and update them before opening the PR. Advisory in this phase — it
 never blocks auto-merge.
 
-### Phase 4 — promotion + audit cron (deferred, [#646](https://github.com/d-hinders/Haven-AI/issues/646))
+### Phase 4 — promotion + audit cron ([#646](https://github.com/d-hinders/Haven-AI/issues/646), shipped 2026-07-18)
 
-Promote a short list of contract docs to blocking checks, and add a scheduled
-audit that opens issues for the stalest docs. Deferred until the advisory
-signal from Phases 1–3 is proven low-noise.
+Two mechanisms, both live:
+
+- **Contract docs block.** A doc marked `contract: true` in front-matter is
+  promoted from advisory to blocking: the `Contract-doc coupling` job in
+  `docs-coupling.yml` reruns the gate with `--strict`, which exits 1 when a
+  contract doc's covered code changed but the doc wasn't touched in the PR
+  (a crash also fails closed in strict mode). The fix is always in-PR: update
+  the doc, or genuinely re-verify it and bump `last-verified`. The advisory
+  comment marks contract findings with ⚠️. Initial contract set:
+  `dev-environment`, `branch-and-release-flow`,
+  `delegation-rail-security-model`, `casp-risk-guardrails`,
+  `mcp-runtime-compatibility`. **Operator note:** the check must be added to
+  the "Haven automerge rules" ruleset's required checks — without a paths
+  filter (the #933 lesson).
+- **Weekly staleness audit.** `scripts/docs/audit-staleness.mjs` ranks every
+  covered, non-archived doc by commits touching its `covers:` paths since its
+  `last-verified` date. `docs-audit.yml` runs it Mondays 06:00 UTC and upserts
+  the report into one tracking issue ("Docs staleness audit (weekly)") — a
+  standing queue of which doc is most likely lying, never a spam of new
+  issues. Run it locally anytime: `node scripts/docs/audit-staleness.mjs`.

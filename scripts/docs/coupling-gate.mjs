@@ -78,7 +78,7 @@ export function ageDays(lastVerified, now = Date.now()) {
 export function implicatedDocs(changed, docs, today = new Date().toISOString().slice(0, 10)) {
   const changedSet = new Set(changed)
   const findings = []
-  for (const { doc, covers, lastVerified } of docs) {
+  for (const { doc, covers, lastVerified, contract } of docs) {
     if (changedSet.has(doc)) continue
     if (!covers || covers.length === 0) continue
     if (lastVerified && lastVerified === today) continue
@@ -87,7 +87,9 @@ export function implicatedDocs(changed, docs, today = new Date().toISOString().s
       const re = globToRegExp(glob)
       for (const f of changed) if (re.test(f)) matched.add(f)
     }
-    if (matched.size > 0) findings.push({ doc, lastVerified, matched: [...matched].sort() })
+    if (matched.size > 0) {
+      findings.push({ doc, lastVerified, contract: Boolean(contract), matched: [...matched].sort() })
+    }
   }
   return findings
 }
@@ -108,11 +110,16 @@ async function main() {
       doc: docRel,
       covers: parsed.data.covers || [],
       lastVerified: parsed.data['last-verified'],
+      // Phase 4 (#646): `contract: true` front-matter promotes a doc from
+      // advisory to BLOCKING in --strict mode.
+      contract: parsed.data.contract === 'true',
     })
   }
 
   const findings = implicatedDocs(changed, docs)
   const hasFindings = findings.length > 0
+  const strict = process.argv.includes('--strict')
+  const contractFindings = findings.filter((f) => f.contract)
 
   if (hasFindings) {
     let body = '<!-- docs-coupling-gate -->\n'
@@ -121,16 +128,18 @@ async function main() {
       'This PR changes code that the docs below describe (via their `covers:` ' +
       'front-matter), but those docs were not touched. Please confirm each is ' +
       'still accurate — or update it and bump `last-verified`. ' +
-      '_Advisory only: this never blocks the merge._\n\n'
+      'Docs marked ⚠️ are **contract docs** — the blocking check fails until ' +
+      'they are touched in this PR; the rest are advisory.\n\n'
     for (const f of findings) {
       const age = ageDays(f.lastVerified)
       const ageStr = age === null ? 'unknown' : `${age}d ago`
-      body += `- \`${f.doc}\` (last verified ${f.lastVerified}, ${ageStr})\n`
+      const mark = f.contract ? '⚠️ ' : ''
+      body += `- ${mark}\`${f.doc}\` (last verified ${f.lastVerified}, ${ageStr})\n`
       for (const m of f.matched) body += `  - matched \`${m}\`\n`
     }
     await writeFile(outPath, body, 'utf8')
     console.log(`Coupling gate: ${findings.length} doc(s) may need updating.`)
-    for (const f of findings) console.log(`  - ${f.doc}`)
+    for (const f of findings) console.log(`  - ${f.contract ? '[contract] ' : ''}${f.doc}`)
   } else {
     console.log('Coupling gate: no covered docs implicated by the changed files.')
   }
@@ -138,13 +147,28 @@ async function main() {
   if (process.env.GITHUB_OUTPUT) {
     await appendFile(process.env.GITHUB_OUTPUT, `has_findings=${hasFindings}\n`)
   }
+
+  // Phase 4 (#646): in --strict mode, a contract doc left untouched FAILS the
+  // check. The fix is always the same: update the doc (or genuinely re-verify
+  // it and bump `last-verified`) in this PR.
+  if (strict && contractFindings.length > 0) {
+    console.error(
+      `\nBLOCKING: ${contractFindings.length} contract doc(s) cover changed code ` +
+      'but were not touched in this PR:',
+    )
+    for (const f of contractFindings) console.error(`  - ${f.doc}`)
+    console.error('Update each doc (or re-verify it and bump `last-verified`) and push again.')
+    process.exit(1)
+  }
 }
 
 // Run as CLI only when invoked directly, not when imported by tests.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main().catch((err) => {
-    // Advisory tool: log and exit 0 so it can never block a PR.
-    console.error('coupling-gate error (non-fatal):', err)
-    process.exit(0)
+    // Advisory posture: log and exit 0 so it can never block a PR. In
+    // --strict mode the gate IS blocking, so a crash must fail closed — a
+    // broken gate silently passing is how contract docs rot.
+    console.error('coupling-gate error:', err)
+    process.exit(process.argv.includes('--strict') ? 1 : 0)
   })
 }

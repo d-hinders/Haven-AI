@@ -1,6 +1,7 @@
 ---
 owner: "@d-hinders"
 status: current
+contract: true
 covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/lib/hybrid-account-config.ts

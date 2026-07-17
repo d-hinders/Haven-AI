@@ -1,6 +1,7 @@
 ---
 owner: "@d-hinders"
 status: current
+contract: true
 covers:
   - .github/workflows/dev-gate.yml
   - .github/workflows/release.yml

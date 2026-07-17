@@ -1,6 +1,7 @@
 ---
 owner: "@d-hinders"
 status: current
+contract: true
 covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/x402.ts

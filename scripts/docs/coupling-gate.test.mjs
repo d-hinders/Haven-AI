@@ -67,3 +67,15 @@ test('still flags a doc verified before today', () => {
   const f = implicatedDocs(['packages/backend/src/routes/x402.ts'], DOCS, '2026-06-02')
   assert.deepEqual(f.map((x) => x.doc).sort(), ['docs/architecture/04-x402.md', 'docs/regulatory/casp.md'])
 })
+
+test('carries the contract flag through to findings (#646 strict mode)', () => {
+  const docs = [
+    { doc: 'docs/a.md', covers: ['packages/x/**'], lastVerified: '2026-06-01', contract: true },
+    { doc: 'docs/b.md', covers: ['packages/x/**'], lastVerified: '2026-06-01' },
+  ]
+  const f = implicatedDocs(['packages/x/y.ts'], docs, '2026-06-02')
+  assert.deepEqual(
+    f.map((x) => [x.doc, x.contract]).sort(),
+    [['docs/a.md', true], ['docs/b.md', false]],
+  )
+})

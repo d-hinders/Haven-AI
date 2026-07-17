@@ -13,7 +13,7 @@ covers:
   - packages/frontend/src/app/**
   - packages/frontend/src/components/**
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-06-29"
+last-verified: "2026-07-18"
 ---
 
 # Haven Product & UX Guide
@@ -24,6 +24,7 @@ This is the durable product UX entrypoint for Haven and the index for the `docs/
 - UX copy: [copy-guidelines.md](./copy-guidelines.md)
 - Screen recipes: [screen-recipes.md](./screen-recipes.md)
 - UI review checklist: [design-review.md](./design-review.md)
+- Account recovery (user-facing model): [account-recovery.md](./account-recovery.md)
 - Redesign implementation history (archived): [../archive/redesign-handoff.md](../archive/redesign-handoff.md)
 
 When these docs overlap, use this order of authority:
@@ -42,7 +43,7 @@ The old dark app system is retired. Do not extend old dark token patterns, gradi
 Haven is a fintech product for agent payments. Every UX decision should reinforce three truths:
 
 1. **The user stays in control.** Haven helps users approve and automate payments within rules; it must not imply Haven can move money on its own.
-2. **Agents receive narrow authority, not unrestricted wallet access.** Haven-supported Safe funding follows explicit agent rules. An agent-held signing key may also control a temporary, pre-existing, or residual agent-wallet balance, so recovery and sweep controls must remain clear.
+2. **Agents receive narrow authority, not unrestricted wallet access.** On new accounts that authority is a signed budget delegation enforced on-chain; on legacy imported Safes it is Haven-supported Safe funding under explicit agent rules. An agent-held signing key may also control a temporary, pre-existing, or residual agent-wallet balance, so recovery and sweep controls must remain clear.
 3. **Trust is built in small moments.** Loading states, empty states, review screens, and errors should be calm, specific, and useful.
 
 Use technical infrastructure terms only when they add transparency for a technical or advanced context. Product surfaces should lead with what the user understands and controls.
@@ -101,7 +102,7 @@ Core rules:
 - Primary buttons use solid brand color: `bg-[var(--v2-brand)]` with `hover:bg-[var(--v2-brand-strong)]`.
 - No gradient buttons. The brand gradient is reserved for the app wordmark and one restrained hero accent phrase.
 - Flat cards are white with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
-- Raised cards are prominent white page anchors such as the dashboard balance hero and account total balance.
+- Raised cards are prominent white page anchors such as the account detail total balance card; the dashboard balance hero uses the tinted anchor surface with the raised shadow rather than a white raised card.
 - Other elevations already present in the shared `Card` primitive, including
   the restrained tinted `anchor` tier, must match the live `/design-system`
   reference and remain secondary to the page's primary anchor. The static
@@ -244,7 +245,7 @@ Use [design-review.md](./design-review.md) before calling any UI change done.
 At minimum:
 
 - `rg -n "from-indigo-500 to-violet-600|bg-gradient-to-r from-indigo|bg-gray-|text-gray-|dark:" packages/frontend/src`
-- `rg -i "policy engine|safe deployed|relayer|allowance module|session key|owner type|generate credentials|hand the credential|drop the credential|Haven gave.*private key|Haven (signs|settles|signed)" packages/frontend/src/app packages/frontend/src/components`
+- `rg -i "policy engine|safe deployed|relayer|allowance module|session key|owner type|enroll signer|generate credentials|hand the credential|drop the credential|Haven gave.*private key|Haven (signs|settles|signed)" packages/frontend/src/app packages/frontend/src/components`
 - Inspect `/design-system` before changing shared UI patterns.
 - Check every changed route plus every shared consumer of changed components;
   do not rely on a frozen route inventory.

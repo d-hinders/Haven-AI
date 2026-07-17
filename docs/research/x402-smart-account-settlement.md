@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/lib/allowance-module.ts
   - packages/backend/src/lib/sweep.ts
   - packages/backend/src/lib/machine-payment-evidence.ts
-last-verified: "2026-06-28"
+last-verified: "2026-07-18"
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)
@@ -18,6 +18,17 @@ last-verified: "2026-06-28"
 > a facilitator and is the next execution step, not part of this write-up.
 >
 > Partner-shareable background note (Google Doc) is linked from the issue.
+>
+> **Outcome (2026-07):** the strategic track shipped. ERC-7710 direct
+> settlement is **live** on the delegation rail (#830 —
+> `packages/backend/src/lib/x402-delegation.ts`,
+> `packages/backend/src/routes/x402.ts`), built on the MetaMask Hybrid
+> DeleGator (epic #821) rather than Safe-via-module. The Permit2 track was not
+> pursued. EIP-3009/delegate-EOA remains the default on the legacy
+> AllowanceModule rail (import-only); a delegation-metered **EIP-3009 fallback
+> on the delegation rail** (for merchant reach) is decided but **not built** —
+> RFC #791 §18 / [#946](https://github.com/d-hinders/Haven-AI/issues/946). The
+> sections below are the original investigation, kept as a decision record.
 
 ## 1. TL;DR / recommendation
 
@@ -58,7 +69,8 @@ type X402Rail =
 
 ## 2. Current baseline (grounded in code)
 
-Standard merchant x402 is `Safe → delegate EOA → merchant`:
+Standard merchant x402 on the legacy AllowanceModule rail (now import-only) is
+`Safe → delegate EOA → merchant`:
 
 1. Agent hits a paid resource → HTTP 402; the SDK parses x402 requirements
    ([`packages/sdk/src/x402.ts`](../../packages/sdk/src/x402.ts)).

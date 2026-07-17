@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/lib/fee/fee-module.ts
-last-verified: "2026-07-12"
+last-verified: "2026-07-18"
 ---
 
 # Haven — Architecture

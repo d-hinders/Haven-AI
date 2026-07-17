@@ -23,7 +23,7 @@ covers:
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-07-10"
+last-verified: "2026-07-18"
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)

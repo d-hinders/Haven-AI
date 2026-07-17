@@ -6,7 +6,7 @@ covers:
   - .github/workflows/**
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-06-30"
+last-verified: "2026-07-18"
 ---
 
 # Dev environment
@@ -53,7 +53,10 @@ database, JWT secret, or relayer key.
 - **`main`** auto-deploys to **production**.
 - Feature work flows `feature/* → dev → main`. The **`dev-gate`** workflow
   (`.github/workflows/dev-gate.yml`) only lets `dev` or `hotfix/*` merge into
-  `main`, so the dev environment always reflects merged-and-green `dev`.
+  `main`, so the dev environment always reflects merged-and-green `dev`. It also
+  carries the **money-flow QA freshness gate** (#578): promotion PRs require a
+  recent green `qa-dev.yml` run on `dev` (bypass: `qa-override` label; advisory
+  until added to main's required status checks).
 
 ## Configuration
 
@@ -77,6 +80,12 @@ Isolation rules that are non-negotiable for a payments product:
   multichain backend resolves the relayer **per chain**
   (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678), so a testnet relayer can never
   touch mainnet funds.
+
+The dev backend also runs the **Fortnox bookkeeping integration**: `FORTNOX_*`
+vars (client id/secret + redirect to the dev backend's
+`/accounting/fortnox/callback`) are set on the dev Railway backend, using a
+**separate dev Fortnox app** — never the prod credentials. The feed was
+live-proven against dev on 2026-07-16.
 
 ### The `DEV` badge
 

@@ -21,7 +21,7 @@ covers:
   - .github/workflows/qa-live.yml
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
-last-verified: "2026-07-10"
+last-verified: "2026-07-18"
 ---
 
 <!--
@@ -121,7 +121,7 @@ Record one row per deterministic or manual scenario.
 |---|---|---|---|---|---|---|
 | within-budget direct settle | Settles and is logged | pass/fail/skip | | | | |
 | over-budget direct queue | Queues; never auto-executes | pass/fail/skip | | | | |
-| x402 above-total-coverage reject | Rejects with no signable intent | pass/fail/skip | | | | |
+| x402 over-budget reject | Rejects with no signable intent | pass/fail/skip | | | | |
 | x402 settle | Funding and merchant settlement complete | pass/fail/skip | | | | |
 | x402 sweep recovery | Stranded USDC at or above the sweep floor returns to the originating Haven wallet; dust below the floor is left on the delegate | pass/fail/skip | | | Record actual chain and `below_min`/floor state | |
 

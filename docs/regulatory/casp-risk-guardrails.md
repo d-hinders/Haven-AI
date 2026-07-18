@@ -123,6 +123,16 @@ Haven backend
 > budgets cannot fund the EOA and are therefore erc7710-only — the fallback
 > never weakens an on-chain pin.
 
+> **Current state (2026-07-18, #956):** agents may report the MERCHANT's own
+> receipt after a settled payment (`POST /machine-payments/:id/merchant-receipt`,
+> agent-scoped, size-capped). The reporting feed attaches it verbatim next to
+> the Haven-generated payment evidence, under a provenance banner stating
+> Haven asserts nothing about its contents — data tooling, not accounting
+> judgment. URL-referenced receipts are fetched server-side at feed time under
+> strict guards (https-only, private/internal hosts refused, content-type
+> whitelist, 5MB cap); string-level host blocking does not defeat DNS
+> rebinding — revisit before production rollout.
+
 ## Hard Architecture Invariants
 
 Preserve these facts as non-negotiable implementation invariants:

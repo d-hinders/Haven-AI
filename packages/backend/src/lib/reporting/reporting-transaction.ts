@@ -26,6 +26,8 @@ export interface ReportingTransaction {
   fxAt: string | null
   /** The underlag to attach (verifiable receipt / evidence). */
   receiptRef: string
+  /** The merchant's own receipt when captured (#956) — attached as a second file. */
+  merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
   /** A *suggestion* only (the user's per-merchant override) — never an asserted account. */
   suggestedAccount?: string | null
 }
@@ -62,6 +64,7 @@ export function toReportingTransaction(entry: AccountingEntry): ReportingTransac
     fxSource: entry.fxSource,
     fxAt: toIso(entry.fxAt),
     receiptRef: entry.receiptRef,
+    merchantReceipt: entry.merchantReceipt ?? null,
     suggestedAccount: entry.account ?? null,
   }
 }

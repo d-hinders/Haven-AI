@@ -16,9 +16,12 @@ vi.mock('../../fortnox-connection.js', () => ({
   getFortnoxConnection: (...a: unknown[]) => mockGetConn(...a),
   fortnoxConfigured: () => mockConfigured(),
 }))
-vi.mock('../receipt-underlag.js', () => ({
-  loadReceiptUnderlag: (...a: unknown[]) => mockLoadUnderlag(...a),
-}))
+vi.mock('../receipt-underlag.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../receipt-underlag.js')>()
+  // Only the DB-backed loader is mocked; the pure renderers and the guarded
+  // fetch (#956) run REAL so the dual-attach tests exercise them genuinely.
+  return { ...actual, loadReceiptUnderlag: (...a: unknown[]) => mockLoadUnderlag(...a) }
+})
 
 const {
   FortnoxConnector,
@@ -41,6 +44,7 @@ const TX = {
   fxSource: 'riksbank',
   fxAt: '2026-07-15T09:30:00.000Z',
   receiptRef: 'receipt-1',
+  merchantReceipt: null as { url: string | null; inlineJson: unknown | null } | null,
   suggestedAccount: null as string | null,
 }
 
@@ -276,5 +280,67 @@ describe('helpers', () => {
     // Fortnox-safe: no Unicode ellipsis in the Name field (live gotcha 2000359).
     expect(fallback).not.toMatch(/…/)
     expect(supplierNameFor({ ...TX, counterparty: { name: null, address: null } })).toBe('Unknown merchant')
+  })
+})
+
+describe('merchant receipt dual-attach (#956)', () => {
+  const UNDERLAG = { filename: 'haven-receipt-pay-123.pdf', pdf: Buffer.from('%PDF-haven') }
+
+  function stubs(extra: Record<string, (init?: RequestInit) => { status?: number; body: unknown }> = {}) {
+    return fetchStub({
+      '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '42', Name: 'NordShield VPN' }] } }),
+      '/supplierinvoicefileconnections': () => ({ body: {} }),
+      '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 900 } } }),
+      '/inbox': () => ({ body: { File: { Id: `file-${Math.random().toString(36).slice(2, 6)}` } } }),
+      ...extra,
+    })
+  }
+
+  it('attaches BOTH files when an inline merchant receipt exists — no note', async () => {
+    mockLoadUnderlag.mockResolvedValue(UNDERLAG)
+    const { impl, calls } = stubs()
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', {
+      ...TX,
+      merchantReceipt: { url: null, inlineJson: { fakturanummer: 'FAK-2026-00001' } },
+    })
+    expect(res).toEqual({ externalRef: 'fortnox:supplierinvoice:900', status: 'pushed' })
+    expect(calls.filter((c) => c.url.endsWith('/inbox')).length).toBe(2)
+    expect(calls.filter((c) => c.url.includes('/supplierinvoicefileconnections')).length).toBe(2)
+  })
+
+  it('absence of a merchant receipt is the NORMAL case — single attach, no note', async () => {
+    mockLoadUnderlag.mockResolvedValue(UNDERLAG)
+    const { impl, calls } = stubs()
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', { ...TX, merchantReceipt: null })
+    expect(res).toEqual({ externalRef: 'fortnox:supplierinvoice:900', status: 'pushed' })
+    expect(calls.filter((c) => c.url.endsWith('/inbox')).length).toBe(1)
+  })
+
+  it('a failed merchant-receipt URL fetch degrades to a note; evidence attach + push survive', async () => {
+    mockLoadUnderlag.mockResolvedValue(UNDERLAG)
+    // The receipt URL host resolves through the SAME injected fetchImpl —
+    // return 404 for it.
+    const { impl, calls } = stubs({ 'merchant.example/receipt.pdf': () => ({ status: 404, body: {} }) })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', {
+      ...TX,
+      merchantReceipt: { url: 'https://merchant.example/receipt.pdf', inlineJson: null },
+    })
+    expect(res.status).toBe('pushed')
+    expect(res.note).toMatch(/merchant receipt attachment failed/)
+    expect(res.note).toMatch(/HTTP 404/)
+    // Evidence PDF still attached:
+    expect(calls.filter((c) => c.url.endsWith('/inbox')).length).toBe(1)
+  })
+
+  it('a private-host receipt URL is refused by the SSRF guard — note, never fetched blind', async () => {
+    mockLoadUnderlag.mockResolvedValue(UNDERLAG)
+    const { impl, calls } = stubs()
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', {
+      ...TX,
+      merchantReceipt: { url: 'https://169.254.169.254/latest/meta-data', inlineJson: null },
+    })
+    expect(res.status).toBe('pushed')
+    expect(res.note).toMatch(/private or internal/)
+    expect(calls.some((c) => c.url.includes('169.254'))).toBe(false)
   })
 })

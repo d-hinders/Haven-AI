@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
 vi.mock('../../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
-const { receiptPdf, underlagFromData, loadReceiptUnderlag } = await import('../receipt-underlag.js')
+const { receiptPdf, underlagFromData, loadReceiptUnderlag, merchantReceiptPdf, fetchMerchantReceiptDocument } = await import('../receipt-underlag.js')
 
 const DATA = {
   paymentId: 'pay-123',
@@ -114,5 +114,55 @@ describe('loadReceiptUnderlag', () => {
     // the throw into a distinct 'receipt lookup failed' note.
     mockQuery.mockRejectedValueOnce(new Error('db down'))
     await expect(loadReceiptUnderlag('u1', TX)).rejects.toThrow('db down')
+  })
+})
+
+describe('merchantReceiptPdf (#956)', () => {
+  it('renders the merchant document verbatim with a provenance banner', () => {
+    const { filename, pdf } = merchantReceiptPdf('pay-123', { fakturanummer: 'FAK-2026-00001', moms_belopp: '0.0002' })
+    expect(filename).toBe('merchant-receipt-pay-123.pdf')
+    const s = pdf.toString('latin1')
+    expect(s).toContain('MERCHANT-ISSUED RECEIPT')
+    expect(s).toContain('Haven asserts nothing')
+    expect(s).toContain('FAK-2026-00001')
+  })
+})
+
+describe('fetchMerchantReceiptDocument (#956 SSRF guards)', () => {
+  const okResponse = (headers: Record<string, string>, bytes = 8) =>
+    new Response(new Uint8Array(bytes), { status: 200, headers })
+
+  it('fetches a whitelisted https document', async () => {
+    const impl = vi.fn(async () => okResponse({ 'content-type': 'application/pdf' })) as unknown as typeof fetch
+    const doc = await fetchMerchantReceiptDocument('https://merchant.example/receipt.pdf', impl)
+    expect(doc.filename).toBe('merchant-receipt.pdf')
+    expect(doc.contentType).toBe('application/pdf')
+  })
+
+  it('refuses private/internal hosts and non-https', async () => {
+    const impl = vi.fn() as unknown as typeof fetch
+    for (const url of [
+      'https://localhost/r.pdf',
+      'https://127.0.0.1/r.pdf',
+      'https://10.0.0.5/r.pdf',
+      'https://192.168.1.1/r.pdf',
+      'https://172.16.0.1/r.pdf',
+      'https://169.254.169.254/r.pdf', // cloud metadata
+      'https://internal.svc.local/r.pdf',
+    ]) {
+      await expect(fetchMerchantReceiptDocument(url, impl)).rejects.toThrow(/private or internal/)
+    }
+    await expect(fetchMerchantReceiptDocument('http://merchant.example/r.pdf' as string, impl))
+      .rejects.toThrow(/https/)
+    expect(impl).not.toHaveBeenCalled()
+  })
+
+  it('refuses disallowed content types and oversized documents', async () => {
+    const htmlImpl = vi.fn(async () => okResponse({ 'content-type': 'text/html' })) as unknown as typeof fetch
+    await expect(fetchMerchantReceiptDocument('https://m.example/r', htmlImpl)).rejects.toThrow(/not allowed/)
+    const bigImpl = vi.fn(async () =>
+      okResponse({ 'content-type': 'application/pdf', 'content-length': String(6 * 1024 * 1024) }),
+    ) as unknown as typeof fetch
+    await expect(fetchMerchantReceiptDocument('https://m.example/r.pdf', bigImpl)).rejects.toThrow(/5MB cap/)
   })
 })

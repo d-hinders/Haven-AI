@@ -12,6 +12,7 @@ import {
   type X402PaymentProcessor,
 } from './x402.js'
 import { PRODUCTS, type ProductId } from './products.js'
+import { invoiceForPayment } from './invoice.js'
 import type { Address } from 'viem'
 
 export interface DemoMerchantServerOptions {
@@ -91,6 +92,11 @@ async function handle(
     if (!payment) return
     settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
+    // #956: hand the paying agent the merchant's OWN receipt machine-readably.
+    // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
+    // Haven, whose reporting feed attaches it next to the payment evidence.
+    const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId)
+    res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
   }
 
   try {

@@ -9,7 +9,12 @@ import {
 } from '../fortnox-connection.js'
 import type { AccountingConnector, PushResult } from './connector.js'
 import type { ReportingTransaction } from './reporting-transaction.js'
-import { loadReceiptUnderlag, type ReceiptUnderlag } from './receipt-underlag.js'
+import {
+  loadReceiptUnderlag,
+  merchantReceiptPdf,
+  fetchMerchantReceiptDocument,
+  type ReceiptUnderlag,
+} from './receipt-underlag.js'
 
 /**
  * Fortnox feed adapter (epic #491, P1 #496) — the first live
@@ -163,9 +168,10 @@ async function fortnoxUploadPdf(
   accessToken: string,
   underlag: ReceiptUnderlag,
   fetchImpl: typeof fetch,
+  contentType = 'application/pdf',
 ): Promise<string> {
   const form = new FormData()
-  form.append('file', new Blob([new Uint8Array(underlag.pdf)], { type: 'application/pdf' }), underlag.filename)
+  form.append('file', new Blob([new Uint8Array(underlag.pdf)], { type: contentType }), underlag.filename)
   let res: Response
   try {
     // No explicit Content-Type: fetch sets the multipart boundary itself.
@@ -297,36 +303,70 @@ export class FortnoxConnector implements AccountingConnector {
     )
     const givenNumber = created.SupplierInvoice?.GivenNumber
 
-    // #498: attach the receipt underlag — strictly best-effort. The invoice is
-    // the delivered value; any attachment problem becomes an observable note.
-    let note: string | undefined
+    // #498/#956: attach the underlag files — strictly best-effort. The invoice
+    // is the delivered value; any attachment problem becomes an observable
+    // note. Two possible files: the Haven-generated payment evidence (#498,
+    // always expected) and the merchant's OWN receipt (#956, present only
+    // when the agent captured one — absence is the normal case, not a note).
+    const notes: string[] = []
     if (givenNumber == null) {
-      note = 'receipt not attached: Fortnox returned no invoice number'
-    } else if (!underlag) {
-      note = 'receipt not attached: no receipt available for this payment'
+      notes.push('receipt not attached: Fortnox returned no invoice number')
     } else {
-      try {
-        const fileId = await fortnoxUploadPdf(accessToken, underlag, this.fetchImpl)
-        await fortnoxPost(
-          accessToken,
-          '/supplierinvoicefileconnections',
-          {
-            SupplierInvoiceFileConnection: {
-              SupplierInvoiceNumber: String(givenNumber),
-              FileId: fileId,
-            },
-          },
-          this.fetchImpl,
-        )
-      } catch (err) {
-        note = `receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`
+      if (!underlag) {
+        notes.push('receipt not attached: no receipt available for this payment')
+      } else {
+        try {
+          await this.attachFile(accessToken, givenNumber, underlag)
+        } catch (err) {
+          notes.push(`receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+
+      if (tx.merchantReceipt) {
+        try {
+          if (tx.merchantReceipt.inlineJson != null) {
+            await this.attachFile(
+              accessToken, givenNumber, merchantReceiptPdf(tx.paymentId, tx.merchantReceipt.inlineJson),
+            )
+          } else if (tx.merchantReceipt.url) {
+            const doc = await fetchMerchantReceiptDocument(tx.merchantReceipt.url, this.fetchImpl)
+            await this.attachFile(accessToken, givenNumber, {
+              filename: doc.filename,
+              pdf: doc.bytes,
+            }, doc.contentType)
+          }
+        } catch (err) {
+          notes.push(`merchant receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
+        }
       }
     }
 
+    const note = notes.length > 0 ? notes.join('; ') : undefined
     return {
       externalRef: givenNumber != null ? `fortnox:supplierinvoice:${givenNumber}` : null,
       status: 'pushed',
       ...(note ? { note } : {}),
     }
+  }
+
+  /** Upload one file to the Inbox and connect it to the invoice (#498/#956). */
+  private async attachFile(
+    accessToken: string,
+    givenNumber: number,
+    file: ReceiptUnderlag,
+    contentType = 'application/pdf',
+  ): Promise<void> {
+    const fileId = await fortnoxUploadPdf(accessToken, file, this.fetchImpl, contentType)
+    await fortnoxPost(
+      accessToken,
+      '/supplierinvoicefileconnections',
+      {
+        SupplierInvoiceFileConnection: {
+          SupplierInvoiceNumber: String(givenNumber),
+          FileId: fileId,
+        },
+      },
+      this.fetchImpl,
+    )
   }
 }

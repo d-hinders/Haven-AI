@@ -22,3 +22,4 @@ design-system-coupling-comment.md
 
 # Local session reports (never commit)
 haven-*.pdf
+*.local.mts

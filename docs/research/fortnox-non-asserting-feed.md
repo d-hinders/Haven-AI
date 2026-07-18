@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: research
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-07-16"
+last-verified: "2026-07-18"
 ---
 
 # Spike — Fortnox non-asserting feed mechanism (#494)
@@ -162,6 +162,13 @@ Semantics locked by tests:
   connections consented before the widening degrade to note-only attachment
   until the user reconnects.
 - **ASCII discipline** (gotcha 5) extends to the PDF text and filename.
+- **Merchant receipt as a second file (#956):** when the agent captured the
+  merchant's own receipt (the SDK reads `x-receipt-json`/`x-receipt-url` off
+  the paid response and reports it), the connector attaches it as a second
+  file connection on the same invoice — inline JSON rendered as a
+  provenance-bannered PDF, URL documents fetched under SSRF guards. Absence
+  is the normal case (no note); a failed merchant attach degrades to a note
+  exactly like the evidence attach.
 
 Live validation: **Q5 CONFIRMED 2026-07-16** — `npm run pilot:fortnox` pushed
 an invoice with the underlag PDF attached and read the file connection back

@@ -237,6 +237,13 @@ blocks the feed — the invoice still pushes, and the degradation is recorded as
 a note on the (pushed) sync row, visible in the Reporting UI. See
 `fortnox-non-asserting-feed.md` §"Receipt attachment".
 
+**Merchant receipts (#956):** when the merchant's paid response carries its
+own receipt (captured by the SDK, reported to
+`/machine-payments/:id/merchant-receipt`, stored in `merchant_receipts`,
+migration 047), the feed attaches it as a SECOND file next to the Haven
+evidence document — the accountant gets both the payment proof and the
+merchant's invoice/VAT document. Absence is the normal case.
+
 ## 10. Dashboard — "Reporting"
 
 The dashboard page is **Reporting** (`/reporting`), superseding the `/accounting`

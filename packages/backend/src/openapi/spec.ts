@@ -1150,6 +1150,71 @@ export const openapiSpec = {
         },
       },
     },
+    '/machine-payments/{id}/merchant-receipt': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'reportMerchantReceipt',
+        summary: "Report the merchant's own receipt for a settled payment.",
+        description:
+          "Captures the receipt document the merchant handed back in the paid response (invoice number, VAT breakdown — facts Haven's own payment evidence cannot assert). " +
+          'The reporting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. ' +
+          'Provide either `url` (https, fetched at feed time under strict guards) or `json` (the inline receipt document, max 64KB).',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'The payment id (intent or approval) the receipt belongs to.',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  url: { type: 'string', description: 'https URL to the merchant receipt document (pdf/png/jpg).' },
+                  json: { type: 'object', description: 'The inline receipt document as provided by the merchant.', additionalProperties: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Merchant receipt stored.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { stored: { type: 'boolean' } },
+                  required: ['stored'],
+                },
+              },
+            },
+          },
+          '200': {
+            description: 'A merchant receipt was already recorded for this payment (first write wins).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { stored: { type: 'boolean' }, message: { type: 'string' } },
+                  required: ['stored'],
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '429': errorResponse,
+        },
+      },
+    },
     '/machine-payments/reconciliation-events': {
       post: {
         tags: ['Machine payments'],

@@ -417,20 +417,12 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
             'funding, POST /x402/:id/settle for erc7710).',
         })
       }
-      // Per-agent hourly cap: on this rail every authorize costs a sponsored
-      // bundler estimation, so the cap is sponsorship-cost protection too.
-      const delegationCap = await agentHourlyX402CapExceeded(agent.id)
-      if (delegationCap !== null) {
-        return reply.code(429).send({
-          error: `Rate limit exceeded: max ${delegationCap} x402 payments per hour`,
-          retry_after_seconds: 60,
-        })
-      }
-
       // Idempotent replay must RESUME, never dead-end: reconstruct the signing
       // payload from stored state instead of re-running an estimation. The
-      // unique index excludes failed/expired rows, so those fall through to a
-      // fresh create.
+      // unique index excludes rows whose STATUS is failed/expired — a
+      // past-expires_at row still holds the key until something flips its
+      // status, so the replay path lazily expires it (below) to free the key
+      // for a fresh create.
       // NOTE: this helper must NOT return the Fastify reply through the
       // async boundary — Reply is a thenable, so `await` on it resolves to
       // undefined and the caller's falsy-check would double-execute the
@@ -459,7 +451,18 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           } }
         }
         if (existing.status !== 'pending_signature') return null
-        if (new Date(existing.expires_at as string) < new Date()) return null
+        if (new Date(existing.expires_at as string) < new Date()) {
+          // Lazy-expire: nothing else on the authorize path flips a stale
+          // pending row, and until its status changes the partial unique
+          // index still holds the idempotency key — every retry would loop
+          // on a bare 409 (found by review, #961 M2).
+          await pool.query(
+            `UPDATE payment_intents SET status = 'expired'
+             WHERE id = $1 AND agent_id = $2 AND status = 'pending_signature'`,
+            [existing.id, agent.id],
+          )
+          return null
+        }
         const mismatch = existingX402IntentMismatch(existing, {
           resourceUrl: url,
           fundingTo: payTo,
@@ -477,7 +480,11 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         }
         if (existing.prepared_user_op == null) return null
         const state = deserializeUserOp(existing.prepared_user_op) as Record<string, unknown>
-        const accountAddress = await computeHybridAccountAddress(agent.chain_id, {
+        // The stored intent's chain is authoritative for the reconstructed
+        // typed data — agent.chain_id happens to equal it today (the network
+        // check pins it), but the sign_hash was computed against the intent.
+        const intentChainId = (existing.chain_id as number) ?? agent.chain_id
+        const accountAddress = await computeHybridAccountAddress(intentChainId, {
           ownerAddress: agent.delegate_address as `0x${string}`,
         })
         const isErc7710State = Boolean(state?.child && state?.budget)
@@ -486,7 +493,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
               hash: existing.sign_hash,
               signature_scheme: 'eip712_delegation',
               typed_data: delegationSigningPayload(
-                state.child as never, agent.chain_id,
+                state.child as never, intentChainId,
               ),
               instructions:
                 'Sign sign_data.typed_data with your delegate (agent) key (EIP-712). Then POST ' +
@@ -495,7 +502,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           : {
               hash: existing.sign_hash,
               signature_scheme: 'eip712_userop',
-              typed_data: userOpTypedData(state, accountAddress as `0x${string}`, agent.chain_id),
+              typed_data: userOpTypedData(state, accountAddress as `0x${string}`, intentChainId),
+              components: {
+                safe: agent.safe_address,
+                account: accountAddress,
+                token: existing.token_address,
+                to: existing.to_address,
+                amount: existing.amount_raw,
+              },
               instructions:
                 'Sign sign_data.typed_data with your delegate (agent) key (EIP-712). Then POST ' +
                 `/payments/${existing.id}/sign with { signature } — the funding redemption moves ` +
@@ -547,6 +561,18 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       if (preExisting) {
         const replayed = await delegationReplay(preExisting)
         if (replayed) return reply.code(replayed.code).send(replayed.body)
+      }
+
+      // Per-agent hourly cap — AFTER the replay lookup (a replay creates
+      // nothing and runs no estimation, so it must never be rate-limited;
+      // legacy-rail parity) but BEFORE any sponsored prepare, so the cap is
+      // sponsorship-cost protection too (#717 surface).
+      const delegationCap = await agentHourlyX402CapExceeded(agent.id)
+      if (delegationCap !== null) {
+        return reply.code(429).send({
+          error: `Rate limit exceeded: max ${delegationCap} x402 payments per hour`,
+          retry_after_seconds: 60,
+        })
       }
 
       if (fundingShape) {

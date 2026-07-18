@@ -108,9 +108,14 @@ export interface PreparedRedemption {
   delegateAccountAddress: Address
 }
 
-/** The account's typed data for a prepared UserOperation (see the interface). */
+/**
+ * The account's typed data for a prepared UserOperation (see the interface).
+ * Exported for #961: an idempotent replay of a pending funding intent
+ * reconstructs the exact signing payload from the STORED UserOperation
+ * instead of re-running a sponsored estimation.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function userOpTypedData(userOperation: any, accountAddress: Address, chainId: number): any {
+export function userOpTypedData(userOperation: any, accountAddress: Address, chainId: number): any {
   const packed = toPackedUserOperation({ ...userOperation, signature: '0x' })
   const message: Record<string, unknown> = { ...packed, entryPoint: entryPoint07Address }
   for (const [key, value] of Object.entries(message)) {

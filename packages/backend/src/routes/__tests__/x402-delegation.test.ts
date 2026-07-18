@@ -85,6 +85,13 @@ describe('x402 delegation-rail settlement (#830)', () => {
     mockCreateIntent.mockReset()
     mockPrepareFunding.mockReset()
     mockCompute.mockResolvedValue(DELEGATE_ACCT)
+    // #961: every delegation authorize consults the hourly cap; default to
+    // an uncapped agent with no existing intents.
+    mockQuery.mockImplementation((sql: string) => {
+      if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 100 }] })
+      if (/COUNT\(\*\)/.test(String(sql))) return Promise.resolve({ rows: [{ cnt: '0' }] })
+      return Promise.resolve({ rows: [] })
+    })
   })
 
   it('authorize builds a settlement child + returns typed data; no funding leg', async () => {
@@ -295,9 +302,113 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockQuery.mock.calls.some((c) => /status = 'submitted'/.test(String(c[0])))).toBe(false)
   })
 
-  it('3009-mode idempotent conflict returns the 409 replay signal (#946)', async () => {
+  // ── #961 hardening: replay resumes, one-shot refused, hourly cap enforced ──
+  const PENDING_3009_ROW = {
+    id: INTENT_ID,
+    status: 'pending_signature',
+    expires_at: new Date(Date.now() + 300_000).toISOString(),
+    sign_hash: `0x${'56'.repeat(32)}`,
+    prepared_user_op: { sender: DELEGATE_ACCT, nonce: '1', callData: '0x' },
+    to_address: DELEGATE_EOA.toLowerCase(),
+    x402_merchant_address: MERCHANT.toLowerCase(),
+    x402_resource_url: 'https://merchant.example/resource',
+    amount_raw: '100000',
+    amount_human: '0.1',
+    token_address: USDC.toLowerCase(),
+    token_symbol: 'USDC',
+    chain_id: 84532,
+    safe_address: '0x' + 'aa'.repeat(20),
+    machine_metadata: { network: 'eip155:84532', settlement_scheme: 'eip3009' },
+  }
+
+  function withHourlyCapQueries(rows: Record<string, unknown>[] = []) {
+    mockQuery.mockImplementation((sql: string) => {
+      if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 100 }] })
+      if (/COUNT\(\*\)/.test(String(sql))) return Promise.resolve({ rows: [{ cnt: '0' }] })
+      if (/x402_idempotency_key = \$2/.test(String(sql))) return Promise.resolve({ rows })
+      return Promise.resolve({ rows: [] })
+    })
+  }
+
+  it('a pending idempotent retry RESUMES the intent — sign_data rebuilt, no new estimation (#961)', async () => {
+    withHourlyCapQueries([PENDING_3009_ROW])
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-1' }),
+    })
+    expect(res.statusCode).toBe(201)
+    const body = res.json()
+    expect(body.idempotent_replay).toBe(true)
+    expect(body.payment_id).toBe(INTENT_ID)
+    expect(body.sign_data.signature_scheme).toBe('eip712_userop')
+    expect(body.sign_data.hash).toBe(`0x${'56'.repeat(32)}`)
+    expect(body.sign_data.typed_data.primaryType).toBe('PackedUserOperation')
+    // The whole point: NO fresh sponsored estimation ran.
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  it('a confirmed idempotent retry replays the receipt (#961)', async () => {
+    withHourlyCapQueries([{ ...PENDING_3009_ROW, status: 'confirmed', tx_hash: `0x${'ab'.repeat(32)}` }])
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-1' }),
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ success: true, payment_id: INTENT_ID, tx_hash: `0x${'ab'.repeat(32)}` })
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+  })
+
+  it('an erc7710 pending retry rebuilds the CHILD signing payload (#961)', async () => {
+    const child = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
+    withHourlyCapQueries([{
+      ...PENDING_3009_ROW,
+      to_address: MERCHANT.toLowerCase(),
+      prepared_user_op: { child, budget: signedBudget, delegateAccountAddress: DELEGATE_ACCT, network: 'eip155:84532' },
+      machine_metadata: null, // erc7710 creates store no metadata (parity)
+    }])
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ idempotencyKey: 'k-1' }), // payTo = merchant
+    })
+    expect(res.statusCode).toBe(201)
+    const body = res.json()
+    expect(body.idempotent_replay).toBe(true)
+    expect(body.sign_data.signature_scheme).toBe('eip712_delegation')
+    expect(body.sign_data.typed_data.domain.name).toBe('DelegationManager')
+    expect(mockSelect).not.toHaveBeenCalled()
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  it('a concurrent-claim conflict RESUMES the winner instead of a bare 409 (#961)', async () => {
+    withHourlyCapQueries([]) // pre-check: nothing yet
     mockPrepareFunding.mockResolvedValueOnce(PREPARED)
-    mockCreateIntent.mockResolvedValueOnce(null) // conflict — another claim owns the key
+    mockCreateIntent.mockImplementationOnce(async () => {
+      // The race: by the time our insert conflicts, the winner's row exists.
+      withHourlyCapQueries([PENDING_3009_ROW])
+      return null
+    })
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-1' }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().idempotent_replay).toBe(true)
+    expect(res.json().payment_id).toBe(INTENT_ID)
+  })
+
+  it('a conflict with NO recoverable winner still 409s (#961 fallback)', async () => {
+    withHourlyCapQueries([])
+    mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+    mockCreateIntent.mockResolvedValueOnce(null)
     const res = await app.inject({
       method: 'POST', url: '/x402/authorize',
       headers: { authorization: 'Bearer sk_agent_test' },
@@ -305,6 +416,92 @@ describe('x402 delegation-rail settlement (#830)', () => {
     })
     expect(res.statusCode).toBe(409)
     expect(res.json().error).toMatch(/Idempotent replay/)
+  })
+
+  it('a stale pending row is LAZILY EXPIRED so the key frees for a fresh create (#961 M2)', async () => {
+    const updates: string[] = []
+    mockQuery.mockImplementation((sql: string) => {
+      updates.push(String(sql))
+      if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 100 }] })
+      if (/COUNT\(\*\)/.test(String(sql))) return Promise.resolve({ rows: [{ cnt: '0' }] })
+      if (/x402_idempotency_key = \$2/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ ...PENDING_3009_ROW, expires_at: new Date(Date.now() - 1000).toISOString() }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+    mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+    mockCreateIntent.mockResolvedValueOnce({ id: 'fresh-intent', status: 'pending_signature', expires_at: 'x' })
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-1' }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().payment_id).toBe('fresh-intent')
+    // The stale row was flipped so its key no longer occupies the index:
+    expect(updates.some((u) => /SET status = 'expired'/.test(u))).toBe(true)
+    expect(mockPrepareFunding).toHaveBeenCalledTimes(1)
+  })
+
+  it('a scheme flip on the same key 409s via the funding_to mismatch (#961)', async () => {
+    // The stored intent is 3009 (funding to the EOA); the retry asks erc7710
+    // (payTo = merchant) with the SAME key — must never leak the original
+    // sign_data under different parameters.
+    withHourlyCapQueries([PENDING_3009_ROW])
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ idempotencyKey: 'k-1' }), // payTo = MERCHANT ≠ stored funding_to
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/different x402 funding_to/)
+    expect(res.json().payment_id).toBe(INTENT_ID)
+  })
+
+  it('a mismatched idempotencyKey 409s with the owning payment id (#961)', async () => {
+    withHourlyCapQueries([{ ...PENDING_3009_ROW, amount_raw: '999999' }])
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-1' }),
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().payment_id).toBe(INTENT_ID)
+    expect(res.json().error).toMatch(/different x402 amount/)
+  })
+
+  it('one-shot signature is refused loudly on the delegation rail (#961)', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, signature: '0x' + 'ab'.repeat(65) }),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/One-shot/)
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+  })
+
+  it('the per-agent hourly cap 429s BEFORE any sponsored estimation (#961)', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 2 }] })
+      if (/COUNT\(\*\)/.test(String(sql))) return Promise.resolve({ rows: [{ cnt: '2' }] })
+      return Promise.resolve({ rows: [] })
+    })
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(429)
+    expect(res.json().error).toMatch(/max 2 x402 payments per hour/)
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+    // Also enforced on the erc7710 path:
+    const res7710 = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody(),
+    })
+    expect(res7710.statusCode).toBe(429)
   })
 
   it('settle 409s a non-delegation intent and 400s a bad signature', async () => {

@@ -105,6 +105,17 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockQuery.mock.calls.some((c) => /allowance/i.test(String(c[0])))).toBe(false)
   })
 
+  it('authorize rejects native-token x402 on the delegation rail (characterization, #946)', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ asset: '0x0000000000000000000000000000000000000000' }),
+    })
+    // Native has no ERC20 transfer to pin/meter — the rail refuses it whole.
+    expect([400, 403]).toContain(res.statusCode)
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
   it('authorize 403s when the agent has no active budget delegation for the merchant', async () => {
     mockSelect.mockResolvedValueOnce(null)
     const res = await app.inject({

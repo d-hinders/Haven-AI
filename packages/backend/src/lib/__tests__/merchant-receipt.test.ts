@@ -26,7 +26,7 @@ describe('validateMerchantReceiptUrl', () => {
 })
 
 describe('captureMerchantReceipt (#956)', () => {
-  const EVIDENCE = { rows: [{ id: 'ev-1' }] }
+  const EVIDENCE = { rows: [{ id: 'ev-1', user_id: 'user-1' }] }
 
   it('stores an inline receipt against the agent-scoped evidence row', async () => {
     mockQuery.mockResolvedValueOnce(EVIDENCE) // evidence lookup
@@ -34,7 +34,7 @@ describe('captureMerchantReceipt (#956)', () => {
     const res = await captureMerchantReceipt({
       paymentId: 'pay-1', agentId: 'agent-1', inlineJson: { fakturanummer: 'FAK-1' },
     })
-    expect(res).toEqual({ ok: true, stored: true })
+    expect(res).toEqual({ ok: true, stored: true, userId: 'user-1' })
     // Agent scoping is in the SQL, not trust:
     const [lookupSql, lookupParams] = mockQuery.mock.calls[0] as [string, unknown[]]
     expect(lookupSql).toMatch(/COALESCE\(pi\.agent_id, ar\.agent_id\) = \$2/)
@@ -47,7 +47,7 @@ describe('captureMerchantReceipt (#956)', () => {
     const res = await captureMerchantReceipt({
       paymentId: 'pay-1', agentId: 'agent-1', inlineJson: { different: 'doc' },
     })
-    expect(res).toEqual({ ok: true, stored: false })
+    expect(res).toEqual({ ok: true, stored: false, userId: 'user-1' })
   })
 
   it('404s when no settled evidence exists for the agent', async () => {

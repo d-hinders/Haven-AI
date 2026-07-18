@@ -40,7 +40,7 @@ export interface CaptureMerchantReceiptInput {
 }
 
 export type CaptureResult =
-  | { ok: true; stored: boolean }
+  | { ok: true; stored: boolean; userId: string }
   | { ok: false; error: string; code: 400 | 404 }
 
 export function validateMerchantReceiptUrl(url: string): string | null {
@@ -82,8 +82,8 @@ export async function captureMerchantReceipt(
 
   // The evidence row is the anchor (#498's receiptRef) — agent-scoped via the
   // intent/approval join so an agent can only annotate its own payments.
-  const evidence = await pool.query<{ id: string }>(
-    `SELECT mpe.id
+  const evidence = await pool.query<{ id: string; user_id: string }>(
+    `SELECT mpe.id, mpe.user_id
      FROM machine_payment_evidence mpe
      LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
      LEFT JOIN approval_requests ar ON ar.id = mpe.approval_request_id
@@ -92,7 +92,8 @@ export async function captureMerchantReceipt(
     [paymentId, agentId],
   )
   const evidenceId = evidence.rows[0]?.id
-  if (!evidenceId) {
+  const userId = evidence.rows[0]?.user_id
+  if (!evidenceId || !userId) {
     return { ok: false, code: 404, error: 'No settled payment evidence found for this payment' }
   }
 
@@ -103,7 +104,7 @@ export async function captureMerchantReceipt(
      RETURNING evidence_id`,
     [evidenceId, url ?? null, inlineJson === undefined ? null : JSON.stringify(inlineJson)],
   )
-  return { ok: true, stored: inserted.rows.length > 0 }
+  return { ok: true, stored: inserted.rows.length > 0, userId }
 }
 
 /** The merchant receipt for an evidence row, or null. */

@@ -9,14 +9,16 @@ covers:
   - packages/backend/src/routes/approvals.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/lib/machine-payments.ts
+  - packages/backend/src/lib/merchant-receipt.ts
   - packages/backend/src/lib/delegation-rail.ts
+  - packages/backend/src/lib/x402-delegation.ts
   - packages/backend/src/lib/delegation-policy.ts
   - packages/backend/src/lib/delegation-authorization.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/lib/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-07-12"
+last-verified: "2026-07-18"
 ---
 
 # Haven — Payment Execution Sequence
@@ -166,8 +168,10 @@ Full security model and exit story:
 ## Related: x402 path
 
 `POST /x402/authorize` ([packages/backend/src/routes/x402.ts](../../packages/backend/src/routes/x402.ts))
-shares the payment/approval writers and AllowanceModule execution primitive,
-but its funding semantics differ:
+branches on the agent's execution rail.
+
+**Legacy AllowanceModule rail** shares the payment/approval writers and
+AllowanceModule execution primitive, but its funding semantics differ:
 
 - Token and chain come from the merchant challenge and must match the agent's
   Haven wallet.
@@ -180,4 +184,39 @@ but its funding semantics differ:
   `/payments/:id/sign`. One-shot mode accepts the funding signature on
   `/x402/authorize` and records confirmation atomically after execution.
 - The shared writers persist rail, resource, merchant, idempotency, and resume
-  context. A per-agent hourly limit (`max_x402_per_hour`, default 100) applies.
+  context.
+
+**Delegation rail** never touches the AllowanceModule or the approval queue,
+and selects a settlement scheme **per payment** from the request's `payTo`
+shape (#946); an explicit `settlementScheme`, when present, is validated
+against that shape:
+
+- **erc7710 direct settlement** (`payTo` = the merchant): Haven builds a
+  settlement CHILD delegation (exact amount, payee pin, expiry capped at 600s)
+  re-delegated from the agent's budget delegation
+  ([packages/backend/src/lib/x402-delegation.ts](../../packages/backend/src/lib/x402-delegation.ts)).
+  The agent signs its EIP-712 typed data (`signature_scheme:
+  'eip712_delegation'`) and POSTs `/x402/:id/settle`, which returns the
+  merchant `X-PAYMENT` header. The merchant redeems the `[child, budget]`
+  chain and settles account→merchant directly — the period budget is metered
+  by the settlement itself; no funding leg.
+- **EIP-3009 fallback** (`payTo` = the agent's own delegate EOA, with
+  `merchantPayTo` required): the budget delegation is redeemed as a funding
+  UserOp to the delegate EOA (signed exactly like a delegation-rail payment:
+  `eip712_userop` typed data via `/payments/:id/sign`), and the EOA then signs
+  the standard EIP-3009 header client-side for the merchant retry.
+  `settlement_scheme: 'eip3009'` is recorded in the intent metadata. The
+  bridge structurally requires an **open (unpinned) budget** — recipient-pinned
+  budgets cannot fund the EOA and are erc7710-only.
+- One-shot authorize+execute is refused on this rail (400) — the signature is
+  typed data over prepared state that does not exist yet (#961). An idempotent
+  replay **resumes** instead of dead-ending: `sign_data` is reconstructed from
+  the stored intent (scheme detected from the stored state), and a stale
+  pending row is lazily expired so the key frees up for a fresh create.
+
+A per-agent hourly limit (`max_x402_per_hour`, default 100) applies on every
+rail — on the delegation rail it runs before any sponsored bundler prepare
+(replays are exempt). After a successful settlement retry the agent can report
+the merchant's own receipt via `POST /machine-payments/:id/merchant-receipt`
+(#956) — best-effort, first write wins, attached as a second file in the
+reporting feed.

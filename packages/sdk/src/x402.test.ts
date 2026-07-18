@@ -1529,7 +1529,9 @@ describe('delegation-rail 3009-mode (#946)', () => {
     })
     const receipt = await haven.authorizeX402(paymentRequired)
 
-    expect(receipt.funding?.txHash ?? receipt.txHash ?? txHash).toBe(txHash)
+    expect(receipt.success).toBe(true)
+    expect(receipt.paymentId).toBe('pay_946')
+    expect(receipt.txHash).toBe(txHash)
 
     // The authorize call followed the standard-x402 contract the backend's
     // scheme routing keys on: payTo = the delegate EOA, merchantPayTo = merchant.

@@ -35,6 +35,7 @@ import {
 } from '../lib/sweep.js'
 import { AgentPaymentPhase, AgentPaymentNextAction } from '../lib/agent-payment-taxonomy.js'
 import { captureMerchantReceipt } from '../lib/merchant-receipt.js'
+import { lateAttachMerchantReceipt } from '../lib/reporting/fortnox-connector.js'
 
 interface MachinePaymentChallengeBody {
   rail: MachinePaymentRail
@@ -932,6 +933,16 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         inlineJson: json,
       })
       if (!result.ok) return reply.code(result.code).send({ error: result.error })
+      if (result.stored) {
+        // #956 late attach: for x402 the feed has usually ALREADY pushed the
+        // invoice (it fires at funding confirmation; the merchant receipt
+        // arrives at the retry seconds later) — attach retroactively.
+        // Fire-and-forget: capture must never block or fail on feed state.
+        void lateAttachMerchantReceipt(result.userId, request.params.id, {
+          url: url ?? null,
+          inlineJson: json ?? null,
+        }).catch(() => {})
+      }
       return reply.code(result.stored ? 201 : 200).send({
         stored: result.stored,
         ...(result.stored ? {} : { message: 'A merchant receipt is already recorded for this payment (first write wins).' }),

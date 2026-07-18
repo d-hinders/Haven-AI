@@ -5,11 +5,17 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockGetToken, mockGetConn, mockConfigured, mockLoadUnderlag } = vi.hoisted(() => ({
+const { mockGetToken, mockGetConn, mockConfigured, mockLoadUnderlag, mockGetSyncState, mockMarkPushed } = vi.hoisted(() => ({
   mockGetToken: vi.fn(),
   mockGetConn: vi.fn(),
   mockConfigured: vi.fn(),
   mockLoadUnderlag: vi.fn(),
+  mockGetSyncState: vi.fn(),
+  mockMarkPushed: vi.fn(),
+}))
+vi.mock('../feed-sync.js', () => ({
+  getSyncState: (...a: unknown[]) => mockGetSyncState(...a),
+  markPushed: (...a: unknown[]) => mockMarkPushed(...a),
 }))
 vi.mock('../../fortnox-connection.js', () => ({
   getValidFortnoxAccessToken: (...a: unknown[]) => mockGetToken(...a),
@@ -29,6 +35,7 @@ const {
   externalInvoiceNumber,
   supplierNameFor,
   feedDescription,
+  lateAttachMerchantReceipt,
 } = await import('../fortnox-connector.js')
 
 const TX = {
@@ -69,6 +76,8 @@ beforeEach(() => {
   mockGetConn.mockReset()
   mockConfigured.mockReset()
   mockLoadUnderlag.mockReset()
+  mockGetSyncState.mockReset()
+  mockMarkPushed.mockReset()
   mockGetToken.mockResolvedValue('token-1')
   mockConfigured.mockReturnValue(true)
   mockLoadUnderlag.mockResolvedValue(null)
@@ -342,5 +351,56 @@ describe('merchant receipt dual-attach (#956)', () => {
     expect(res.status).toBe('pushed')
     expect(res.note).toMatch(/private or internal/)
     expect(calls.some((c) => c.url.includes('169.254'))).toBe(false)
+  })
+})
+
+describe('late attach — the x402 timing gap (#956, found live)', () => {
+  function lateStubs(extra: Record<string, (init?: RequestInit) => { status?: number; body: unknown }> = {}) {
+    return fetchStub({
+      '/supplierinvoicefileconnections?limit=500': () => ({
+        body: { SupplierInvoiceFileConnections: [{ SupplierInvoiceNumber: '11', Name: 'haven-receipt-x.pdf' }] },
+      }),
+      '/supplierinvoicefileconnections': () => ({ body: {} }),
+      '/inbox': () => ({ body: { File: { Id: 'file-late' } } }),
+      ...extra,
+    })
+  }
+
+  it('attaches retroactively onto the already-pushed invoice', async () => {
+    mockGetSyncState.mockResolvedValue({ status: 'pushed', external_ref: 'fortnox:supplierinvoice:11' })
+    const { impl, calls } = lateStubs()
+    await lateAttachMerchantReceipt('u1', 'pay-late', { url: null, inlineJson: { fakturanummer: 'FAK-9' } }, impl)
+    expect(calls.some((c) => c.url.endsWith('/inbox'))).toBe(true)
+    const connect = calls.find((c) => c.url.endsWith('/supplierinvoicefileconnections') && c.init?.method === 'POST')!
+    expect(JSON.parse(String(connect.init?.body)).SupplierInvoiceFileConnection.SupplierInvoiceNumber).toBe('11')
+    expect(mockMarkPushed).not.toHaveBeenCalled()
+  })
+
+  it('no-ops when the payment is not pushed yet (in-order flow attaches at push)', async () => {
+    mockGetSyncState.mockResolvedValue({ status: 'pending', external_ref: null })
+    const { impl, calls } = lateStubs()
+    await lateAttachMerchantReceipt('u1', 'pay-late', { url: null, inlineJson: {} }, impl)
+    expect(calls.length).toBe(0)
+  })
+
+  it('skips when a merchant-receipt file is already connected (race guard)', async () => {
+    mockGetSyncState.mockResolvedValue({ status: 'pushed', external_ref: 'fortnox:supplierinvoice:11' })
+    const { impl, calls } = lateStubs({
+      '/supplierinvoicefileconnections?limit=500': () => ({
+        body: { SupplierInvoiceFileConnections: [{ SupplierInvoiceNumber: '11', Name: 'merchant-receipt-x.pdf' }] },
+      }),
+    })
+    await lateAttachMerchantReceipt('u1', 'pay-late', { url: null, inlineJson: {} }, impl)
+    expect(calls.some((c) => c.url.endsWith('/inbox'))).toBe(false)
+  })
+
+  it('a late-attach failure lands as a note on the sync row, never an error', async () => {
+    mockGetSyncState.mockResolvedValue({ status: 'pushed', external_ref: 'fortnox:supplierinvoice:11' })
+    const { impl } = lateStubs({ '/inbox': () => ({ status: 500, body: {} }) })
+    await lateAttachMerchantReceipt('u1', 'pay-late', { url: null, inlineJson: {} }, impl)
+    expect(mockMarkPushed).toHaveBeenCalledWith(
+      'u1', 'fortnox', 'pay-late', 'fortnox:supplierinvoice:11',
+      expect.stringMatching(/late-attach failed/),
+    )
   })
 })

@@ -7,6 +7,7 @@ import {
   getFortnoxConnection,
   getValidFortnoxAccessToken,
 } from '../fortnox-connection.js'
+import { getSyncState, markPushed } from './feed-sync.js'
 import type { AccountingConnector, PushResult } from './connector.js'
 import type { ReportingTransaction } from './reporting-transaction.js'
 import {
@@ -324,17 +325,9 @@ export class FortnoxConnector implements AccountingConnector {
 
       if (tx.merchantReceipt) {
         try {
-          if (tx.merchantReceipt.inlineJson != null) {
-            await this.attachFile(
-              accessToken, givenNumber, merchantReceiptPdf(tx.paymentId, tx.merchantReceipt.inlineJson),
-            )
-          } else if (tx.merchantReceipt.url) {
-            const doc = await fetchMerchantReceiptDocument(tx.merchantReceipt.url, this.fetchImpl)
-            await this.attachFile(accessToken, givenNumber, {
-              filename: doc.filename,
-              pdf: doc.bytes,
-            }, doc.contentType)
-          }
+          await attachMerchantReceiptFiles(
+            accessToken, givenNumber, tx.paymentId, tx.merchantReceipt, this.fetchImpl,
+          )
         } catch (err) {
           notes.push(`merchant receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
         }
@@ -367,6 +360,77 @@ export class FortnoxConnector implements AccountingConnector {
         },
       },
       this.fetchImpl,
+    )
+  }
+}
+
+/** Shared merchant-receipt attach: inline → provenance PDF, url → guarded fetch. */
+async function attachMerchantReceiptFiles(
+  accessToken: string,
+  givenNumber: number,
+  paymentId: string,
+  receipt: { url: string | null; inlineJson: unknown | null },
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  let file: ReceiptUnderlag
+  let contentType = 'application/pdf'
+  if (receipt.inlineJson != null) {
+    file = merchantReceiptPdf(paymentId, receipt.inlineJson)
+  } else if (receipt.url) {
+    const doc = await fetchMerchantReceiptDocument(receipt.url, fetchImpl)
+    file = { filename: doc.filename, pdf: doc.bytes }
+    contentType = doc.contentType
+  } else {
+    return
+  }
+  const fileId = await fortnoxUploadPdf(accessToken, file, fetchImpl, contentType)
+  await fortnoxPost(
+    accessToken,
+    '/supplierinvoicefileconnections',
+    { SupplierInvoiceFileConnection: { SupplierInvoiceNumber: String(givenNumber), FileId: fileId } },
+    fetchImpl,
+  )
+}
+
+/**
+ * Late attach (#956, found live): for x402 the feed pushes at the FUNDING
+ * confirmation, but the merchant hands its receipt to the agent only at the
+ * merchant retry seconds later — so the invoice is already pushed when the
+ * receipt arrives, and pushed sync rows are never re-claimed. The capture
+ * route calls this fire-and-forget: when the payment is already pushed to
+ * Fortnox, attach the just-captured receipt retroactively onto the invoice
+ * we know from external_ref. Best-effort by contract — a failure becomes a
+ * note on the sync row, never an error to the reporting agent.
+ */
+export async function lateAttachMerchantReceipt(
+  userId: string,
+  paymentId: string,
+  receipt: { url: string | null; inlineJson: unknown | null },
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const sync = await getSyncState(userId, 'fortnox', paymentId)
+  const match = sync?.status === 'pushed' ? sync.external_ref?.match(/^fortnox:supplierinvoice:(\d+)$/) : null
+  if (!match) return // not pushed (the normal in-order flow attaches at push time)
+  const givenNumber = Number(match[1])
+
+  const accessToken = await getValidFortnoxAccessToken(userId, fetchImpl)
+  if (!accessToken) return
+
+  try {
+    // Skip if a merchant-receipt file is already connected (guards the tiny
+    // capture/push race from double-attaching).
+    const existing = await fortnoxGet<{
+      SupplierInvoiceFileConnections?: Array<{ SupplierInvoiceNumber?: string; Name?: string }>
+    }>(accessToken, '/supplierinvoicefileconnections?limit=500', fetchImpl)
+    const already = (existing.SupplierInvoiceFileConnections ?? []).some(
+      (c) => String(c.SupplierInvoiceNumber) === String(givenNumber) && (c.Name ?? '').startsWith('merchant-receipt'),
+    )
+    if (already) return
+    await attachMerchantReceiptFiles(accessToken, givenNumber, paymentId, receipt, fetchImpl)
+  } catch (err) {
+    await markPushed(
+      userId, 'fortnox', paymentId, sync.external_ref,
+      `merchant receipt late-attach failed: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
 }

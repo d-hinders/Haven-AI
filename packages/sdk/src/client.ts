@@ -1575,7 +1575,46 @@ export class HavenClient {
       protocolReceiptHeader: retryResponse.headers.get('PAYMENT-RESPONSE') ?? undefined,
     })
 
+    await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
+
     return retryResponse
+  }
+
+  /**
+   * #956: capture the merchant's OWN receipt when the paid response carries
+   * one, and report it to Haven so the reporting feed can attach it next to
+   * the Haven-generated payment evidence (#498). Two supported signals on the
+   * paid response:
+   *
+   *   x-receipt-json: base64-encoded JSON receipt document (inline)
+   *   x-receipt-url:  https URL to the receipt document (reference)
+   *
+   * Strictly best-effort: absence is the normal case, and no failure here may
+   * ever affect the completed payment — the response is already paid for.
+   */
+  private async reportMerchantReceipt(paymentId: string, response: Response): Promise<void> {
+    try {
+      const inlineB64 = response.headers.get('x-receipt-json')
+      const url = response.headers.get('x-receipt-url')
+      if (!inlineB64 && !url) return
+
+      let body: Record<string, unknown> | null = null
+      if (inlineB64) {
+        // 64KB decoded cap mirrors the backend's inline limit — don't ship
+        // what the server will reject.
+        if (inlineB64.length > 90_000) return
+        const decoded = JSON.parse(Buffer.from(inlineB64, 'base64').toString('utf8')) as unknown
+        if (decoded && typeof decoded === 'object') body = { json: decoded }
+      } else if (url && url.startsWith('https://') && url.length <= 2048) {
+        body = { url }
+      }
+      if (!body) return
+
+      await this.post(`/machine-payments/${paymentId}/merchant-receipt`, body)
+    } catch {
+      // Best-effort by contract — a malformed header or a capture-endpoint
+      // hiccup never surfaces to the caller of a successful payment.
+    }
   }
 
   /**

@@ -34,6 +34,7 @@ import {
   relaySweepAuthorization,
 } from '../lib/sweep.js'
 import { AgentPaymentPhase, AgentPaymentNextAction } from '../lib/agent-payment-taxonomy.js'
+import { captureMerchantReceipt } from '../lib/merchant-receipt.js'
 
 interface MachinePaymentChallengeBody {
   rail: MachinePaymentRail
@@ -910,6 +911,33 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       throw err
     }
   })
+
+  // ── POST /:id/merchant-receipt — capture the merchant's own receipt (#956) ──
+  //
+  // After a successful settlement retry the merchant may hand the agent its
+  // own receipt (invoice/VAT document). The agent reports it here; the
+  // reporting feed attaches it as a SECOND file next to the Haven-generated
+  // payment evidence (#498). Best-effort by design: absence is the normal
+  // case, and a failure here never affects the payment itself.
+  app.post<{ Params: { id: string }; Body: { url?: string; json?: unknown } }>(
+    '/:id/merchant-receipt',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const { url, json } = request.body ?? {}
+      const result = await captureMerchantReceipt({
+        paymentId: request.params.id,
+        agentId: agent.id,
+        url,
+        inlineJson: json,
+      })
+      if (!result.ok) return reply.code(result.code).send({ error: result.error })
+      return reply.code(result.stored ? 201 : 200).send({
+        stored: result.stored,
+        ...(result.stored ? {} : { message: 'A merchant receipt is already recorded for this payment (first write wins).' }),
+      })
+    },
+  )
 
   app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext

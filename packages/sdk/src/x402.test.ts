@@ -1550,3 +1550,76 @@ describe('delegation-rail 3009-mode (#946)', () => {
     )
   })
 })
+
+// ── #956: merchant-receipt capture after a successful paid retry ─────────────
+describe('merchant receipt capture (#956)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const INVOICE = { fakturanummer: 'FAK-2026-00042', totalt_inkl_moms: '0.02' }
+
+  function paidFlowMocks(retryHeaders: Record<string, string>): ReturnType<typeof vi.spyOn> {
+    const txHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+      status: 402, headers: { 'Content-Type': 'application/json' },
+    }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_956',
+      status: 'pending_signature',
+      chain_id: 8453,
+      safe_address: safeAddress,
+      token: 'USDC', amount: '0.02', to: delegateAddress,
+      resource_url: paymentRequired.resource.url,
+      sign_data: { hash: `0x${'11'.repeat(32)}`, components: { safe: safeAddress }, instructions: 'sign' },
+    }), { status: 201 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_956', status: 'confirmed', tx_hash: txHash, chain_id: 8453,
+      token: 'USDC', amount: '0.02', to: delegateAddress,
+    }), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response('paid content', { status: 200, headers: retryHeaders }))
+    // evidence report + (maybe) receipt report:
+    fetchMock.mockResolvedValue(new Response('{}', { status: 200 }))
+    return fetchMock
+  }
+
+  it('reports an x-receipt-json receipt to Haven after the paid retry', async () => {
+    const fetchMock = paidFlowMocks({
+      'x-receipt-json': Buffer.from(JSON.stringify(INVOICE), 'utf8').toString('base64'),
+    })
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    const res = await haven.payX402Quote(quote)
+    expect(res.status).toBe(200)
+
+    const receiptCall = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes('/machine-payments/pay_956/merchant-receipt'))
+    expect(receiptCall).toBeDefined()
+    expect(JSON.parse((receiptCall![1] as RequestInit).body as string)).toEqual({ json: INVOICE })
+  })
+
+  it('a malformed receipt header is ignored — the paid response is untouched', async () => {
+    const fetchMock = paidFlowMocks({ 'x-receipt-json': '%%%not-base64-json%%%' })
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    const res = await haven.payX402Quote(quote)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('paid content')
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/merchant-receipt'))).toBe(false)
+  })
+
+  it('no receipt headers → no capture call (absence is the normal case)', async () => {
+    const fetchMock = paidFlowMocks({})
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    await haven.payX402Quote(quote)
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/merchant-receipt'))).toBe(false)
+  })
+})

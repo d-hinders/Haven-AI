@@ -123,6 +123,73 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
   }
 }
 
+/**
+ * Render a merchant-issued INLINE receipt (#956) as an attachable PDF. The
+ * document is presented verbatim as the merchant provided it — Haven adds
+ * only a provenance banner. Same ASCII/renderer constraints as the evidence
+ * PDF above.
+ */
+export function merchantReceiptPdf(paymentId: string, inlineJson: unknown): ReceiptUnderlag {
+  const pretty = JSON.stringify(inlineJson, null, 1) ?? 'null'
+  const lines = [
+    'MERCHANT-ISSUED RECEIPT',
+    '='.repeat(72),
+    '',
+    'Provided by the merchant in the paid response and reported by the',
+    `paying agent. Haven payment ${paymentId}. Contents verbatim below;`,
+    'Haven asserts nothing about them.',
+    '',
+    ...pretty.split('\n').slice(0, 400),
+  ]
+  return {
+    filename: `merchant-receipt-${paymentId.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 78)}.pdf`,
+    pdf: receiptPdf(lines),
+  }
+}
+
+/** Content types accepted from a merchant receipt URL (#956). */
+const MERCHANT_RECEIPT_CONTENT_TYPES = new Map([
+  ['application/pdf', 'pdf'],
+  ['image/png', 'png'],
+  ['image/jpeg', 'jpg'],
+])
+const MERCHANT_RECEIPT_MAX_BYTES = 5 * 1024 * 1024
+
+/** Hostname patterns that must never be fetched server-side (SSRF floor). */
+const BLOCKED_HOST_RE =
+  /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.|\[::1\]|.*\.local|.*\.internal)/i
+
+/**
+ * Fetch a merchant receipt DOCUMENT by URL at feed time (#956) — strictly
+ * guarded: https only, private/internal hosts refused, content-type
+ * whitelisted, size-capped. Throws with an actionable message on any
+ * violation; the connector degrades to a note (never fails the push).
+ *
+ * Known residual: string-level host blocking does not defeat DNS rebinding;
+ * acceptable for the current dev/testnet posture, revisit before any
+ * production rollout (noted in the security review).
+ */
+export async function fetchMerchantReceiptDocument(
+  url: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ filename: string; bytes: Buffer; contentType: string }> {
+  const parsed = new URL(url)
+  if (parsed.protocol !== 'https:') throw new Error('merchant receipt url must be https')
+  if (BLOCKED_HOST_RE.test(parsed.hostname)) {
+    throw new Error('merchant receipt url points at a private or internal host')
+  }
+  const res = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(15_000) })
+  if (!res.ok) throw new Error(`merchant receipt fetch failed (HTTP ${res.status})`)
+  const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
+  const ext = MERCHANT_RECEIPT_CONTENT_TYPES.get(contentType)
+  if (!ext) throw new Error(`merchant receipt content-type '${contentType}' is not allowed (pdf/png/jpg only)`)
+  const declared = Number(res.headers.get('content-length') ?? '0')
+  if (declared > MERCHANT_RECEIPT_MAX_BYTES) throw new Error('merchant receipt exceeds the 5MB cap')
+  const bytes = Buffer.from(await res.arrayBuffer())
+  if (bytes.byteLength > MERCHANT_RECEIPT_MAX_BYTES) throw new Error('merchant receipt exceeds the 5MB cap')
+  return { filename: `merchant-receipt.${ext}`, bytes, contentType }
+}
+
 interface UnderlagSourceRow {
   tx_hash: string | null
   chain_id: number | null

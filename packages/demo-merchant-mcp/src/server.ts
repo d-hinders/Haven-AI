@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { z } from 'zod'
 import { PRODUCTS, formatUsdc, type ProductId } from './products.js'
-import { generateInvoice, nextInvoiceNumber } from './invoice.js'
+import { invoiceForPayment } from './invoice.js'
 import type { SettledPayment, X402PaymentProcessor } from './x402.js'
 import type { Address } from 'viem'
 
@@ -128,14 +128,9 @@ function completePurchase(config: MerchantConfig, productId: ProductId, descript
     return { content: [{ type: 'text' as const, text: cachedText }] }
   }
 
-  const invoiceNumber = nextInvoiceNumber()
-  const invoice = generateInvoice({
-    invoiceNumber,
-    productId,
-    buyerAddress: payment.from,
-    authorizationNonce: payment.nonce,
-    txHash: payment.txHash,
-  })
+  // Shared with the HTTP layer's x-receipt-json header (#956) — one invoice
+  // per settled payment, so header and text can never diverge.
+  const invoice = invoiceForPayment(payment, productId)
 
   const text =
     `✅ Köp bekräftat!\n\n` +

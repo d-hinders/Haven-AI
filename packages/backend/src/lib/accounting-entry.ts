@@ -44,6 +44,8 @@ export interface AccountingEntry {
   resourceUrl: string | null
   /** Underlag: the settlement evidence backing this entry. */
   receiptRef: string
+  /** The merchant's OWN receipt when the agent captured one (#956); null = none. */
+  merchantReceipt: { url: string | null; inlineJson: unknown | null } | null
 }
 
 /** Shape selected from `machine_payment_evidence` for one settled payment. */
@@ -71,6 +73,9 @@ export interface AccountingEntrySourceRow {
   override_account: string | null
   /** Haven fee in SEK from the fee ledger (LEFT JOIN); null while fees are dark. */
   fee_sek: string | null
+  /** Merchant-issued receipt (LEFT JOIN merchant_receipts, #956). */
+  merchant_receipt_url: string | null
+  merchant_receipt_json: unknown
 }
 
 /**
@@ -102,6 +107,10 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     vatTreatment: vatTreatmentForCountry(row.country),
     resourceUrl: row.resource_url,
     receiptRef: row.id,
+    merchantReceipt:
+      row.merchant_receipt_url != null || row.merchant_receipt_json != null
+        ? { url: row.merchant_receipt_url, inlineJson: row.merchant_receipt_json ?? null }
+        : null,
   }
 }
 
@@ -114,7 +123,9 @@ const ENTRY_SOURCE_SQL = `
   mc.category AS category,
   mc.country AS country,
   mao.bas_account AS override_account,
-  pf.fee_sek AS fee_sek
+  pf.fee_sek AS fee_sek,
+  mr.url AS merchant_receipt_url,
+  mr.inline_json AS merchant_receipt_json
   FROM machine_payment_evidence mpe
   LEFT JOIN LATERAL (
     SELECT category, country FROM merchant_catalog
@@ -124,7 +135,9 @@ const ENTRY_SOURCE_SQL = `
   LEFT JOIN merchant_account_overrides mao
     ON mao.user_id = mpe.user_id AND mao.resource_url = mpe.resource_url
   LEFT JOIN payment_fees pf
-    ON pf.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)`
+    ON pf.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
+  LEFT JOIN merchant_receipts mr
+    ON mr.evidence_id = mpe.id`
 
 export interface BuildAccountingEntriesOptions {
   userId: string

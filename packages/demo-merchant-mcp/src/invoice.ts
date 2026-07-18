@@ -1,5 +1,6 @@
 import type { ProductId } from './products.js'
 import { PRODUCTS, formatUsdc } from './products.js'
+import type { SettledPayment } from './x402.js'
 
 // ── Merchant identity ────────────────────────────────────────────────────────
 const MERCHANT = {
@@ -200,3 +201,26 @@ BLOCKKEDJEREFERENS
 }
 
 export { nextInvoiceNumber }
+
+// ── Per-payment invoice cache (#956) ─────────────────────────────────────────
+//
+// The invoice is now needed in TWO places for the same settled payment: the
+// HTTP layer sets it as the machine-readable `x-receipt-json` response header
+// (so a paying agent can capture the merchant's own receipt), and the MCP tool
+// handler renders it in the confirmation text. One generation per payment
+// keeps the two identical — and repeat tool calls replay the same invoice.
+const invoicesByPayment = new WeakMap<SettledPayment, Invoice>()
+
+export function invoiceForPayment(payment: SettledPayment, productId: ProductId): Invoice {
+  const cached = invoicesByPayment.get(payment)
+  if (cached) return cached
+  const invoice = generateInvoice({
+    invoiceNumber: nextInvoiceNumber(),
+    productId,
+    buyerAddress: payment.from,
+    authorizationNonce: payment.nonce,
+    txHash: payment.txHash,
+  })
+  invoicesByPayment.set(payment, invoice)
+  return invoice
+}

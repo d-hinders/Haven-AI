@@ -277,6 +277,36 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockQuery.mock.calls.some((c) => /status = 'submitted'/.test(String(c[0])))).toBe(true)
   })
 
+  it('settle REFUSES a 3009-mode funding intent — /payments/:id/sign is its path (#946)', async () => {
+    // A 3009 funding intent stores a prepared UserOp, not {child, budget}.
+    mockQuery.mockResolvedValue({ rows: [{
+      id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
+      prepared_user_op: { sender: DELEGATE_ACCT, nonce: '1' }, chain_id: 84532,
+      x402_resource_url: 'https://merchant.example/resource',
+    }] })
+    const res = await app.inject({
+      method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: '0x' + 'ef'.repeat(65) },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/EIP-3009 \(funding leg\)/)
+    // Nothing flipped to submitted:
+    expect(mockQuery.mock.calls.some((c) => /status = 'submitted'/.test(String(c[0])))).toBe(false)
+  })
+
+  it('3009-mode idempotent conflict returns the 409 replay signal (#946)', async () => {
+    mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+    mockCreateIntent.mockResolvedValueOnce(null) // conflict — another claim owns the key
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-1' }),
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/Idempotent replay/)
+  })
+
   it('settle 409s a non-delegation intent and 400s a bad signature', async () => {
     mockQuery.mockResolvedValue({ rows: [{ id: INTENT_ID, status: 'pending_signature', execution_rail: 'session_key', prepared_user_op: {}, chain_id: 84532, x402_resource_url: null }] })
     const wrongRail = await app.inject({

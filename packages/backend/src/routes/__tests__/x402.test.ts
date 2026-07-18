@@ -116,6 +116,26 @@ describe('x402 routes', () => {
     expect(response.json()).toEqual({ error: 'Missing or invalid API key' })
   })
 
+  it('rejects settlementScheme erc7710 on the legacy rail — 3009 only there (#946)', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        settlementScheme: 'erc7710',
+      },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatch(/delegation-rail account/)
+  })
+
   it('creates a funding intent to the delegate and records merchant metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })

@@ -324,6 +324,18 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'idempotencyKey must be a non-empty string up to 128 characters' })
     }
 
+    // #946: settlementScheme is validated for EVERY rail — a legacy-rail agent
+    // requesting erc7710 must fail loudly, not silently get the 3009 two-leg.
+    const { settlementScheme } = request.body
+    if (settlementScheme !== undefined && !['erc7710', 'eip3009'].includes(settlementScheme)) {
+      return reply.code(400).send({ error: "settlementScheme must be 'erc7710' or 'eip3009'" })
+    }
+    if (settlementScheme === 'erc7710' && agent.execution_rail !== 'delegation') {
+      return reply.code(400).send({
+        error: 'erc7710 settlement requires a delegation-rail account — the legacy AllowanceModule rail settles via EIP-3009 only',
+      })
+    }
+
     // 2. Resolve token from asset address (shared with the MPP core).
     const tokenResult = resolvePaymentToken(agent.chain_id, asset)
     if (!tokenResult.ok) {
@@ -358,10 +370,6 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       // merchantPayTo = the merchant, while erc7710 callers send the merchant
       // as payTo. An explicit settlementScheme, when present, must agree.
       const fundingShape = payTo.toLowerCase() === agent.delegate_address.toLowerCase()
-      const { settlementScheme } = request.body
-      if (settlementScheme !== undefined && !['erc7710', 'eip3009'].includes(settlementScheme)) {
-        return reply.code(400).send({ error: "settlementScheme must be 'erc7710' or 'eip3009'" })
-      }
       if (settlementScheme === 'eip3009' && !fundingShape) {
         return reply.code(400).send({
           error: 'eip3009 settlement requires payTo = the agent delegate EOA (the funding target) and merchantPayTo = the merchant',
@@ -1281,6 +1289,17 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           budget: Parameters<typeof assembleSettlementPayload>[3]
           delegateAccountAddress: `0x${string}`
           network: string
+        }
+        // #946 guard: a 3009-mode funding intent stores a prepared UserOp, not
+        // an erc7710 {child, budget} settlement state. Refuse it here
+        // structurally — otherwise a tolerant encoder could flip the intent to
+        // 'submitted' with a garbage header and no funding ever executed.
+        if (!state?.child || !state?.budget) {
+          return reply.code(409).send({
+            error:
+              'This intent settles via EIP-3009 (funding leg) — sign it via POST ' +
+              `/payments/${intent.id}/sign. /settle is for erc7710 direct settlement only.`,
+          })
         }
         const payload = assembleSettlementPayload(
           intent.chain_id,

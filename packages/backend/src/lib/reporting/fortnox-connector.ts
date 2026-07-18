@@ -409,8 +409,9 @@ export async function lateAttachMerchantReceipt(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const sync = await getSyncState(userId, 'fortnox', paymentId)
-  const match = sync?.status === 'pushed' ? sync.external_ref?.match(/^fortnox:supplierinvoice:(\d+)$/) : null
-  if (!match) return // not pushed (the normal in-order flow attaches at push time)
+  if (!sync || sync.status !== 'pushed') return // not pushed — in-order flow attaches at push time
+  const match = sync.external_ref?.match(/^fortnox:supplierinvoice:(\d+)$/)
+  if (!match) return
   const givenNumber = Number(match[1])
 
   const accessToken = await getValidFortnoxAccessToken(userId, fetchImpl)

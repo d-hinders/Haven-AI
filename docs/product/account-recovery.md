@@ -6,7 +6,7 @@ covers:
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/onboarding/RecoveryNudge.tsx
   - packages/backend/src/routes/agent-delegations.ts
-last-verified: "2026-07-12"
+last-verified: "2026-07-14"
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -41,6 +41,12 @@ same rule as a clear message ("add a backup first") rather than a failed
 transaction.
 
 Because a fresh single-passkey account starts with exactly one way to approve,
+**On mainnet, a backup is required — not just suggested.** Real-money accounts
+must have at least two ways to approve before they can be created or grant an
+agent a budget. If you truly want to run with a single device, you must
+explicitly acknowledge that losing it loses the account — Haven records that
+choice. (On testnets this rule does not apply.)
+
 **Haven nudges you to add a backup right after signup.** It is dismissible, and
 you can add one at any time from **Backup & recovery** on any agent that uses
 the account.

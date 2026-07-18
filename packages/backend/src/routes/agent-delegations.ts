@@ -35,6 +35,7 @@ import { getChain } from '../lib/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../lib/hybrid-provisioning.js'
 import { loadHybridOwnerConfig, isPasskeyOnly } from '../lib/hybrid-account-config.js'
+import { signerFloorError } from '../lib/mainnet-gate.js'
 import {
   buildBudgetDelegation,
   buildRevocation,
@@ -109,7 +110,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     if (agent.account_type !== 'delegator_hybrid' || !agent.treasury_address) {
       return reply.code(409).send({ error: 'Agent account is not on the delegation rail' })
     }
-    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address)
+    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
     return {
       account_address: agent.treasury_address,
@@ -187,6 +188,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if (owner.config.ownerAddress) {
         return { error: 'This account already has a wallet owner' }
       }
+      // Zero address = the "no owner" encoding; it must never be enrolled as
+      // a signer (it would inflate the #908 floor count with a non-signer).
+      if (body.owner_address && /^0x0{40}$/i.test(body.owner_address)) {
+        return { error: 'owner_address must not be the zero address' }
+      }
       if (!body.owner_address || !isValidAddress(body.owner_address)) {
         return { error: 'A valid owner_address is required' }
       }
@@ -204,7 +210,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if (agent.account_type !== 'delegator_hybrid' || !agent.treasury_address) {
         return reply.code(409).send({ error: 'Agent account is not on the delegation rail' })
       }
-      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address)
+      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address, agent.chain_id)
       if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
       const encoded = encodeSignerAction(request.body ?? {}, owner)
@@ -257,7 +263,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if (!user_operation || typeof user_operation !== 'object') {
         return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
       }
-      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string)
+      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
       if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
       // Re-derive the calldata from the CLAIMED action and require it inside
@@ -458,12 +464,37 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       // preserved; non-custody unchanged — the account's signers are the
       // owner's keys). Fail-closed: no activation on a failed deploy, the
       // grant stays pending and activate can be retried.
-      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string)
+      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
       if (!owner) {
         return reply.code(409).send({
           error: 'Account signer configuration unknown — cannot deploy this account',
         })
       }
+
+      // ── #908 mainnet signer floor at the AUTHORITY moment ──
+      // Provisioning gates new rows, but activation is where a delegation
+      // becomes live spend authority — enforce the floor here too so accounts
+      // created by older code (or any other path) cannot operate under-floor
+      // on a value-bearing chain without a recorded waiver.
+      // The zero address is "no owner" in the Hybrid encoding — never a
+      // signer. Rows created by older code could carry it; count defensively.
+      const hasRealOwner =
+        !!owner.config.ownerAddress && !/^0x0{40}$/i.test(owner.config.ownerAddress)
+      const signerCount = (owner.config.passkeys?.length ?? 0) + (hasRealOwner ? 1 : 0)
+      const waiverRow = await pool.query<{ single_signer_waiver_at: string | null }>(
+        `SELECT single_signer_waiver_at FROM user_safes
+         WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`,
+        [sub, agent.treasury_address, agent.chain_id],
+      )
+      const floorBlock = signerFloorError({
+        chainId: agent.chain_id,
+        signerCount,
+        waiverAcknowledged: waiverRow.rows[0]?.single_signer_waiver_at != null,
+      })
+      if (floorBlock) {
+        return reply.code(403).send({ error: floorBlock })
+      }
+
       try {
         const deployed = await ensureHybridDeployed(
           agent.chain_id,
@@ -527,7 +558,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       // Reconstruct the treasury's owner config (#885): an EOA account signs
       // the EIP-712 typed data; a pure-passkey account signs the userOpHash via
       // WebAuthn (#887). Check BEFORE building — a cheap 409 beats a 502.
-      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string)
+      const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
       if (!owner) {
         return reply.code(409).send({
           error: 'Account signer configuration unknown — revoke via the exit path (docs)',
@@ -592,7 +623,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     if (!user_operation || typeof user_operation !== 'object') {
       return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
     }
-    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string)
+    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
     try {

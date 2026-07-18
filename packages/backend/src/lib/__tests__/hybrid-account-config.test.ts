@@ -25,7 +25,7 @@ beforeEach(() => mockQuery.mockReset())
 describe('loadHybridOwnerConfig (#885)', () => {
   it('returns the EOA owner config when owner_address is set', async () => {
     mock({ id: 's1', owner_address: '0x' + 'ee'.repeat(20) })
-    const res = await loadHybridOwnerConfig(USER, SAFE)
+    const res = await loadHybridOwnerConfig(USER, SAFE, 84532)
     expect(res?.config).toEqual({ ownerAddress: '0x' + 'ee'.repeat(20), passkeys: undefined })
     expect(res && isPasskeyOnly(res.config)).toBe(false)
   })
@@ -35,7 +35,7 @@ describe('loadHybridOwnerConfig (#885)', () => {
       { key_id: 'k1', public_key_x: '0x11', public_key_y: '0x22' },
       { key_id: 'k2', public_key_x: '0x33', public_key_y: '0x44' },
     ])
-    const res = await loadHybridOwnerConfig(USER, SAFE)
+    const res = await loadHybridOwnerConfig(USER, SAFE, 84532)
     expect(res?.config.ownerAddress).toBeUndefined()
     expect(res?.config.passkeys).toEqual([
       { keyId: 'k1', x: 0x11n, y: 0x22n },
@@ -46,7 +46,7 @@ describe('loadHybridOwnerConfig (#885)', () => {
 
   it('carries both an EOA owner and passkeys when present', async () => {
     mock({ id: 's1', owner_address: '0x' + 'ee'.repeat(20) }, [{ key_id: 'k1', public_key_x: '0x11', public_key_y: '0x22' }])
-    const res = await loadHybridOwnerConfig(USER, SAFE)
+    const res = await loadHybridOwnerConfig(USER, SAFE, 84532)
     expect(res?.config.ownerAddress).toBe('0x' + 'ee'.repeat(20))
     expect(res?.config.passkeys).toHaveLength(1)
     expect(res && isPasskeyOnly(res.config)).toBe(false) // has an EOA owner
@@ -54,11 +54,11 @@ describe('loadHybridOwnerConfig (#885)', () => {
 
   it('returns null for an unknown account', async () => {
     mock(null)
-    expect(await loadHybridOwnerConfig(USER, SAFE)).toBeNull()
+    expect(await loadHybridOwnerConfig(USER, SAFE, 84532)).toBeNull()
   })
 
   it('returns null when the account has NO signer at all (neither owner nor passkey)', async () => {
     mock({ id: 's1', owner_address: null }, [])
-    expect(await loadHybridOwnerConfig(USER, SAFE)).toBeNull()
+    expect(await loadHybridOwnerConfig(USER, SAFE, 84532)).toBeNull()
   })
 })

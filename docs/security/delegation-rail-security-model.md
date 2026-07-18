@@ -257,3 +257,13 @@ UserOp's typed data and the 3009 header); Haven prepares and relays, holds no
 key, and sponsorship can pay gas but never move value. The scheme is recorded
 per intent (`machine_metadata.settlement_scheme`) so 3009-mode usage is
 auditable and its retirement measurable.
+
+Hardening shipped with #961: the per-agent hourly x402 cap now guards the
+delegation branch too (every authorize costs a sponsored bundler estimation,
+so the cap is sponsorship-cost protection on the #717 surface — placed after
+the idempotent-replay lookup so recovery retries are never rate-limited);
+one-shot authorize+execute is refused loudly (a signature over
+not-yet-prepared state can never be valid); and idempotent replays resume
+with the ORIGINAL reconstructed signing payload rather than re-running
+estimations — the stored intent, not a fresh prepare, is the source of truth
+for what the agent signs.

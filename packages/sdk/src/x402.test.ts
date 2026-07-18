@@ -1448,3 +1448,105 @@ describe('x402 helpers', () => {
     expect(decoded.accepted).toEqual(accepted)
   })
 })
+
+// ── #946: delegation-rail EIP-3009 fallback rides the standard flow ──────────
+//
+// The backend's 3009-mode authorize response differs from legacy only in the
+// signing scheme: sign_data carries `eip712_userop` + the account's typed
+// data (the funding redemption UserOp), and /payments/:id/sign submits the
+// sponsored redemption. The SDK must complete the SAME authorize→sign→retry
+// machinery, signing typed data instead of the bare hash.
+describe('delegation-rail 3009-mode (#946)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('signs eip712_userop typed data for the funding leg and completes the flow', async () => {
+    const delegateKey = `0x${'01'.repeat(32)}`
+    const txHash = `0x${'ab'.repeat(32)}`
+    const typedData = {
+      domain: {
+        chainId: 8453,
+        name: 'HybridDeleGator',
+        version: '1',
+        verifyingContract: '0x' + 'dd'.repeat(20),
+      },
+      types: {
+        PackedUserOperation: [
+          { name: 'sender', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'entryPoint', type: 'address' },
+        ],
+      },
+      primaryType: 'PackedUserOperation',
+      message: {
+        sender: '0x' + 'dd'.repeat(20),
+        nonce: '1',
+        entryPoint: '0x' + 'ee'.repeat(20),
+      },
+    }
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_946',
+      status: 'pending_signature',
+      expires_at: 'later',
+      chain_id: 8453,
+      safe_address: safeAddress,
+      payer: safeAddress,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+      merchant_to: accepted.payTo,
+      resource_url: paymentRequired.resource.url,
+      sign_data: {
+        hash: `0x${'56'.repeat(32)}`,
+        signature_scheme: 'eip712_userop',
+        typed_data: typedData,
+        components: {
+          safe: safeAddress,
+          token: accepted.asset,
+          to: delegateAddress,
+          amount: accepted.amount,
+        },
+        instructions: 'sign then POST /payments/pay_946/sign',
+      },
+    }), { status: 201 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_946',
+      status: 'confirmed',
+      tx_hash: txHash,
+      chain_id: 8453,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+    }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl: 'https://haven.example',
+    })
+    const receipt = await haven.authorizeX402(paymentRequired)
+
+    expect(receipt.success).toBe(true)
+    expect(receipt.paymentId).toBe('pay_946')
+    expect(receipt.txHash).toBe(txHash)
+
+    // The authorize call followed the standard-x402 contract the backend's
+    // scheme routing keys on: payTo = the delegate EOA, merchantPayTo = merchant.
+    const authorizeBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(authorizeBody.payTo.toLowerCase()).toBe(delegateAddress.toLowerCase())
+    expect(authorizeBody.merchantPayTo).toBe(accepted.payTo)
+
+    // The signature posted to /payments/pay_946/sign is the TYPED-DATA
+    // signature (the account rejects a bare-hash one) — byte-identical to an
+    // independent signUserOpTypedDataForDelegation over the same payload.
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://haven.example/payments/pay_946/sign')
+    const signBody = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)
+    const { signUserOpTypedDataForDelegation } = await import('./signer.js')
+    expect(signBody.signature).toBe(
+      await signUserOpTypedDataForDelegation(delegateKey, typedData as never),
+    )
+  })
+})

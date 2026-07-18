@@ -111,6 +111,18 @@ Haven backend
   + Haven discretion
 ```
 
+> **Current state (2026-07-18, #946):** the delegation rail settles x402 by
+> two schemes. erc7710 direct settlement redeems the budget delegation itself
+> (authority = the caveat stack, at settlement). The EIP-3009 fallback funds
+> the agent's delegate EOA by redeeming the same budget delegation (authority
+> = the caveat stack, at the funding hop; agent-signed sponsored UserOp), and
+> the merchant leg is then the standard agent-signed EIP-3009 transfer bound
+> to the exact authenticated payment context — the same shape as the legacy
+> rail's merchant leg described above. In both schemes Haven prepares and
+> relays only; no leg is authorised by Haven policy alone. Recipient-pinned
+> budgets cannot fund the EOA and are therefore erc7710-only — the fallback
+> never weakens an on-chain pin.
+
 ## Hard Architecture Invariants
 
 Preserve these facts as non-negotiable implementation invariants:

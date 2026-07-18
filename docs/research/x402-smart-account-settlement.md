@@ -26,7 +26,8 @@ last-verified: "2026-07-18"
 > DeleGator (epic #821) rather than Safe-via-module. The Permit2 track was not
 > pursued. EIP-3009/delegate-EOA remains the default on the legacy
 > AllowanceModule rail (import-only); a delegation-metered **EIP-3009 fallback
-> on the delegation rail** (for merchant reach) is decided but **not built** —
+> on the delegation rail** (for merchant reach) is **built** (per-payment scheme
+> selection; pinned budgets stay erc7710-only) —
 > RFC #791 §18 / [#946](https://github.com/d-hinders/Haven-AI/issues/946). The
 > sections below are the original investigation, kept as a decision record.
 

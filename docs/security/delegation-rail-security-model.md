@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-07-14"
+last-verified: "2026-07-18"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -218,3 +218,42 @@ address, which provably is NOT a signer, is rejected at every entry point).
 
 Remaining for the UI (when mainnet onboarding opens): a first-class backup
 step or an explicit waiver screen — the API refuses either way.
+
+## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
+
+The rail settles x402 two ways, selected per payment (`routes/x402.ts`):
+
+- **erc7710 direct settlement (default & destination, #830):** the settlement
+  redeems the budget delegation itself — enforcers run at every payment,
+  against every merchant; no funding leg, no hot balance, no sweep.
+- **EIP-3009 fallback (temporary interop bridge, #946 / RFC #791 §18):** for
+  facilitators that cannot redeem a delegation chain. The budget delegation is
+  redeemed with `to = the agent's own delegate EOA` (a sponsored UserOp the
+  agent signs — the same prepare/submit split as any redemption), then the EOA
+  signs a standard EIP-3009 header client-side and the facilitator settles
+  EOA→merchant.
+
+What the bridge deliberately gives up, for 3009 payments only — and the
+compensating controls:
+
+1. **A transient hot balance returns** on the delegate EOA between funding and
+   settlement. Bounded: the funding is the exact payment amount; the header's
+   validity window is capped (≤600 s, SDK-side); the delegate-balance monitor
+   covers delegation-rail agents; the rail-agnostic sweep route recovers
+   residuals to the **treasury Hybrid** (`agent.safe_address`), with the
+   1 USDC dust floor and sub-floor residuals visible in the ledger.
+2. **Budget meters at the funding hop, not at settlement.** Verify-without-
+   settle strands the amount on the EOA → sweep reconciles it; the budget
+   consumption is honest (funds genuinely left the treasury).
+3. **The merchant hop has no on-chain policy.** This is why 3009-mode
+   structurally requires an **open (unpinned) budget**: a recipient-pinned
+   delegation cannot fund the EOA (the pin locks `transfer(to,…)` to the
+   merchant), and the server only funds via delegations whose caveats permit
+   the EOA as recipient. **Pinned agents are erc7710-only** (owner decision
+   2026-07-15, recorded on #946) — a pin is never weakened for interop.
+
+Non-custody is unchanged: the agent signs both legs client-side (the funding
+UserOp's typed data and the 3009 header); Haven prepares and relays, holds no
+key, and sponsorship can pay gas but never move value. The scheme is recorded
+per intent (`machine_metadata.settlement_scheme`) so 3009-mode usage is
+auditable and its retirement measurable.

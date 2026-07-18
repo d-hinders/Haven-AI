@@ -135,7 +135,7 @@ on-chain agent rules in Haven → the agent can pay. Current contracts:
   is the dev/QA testnet; **Gnosis Chain** (100) remains supported for existing
   configured Safe flows. Standard merchant x402 is exact-scheme USDC on Base
   and Base Sepolia; delegation-rail accounts settle x402 via ERC-7710 direct
-  settlement (merchant reach still thin — EIP-3009 fallback decided, #946)
+  settlement, with a per-payment EIP-3009 fallback for facilitators without erc7710 support (#946)
   ([x402 sequence](04-x402-payment-sequence.md)).
 
 For trust boundaries and who-talks-to-who, start at

@@ -528,6 +528,17 @@ export class HavenClient {
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
     }
+    // #946: a delegation-rail funding intent signs the ACCOUNT's EIP-712 typed
+    // data — the keyless/hosted flow's edge signer only raw-ECDSA-signs a
+    // payload hash, which the account would reject at the bundler AFTER the
+    // intent is claimed. Fail loudly here instead of confusingly there.
+    if (raw.sign_data.signature_scheme !== undefined) {
+      throw new HavenSigningError(
+        `This account's x402 funding intent requires signature scheme '${raw.sign_data.signature_scheme}', ` +
+          'which the hosted/keyless signer flow does not support yet. Use the local SDK flow ' +
+          '(HavenClient with delegateKey) for delegation-rail x402 payments.',
+      )
+    }
     if (!raw.x402_expected_auth) {
       throw new HavenApiError('No x402 expected-context binding returned from x402/authorize', 500, raw)
     }

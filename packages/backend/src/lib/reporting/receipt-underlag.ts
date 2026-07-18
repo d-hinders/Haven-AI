@@ -125,9 +125,9 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
 
 /**
  * Render a merchant-issued INLINE receipt (#956) as an attachable PDF. The
- * document is presented verbatim as the merchant provided it — Haven adds
- * only a provenance banner. Same ASCII/renderer constraints as the evidence
- * PDF above.
+ * document is presented as the merchant provided it (non-ASCII folded to '?',
+ * the renderer's filing-artifact constraint) — Haven adds only a provenance
+ * banner. Same renderer constraints as the evidence PDF above.
  */
 export function merchantReceiptPdf(paymentId: string, inlineJson: unknown): ReceiptUnderlag {
   const pretty = JSON.stringify(inlineJson, null, 1) ?? 'null'
@@ -136,8 +136,8 @@ export function merchantReceiptPdf(paymentId: string, inlineJson: unknown): Rece
     '='.repeat(72),
     '',
     'Provided by the merchant in the paid response and reported by the',
-    `paying agent. Haven payment ${paymentId}. Contents verbatim below;`,
-    'Haven asserts nothing about them.',
+    `paying agent. Haven payment ${paymentId}. Contents as provided below`,
+    '(non-ASCII characters folded to ?); Haven asserts nothing about them.',
     '',
     ...pretty.split('\n').slice(0, 400),
   ]
@@ -157,7 +157,7 @@ const MERCHANT_RECEIPT_MAX_BYTES = 5 * 1024 * 1024
 
 /** Hostname patterns that must never be fetched server-side (SSRF floor). */
 const BLOCKED_HOST_RE =
-  /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.|\[::1\]|.*\.local|.*\.internal)/i
+  /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|100\.6[4-9]\.|100\.[7-9]\d\.|100\.1[01]\d\.|100\.12[0-7]\.|0\.|\[::1?\]|\[::ffff:.*|\[f[cd][0-9a-f]{2}:.*|\[fe80:.*|.*\.local|.*\.internal)/i
 
 /**
  * Fetch a merchant receipt DOCUMENT by URL at feed time (#956) — strictly
@@ -165,8 +165,10 @@ const BLOCKED_HOST_RE =
  * whitelisted, size-capped. Throws with an actionable message on any
  * violation; the connector degrades to a note (never fails the push).
  *
- * Known residual: string-level host blocking does not defeat DNS rebinding;
- * acceptable for the current dev/testnet posture, revisit before any
+ * Known residual: string-level host blocking does not defeat DNS rebinding,
+ * and exotic address literals beyond the covered v4/v6 ranges may slip the
+ * regex — the real fix is resolve-then-validate against private ranges.
+ * Acceptable for the current dev/testnet posture, revisit before any
  * production rollout (noted in the security review).
  */
 export async function fetchMerchantReceiptDocument(

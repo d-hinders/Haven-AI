@@ -1211,6 +1211,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
+          '429': errorResponse,
         },
       },
     },

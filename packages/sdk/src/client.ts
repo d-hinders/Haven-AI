@@ -1600,9 +1600,9 @@ export class HavenClient {
 
       let body: Record<string, unknown> | null = null
       if (inlineB64) {
-        // 64KB decoded cap mirrors the backend's inline limit — don't ship
-        // what the server will reject.
-        if (inlineB64.length > 90_000) return
+        // Mirror the backend's 64KB decoded cap exactly (base64 inflates 4/3)
+        // — don't ship what the server will reject.
+        if (inlineB64.length > Math.ceil((64 * 1024 * 4) / 3)) return
         const decoded = JSON.parse(Buffer.from(inlineB64, 'base64').toString('utf8')) as unknown
         if (decoded && typeof decoded === 'object') body = { json: decoded }
       } else if (url && url.startsWith('https://') && url.length <= 2048) {
@@ -1717,6 +1717,9 @@ export class HavenClient {
         protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
         protocolReceiptHeader,
       })
+      // #956: the hosted-MCP completion path is a successful paid retry too —
+      // capture the merchant's receipt exactly like the local flow does.
+      await this.reportMerchantReceipt(evidenceContext.paymentId, surfaced)
     }
 
     return {
@@ -1988,6 +1991,10 @@ export class HavenClient {
         retryResponse.headers.get('MACHINE-PAYMENT-RESPONSE') ??
         undefined,
     })
+
+    // #956: a successful machine-payment retry can carry a merchant receipt
+    // too — same capture contract as the x402 paths.
+    await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
 
     return retryResponse
   }

@@ -168,7 +168,13 @@ Semantics locked by tests:
   file connection on the same invoice — inline JSON rendered as a
   provenance-bannered PDF, URL documents fetched under SSRF guards. Absence
   is the normal case (no note); a failed merchant attach degrades to a note
-  exactly like the evidence attach.
+  exactly like the evidence attach. **Timing (found live, #965):** for x402
+  the feed pushes at the FUNDING confirmation while the merchant's receipt
+  reaches the agent only at the merchant retry seconds later — so the normal
+  x402 path is the LATE ATTACH: the capture endpoint retroactively attaches
+  onto the already-pushed invoice via the sync row's `external_ref`
+  (double-attach-guarded; failures degrade to a sync-row note). Sandbox
+  invoice 12 proves the full dual-attachment chain.
 
 Live validation: **Q5 CONFIRMED 2026-07-16** — `npm run pilot:fortnox` pushed
 an invoice with the underlag PDF attached and read the file connection back

@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/lib/sweep.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-07-10"
+last-verified: "2026-07-18"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -101,6 +101,19 @@ For balance-aware x402 coverage:
 - `amount > remaining + delegate balance` is rejected as insufficient coverage.
 
 Neither a queued nor rejected request returns a funding hash.
+
+The hosted keyless construct is currently allowance-rail only. When a funding
+intent demands a typed-data signing scheme (`sign_data.signature_scheme` set —
+delegation-rail accounts), the SDK's `createX402Intent` fails loudly with a
+`HavenSigningError` at authorize, before any signing context reaches the edge
+signer, directing the user to the local SDK flow (`HavenClient` with
+`delegateKey`). Hosted-signer delegation-rail agents therefore cannot pay x402
+today.
+
+After a successful paid retry — including the hosted completion path
+(`completeX402MerchantCall`) — the SDK captures a merchant-issued receipt from
+the paid response's `x-receipt-json`/`x-receipt-url` headers and reports it,
+best-effort, to `POST /machine-payments/:id/merchant-receipt`.
 
 ## Tool surfaces
 

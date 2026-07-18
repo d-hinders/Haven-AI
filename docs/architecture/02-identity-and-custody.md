@@ -38,7 +38,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-07-12"
+last-verified: "2026-07-18"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -212,10 +212,15 @@ radius shifts in a few ways worth mapping explicitly:
   ≤ one period's budget, only to pinned recipients, until expiry or the owner's
   `disableDelegation` kill-switch. Blast radius is therefore **identical in kind**
   to the retired session rail's per-period allowance.
-- **No funding leg, so no stranded delegate balance.** Payments move
-  account→recipient directly (invariant 5's "delegate-key exposure includes
-  delegate-held x402 funds" does not apply on this rail — there is no Safe→delegate
-  funding transfer).
+- **No funding leg on the primary paths, so no standing delegate balance.**
+  Direct payments and erc7710 x402 settle account→recipient/merchant directly.
+  The **EIP-3009 x402 fallback (#946) is the deliberate exception**: the budget
+  delegation is redeemed to transiently fund the agent's delegate EOA, which
+  signs the standard merchant header — so in 3009-mode invariant 5's
+  "delegate-key exposure includes delegate-held x402 funds" DOES apply,
+  bounded by the period budget (metered at the funding hop) and covered by the
+  reused sweep/monitor machinery. Recipient-pinned budgets cannot fund the EOA
+  and stay erc7710-only.
 - **The account owner is watch-only in Haven**, and the DeleGator's UUPS upgrade
   authority is the account's own signers — never Haven. Haven-side compromise can
   construct malicious payloads but cannot sign grants, redemptions, or upgrades.

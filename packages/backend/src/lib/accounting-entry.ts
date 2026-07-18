@@ -109,7 +109,7 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     receiptRef: row.id,
     merchantReceipt:
       row.merchant_receipt_url != null || row.merchant_receipt_json != null
-        ? { url: row.merchant_receipt_url, inlineJson: row.merchant_receipt_json ?? null }
+        ? { url: row.merchant_receipt_url ?? null, inlineJson: row.merchant_receipt_json ?? null }
         : null,
   }
 }

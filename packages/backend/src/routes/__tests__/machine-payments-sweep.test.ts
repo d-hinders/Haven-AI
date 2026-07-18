@@ -121,6 +121,33 @@ describe('machine payment sweep routes', () => {
       expect(body.amount_atomic).toBe('2000000')
     })
 
+    it('sweeps a DELEGATION-rail agent to its treasury Hybrid — 3009-mode reconciliation (#946)', async () => {
+      // The #946 EIP-3009 fallback reintroduces a bounded funding leg on the
+      // delegation rail and leans on THIS route for verify-without-settle
+      // reconciliation: agent.safe_address is the treasury Hybrid for
+      // delegator accounts, and the route must stay rail-agnostic.
+      const TREASURY_HYBRID = '0x' + '77'.repeat(20)
+      mockQuery.mockResolvedValueOnce({
+        rows: [{
+          ...AGENT,
+          safe_address: TREASURY_HYBRID,
+          execution_rail: 'delegation',
+          account_type: 'delegator_hybrid',
+          chain_id: 84532,
+        }],
+      })
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n)
+      sweepMocks.buildSweepAuthorization.mockReturnValueOnce({ ...AUTH, to: TREASURY_HYBRID, chainId: 84532 })
+      sweepMocks.signSweepExpectedContext.mockResolvedValueOnce('0xsigned')
+
+      const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
+
+      expect(res.statusCode).toBe(201)
+      expect(sweepMocks.buildSweepAuthorization).toHaveBeenCalledWith(
+        expect.objectContaining({ safeAddress: TREASURY_HYBRID, chainId: 84532 }),
+      )
+    })
+
     it('leaves dust below the sweep floor un-swept (#700 floor)', async () => {
       mockQuery.mockResolvedValueOnce(authRow())
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(500_000n) // 0.5 USDC < 1 floor

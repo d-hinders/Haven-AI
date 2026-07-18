@@ -33,7 +33,7 @@ import {
   getAgentPaymentStatus,
 } from '../lib/agent-payment-status.js'
 import { redactVendorSecrets } from '../lib/execution-rail.js'
-import { selectDelegation } from '../lib/delegation-authorization.js'
+import { selectDelegation, prepareDelegationPayment } from '../lib/delegation-authorization.js'
 import { computeHybridAccountAddress } from '../lib/hybrid-provisioning.js'
 import {
   buildSettlementDelegation,
@@ -61,6 +61,14 @@ interface X402AuthorizeBody {
   category?: string       // api_access, data, compute
   idempotencyKey?: string
   signature?: string      // delegate signature (optional — enables one-shot authorize+execute)
+  /**
+   * #946: explicit settlement-scheme request on the delegation rail
+   * ('erc7710' | 'eip3009'). Optional — the payTo shape (merchant vs the
+   * agent's own delegate EOA) already selects the scheme; when present this
+   * is validated against that shape so a confused client fails loudly
+   * instead of getting the wrong flow.
+   */
+  settlementScheme?: string
 }
 
 interface X402ApprovalRow {
@@ -340,6 +348,141 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       if (tokenAddress === ZERO_ADDRESS) {
         return reply.code(400).send({ error: 'Native-token x402 is not supported on the delegation rail' })
       }
+
+      // ── Scheme routing (#946) ────────────────────────────────────────────
+      // erc7710 direct settlement is the default and the destination; the
+      // EIP-3009 two-leg below is a deliberate, temporary interop bridge for
+      // facilitators that cannot redeem a delegation chain (RFC #791 §18).
+      // The payTo shape selects the scheme: the standard-x402 SDK contract
+      // sends payTo = the agent's own delegate EOA (the funding target) with
+      // merchantPayTo = the merchant, while erc7710 callers send the merchant
+      // as payTo. An explicit settlementScheme, when present, must agree.
+      const fundingShape = payTo.toLowerCase() === agent.delegate_address.toLowerCase()
+      const { settlementScheme } = request.body
+      if (settlementScheme !== undefined && !['erc7710', 'eip3009'].includes(settlementScheme)) {
+        return reply.code(400).send({ error: "settlementScheme must be 'erc7710' or 'eip3009'" })
+      }
+      if (settlementScheme === 'eip3009' && !fundingShape) {
+        return reply.code(400).send({
+          error: 'eip3009 settlement requires payTo = the agent delegate EOA (the funding target) and merchantPayTo = the merchant',
+        })
+      }
+      if (settlementScheme === 'erc7710' && fundingShape) {
+        return reply.code(400).send({
+          error: 'erc7710 settlement requires payTo = the merchant, not the agent delegate EOA',
+        })
+      }
+
+      if (fundingShape) {
+        // ── EIP-3009 fallback: delegation-metered funding leg (#946) ──────
+        // treasury ──(budget delegation)──▶ agent EOA, then the EOA signs the
+        // standard EIP-3009 header client-side and the facilitator settles
+        // EOA→merchant. The budget is metered at the funding hop (accepted
+        // bridge downside — see the issue); recipient-PINNED budgets cannot
+        // fund the EOA, so 3009-mode structurally requires an open budget
+        // (owner decision 2026-07-15: pinned agents are erc7710-only).
+        if (!merchantPayTo) {
+          return reply.code(400).send({
+            error: 'merchantPayTo is required for EIP-3009 x402 on the delegation rail — the ledger must record the real merchant, not the funding target',
+          })
+        }
+        let fundingAuth
+        try {
+          fundingAuth = await prepareDelegationPayment(
+            { id: agent.id, chain_id: agent.chain_id, delegate_address: agent.delegate_address },
+            tokenAddress,
+            payTo.toLowerCase(),
+            amountRaw,
+          )
+        } catch (err) {
+          // Caveat rejection (budget/expiry) or bundler failure — database untouched.
+          return reply.code(502).send({
+            error: 'Delegation-rail funding authorization failed (on-chain policy or bundler)',
+            details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+          })
+        }
+        if (!fundingAuth) {
+          return reply.code(403).send({
+            error:
+              `Agent has no delegation able to fund EIP-3009 settlement for ${tokenConfig.symbol}. ` +
+              '3009-mode needs an open (unpinned) budget delegation — merchant-pinned budgets settle via erc7710 only.',
+          })
+        }
+
+        const intent = await createPaymentIntent({
+          agent,
+          rail: 'x402',
+          payTo,
+          tokenSymbol: tokenConfig.symbol,
+          tokenAddress,
+          amountRaw,
+          amountHuman,
+          allowanceNonce: 0,
+          signHash: fundingAuth.prepared.userOpHash,
+          resourceUrl: url,
+          category: category ?? null,
+          merchantAddress: merchantPayTo.toLowerCase(),
+          challengeId: null,
+          idempotencyKey: idempotencyKey ?? null,
+          metadata: { network, settlement_scheme: 'eip3009' },
+          executionRail: 'delegation',
+          delegationHash: fundingAuth.delegationHash,
+          preparedUserOp: serializeUserOp(fundingAuth.prepared.userOperation),
+          conflictTarget: 'x402_idempotency_key',
+        })
+        if (!intent) {
+          return reply.code(409).send({ error: 'Idempotent replay in progress — retry the original request' })
+        }
+
+        // Mirror the legacy-rail 201 shape (chain/payer/merchant/expected-auth)
+        // so the standard-x402 SDK machinery — receipt mapping and the edge
+        // signer's expected-context binding check — works unchanged; only the
+        // signing scheme differs (the account's UserOp typed data).
+        const fundingExpectedAuth = await signX402ExpectedContext({
+          paymentId: intent.id,
+          payloadHash: fundingAuth.prepared.userOpHash,
+          resourceUrl: url,
+          merchantTo: merchantPayTo.toLowerCase(),
+          amount: amountRaw.toString(),
+          asset: tokenAddress,
+          network,
+          expiresAt: intent.expires_at,
+        })
+        return reply.code(201).send({
+          payment_id: intent.id,
+          status: intent.status,
+          expires_at: intent.expires_at,
+          chain_id: agent.chain_id,
+          safe_address: agent.safe_address,
+          payer: agent.safe_address,
+          token: tokenConfig.symbol,
+          amount: amountHuman,
+          to: payTo.toLowerCase(),
+          merchant_to: merchantPayTo.toLowerCase(),
+          resource_url: url,
+          x402_expected_auth: fundingExpectedAuth,
+          sign_data: {
+            hash: fundingAuth.prepared.userOpHash,
+            signature_scheme: 'eip712_userop',
+            // The account validates THIS typed data (not the bare 4337 hash).
+            typed_data: fundingAuth.prepared.signingTypedData,
+            components: {
+              safe: agent.safe_address,
+              account: fundingAuth.prepared.delegateAccountAddress,
+              token: tokenAddress,
+              to: payTo.toLowerCase(),
+              amount: amountRaw.toString(),
+            },
+            instructions:
+              'Sign sign_data.typed_data with your delegate (agent) key (EIP-712; ' +
+              '@haven_ai/sdk does this automatically). Then POST ' +
+              `/payments/${intent.id}/sign with { signature } — the funding redemption ` +
+              'moves the exact amount to your delegate EOA, after which you retry the ' +
+              'merchant with your EIP-3009 X-PAYMENT header. Sweep any residual.',
+          },
+        })
+      }
+
       const budget = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
       if (!budget) {
         return reply.code(403).send({

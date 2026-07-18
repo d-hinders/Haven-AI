@@ -5,11 +5,12 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const { mockQuery, mockSelect, mockCompute, mockCreateIntent } = vi.hoisted(() => ({
+const { mockQuery, mockSelect, mockCompute, mockCreateIntent, mockPrepareFunding } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockSelect: vi.fn(),
   mockCompute: vi.fn(),
   mockCreateIntent: vi.fn(),
+  mockPrepareFunding: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 vi.mock('../../middleware/agentAuth.js', () => ({
@@ -23,7 +24,10 @@ vi.mock('../../middleware/agentAuth.js', () => ({
     }
   },
 }))
-vi.mock('../../lib/delegation-authorization.js', () => ({ selectDelegation: mockSelect }))
+vi.mock('../../lib/delegation-authorization.js', () => ({
+  selectDelegation: mockSelect,
+  prepareDelegationPayment: mockPrepareFunding,
+}))
 vi.mock('../../lib/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/hybrid-provisioning.js')>()
   return { ...actual, computeHybridAccountAddress: mockCompute }
@@ -66,6 +70,10 @@ function authorizeBody(overrides: Record<string, unknown> = {}) {
 describe('x402 delegation-rail settlement (#830)', () => {
   let app: FastifyInstance
   beforeAll(async () => {
+    // 3009-mode responses carry the expected-context binding (#946); the
+    // signer needs the dedicated key (test-only value, same as x402.test.ts).
+    process.env.X402_BINDING_PRIVATE_KEY =
+      '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
     app = Fastify({ logger: false })
     await app.register(x402Routes, { prefix: '/x402' })
   })
@@ -75,6 +83,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     mockSelect.mockReset()
     mockCompute.mockReset()
     mockCreateIntent.mockReset()
+    mockPrepareFunding.mockReset()
     mockCompute.mockResolvedValue(DELEGATE_ACCT)
   })
 
@@ -126,6 +135,108 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(res.statusCode).toBe(403)
     expect(res.json().error).toMatch(/no active budget delegation/)
     expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  // ── #946: EIP-3009 fallback (delegation-metered funding leg) ──────────────
+  const DELEGATE_EOA = '0x' + 'bb'.repeat(20) // = the mocked agent.delegate_address
+  const PREPARED = {
+    delegationHash: `0x${'34'.repeat(32)}`,
+    prepared: {
+      userOperation: { sender: DELEGATE_ACCT, nonce: '1' },
+      userOpHash: `0x${'56'.repeat(32)}`,
+      signingTypedData: { domain: { name: 'HybridDeleGator' }, primaryType: 'PackedUserOperation' },
+      delegateAccountAddress: DELEGATE_ACCT,
+    },
+  }
+
+  it('payTo = delegate EOA selects 3009-mode: funding redemption + eip712_userop sign_data (#946)', async () => {
+    mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+    mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(201)
+    const body = res.json()
+    // The funding leg signs the ACCOUNT's UserOp typed data, not a child delegation:
+    expect(body.sign_data.signature_scheme).toBe('eip712_userop')
+    expect(body.sign_data.hash).toBe(PREPARED.prepared.userOpHash)
+    expect(body.sign_data.instructions).toMatch(/\/payments\//)
+    // Funding goes to the EOA; the LEDGER records the real merchant + the scheme:
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      executionRail: 'delegation',
+      merchantAddress: MERCHANT.toLowerCase(),
+      metadata: expect.objectContaining({ settlement_scheme: 'eip3009' }),
+      delegationHash: PREPARED.delegationHash,
+    }))
+    // The funding redemption targeted the EOA with the exact amount:
+    expect(mockPrepareFunding).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n,
+    )
+    // The erc7710 selector was never consulted:
+    expect(mockSelect).not.toHaveBeenCalled()
+  })
+
+  it('3009-mode requires merchantPayTo — the ledger must record the real merchant', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA }),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/merchantPayTo is required/)
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+  })
+
+  it('3009-mode 403s without a fundable (open) budget — pinned budgets stay erc7710-only', async () => {
+    mockPrepareFunding.mockResolvedValueOnce(null)
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().error).toMatch(/open \(unpinned\) budget/)
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  it('3009-mode maps caveat/bundler failure to a clean 502; database untouched', async () => {
+    mockPrepareFunding.mockRejectedValueOnce(new Error('estimation reverted: period budget exceeded'))
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error).toMatch(/funding authorization failed/)
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  it('an explicit settlementScheme must agree with the payTo shape', async () => {
+    const wrong3009 = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ settlementScheme: 'eip3009' }), // payTo = merchant
+    })
+    expect(wrong3009.statusCode).toBe(400)
+    expect(wrong3009.json().error).toMatch(/payTo = the agent delegate EOA/)
+
+    const wrong7710 = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, settlementScheme: 'erc7710' }),
+    })
+    expect(wrong7710.statusCode).toBe(400)
+    expect(wrong7710.json().error).toMatch(/payTo = the merchant/)
+
+    const invalid = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ settlementScheme: 'sudo' }),
+    })
+    expect(invalid.statusCode).toBe(400)
   })
 
   it('settle assembles the X-PAYMENT header and flips to submitted; Haven submits nothing', async () => {

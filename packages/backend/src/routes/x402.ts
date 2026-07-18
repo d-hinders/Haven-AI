@@ -34,6 +34,8 @@ import {
 } from '../lib/agent-payment-status.js'
 import { redactVendorSecrets } from '../lib/execution-rail.js'
 import { selectDelegation, prepareDelegationPayment } from '../lib/delegation-authorization.js'
+import { userOpTypedData } from '../lib/delegation-rail.js'
+import { delegationSigningPayload } from '../lib/delegation-policy.js'
 import { computeHybridAccountAddress } from '../lib/hybrid-provisioning.js'
 import {
   buildSettlementDelegation,
@@ -138,6 +140,27 @@ async function signX402ExpectedContext(context: X402ExpectedContext) {
     signature: await wallet.signMessage(message),
     signer: wallet.address,
   }
+}
+
+/**
+ * #961: the per-agent hourly x402 cap, enforced on EVERY rail. Returns the cap
+ * when exceeded (caller 429s), null when within it. On the delegation rail
+ * each authorize runs a sponsored bundler estimation, so this cap is also
+ * sponsorship-cost protection (#717 surface), not just API hygiene.
+ */
+async function agentHourlyX402CapExceeded(agentId: string): Promise<number | null> {
+  const agentConfig = await pool.query(
+    `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
+    [agentId],
+  )
+  // 100 = default max x402 calls per hour (rate limit), NOT chain 100.
+  const maxPerHour = agentConfig.rows[0]?.max_x402_per_hour ?? 100
+  const recentCount = await pool.query(
+    `SELECT COUNT(*) as cnt FROM payment_intents
+     WHERE agent_id = $1 AND source = 'x402' AND created_at > NOW() - interval '1 hour'`,
+    [agentId],
+  )
+  return Number(recentCount.rows[0].cnt) >= maxPerHour ? maxPerHour : null
 }
 
 async function currentPaymentIntentStatus(id: string, agent: AgentContext): Promise<string> {
@@ -381,6 +404,151 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         })
       }
 
+      // ── #961 hardening: cap, one-shot, replay — BEFORE any sponsored prepare ──
+      // One-shot authorize+execute is a legacy-rail convenience; on this rail
+      // the signature is typed data over prepared state that does not exist
+      // yet, so a provided signature can never be valid. Refuse loudly instead
+      // of silently minting a fresh intent per call.
+      if (signature !== undefined) {
+        return reply.code(400).send({
+          error:
+            'One-shot authorize+execute is not supported on the delegation rail — authorize first, ' +
+            'then sign the returned sign_data and submit it (POST /payments/:id/sign for EIP-3009 ' +
+            'funding, POST /x402/:id/settle for erc7710).',
+        })
+      }
+      // Per-agent hourly cap: on this rail every authorize costs a sponsored
+      // bundler estimation, so the cap is sponsorship-cost protection too.
+      const delegationCap = await agentHourlyX402CapExceeded(agent.id)
+      if (delegationCap !== null) {
+        return reply.code(429).send({
+          error: `Rate limit exceeded: max ${delegationCap} x402 payments per hour`,
+          retry_after_seconds: 60,
+        })
+      }
+
+      // Idempotent replay must RESUME, never dead-end: reconstruct the signing
+      // payload from stored state instead of re-running an estimation. The
+      // unique index excludes failed/expired rows, so those fall through to a
+      // fresh create.
+      // NOTE: this helper must NOT return the Fastify reply through the
+      // async boundary — Reply is a thenable, so `await` on it resolves to
+      // undefined and the caller's falsy-check would double-execute the
+      // request (found by the #961 tests). It returns {code, body}; the
+      // caller sends.
+      const delegationReplay = async (
+        existing: Record<string, unknown>,
+      ): Promise<{ code: number; body: unknown } | null> => {
+        if (existing.status === 'confirmed' && existing.tx_hash) {
+          return { code: 200, body: {
+            success: true,
+            payment_id: existing.id,
+            status: existing.status,
+            tx_hash: existing.tx_hash,
+            chain_id: existing.chain_id ?? agent.chain_id,
+            safe_address: existing.safe_address,
+            payer: existing.safe_address,
+            token: existing.token_symbol,
+            amount: existing.amount_human,
+            to: existing.to_address,
+            merchant_to: existing.x402_merchant_address,
+            resource_url: existing.x402_resource_url,
+            explorer_url: getExplorerUrl(
+              (existing.chain_id as number) ?? agent.chain_id, 'tx', existing.tx_hash as string,
+            ),
+          } }
+        }
+        if (existing.status !== 'pending_signature') return null
+        if (new Date(existing.expires_at as string) < new Date()) return null
+        const mismatch = existingX402IntentMismatch(existing, {
+          resourceUrl: url,
+          fundingTo: payTo,
+          merchantTo: merchantPayTo?.toLowerCase() ?? payTo.toLowerCase(),
+          amountRaw: amountRaw.toString(),
+          tokenAddress,
+          network,
+        })
+        if (mismatch) {
+          return { code: 409, body: {
+            payment_id: existing.id,
+            status: existing.status,
+            error: `idempotencyKey already belongs to a different x402 ${mismatch}`,
+          } }
+        }
+        if (existing.prepared_user_op == null) return null
+        const state = deserializeUserOp(existing.prepared_user_op) as Record<string, unknown>
+        const accountAddress = await computeHybridAccountAddress(agent.chain_id, {
+          ownerAddress: agent.delegate_address as `0x${string}`,
+        })
+        const isErc7710State = Boolean(state?.child && state?.budget)
+        const sign_data = isErc7710State
+          ? {
+              hash: existing.sign_hash,
+              signature_scheme: 'eip712_delegation',
+              typed_data: delegationSigningPayload(
+                state.child as never, agent.chain_id,
+              ),
+              instructions:
+                'Sign sign_data.typed_data with your delegate (agent) key (EIP-712). Then POST ' +
+                `/x402/${existing.id}/settle with { signature } to receive the X-PAYMENT header.`,
+            }
+          : {
+              hash: existing.sign_hash,
+              signature_scheme: 'eip712_userop',
+              typed_data: userOpTypedData(state, accountAddress as `0x${string}`, agent.chain_id),
+              instructions:
+                'Sign sign_data.typed_data with your delegate (agent) key (EIP-712). Then POST ' +
+                `/payments/${existing.id}/sign with { signature } — the funding redemption moves ` +
+                'the exact amount to your delegate EOA; retry the merchant with your EIP-3009 header.',
+            }
+        const replayExpectedAuth = await signX402ExpectedContext({
+          paymentId: existing.id as string,
+          payloadHash: existing.sign_hash as string,
+          resourceUrl: url,
+          merchantTo: (existing.x402_merchant_address as string | null) ?? payTo.toLowerCase(),
+          amount: amountRaw.toString(),
+          asset: tokenAddress,
+          network,
+          expiresAt: existing.expires_at as string,
+        })
+        return { code: 201, body: {
+          payment_id: existing.id,
+          status: existing.status,
+          expires_at: existing.expires_at,
+          chain_id: agent.chain_id,
+          safe_address: agent.safe_address,
+          payer: agent.safe_address,
+          token: tokenConfig.symbol,
+          amount: existing.amount_human,
+          to: existing.to_address,
+          merchant_to: existing.x402_merchant_address ?? null,
+          resource_url: existing.x402_resource_url ?? url,
+          x402_expected_auth: replayExpectedAuth,
+          idempotent_replay: true,
+          sign_data,
+        } }
+      }
+      const findExistingByKey = async () => {
+        if (!idempotencyKey) return null
+        const existingResult = await pool.query(
+          `SELECT *
+           FROM payment_intents
+           WHERE agent_id = $1
+             AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND status <> 'failed'
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [agent.id, idempotencyKey],
+        )
+        return existingResult.rows[0] ?? null
+      }
+      const preExisting = await findExistingByKey()
+      if (preExisting) {
+        const replayed = await delegationReplay(preExisting)
+        if (replayed) return reply.code(replayed.code).send(replayed.body)
+      }
+
       if (fundingShape) {
         // ── EIP-3009 fallback: delegation-metered funding leg (#946) ──────
         // treasury ──(budget delegation)──▶ agent EOA, then the EOA signs the
@@ -439,6 +607,13 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           conflictTarget: 'x402_idempotency_key',
         })
         if (!intent) {
+          // #961: a concurrent claim won the insert — resume THAT intent
+          // instead of dead-ending the client on a bare 409.
+          const winner = await findExistingByKey()
+          if (winner) {
+            const replayed = await delegationReplay(winner)
+            if (replayed) return reply.code(replayed.code).send(replayed.body)
+          }
           return reply.code(409).send({ error: 'Idempotent replay in progress — retry the original request' })
         }
 
@@ -546,6 +721,13 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         conflictTarget: 'x402_idempotency_key',
       })
       if (!intent) {
+        // #961: a concurrent claim won the insert — resume THAT intent
+        // instead of dead-ending the client on a bare 409.
+        const winner = await findExistingByKey()
+        if (winner) {
+          const replayed = await delegationReplay(winner)
+          if (replayed) return reply.code(replayed.code).send(replayed.body)
+        }
         return reply.code(409).send({ error: 'Idempotent replay in progress — retry the original request' })
       }
 
@@ -769,22 +951,11 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // 5. Rate limiting: max x402 payments per hour
-    const agentConfig = await pool.query(
-      `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
-      [agent.id],
-    )
-    // 100 = default max x402 calls per hour (rate limit), NOT chain 100.
-    const maxPerHour = agentConfig.rows[0]?.max_x402_per_hour ?? 100
-
-    const recentCount = await pool.query(
-      `SELECT COUNT(*) as cnt FROM payment_intents
-       WHERE agent_id = $1 AND source = 'x402' AND created_at > NOW() - interval '1 hour'`,
-      [agent.id],
-    )
-    if (Number(recentCount.rows[0].cnt) >= maxPerHour) {
+    // 5. Rate limiting: max x402 payments per hour (#961: shared helper)
+    const exceededCap = await agentHourlyX402CapExceeded(agent.id)
+    if (exceededCap !== null) {
       return reply.code(429).send({
-        error: `Rate limit exceeded: max ${maxPerHour} x402 payments per hour`,
+        error: `Rate limit exceeded: max ${exceededCap} x402 payments per hour`,
         retry_after_seconds: 60,
       })
     }

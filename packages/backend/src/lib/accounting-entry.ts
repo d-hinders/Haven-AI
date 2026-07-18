@@ -44,8 +44,8 @@ export interface AccountingEntry {
   resourceUrl: string | null
   /** Underlag: the settlement evidence backing this entry. */
   receiptRef: string
-  /** The merchant's OWN receipt when the agent captured one (#956); null = none. */
-  merchantReceipt: { url: string | null; inlineJson: unknown | null } | null
+  /** The merchant's OWN receipt when the agent captured one (#956); absent/null = none. */
+  merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
 }
 
 /** Shape selected from `machine_payment_evidence` for one settled payment. */
@@ -74,8 +74,8 @@ export interface AccountingEntrySourceRow {
   /** Haven fee in SEK from the fee ledger (LEFT JOIN); null while fees are dark. */
   fee_sek: string | null
   /** Merchant-issued receipt (LEFT JOIN merchant_receipts, #956). */
-  merchant_receipt_url: string | null
-  merchant_receipt_json: unknown
+  merchant_receipt_url?: string | null
+  merchant_receipt_json?: unknown
 }
 
 /**

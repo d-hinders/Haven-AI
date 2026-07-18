@@ -1559,7 +1559,7 @@ describe('merchant receipt capture (#956)', () => {
 
   const INVOICE = { fakturanummer: 'FAK-2026-00042', totalt_inkl_moms: '0.02' }
 
-  function paidFlowMocks(retryHeaders: Record<string, string>): ReturnType<typeof vi.spyOn> {
+  function paidFlowMocks(retryHeaders: Record<string, string>) {
     const txHash = `0x${'ab'.repeat(32)}`
     const fetchMock = vi.spyOn(globalThis, 'fetch')
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {

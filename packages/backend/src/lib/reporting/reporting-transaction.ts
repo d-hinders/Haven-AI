@@ -27,7 +27,7 @@ export interface ReportingTransaction {
   /** The underlag to attach (verifiable receipt / evidence). */
   receiptRef: string
   /** The merchant's own receipt when captured (#956) — attached as a second file. */
-  merchantReceipt: { url: string | null; inlineJson: unknown | null } | null
+  merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
   /** A *suggestion* only (the user's per-merchant override) — never an asserted account. */
   suggestedAccount?: string | null
 }

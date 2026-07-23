@@ -23,3 +23,12 @@ design-system-coupling-comment.md
 # Local session reports (never commit)
 haven-*.pdf
 *.local.mts
+
+# iCloud/macOS resurrects deleted files as "<name> 2.<ext>" duplicates and
+# leaves build tarballs around — never commit these (they broke the docs
+# coupling gate on #969, 2026-07-23; same class as the earlier docs junk).
+* 2.ts
+* 2.tsx
+* 2.mts
+* 2.js
+*.tgz

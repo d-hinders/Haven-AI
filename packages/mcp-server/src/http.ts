@@ -179,6 +179,14 @@ function writeJson(res: ServerResponse, status: number, payload: unknown): void 
   res.end(text)
 }
 
+// Wildcard CORS is intentional and safe here — NOT the CSRF/recon vector a
+// scanner assumes. Auth is a Bearer token (Authorization header, SHA-256
+// verified), never an ambient cookie, and Access-Control-Allow-Credentials is
+// never set, so a browser page cannot ride a user's session cross-origin (it
+// has no token) and cannot read responses with credentials. MCP is not
+// browser-initiated from arbitrary pages; the clients are agent runtimes that
+// don't send Origin at all. Tightening the wildcard would add no security and
+// risk breaking a legitimate cross-origin caller.
 function applyCorsHeaders(res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')

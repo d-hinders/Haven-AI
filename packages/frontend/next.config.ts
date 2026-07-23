@@ -23,6 +23,39 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+  // Security response headers (scanner follow-up). The dashboard's JWT lives in
+  // localStorage — a deliberate SPA tradeoff whose blast radius is bounded by
+  // non-custody (a stolen token grants dashboard access only; moving funds
+  // needs the local signer/delegate key, which never touches the browser).
+  // These headers shrink the XSS surface that tradeoff exposes. CSP ships in
+  // REPORT-ONLY first: it cannot break rendering, surfaces real violations to
+  // promote from, and avoids guessing every connect-src (backend API,
+  // wallet/onramp endpoints) blind.
+  async headers() {
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "connect-src 'self' https:",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join('; ')
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+          { key: 'Content-Security-Policy-Report-Only', value: csp },
+        ],
+      },
+    ]
+  },
 }
 
 export default nextConfig

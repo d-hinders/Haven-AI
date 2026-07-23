@@ -29,6 +29,11 @@ async function eitherAuth(request: FastifyRequest, reply: FastifyReply): Promise
     authHeader?.startsWith('Bearer sk_agent_') ||
     (typeof xApiKey === 'string' && xApiKey.startsWith('sk_agent_'))
 
+  // The `sk_agent_` prefix only ROUTES to the agent middleware — it is not a
+  // trust decision. agentAuthMiddleware then does a full SHA-256 hash lookup
+  // (WHERE api_key_hash = $1) plus a status allow-list, so a forged prefix
+  // routes straight into verification and fails at the DB. No prefix-match
+  // bypass exists.
   if (hasAgentKey) {
     return agentAuthMiddleware(request, reply)
   }

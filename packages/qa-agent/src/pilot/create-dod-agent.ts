@@ -135,10 +135,28 @@ async function main(): Promise<void> {
   console.log('')
   console.log('✅ dev user + pilot Safe + agent ready')
   console.log('')
+  // The private key + API key are printed for the operator to paste into
+  // ~/.haven/pilot.env on their own machine. In CI the same stdout is a
+  // durable, capturable log, so mask there and write the secrets to the env
+  // file directly instead of echoing them (the real capture vector the
+  // security scan named, #13). Local interactive runs keep the copy-paste UX.
+  const inCi = Boolean(process.env.CI)
   console.log('── Append to ~/.haven/pilot.env (SECRETS — never in chat/commits) ──')
   console.log(`PILOT_AGENT_DELEGATE_ADDRESS=${delegate.address}`)
-  console.log(`PILOT_AGENT_DELEGATE_PRIVATE_KEY=${delegate.privateKey}`)
-  console.log(`PILOT_AGENT_API_KEY=${apiKey}`)
+  if (inCi) {
+    console.log('PILOT_AGENT_DELEGATE_PRIVATE_KEY=<masked in CI — see ~/.haven/pilot.env>')
+    console.log('PILOT_AGENT_API_KEY=<masked in CI — see ~/.haven/pilot.env>')
+    const { appendFileSync } = await import('node:fs')
+    const { homedir } = await import('node:os')
+    const { join } = await import('node:path')
+    appendFileSync(
+      join(homedir(), '.haven', 'pilot.env'),
+      `\nPILOT_AGENT_DELEGATE_PRIVATE_KEY=${delegate.privateKey}\nPILOT_AGENT_API_KEY=${apiKey}\n`,
+    )
+  } else {
+    console.log(`PILOT_AGENT_DELEGATE_PRIVATE_KEY=${delegate.privateKey}`)
+    console.log(`PILOT_AGENT_API_KEY=${apiKey}`)
+  }
   console.log('─────────────────────────────────────────────────────────────────────')
   console.log('')
   console.log('next: re-source the env, then step 3:')

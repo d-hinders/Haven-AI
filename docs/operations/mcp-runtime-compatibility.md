@@ -7,7 +7,7 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - .github/workflows/publish.yml
-last-verified: "2026-06-28"
+last-verified: "2026-07-23"
 ---
 
 # MCP Runtime Compatibility
@@ -32,11 +32,11 @@ Keep this table in sync with that file.
 
 | Component | Supported version |
 | --- | --- |
-| Node.js | >= 20.0.0 |
-| `@haven_ai/connect` | `0.1.10-alpha.0` |
-| `@haven_ai/mcp` | `0.1.10-alpha.0` |
-| `@haven_ai/sdk` | `0.1.10-alpha.0` |
-| `@haven_ai/signer` | `0.1.10-alpha.0` |
+| Node.js | >= 24.0.0 (pinned to LTS 24 in `.nvmrc` / package `engines`) |
+| `@haven_ai/connect` | `0.1.18-alpha.0` |
+| `@haven_ai/mcp` | `0.1.18-alpha.0` |
+| `@haven_ai/sdk` | `0.1.18-alpha.0` |
+| `@haven_ai/signer` | `0.1.18-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -78,7 +78,7 @@ Keep this table in sync with that file.
 - **Invalid Codex TOML:** the connector writes Codex config with a TOML string
   serializer and validates the generated Haven block before writing. The
   expected shape is `command = ".../bin/haven-mcp"` and `args = []`.
-- **Unsupported Node.js:** local MCP setup requires Node.js `>=20.0.0`. Upgrade
+- **Unsupported Node.js:** local MCP setup requires Node.js `>=24.0.0`. Upgrade
   Node and rerun the setup command.
 - **Local MCP runtime install failed:** rerun the setup command. It will reuse
   local credentials and install the pinned runtime into `~/.haven/mcp-runtime`,

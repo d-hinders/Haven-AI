@@ -92,8 +92,14 @@ async function deploySafeWithEoa(
     ],
   })
 
-  // 2. Use a random salt nonce
-  const saltNonce = BigInt(Math.floor(Math.random() * 1_000_000_000))
+  // 2. Full-width CSPRNG salt nonce (uint256). Ephemeral — the deployed
+  // address comes back from the chain, so the salt is never recomputed; a
+  // crypto salt over the whole space removes the collision concern a
+  // ~1e9 Math.random() range would leave.
+  const saltBytes = crypto.getRandomValues(new Uint8Array(32))
+  const saltNonce = BigInt(
+    '0x' + Array.from(saltBytes, (b) => b.toString(16).padStart(2, '0')).join(''),
+  )
 
   // 3. Call ProxyFactory.createProxyWithNonce()
   onProgress?.('signing')

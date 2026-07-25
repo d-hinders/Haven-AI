@@ -3,7 +3,8 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
-  - .github/workflows/**
+  - .github/workflows/dev-gate.yml
+  - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
 last-verified: "2026-07-18"

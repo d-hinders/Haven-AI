@@ -121,7 +121,7 @@ Use the smallest reliable set that matches the change.
 | --- | --- |
 | Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment) |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
-| Backend/API | `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` |
+| Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, and `npm run lint:deps` (dependency boundaries, #982) |
 | Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, and `npm run build -w packages/sdk` |
 | Cross-package or release-risk | `npm run quality` |
@@ -132,6 +132,7 @@ Notes:
 - `npm run quality` means typecheck, unit tests, and builds across workspaces.
 - Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with one exception: editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only.
+- The backend has an equivalent shrink-only-baseline gate: **dependency-boundary lint** (#982), a blocking step inside *Backend checks* enforcing `docs/architecture/10-module-boundaries.md` with the baseline at `packages/backend/dep-lint-baseline.json`. Like the frontend baselines it fails on NEW violations only — fix the boundary rather than running `npm run lint:deps:update`. `no-circular` is the exception: it is asserted absolutely and a cycle may never be baselined.
 - Auto-merge is gated by the required checks in the **"Haven automerge rules"** ruleset (per-surface checks plus *Design visual regression* and *Banned product-copy terms*) — see `docs/contributing/autonomous-pr-loop.md` §One-time setup. A "blocking" job not in that list is advisory in practice.
 - Every PR also gets two advisory sticky comments: doc↔code coupling (docs whose `covers:` match changed code the PR didn't touch — update the flagged doc in the same PR) and design-system coupling.
 - Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.

@@ -116,3 +116,28 @@ describe('Tier 1 · computeEffectiveAllowance vs AllowanceModule reference model
     })
   })
 })
+
+/**
+ * The harness's core promise: a divergence reported on one day must be
+ * replayable on the next. That only holds if generation is a pure function of
+ * the seed — so no generated field may depend on the wall clock. (The backend
+ * generator anchored to `Date.now()` until 2026-07-25; this pins the fix.)
+ */
+describe('seed-only reproducibility', () => {
+  const collect = (seed: number, count: number) =>
+    [...generateAllowanceCases(seed, count)].map((c) =>
+      JSON.stringify(c, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)),
+    )
+
+  it('produces identical cases regardless of the system clock', () => {
+    const before = collect(4242, 25)
+    const realNow = Date.now
+    try {
+      // Same seed, "a week later".
+      Date.now = () => realNow() + 7 * 24 * 60 * 60 * 1000
+      expect(collect(4242, 25)).toEqual(before)
+    } finally {
+      Date.now = realNow
+    }
+  })
+})

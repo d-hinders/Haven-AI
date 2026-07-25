@@ -9,7 +9,7 @@ covers:
   - .github/workflows/ci.yml
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/code-quality-loop.md
-last-verified: "2026-07-18"
+last-verified: "2026-07-25"
 ---
 
 # Loop Engineering (oracle-grounded automated loops)
@@ -118,11 +118,11 @@ can be verified. Therefore:
 
 - Generate cases from a **seed**, never `Math.random()`.
 - Do **not** anchor generated inputs to wall-clock time. Use a fixed epoch
-  constant (see `BASE_NOW_MIN` in the frontend harness's `generators.ts`) so a
-  reported `seed` reproduces the same case months later. (Known deviation: the
-  backend harness's generator still derives its case base from `Date.now()`, so
-  a backend seed is only stable within a run — worth aligning to the frontend's
-  fixed-epoch approach.)
+  constant (`BASE_NOW_MIN`, in both harnesses' `generators.ts`) so a reported
+  `seed` reproduces the same case months later. Both harnesses now comply; the
+  backend's generator anchored to `Date.now()` until 2026-07-25, which made a
+  backend seed stable only within a run — a divergence found on one day could
+  not be replayed on the next. A regression test pins the property.
 - Surface the `seed` (and the minimal inputs) in the failure message.
 
 ## 6. Convergence model

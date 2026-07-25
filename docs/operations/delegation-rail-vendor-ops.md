@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-07-24"
+last-verified: "2026-07-25"
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -85,9 +85,9 @@ run no estimation, so recovery retries cost nothing.
   request**, not per API key (#738): an unset id means unrestricted
   sponsorship against the key's account. Set it in every deployed env.
 - Key rotation: new key in the vendor dashboard → update env → redeploy →
-  delete old key (the #738 procedure). One credential, one env var — but see
-  the `ops:check-bundler` caveat in §3 before assuming the probe rotated with
-  it.
+  delete old key (the #738 procedure). One credential, one env var — and
+  `ops:check-bundler` reads that same var through the rail's resolver, so the
+  probe verifies the rotation rather than a stale copy of it.
 
 ## 3. Failure modes & the degradation contract
 
@@ -105,12 +105,16 @@ activation (the delegator deploy, §1) while payments on already-deployed
 accounts continue.
 
 Probes:
-- `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle (inherited
-  from the retired session rail's runbook; same vendor account). **Caveat:**
-  `check-bundler.ts` still reads `SESSION_RAIL_BUNDLER_URL ?? PILOT_BUNDLER_URL`
-  — it does NOT read the var the rail actually uses. Export one of those for
-  the probe run, and treat a green probe as evidence about the *vendor*, not
-  about the deployed env's `DELEGATION_RAIL_BUNDLER_URL`.
+- `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle. It resolves
+  the credential through the rail's own `delegationRailBundlerUrl()`, so a
+  green probe **is** evidence about the deployed environment: it exercised the
+  same credential and the same chain gate a payment would. Unset credential or
+  a non-enabled chain exits 2 (*not configured*) with the rail's own message,
+  distinct from exit 1 (*degraded*). Defaults to the lowest enabled chain;
+  override with `CHECK_BUNDLER_CHAIN_ID`.
+  (Until 2026-07-25 it read the retired `SESSION_RAIL_BUNDLER_URL` and proved
+  nothing about the deployed env — fixed by pointing it at the resolver so the
+  probe cannot drift from the rail again.)
 - `ops:check-delegation` — every PINNED contract (manager, entry point,
   factory, Hybrid impl, 8 enforcers) is live bytecode on every enabled
   chain. Run on deploy and daily; exit 1 = stop before any rail use.

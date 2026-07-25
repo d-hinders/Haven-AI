@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - docs/architecture/0*.md
+  - docs/architecture/1*.md
   - docs/archive/connect-agent-2-*.md
   - docs/research/**
   - packages/backend/src/lib/chains.ts
@@ -32,6 +33,7 @@ is canonical; exported PNG and SVG files are convenience artifacts.
 | 7 | [Edge Signer](07-edge-signer.md) | The local component that holds the delegate key and signs — its form (signer core + local stdio MCP), the pay/x402 orchestration, and custody invariants. |
 | 8 | [Local vs Hosted MCP](08-local-vs-hosted-mcp.md) | Topology and deployment trade-offs for default hosted MCP + edge signer versus advanced fully-local MCP. Use doc 7 for the current signer tool list and x402 fast path. |
 | 9 | [Rail-agnostic Fee Module](09-fee-module.md) | Current disabled zero-fee backend scaffold plus future per-rail settlement design; no fee transfer executes today. |
+| 10 | [Module Boundaries](10-module-boundaries.md) | Deciding where new backend code goes, or reviewing a change that moves it. Target module structure and the dependency rules CI enforces (epic #980). |
 
 The detailed Connect Agent 2 contract and its rollout closeout were point-in-time
 artifacts for shipping that feature; they now live in

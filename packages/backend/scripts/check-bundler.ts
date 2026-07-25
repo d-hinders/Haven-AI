@@ -1,17 +1,26 @@
 /**
- * #738 standing check: is the session-rail bundler/paymaster reachable and
+ * #738 standing check: is the delegation-rail bundler/paymaster reachable and
  * serving our EntryPoint? Suitable as a manual probe or a cron/uptime check
  * (exit 0 = healthy, 1 = degraded/down, 2 = not configured).
  *
- * Checks, via the configured SESSION_RAIL_BUNDLER_URL (SECRET — never logged;
- * this script prints status only, never the URL):
+ * The credential is resolved through the RAIL'S OWN resolver
+ * (`delegationRailBundlerUrl`) rather than read from the environment here, so
+ * the probe can never drift from what the rail actually uses. It previously
+ * read `SESSION_RAIL_BUNDLER_URL` — retired in #882 — which meant a green
+ * probe proved nothing about the deployed environment.
+ *
+ * The URL is a SECRET (hosted bundler URLs embed the API key): this script
+ * prints status only, never the URL.
  *   1. eth_supportedEntryPoints includes EntryPoint v0.7 (bundler up)
  *   2. pimlico_getUserOperationGasPrice answers (paymaster/oracle side up)
  *
- * Outage playbook: docs/operations/session-rail-vendor-ops.md §3.
+ * Outage playbook: docs/operations/delegation-rail-vendor-ops.md §3.
  *
  * Run: npm run ops:check-bundler -w @haven/backend
+ *      CHECK_BUNDLER_CHAIN_ID=8453 npm run ops:check-bundler -w @haven/backend
  */
+import { delegationRailBundlerUrl } from '../src/lib/delegation-rail.js'
+import { DELEGATION_RAIL_CHAIN_IDS } from '../src/lib/delegation-contracts.js'
 
 const ENTRY_POINT_07 = '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
 
@@ -28,11 +37,20 @@ async function rpc(url: string, method: string, params: unknown[] = []): Promise
 }
 
 async function main(): Promise<void> {
-  const url = process.env.SESSION_RAIL_BUNDLER_URL ?? process.env.PILOT_BUNDLER_URL
-  if (!url) {
-    console.error('not configured: set SESSION_RAIL_BUNDLER_URL (or PILOT_BUNDLER_URL locally)')
+  // Default to the lowest enabled delegation-rail chain (Base Sepolia today);
+  // override for a specific chain with CHECK_BUNDLER_CHAIN_ID.
+  const chainId = Number(process.env.CHECK_BUNDLER_CHAIN_ID ?? [...DELEGATION_RAIL_CHAIN_IDS][0])
+
+  let url: string
+  try {
+    url = delegationRailBundlerUrl(chainId)
+  } catch (err) {
+    // Same failure the rail itself would hit — unset credential, or a chain the
+    // rail is not enabled on. Exit 2 = not configured, not "degraded".
+    console.error(`not configured: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(2)
   }
+  console.log(`chain:     ${chainId}`)
 
   let healthy = true
 
@@ -58,9 +76,9 @@ async function main(): Promise<void> {
 
   console.log('')
   if (healthy) {
-    console.log('✅ session-rail vendor healthy')
+    console.log('✅ delegation-rail vendor healthy')
   } else {
-    console.log('❌ degraded — see docs/operations/session-rail-vendor-ops.md §3 (outage playbook)')
+    console.log('❌ degraded — see docs/operations/delegation-rail-vendor-ops.md §3 (outage playbook)')
     process.exit(1)
   }
 }

@@ -1,0 +1,105 @@
+// Dependency-boundary rules for packages/backend (#982, epic #980).
+//
+// These rules are the machine-checkable form of the seven rules in
+// docs/architecture/10-module-boundaries.md. That doc is the prose; THIS FILE
+// IS AUTHORITATIVE — if the two disagree, the doc is the bug.
+//
+// Only the subset checkable against TODAY's tree is enabled. The structural
+// rules (domain purity, module entry points, http/ thinness) arrive with the
+// directories they police, as epic #980 creates them. Each rule below names
+// the sub-issue that will drive its baseline to zero.
+//
+// Existing debt is ratcheted in packages/backend/dep-lint-baseline.json and may
+// only SHRINK — see scripts/dep-lint.mjs and the shared engine in
+// scripts/lib/ratchet.mjs.
+//
+//   npm run lint:deps           # check against the baseline
+//   npm run lint:deps:update    # rewrite the baseline (shrink, or a reviewed add)
+
+// Chain SDKs, confined to rails/ and infra/ once those exist (#994).
+// NOTE: dependency-cruiser reports npm dependencies by their RESOLVED path, so
+// this must match `node_modules/<pkg>` — a bare `^ethers` matches nothing and
+// silently passes. That false negative is covered by a unit test.
+const CHAIN_SDKS = 'node_modules/(ethers|viem|permissionless|@metamask/smart-accounts-kit)/'
+
+module.exports = {
+  forbidden: [
+    {
+      // Rule 7 — the one to defend hardest. A cycle makes a module impossible
+      // to test in isolation, split, or delete from.
+      name: 'no-circular',
+      severity: 'error',
+      comment:
+        'This dependency is part of a cycle. Cycles are defects regardless of intent — ' +
+        'break it by moving the shared piece down into domain/ or platform/.',
+      from: {},
+      to: { circular: true },
+    },
+    {
+      // Rule 3 — tenant isolation. Much of Haven's authorization lives in the
+      // `WHERE user_id = $1` clause; it belongs behind repositories where the
+      // scoping argument is required and explicit. Driven to zero by #985/#988/#995.
+      name: 'pg-only-in-infra',
+      severity: 'error',
+      comment:
+        'Only infra/repositories/ may reach the database. Move the query into a repository ' +
+        'that takes its tenant-scoping argument as a required parameter (see #985).',
+      from: {
+        path: '^packages/backend/src/',
+        pathNot: '^packages/backend/src/(db/|infra/repositories/|db\\.ts$)',
+      },
+      to: {
+        path: '^(packages/backend/src/db\\.ts$|node_modules/pg/)',
+      },
+    },
+    {
+      // Rule 4 — not tidiness. ethers and viem format payment amounts
+      // differently at the edges; confining them makes substitution testable
+      // in one place. Driven to zero by #994.
+      name: 'chain-sdk-not-in-routes',
+      severity: 'error',
+      comment:
+        'Route handlers must not import a chain SDK. Go through the ChainClient port ' +
+        '(#994); pure helpers like formatUnits belong in @haven_ai/core.',
+      from: { path: '^packages/backend/src/routes/' },
+      to: { path: CHAIN_SDKS },
+    },
+    {
+      // Rule 6, scoped to the two directories that are already modules.
+      // Neither has an index.ts yet, so today EVERY external import is "deep" —
+      // the baseline records that, and the rule stops the count growing.
+      // Widens to modules/** as #980 creates them; zeroed by #998.
+      name: 'no-deep-cross-module-import',
+      severity: 'error',
+      comment:
+        "Import a module through its public index.ts, not a private file. " +
+        'If the module has no index.ts yet, adding one is part of its #980 sub-issue.',
+      from: {
+        path: '^packages/backend/src/',
+        pathNot: '^packages/backend/src/lib/(reporting|fee)/',
+      },
+      to: {
+        path: '^packages/backend/src/lib/(reporting|fee)/',
+        pathNot: '^packages/backend/src/lib/(reporting|fee)/index\\.ts$',
+      },
+    },
+  ],
+
+  options: {
+    doNotFollow: { path: 'node_modules' },
+    // Tests legitimately reach past production boundaries (integration tests
+    // touch the pool directly, route tests stub chain SDKs). The rules describe
+    // PRODUCTION structure, so scanning tests would fill the baseline with
+    // entries nobody should ever "fix".
+    exclude: {
+      path: '(/__tests__/|\\.test\\.ts$|\\.parity\\.test\\.ts$|/loop-harness/|/docs-drift/)',
+    },
+    // NOTE: deliberately no `tsConfig`. packages/backend/tsconfig.json extends
+    // ../../tsconfig.base.json, and dependency-cruiser resolves that `extends`
+    // against the wrong base dir (TS5083). Neither tsconfig declares `paths`,
+    // so the only thing tsConfig would buy us is alias resolution we don't use.
+    // Re-add it — with a verified extends resolution — if aliases are ever
+    // introduced.
+    tsPreCompilationDeps: true,
+  },
+}

@@ -25,7 +25,10 @@
     "docs:test": "node --test scripts/docs/*.test.mjs",
     "lint:copy": "node scripts/frontend-copy-lint.mjs",
     "lint:copy:update": "node scripts/frontend-copy-lint.mjs --update",
-    "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs"
+    "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs",
+    "lint:deps": "node scripts/dep-lint.mjs",
+    "lint:deps:update": "node scripts/dep-lint.mjs --update",
+    "lint:deps:test": "node --test scripts/dep-lint.test.mjs"
   },
   "overrides": {
     "axios": "^1.16.1",
@@ -35,6 +38,7 @@
     "postcss": "^8.5.15"
   },
   "devDependencies": {
-    "concurrently": "^9.0.0"
+    "concurrently": "^9.0.0",
+    "dependency-cruiser": "^18.1.0"
   }
 }

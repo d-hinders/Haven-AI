@@ -2,6 +2,9 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - .dependency-cruiser.cjs
+  - scripts/dep-lint.mjs
+  - packages/backend/dep-lint-baseline.json
   - packages/backend/src/index.ts
   - packages/backend/src/db.ts
   - packages/backend/src/lib/execution-rail.ts
@@ -96,10 +99,24 @@ visibly the most maintainable code in the backend. The target generalises them.
 
 ## The dependency rules
 
-These are the normative rules.
-[#982](https://github.com/d-hinders/Haven-AI/issues/982) encodes exactly this
-list in `.dependency-cruiser.cjs`; if the two ever disagree, the lint config is
-authoritative and this doc is the bug.
+These are the normative rules. `.dependency-cruiser.cjs` encodes them; if the
+two ever disagree, **the lint config is authoritative and this doc is the bug.**
+
+Only the subset checkable against today's tree is enabled — a rule about
+`domain/` cannot fire before `domain/` exists. Enforcement status:
+
+| Rule | Enforced today | Arrives with |
+|---|---|---|
+| 1. `domain/` is pure | ✗ | the `domain/` directory (#983 / #998) |
+| 2. `modules/` may not import `http/` | ✗ | the `modules/` directories (#992 / #996 / #997) |
+| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | zeroed by #985 / #988 / #995 |
+| 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes` | zeroed by #994 |
+| 5. `http/` imports module entry points only | ✗ | the `http/` directory (#998) |
+| 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` | widens as modules land; zeroed by #998 |
+| 7. The graph is acyclic | ✅ `no-circular` | already at zero — held absolutely |
+
+Rule 7 is the only one with no baseline: the tree is currently cycle-free and a
+new cycle must be broken, never grandfathered.
 
 1. **`domain/` is pure.** It may not import `fastify`, `pg`, `ethers`, `viem`,
    `permissionless`, `@metamask/smart-accounts-kit`, or any path under
@@ -145,8 +162,11 @@ was subsequently driven to zero by
 [#913](https://github.com/d-hinders/Haven-AI/issues/913). The dependency graph
 gets the same treatment:
 
-1. **Install the linter with a baseline of today's violations** (#982). Nothing
-   moves; new violations simply become impossible.
+1. **Install the linter with a baseline of today's violations** (#982 — done).
+   Nothing moves; new violations simply become impossible. The opening baseline
+   is **66 violations across 48 files**: 47 `pg-only-in-infra`, 10
+   `chain-sdk-not-in-routes`, 9 `no-deep-cross-module-import` — and **zero**
+   cycles, so `no-circular` is asserted absolutely rather than baselined.
 2. **Shrink the baseline** as each epic issue removes a class of violation. The
    script refuses to grow the baseline without an explicit `--update`.
 3. **Delete the baseline** when it reaches zero
@@ -172,7 +192,8 @@ Current state as of 2026-07-25, recorded so progress is measurable:
 | `pool.query` call sites | 256, across 44 non-test files | Zero outside `infra/repositories/` |
 | Chain SDK imported in `routes/` | 10 non-test route files | Zero |
 | Rail branching outside the seam | 11+ non-test sites | Zero outside `rails/` |
-| Boundary enforcement | None | `npm run lint:deps`, blocking |
+| Boundary enforcement | `npm run lint:deps`, blocking, 66 violations baselined (#982) | Baseline deleted, rules unconditional (#999) |
+| Dependency cycles | **0** — asserted absolutely, never baselined | 0 |
 
 Reproduce these from `packages/backend/src`:
 

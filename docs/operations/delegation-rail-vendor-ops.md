@@ -4,9 +4,11 @@ status: current
 covers:
   - packages/backend/src/lib/delegation-rail.ts
   - packages/backend/src/lib/delegation-contracts.ts
+  - packages/backend/src/lib/hybrid-provisioning.ts
+  - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-07-12"
+last-verified: "2026-07-24"
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -35,22 +37,57 @@ on the retired session rail was the redemption
 indirection; the offset is that budgets refill natively (no schedule
 machinery to execute).
 
+**Three gas payers, not one.** The paymaster is the largest line, not the
+only one:
+
+- **Paymaster (Pimlico)** — every redemption UserOp: `/payments` on the rail,
+  treasury ops (revoke), and the EIP-3009 funding leg below.
+- **Haven's relayer** — the delegator/treasury Hybrid's one-time factory
+  deploy at grant activation (#860, `ensureHybridDeployed`). A 4337 factory
+  call is permissionless, so this is a plain relayer transaction, NOT a
+  sponsored op: it draws relayer gas balance, and a drained relayer blocks
+  **grants**, not payments. Same alerting as every other relayer chain.
+- **The merchant / facilitator** — erc7710 x402 settlement, below.
+
+**x402 sponsorship depends on the settlement scheme (#946).** The scheme is
+chosen per payment from the `payTo` shape (or an explicit `settlementScheme`)
+and recorded in `machine_metadata.settlement_scheme`:
+
+- **`erc7710`** (default and destination) — Haven sponsors **nothing**.
+  Authorize builds a narrowed child delegation and runs no bundler
+  estimation; the merchant redeems `[child, budget]` and pays that gas.
+- **`eip3009`** (interop fallback) — Haven sponsors **one extra redemption
+  UserOp per payment**: the funding leg treasury → the agent's delegate EOA.
+  Budget roughly one warm redemption (~303k gas) per 3009 x402 call, on top of
+  ordinary `/payments` traffic. Merchant-pinned budgets can't use this scheme
+  at all (they are erc7710-only), so the exposure scales with open-budget
+  agents. Terms in the [security model §8](../security/delegation-rail-security-model.md).
+
+A 3009 authorize spends a sponsored bundler **estimation** even when the
+payment is never signed, so #961 enforces the per-agent hourly x402 cap
+(`agents.max_x402_per_hour`, default 100) on the delegation branch — it is
+sponsorship-cost protection, not just API hygiene, and it bounds a single
+agent at 100 estimations/hour. Idempotent replays resume from stored state and
+run no estimation, so recovery retries cost nothing.
+
 ## 2. Credentials & policies
 
-- `DELEGATION_RAIL_BUNDLER_URL` — SECRET (embeds the API key). Falls back to
-  `SESSION_RAIL_BUNDLER_URL`, which survives the session rail's retirement
-  (#834) ONLY as this fallback. **Operator step:** set
-  `DELEGATION_RAIL_BUNDLER_URL` in every deployed env, then drop the
-  `SESSION_RAIL_*` variables (`SESSION_RAIL_SPONSORSHIP_POLICY_ID` and
-  `SCHEDULE_RENEWAL_WEBHOOK_URL` are already dead). Read in exactly ONE place
+- `DELEGATION_RAIL_BUNDLER_URL` — SECRET (embeds the API key). REQUIRED and
+  fail-closed: the legacy `SESSION_RAIL_BUNDLER_URL` fallback was **removed**
+  once both deployed envs migrated (#882), so an unset var throws
+  ("delegation rail unavailable") instead of silently borrowing the retired
+  rail's credential. The `SESSION_RAIL_*` variables and
+  `SCHEDULE_RENEWAL_WEBHOOK_URL` are dead everywhere except the
+  `ops:check-bundler` probe (§3). Read in exactly ONE place
   (`delegationRailBundlerUrl`); every error surface passes
   `redactVendorSecrets` (bundler errors echo the URL — the #764 incident).
 - `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` — Pimlico policies bind **per
   request**, not per API key (#738): an unset id means unrestricted
   sponsorship against the key's account. Set it in every deployed env.
 - Key rotation: new key in the vendor dashboard → update env → redeploy →
-  delete old key (the #738 procedure). One credential, two
-  env names — rotate BOTH vars if the fallback is still set.
+  delete old key (the #738 procedure). One credential, one env var — but see
+  the `ops:check-bundler` caveat in §3 before assuming the probe rotated with
+  it.
 
 ## 3. Failure modes & the degradation contract
 
@@ -61,9 +98,19 @@ prepare/submit throw and the payment route 502s cleanly with a redacted
 error. There is no fallback signer, no retry-with-Haven-funds path, and none
 may be added (red line — see the security model).
 
+Blast radius since #946: `/payments` and **3009-mode** x402 pause; **erc7710
+x402 keeps working**, because it prepares no sponsored op — the merchant
+redeems. A separate outage class is a **drained relayer**, which pauses grant
+activation (the delegator deploy, §1) while payments on already-deployed
+accounts continue.
+
 Probes:
 - `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle (inherited
-  from the retired session rail's runbook; same vendor account).
+  from the retired session rail's runbook; same vendor account). **Caveat:**
+  `check-bundler.ts` still reads `SESSION_RAIL_BUNDLER_URL ?? PILOT_BUNDLER_URL`
+  — it does NOT read the var the rail actually uses. Export one of those for
+  the probe run, and treat a green probe as evidence about the *vendor*, not
+  about the deployed env's `DELEGATION_RAIL_BUNDLER_URL`.
 - `ops:check-delegation` — every PINNED contract (manager, entry point,
   factory, Hybrid impl, 8 enforcers) is live bytecode on every enabled
   chain. Run on deploy and daily; exit 1 = stop before any rail use.

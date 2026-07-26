@@ -29,3 +29,21 @@ export {
   bindingMatches,
   type PassportAddressBinding,
 } from './binding.js'
+
+export {
+  getPassport,
+  requestPassport,
+  issuePassport,
+  issuePassportBestEffort,
+  retryPendingPassports,
+  setAnchor,
+  type PassportStatus,
+  type PassportRow,
+  type PassportClaim,
+  type Anchor,
+  type AnchorResult,
+} from './issuance.js'
+
+// The real on-chain anchor. Imported here (not inside issuance.ts) so the
+// issuance state machine stays testable without ethers or a relayer.
+export { anchorOnChain, buildAttestCall, encodeClaim } from './attestation.js'

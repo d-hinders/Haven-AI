@@ -131,17 +131,7 @@ const READ_BUT_UNDOCUMENTED: Array<{ name: string; because: string }> = [
 
 // Documented in `.env.example` but read only outside code the scan sees (or
 // injected by the platform), so the "read somewhere" check would miss them.
-const DOCUMENTED_BUT_UNREAD: Array<{ name: string; because: string }> = [
-  {
-    name: 'AGENT_PASSPORT_SCHEMA_UID',
-    because:
-      'Read per-chain via a template literal in lib/passport/schema.ts ' +
-      '(`AGENT_PASSPORT_SCHEMA_UID_${chainId}`), which the literal-key scanner ' +
-      'above cannot see. `normalize()` collapses the numbered family onto this ' +
-      'base name, so one entry covers every chain rather than one per chain. ' +
-      'Delete this when the key is read by a literal name (#971, epic #970).',
-  },
-]
+const DOCUMENTED_BUT_UNREAD: Array<{ name: string; because: string }> = []
 
 const allowedUndocumented = new Set(READ_BUT_UNDOCUMENTED.map((e) => e.name))
 const allowedUnread = new Set(DOCUMENTED_BUT_UNREAD.map((e) => e.name))

@@ -58,6 +58,7 @@ covers:
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/architecture/07-edge-signer.md
   - docs/architecture/08-local-vs-hosted-mcp.md
+  - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
 last-verified: "2026-07-26"
 ---
@@ -131,6 +132,12 @@ on-chain agent rules in Haven → the agent can pay. Current contracts:
   policy as delegations + caveat enforcers. Payments redeem the agent's
   budget delegation via sponsored UserOps (#829); budgets refill natively
   on-chain. See `docs/security/delegation-rail-security-model.md`.
+- **EAS (Ethereum Attestation Service) — L0 agent passports (epic #970):**
+  opt-in, revocable credential attesting an agent's **governance, not
+  identity** (issued / governed / revocable), anchored by the gas-only relayer
+  on Base Sepolia. Haven's verifier is authoritative for live standing; the
+  on-chain anchor is eventually consistent. See
+  [agent passport schema](11-agent-passport-schema.md).
 - **PostgreSQL** — users, wallets, agents, allowances, payments, approvals,
   receipts, catalog/reporting state, and audit records.
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)

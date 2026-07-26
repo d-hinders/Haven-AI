@@ -26,3 +26,16 @@ export type {
   operations as ApiOperations,
 } from './api-types.js'
 export type { ApiSchema } from './api-schema.js'
+
+// Shared chain + token registry (#986) — the single source for per-chain
+// facts; backend/frontend layer environment wiring and representation on top.
+export {
+  CHAIN_REGISTRY,
+  REGISTRY_CHAIN_IDS,
+  getChainData,
+  isRegisteredChain,
+  resolveToken,
+  buildExplorerUrl,
+  type CoreChainConfig,
+  type CoreTokenConfig,
+} from './chains.js'

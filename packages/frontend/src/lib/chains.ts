@@ -1,11 +1,19 @@
 /**
- * Multi-chain configuration for the Haven frontend.
+ * Frontend chain configuration — client construction over the shared registry.
  *
- * Single source of truth for per-chain data: contract addresses,
- * tokens, explorer URLs, and Safe TX service URLs.
+ * The per-chain FACTS (identity, explorer/Safe URLs, contracts, passkey,
+ * token data) live in `@haven_ai/core` (#986) — ONE definition shared with
+ * the backend. This module adds what only the frontend owns: viem chain
+ * objects, the offered-chains policy (pickers), the build-time default
+ * chain, and the frontend's token Record representation (keyed by display
+ * symbol, in picker order).
+ *
+ * Purity proof: `__tests__/chains-registry-snapshot.test.ts` pins the fully
+ * resolved registry byte-for-byte against the pre-move fixture.
  */
 import type { Address } from 'viem'
 import { gnosis, base, baseSepolia } from 'viem/chains'
+import { getChainData, resolveToken } from '@haven_ai/core'
 
 // Re-export viem chain objects for convenience
 export { gnosis, base, baseSepolia }
@@ -39,87 +47,39 @@ export interface FrontendChainConfig {
   tokens: Record<string, FrontendTokenConfig>
 }
 
-// ── Gnosis Chain (100) ────────────────────────────────────────────
+// ── Construction from the shared registry ─────────────────────────
 
-const GNOSIS_CONFIG: FrontendChainConfig = {
-  chainId: 100,
-  name: 'Gnosis Chain',
-  shortName: 'gnosis',
-  viemChain: gnosis,
-  explorerUrl: 'https://gnosisscan.io',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/gno',
-  contracts: {
-    safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
-    safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
-    fallbackHandler: '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4',
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
-  passkey: {
-    // TODO: source from safe-modules-deployments once the package exposes the Gnosis FCL verifier.
-    verifier: '0x445a0683e494ea0c5af3e83c5159fbe47cf9e765',
-  },
-  tokens: {
-    'xDAI': { symbol: 'xDAI', decimals: 18, address: null },
-    'EURe': { symbol: 'EURe', decimals: 18, address: '0xcB444e90D8198415266c6a2724b7900fb12FC56E' },
-    'USDC.e': { symbol: 'USDC.e', decimals: 6, address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0' },
-  },
+/**
+ * Frontend-owned per-chain layer: the viem client object and the token
+ * PICKER ORDER (differs from the backend's native-first API order — e.g.
+ * Base lists USDC before ETH in pickers). Values come from core.
+ */
+const FRONTEND_CHAIN_LAYER: Record<number, { viemChain: FrontendChainConfig['viemChain']; tokenOrder: string[] }> = {
+  100: { viemChain: gnosis, tokenOrder: ['xDAI', 'EURe', 'USDC.e'] },
+  8453: { viemChain: base, tokenOrder: ['USDC', 'ETH'] },
+  84532: { viemChain: baseSepolia, tokenOrder: ['USDC', 'ETH'] },
 }
 
-// ── Base (8453) ───────────────────────────────────────────────────
-
-const BASE_CONFIG: FrontendChainConfig = {
-  chainId: 8453,
-  name: 'Base',
-  shortName: 'base',
-  viemChain: base,
-  explorerUrl: 'https://basescan.org',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/base',
-  contracts: {
-    // Base uses EIP-155 variant addresses for Safe v1.3.0
-    safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
-    safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
-    fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    // Same CREATE2 addresses on Base
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
-  passkey: {
-    verifier: '0x0000000000000000000000000000000000000100',
-  },
-  tokens: {
-    'USDC': { symbol: 'USDC', decimals: 6, address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
-    'ETH': { symbol: 'ETH', decimals: 18, address: null },
-  },
-}
-
-// ── Base Sepolia (84532) — testnet, for the dev environment ───────
-//
-// Mirrors the backend BASE_SEPOLIA (#598); every address verified deployed on
-// Base Sepolia via eth_getCode. The AllowanceModule is the **v0.1.1** deployment
-// (0xAA46…) — v0.1.0's 0xCFbF… is not on Base Sepolia (identical ABI). USDC is
-// Circle's testnet token.
-const BASE_SEPOLIA_CONFIG: FrontendChainConfig = {
-  chainId: 84532,
-  name: 'Base Sepolia',
-  shortName: 'base-sepolia',
-  viemChain: baseSepolia,
-  explorerUrl: 'https://sepolia.basescan.org',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/basesep',
-  contracts: {
-    safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
-    safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
-    fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    allowanceModule: '0xAA46724893dedD72658219405185Fb0Fc91e091C',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
-  passkey: {
-    verifier: '0x0000000000000000000000000000000000000100',
-  },
-  tokens: {
-    'USDC': { symbol: 'USDC', decimals: 6, address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' },
-    'ETH': { symbol: 'ETH', decimals: 18, address: null },
-  },
+function buildFrontendChain(chainId: number): FrontendChainConfig {
+  const core = getChainData(chainId)
+  const layer = FRONTEND_CHAIN_LAYER[chainId]
+  const tokens: Record<string, FrontendTokenConfig> = {}
+  for (const symbol of layer.tokenOrder) {
+    const token = resolveToken(chainId, symbol)
+    if (!token) throw new Error(`chains: token ${symbol} missing from the shared registry for chain ${chainId}`)
+    tokens[symbol] = { symbol: token.symbol, decimals: token.decimals, address: token.address as Address | null }
+  }
+  return {
+    chainId: core.chainId,
+    name: core.name,
+    shortName: core.shortName,
+    viemChain: layer.viemChain,
+    explorerUrl: core.explorerUrl,
+    safeTxServiceUrl: core.safeTxServiceUrl,
+    contracts: core.contracts as FrontendChainConfig['contracts'],
+    passkey: { verifier: core.passkey.verifier as Address },
+    tokens,
+  }
 }
 
 // ── Registry ──────────────────────────────────────────────────────
@@ -130,11 +90,12 @@ const BASE_SEPOLIA_CONFIG: FrontendChainConfig = {
  * imported on Gnosis before we went Base-only) still renders without
  * crashing.
  */
-const CHAINS: Record<number, FrontendChainConfig> = {
-  100: GNOSIS_CONFIG,
-  8453: BASE_CONFIG,
-  84532: BASE_SEPOLIA_CONFIG,
-}
+const CHAINS: Record<number, FrontendChainConfig> = Object.fromEntries(
+  Object.keys(FRONTEND_CHAIN_LAYER).map((id) => [Number(id), buildFrontendChain(Number(id))]),
+)
+
+const BASE_CONFIG = CHAINS[8453]
+const BASE_SEPOLIA_CONFIG = CHAINS[84532]
 
 /**
  * Every chain in the registry — including ones no longer *offered* in pickers

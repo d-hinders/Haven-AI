@@ -27,7 +27,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getChain } from '../lib/chains.js'
 import { getProvider } from '../lib/allowance-module.js'
 import { formatTokenValue } from '../lib/tokens.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 
 // ── ABI for decoding AllowanceModule calldata ─────────────────────
 

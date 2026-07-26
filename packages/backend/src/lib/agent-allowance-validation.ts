@@ -1,4 +1,4 @@
-import { isAddress } from './address.js'
+import { isAddress } from '@haven_ai/core'
 
 export interface AgentAllowanceInput {
   token_address?: unknown

@@ -65,6 +65,25 @@ module.exports = {
       to: { path: CHAIN_SDKS },
     },
     {
+      // Rule 1 (the pure end of the stable-dependency rule), applied to the
+      // shared kernel. @haven_ai/core is imported by a Node server AND a
+      // browser bundle, so a framework or chain-SDK dependency here would be
+      // wrong in both directions at once.
+      //
+      // This rule starts at ZERO violations and must NEVER gain a baseline
+      // entry. If it fires, the new code belongs in the consumer, not in core.
+      name: 'core-stays-pure',
+      severity: 'error',
+      comment:
+        '@haven_ai/core must stay pure — no fastify, pg, ethers, viem, permissionless or ' +
+        'smart-accounts-kit. It is shared by the server and the browser bundle. Put the ' +
+        'impure part in the consumer.',
+      from: { path: '^packages/core/src/' },
+      to: {
+        path: 'node_modules/(fastify|pg|ethers|viem|permissionless|@metamask/smart-accounts-kit)/',
+      },
+    },
+    {
       // Rule 6, scoped to the two directories that are already modules.
       // Neither has an index.ts yet, so today EVERY external import is "deep" —
       // the baseline records that, and the rule stops the count growing.

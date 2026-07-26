@@ -8,7 +8,7 @@ import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../
 import { getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   getTokenAllowance,
   getTokenBalance,

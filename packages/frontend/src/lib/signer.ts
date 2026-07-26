@@ -1,5 +1,6 @@
 'use client'
 
+import { ETH_ADDRESS_RE } from '@haven_ai/core'
 import { useMemo, useSyncExternalStore } from 'react'
 import { useAccount, useWalletClient } from 'wagmi'
 import type { Address, WalletClient } from 'viem'
@@ -32,7 +33,6 @@ export interface StoredPasskeySigner {
   createdAt: number
 }
 
-const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/
 
 export function passkeyStorageKey(safeAddress: Address, chainId: number): string {

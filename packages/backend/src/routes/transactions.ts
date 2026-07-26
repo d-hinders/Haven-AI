@@ -11,7 +11,7 @@ import { getChain, isSupportedChain } from '../lib/chains.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import { createCache } from '../lib/cache.js'
 import { machinePaymentLifecycle } from '../lib/machine-payment-lifecycle.js'
-import { ETH_ADDRESS_RE } from '../lib/address.js'
+import { ETH_ADDRESS_RE } from '@haven_ai/core'
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 

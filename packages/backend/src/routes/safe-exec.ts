@@ -5,7 +5,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
 import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../lib/relayer.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 
 const HEX_RE = /^0x([0-9a-fA-F]{2})*$/
 const DECIMAL_RE = /^\d+$/

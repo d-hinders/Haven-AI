@@ -9,7 +9,7 @@ import {
   type MachinePaymentRail,
 } from '../lib/machine-payments.js'
 import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../lib/agent-payment-status.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   attachMachinePaymentEvidence,
   type MachinePaymentEvidenceRow,

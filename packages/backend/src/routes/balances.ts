@@ -7,7 +7,7 @@ import { getProvider } from '../lib/allowance-module.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import { createCache } from '../lib/cache.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
-import { ETH_ADDRESS_RE } from '../lib/address.js'
+import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 // Minimal ERC-20 ABI for balanceOf
 const ERC20_ABI = ['function balanceOf(address account) view returns (uint256)']

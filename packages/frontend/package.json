@@ -23,6 +23,7 @@
     "test:e2e:report": "playwright show-report ../../output/playwright/html-report"
   },
   "dependencies": {
+    "@haven_ai/core": "*",
     "@metamask/smart-accounts-kit": "^1.6.0",
     "@rainbow-me/rainbowkit": "^2.2.10",
     "@safe-global/safe-modules-deployments": "^3.0.4",

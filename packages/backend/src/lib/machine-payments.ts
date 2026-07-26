@@ -19,7 +19,7 @@ import {
 } from './allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from './machine-payment-evidence.js'
 import { decideCoverage } from './payment-coverage.js'
-import { isAddress } from './address.js'
+import { isAddress } from '@haven_ai/core'
 import {
   loadExecutionRailState,
   redactVendorSecrets,
@@ -110,7 +110,7 @@ interface ApprovalRequestRow {
   machine_metadata: unknown
 }
 
-export { isAddress as isValidAddress } from './address.js'
+export { isAddress as isValidAddress } from '@haven_ai/core'
 
 export function normaliseAddress(addr: string): string {
   return ethers.getAddress(addr.toLowerCase())

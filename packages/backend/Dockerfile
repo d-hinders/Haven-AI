@@ -5,12 +5,16 @@ WORKDIR /app
 
 # Install dependencies for the whole monorepo (needed for workspace resolution)
 COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages/core/package.json ./packages/core/
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/backend/package.json ./packages/backend/
 
-RUN npm ci --workspace=packages/backend --workspace=packages/sdk --include-workspace-root
+RUN npm ci --workspace=packages/backend --workspace=packages/core --workspace=packages/sdk --include-workspace-root
 
-# Build SDK first (backend depends on it)
+# Build shared kernel, then SDK (backend depends on both)
+COPY packages/core ./packages/core
+RUN npm run build -w packages/core
+
 COPY packages/sdk ./packages/sdk
 RUN npm run build -w packages/sdk
 
@@ -27,12 +31,14 @@ ENV NODE_ENV=production
 
 # Copy production dependencies
 COPY package.json package-lock.json* ./
+COPY packages/core/package.json ./packages/core/
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/backend/package.json ./packages/backend/
 
-RUN npm ci --workspace=packages/backend --workspace=packages/sdk --include-workspace-root --omit=dev
+RUN npm ci --workspace=packages/backend --workspace=packages/core --workspace=packages/sdk --include-workspace-root --omit=dev
 
 # Copy compiled output
+COPY --from=builder /app/packages/core/dist ./packages/core/dist
 COPY --from=builder /app/packages/sdk/dist ./packages/sdk/dist
 COPY --from=builder /app/packages/backend/dist ./packages/backend/dist
 

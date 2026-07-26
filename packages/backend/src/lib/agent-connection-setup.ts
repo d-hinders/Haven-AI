@@ -152,7 +152,7 @@ export function sanitizeInstallStatus(value: unknown): Record<string, unknown> {
   return status
 }
 
-export { isAddress as isValidAddress } from './address.js'
+export { isAddress as isValidAddress } from '@haven_ai/core'
 
 export function isValidHexHash(value: unknown): value is string {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value)

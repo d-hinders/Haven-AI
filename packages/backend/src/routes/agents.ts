@@ -10,7 +10,7 @@ import {
 import { getTokenBalance } from '../lib/allowance-module.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import { formatTokenValue } from '../lib/tokens.js'
 
 // ── Types ──────────────────────────────────────────────────────────

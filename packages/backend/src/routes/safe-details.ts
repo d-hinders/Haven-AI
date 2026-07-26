@@ -3,7 +3,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
 import { isSupportedChain } from '../lib/chains.js'
 import { getSafeDetails } from '../lib/safe-details.js'
-import { ETH_ADDRESS_RE } from '../lib/address.js'
+import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 function parseChainId(value: unknown): number | null {
   if (value === undefined) return null

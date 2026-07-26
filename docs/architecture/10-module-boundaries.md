@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/lib/reporting/**
   - packages/backend/src/lib/fee/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-07-25"
+last-verified: "2026-07-26"
 ---
 
 # Module Boundaries
@@ -115,6 +115,12 @@ Only the subset checkable against today's tree is enabled — a rule about
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (#998) |
 | 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` | widens as modules land; zeroed by #998 |
 | 7. The graph is acyclic | ✅ `no-circular` | already at zero — held absolutely |
+
+`@haven_ai/core` also carries the GENERATED API wire types (#984):
+`src/api-types.ts` is emitted from the backend's OpenAPI spec by
+`scripts/generate-api-types.mjs` and gated against drift in CI
+(`npm run check:api-types`). Generated code is still bound by
+`core-stays-pure` — it imports nothing, by construction.
 
 Two rules carry **no baseline at all** and never may: `no-circular` (the tree is
 cycle-free and a new cycle must be broken, not grandfathered) and

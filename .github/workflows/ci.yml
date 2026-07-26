@@ -105,7 +105,7 @@ jobs:
               # The dependency-boundary gate (#982) lives outside packages/ but
               # polices packages/backend. Without this case, weakening a rule or
               # the ratchet script would ship without the gate ever running.
-              .dependency-cruiser.cjs|scripts/dep-lint.mjs|scripts/dep-lint.test.mjs|scripts/lib/ratchet.mjs)
+              .dependency-cruiser.cjs|scripts/dep-lint.mjs|scripts/dep-lint.test.mjs|scripts/lib/ratchet.mjs|scripts/generate-api-types.mjs)
                 code=true
                 backend=true
                 ;;
@@ -302,6 +302,12 @@ jobs:
         # this step exists to make drift failures unambiguous on the GitHub
         # PR check list without scanning a 100+ line test output.
         run: npm run test -w packages/backend -- src/openapi/spec.test.ts
+
+      - name: Generated api-types drift check (#984)
+        # Blocking: packages/core/src/api-types.ts is generated from the
+        # OpenAPI spec and committed; editing the spec without regenerating
+        # fails here. Fix with `npm run generate:api-types`.
+        run: npm run check:api-types
 
       - name: Run backend unit tests
         run: npm run test -w packages/backend

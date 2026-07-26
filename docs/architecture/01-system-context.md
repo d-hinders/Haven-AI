@@ -6,6 +6,7 @@ covers:
   - packages/backend/src/lib/allowance-module.ts
   - packages/backend/src/lib/relayer.ts
   - packages/backend/src/lib/chains.ts
+  - packages/core/src/chains.ts
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
@@ -26,7 +27,7 @@ covers:
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-07-15"
+last-verified: "2026-07-26"
 ---
 
 # Haven — System Context
@@ -179,11 +180,11 @@ flowchart LR
   EIP-712 typed data with its delegate key. Funds move account→recipient directly,
   metered on-chain by audited caveat enforcers during gas estimation — Haven never
   holds a DeleGator signer, and the account owner is watch-only. x402 on this rail
-  settles treasury→merchant directly via ERC-7710 (no funding leg) — but that path
-  needs facilitator-side erc7710 support, which is still thin, so EIP-3009-only
-  merchants are not yet reachable on this rail; the decided bridge is an EIP-3009
-  fallback (a bounded, transient two-leg — RFC #791 §18 / #946, not yet built).
-  This rail is
+  settles treasury→merchant directly via ERC-7710 (no funding leg); facilitators
+  without erc7710 support take the per-payment EIP-3009 fallback (#946): the
+  budget delegation transiently funds the delegate EOA, which signs the standard
+  merchant header — bounded by the period budget and covered by the sweep
+  machinery (see doc 2's delegation-rail custody notes). This rail is
   **Base-only** (Base 8453, Base Sepolia 84532); Gnosis is not in scope. Details:
   [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md),
   [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md)
@@ -191,6 +192,8 @@ flowchart LR
   [agent auth](../../packages/backend/src/middleware/agentAuth.ts)).
 - **Supported chains are Base (8453), Gnosis Chain (100), and Base Sepolia
   (84532).** Base is the primary production network; Base Sepolia is the dev/QA
-  testnet. RPC endpoints, token addresses, Safe contracts, and relayer
-  configuration are selected per chain
-  ([chain registry](../../packages/backend/src/lib/chains.ts)).
+  testnet. Per-chain facts (token addresses, Safe contracts, explorers) live in
+  the shared `@haven_ai/core` registry; the backend layers RPC endpoints and
+  relayer configuration over it per chain
+  ([core registry](../../packages/core/src/chains.ts),
+  [backend chain wiring](../../packages/backend/src/lib/chains.ts)).

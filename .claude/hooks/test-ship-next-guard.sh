@@ -34,7 +34,13 @@ check() { # name expected(fire|silent) payload
     printf '  FAIL  %-52s expected %s, got %s\n' "$1" "$2" "$actual"
   fi
 }
-b() { printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"; }
+b() { printf '{"session_id":"testsess","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"; }
+MARKER_DIR="${TMPDIR:-/tmp}"
+mk() { : > "$MARKER_DIR/claude-ship-next-$1"; }          # set marker
+mkrm() { rm -f "$MARKER_DIR/claude-ship-next-$1"; }      # clear marker
+mkhas() { [ -f "$MARKER_DIR/claude-ship-next-$1" ]; }    # marker still there?
+WRITER="$(dirname "$0")/ship-next-marker.sh"
+pr() { printf '{"session_id":"%s","tool_name":"mcp__github__create_pull_request","tool_input":{}}' "$1"; }
 
 # --- must warn: these open a pull request --------------------------------
 check "mcp create_pull_request" fire '{"tool_name":"mcp__github__create_pull_request","tool_input":{"title":"x"}}'
@@ -90,8 +96,52 @@ check "malformed json" silent 'not json'
 check "missing tool_input" silent '{"tool_name":"Bash"}'
 check "empty command" silent "$(b '')"
 
+
+# --- #1018: silent when /ship-next is actually driving --------------------
+mkrm sess1
+check "no marker -> warns (unchanged)" fire "$(pr sess1)"
+
+mk sess1
+check "marker present -> SILENT (compliant PR)" silent "$(pr sess1)"
+if mkhas sess1; then fail=$((fail+1)); printf '  FAIL  marker was not CONSUMED\n'; else pass=$((pass+1)); fi
+check "marker consumed -> 2nd PR warns again" fire "$(pr sess1)"
+
+# Cross-session isolation: another session's marker must not silence this one.
+mkrm sess1; mk sess2
+check "other session's marker does not silence" fire "$(pr sess1)"
+mkrm sess2
+
+# --- the asymmetry: broken marker machinery must WARN, never silence ------
+check "missing session_id -> warns" fire '{"tool_name":"mcp__github__create_pull_request","tool_input":{}}'
+check "empty session_id -> warns" fire '{"session_id":"","tool_name":"mcp__github__create_pull_request","tool_input":{}}'
+# A session_id that sanitizes to a path-traversal attempt must not resolve to
+# some other file that happens to exist.
+check "path-traversal session_id -> warns" fire "$(pr '../../etc/passwd')"
+
+# --- the writer sets the marker from BOTH paths --------------------------
+mkrm wsess
+printf '{"session_id":"wsess","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"ship-next"}}' | sh "$WRITER" 2>/dev/null
+if mkhas wsess; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  Skill-tool path did not set the marker\n'; fi
+mkrm wsess
+
+printf '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":"/ship-next 1018"}' | sh "$WRITER" 2>/dev/null
+if mkhas wsess; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  /ship-next prompt path did not set the marker\n'; fi
+mkrm wsess
+
+# --- the writer must NOT set it for anything else -------------------------
+for bad in '{"session_id":"wsess","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"new-task"}}' \
+           '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":"tell me about /ship-next"}' \
+           '{"session_id":"wsess","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}' \
+           '{"session_id":"wsess","hook_event_name":"SessionStart","prompt":"/ship-next"}'; do
+  mkrm wsess
+  printf '%s' "$bad" | sh "$WRITER" 2>/dev/null
+  if mkhas wsess; then fail=$((fail+1)); printf '  FAIL  writer set marker for: %s\n' "$bad"; else pass=$((pass+1)); fi
+done
+mkrm wsess
+mkrm testsess
+
 # --- the warning must carry the gates, not just a pointer -----------------
-body=$(printf '%s' '{"tool_name":"mcp__github__create_pull_request"}' | sh "$GUARD" 2>/dev/null \
+body=$(printf '%s' '{"session_id":"gatesess","tool_name":"mcp__github__create_pull_request"}' | sh "$GUARD" 2>/dev/null \
   | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)
 for needle in "CODEOWNERS" "coupling-gate.mjs" "origin/dev" "docs:check" "scripts/docs/"; do
   case "$body" in

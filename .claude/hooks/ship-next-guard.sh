@@ -101,7 +101,40 @@ This warning does not block. It is on you.'
   exit 0
 }
 
-[ "$tool" = "mcp__github__create_pull_request" ] && fire
+
+# Warning on a COMPLIANT pull request is not a cosmetic annoyance: it trains the
+# reader to ignore the guard, which is the muted-guard failure this file's own
+# header calls out. The marker is written by the harness (see
+# ship-next-marker.sh), never by the model remembering to.
+#
+# The check is deliberately asymmetric — it can only move toward SILENCE when a
+# marker is POSITIVELY PRESENT. No session id, unreadable tmpdir, malformed
+# payload, marker missing: every one falls through to the warning. A bug in
+# here cannot silence the guard, only make it noisier, because a silent guard
+# is indistinguishable from a working one.
+#
+# BOTH detection paths (the MCP tool and the Bash shapes) route through this.
+# An earlier draft had the MCP path call fire() directly and skip the marker
+# entirely — caught by the test, which is why the marker case is asserted for
+# the MCP payload specifically.
+fire_unless_ship_next() {
+  session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || fire
+  [ -n "$session" ] || fire
+  safe=$(printf '%s' "$session" | tr -c 'A-Za-z0-9_-' '_' 2>/dev/null) || fire
+  [ -n "$safe" ] || fire
+
+  marker="${TMPDIR:-/tmp}/claude-ship-next-$safe"
+  if [ -f "$marker" ]; then
+    # CONSUME it. ship-next ships exactly one issue per invocation, so a
+    # single-use marker gives per-PR precision: a second, hand-rolled PR later
+    # in the same session warns as it should.
+    rm -f "$marker" 2>/dev/null || true
+    exit 0
+  fi
+  fire
+}
+
+[ "$tool" = "mcp__github__create_pull_request" ] && fire_unless_ship_next
 [ "$tool" = "Bash" ] || exit 0
 [ -n "$cmd" ] || exit 0
 
@@ -164,5 +197,6 @@ for seg in $segments; do
 done
 unset IFS
 
-[ "$is_pr" -eq 1 ] && fire
+[ "$is_pr" -eq 1 ] || exit 0
+fire_unless_ship_next
 exit 0

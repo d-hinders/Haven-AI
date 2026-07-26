@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/*/package.json
+  - packages/core/src/index.ts
   - packages/backend/src/lib/chains.ts
   - packages/backend/src/lib/merchant-catalog.ts
   - packages/backend/src/lib/catalog-discovery.ts
@@ -57,8 +58,9 @@ covers:
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/architecture/07-edge-signer.md
   - docs/architecture/08-local-vs-hosted-mcp.md
+  - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-07-18"
+last-verified: "2026-07-26"
 ---
 
 # Haven — Architecture Overview
@@ -98,7 +100,7 @@ with no funding leg and no approval queue. Deep dive:
 | `@haven_ai/signer` | Local edge signer — holds the delegate key, signs only. Funding relay sends `{ payment_id, signature }` to hosted MCP; paid MCP-tool completion can also send a signed, merchant-bound `payment_header` for settlement/evidence. |
 | `@haven_ai/mcp` | Fully-local MCP — tool orchestration and signing share one local process, while still using the configured Haven API/relayer and external chain or merchant; **advanced opt-in** (`--local`), not the default. |
 | `@haven_ai/cli` | User-authenticated terminal companion for reads and backend-only management; owner-signed on-chain actions remain in the dashboard. |
-| `@haven_ai/core` | Shared Haven kernel — pure domain types and helpers (today: address validation) used by BOTH the backend and the dashboard so neither re-derives them. **Private**, never published; private consumers pin it `"*"`. Must stay free of `fastify`/`pg`/`ethers`/`viem` — enforced by the `core-stays-pure` dependency rule (epic #980). |
+| `@haven_ai/core` | Shared Haven kernel — pure domain types and helpers used by BOTH the backend and the dashboard so neither re-derives them: address validation, the generated OpenAPI wire types (`api-types.ts`, drift-gated in CI by `npm run check:api-types`, #984), the chain+token registry facts (#986; backend/frontend layer env wiring and viem construction over them), and the machine-payment lifecycle domain (#987). **Private**, never published; private consumers pin it `"*"`. Must stay free of `fastify`/`pg`/`ethers`/`viem` — enforced by the `core-stays-pure` dependency rule (epic #980). |
 | `@haven_ai/qa-agent` | Private Base-Sepolia dev harness for deterministic seeded money-flow and merchant round-trip checks; also hosts the experimental ERC-4337 pilot scripts (ADR #719, `src/pilot/` — see the research doc); not published. |
 | `@haven_ai/demo-merchant-mcp` | Internal x402 demo merchant — test counterparty, not product. |
 
@@ -130,6 +132,12 @@ on-chain agent rules in Haven → the agent can pay. Current contracts:
   policy as delegations + caveat enforcers. Payments redeem the agent's
   budget delegation via sponsored UserOps (#829); budgets refill natively
   on-chain. See `docs/security/delegation-rail-security-model.md`.
+- **EAS (Ethereum Attestation Service) — L0 agent passports (epic #970):**
+  opt-in, revocable credential attesting an agent's **governance, not
+  identity** (issued / governed / revocable), anchored by the gas-only relayer
+  on Base Sepolia. Haven's verifier is authoritative for live standing; the
+  on-chain anchor is eventually consistent. See
+  [agent passport schema](11-agent-passport-schema.md).
 - **PostgreSQL** — users, wallets, agents, allowances, payments, approvals,
   receipts, catalog/reporting state, and audit records.
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)

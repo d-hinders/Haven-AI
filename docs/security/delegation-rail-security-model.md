@@ -74,6 +74,16 @@ property of the deployed bytecode, not our code — covered by pinning exact
 addresses with audit provenance (#825) and the #826 tripwires (framework repo
 activity, alternative 7710 implementations), not by CI.
 
+**Passport attestations (#970) — a new relayer use, still not value-bearing:**
+the L0 agent-passport anchor (`lib/passport/attestation.ts`) is the one place
+the relayer signs something other than gas on a user-authorised transaction —
+it submits EAS `attest`/`revoke` calls with Haven as issuer. That is governance
+metadata, not spend authority: the transaction targets the pinned EAS contract
+only, carries zero value, encodes no transfer, and involves no user key,
+delegation, or allowance (a test pins the target and the zero value). It does
+not add a value-bearing server signer, so invariant 3 stands. See
+[11-agent-passport-schema](../architecture/11-agent-passport-schema.md).
+
 ## 3. Delegation custody semantics (#828's contract)
 
 **Where the signed delegation lives:** the agent receives it through the

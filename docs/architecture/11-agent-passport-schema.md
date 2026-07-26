@@ -6,6 +6,11 @@ covers:
   - packages/backend/src/routes/agent-passports.ts
   - packages/backend/src/routes/passport-verify.ts
   - packages/backend/scripts/register-passport-schema.ts
+  - packages/backend/src/db/migrations/048_agent_passports.ts
+  - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
+  - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
+  - packages/backend/src/infra/repositories/agent-passports.ts
+  - packages/backend/src/routes/agent-passports.ts
 last-verified: "2026-07-26"
 ---
 
@@ -96,6 +101,30 @@ with `smartAccount = 0x0`. Two rules follow, both enforced in
 
 This mirrors the delegation rail's posture on the zero address
 ([security model](../security/delegation-rail-security-model.md) §7).
+
+## Issuance — opt-in, issuer-signed
+
+A passport is **opt-in and a separate action from agent creation** (owner
+decision 2026-07-24): `issue_passport: true` on `POST /agents`, or
+`POST /agents/:id/passport` later for an existing agent. Both entry points are
+dashboard-authenticated — an agent must not be able to issue itself a
+credential — and an agent with no passport row is the normal case, behaving
+exactly as before this shipped. Each passport is an attestation the relayer
+pays gas for, and opt-in lets the owner choose what goes on-chain (the graph
+note above).
+
+The EAS write is **async, best-effort and retryable** — recorded synchronously
+(the POST returns 202), anchored fire-and-forget. A failed, slow, or unfunded
+attestation can never fail or block agent creation; it degrades to a
+`pending`/`failed` passport row that the sweep below retries.
+
+**Who signs and pays:** Haven signs the attestation as *issuer*, submitted by
+the **gas-only relayer**. That is governance metadata, not spend authority —
+the transaction targets the pinned EAS contract and nothing else, carries zero
+value, and involves no user key, delegation, or allowance (a test pins the
+target and the zero value). Non-custody is unaffected; see the
+[delegation-rail security model](../security/delegation-rail-security-model.md)
+§2.
 
 ## Revocation — what merchants must check
 

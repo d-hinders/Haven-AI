@@ -278,6 +278,30 @@ export interface VerificationRow {
   safe_address: string | null
 }
 
+/**
+ * The verifier resolves ANCHORED passports only — owner decision 2026-07-26.
+ *
+ * `p.status = 'anchored'` is the disclosure boundary, and it is stated here
+ * rather than left to emerge. Today `markAnchored` writes `agent_eoa`,
+ * `smart_account` and `attestation_uid` in the SAME statement that sets
+ * `status = 'anchored'`, so a pending or failed row has NULLs in every lookup
+ * column and cannot be found anyway. That is an accident of write ordering, not
+ * a rule: the day someone records the addresses at request time — to show a
+ * "passport pending" state, say — an unauthenticated endpoint would quietly
+ * begin confirming that an address belongs to a Haven customer *before*
+ * anything about it is public on-chain.
+ *
+ * With the filter explicit, the endpoint's disclosure has a line that can be
+ * stated in one sentence: **the verifier only speaks about passports that are
+ * already public on-chain.** Everything it reveals about an agent's existence
+ * is readable from the EAS attestation by anyone. Live standing goes further
+ * than the chain — that is the entire product, and #973's whole point — but it
+ * now does so only for agents whose attestation is already published.
+ *
+ * A non-anchored passport returns the same `no_passport` as no passport at all.
+ * Distinguishing "pending" from "none" would leak precisely what this filter
+ * exists to withhold.
+ */
 const VERIFICATION_SELECT = `
   SELECT a.id AS agent_id, a.status AS agent_status, a.updated_at AS standing_changed_at,
          p.status AS passport_status, p.attestation_uid,
@@ -286,7 +310,8 @@ const VERIFICATION_SELECT = `
          s.execution_rail, s.safe_address
     FROM agent_passports p
     JOIN agents a ON a.id = p.agent_id
-    LEFT JOIN user_safes s ON s.id = a.safe_id`
+    LEFT JOIN user_safes s ON s.id = a.safe_id
+   WHERE p.status = 'anchored'`
 
 /**
  * Resolve a passport from EITHER agent address.
@@ -309,7 +334,7 @@ export async function findByAgentAddress(
   if (!normalized) return null
   const { rows } = await db.query<VerificationRow>(
     `${VERIFICATION_SELECT}
-      WHERE p.agent_eoa = $1 OR p.smart_account = $1
+        AND (p.agent_eoa = $1 OR p.smart_account = $1)
       LIMIT 1`,
     [normalized],
   )
@@ -323,7 +348,7 @@ export async function findByAttestationUid(
 ): Promise<VerificationRow | null> {
   const { rows } = await db.query<VerificationRow>(
     `${VERIFICATION_SELECT}
-      WHERE p.attestation_uid = $1
+        AND p.attestation_uid = $1
       LIMIT 1`,
     [attestationUid],
   )

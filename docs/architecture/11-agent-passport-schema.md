@@ -221,6 +221,30 @@ An agent with **no passport is a normal 200 answer**, not a 404. Issuance is
 opt-in, so most agents have none — and an error status is what makes an
 integration treat a lookup failure as a pass.
 
+### The verifier speaks only about passports already public on-chain
+
+Owner decision 2026-07-26. Lookups resolve **anchored passports only**. A
+pending or failed passport returns the same `{ found: false, reason:
+"no_passport" }` as an agent with none — reporting "pending" separately would
+disclose exactly what this withholds, that the address belongs to a Haven
+customer.
+
+The line that gives: everything the endpoint reveals about an agent's
+**existence** is already readable from the EAS attestation by anyone. Live
+`standing` deliberately goes *further* than the chain — that is the product, and
+the whole point of the revocation model above — but it now does so only for
+agents whose attestation is already published.
+
+The filter is written into the query explicitly rather than left to emerge.
+`markAnchored` happens to write `agent_eoa`, `smart_account` and
+`attestation_uid` in the same statement that sets `status = 'anchored'`, so a
+pending row has NULLs in every lookup column and could not be found anyway —
+but that is an accident of write ordering. The day someone records those
+addresses at request time, an unauthenticated endpoint would quietly start
+confirming Haven customers before anything about them is public. Four tests
+assert the filter against rows whose lookup columns are populated, so they fail
+if the clause is removed.
+
 ### Why a signed receipt and not a boolean
 
 A bare `{ ok: true }` forces a live call to Haven for every merchant decision:

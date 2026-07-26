@@ -186,7 +186,8 @@ const QUERIES: SmokeQuery[] = [
             FROM agent_passports p
             JOIN agents a ON a.id = p.agent_id
             LEFT JOIN user_safes s ON s.id = a.safe_id
-           WHERE p.agent_eoa = $1 OR p.smart_account = $1
+           WHERE p.status = 'anchored'
+             AND (p.agent_eoa = $1 OR p.smart_account = $1)
            LIMIT 1`,
   },
   {

@@ -51,6 +51,29 @@ function mockLookup(found: Record<string, unknown> | null) {
   mockQuery.mockImplementation(async () => ({ rows: found ? [found] : [] }))
 }
 
+/**
+ * A faithful stand-in for the WHERE clause, so a test can prove the SQL filters
+ * rather than that the mock returned nothing. Rows are matched the way the real
+ * query matches them, including `p.status = 'anchored'`.
+ */
+function mockTable(rows: Array<Record<string, unknown>>) {
+  mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
+    const needle = String(params[0] ?? '').toLowerCase()
+    // The anchored filter is DERIVED from the SQL, never assumed. Hard-coding it
+    // here would make every test below pass with the WHERE clause deleted —
+    // asserting the mock's opinion instead of the query's.
+    const anchoredOnly = /p\.status = 'anchored'/.test(sql)
+    const match = rows
+      .filter((r) => !anchoredOnly || r.passport_status === 'anchored')
+      .filter((r) =>
+        /attestation_uid = \$1/.test(sql)
+          ? r.attestation_uid === params[0]
+          : r.agent_eoa === needle || r.smart_account === needle,
+      )
+    return { rows: match.slice(0, 1) }
+  })
+}
+
 async function build() {
   const app = Fastify({ logger: false })
   await app.register(passportVerifyRoutes, { prefix: '/passport' })
@@ -130,6 +153,64 @@ describe('GET /passport/verify', () => {
     expect(res.json()).toEqual({ found: false, reason: 'no_passport' })
     // Rejected before it ever reaches the database.
     expect(mockQuery).not.toHaveBeenCalled()
+  })
+})
+
+describe('the verifier speaks ONLY about passports already public on-chain', () => {
+  // Owner decision 2026-07-26. Everything the endpoint reveals about an agent's
+  // EXISTENCE is readable from the EAS attestation by anyone. Live standing goes
+  // further than the chain — that is the product — but only for agents whose
+  // attestation is already published.
+
+  it('does not resolve a PENDING passport, even with its addresses populated', async () => {
+    // The columns are populated deliberately here. Today `markAnchored` writes
+    // them in the same statement that sets status='anchored', so a pending row
+    // has NULLs and could not be found regardless — which means a test using a
+    // realistic pending row would pass without the filter and prove nothing.
+    // This asserts the FILTER, so recording addresses earlier (to show a
+    // "passport pending" state, say) cannot silently widen disclosure.
+    mockTable([row({ passport_status: 'pending', attestation_uid: null })])
+    const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ found: false, reason: 'no_passport' })
+  })
+
+  it('does not resolve a FAILED passport', async () => {
+    mockTable([row({ passport_status: 'failed' })])
+    const body = (await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json()
+    expect(body).toEqual({ found: false, reason: 'no_passport' })
+  })
+
+  it('does not resolve a pending passport by UID either', async () => {
+    mockTable([row({ passport_status: 'pending' })])
+    const body = (await (await build()).inject({ url: `/passport/verify?uid=${UID}` })).json()
+    expect(body).toEqual({ found: false, reason: 'no_passport' })
+  })
+
+  it('is INDISTINGUISHABLE from an agent with no passport at all', async () => {
+    // Reporting "pending" separately would leak exactly what the filter
+    // withholds: that this address belongs to a Haven customer.
+    mockTable([row({ passport_status: 'pending' })])
+    const pending = (await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json()
+    mockTable([])
+    const absent = (await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json()
+    expect(pending).toEqual(absent)
+  })
+
+  it('still resolves an anchored passport', async () => {
+    // The filter must not have narrowed away the feature.
+    mockTable([row()])
+    expect((await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json().found).toBe(true)
+  })
+
+  it('still reports a REVOKED anchored agent — live standing is the product', async () => {
+    // Narrowing is about existence, not about standing. An anchored attestation
+    // is already public, so answering "revoked" for it discloses nothing new
+    // about who the agent is — only that Haven has withdrawn it, which is the
+    // entire reason the endpoint exists.
+    mockTable([row({ agent_status: 'revoked', revocation_status: 'pending' })])
+    const body = (await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json()
+    expect(body.receipt.standing).toBe('revoked')
   })
 })
 

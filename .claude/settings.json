@@ -3,11 +3,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__github__create_pull_request|Bash",
+        "matcher": "^(mcp__github__create_pull_request|Bash)$",
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ship-next-guard.sh\" 2>/dev/null || true",
+            "command": "sh \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/ship-next-guard.sh\" 2>/dev/null || true",
             "timeout": 10,
             "statusMessage": "Checking ship-next workflow"
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-notice.sh\" 2>/dev/null || true",
+            "command": "sh \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/session-notice.sh\" 2>/dev/null || true",
             "timeout": 10
           }
         ]

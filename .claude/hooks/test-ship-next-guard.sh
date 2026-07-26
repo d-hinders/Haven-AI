@@ -49,6 +49,14 @@ check "empty stdin" silent ''
 check "malformed json" silent 'not json'
 check "missing tool_input" silent '{"tool_name":"Bash"}'
 
+
+# --- text ABOUT the workflow is not an invocation (the guard fired on the
+# --- very commit that introduced it, because the message described it) ------
+check "heredoc commit msg mentioning gh pr create" silent '{"tool_name":"Bash","tool_input":{"command":"cat > /tmp/m.txt <<MSG\nguard on PR creation (gh pr create, curl POST to /pulls)\nMSG\ngit commit -F /tmp/m.txt"}}'
+check "heredoc mentioning curl POST /pulls -d" silent '{"tool_name":"Bash","tool_input":{"command":"cat > d.md <<EOF\nrun: curl -X POST https://api.github.com/repos/o/r/pulls -d @b.json\nEOF"}}'
+check "quoted heredoc delimiter" silent '{"tool_name":"Bash","tool_input":{"command":"cat > f <<\u0027EOF\u0027\ngh pr create --base dev\nEOF"}}'
+check "real create AFTER a heredoc block" fire '{"tool_name":"Bash","tool_input":{"command":"cat > /tmp/b.md <<EOF\nsome body\nEOF\ngh pr create --body-file /tmp/b.md"}}'
+
 # --- the warning must carry the gates, not just a pointer ---------------
 body=$(printf '%s' '{"tool_name":"mcp__github__create_pull_request"}' | sh "$GUARD" 2>/dev/null \
   | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)

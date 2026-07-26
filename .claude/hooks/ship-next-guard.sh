@@ -24,6 +24,24 @@ input=$(cat 2>/dev/null) || exit 0
 tool=$(printf '%s' "$input" | jq -r '.tool_name // ""' 2>/dev/null) || exit 0
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null) || cmd=""
 
+# Strip heredoc BODIES before matching. Text being written is not a command
+# being run: a commit message, doc, or test fixture that mentions `gh pr create`
+# must not trip the guard. This was found the honest way — the guard fired on
+# the very commit that introduced it, because the message described what it
+# detects. A guard that warns whenever someone writes ABOUT the workflow gets
+# muted, and a muted guard is the same as no guard.
+if printf '%s' "$cmd" | grep -q '<<' 2>/dev/null; then
+  cmd=$(printf '%s' "$cmd" | awk '
+    !inhd && match($0, /<<-?['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/) {
+      d = substr($0, RSTART, RLENGTH)
+      sub(/^<<-?['"'"'"]?/, "", d)
+      delim = d; inhd = 1; print; next
+    }
+    inhd { if ($0 ~ "^[[:space:]]*" delim "[[:space:]]*$") inhd = 0; next }
+    { print }
+  ' 2>/dev/null) || cmd=""
+fi
+
 is_pr=0
 case "$tool" in
   mcp__github__create_pull_request)

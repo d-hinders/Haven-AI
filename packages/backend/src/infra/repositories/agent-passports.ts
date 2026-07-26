@@ -175,19 +175,52 @@ export async function insertRequested(
   return (rowCount ?? 0) > 0
 }
 
+/**
+ * Record the anchor, INCLUDING the addresses that were attested (#974).
+ *
+ * The addresses are stored, not re-derived later, for two reasons: the Hybrid
+ * account address is derived one-way from the EOA so there is no reverse
+ * lookup without it, and a receipt must report what was actually attested
+ * rather than a fresh derivation that could silently disagree with the chain.
+ *
+ * Takes the anchor facts as ONE object rather than a growing positional list:
+ * the previous shape put `addresses` between `txHash` and the trailing
+ * `db: Executor`, so the next caller needing a transaction client had to know
+ * a new slot had appeared in the middle. A named object cannot be mis-slotted.
+ *
+ * The zero-address sentinel is an EAS ENCODING detail and is mapped to NULL
+ * here — see migration 051. Storing it would collide every EOA-only agent on
+ * one "address" in the verifier's lookup.
+ */
 export async function markAnchored(
   agentId: string,
-  attestationUid: string,
-  txHash: string,
+  anchor: {
+    attestationUid: string
+    txHash: string
+    agentEoa: string | null
+    smartAccount: string | null
+  },
   db: Executor = pool,
 ): Promise<void> {
+  const { attestationUid, txHash } = anchor
+  const addresses = anchor
   await db.query(
     `UPDATE agent_passports
         SET status = 'anchored', attestation_uid = $2, tx_hash = $3,
+            agent_eoa = $4, smart_account = $5,
             last_error = NULL, anchored_at = NOW(), updated_at = NOW()
       WHERE agent_id = $1`,
-    [agentId, attestationUid, txHash],
+    [agentId, attestationUid, txHash, normalizeAddress(addresses.agentEoa), normalizeAddress(addresses.smartAccount)],
   )
+}
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+/** Lowercase, with the zero-address sentinel mapped to NULL. */
+function normalizeAddress(address: string | null | undefined): string | null {
+  if (!address) return null
+  const lower = address.toLowerCase()
+  return lower === ZERO_ADDRESS ? null : lower
 }
 
 export async function markFailed(agentId: string, error: string, db: Executor = pool): Promise<void> {
@@ -221,6 +254,104 @@ export async function listRetryable(
   return rows
 }
 
+
+// ── Verification lookups (#974) ─────────────────────────────────────
+//
+// Merchant-facing and therefore NOT owner-scoped — a merchant verifying an
+// agent is not its owner. The `SELECT` list is the disclosure boundary: it
+// carries no owner identity, no budgets, no balances, and no counterparties.
+
+export interface VerificationRow {
+  agent_id: string
+  agent_status: string
+  /** When the agent's standing last changed — the receipt's monotonic epoch. */
+  standing_changed_at: Date
+  passport_status: PassportStatus | null
+  attestation_uid: string | null
+  revocation_status: RevocationStatus | null
+  revocation_confirmed_at: Date | null
+  agent_eoa: string | null
+  smart_account: string | null
+  chain_id: number | null
+  execution_rail: string | null
+  /** Presence only — the verifier reports "treasury-bound", never the address. */
+  safe_address: string | null
+}
+
+/**
+ * The verifier resolves ANCHORED passports only — owner decision 2026-07-26.
+ *
+ * `p.status = 'anchored'` is the disclosure boundary, and it is stated here
+ * rather than left to emerge. Today `markAnchored` writes `agent_eoa`,
+ * `smart_account` and `attestation_uid` in the SAME statement that sets
+ * `status = 'anchored'`, so a pending or failed row has NULLs in every lookup
+ * column and cannot be found anyway. That is an accident of write ordering, not
+ * a rule: the day someone records the addresses at request time — to show a
+ * "passport pending" state, say — an unauthenticated endpoint would quietly
+ * begin confirming that an address belongs to a Haven customer *before*
+ * anything about it is public on-chain.
+ *
+ * With the filter explicit, the endpoint's disclosure has a line that can be
+ * stated in one sentence: **the verifier only speaks about passports that are
+ * already public on-chain.** Everything it reveals about an agent's existence
+ * is readable from the EAS attestation by anyone. Live standing goes further
+ * than the chain — that is the entire product, and #973's whole point — but it
+ * now does so only for agents whose attestation is already published.
+ *
+ * A non-anchored passport returns the same `no_passport` as no passport at all.
+ * Distinguishing "pending" from "none" would leak precisely what this filter
+ * exists to withhold.
+ */
+const VERIFICATION_SELECT = `
+  SELECT a.id AS agent_id, a.status AS agent_status, a.updated_at AS standing_changed_at,
+         p.status AS passport_status, p.attestation_uid,
+         p.revocation_status, p.revocation_confirmed_at,
+         p.agent_eoa, p.smart_account, p.chain_id,
+         s.execution_rail, s.safe_address
+    FROM agent_passports p
+    JOIN agents a ON a.id = p.agent_id
+    LEFT JOIN user_safes s ON s.id = a.safe_id
+   WHERE p.status = 'anchored'`
+
+/**
+ * Resolve a passport from EITHER agent address.
+ *
+ * A merchant sees a different address depending on how the payment settled —
+ * the delegate EOA on an EIP-3009 header, the Hybrid account in erc7710
+ * redemption (#946 made that a per-payment choice) — and must be able to
+ * verify from whichever one it holds.
+ *
+ * The zero address is refused BEFORE the query. Migration 050 already prevents
+ * storing it, but the sentinel is dangerous enough to be rejected at every
+ * layer that could ever handle it: a lookup by `0x0` resolving to any passport
+ * would hand a merchant somebody else's credential.
+ */
+export const FIND_BY_AGENT_ADDRESS_SQL = `${VERIFICATION_SELECT}
+    AND (p.agent_eoa = $1 OR p.smart_account = $1)
+  LIMIT 1`
+
+export async function findByAgentAddress(
+  address: string,
+  db: Executor = pool,
+): Promise<VerificationRow | null> {
+  const normalized = normalizeAddress(address)
+  if (!normalized) return null
+  const { rows } = await db.query<VerificationRow>(FIND_BY_AGENT_ADDRESS_SQL, [normalized])
+  return rows[0] ?? null
+}
+
+export const FIND_BY_ATTESTATION_UID_SQL = `${VERIFICATION_SELECT}
+    AND p.attestation_uid = $1
+  LIMIT 1`
+
+/** Resolve a passport by its EAS attestation UID — the evidence pointer. */
+export async function findByAttestationUid(
+  attestationUid: string,
+  db: Executor = pool,
+): Promise<VerificationRow | null> {
+  const { rows } = await db.query<VerificationRow>(FIND_BY_ATTESTATION_UID_SQL, [attestationUid])
+  return rows[0] ?? null
+}
 
 // ── Revocation (#973) ───────────────────────────────────────────────
 //

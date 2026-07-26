@@ -3,12 +3,14 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/lib/passport/**
+  - packages/backend/src/infra/repositories/agent-passports.ts
+  - packages/backend/src/routes/agent-passports.ts
+  - packages/backend/src/routes/passport-verify.ts
   - packages/backend/scripts/register-passport-schema.ts
   - packages/backend/src/db/migrations/048_agent_passports.ts
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
-  - packages/backend/src/infra/repositories/agent-passports.ts
-  - packages/backend/src/routes/agent-passports.ts
+  - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
 last-verified: "2026-07-26"
 ---
 
@@ -228,6 +230,162 @@ not which plan.
   concurrent attempts would burn gas and then fail on every backoff cycle
   forever instead of converging.
 
+## Verifying a passport (merchant-facing)
+
+Two public, unauthenticated endpoints. The caller is a merchant deciding
+whether to serve an agent; it has no Haven account and cannot be asked to get
+one.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /passport/issuer` | The address to pin, the payload version, and the receipt TTL |
+| `GET /passport/verify?address=0x…` or `?uid=0x…` | A **signed receipt**, or `{ found: false, reason: "no_passport" }` |
+
+Resolution works from **either** agent address — the delegate EOA a merchant
+sees on an EIP-3009 header, or the Hybrid account it sees as the delegator in
+erc7710 redemption. #971 binds both precisely because #946 made settlement a
+per-payment choice, so a merchant can verify from whichever address it holds.
+
+An agent with **no passport is a normal 200 answer**, not a 404. Issuance is
+opt-in, so most agents have none — and an error status is what makes an
+integration treat a lookup failure as a pass.
+
+### The verifier speaks only about passports already public on-chain
+
+Owner decision 2026-07-26. Lookups resolve **anchored passports only**. A
+pending or failed passport returns the same `{ found: false, reason:
+"no_passport" }` as an agent with none — reporting "pending" separately would
+disclose exactly what this withholds, that the address belongs to a Haven
+customer.
+
+The line that gives: everything the endpoint reveals about an agent's
+**existence** is already readable from the EAS attestation by anyone. Live
+`standing` deliberately goes *further* than the chain — that is the product, and
+the whole point of the revocation model above — but it now does so only for
+agents whose attestation is already published.
+
+The filter is written into the query explicitly rather than left to emerge.
+`markAnchored` happens to write `agent_eoa`, `smart_account` and
+`attestation_uid` in the same statement that sets `status = 'anchored'`, so a
+pending row has NULLs in every lookup column and could not be found anyway —
+but that is an accident of write ordering. The day someone records those
+addresses at request time, an unauthenticated endpoint would quietly start
+confirming Haven customers before anything about them is public. Four tests
+assert the filter against rows whose lookup columns are populated, so they fail
+if the clause is removed.
+
+### Why a signed receipt and not a boolean
+
+A bare `{ ok: true }` forces a live call to Haven for every merchant decision:
+an availability coupling (Haven down means merchants cannot gate) and a privacy
+one (Haven sees every merchant's traffic). The response is instead a
+self-contained artifact whose authenticity a merchant checks **offline**:
+
+```ts
+import { verifyMessage } from 'ethers' // or viem's verifyMessage
+
+// Sort keys at EVERY depth — see the warning below before "simplifying" this.
+const canon = (v) =>
+  Array.isArray(v) ? v.map(canon)
+  : v && typeof v === 'object'
+    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])]))
+    : v
+
+const { receipt, signature } = await fetch(`${HAVEN}/passport/verify?address=${agent}`).then((r) => r.json())
+const ok = verifyMessage(JSON.stringify(canon(receipt)), signature).toLowerCase() === PINNED_ISSUER.toLowerCase()
+if (!ok || receipt.standing !== 'active' || receipt.expiresAt < Date.now() / 1000) return deny()
+```
+
+Pin `PINNED_ISSUER` once from `GET /passport/issuer`. Do **not** take it from
+the receipt's own `issuer` field — authenticating an artifact against a value it
+carries is circular.
+
+Key ordering does not matter: the signature is over a canonical serialization
+(**every** key sorted, at every depth, no whitespace), so a merchant that parses
+and re-serializes still verifies. That is deliberate — a digest that depended on
+our wire ordering would make every such merchant conclude Haven was forging
+receipts.
+
+> **⚠️ Do NOT replace `canon` with `JSON.stringify(receipt, Object.keys(receipt).sort())`.**
+> It looks like the same thing and is not: the array form of the replacer is a
+> recursive property *allow-list*, so nested objects have their keys filtered
+> against the top-level names. `controls` collapses to `{}` and drops out of the
+> digest entirely — meaning `policyEnforcedOnchain`, the field the receipt is
+> *about*, would verify as authentic no matter what it said. This was Haven's
+> own first implementation and this snippet's first version; the check below
+> passed happily against a forged control summary. If you shipped that version,
+> re-verify anything you accepted with it.
+
+`version` is part of the signed payload, so a receipt is only ever interpreted
+under the rules it was minted with. It is at `haven-passport-receipt/2`; `/1`
+was never released.
+
+### Freshness, and the gap caching would otherwise reopen
+
+A cacheable receipt is **by definition potentially stale on replay**: the agent
+can be revoked a second after it was issued. Unbounded, that reintroduces
+exactly the "anchor says authorized, issuer says revoked" gap above — only with
+the merchant's cache playing the part of the lagging chain. Three things bound
+it, and all three are in the artifact rather than in advice:
+
+- **`expiresAt`, five minutes, and signed** — so a merchant cannot extend it and
+  an expired receipt is objectively expired rather than a matter of local policy.
+  The value is a deliberate choice: shorter and caching buys nothing over
+  calling us; much longer and a revocation could go unnoticed for most of a
+  payment session.
+- **`standingEpoch`, monotonic** — two receipts for the same agent are strictly
+  comparable, so a merchant can tell a newer one from an older one. `issuedAt`
+  alone cannot do this: clocks skew.
+- **Re-verify before anything irreversible.** Cached receipts are for routine
+  gating and rate-limiting. The endpoint always answers from current state;
+  caching is the merchant's choice, never ours.
+
+A verification failure reports **`not_signed_by_issuer`** rather than
+distinguishing "tampered" from "signed by someone else". Those are
+cryptographically indistinguishable — recovery yields *some* address for any
+payload — and an API that claimed to tell them apart would be asserting
+something it cannot know. `expired` stays separate because it is the one
+distinction that changes what a merchant should do: re-fetch, rather than treat
+as an attack.
+
+### Rate limiting is per SUBJECT, not per caller
+
+The endpoint is unauthenticated and there is no `trustProxy`, so `request.ip`
+collapses to the proxy address for all external traffic — a per-caller limit
+would be one global bucket, and a single client sending 121 requests a minute
+could 429 passport verification for **every merchant at once**. Raising the
+ceiling makes the shared bucket bigger, not safer.
+
+So the limiter keys on the **queried address or UID** (120/min each). Merchants
+verifying different agents mostly do not collide, and an abusive caller mostly
+exhausts only the bucket for the agent it is hammering. *Mostly*, precisely: the
+key generator runs before the handler validates input, and the default store is
+a 5000-entry LRU, so flooding more than that many junk subjects inside a window
+can evict a real subject's counter and reset its ceiling. A large improvement on
+one global bucket, not an absolute guarantee. That is also the right shape for
+the real threat — hammering or enumerating a specific subject — rather than for
+"who is calling", which behind an untrusted proxy is unknowable. Making
+per-caller limits real needs `trustProxy`, which changes `request.ip` for every
+rate-limited route including the money path; that is a separate decision.
+
+### Minimal disclosure
+
+The endpoint is unauthenticated, so the response shape *is* the protection. It
+carries standing, assurance level, the bound addresses (already public
+on-chain), and a boolean control summary — `rail`, `policyEnforcedOnchain`,
+`treasuryBound`. It carries **no** owner identity, budget amounts, balances,
+counterparties, or treasury address. A merchant needs to know an agent is
+governed, not how much its owner lets it spend.
+
+### Perimeter
+
+This answers a question about an **agent's governance status**. It verifies no
+payment, settles nothing, holds nothing, and takes no fee — none of the
+merchant-acquiring surface [`casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
+puts out of scope. Do not grow it into payment verification or receipts for
+settled merchant transactions; that is a different question with a different
+perimeter.
+
 ## Registration and configuration
 
 Registration is an **operator step** — an on-chain transaction needing a funded
@@ -258,6 +416,13 @@ verification run — never by copying the block.
 `PASSPORT_SCHEMA_REGISTRAR_KEY` is a throwaway testnet key for that one-off
 registration. **Never reuse `RELAYER_PRIVATE_KEY`**: registration is public and
 permissionless and has no business borrowing a key that moves value.
+
+`PASSPORT_RECEIPT_SIGNING_KEY` signs the verification receipts above and follows
+the same rule for the same reason — its address is *published* for merchants to
+pin, so it signs public assertions and must be dedicated. It is a **message
+signer only**: no provider, no transaction, and a non-custody invariant test
+enforces that rather than trusting the convention. Unset means verification is
+off and both endpoints return 503 rather than serving an unsigned receipt.
 
 ## Related
 

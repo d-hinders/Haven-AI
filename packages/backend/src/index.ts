@@ -27,10 +27,12 @@ import {
   anchorOnChain,
   setRevoker,
   revokeOnChain,
+  setReceiptSigningKey,
   retryPendingPassports,
   reconcilePendingRevocations,
   listStuckRevocations,
 } from './lib/passport/index.js'
+import passportVerifyRoutes from './routes/passport-verify.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
@@ -175,6 +177,17 @@ app.get('/chains', async () => {
 // (#972 / #973). Both are governance metadata: EAS-only targets, zero value.
 setAnchor(anchorOnChain)
 setRevoker(revokeOnChain)
+// Receipts the merchant-facing verifier hands out (#974) are signed with a
+// DEDICATED key, never the relayer's: the relayer pays gas for user-authorised
+// transactions, while this one signs public assertions and its address is
+// published for pinning. Unset means verification is off, and the endpoint
+// fails closed rather than serving an unsigned receipt.
+// Refuses at boot if it IS the relayer key — the static invariant test reads
+// source, so only a runtime check can catch that operator copy-paste.
+setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null, [
+  config.relayerPrivateKey,
+  ...SUPPORTED_CHAIN_IDS.map((id) => process.env[`RELAYER_PRIVATE_KEY_${id}`]),
+])
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })
@@ -187,6 +200,10 @@ await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentPassportRoutes, { prefix: '/agents' })
+// Public and unauthenticated (#974): the caller is a merchant deciding whether
+// to serve an agent, and it has no Haven account. Registered separately from
+// the dashboard-authed passport routes so the auth hook cannot be assumed.
+await app.register(passportVerifyRoutes, { prefix: '/passport' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })

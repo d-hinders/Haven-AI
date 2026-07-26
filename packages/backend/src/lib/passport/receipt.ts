@@ -158,10 +158,30 @@ export function canonicalize(receipt: PassportReceipt): string {
   return JSON.stringify(sortDeep(receipt))
 }
 
-/** Rebuild `value` with every object's keys in sorted order, recursively. */
+/**
+ * Rebuild `value` with every object's keys in sorted order, recursively.
+ *
+ * Refuses anything that is not a plain object, array, or JSON primitive. That
+ * guard is the same lesson as the bug above, applied forward: a `Date` (or a
+ * `Map`, or a class instance) is `typeof 'object'` with NO own enumerable keys,
+ * so it would serialize as `{}` and drop out of the signature silently —
+ * exactly how `controls` became forgeable. No receipt field is a `Date` today;
+ * this makes the day someone adds one a loud failure rather than a quiet hole.
+ *
+ * `Array.prototype.sort()` with no comparator is UTF-16 code-unit ordering,
+ * which the spec fixes — not locale-sensitive, so the bytes are reproducible in
+ * any language a merchant verifies from.
+ */
 function sortDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortDeep)
   if (value === null || typeof value !== 'object') return value
+  const proto = Object.getPrototypeOf(value)
+  if (proto !== Object.prototype && proto !== null) {
+    throw new Error(
+      `passport receipt: cannot canonicalize a ${value.constructor?.name ?? 'non-plain'} value — ` +
+        'it would serialize as {} and be excluded from the signature. Use a primitive.',
+    )
+  }
   const source = value as Record<string, unknown>
   const out: Record<string, unknown> = {}
   for (const key of Object.keys(source).sort()) out[key] = sortDeep(source[key])
@@ -193,13 +213,26 @@ export function setReceiptSigningKey(
   // any later re-configuration, where "the new key was refused" must not mean
   // "the old one silently kept signing".
   signerKey = null
-  if (key && forbiddenKeys.some((k) => k && k.trim() === key)) {
+  if (key && forbiddenKeys.some((k) => k && sameKey(k, key))) {
     throw new Error(
       'PASSPORT_RECEIPT_SIGNING_KEY must not be the relayer key: its address is published ' +
         'for merchants to pin, and the relayer pays gas for user-authorised transactions.',
     )
   }
   signerKey = key
+}
+
+/**
+ * Do two env values denote the SAME private key?
+ *
+ * Compared on the key's VALUE, not its text. The threat is an operator pasting
+ * one key into two variables, and a paste routinely differs in casing or the
+ * `0x` prefix while being cryptographically identical — a text comparison would
+ * wave exactly the mistake it exists to catch straight through.
+ */
+function sameKey(a: string, b: string): boolean {
+  const normalize = (k: string) => k.trim().toLowerCase().replace(/^0x/, '')
+  return normalize(a) === normalize(b)
 }
 
 export function isReceiptSigningConfigured(): boolean {

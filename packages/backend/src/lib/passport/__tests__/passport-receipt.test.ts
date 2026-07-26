@@ -123,6 +123,23 @@ describe('offline verification — the whole point of a signed receipt', () => {
     expect(verifyReceipt({ ...signed, receipt: reordered }, SIGNER.address).valid).toBe(true)
   })
 
+  it('REFUSES a value that would silently vanish from the signature', () => {
+    // The same lesson as the controls bug, applied forward. A Date is
+    // `typeof 'object'` with no own enumerable keys, so it serializes as {} and
+    // drops out of the digest — exactly how policyEnforcedOnchain became
+    // forgeable. No field is a Date today; this makes the day someone adds one
+    // a loud failure instead of a quiet hole.
+    const withDate = { ...receipt(), issuedAt: new Date() as unknown as number }
+    expect(() => canonicalize(withDate)).toThrow(/cannot canonicalize/)
+  })
+
+  it('still canonicalizes plain nested objects and arrays', () => {
+    // The guard must not have banned the shapes a receipt legitimately uses.
+    const ok = { ...receipt(), controls: { rail: 'delegation', policyEnforcedOnchain: true, treasuryBound: true } }
+    expect(() => canonicalize(ok)).not.toThrow()
+    expect(canonicalize({ ...ok, agentEoa: null } as never)).toContain('"agentEoa":null')
+  })
+
   it('the canonical string actually CONTAINS the control fields', async () => {
     // Belt and braces: the tamper test above would also pass if `controls` were
     // dropped from BOTH sides. Assert the bytes really carry them.
@@ -224,11 +241,17 @@ describe('fail-closed when signing is unconfigured', () => {
     expect(isReceiptSigningConfigured()).toBe(false)
   })
 
-  it('ignores surrounding whitespace when comparing against the relayer key', async () => {
-    // A trailing newline from a copy-pasted secret must not defeat the check.
-    expect(() => setReceiptSigningKey(` ${OTHER.privateKey} `, [`${OTHER.privateKey}\n`])).toThrow(
-      /must not be the relayer key/,
-    )
+  it('compares the KEY, not its text — case and 0x prefix cannot smuggle it past', async () => {
+    // The threat is an operator pasting one key into two env vars, and a paste
+    // routinely differs in casing or the 0x prefix while being cryptographically
+    // identical. A text comparison would wave through exactly the mistake the
+    // check exists to catch.
+    const bare = OTHER.privateKey.replace(/^0x/, '')
+    for (const variant of [` ${OTHER.privateKey} `, OTHER.privateKey.toUpperCase().replace('0X', '0x'), bare]) {
+      expect(() => setReceiptSigningKey(variant, [`${OTHER.privateKey}\n`]), variant).toThrow(
+        /must not be the relayer key/,
+      )
+    }
   })
 
   it('accepts a distinct key alongside a configured relayer key', () => {

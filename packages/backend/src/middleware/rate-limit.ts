@@ -79,11 +79,20 @@ export const demoRateLimit = {
  * the shared bucket bigger.
  *
  * Keying on the queried address or UID fixes the blast radius rather than the
- * size. Merchants verifying different agents never collide, and an abusive
- * caller can only exhaust the bucket for the one agent it is hammering. That
- * also happens to be the right shape for the actual threat here — enumerating
- * or hammering a specific subject — rather than for "who is calling", which
- * behind an untrusted proxy we cannot know anyway.
+ * size. Merchants verifying different agents mostly do not collide, and an
+ * abusive caller mostly exhausts only the bucket for the agent it is hammering.
+ * That is also the right shape for the actual threat here — enumerating or
+ * hammering a specific subject — rather than for "who is calling", which behind
+ * an untrusted proxy we cannot know anyway.
+ *
+ * "Mostly", precisely: the key generator runs as an `onRequest` hook, BEFORE the
+ * handler validates the address, so it buckets raw query text. @fastify/rate-limit's
+ * default store is an LRU capped at 5000 entries, so this is not unbounded
+ * memory growth — but a caller flooding >5000 distinct junk subjects inside a
+ * window can EVICT a specific legitimate subject's counter and reset its
+ * ceiling. So the isolation is a large improvement on one global bucket, not an
+ * absolute guarantee. Making it absolute means a shared store with real keys,
+ * which needs `trustProxy` first.
  *
  * 120/min per subject is generous on purpose: receipts carry a 5-minute signed
  * TTL and are explicitly cacheable, so a correctly integrated merchant needs

@@ -27,6 +27,8 @@ import { getPool } from '../src/db.js'
 import { runMigrations } from '../src/db/migrate.js'
 import {
   CLAIM_REVOCATION_SQL,
+  FIND_BY_AGENT_ADDRESS_SQL,
+  FIND_BY_ATTESTATION_UID_SQL,
   LIST_REVOCATIONS_DUE_SQL,
   LIST_STUCK_REVOCATIONS_SQL,
 } from '../src/infra/repositories/agent-passports.js'
@@ -176,19 +178,15 @@ const QUERIES: SmokeQuery[] = [
   {
     // The merchant-facing lookup. A schema mismatch here means verification
     // returns "no passport" for a real agent — which a merchant reads as
-    // "unknown agent" and may act on.
+    // "unknown agent" and may act on. IMPORTED, not pasted: this was the last
+    // hand-copied query in the passport set, and it had already been hand-edited
+    // once to track the anchored-only narrowing.
     name: 'passport: verifier resolves EITHER agent address (#974)',
-    sql: `SELECT a.id AS agent_id, a.status AS agent_status, a.updated_at AS standing_changed_at,
-                 p.status AS passport_status, p.attestation_uid,
-                 p.revocation_status, p.revocation_confirmed_at,
-                 p.agent_eoa, p.smart_account, p.chain_id,
-                 s.execution_rail, s.safe_address
-            FROM agent_passports p
-            JOIN agents a ON a.id = p.agent_id
-            LEFT JOIN user_safes s ON s.id = a.safe_id
-           WHERE p.status = 'anchored'
-             AND (p.agent_eoa = $1 OR p.smart_account = $1)
-           LIMIT 1`,
+    sql: FIND_BY_AGENT_ADDRESS_SQL,
+  },
+  {
+    name: 'passport: verifier resolves by attestation UID (#974)',
+    sql: FIND_BY_ATTESTATION_UID_SQL,
   },
   {
     name: 'passport: markAnchored records the attested addresses (#974)',

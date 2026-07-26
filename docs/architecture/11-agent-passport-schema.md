@@ -255,9 +255,15 @@ self-contained artifact whose authenticity a merchant checks **offline**:
 ```ts
 import { verifyMessage } from 'ethers' // or viem's verifyMessage
 
+// Sort keys at EVERY depth — see the warning below before "simplifying" this.
+const canon = (v) =>
+  Array.isArray(v) ? v.map(canon)
+  : v && typeof v === 'object'
+    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])]))
+    : v
+
 const { receipt, signature } = await fetch(`${HAVEN}/passport/verify?address=${agent}`).then((r) => r.json())
-const canonical = JSON.stringify(receipt, Object.keys(receipt).sort())
-const ok = verifyMessage(canonical, signature).toLowerCase() === PINNED_ISSUER.toLowerCase()
+const ok = verifyMessage(JSON.stringify(canon(receipt)), signature).toLowerCase() === PINNED_ISSUER.toLowerCase()
 if (!ok || receipt.standing !== 'active' || receipt.expiresAt < Date.now() / 1000) return deny()
 ```
 
@@ -271,14 +277,15 @@ and re-serializes still verifies. That is deliberate — a digest that depended 
 our wire ordering would make every such merchant conclude Haven was forging
 receipts.
 
-> **Sort recursively.** `JSON.stringify(receipt, Object.keys(receipt).sort())`
-> looks like the same thing and is not: the array form of the replacer is a
+> **⚠️ Do NOT replace `canon` with `JSON.stringify(receipt, Object.keys(receipt).sort())`.**
+> It looks like the same thing and is not: the array form of the replacer is a
 > recursive property *allow-list*, so nested objects have their keys filtered
 > against the top-level names. `controls` collapses to `{}` and drops out of the
-> signature entirely. That was the first implementation, and it meant
-> `policyEnforcedOnchain` — the field the receipt is *about* — was unsigned and
-> freely forgeable while the documented check still passed. Rebuild the object
-> and sort at every depth.
+> digest entirely — meaning `policyEnforcedOnchain`, the field the receipt is
+> *about*, would verify as authentic no matter what it said. This was Haven's
+> own first implementation and this snippet's first version; the check below
+> passed happily against a forged control summary. If you shipped that version,
+> re-verify anything you accepted with it.
 
 `version` is part of the signed payload, so a receipt is only ever interpreted
 under the rules it was minted with. It is at `haven-passport-receipt/2`; `/1`
@@ -321,8 +328,12 @@ could 429 passport verification for **every merchant at once**. Raising the
 ceiling makes the shared bucket bigger, not safer.
 
 So the limiter keys on the **queried address or UID** (120/min each). Merchants
-verifying different agents never collide, and an abusive caller can only exhaust
-the bucket for the one agent it is hammering. That is also the right shape for
+verifying different agents mostly do not collide, and an abusive caller mostly
+exhausts only the bucket for the agent it is hammering. *Mostly*, precisely: the
+key generator runs before the handler validates input, and the default store is
+a 5000-entry LRU, so flooding more than that many junk subjects inside a window
+can evict a real subject's counter and reset its ceiling. A large improvement on
+one global bucket, not an absolute guarantee. That is also the right shape for
 the real threat — hammering or enumerating a specific subject — rather than for
 "who is calling", which behind an untrusted proxy is unknowable. Making
 per-caller limits real needs `trustProxy`, which changes `request.ip` for every

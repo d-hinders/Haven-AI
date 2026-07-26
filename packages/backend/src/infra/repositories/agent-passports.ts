@@ -326,32 +326,30 @@ const VERIFICATION_SELECT = `
  * layer that could ever handle it: a lookup by `0x0` resolving to any passport
  * would hand a merchant somebody else's credential.
  */
+export const FIND_BY_AGENT_ADDRESS_SQL = `${VERIFICATION_SELECT}
+    AND (p.agent_eoa = $1 OR p.smart_account = $1)
+  LIMIT 1`
+
 export async function findByAgentAddress(
   address: string,
   db: Executor = pool,
 ): Promise<VerificationRow | null> {
   const normalized = normalizeAddress(address)
   if (!normalized) return null
-  const { rows } = await db.query<VerificationRow>(
-    `${VERIFICATION_SELECT}
-        AND (p.agent_eoa = $1 OR p.smart_account = $1)
-      LIMIT 1`,
-    [normalized],
-  )
+  const { rows } = await db.query<VerificationRow>(FIND_BY_AGENT_ADDRESS_SQL, [normalized])
   return rows[0] ?? null
 }
+
+export const FIND_BY_ATTESTATION_UID_SQL = `${VERIFICATION_SELECT}
+    AND p.attestation_uid = $1
+  LIMIT 1`
 
 /** Resolve a passport by its EAS attestation UID — the evidence pointer. */
 export async function findByAttestationUid(
   attestationUid: string,
   db: Executor = pool,
 ): Promise<VerificationRow | null> {
-  const { rows } = await db.query<VerificationRow>(
-    `${VERIFICATION_SELECT}
-        AND p.attestation_uid = $1
-      LIMIT 1`,
-    [attestationUid],
-  )
+  const { rows } = await db.query<VerificationRow>(FIND_BY_ATTESTATION_UID_SQL, [attestationUid])
   return rows[0] ?? null
 }
 

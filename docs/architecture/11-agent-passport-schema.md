@@ -1,0 +1,136 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/lib/passport/**
+  - packages/backend/scripts/register-passport-schema.ts
+last-verified: "2026-07-26"
+---
+
+# L0 Agent Passport — EAS schema
+
+The passport is a signed, on-chain-anchored, revocable credential attesting an
+agent's **provenance, enforced controls, and live status**. This doc fixes the
+schema's field semantics and the two encodings that are easy to get wrong.
+Epic: [#970](https://github.com/d-hinders/Haven-AI/issues/970); this schema is
+[#971](https://github.com/d-hinders/Haven-AI/issues/971).
+
+## What L0 attests — and what it does not
+
+This distinction is the product, not a caveat. Blurring it is the one failure
+mode that would matter.
+
+| L0 **does** attest | L0 does **NOT** attest |
+|---|---|
+| **Issued by Haven** — this agent was provisioned by a known operator | **Who is accountable** — no legal or natural person is identified |
+| **Bound to a treasury** — the account whose funds it can spend | Anything KYC-derived |
+| **Enforced policy** — a pointer to the on-chain controls that bound it | That the agent behaves well, or that its operator is reputable |
+| **Live status** — revocable, with revocation authoritative off-chain | Regulatory compliance of any kind |
+
+Naming discipline, from the epic: say **issued / governed / revocable**.
+*Verified* is reserved for L2 (ZK-anchored KYC) and must not appear in copy,
+API fields, or docs describing L0. L0 attests **governance, not identity**.
+
+**No PII is in the schema.** Everything person-shaped stays off-chain behind
+Haven's API. Note the graph is permanently public regardless: treasury → N
+agents → issued-by-Haven is visible to anyone reading the chain, even with
+policy detail API-gated. That is a conscious trade (epic §open questions), not
+an oversight.
+
+## Fields
+
+Registered as one EAS schema, `revocable = true`, no resolver:
+
+```text
+address agentEoa,address smartAccount,address treasury,uint8 assuranceLevel,
+string policyUri,uint64 issuedAt,uint64 expiresAt
+```
+
+| Field | Meaning |
+|---|---|
+| `agentEoa` | `agents.delegate_address`. **Required.** |
+| `smartAccount` | The Hybrid delegator. **Optional** — zero address when absent. |
+| `treasury` | The account the agent spends from — the "bound to" claim. |
+| `assuranceLevel` | `uint8` ladder: `0` = L0 (issuable). `1`/`2` reserved. |
+| `policyUri` | Pointer to the enforced controls; detail resolves via Haven's API. |
+| `issuedAt` / `expiresAt` | Unix seconds. Expiry is a claim, not enforcement. |
+
+> **The schema string is immutable once registered.** Field order, names and
+> types all feed the UID; changing any of them mints a *different* schema and
+> orphans every passport already attested. A change is a new schema plus a
+> migration, never an edit.
+
+## The two encodings that bite
+
+### 1. Both addresses are bound, and either must verify
+
+Owner decision 2026-07-24. [#946](https://github.com/d-hinders/Haven-AI/issues/946)
+made settlement a **per-payment** choice, and a merchant sees a different
+address on each path:
+
+- **EIP-3009 leg** → the merchant sees the **agent EOA** as `from`.
+- **erc7710 redemption** → the merchant sees the **smart account** as delegator.
+
+Bind only one and verification breaks depending on which path the payment took.
+So the verifier ([#974](https://github.com/d-hinders/Haven-AI/issues/974)) maps
+*either* bound address to the same passport.
+
+`agentEoa` is the **required** one because it is universal — every agent has a
+delegate address, including legacy/import-only agents that have nothing else.
+The smart account is derived from it and exists only on the delegation rail.
+(This is reversed from the epic's initial suggestion; the data model decided it.)
+
+### 2. The zero address means "absent", and must never resolve
+
+EAS has no nullable field type, so an agent with no smart account is attested
+with `smartAccount = 0x0`. Two rules follow, both enforced in
+`lib/passport/binding.ts` rather than left to callers:
+
+- **A lookup by the zero address never matches.** Otherwise every EOA-only
+  agent collides on one "address", and a merchant querying a junk or zero
+  address gets handed somebody else's passport.
+- **A zero smart account decodes to `null`, never to a real value** — accepting
+  it as real would make an EOA-only agent look like a delegation-rail one.
+
+This mirrors the delegation rail's posture on the zero address
+([security model](../security/delegation-rail-security-model.md) §7).
+
+## Registration and configuration
+
+Registration is an **operator step** — an on-chain transaction needing a funded
+key, whose UID does not exist until it lands:
+
+```bash
+npm run ops:register-passport-schema -w packages/backend            # dry run: verify pins
+npm run ops:register-passport-schema -w packages/backend -- --send  # register
+```
+
+The script is **fail-closed on the pins**. The EAS addresses in
+`lib/passport/schema.ts` are the standard OP-Stack predeploys Base inherits,
+but they were pinned *without* an on-chain check (no RPC egress in the authoring
+environment). Before sending anything the script proves both contracts have
+bytecode **and** that SchemaRegistry answers `getSchema(bytes32)` — code at an
+address is not proof it is the right contract. The dry run does exactly that
+verification and stops, so anyone with an RPC URL can confirm the pins with no
+key and no gas. Until it has run, treat the addresses as *proposed, not pinned*
+— the posture `delegation-contracts.ts` takes.
+
+Config is per chain and fail-closed: `AGENT_PASSPORT_SCHEMA_UID_<chainId>`.
+Unset means "not registered here" and issuance **refuses** rather than
+attesting against a schema nobody can verify. Base Sepolia (84532) is the only
+chain served; Base mainnet rides with the
+[#908](https://github.com/d-hinders/Haven-AI/issues/908) gate and its own
+verification run — never by copying the block.
+
+`PASSPORT_SCHEMA_REGISTRAR_KEY` is a throwaway testnet key for that one-off
+registration. **Never reuse `RELAYER_PRIVATE_KEY`**: registration is public and
+permissionless and has no business borrowing a key that moves value.
+
+## Related
+
+- [Module boundaries](10-module-boundaries.md) — `lib/passport/` is a module
+  with a public `index.ts`; import through it, never a private file.
+- [Delegation-rail security model](../security/delegation-rail-security-model.md)
+  — the custody perimeter the passport describes, and the zero-address posture.
+- [x402 payment sequence](04-x402-payment-sequence.md) — the two settlement
+  paths that force the dual address binding.

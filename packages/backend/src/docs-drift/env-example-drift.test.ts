@@ -76,7 +76,9 @@ function collectCodeFiles(root: string, opts: { includeTests: boolean }): string
 // backed by a dynamic `process.env[`RELAYER_PRIVATE_KEY_${chainId}`]` read; treat
 // any numbered variant as the base key so the family matches in both directions.
 function normalize(name: string): string {
-  return name.replace(/^RELAYER_PRIVATE_KEY_\d+$/, 'RELAYER_PRIVATE_KEY')
+  return name
+    .replace(/^RELAYER_PRIVATE_KEY_\d+$/, 'RELAYER_PRIVATE_KEY')
+    .replace(/^AGENT_PASSPORT_SCHEMA_UID_\d+$/, 'AGENT_PASSPORT_SCHEMA_UID')
 }
 
 const READ_PATTERNS: RegExp[] = [
@@ -129,7 +131,17 @@ const READ_BUT_UNDOCUMENTED: Array<{ name: string; because: string }> = [
 
 // Documented in `.env.example` but read only outside code the scan sees (or
 // injected by the platform), so the "read somewhere" check would miss them.
-const DOCUMENTED_BUT_UNREAD: Array<{ name: string; because: string }> = []
+const DOCUMENTED_BUT_UNREAD: Array<{ name: string; because: string }> = [
+  {
+    name: 'AGENT_PASSPORT_SCHEMA_UID',
+    because:
+      'Read per-chain via a template literal in lib/passport/schema.ts ' +
+      '(`AGENT_PASSPORT_SCHEMA_UID_${chainId}`), which the literal-key scanner ' +
+      'above cannot see. `normalize()` collapses the numbered family onto this ' +
+      'base name, so one entry covers every chain rather than one per chain. ' +
+      'Delete this when the key is read by a literal name (#971, epic #970).',
+  },
+]
 
 const allowedUndocumented = new Set(READ_BUT_UNDOCUMENTED.map((e) => e.name))
 const allowedUnread = new Set(DOCUMENTED_BUT_UNREAD.map((e) => e.name))

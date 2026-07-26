@@ -22,7 +22,15 @@ import agentRoutes from './routes/agents.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
 import agentPassportRoutes from './routes/agent-passports.js'
-import { setAnchor, anchorOnChain, setRevoker, revokeOnChain } from './lib/passport/index.js'
+import {
+  setAnchor,
+  anchorOnChain,
+  setRevoker,
+  revokeOnChain,
+  retryPendingPassports,
+  reconcilePendingRevocations,
+  listStuckRevocations,
+} from './lib/passport/index.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
@@ -209,6 +217,13 @@ await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
 // --- Start ---
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
 const DELEGATE_MONITOR_INTERVAL_MS = 60 * 60 * 1000 // hourly (#714)
+// Every 5 minutes, not hourly: this sweep carries revocation reconciliation,
+// and the backoff schedule it drives starts at 30s. An hourly tick would flatten
+// that to an hour, leaving a revoked agent's attestation live on-chain far
+// longer than the retry policy intends (#973).
+const PASSPORT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+/** A revoke still unreconciled after this long is an incident, not a retry. */
+const PASSPORT_STUCK_REVOKE_SECONDS = 60 * 60
 
 const start = async () => {
   try {
@@ -285,6 +300,41 @@ const start = async () => {
     }
     void runRelayerMonitor()
     setInterval(runRelayerMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
+
+    // L0 passport anchor sweep (#972 / #973). Both halves of issuance are
+    // fire-and-forget by design — an EAS write must never block agent creation
+    // or an owner's revoke — which only holds because something later retries
+    // what the in-request attempt dropped. This is that something; without it
+    // "best-effort + retryable" is just "best-effort".
+    //
+    // The revocation half is the one that matters for safety: an agent revoked
+    // in Haven's DB whose attestation is still live on-chain is precisely the
+    // divergence #973 exists to close, and a merchant checking only the chain
+    // would still see it as valid. So a revoke that stays unreconciled past
+    // the alarm threshold is logged as an operational incident rather than
+    // retried silently forever.
+    const runPassportSweep = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.passportSweep, async () => {
+          const issuance = await retryPendingPassports()
+          const revocations = await reconcilePendingRevocations()
+          if (issuance.attempted || revocations.attempted) {
+            app.log.info({ ...issuance, revocations: revocations.attempted }, 'Passport sweep complete')
+          }
+          const stuck = await listStuckRevocations(PASSPORT_STUCK_REVOKE_SECONDS)
+          if (stuck.length > 0) {
+            app.log.warn(
+              { count: stuck.length, agents: stuck.slice(0, 10) },
+              'Passport revocations unreconciled past threshold — agents revoked in Haven still hold a live attestation on-chain',
+            )
+          }
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Passport sweep failed')
+      }
+    }
+    void runPassportSweep()
+    setInterval(runPassportSweep, PASSPORT_SWEEP_INTERVAL_MS).unref()
   } catch (err) {
     app.log.error(err)
     process.exit(1)

@@ -28,8 +28,20 @@ import * as repo from '../../infra/repositories/agent-passports.js'
 import { redactVendorSecrets } from '../execution-rail.js'
 import { getEasDeployment, isPassportConfigured } from './schema.js'
 
-/** How the caller should treat this agent, right now. */
-export type Standing = 'active' | 'revoked' | 'unknown'
+/**
+ * How the caller should treat this agent, right now.
+ *
+ * `suspended` covers every non-active, non-revoked agent status (`paused`
+ * today, plus anything a later migration adds). It is deliberately NOT folded
+ * into `active`: a paused agent must not transact, and defaulting an
+ * unrecognised status to `active` would mean any future status silently
+ * became a permission. Only the literal string `'active'` reads as active.
+ *
+ * Unlike `revoked`, `suspended` is reversible and does NOT revoke the anchor —
+ * un-pausing must not require re-issuing a passport, and an EAS revoke is
+ * one-way.
+ */
+export type Standing = 'active' | 'suspended' | 'revoked' | 'unknown'
 
 /** Progress of the on-chain anchor. Never the authority. */
 export type AnchorState = 'not_anchored' | 'anchored' | 'revocation_pending' | 'revoked_onchain'
@@ -70,7 +82,17 @@ export async function passportStanding(agentId: string): Promise<PassportStandin
 
   // The DB decides. Note this reads `agents.status`, NOT any passport column:
   // an agent revoked before its passport ever anchored is still revoked.
-  const standing: Standing = row.agent_status === 'revoked' ? 'revoked' : 'active'
+  //
+  // Allow-list, not deny-list: ONLY 'active' reads as active. A deny-list
+  // (`!== 'revoked' ? 'active' : ...`) makes every present and future status a
+  // permission by default — it already read `paused` as active, and the next
+  // status added would inherit the same bug silently.
+  const standing: Standing =
+    row.agent_status === 'revoked'
+      ? 'revoked'
+      : row.agent_status === 'active'
+        ? 'active'
+        : 'suspended'
 
   let anchor: AnchorState = 'not_anchored'
   if (row.passport_status === 'anchored') {
@@ -121,15 +143,26 @@ export function revokePassportBestEffort(agentId: string): void {
 /**
  * Push the on-chain anchor one step toward agreeing with the DB.
  *
- * Safe to call repeatedly — that is the retry mechanism. Returns the resulting
- * anchor state so a sweep can report progress.
+ * Safe to call repeatedly — that is the retry mechanism, and it is also safe
+ * to call for an agent that is NOT revoked: `claimRevocation` checks the
+ * invariant (`agents.status = 'revoked'`) as part of the same atomic UPDATE,
+ * so this cannot revoke a live agent's anchor no matter who calls it.
+ *
+ * Returns the resulting anchor state so a sweep can report progress.
  */
 export async function reconcileRevocation(agentId: string): Promise<AnchorState> {
   const row = await repo.findByAgent(agentId)
   if (!row) return 'not_anchored'
   if (row.status !== 'anchored' || !row.attestation_uid) return 'not_anchored'
   if (row.revocation_status === 'confirmed') return 'revoked_onchain'
-  if (row.revocation_status !== 'pending') return 'anchored'
+
+  // The single gate: invariant + lease, atomically. A loser submits NOTHING —
+  // EAS reverts a second revoke with `AlreadyRevoked`, so two concurrent
+  // attempts would burn gas and then fail on every backoff cycle forever
+  // instead of converging.
+  if (!(await repo.claimRevocation(agentId))) {
+    return row.revocation_status === 'pending' ? 'revocation_pending' : 'anchored'
+  }
 
   if (!isPassportConfigured(row.chain_id) || !revokerImpl) {
     await repo.scheduleRevocationRetry(

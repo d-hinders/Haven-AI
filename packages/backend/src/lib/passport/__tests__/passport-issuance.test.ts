@@ -29,6 +29,9 @@ function mockDb(opts: {
   agent?: Record<string, unknown> | null
   onUpdate?: (sql: string, params: unknown[]) => void
   retryRows?: Array<{ agent_id: string; user_id: string }>
+  /** Whether `agents.status = 'revoked'` — the invariant claimRevocation checks. */
+  agentRevoked?: boolean
+  onRevocationClaim?: (won: boolean) => void
 }) {
   let passport = opts.passport === undefined ? null : opts.passport
   pool.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
@@ -49,6 +52,14 @@ function mockDb(opts: {
       passport.anchoring_started_at = new Date()
       passport.attempts = (passport.attempts as number) + 1
       return { rows: [], rowCount: 1 }
+    }
+    if (/UPDATE agent_passports p/.test(sql) && /FROM agents a/.test(sql)) {
+      // claimRevocation. Its WHERE requires `a.status = 'revoked'`, so for a
+      // live agent it claims nothing — which is what makes it safe to fire
+      // unconditionally after anchoring. `agentRevoked` flips that.
+      const ok = !!opts.agentRevoked && !!passport && passport.status === 'anchored'
+      opts.onRevocationClaim?.(ok)
+      return { rows: [], rowCount: ok ? 1 : 0 }
     }
     if (/UPDATE agent_passports/.test(sql)) {
       opts.onUpdate?.(sql, params)
@@ -163,6 +174,38 @@ describe('anchoring', () => {
     expect(row?.status).toBe('anchored')
     expect(row?.attestation_uid).toBe(UID)
     expect(row?.tx_hash).toBe('0xfeed')
+  })
+
+  it('REVOKES an attestation that lands after the agent was revoked (the anchor race)', async () => {
+    // The window that made this necessary: anchoring takes seconds, and the
+    // owner can revoke during them. The revoke hook's enqueue requires an
+    // ALREADY-anchored passport, so it was a no-op — and the attestation that
+    // landed a moment later stayed LIVE on-chain for a revoked agent.
+    let claimed: boolean | null = null
+    mockDb({
+      passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
+      agentRevoked: true,
+      onRevocationClaim: (won) => { claimed = won },
+    })
+    setAnchor(async () => ({ attestationUid: UID, txHash: '0xfeed' }))
+    await issuePassport(AGENT, USER)
+    await new Promise((r) => setTimeout(r, 0)) // the hook is fire-and-forget
+    expect(claimed).toBe(true)
+  })
+
+  it('does NOT touch revocation for a live agent — the hook is invariant-gated', async () => {
+    // The same unconditional call, for the normal case. It must claim nothing:
+    // the guard lives in claimRevocation's WHERE, not in the caller.
+    let claimed: boolean | null = null
+    mockDb({
+      passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
+      agentRevoked: false,
+      onRevocationClaim: (won) => { claimed = won },
+    })
+    setAnchor(async () => ({ attestationUid: UID, txHash: '0xfeed' }))
+    await issuePassport(AGENT, USER)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(claimed).toBe(false)
   })
 
   it('an already-anchored passport is a no-op — no second attestation, no re-spent gas', async () => {

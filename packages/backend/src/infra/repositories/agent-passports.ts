@@ -135,14 +135,22 @@ export async function claimForAnchoring(
   return (rowCount ?? 0) > 0
 }
 
-/** The agent's bound chain, owner-scoped. Null row = not this user's agent. */
+/**
+ * The agent's bound chain AND its status, owner-scoped. Null row = not this
+ * user's agent.
+ *
+ * `status` rides along because every caller that decides whether to ISSUE a
+ * passport needs it: minting a fresh attestation for a revoked agent is
+ * exactly the divergence #973 exists to prevent, and a separate lookup would
+ * be one a caller could forget.
+ */
 export async function findAgentChain(
   agentId: string,
   userId: string,
   db: Executor = pool,
-): Promise<{ chain_id: number | null } | null> {
-  const { rows } = await db.query<{ chain_id: number | null }>(
-    `SELECT s.chain_id
+): Promise<{ chain_id: number | null; status: string } | null> {
+  const { rows } = await db.query<{ chain_id: number | null; status: string }>(
+    `SELECT s.chain_id, a.status
        FROM agents a
        LEFT JOIN user_safes s ON s.id = a.safe_id
       WHERE a.id = $1 AND a.user_id = $2`,
@@ -275,6 +283,51 @@ export async function enqueueRevocation(agentId: string, db: Executor = pool): P
   return (rowCount ?? 0) > 0
 }
 
+/**
+ * Atomically claim the right to submit a revoke, leasing the row for
+ * `leaseSeconds`. Exactly one caller wins.
+ *
+ * This is the SINGLE gate on submitting a revoke, and it encodes the whole
+ * precondition rather than just a lock:
+ *
+ * - `a.status = 'revoked'` — the INVARIANT. Because the agent's own status is
+ *   checked here, a caller cannot submit a revoke for a live agent even by
+ *   mistake, and the anchor-completion hook can call this unconditionally.
+ * - `status = 'anchored'` and not already confirmed — there must be something
+ *   on-chain left to revoke.
+ * - the lease — without it the fire-and-forget call and the sweep can both
+ *   read 'pending' and both submit revoke(). EAS reverts on a second revoke
+ *   (`AlreadyRevoked`), so the loser burns gas and then reverts on every
+ *   backoff cycle forever, never converging.
+ *
+ * The lease reuses `revocation_next_attempt_at` rather than adding a column:
+ * pushing it into the future IS the claim, and a crashed holder is reclaimed
+ * when the lease expires. It also normalises `revocation_status` to 'pending'
+ * so an agent revoked mid-anchor (never enqueued) is adopted by the sweep.
+ */
+export async function claimRevocation(
+  agentId: string,
+  leaseSeconds = 300,
+  db: Executor = pool,
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE agent_passports p
+        SET revocation_status = 'pending',
+            revocation_requested_at = COALESCE(p.revocation_requested_at, NOW()),
+            revocation_next_attempt_at = NOW() + MAKE_INTERVAL(secs => $2),
+            updated_at = NOW()
+       FROM agents a
+      WHERE a.id = p.agent_id
+        AND p.agent_id = $1
+        AND a.status = 'revoked'
+        AND p.status = 'anchored'
+        AND p.revocation_status <> 'confirmed'
+        AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())`,
+    [agentId, leaseSeconds],
+  )
+  return (rowCount ?? 0) > 0
+}
+
 export async function markRevocationConfirmed(
   agentId: string,
   txHash: string,
@@ -314,17 +367,29 @@ export async function scheduleRevocationRetry(
   )
 }
 
-/** Revocations due for another attempt. */
+/**
+ * Revocations due for another attempt.
+ *
+ * Defined by the INVARIANT — "the agent is revoked but its anchor is not
+ * confirmed" — rather than by `revocation_status = 'pending'`. That difference
+ * is load-bearing: an agent revoked WHILE its passport was still anchoring
+ * never got enqueued (the enqueue guard requires an anchored row), so a
+ * flag-based queue would miss it forever and the attestation would stay live
+ * on-chain. Keying off the invariant makes that case self-healing.
+ */
 export async function listRevocationsDue(
   limit: number,
   db: Executor = pool,
 ): Promise<Array<{ agent_id: string; revocation_attempts: number }>> {
   const { rows } = await db.query<{ agent_id: string; revocation_attempts: number }>(
-    `SELECT agent_id, revocation_attempts
-       FROM agent_passports
-      WHERE revocation_status = 'pending'
-        AND (revocation_next_attempt_at IS NULL OR revocation_next_attempt_at <= NOW())
-      ORDER BY revocation_requested_at ASC
+    `SELECT p.agent_id, p.revocation_attempts
+       FROM agent_passports p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE p.status = 'anchored'
+        AND a.status = 'revoked'
+        AND p.revocation_status <> 'confirmed'
+        AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())
+      ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC
       LIMIT $1`,
     [limit],
   )
@@ -334,25 +399,32 @@ export async function listRevocationsDue(
 /**
  * Revocations unreconciled past a threshold — the stuck-revoke alarm.
  *
- * A revoked agent whose on-chain flag never flipped is an operational incident,
- * not a silent state. Merchants checking only the chain would still see it as
- * valid, which is precisely the divergence #973 exists to prevent.
+ * Same invariant-based definition as the due-list, and for the same reason: a
+ * flag-based scan (`revocation_status = 'pending'`) is BLIND to an agent
+ * revoked mid-anchor, which is precisely the case most likely to strand a live
+ * attestation. The alarm must see every divergence, not only the enqueued ones.
+ *
+ * A stuck revoke is an operational incident: merchants checking only the chain
+ * still see the agent as valid.
  */
 export async function listStuckRevocations(
   olderThanSeconds: number,
   db: Executor = pool,
-): Promise<Array<{ agent_id: string; revocation_requested_at: Date; revocation_attempts: number; revocation_last_error: string | null }>> {
+): Promise<Array<{ agent_id: string; revocation_requested_at: Date | null; revocation_attempts: number; revocation_last_error: string | null }>> {
   const { rows } = await db.query<{
     agent_id: string
-    revocation_requested_at: Date
+    revocation_requested_at: Date | null
     revocation_attempts: number
     revocation_last_error: string | null
   }>(
-    `SELECT agent_id, revocation_requested_at, revocation_attempts, revocation_last_error
-       FROM agent_passports
-      WHERE revocation_status = 'pending'
-        AND revocation_requested_at < NOW() - MAKE_INTERVAL(secs => $1)
-      ORDER BY revocation_requested_at ASC`,
+    `SELECT p.agent_id, p.revocation_requested_at, p.revocation_attempts, p.revocation_last_error
+       FROM agent_passports p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE p.status = 'anchored'
+        AND a.status = 'revoked'
+        AND p.revocation_status <> 'confirmed'
+        AND COALESCE(p.revocation_requested_at, p.anchored_at) < NOW() - MAKE_INTERVAL(secs => $1)
+      ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC`,
     [olderThanSeconds],
   )
   return rows

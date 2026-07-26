@@ -117,8 +117,21 @@ up yet".
 | `standing` | Meaning |
 |---|---|
 | `active` | Authorized right now |
-| `revoked` | **Not** authorized — regardless of what the chain says |
+| `suspended` | Temporarily **not** authorized (paused). Reversible; the anchor is untouched |
+| `revoked` | **Not** authorized — regardless of what the chain says. Terminal |
 | `unknown` | No such agent. Never treat as authorized |
+
+**`active` is an allow-list of one.** Only the literal agent status `active`
+reads as authorized; every other status — `paused` today, anything a later
+migration adds — reads as `suspended`. A deny-list (*"not revoked, therefore
+active"*) would make each new status a permission by default, which is how a
+paused agent came to read as `active` in the first draft.
+
+`suspended` deliberately does **not** revoke the anchor: pausing is reversible
+and an EAS revoke is one-way, so revoking on pause would make un-pausing require
+re-issuing the passport. Issuance is likewise allowed for a paused agent and
+**refused (409) for a revoked one** — minting an attestation for an agent Haven
+has already revoked spends gas to create the very divergence described above.
 
 `anchor` reports the chain's progress for transparency: `not_anchored`,
 `anchored`, `revocation_pending`, `revoked_onchain`.
@@ -135,6 +148,33 @@ A revocation left unreconciled past a threshold is an **operational incident**,
 not a silent state — surfaced by `listStuckRevocations()` for alarming. While it
 is stuck, the verifier still answers `revoked` correctly; the exposure is only to
 merchants who ignored the rule above and checked the chain alone.
+
+### What actually drives the retries
+
+Both halves of the anchor are fire-and-forget — an EAS write must never block
+agent creation or an owner's revoke — which only holds because something later
+retries what the in-request attempt dropped. That something is the **passport
+sweep** in `index.ts`: a leader-locked tick (every 5 minutes, not hourly, so it
+does not flatten a schedule that starts at 30s) that runs
+`retryPendingPassports()`, then `reconcilePendingRevocations()`, then logs
+anything `listStuckRevocations()` returns as a warning.
+
+Two properties make that safe to run repeatedly and from more than one place:
+
+- **The queue is defined by the invariant, not a flag.** "Agent revoked, anchor
+  not confirmed" — *not* `revocation_status = 'pending'`. The difference is
+  load-bearing: revoking an agent while its passport is still anchoring enqueues
+  nothing (the enqueue guard requires an already-anchored row), so a flag-based
+  queue would miss that agent forever and leave its attestation live. Issuance
+  also re-checks on anchor completion, closing the same race immediately rather
+  than at the next tick.
+- **`claimRevocation` is the single gate**, and it checks the invariant *and*
+  takes a lease in one atomic `UPDATE`. Checking `agents.status = 'revoked'`
+  there rather than in the caller is what makes the unconditional
+  anchor-completion hook safe — no caller can revoke a live agent's anchor. The
+  lease matters because EAS reverts a second revoke with `AlreadyRevoked`: two
+  concurrent attempts would burn gas and then fail on every backoff cycle
+  forever instead of converging.
 
 ## Registration and configuration
 

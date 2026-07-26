@@ -141,6 +141,45 @@ const QUERIES: SmokeQuery[] = [
             AND (recipient_address = LOWER($3) OR recipient_address IS NULL)
           ORDER BY (recipient_address IS NULL), created_at DESC`,
   },
+  {
+    // Not a money query, but it is a SAFETY query: if it stops matching the
+    // schema, revoked agents keep a live attestation on-chain and nothing
+    // fails loudly. The unit tests mock `pg`, so this is the only place the
+    // UPDATE…FROM shape and `MAKE_INTERVAL(secs => $n)` meet a real planner.
+    name: 'passport: claimRevocation — invariant + lease, atomically (#973)',
+    sql: `UPDATE agent_passports p
+             SET revocation_status = 'pending',
+                 revocation_requested_at = COALESCE(p.revocation_requested_at, NOW()),
+                 revocation_next_attempt_at = NOW() + MAKE_INTERVAL(secs => $2),
+                 updated_at = NOW()
+            FROM agents a
+           WHERE a.id = p.agent_id
+             AND p.agent_id = $1
+             AND a.status = 'revoked'
+             AND p.status = 'anchored'
+             AND p.revocation_status <> 'confirmed'
+             AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())`,
+  },
+  {
+    name: 'passport: listStuckRevocations — the stuck-revoke alarm (#973)',
+    sql: `SELECT p.agent_id, p.revocation_requested_at, p.revocation_attempts, p.revocation_last_error
+            FROM agent_passports p
+            JOIN agents a ON a.id = p.agent_id
+           WHERE p.status = 'anchored'
+             AND a.status = 'revoked'
+             AND p.revocation_status <> 'confirmed'
+             AND COALESCE(p.revocation_requested_at, p.anchored_at) < NOW() - MAKE_INTERVAL(secs => $1)
+           ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC`,
+  },
+  {
+    name: 'passport: claimForAnchoring — the double-attest guard (#972)',
+    sql: `UPDATE agent_passports
+             SET anchoring_started_at = NOW(), attempts = attempts + 1, updated_at = NOW()
+           WHERE agent_id = $1
+             AND status <> 'anchored'
+             AND (anchoring_started_at IS NULL
+                  OR anchoring_started_at < NOW() - MAKE_INTERVAL(secs => $2))`,
+  },
 ]
 
 async function main(): Promise<void> {

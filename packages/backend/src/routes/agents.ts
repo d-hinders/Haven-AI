@@ -471,7 +471,13 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       // step: enqueued and fired best-effort so a slow or failing EAS revoke can
       // never delay or fail the user's revoke. It retries until the two agree.
       try {
-        if (await enqueuePassportRevocation(id)) revokePassportBestEffort(id)
+        await enqueuePassportRevocation(id)
+        // Fired unconditionally, not gated on the enqueue's return. The enqueue
+        // is a no-op while a passport is still anchoring, and gating on it meant
+        // the attempt depended on a value read a moment earlier. `claimRevocation`
+        // re-checks the invariant atomically, so this is a no-op when there is
+        // nothing to revoke and correct when there is.
+        revokePassportBestEffort(id)
       } catch (err) {
         request.log.warn({ err, agentId: id }, 'passport revocation enqueue failed; agent revoked')
       }

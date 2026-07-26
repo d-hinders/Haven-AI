@@ -3,14 +3,14 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/lib/passport/**
+  - packages/backend/src/infra/repositories/agent-passports.ts
   - packages/backend/src/routes/agent-passports.ts
   - packages/backend/src/routes/passport-verify.ts
   - packages/backend/scripts/register-passport-schema.ts
   - packages/backend/src/db/migrations/048_agent_passports.ts
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
-  - packages/backend/src/infra/repositories/agent-passports.ts
-  - packages/backend/src/routes/agent-passports.ts
+  - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
 last-verified: "2026-07-26"
 ---
 

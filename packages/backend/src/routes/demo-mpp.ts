@@ -3,7 +3,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { getExplorerUrl } from '../lib/chains.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import { demoRateLimit } from '../middleware/rate-limit.js'
 
 const RAIL = 'mpp_demo'

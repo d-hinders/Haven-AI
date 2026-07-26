@@ -153,6 +153,26 @@ test('the scan exclude is DERIVED from the config, so the two cannot drift', () 
   }
 })
 
+test('the core-stays-pure matcher covers every banned dependency', () => {
+  // core is imported by a Node server AND a browser bundle, so this rule is the
+  // pure end of the stable-dependency rule. Same failure mode as the chain-SDK
+  // rule: it matches RESOLVED npm paths, so assert it against realistic ones.
+  const rule = ruleSet.forbidden.find((r) => r.name === 'core-stays-pure')
+  const re = new RegExp(rule.to.path)
+  for (const resolved of [
+    'node_modules/fastify/fastify.js',
+    'node_modules/pg/lib/index.js',
+    'node_modules/ethers/lib.commonjs/index.js',
+    'node_modules/viem/_cjs/index.js',
+    'node_modules/permissionless/index.js',
+    'node_modules/@metamask/smart-accounts-kit/dist/index.js',
+  ]) {
+    assert.ok(re.test(resolved), `core must not be allowed to import ${resolved}`)
+  }
+  assert.equal(new RegExp(rule.from.path).test('packages/core/src/address.ts'), true)
+  assert.equal(new RegExp(rule.from.path).test('packages/backend/src/lib/relayer.ts'), false)
+})
+
 test('every forbidden rule has a name and an actionable comment', () => {
   for (const rule of ruleSet.forbidden) {
     assert.ok(rule.name, 'rule needs a name — it is the baseline key')
@@ -173,6 +193,14 @@ test('the live scan detects real violations and reports zero cycles', async () =
     'routes/x402.ts imports ethers — the chain-SDK rule must fire on it',
   )
 
+  // The shared kernel is clean. Paired with the scan-coverage test below, which
+  // proves packages/core files actually reached the cruiser — without that, this
+  // assertion would pass vacuously.
+  assert.ok(
+    details.every((d) => d.rule !== 'core-stays-pure'),
+    'core-stays-pure must have zero violations — it may never be baselined',
+  )
+
   // Rule 7 is the one to defend hardest; the tree is currently cycle-free and
   // must stay that way. This is an absolute assertion, NOT a baselined one.
   assert.equal(
@@ -180,6 +208,15 @@ test('the live scan detects real violations and reports zero cycles', async () =
     0,
     'a dependency cycle was introduced — break it rather than baselining it',
   )
+})
+
+test('the scan actually reaches packages/core (else core-stays-pure is vacuous)', async () => {
+  const { scannedFiles } = await scanAll()
+  assert.ok(
+    scannedFiles.some((f) => f.startsWith('packages/core/src/')),
+    'no packages/core file was scanned — core-stays-pure could never fire',
+  )
+  assert.ok(scannedFiles.some((f) => f.startsWith('packages/backend/src/')))
 })
 
 test('the committed baseline covers the live scan (checked-in state is green)', async () => {

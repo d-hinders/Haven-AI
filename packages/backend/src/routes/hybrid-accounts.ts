@@ -15,7 +15,7 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
 import { isValueBearingChain, signerFloorError } from '../lib/mainnet-gate.js'
 import { computeHybridAccountAddress, type PasskeySigner } from '../lib/hybrid-provisioning.js'

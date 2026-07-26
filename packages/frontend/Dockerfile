@@ -4,12 +4,16 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 
 # Install dependencies
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages/core/package.json ./packages/core/
 COPY packages/frontend/package.json ./packages/frontend/
 
-RUN npm ci --workspace=packages/frontend --include-workspace-root
+RUN npm ci --workspace=packages/frontend --workspace=packages/core --include-workspace-root
 
 # Build the Next.js app
+COPY packages/core ./packages/core
+RUN npm run build -w packages/core
+
 COPY packages/frontend ./packages/frontend
 
 ENV NEXT_TELEMETRY_DISABLED=1

@@ -4,15 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "typecheck": "tsc --noEmit",
+    "build": "npm --prefix ../core run build && next build",
+    "typecheck": "npm --prefix ../core run build && tsc --noEmit",
     "start": "next start",
     "lint": "next lint",
     "design:lint": "node scripts/design-lint.mjs",
     "design:lint:update": "node scripts/design-lint.mjs --update",
     "design:coupling": "node scripts/design-system-coupling.mjs",
     "screenshot": "node scripts/screenshot.mjs",
-    "test": "vitest run",
+    "test": "npm --prefix ../core run build && vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:visual": "VISUAL_REGRESSION=1 playwright test e2e/design-system.visual.spec.ts --project=chromium-desktop",
@@ -23,6 +23,7 @@
     "test:e2e:report": "playwright show-report ../../output/playwright/html-report"
   },
   "dependencies": {
+    "@haven_ai/core": "*",
     "@metamask/smart-accounts-kit": "^1.6.0",
     "@rainbow-me/rainbowkit": "^2.2.10",
     "@safe-global/safe-modules-deployments": "^3.0.4",

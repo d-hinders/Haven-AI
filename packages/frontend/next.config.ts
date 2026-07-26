@@ -2,6 +2,12 @@ import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // `@haven_ai/core` is a private workspace package (epic #980, #983). It ships
+  // a built `dist`, so Next can resolve it as-is — this entry exists so the
+  // dashboard keeps building if core ever exposes untranspiled source, and so
+  // core's output goes through Next's own browser-target pipeline rather than
+  // being trusted verbatim.
+  transpilePackages: ['@haven_ai/core'],
   async rewrites() {
     return [
       {

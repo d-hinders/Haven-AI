@@ -11,7 +11,7 @@ import {
   OwnerExistsError,
   OwnerNotFoundError,
 } from '../lib/safe-owner-tx.js'
-import { ETH_ADDRESS_RE } from '../lib/address.js'
+import { ETH_ADDRESS_RE } from '@haven_ai/core'
 const APPROVER_TYPES = new Set(['eoa', 'passkey'])
 
 // ── Types ─────────────────────────────────────────────────────────

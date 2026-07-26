@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Dependency-boundary lint: enforce the module-boundary rules from
-// docs/architecture/10-module-boundaries.md against packages/backend.
+// docs/architecture/10-module-boundaries.md against packages/backend and the
+// shared kernel packages/core.
 //
 // BLOCKING, ratcheting baseline (#982, epic #980): existing debt is captured in
 // packages/backend/dep-lint-baseline.json (file → rule → count); counts may only
@@ -28,7 +29,14 @@ export { newViolations, hasShrunk }
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BASELINE_PATH = join(REPO_ROOT, 'packages', 'backend', 'dep-lint-baseline.json')
-const SCAN_ROOT = join(REPO_ROOT, 'packages', 'backend', 'src')
+// Roots the gate polices. `core` is here so `core-stays-pure` can actually fire
+// — a rule whose source tree is never scanned reports zero forever (#982's
+// chain-SDK lesson). The baseline file keeps its packages/backend home; it is
+// keyed by full repo-relative path, so entries from either root coexist.
+const SCAN_ROOTS = [
+  join(REPO_ROOT, 'packages', 'backend', 'src'),
+  join(REPO_ROOT, 'packages', 'core', 'src'),
+]
 const CONFIG_PATH = join(REPO_ROOT, '.dependency-cruiser.cjs')
 
 /** The ruleset, loaded once. Also the source of the scan's exclude pattern. */
@@ -77,7 +85,7 @@ export function foldViolations(violations) {
 }
 
 /**
- * Run dependency-cruiser over the backend source tree.
+ * Run dependency-cruiser over the scanned source roots.
  *
  * The ruleset is required in directly rather than passed as `config.fileName`:
  * the programmatic API expects the resolved ruleset inline (only the CLI loads
@@ -86,7 +94,9 @@ export function foldViolations(violations) {
  * .dependency-cruiser.cjs the single source of truth for both entry points.
  */
 export async function scanAll() {
-  const files = (await walk(SCAN_ROOT)).sort()
+  const files = []
+  for (const root of SCAN_ROOTS) await walk(root, files)
+  files.sort()
   const rel = files.map((f) => relative(REPO_ROOT, f).split(sep).join('/'))
   const { output } = await cruise(rel, {
     ...ruleSet.options,
@@ -95,7 +105,9 @@ export async function scanAll() {
     validate: true,
   })
   const report = typeof output === 'string' ? JSON.parse(output) : output
-  return { ...foldViolations(report.summary.violations), fileCount: rel.length }
+  // `scannedFiles` is returned so callers can assert the scan actually reached
+  // a given root — a rule whose tree is never walked reports zero forever.
+  return { ...foldViolations(report.summary.violations), fileCount: rel.length, scannedFiles: rel }
 }
 
 async function main() {
@@ -130,7 +142,7 @@ async function main() {
   }
 
   console.log(
-    `✓ No new dependency-boundary violations across ${fileCount} backend source files ` +
+    `✓ No new dependency-boundary violations across ${fileCount} source files ` +
       `(${details.length} baselined violation(s) remain).` +
       (hasShrunk(counts, baseline)
         ? ' Debt shrank — run `npm run lint:deps:update` to tighten the ratchet.'

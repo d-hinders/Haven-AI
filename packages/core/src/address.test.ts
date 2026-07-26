@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isAddress, ETH_ADDRESS_RE } from '../address.js'
+import { isAddress, ETH_ADDRESS_RE } from './address.js'
 
 describe('isAddress', () => {
   it('accepts a 40-hex address (any casing)', () => {

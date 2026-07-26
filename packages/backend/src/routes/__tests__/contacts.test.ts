@@ -10,7 +10,7 @@ import fastifyJwt from '@fastify/jwt'
  * user (a contact owned by someone else is a 404, never a cross-user mutation);
  * addresses are validated with the shared guard before any write; and the
  * documented status codes (201 / 400 / 404 / 409) hold. The real
- * `lib/address.ts` guard is used (not mocked) so address validation is
+ * `@haven_ai/core` address guard is used (not mocked) so address validation is
  * genuinely exercised.
  */
 

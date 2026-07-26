@@ -1,5 +1,6 @@
 'use client'
 
+import { isAddress } from '@haven_ai/core'
 import { Check, ChevronLeft, ChevronRight, CircleAlert, CreditCard, FlaskConical, Link as LinkIcon, Plus, Star, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect } from 'react'
@@ -97,7 +98,7 @@ function AddSafeModal({
     e.preventDefault()
     setError('')
 
-    if (!/^0x[0-9a-fA-F]{40}$/.test(importAddress)) {
+    if (!isAddress(importAddress)) {
       setError('Invalid Ethereum address')
       return
     }

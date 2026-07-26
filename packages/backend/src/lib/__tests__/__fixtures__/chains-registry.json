@@ -1,0 +1,161 @@
+[
+  {
+    "chainId": 100,
+    "name": "Gnosis Chain",
+    "shortName": "gnosis",
+    "nativeCurrency": {
+      "name": "xDAI",
+      "symbol": "xDAI",
+      "decimals": 18
+    },
+    "rpcUrl": "<env>",
+    "explorerUrl": "https://gnosisscan.io",
+    "explorerApiUrl": "https://api.etherscan.io/v2/api",
+    "explorerApiKey": "<env>",
+    "explorerApiProvider": "etherscan-v2",
+    "safeTxServiceUrl": "https://api.safe.global/tx-service/gno",
+    "contracts": {
+      "safeProxyFactory": "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2",
+      "safeSingletonL2": "0x3E5c63644E683549055b9Be8653de26E0B4CD36E",
+      "fallbackHandler": "0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4",
+      "allowanceModule": "0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134",
+      "multiSendCallOnly": "0x40A2aCCbd92BCA938b02010E17A5b8929b49130D"
+    },
+    "passkey": {
+      "verifier": "0x445a0683e494ea0c5af3e83c5159fbe47cf9e765",
+      "factoryAddress": "0x1d31F259eE307358a26dFb23EB365939E8641195"
+    },
+    "tokens": {
+      "XDAI": {
+        "symbol": "xDAI",
+        "decimals": 18,
+        "address": null,
+        "coingeckoId": "xdai"
+      },
+      "EURE": {
+        "symbol": "EURe",
+        "decimals": 18,
+        "address": "0xcB444e90D8198415266c6a2724b7900fb12FC56E",
+        "coingeckoId": "monerium-eur-money"
+      },
+      "USDCE": {
+        "symbol": "USDC.e",
+        "decimals": 6,
+        "address": "0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0",
+        "coingeckoId": "usd-coin"
+      }
+    },
+    "tokenByAddress": {
+      "0xcb444e90d8198415266c6a2724b7900fb12fc56e": {
+        "symbol": "EURe",
+        "decimals": 18,
+        "address": "0xcB444e90D8198415266c6a2724b7900fb12FC56E",
+        "coingeckoId": "monerium-eur-money"
+      },
+      "0x2a22f9c3b484c3629090feed35f17ff8f88f76f0": {
+        "symbol": "USDC.e",
+        "decimals": 6,
+        "address": "0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0",
+        "coingeckoId": "usd-coin"
+      }
+    }
+  },
+  {
+    "chainId": 8453,
+    "name": "Base",
+    "shortName": "base",
+    "nativeCurrency": {
+      "name": "Ether",
+      "symbol": "ETH",
+      "decimals": 18
+    },
+    "rpcUrl": "<env>",
+    "explorerUrl": "https://basescan.org",
+    "explorerApiUrl": "https://base.blockscout.com/api/v2",
+    "explorerApiKey": "<env>",
+    "explorerApiProvider": "blockscout-v2",
+    "safeTxServiceUrl": "https://api.safe.global/tx-service/base",
+    "contracts": {
+      "safeProxyFactory": "0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC",
+      "safeSingletonL2": "0xfb1bffC9d739B8D520DaF37dF666da4C687191EA",
+      "fallbackHandler": "0x017062a1dE2FE6b99BE3d9d37841FeD19F573804",
+      "allowanceModule": "0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134",
+      "multiSendCallOnly": "0x40A2aCCbd92BCA938b02010E17A5b8929b49130D"
+    },
+    "passkey": {
+      "verifier": "0x0000000000000000000000000000000000000100",
+      "factoryAddress": "0x1d31F259eE307358a26dFb23EB365939E8641195"
+    },
+    "tokens": {
+      "ETH": {
+        "symbol": "ETH",
+        "decimals": 18,
+        "address": null,
+        "coingeckoId": "ethereum"
+      },
+      "USDC": {
+        "symbol": "USDC",
+        "decimals": 6,
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "coingeckoId": "usd-coin"
+      }
+    },
+    "tokenByAddress": {
+      "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+        "symbol": "USDC",
+        "decimals": 6,
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "coingeckoId": "usd-coin"
+      }
+    }
+  },
+  {
+    "chainId": 84532,
+    "name": "Base Sepolia",
+    "shortName": "base-sepolia",
+    "nativeCurrency": {
+      "name": "Ether",
+      "symbol": "ETH",
+      "decimals": 18
+    },
+    "rpcUrl": "<env>",
+    "explorerUrl": "https://sepolia.basescan.org",
+    "explorerApiUrl": "https://base-sepolia.blockscout.com/api/v2",
+    "explorerApiKey": "<env>",
+    "explorerApiProvider": "blockscout-v2",
+    "safeTxServiceUrl": "https://api.safe.global/tx-service/basesep",
+    "contracts": {
+      "safeProxyFactory": "0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC",
+      "safeSingletonL2": "0xfb1bffC9d739B8D520DaF37dF666da4C687191EA",
+      "fallbackHandler": "0x017062a1dE2FE6b99BE3d9d37841FeD19F573804",
+      "allowanceModule": "0xAA46724893dedD72658219405185Fb0Fc91e091C",
+      "multiSendCallOnly": "0x40A2aCCbd92BCA938b02010E17A5b8929b49130D"
+    },
+    "passkey": {
+      "verifier": "0x0000000000000000000000000000000000000100",
+      "factoryAddress": "0x1d31F259eE307358a26dFb23EB365939E8641195"
+    },
+    "tokens": {
+      "ETH": {
+        "symbol": "ETH",
+        "decimals": 18,
+        "address": null,
+        "coingeckoId": "ethereum"
+      },
+      "USDC": {
+        "symbol": "USDC",
+        "decimals": 6,
+        "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "coingeckoId": "usd-coin"
+      }
+    },
+    "tokenByAddress": {
+      "0x036cbd53842c5426634e7929541ec2318f3dcf7e": {
+        "symbol": "USDC",
+        "decimals": 6,
+        "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "coingeckoId": "usd-coin"
+      }
+    }
+  }
+]

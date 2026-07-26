@@ -46,6 +46,7 @@ import * as hybridAccountPasskeys from './044_hybrid_account_passkeys.js'
 import * as dropSessionRailTables from './045_drop_session_rail_tables.js'
 import * as singleSignerWaiver from './046_single_signer_waiver.js'
 import * as merchantReceipts from './047_merchant_receipts.js'
+import * as agentPassports from './048_agent_passports.js'
 
 export interface Migration {
   version: string
@@ -105,4 +106,5 @@ export const migrations: Migration[] = [
   dropSessionRailTables,
   singleSignerWaiver,
   merchantReceipts,
+  agentPassports,
 ]

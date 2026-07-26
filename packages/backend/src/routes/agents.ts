@@ -11,6 +11,7 @@ import { getTokenBalance } from '../lib/allowance-module.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
+import { requestPassport, issuePassportBestEffort, PASSPORT_CHAIN_IDS } from '../lib/passport/index.js'
 import { formatTokenValue } from '../lib/tokens.js'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -20,6 +21,13 @@ interface CreateAgentBody {
   description?: string
   delegate_address: string
   safe_id?: string
+  /**
+   * Opt in to an L0 Agent Passport at creation time (#972). Absent/false is the
+   * DEFAULT and the normal case: a basic agent has no passport and behaves
+   * exactly as before. Issuance is fire-and-forget — it can never fail or delay
+   * agent creation (owner decision 2026-07-24; v6 review point 2).
+   */
+  issue_passport?: boolean
   allowances?: {
     token_address: string
     token_symbol: string
@@ -220,7 +228,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   // POST /agents — create agent with delegate address and on-chain allowance config
   app.post<{ Body: CreateAgentBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { name, description, delegate_address, safe_id, allowances } = request.body
+    const { name, description, delegate_address, safe_id, allowances, issue_passport } = request.body
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return reply.code(400).send({ error: 'Name is required' })
@@ -320,11 +328,35 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       if (savedAllowances.length > 0) {
         emitFunnelEvent(sub, 'allowance_granted', { agent_id: agent.id })
       }
+      // Opt-in passport (#972). Deliberately AFTER the transaction commits and
+      // outside any try that could turn a passport problem into a failed agent:
+      // requestPassport records the intent, then the EAS write is fire-and-forget.
+      // A slow, failing, or unfunded attestation degrades to "pending"/"failed"
+      // on the passport row and never touches this response.
+      // Narrowed to a local so the chain id stays non-null for the call below;
+      // eligibility mirrors POST /agents/:id/passport so the two entry points
+      // agree rather than one silently creating a permanently-failed row.
+      const passportChainId =
+        issue_passport === true &&
+        safeInfo.safe_chain_id != null &&
+        PASSPORT_CHAIN_IDS.has(safeInfo.safe_chain_id)
+          ? safeInfo.safe_chain_id
+          : null
+      if (passportChainId != null) {
+        try {
+          await requestPassport(agent.id, passportChainId)
+          issuePassportBestEffort(agent.id, sub)
+        } catch (err) {
+          request.log.warn({ err, agentId: agent.id }, 'passport request failed; agent created')
+        }
+      }
+
       return reply.code(201).send({
         ...agent,
         ...safeInfo,
         api_key: apiKey,
         allowances: savedAllowances,
+        passport_requested: passportChainId != null,
       })
     } catch (err) {
       await client.query('ROLLBACK')

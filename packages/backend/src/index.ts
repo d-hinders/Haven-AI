@@ -21,6 +21,8 @@ import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
+import agentPassportRoutes from './routes/agent-passports.js'
+import { setAnchor, anchorOnChain } from './lib/passport/index.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
@@ -161,6 +163,9 @@ app.get('/chains', async () => {
   return { deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS }
 })
 
+// L0 passport attestations are anchored by the gas-only relayer (#972).
+setAnchor(anchorOnChain)
+
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })
 await app.register(balanceRoutes, { prefix: '/balances' })
@@ -171,6 +176,7 @@ await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
+await app.register(agentPassportRoutes, { prefix: '/agents' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })

@@ -166,6 +166,32 @@ describe('the EAS write NEVER blocks agent creation', () => {
   })
 })
 
+describe('the retry sweep isolates rows', () => {
+  it('keeps going after a row THROWS — and this sweep runs BEFORE the revocation half', async () => {
+    // The extra sting here: retryPendingPassports runs first in the tick, so an
+    // unisolated throw took the safety-critical revocation reconciliation and
+    // the stuck-revoke alarm down with it.
+    const OTHER = '33333333-3333-3333-3333-333333333333'
+    const seen: string[] = []
+    pool.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (/JOIN agents a ON a\.id = p\.agent_id/.test(sql)) {
+        return { rows: [{ agent_id: AGENT, user_id: USER }, { agent_id: OTHER, user_id: USER }] }
+      }
+      if (/FROM agent_passports WHERE agent_id/.test(sql)) {
+        seen.push(String(params[0]))
+        if (params[0] === AGENT) throw new Error('connection reset')
+        return { rows: [] } // no passport → clean no-op
+      }
+      return { rows: [], rowCount: 0 }
+    })
+
+    const result = await retryPendingPassports()
+
+    expect(seen).toEqual([AGENT, OTHER])
+    expect(result).toEqual({ attempted: 2, failed: 1 })
+  })
+})
+
 describe('anchoring', () => {
   it('records the UID and tx hash on success', async () => {
     mockDb({ passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 } })
@@ -259,12 +285,12 @@ describe('retry sweep', () => {
       retryRows: [{ agent_id: AGENT, user_id: USER }],
     })
     setAnchor(async () => ({ attestationUid: UID, txHash: '0x2' }))
-    expect(await retryPendingPassports()).toEqual({ attempted: 1 })
+    expect(await retryPendingPassports()).toEqual({ attempted: 1, failed: 0 })
   })
 
   it('is a no-op when nothing is pending', async () => {
     mockDb({ passport: null, retryRows: [] })
-    expect(await retryPendingPassports()).toEqual({ attempted: 0 })
+    expect(await retryPendingPassports()).toEqual({ attempted: 0, failed: 0 })
   })
 })
 

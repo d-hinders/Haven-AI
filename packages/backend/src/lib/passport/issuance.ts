@@ -198,9 +198,30 @@ export function issuePassportBestEffort(agentId: string, userId: string): void {
   void issuePassport(agentId, userId).catch(() => {})
 }
 
-/** Retry sweep — every non-anchored passport, oldest first. Idempotent. */
-export async function retryPendingPassports(limit = 50): Promise<{ attempted: number }> {
+/**
+ * Retry sweep — every non-anchored passport, oldest first. Idempotent.
+ *
+ * **Each row is isolated**, for the same reason as the revocation sweep:
+ * `issuePassport` leaves `getPassport`, `findAgentFacts` and `claimForAnchoring`
+ * outside its try block, so one bad row or a transient pool error throws out of
+ * the loop. Oldest-first ordering then puts that same row first on every tick,
+ * and the batch dies on item 1 forever. Worse, this sweep runs BEFORE the
+ * revocation half — so an unisolated failure here would take the safety-critical
+ * half down with it.
+ */
+export async function retryPendingPassports(
+  limit = 50,
+): Promise<{ attempted: number; failed: number }> {
   const rows = await repo.listRetryable(limit)
-  for (const row of rows) await issuePassport(row.agent_id, row.user_id)
-  return { attempted: rows.length }
+  let failed = 0
+  for (const row of rows) {
+    try {
+      await issuePassport(row.agent_id, row.user_id)
+    } catch {
+      // Still non-anchored, so it stays in the queue for the next tick — and
+      // the rows behind it are not punished for it.
+      failed++
+    }
+  }
+  return { attempted: rows.length, failed }
 }

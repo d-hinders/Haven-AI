@@ -313,23 +313,43 @@ const start = async () => {
     // would still see it as valid. So a revoke that stays unreconciled past
     // the alarm threshold is logged as an operational incident rather than
     // retried silently forever.
+    // The three phases are INDEPENDENT. Sequencing them under one try/catch
+    // meant a throw in the issuance retry skipped both the revocation
+    // reconciliation and the stuck-revoke alarm for that tick — and since the
+    // queues are oldest-first, one poison row would be first on every tick and
+    // silence the safety-critical half permanently. The alarm especially must
+    // run even when everything above it is failing: that is when it matters.
+    const phase = async (name: string, fn: () => Promise<void>) => {
+      try {
+        await fn()
+      } catch (err) {
+        app.log.warn({ err, phase: name }, 'Passport sweep phase failed')
+      }
+    }
+
     const runPassportSweep = async () => {
       try {
         await runIfLeader(LEADER_LOCK_KEYS.passportSweep, async () => {
-          const issuance = await retryPendingPassports()
-          const revocations = await reconcilePendingRevocations()
-          if (issuance.attempted || revocations.attempted) {
-            app.log.info({ ...issuance, revocations: revocations.attempted }, 'Passport sweep complete')
-          }
-          const stuck = await listStuckRevocations(PASSPORT_STUCK_REVOKE_SECONDS)
-          if (stuck.length > 0) {
-            app.log.warn(
-              { count: stuck.length, agents: stuck.slice(0, 10) },
-              'Passport revocations unreconciled past threshold — agents revoked in Haven still hold a live attestation on-chain',
-            )
-          }
+          await phase('issuance', async () => {
+            const issuance = await retryPendingPassports()
+            if (issuance.attempted) app.log.info(issuance, 'Passport issuance retries')
+          })
+          await phase('revocation', async () => {
+            const revocations = await reconcilePendingRevocations()
+            if (revocations.attempted) app.log.info(revocations, 'Passport revocation reconciliation')
+          })
+          await phase('alarm', async () => {
+            const stuck = await listStuckRevocations(PASSPORT_STUCK_REVOKE_SECONDS)
+            if (stuck.length > 0) {
+              app.log.warn(
+                { count: stuck.length, agents: stuck.slice(0, 10) },
+                'Passport revocations unreconciled past threshold — agents revoked in Haven still hold a live attestation on-chain',
+              )
+            }
+          })
         })
       } catch (err) {
+        // Only leader-election itself reaches here now.
         app.log.warn({ err }, 'Passport sweep failed')
       }
     }

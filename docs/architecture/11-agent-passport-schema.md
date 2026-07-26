@@ -161,6 +161,20 @@ does not flatten a schedule that starts at 30s) that runs
 `retryPendingPassports()`, then `reconcilePendingRevocations()`, then logs
 anything `listStuckRevocations()` returns as a warning.
 
+**Every phase and every row is isolated**, which is not incidental. Neither
+sweep's per-row call catches everything — `issuePassport` and
+`reconcileRevocation` both make repository calls outside their own try blocks —
+and both queues are ordered OLDEST FIRST. So a single poison row (or one
+transient pool error) aborting a batch would put that same row first again on
+the next tick, and every tick after: one bad row silently stopping every
+revocation in the system, which is exactly the failure the sweep exists to
+prevent. Each row is caught individually and counted (`{ attempted, failed }` —
+a sweep reporting `attempted: 50` while failing all 50 reads as healthy), and
+each of the three phases runs in its own try/catch so a failure in the issuance
+retry cannot silence the revocation reconciliation or the alarm. The alarm
+especially must run when everything above it is failing: that is when it
+matters.
+
 Two properties make that safe to run repeatedly and from more than one place:
 
 - **The queue is defined by the invariant, not a flag.** "Agent revoked, anchor
@@ -170,6 +184,15 @@ Two properties make that safe to run repeatedly and from more than one place:
   queue would miss that agent forever and leave its attestation live. Issuance
   also re-checks on anchor completion, closing the same race immediately rather
   than at the next tick.
+The sweep's queries are indexed for the invariant they actually use.
+Migration 049's partial index was `WHERE revocation_status = 'pending'`, which
+matched the flag-based queue; redefining the queue by invariant
+(`revocation_status <> 'confirmed'`) silently orphaned it, because Postgres uses
+a partial index only when the query's WHERE clause *implies* the index
+predicate. Migration 050 replaces it. Note `db:schema-smoke` cannot catch this
+class of problem — it `PREPARE`s each query, so it validates that a plan exists,
+not which plan.
+
 - **`claimRevocation` is the single gate**, and it checks the invariant *and*
   takes a lease in one atomic `UPDATE`. Checking `agents.status = 'revoked'`
   there rather than in the caller is what makes the unconditional

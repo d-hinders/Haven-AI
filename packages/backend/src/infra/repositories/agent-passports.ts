@@ -189,7 +189,7 @@ export async function insertRequested(
  * a new slot had appeared in the middle. A named object cannot be mis-slotted.
  *
  * The zero-address sentinel is an EAS ENCODING detail and is mapped to NULL
- * here — see migration 050. Storing it would collide every EOA-only agent on
+ * here — see migration 051. Storing it would collide every EOA-only agent on
  * one "address" in the verifier's lookup.
  */
 export async function markAnchored(
@@ -413,13 +413,7 @@ export async function enqueueRevocation(agentId: string, db: Executor = pool): P
  * when the lease expires. It also normalises `revocation_status` to 'pending'
  * so an agent revoked mid-anchor (never enqueued) is adopted by the sweep.
  */
-export async function claimRevocation(
-  agentId: string,
-  leaseSeconds = 300,
-  db: Executor = pool,
-): Promise<boolean> {
-  const { rowCount } = await db.query(
-    `UPDATE agent_passports p
+export const CLAIM_REVOCATION_SQL = `UPDATE agent_passports p
         SET revocation_status = 'pending',
             revocation_requested_at = COALESCE(p.revocation_requested_at, NOW()),
             revocation_next_attempt_at = NOW() + MAKE_INTERVAL(secs => $2),
@@ -430,9 +424,14 @@ export async function claimRevocation(
         AND a.status = 'revoked'
         AND p.status = 'anchored'
         AND p.revocation_status <> 'confirmed'
-        AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())`,
-    [agentId, leaseSeconds],
-  )
+        AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())`
+
+export async function claimRevocation(
+  agentId: string,
+  leaseSeconds = 300,
+  db: Executor = pool,
+): Promise<boolean> {
+  const { rowCount } = await db.query(CLAIM_REVOCATION_SQL, [agentId, leaseSeconds])
   return (rowCount ?? 0) > 0
 }
 
@@ -485,12 +484,7 @@ export async function scheduleRevocationRetry(
  * flag-based queue would miss it forever and the attestation would stay live
  * on-chain. Keying off the invariant makes that case self-healing.
  */
-export async function listRevocationsDue(
-  limit: number,
-  db: Executor = pool,
-): Promise<Array<{ agent_id: string; revocation_attempts: number }>> {
-  const { rows } = await db.query<{ agent_id: string; revocation_attempts: number }>(
-    `SELECT p.agent_id, p.revocation_attempts
+export const LIST_REVOCATIONS_DUE_SQL = `SELECT p.agent_id, p.revocation_attempts
        FROM agent_passports p
        JOIN agents a ON a.id = p.agent_id
       WHERE p.status = 'anchored'
@@ -498,7 +492,14 @@ export async function listRevocationsDue(
         AND p.revocation_status <> 'confirmed'
         AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())
       ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC
-      LIMIT $1`,
+      LIMIT $1`
+
+export async function listRevocationsDue(
+  limit: number,
+  db: Executor = pool,
+): Promise<Array<{ agent_id: string; revocation_attempts: number }>> {
+  const { rows } = await db.query<{ agent_id: string; revocation_attempts: number }>(
+    LIST_REVOCATIONS_DUE_SQL,
     [limit],
   )
   return rows
@@ -515,6 +516,15 @@ export async function listRevocationsDue(
  * A stuck revoke is an operational incident: merchants checking only the chain
  * still see the agent as valid.
  */
+export const LIST_STUCK_REVOCATIONS_SQL = `SELECT p.agent_id, p.revocation_requested_at, p.revocation_attempts, p.revocation_last_error
+       FROM agent_passports p
+       JOIN agents a ON a.id = p.agent_id
+      WHERE p.status = 'anchored'
+        AND a.status = 'revoked'
+        AND p.revocation_status <> 'confirmed'
+        AND COALESCE(p.revocation_requested_at, p.anchored_at) < NOW() - MAKE_INTERVAL(secs => $1)
+      ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC`
+
 export async function listStuckRevocations(
   olderThanSeconds: number,
   db: Executor = pool,
@@ -524,16 +534,6 @@ export async function listStuckRevocations(
     revocation_requested_at: Date | null
     revocation_attempts: number
     revocation_last_error: string | null
-  }>(
-    `SELECT p.agent_id, p.revocation_requested_at, p.revocation_attempts, p.revocation_last_error
-       FROM agent_passports p
-       JOIN agents a ON a.id = p.agent_id
-      WHERE p.status = 'anchored'
-        AND a.status = 'revoked'
-        AND p.revocation_status <> 'confirmed'
-        AND COALESCE(p.revocation_requested_at, p.anchored_at) < NOW() - MAKE_INTERVAL(secs => $1)
-      ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC`,
-    [olderThanSeconds],
-  )
+  }>(LIST_STUCK_REVOCATIONS_SQL, [olderThanSeconds])
   return rows
 }

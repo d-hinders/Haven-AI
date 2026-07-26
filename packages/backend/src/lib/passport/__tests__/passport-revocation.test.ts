@@ -291,7 +291,55 @@ describe('reconciliation — retries until DB and chain agree', () => {
       due: [{ agent_id: AGENT, revocation_attempts: 0 }],
     })
     setRevoker(async () => ({ txHash: '0x1' }))
-    expect(await reconcilePendingRevocations()).toEqual({ attempted: 1 })
+    expect(await reconcilePendingRevocations()).toEqual({ attempted: 1, failed: 0 })
+  })
+})
+
+describe('the sweep isolates rows — one poison row cannot stop the world', () => {
+  it('keeps going after a row THROWS, and reports the failure', async () => {
+    // reconcileRevocation does not catch everything: findByAgent and
+    // claimRevocation sit outside its try block. Unisolated, a transient pool
+    // error or one malformed row aborts the whole batch — and because the queue
+    // is ordered OLDEST FIRST, that same row is first again on every tick. One
+    // bad row would silently stop every revocation in the system, forever,
+    // which is the precise failure this sweep exists to prevent.
+    const OTHER = '22222222-2222-2222-2222-222222222222'
+    const seen: string[] = []
+    pool.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (/JOIN agents a ON a\.id = p\.agent_id/.test(sql)) {
+        return { rows: [{ agent_id: AGENT, revocation_attempts: 0 }, { agent_id: OTHER, revocation_attempts: 0 }] }
+      }
+      if (/FROM agent_passports WHERE agent_id/.test(sql)) {
+        seen.push(String(params[0]))
+        if (params[0] === AGENT) throw new Error('connection reset')
+        return {
+          rows: [{ agent_id: OTHER, chain_id: 84532, status: 'anchored', attestation_uid: UID, revocation_status: 'pending', revocation_attempts: 0 }],
+        }
+      }
+      if (/UPDATE agent_passports p/.test(sql) && /MAKE_INTERVAL/.test(sql)) {
+        return { rows: [], rowCount: 1 }
+      }
+      return { rows: [], rowCount: 0 }
+    })
+    setRevoker(async () => ({ txHash: '0xok' }))
+
+    const result = await reconcilePendingRevocations()
+
+    // The row BEHIND the failure still got its turn — the whole point.
+    expect(seen).toEqual([AGENT, OTHER])
+    expect(result).toEqual({ attempted: 2, failed: 1 })
+  })
+
+  it('does not report success it did not have', async () => {
+    // A sweep reporting `attempted: 2` while failing both is worse than one
+    // that says so — it reads as healthy in the logs.
+    pool.query.mockImplementation(async (sql: string) => {
+      if (/JOIN agents a ON a\.id = p\.agent_id/.test(sql)) {
+        return { rows: [{ agent_id: AGENT, revocation_attempts: 0 }] }
+      }
+      throw new Error('db down')
+    })
+    expect(await reconcilePendingRevocations()).toEqual({ attempted: 1, failed: 1 })
   })
 })
 

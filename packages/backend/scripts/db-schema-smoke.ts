@@ -14,11 +14,22 @@
  * schema drift would be most damaging. Add a query here when a new money-path
  * query is introduced; this is a guard, not an exhaustive mirror of every SELECT.
  *
+ * Prefer IMPORTING the query over pasting it. A pasted copy only proves the
+ * copy still matches the schema, and drifts from production the first time
+ * someone edits the real one — which is the failure this script exists to
+ * catch, reproduced inside the check itself. The passport revocation queries
+ * are imported for exactly that reason.
+ *
  * Run (needs DATABASE_URL): npm run db:schema-smoke -w @haven/backend
  */
 
 import { getPool } from '../src/db.js'
 import { runMigrations } from '../src/db/migrate.js'
+import {
+  CLAIM_REVOCATION_SQL,
+  LIST_REVOCATIONS_DUE_SQL,
+  LIST_STUCK_REVOCATIONS_SQL,
+} from '../src/infra/repositories/agent-passports.js'
 
 interface SmokeQuery {
   name: string
@@ -142,34 +153,25 @@ const QUERIES: SmokeQuery[] = [
           ORDER BY (recipient_address IS NULL), created_at DESC`,
   },
   {
-    // Not a money query, but it is a SAFETY query: if it stops matching the
-    // schema, revoked agents keep a live attestation on-chain and nothing
-    // fails loudly. The unit tests mock `pg`, so this is the only place the
+    // Not a money query, but it is a SAFETY query: if these stop matching the
+    // schema, revoked agents keep a live attestation on-chain and nothing fails
+    // loudly. The unit tests mock `pg`, so this is the only place the
     // UPDATE…FROM shape and `MAKE_INTERVAL(secs => $n)` meet a real planner.
+    //
+    // IMPORTED, not pasted — see the note above.
     name: 'passport: claimRevocation — invariant + lease, atomically (#973)',
-    sql: `UPDATE agent_passports p
-             SET revocation_status = 'pending',
-                 revocation_requested_at = COALESCE(p.revocation_requested_at, NOW()),
-                 revocation_next_attempt_at = NOW() + MAKE_INTERVAL(secs => $2),
-                 updated_at = NOW()
-            FROM agents a
-           WHERE a.id = p.agent_id
-             AND p.agent_id = $1
-             AND a.status = 'revoked'
-             AND p.status = 'anchored'
-             AND p.revocation_status <> 'confirmed'
-             AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())`,
+    sql: CLAIM_REVOCATION_SQL,
+  },
+  {
+    // The query that decides whether an agent revoked mid-anchor is ever picked
+    // up at all. It was missing while its alarm cousin was covered — the retry
+    // path mattering more than the alarm for it.
+    name: 'passport: listRevocationsDue — the retry queue (#973)',
+    sql: LIST_REVOCATIONS_DUE_SQL,
   },
   {
     name: 'passport: listStuckRevocations — the stuck-revoke alarm (#973)',
-    sql: `SELECT p.agent_id, p.revocation_requested_at, p.revocation_attempts, p.revocation_last_error
-            FROM agent_passports p
-            JOIN agents a ON a.id = p.agent_id
-           WHERE p.status = 'anchored'
-             AND a.status = 'revoked'
-             AND p.revocation_status <> 'confirmed'
-             AND COALESCE(p.revocation_requested_at, p.anchored_at) < NOW() - MAKE_INTERVAL(secs => $1)
-           ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC`,
+    sql: LIST_STUCK_REVOCATIONS_SQL,
   },
   {
     // The merchant-facing lookup. A schema mismatch here means verification

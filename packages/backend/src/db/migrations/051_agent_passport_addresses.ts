@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg'
 
-export const version = '050_agent_passport_addresses'
+export const version = '051_agent_passport_addresses'
 
 /**
  * The addresses a passport was ATTESTED with (#974, epic #970).

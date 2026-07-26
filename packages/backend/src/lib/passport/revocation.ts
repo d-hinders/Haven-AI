@@ -210,11 +210,36 @@ export async function enqueuePassportRevocation(agentId: string): Promise<boolea
   return repo.enqueueRevocation(agentId)
 }
 
-/** Retry sweep for due revocations. Idempotent and resumable. */
-export async function reconcilePendingRevocations(limit = 50): Promise<{ attempted: number }> {
+/**
+ * Retry sweep for due revocations. Idempotent and resumable.
+ *
+ * **Each row is isolated.** `reconcileRevocation` does not catch everything —
+ * its `findByAgent` and `claimRevocation` calls sit outside its try block, so a
+ * transient pool error or one malformed row throws all the way out. Without
+ * this catch that would abort the whole batch, and because the queue is ordered
+ * OLDEST FIRST the same row would be first again on every tick: one bad row
+ * silently stops every revocation in the system, forever. That is the exact
+ * failure this sweep exists to prevent, so it must not be how the sweep itself
+ * fails.
+ *
+ * Failures are counted and returned rather than swallowed — a sweep that
+ * reports `attempted: 50` while failing all 50 is worse than one that says so.
+ */
+export async function reconcilePendingRevocations(
+  limit = 50,
+): Promise<{ attempted: number; failed: number }> {
   const due = await repo.listRevocationsDue(limit)
-  for (const row of due) await reconcileRevocation(row.agent_id)
-  return { attempted: due.length }
+  let failed = 0
+  for (const row of due) {
+    try {
+      await reconcileRevocation(row.agent_id)
+    } catch {
+      // The row stays due (nothing was marked confirmed), so the next tick
+      // retries it — and the rows behind it still get their turn now.
+      failed++
+    }
+  }
+  return { attempted: due.length, failed }
 }
 
 /**

@@ -6,6 +6,7 @@ covers:
   - docs/architecture/1*.md
   - docs/archive/connect-agent-2-*.md
   - docs/research/**
+  - packages/core/src/chains.ts
   - packages/backend/src/lib/chains.ts
   - packages/frontend/src/lib/chains.ts
   - packages/backend/src/middleware/agentAuth.ts

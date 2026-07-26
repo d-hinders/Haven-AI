@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-07-12"
+last-verified: "2026-07-26"
 ---
 
 # Backend / API playbook
@@ -10,6 +10,7 @@ last-verified: "2026-07-12"
 Loaded by `ship-next` for `area:backend` issues.
 
 - **OpenAPI drift.** Keep `packages/backend/src/openapi/spec.test.ts` green — a route on the agent-payment surface must be documented in `openapi/spec.ts` or carry a `because:` entry in the allowlist. Adding a route means updating the spec.
+- **Generated wire types (#984).** Any edit to `openapi/spec.ts` must regenerate the shared wire types: run `npm run generate:api-types` and commit the resulting `packages/core/src/api-types.ts`. CI's **blocking** `npm run check:api-types` drift gate fails the PR if the spec and the generated types disagree. Never hand-edit `api-types.ts`.
 - **Package gate.** `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` must pass. **Run `typecheck` as the LAST step, after every test file is written or edited** — `vitest`/`tsx` strip types and do NOT type-check, so a green test run says nothing about type errors in the test itself. `tsc` is the only thing that checks `*.test.ts`; a type error there (a wrong config field, a stale mock shape) fails CI's typecheck but never the test run (#781, the #776 miss).
 - **SQL schema drift.** When the diff adds or changes a money-path query, add it to the curated list in `packages/backend/scripts/db-schema-smoke.ts` — CI applies the migrations and `PREPARE`s each query against a real Postgres, so a column/type mismatch fails in CI instead of dev (mocked route tests never validate SQL against the schema — how `agents.safe_address` reached dev, #757). Run locally against a throwaway DB with `DATABASE_URL=… npm run db:schema-smoke -w packages/backend`.
 - **Query mocks.** For **new** route tests, mock the DB by **matching on SQL content**, not by positional order. A long `mockQuery.mockResolvedValueOnce(...).mockResolvedValueOnce(...)` chain breaks the moment an unrelated query is inserted upstream — one read-only SELECT on the authorize path once shifted 12 sequences across 3 files (#775). Prefer `mockQuery.mockImplementation((sql) => …)` dispatching on a fragment (`/FROM agent_allowances/`, `/INSERT INTO payment_intents/`), returning the right rows per pattern and a safe default otherwise. Existing positional tests migrate opportunistically when you're already editing them, not wholesale.

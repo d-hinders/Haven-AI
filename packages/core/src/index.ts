@@ -39,3 +39,12 @@ export {
   type CoreChainConfig,
   type CoreTokenConfig,
 } from './chains.js'
+
+// Machine-payment lifecycle domain (#987) — rails, status unions, derivation.
+export {
+  MACHINE_PAYMENT_RAILS,
+  machinePaymentLifecycle,
+  type MachinePaymentFlowStatus,
+  type MachinePaymentAttentionReason,
+  type MachinePaymentLifecycle,
+} from './machine-payment-lifecycle.js'

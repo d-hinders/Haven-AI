@@ -14,11 +14,22 @@
  * schema drift would be most damaging. Add a query here when a new money-path
  * query is introduced; this is a guard, not an exhaustive mirror of every SELECT.
  *
+ * Prefer IMPORTING the query over pasting it. A pasted copy only proves the
+ * copy still matches the schema, and drifts from production the first time
+ * someone edits the real one — which is the failure this script exists to
+ * catch, reproduced inside the check itself. The passport revocation queries
+ * are imported for exactly that reason.
+ *
  * Run (needs DATABASE_URL): npm run db:schema-smoke -w @haven/backend
  */
 
 import { getPool } from '../src/db.js'
 import { runMigrations } from '../src/db/migrate.js'
+import {
+  CLAIM_REVOCATION_SQL,
+  LIST_REVOCATIONS_DUE_SQL,
+  LIST_STUCK_REVOCATIONS_SQL,
+} from '../src/infra/repositories/agent-passports.js'
 
 interface SmokeQuery {
   name: string
@@ -140,6 +151,36 @@ const QUERIES: SmokeQuery[] = [
             AND status = 'active'
             AND (recipient_address = LOWER($3) OR recipient_address IS NULL)
           ORDER BY (recipient_address IS NULL), created_at DESC`,
+  },
+  {
+    // Not a money query, but it is a SAFETY query: if these stop matching the
+    // schema, revoked agents keep a live attestation on-chain and nothing fails
+    // loudly. The unit tests mock `pg`, so this is the only place the
+    // UPDATE…FROM shape and `MAKE_INTERVAL(secs => $n)` meet a real planner.
+    //
+    // IMPORTED, not pasted — see the note above.
+    name: 'passport: claimRevocation — invariant + lease, atomically (#973)',
+    sql: CLAIM_REVOCATION_SQL,
+  },
+  {
+    // The query that decides whether an agent revoked mid-anchor is ever picked
+    // up at all. It was missing while its alarm cousin was covered — the retry
+    // path mattering more than the alarm for it.
+    name: 'passport: listRevocationsDue — the retry queue (#973)',
+    sql: LIST_REVOCATIONS_DUE_SQL,
+  },
+  {
+    name: 'passport: listStuckRevocations — the stuck-revoke alarm (#973)',
+    sql: LIST_STUCK_REVOCATIONS_SQL,
+  },
+  {
+    name: 'passport: claimForAnchoring — the double-attest guard (#972)',
+    sql: `UPDATE agent_passports
+             SET anchoring_started_at = NOW(), attempts = attempts + 1, updated_at = NOW()
+           WHERE agent_id = $1
+             AND status <> 'anchored'
+             AND (anchoring_started_at IS NULL
+                  OR anchoring_started_at < NOW() - MAKE_INTERVAL(secs => $2))`,
   },
 ]
 

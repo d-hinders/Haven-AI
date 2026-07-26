@@ -95,6 +95,110 @@ with `smartAccount = 0x0`. Two rules follow, both enforced in
 This mirrors the delegation rail's posture on the zero address
 ([security model](../security/delegation-rail-security-model.md) §7).
 
+## Revocation — what merchants must check
+
+**Haven's verifier is authoritative. The chain is an anchor, not the authority.**
+This is the single most important thing for an integrator to get right.
+
+| | Authority | Latency |
+|---|---|---|
+| **Haven's verifier** (`standing`) | ✅ **Decides.** `agents.status = 'revoked'` IS the revocation | Immediate |
+| **The EAS attestation** | Anchor only — describes, never decides | Eventually consistent |
+
+> **Check the verifier, not only the chain.** An EAS revoke is a transaction: it
+> can lag, fail, or sit unmined. During that window the on-chain attestation
+> still reads as valid while Haven has already revoked the agent. A merchant
+> deciding on-chain alone would serve a revoked agent.
+
+The standing response makes the divergence visible rather than leaving it to be
+inferred — `chainLagging: true` means exactly "revoked here, chain hasn't caught
+up yet".
+
+| `standing` | Meaning |
+|---|---|
+| `active` | Authorized right now |
+| `suspended` | Temporarily **not** authorized (paused). Reversible; the anchor is untouched |
+| `revoked` | **Not** authorized — regardless of what the chain says. Terminal |
+| `unknown` | No such agent. Never treat as authorized |
+
+**`active` is an allow-list of one.** Only the literal agent status `active`
+reads as authorized; every other status — `paused` today, anything a later
+migration adds — reads as `suspended`. A deny-list (*"not revoked, therefore
+active"*) would make each new status a permission by default, which is how a
+paused agent came to read as `active` in the first draft.
+
+`suspended` deliberately does **not** revoke the anchor: pausing is reversible
+and an EAS revoke is one-way, so revoking on pause would make un-pausing require
+re-issuing the passport. Issuance is likewise allowed for a paused agent and
+**refused (409) for a revoked one** — minting an attestation for an agent Haven
+has already revoked spends gas to create the very divergence described above.
+
+`anchor` reports the chain's progress for transparency: `not_anchored`,
+`anchored`, `revocation_pending`, `revoked_onchain`.
+
+### Why a revoke cannot fail permanently
+
+A failed anchor **retries with backoff** (30s doubling to a 1h cap) until the DB
+and chain agree — owner decision 2026-07-24. There is deliberately **no terminal
+`failed` revocation state**: a revoked agent whose on-chain flag never flipped is
+precisely the divergence this design exists to prevent, so a struggling revoke
+stays `pending` and due rather than being dropped.
+
+A revocation left unreconciled past a threshold is an **operational incident**,
+not a silent state — surfaced by `listStuckRevocations()` for alarming. While it
+is stuck, the verifier still answers `revoked` correctly; the exposure is only to
+merchants who ignored the rule above and checked the chain alone.
+
+### What actually drives the retries
+
+Both halves of the anchor are fire-and-forget — an EAS write must never block
+agent creation or an owner's revoke — which only holds because something later
+retries what the in-request attempt dropped. That something is the **passport
+sweep** in `index.ts`: a leader-locked tick (every 5 minutes, not hourly, so it
+does not flatten a schedule that starts at 30s) that runs
+`retryPendingPassports()`, then `reconcilePendingRevocations()`, then logs
+anything `listStuckRevocations()` returns as a warning.
+
+**Every phase and every row is isolated**, which is not incidental. Neither
+sweep's per-row call catches everything — `issuePassport` and
+`reconcileRevocation` both make repository calls outside their own try blocks —
+and both queues are ordered OLDEST FIRST. So a single poison row (or one
+transient pool error) aborting a batch would put that same row first again on
+the next tick, and every tick after: one bad row silently stopping every
+revocation in the system, which is exactly the failure the sweep exists to
+prevent. Each row is caught individually and counted (`{ attempted, failed }` —
+a sweep reporting `attempted: 50` while failing all 50 reads as healthy), and
+each of the three phases runs in its own try/catch so a failure in the issuance
+retry cannot silence the revocation reconciliation or the alarm. The alarm
+especially must run when everything above it is failing: that is when it
+matters.
+
+Two properties make that safe to run repeatedly and from more than one place:
+
+- **The queue is defined by the invariant, not a flag.** "Agent revoked, anchor
+  not confirmed" — *not* `revocation_status = 'pending'`. The difference is
+  load-bearing: revoking an agent while its passport is still anchoring enqueues
+  nothing (the enqueue guard requires an already-anchored row), so a flag-based
+  queue would miss that agent forever and leave its attestation live. Issuance
+  also re-checks on anchor completion, closing the same race immediately rather
+  than at the next tick.
+The sweep's queries are indexed for the invariant they actually use.
+Migration 049's partial index was `WHERE revocation_status = 'pending'`, which
+matched the flag-based queue; redefining the queue by invariant
+(`revocation_status <> 'confirmed'`) silently orphaned it, because Postgres uses
+a partial index only when the query's WHERE clause *implies* the index
+predicate. Migration 050 replaces it. Note `db:schema-smoke` cannot catch this
+class of problem — it `PREPARE`s each query, so it validates that a plan exists,
+not which plan.
+
+- **`claimRevocation` is the single gate**, and it checks the invariant *and*
+  takes a lease in one atomic `UPDATE`. Checking `agents.status = 'revoked'`
+  there rather than in the caller is what makes the unconditional
+  anchor-completion hook safe — no caller can revoke a live agent's anchor. The
+  lease matters because EAS reverts a second revoke with `AlreadyRevoked`: two
+  concurrent attempts would burn gas and then fail on every backoff cycle
+  forever instead of converging.
+
 ## Registration and configuration
 
 Registration is an **operator step** — an on-chain transaction needing a funded

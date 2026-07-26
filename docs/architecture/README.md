@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/lib/fee/fee-module.ts
-last-verified: "2026-07-18"
+last-verified: "2026-07-26"
 ---
 
 # Haven — Architecture
@@ -34,7 +34,7 @@ is canonical; exported PNG and SVG files are convenience artifacts.
 | 8 | [Local vs Hosted MCP](08-local-vs-hosted-mcp.md) | Topology and deployment trade-offs for default hosted MCP + edge signer versus advanced fully-local MCP. Use doc 7 for the current signer tool list and x402 fast path. |
 | 9 | [Rail-agnostic Fee Module](09-fee-module.md) | Current disabled zero-fee backend scaffold plus future per-rail settlement design; no fee transfer executes today. |
 | 10 | [Module Boundaries](10-module-boundaries.md) | Deciding where new backend code goes, or reviewing a change that moves it. Target module structure and the dependency rules CI enforces (epic #980). |
-| 11 | [L0 Agent Passport — EAS schema](11-agent-passport-schema.md) | Working on agent identity: what L0 attests (governance, not identity), the schema fields, the dual address binding, and the zero-address sentinel (epic #970). |
+| 11 | [L0 Agent Passport — EAS schema](11-agent-passport-schema.md) | Working on agent identity: what L0 attests (governance, not identity), the schema fields, the dual address binding, the zero-address sentinel, and the revocation model — Haven's verifier decides, the chain is an eventually-consistent anchor (epic #970). |
 
 The detailed Connect Agent 2 contract and its rollout closeout were point-in-time
 artifacts for shipping that feature; they now live in

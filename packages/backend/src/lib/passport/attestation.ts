@@ -22,6 +22,7 @@ import { AbiCoder, Contract, Interface } from 'ethers'
 import { getRelayer } from '../relayer.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
 import type { Anchor, AnchorResult, PassportClaim } from './issuance.js'
+import type { Revoker } from './revocation.js'
 
 /** Field order MUST match PASSPORT_SCHEMA — the encoding is positional. */
 const SCHEMA_TYPES = [
@@ -36,6 +37,7 @@ const SCHEMA_TYPES = [
 
 const EAS_ABI = [
   'function attest((bytes32 schema,(address recipient,uint64 expirationTime,bool revocable,bytes32 refUID,bytes data,uint256 value) data)) external payable returns (bytes32)',
+  'function revoke((bytes32 schema,(bytes32 uid,uint256 value) data)) external payable',
 ]
 
 const ZERO_BYTES32 = '0x' + '00'.repeat(32)
@@ -113,4 +115,42 @@ export const anchorOnChain: Anchor = async (
     throw new Error(`passport attestation reverted (tx ${tx.hash})`)
   }
   return { attestationUid, txHash: tx.hash }
+}
+
+
+/** Build the revoke calldata without sending — the shape a test can assert on. */
+export function buildRevokeCall(
+  chainId: number,
+  attestationUid: string,
+): { to: string; data: string; value: bigint } {
+  const { eas } = getEasDeployment(chainId)
+  const data = new Interface(EAS_ABI).encodeFunctionData('revoke', [
+    { schema: getPassportSchemaUid(chainId), data: { uid: attestationUid, value: 0n } },
+  ])
+  return { to: eas, data, value: 0n }
+}
+
+/**
+ * Revoke the attestation on-chain with the gas-only relayer (#973).
+ *
+ * Same non-custody shape as `anchorOnChain`: targets the pinned EAS contract,
+ * `value: 0`, no user key. Revoking is governance metadata being withdrawn —
+ * it moves nothing and can only ever reduce an agent's standing.
+ *
+ * Note this is the ANCHOR catching up, not the revocation itself: the agent was
+ * already revoked in the DB, which is authoritative (see `revocation.ts`).
+ */
+export const revokeOnChain: Revoker = async (chainId: number, attestationUid: string) => {
+  const { eas } = getEasDeployment(chainId)
+  const contract = new Contract(eas, EAS_ABI, getRelayer(chainId))
+  const request = {
+    schema: getPassportSchemaUid(chainId),
+    data: { uid: attestationUid, value: 0n },
+  }
+  const tx = await contract.revoke(request)
+  const receipt = await tx.wait()
+  if (!receipt || receipt.status !== 1) {
+    throw new Error(`passport revocation reverted (tx ${tx.hash})`)
+  }
+  return { txHash: tx.hash }
 }

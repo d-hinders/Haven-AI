@@ -32,6 +32,7 @@ import { computeHybridAccountAddress } from '../hybrid-provisioning.js'
 import { getEasDeployment, isPassportConfigured } from './schema.js'
 import { AssuranceLevel } from './schema.js'
 import { buildAddressBinding, encodeAddressBinding } from './binding.js'
+import { revokePassportBestEffort } from './revocation.js'
 
 export type { PassportStatus, PassportRow } from '../../infra/repositories/agent-passports.js'
 import type { PassportRow } from '../../infra/repositories/agent-passports.js'
@@ -171,6 +172,13 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
     getEasDeployment(chainId) // reject an unpinned chain before spending gas
     const result = await anchorImpl(chainId, claim)
     await markAnchored(agentId, result)
+    // Close the anchor race (#973). Anchoring takes seconds, and the owner can
+    // revoke the agent during them. The revoke hook is a no-op in that window —
+    // its enqueue requires an ALREADY-anchored passport — so without this the
+    // attestation that lands a moment later stays live on-chain, for a revoked
+    // agent, until someone notices. `reconcileRevocation` re-checks the
+    // invariant atomically, so for a live agent this is a cheap no-op.
+    revokePassportBestEffort(agentId)
   } catch (err) {
     await markFailed(agentId, err instanceof Error ? err.message : String(err))
   }
@@ -190,9 +198,30 @@ export function issuePassportBestEffort(agentId: string, userId: string): void {
   void issuePassport(agentId, userId).catch(() => {})
 }
 
-/** Retry sweep — every non-anchored passport, oldest first. Idempotent. */
-export async function retryPendingPassports(limit = 50): Promise<{ attempted: number }> {
+/**
+ * Retry sweep — every non-anchored passport, oldest first. Idempotent.
+ *
+ * **Each row is isolated**, for the same reason as the revocation sweep:
+ * `issuePassport` leaves `getPassport`, `findAgentFacts` and `claimForAnchoring`
+ * outside its try block, so one bad row or a transient pool error throws out of
+ * the loop. Oldest-first ordering then puts that same row first on every tick,
+ * and the batch dies on item 1 forever. Worse, this sweep runs BEFORE the
+ * revocation half — so an unisolated failure here would take the safety-critical
+ * half down with it.
+ */
+export async function retryPendingPassports(
+  limit = 50,
+): Promise<{ attempted: number; failed: number }> {
   const rows = await repo.listRetryable(limit)
-  for (const row of rows) await issuePassport(row.agent_id, row.user_id)
-  return { attempted: rows.length }
+  let failed = 0
+  for (const row of rows) {
+    try {
+      await issuePassport(row.agent_id, row.user_id)
+    } catch {
+      // Still non-anchored, so it stays in the queue for the next tick — and
+      // the rows behind it are not punished for it.
+      failed++
+    }
+  }
+  return { attempted: rows.length, failed }
 }

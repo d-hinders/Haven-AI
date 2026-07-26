@@ -17,6 +17,7 @@ import {
   requestPassport,
   issuePassportBestEffort,
   isPassportConfigured,
+  passportStanding,
   PASSPORT_CHAIN_IDS,
 } from '../lib/passport/index.js'
 
@@ -47,7 +48,13 @@ export default async function agentPassportRoutes(app: FastifyInstance): Promise
     const { sub } = request.user as { sub: string }
     const agent = await findAgentChain(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
-    return reply.send({ passport: serialize(await getPassport(request.params.id)) })
+    // `standing` is the DB-authoritative answer; `passport.revocation_status`
+    // merely describes how far the on-chain anchor has got (#973).
+    const [passport, standing] = await Promise.all([
+      getPassport(request.params.id),
+      passportStanding(request.params.id),
+    ])
+    return reply.send({ passport: serialize(passport), standing })
   })
 
   /**
@@ -61,6 +68,14 @@ export default async function agentPassportRoutes(app: FastifyInstance): Promise
 
     const agent = await findAgentChain(agentId, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    if (agent.status === 'revoked') {
+      // Fail closed. Revocation is terminal, so anchoring a passport now would
+      // spend gas to mint an attestation that must immediately be revoked
+      // again — the exact DB/chain divergence #973 exists to prevent. A paused
+      // agent is NOT blocked: pausing is reversible, and `standing` already
+      // reports it as `suspended` rather than active.
+      return reply.code(409).send({ error: 'Agent is revoked — a passport cannot be issued' })
+    }
     if (agent.chain_id == null) {
       return reply.code(400).send({
         error: 'Agent has no bound account — a passport attests the treasury it spends from',

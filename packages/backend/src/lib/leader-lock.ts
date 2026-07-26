@@ -26,6 +26,8 @@ export const LEADER_LOCK_KEYS = {
   catalogRefresh: 811001,
   delegateBalanceMonitor: 811002,
   relayerBalanceMonitor: 811004,
+  /** L0 passport anchor sweep — issuance retries + revocation reconciliation (#973). */
+  passportSweep: 811005,
 } as const
 
 export interface QueryableClientLike {

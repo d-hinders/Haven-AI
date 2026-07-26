@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/lib/delegation-rail.ts
   - packages/backend/src/lib/delegation-authorization.ts
-last-verified: "2026-07-12"
+last-verified: "2026-07-24"
 ---
 
 # Delegation rail — definition-of-done report (#835, epic #821)
@@ -120,6 +120,34 @@ After this closeout, the rail gained passkey-owned treasuries: delegation-rail.t
 accepts a WebAuthn signer set (`TreasuryPasskey`), and the #884 spike proved
 passkey-signed grants redeem through the same DelegationManager path measured
 here. Nothing in this report's measurements or conclusions changes.
+
+## Post-script 2 — what the rail gained after this closeout
+
+This report is the #835 record as it stood; every row still reproduces and
+nothing below retracts one. But three later changes matter if you read it as a
+description of the rail *today*:
+
+- **x402 settles two ways now (#946).** Row 8's ERC-7710 direct settlement
+  remains the default and the destination, but a delegation-metered **EIP-3009
+  fallback** exists for facilitators that cannot redeem a delegation chain: the
+  budget delegation is redeemed to the agent's own delegate EOA, which then
+  signs a standard 3009 header. For those payments only, the transient hot
+  balance this rail deleted comes back — so merchant-pinned budgets are
+  erc7710-only. Terms and compensating controls:
+  [security model §8](../security/delegation-rail-security-model.md).
+- **The authorize path is hardened (#961).** Idempotent replays resume with a
+  reconstructed signing payload instead of dead-ending, one-shot
+  authorize+execute is refused, and the per-agent hourly x402 cap now covers
+  the delegation branch as sponsorship-cost protection.
+- **Mainnet has a signer floor (#947, gate #908).** On value-bearing chains no
+  account may be provisioned, and no grant activated, below two enrolled
+  signers without a recorded single-signer waiver (migration 046). The matrix
+  above is unaffected — the gate exempts known testnets, including Base
+  Sepolia.
+
+The gas/latency table's `_TBD from run_` cells were never backfilled; the
+measured figures live in
+[the vendor-ops runbook §1](../operations/delegation-rail-vendor-ops.md).
 
 ## Running it
 

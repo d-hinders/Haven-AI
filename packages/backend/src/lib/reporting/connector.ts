@@ -58,9 +58,10 @@ export function listConnectors(): AccountingConnector[] {
 
 /**
  * Whether a real (non-test) accounting connector is registered, i.e. whether the
- * feed can actually deliver to an external tool. False today — the live Fortnox
- * adapter (#496/#498) is deferred to a follow-up. The Reporting surface uses this
- * to flag that sync is a preview. The in-memory test connector does not count.
+ * feed can actually deliver to an external tool. True once the live Fortnox
+ * adapter (#496/#498/#956) registers at startup — i.e. whenever Fortnox is
+ * configured. The Reporting surface uses this to flag sync as a preview when no
+ * live connector exists. The in-memory test connector does not count.
  */
 export function hasLiveConnector(): boolean {
   return listConnectors().some((c) => c.provider !== 'memory')

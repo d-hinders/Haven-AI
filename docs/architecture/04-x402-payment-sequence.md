@@ -1,6 +1,7 @@
 ---
 owner: "@d-hinders"
 status: current
+contract: true
 covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/x402-resources.ts
@@ -15,7 +16,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-07-15"
+last-verified: "2026-07-24"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -268,29 +269,59 @@ security model: [`delegation-rail-security-model.md`](../security/delegation-rai
 
 ### Settlement-scheme reality and the EIP-3009 bridge
 
-The direct erc7710 path is elegant, but it is currently the **only** x402
-settlement scheme on the delegation rail — and that is a merchant-reach problem,
-not a solved settlement story. Redeeming the `[child, budget]` chain requires
-**facilitator-side erc7710 support**, and adoption is still thin: as of the
-2026-07 catalog probe, ≈every real x402 merchant is **EIP-3009-only**. So a
-delegation-rail account (the default for new accounts) currently has **no route
-to most merchants**, and `routes/x402.ts` has no EIP-3009 branch for
-`execution_rail = 'delegation'` — it forks unconditionally to erc7710 and even
-rejects native-token x402.
+Redeeming the `[child, budget]` chain requires **facilitator-side erc7710
+support**, and adoption is still thin: as of the 2026-07 catalog probe, ≈every
+real x402 merchant is **EIP-3009-only**. erc7710 alone therefore left
+delegation-rail accounts (the default for new accounts) with no route to most
+merchants — so the rail now selects a settlement scheme **per payment**
+([#946](https://github.com/d-hinders/Haven-AI/issues/946), shipped and
+live-proven 2026-07-18; design of record: RFC
+[#791](https://github.com/d-hinders/Haven-AI/issues/791) §18 "B4-D").
 
-The decided answer is an **EIP-3009 fallback on the delegation rail**, chosen per
-payment (prefer erc7710 when the facilitator supports it, fall back to 3009).
-EIP-3009 (`transferWithAuthorization`) is ECDSA-based — the fund-holder must be an
-**EOA** that signs (USDC rejects EIP-1271 for it), which neither Hybrid can do —
-so 3009-mode redeems the budget delegation to **transiently fund the agent EOA**,
-which then signs the standard header. One budget delegation meters direct
-transfers, erc7710 settlement, and 3009 funding: revoke once, everything stops.
+**How the scheme is chosen.** `routes/x402.ts` keys on the authorize request's
+`payTo` shape — which is exactly the standard-x402 SDK contract, so existing
+SDKs gained delegation-rail merchant reach with no client change:
+
+| `payTo` | Scheme | Merchant sees |
+|---|---|---|
+| the merchant address | **erc7710 direct settlement** (unchanged) | the delegation chain, redeemed in-band |
+| the agent's own delegate EOA (+ required `merchantPayTo`) | **EIP-3009 fallback** | a standard header from the delegate EOA |
+
+An explicit `settlementScheme` field is validated against that shape on every
+rail, so a confused client fails loudly instead of silently getting the wrong
+flow. Native-token x402 is still rejected on this rail (no ERC20 transfer to
+pin or meter). The chosen scheme is recorded on the intent
+(`machine_metadata.settlement_scheme`) so 3009-mode usage is auditable and its
+eventual retirement measurable.
+
+**How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
+the fund-holder must be an **EOA** that signs (USDC rejects EIP-1271 for it),
+which neither Hybrid can do — so 3009-mode redeems the budget delegation to
+**transiently fund the agent EOA** (a sponsored UserOp the agent signs; caveats
+run on-chain at gas estimation), which then signs the standard header. One
+budget delegation meters direct transfers, erc7710 settlement, and 3009 funding:
+revoke once, everything stops.
+
+**Pins are never weakened.** A recipient-pinned budget delegation structurally
+cannot fund the EOA (the pin locks the transfer to the merchant), so
+**pinned agents stay erc7710-only** — an owner decision recorded on #946, not a
+limitation to engineer around. 3009-mode requires an open (unpinned) budget.
+
 This is a deliberate, temporary interop bridge that **reintroduces a bounded
-funding leg** (transient hot balance + sweep) — accepted because an agent that can
-pay with a short-lived hot balance beats one that cannot pay at all; erc7710 stays
-the long-term goal. Design of record: **RFC [#791](https://github.com/d-hinders/Haven-AI/issues/791)
-§18 (B4-D)**; scoped build: **[#946](https://github.com/d-hinders/Haven-AI/issues/946)**
-(not yet built).
+funding leg** (transient hot balance + sweep) — accepted because an agent that
+can pay with a short-lived hot balance beats one that cannot pay at all;
+erc7710 stays the long-term goal. The exposure is bounded by exact-amount
+funding, the capped header window, the delegate-balance monitor, and the
+rail-agnostic sweep (which recovers residuals to the treasury Hybrid).
+
+**Hardening on the authorize path** ([#961](https://github.com/d-hinders/Haven-AI/issues/961)):
+an idempotent retry **resumes** — `sign_data` is reconstructed from the stored
+intent rather than re-running a sponsored estimation, a confirmed retry replays
+the receipt, and a stale pending row is lazily expired so its key frees;
+one-shot authorize+execute is refused (a signature over not-yet-prepared state
+can never be valid); and the per-agent hourly x402 cap now guards the delegation
+branch too — placed after the replay lookup (replays are never rate-limited) but
+before any sponsored prepare, making it sponsorship-cost protection as well.
 
 ## Guardrails
 

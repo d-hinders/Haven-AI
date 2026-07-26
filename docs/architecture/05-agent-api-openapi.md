@@ -20,7 +20,13 @@ covers:
   - packages/backend/src/lib/agent-payment-taxonomy.ts
   - packages/backend/src/lib/agent-payment-taxonomy.parity.test.ts
   - .github/workflows/ci.yml
-last-verified: "2026-07-18"
+  - scripts/generate-api-types.mjs
+  - packages/core/src/api-types.ts
+  - packages/backend/src/routes/dashboard.ts
+  - packages/backend/src/routes/balances.ts
+  - packages/backend/src/routes/portfolio.ts
+  - packages/backend/src/routes/safe-details.ts
+last-verified: "2026-07-26"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -129,8 +135,13 @@ client behavior.
 Issue #161 also calls for a generated-client round-trip check. The current CI
 guard remains narrower than that full acceptance criterion: it pins required
 paths, taxonomy enum values, served-spec parity, and authority-boundary copy.
-A deeper `openapi-typescript` comparison remains a follow-up before treating
-the spec as a complete generated-client compatibility gate.
+Since #984, `openapi-typescript` runs against the spec in earnest: the
+frontend's wire types are GENERATED from it (`packages/core/src/api-types.ts`,
+via `scripts/generate-api-types.mjs`), and a blocking CI drift check
+(`npm run check:api-types`) fails any PR that edits the spec without
+regenerating. Editing the spec now changes the dashboard's compile-time types
+— an inaccurate spec entry fails the frontend typecheck, which is exactly the
+pressure that keeps the contract honest.
 
 ## Authentication And Authority Boundaries
 
@@ -138,7 +149,14 @@ The contract exposes three authentication schemes:
 
 - `AgentApiKey` identifies an agent on payment and read surfaces.
 - `DashboardJwt` authenticates the user for account management, setup, and
-  dashboard read operations.
+  dashboard read operations. Since #984 the dashboard read surface is
+  documented in the spec itself (tag `Dashboard`: `/dashboard/overview`,
+  `/balances/{safeAddress}`, `/portfolio/{safeAddress}`,
+  `/transactions/filters`, `/transactions/{safeAddress}`,
+  `/safe/{safeAddress}/details`) — it is the source for the frontend's
+  generated response types, so it must describe what the routes actually
+  emit, not an idealization (e.g. `from`/`to` can be the empty string;
+  `amountSek` is present on enriched rows).
 - `SetupToken` is a narrowly scoped, expiring connector pairing credential.
 
 Authentication does not itself create payment authority. For agent payments,

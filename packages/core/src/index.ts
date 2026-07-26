@@ -16,3 +16,13 @@
  */
 
 export { ETH_ADDRESS_RE, isAddress } from './address.js'
+
+// Wire shapes generated from the backend's OpenAPI spec (#984) — the single
+// source for API response types. `ApiSchema<'TransactionsResponse'>` is the
+// ergonomic entry point; `ApiPaths`/`ApiOperations` cover route-keyed lookups.
+export type {
+  paths as ApiPaths,
+  components as ApiComponents,
+  operations as ApiOperations,
+} from './api-types.js'
+export type { ApiSchema } from './api-schema.js'

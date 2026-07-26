@@ -29,7 +29,9 @@ function overview(id: string): DashboardOverviewResponse {
       successfulTransactions: 0,
       activeAccounts: 0,
     },
+    actionableApprovals: 0,
     pendingApprovals: 0,
+    onboardingProgress: { hasFirstAgentPayment: false },
     agents: [],
     transactions: [{
       hash: id,

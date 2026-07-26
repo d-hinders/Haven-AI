@@ -94,16 +94,6 @@ const KNOWN_UNDOCUMENTED_ROUTES: Array<{
     because: 'Dashboard-only audit view using dashboard JWT auth.',
   },
   {
-    method: 'GET',
-    path: '/transactions/filters',
-    because: 'Dashboard-only filter metadata using dashboard JWT auth.',
-  },
-  {
-    method: 'GET',
-    path: '/transactions/{safeAddress}',
-    because: 'Dashboard-only per-Safe view using dashboard JWT auth.',
-  },
-  {
     method: 'POST',
     path: '/x402/{id}/settle',
     because:

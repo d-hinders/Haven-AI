@@ -1352,6 +1352,126 @@ export const openapiSpec = {
         },
       },
     },
+    '/transactions/filters': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getTransactionFilterOptions',
+        summary: 'Filter metadata (safes, agents, tokens) for the transactions view.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'Available filter options.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/TransactionFilterOptionsResponse' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/transactions/{safeAddress}': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listSafeTransactions',
+        summary: 'Page-based transaction list for one Safe.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'safeAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer' } },
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
+          { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'Paginated per-Safe transactions.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/TransactionsPageResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/dashboard/overview': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getDashboardOverview',
+        summary: 'Aggregated dashboard overview: totals, day change, metrics, previews.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Dashboard overview.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardOverviewResponse' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/balances/{safeAddress}': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getSafeBalances',
+        summary: 'Token balances for one Safe.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'safeAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer' }, description: 'Required when the same address is linked on more than one chain.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Balances, native token first.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/BalancesResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/portfolio/{safeAddress}': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getSafePortfolio',
+        summary: 'Fiat-valued portfolio breakdown for one Safe.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'safeAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer' }, description: 'Required when the same address is linked on more than one chain.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Portfolio totals and per-token breakdown.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/PortfolioResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
+    '/safe/{safeAddress}/details': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getSafeDetails',
+        summary: 'On-chain Safe details: owners, threshold, nonce.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'safeAddress', in: 'path', required: true, schema: address },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Safe details.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SafeDetails' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
     '/catalog': {
       get: {
         tags: ['Catalog'],
@@ -2458,25 +2578,29 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
-      Transaction: {
+      TransactionBase: {
+        description: 'Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`).',
         type: 'object',
-        required: ['hash', 'type', 'from', 'to', 'value', 'valueFormatted', 'asset', 'decimals', 'direction', 'timestamp', 'blockNumber', 'isError', 'chainId', 'safeId', 'safeAddress', 'safeName'],
+        required: ['hash', 'type', 'from', 'to', 'value', 'valueFormatted', 'asset', 'decimals', 'direction', 'timestamp', 'blockNumber', 'isError'],
         properties: {
           hash: { type: 'string' },
           type: { type: 'string', enum: ['native', 'erc20', 'internal'] },
-          from: address,
-          to: address,
+          // Deliberately NOT the `address` helper: Safe Transaction Service
+          // transfers with a null counterparty are emitted as '' (#984 spec
+          // correction — the old pattern rejected real responses).
+          from: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
+          to: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
           value: { type: 'string' },
           valueFormatted: { type: 'string' },
-          asset: { type: 'string' },
+          asset: { type: 'string', description: 'Token ticker where known; falls back to the raw contract address for unknown tokens.' },
           decimals: { type: 'integer' },
           direction: { type: 'string', enum: ['in', 'out'] },
           timestamp: { type: 'integer' },
-          blockNumber: { type: 'integer' },
+          blockNumber: { type: 'integer', description: '0 for x402-synthesized rows with no on-chain receipt yet.' },
           isError: { type: 'boolean' },
           tokenAddress: address,
           tokenSymbol: { type: 'string' },
-          source: { type: 'string' },
+          source: { type: 'string', description: "Origin of the row. Known values: 'direct', 'x402', 'mpp_demo', 'mpp_crypto', 'spt', 'stripe_deposit'. Open set — new payment rails add values." },
           x402ResourceUrl: { type: ['string', 'null'] },
           x402MerchantAddress: { type: ['string', 'null'] },
           paymentId: { type: 'string' },
@@ -2490,12 +2614,204 @@ export const openapiSpec = {
             enum: ['merchant_retry_rejected_after_payment', null],
           },
           activityType: { type: 'string', enum: ['delegate_sweep'] },
-          chainId: { type: 'integer' },
-          safeId: uuid,
-          safeAddress: address,
-          safeName: { type: 'string' },
-          agentId: uuid,
           agentName: { type: 'string' },
+          // #984 spec correction: emitted on every enriched row (string | null),
+          // was missing while additionalProperties:false claimed completeness.
+          amountSek: { type: ['string', 'null'] },
+        },
+      },
+      Transaction: {
+        description: 'Aggregated-feed transaction: the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields.',
+        allOf: [
+          { $ref: '#/components/schemas/TransactionBase' },
+          {
+            type: 'object',
+            required: ['chainId', 'safeId', 'safeAddress', 'safeName'],
+            properties: {
+              chainId: { type: 'integer' },
+              safeId: uuid,
+              safeAddress: address,
+              safeName: { type: 'string' },
+              agentId: uuid,
+            },
+          },
+        ],
+      },
+      TransactionsPageResponse: {
+        description: 'Per-Safe paginated transaction list (`GET /transactions/{safeAddress}`). Items carry no Safe scope — the Safe is the path parameter.',
+        type: 'object',
+        required: ['transactions', 'total', 'page', 'limit', 'pages'],
+        properties: {
+          transactions: { type: 'array', items: { $ref: '#/components/schemas/TransactionBase' } },
+          total: { type: 'integer' },
+          page: { type: 'integer', minimum: 1 },
+          limit: { type: 'integer' },
+          pages: { type: 'integer', description: '0 when total is 0.' },
+        },
+        additionalProperties: false,
+      },
+      BalanceItem: {
+        type: 'object',
+        required: ['symbol', 'address', 'balance', 'formatted', 'decimals'],
+        properties: {
+          symbol: { type: 'string' },
+          address: { type: ['string', 'null'], description: 'Token contract address; null for the chain-native token (exactly one entry).' },
+          balance: { type: 'string', description: "Raw base units; '0' when the RPC lookup failed." },
+          formatted: { type: 'string' },
+          decimals: { type: 'integer' },
+        },
+        additionalProperties: false,
+      },
+      BalancesResponse: {
+        type: 'object',
+        required: ['balances'],
+        properties: {
+          balances: { type: 'array', items: { $ref: '#/components/schemas/BalanceItem' }, description: 'Native token first, then ERC-20s in registry order. Never empty.' },
+        },
+        additionalProperties: false,
+      },
+      PortfolioBreakdown: {
+        type: 'object',
+        required: ['symbol', 'balance', 'formatted', 'usdValue', 'eurValue'],
+        properties: {
+          symbol: { type: 'string' },
+          balance: { type: 'string', description: "Raw base units; '0' on RPC failure." },
+          formatted: { type: 'string' },
+          usdValue: { type: 'number', description: '0 when the price feed failed.' },
+          eurValue: { type: 'number' },
+        },
+        additionalProperties: false,
+      },
+      PortfolioResponse: {
+        type: 'object',
+        required: ['totalUsd', 'totalEur', 'breakdown'],
+        properties: {
+          totalUsd: { type: 'number' },
+          totalEur: { type: 'number' },
+          breakdown: { type: 'array', items: { $ref: '#/components/schemas/PortfolioBreakdown' } },
+        },
+        additionalProperties: false,
+      },
+      SafeDetails: {
+        type: 'object',
+        required: ['address', 'owners', 'threshold', 'nonce'],
+        properties: {
+          address: { type: 'string', description: 'Echoed back as supplied — not re-checksummed.' },
+          owners: { type: 'array', items: address, description: 'Checksummed owner addresses from the contract.' },
+          threshold: { type: 'integer' },
+          nonce: { type: 'integer' },
+        },
+        additionalProperties: false,
+      },
+      TransactionFilterOptionsResponse: {
+        type: 'object',
+        required: ['safes', 'agents', 'tokens'],
+        properties: {
+          safes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'name', 'address', 'chainId'],
+              properties: { id: uuid, name: { type: 'string' }, address, chainId: { type: 'integer' } },
+              additionalProperties: false,
+            },
+          },
+          agents: {
+            type: 'array',
+            description: 'ALL agents including revoked — unlike the dashboard preview.',
+            items: {
+              type: 'object',
+              required: ['id', 'name', 'status'],
+              properties: { id: uuid, name: { type: 'string' }, status: { type: 'string', enum: ['active', 'paused', 'revoked'] } },
+              additionalProperties: false,
+            },
+          },
+          tokens: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['key', 'symbol', 'address', 'chainId', 'isNative'],
+              properties: {
+                key: { type: 'string', description: "'<chainId>:native' or '<chainId>:<lowercased address>'." },
+                symbol: { type: 'string' },
+                address: { type: ['string', 'null'], description: 'null iff isNative.' },
+                chainId: { type: 'integer' },
+                isNative: { type: 'boolean' },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      DashboardAgentAllowance: {
+        type: 'object',
+        required: ['tokenSymbol', 'allowanceAmount', 'resetPeriodMin'],
+        properties: {
+          tokenSymbol: { type: 'string' },
+          allowanceAmount: { type: 'string' },
+          resetPeriodMin: { type: 'integer' },
+        },
+        additionalProperties: false,
+      },
+      DashboardAgentPreview: {
+        type: 'object',
+        required: ['id', 'name', 'status', 'safeId', 'safeName', 'safeChainId', 'allowances'],
+        properties: {
+          id: uuid,
+          name: { type: 'string' },
+          status: { type: 'string', enum: ['active', 'paused'], description: 'Revoked agents are excluded from the preview query.' },
+          safeId: { type: ['string', 'null'], format: 'uuid' },
+          safeName: { type: ['string', 'null'] },
+          safeChainId: { type: ['integer', 'null'] },
+          allowances: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentAllowance' } },
+        },
+        additionalProperties: false,
+      },
+      DashboardOverviewResponse: {
+        type: 'object',
+        required: ['totals', 'change', 'metrics', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'transactions'],
+        properties: {
+          totals: {
+            type: 'object',
+            required: ['usd', 'eur'],
+            properties: { usd: { type: 'number' }, eur: { type: 'number' } },
+            additionalProperties: false,
+          },
+          change: {
+            type: 'object',
+            required: ['available', 'usdAmount', 'eurAmount', 'usdPercent', 'eurPercent'],
+            properties: {
+              available: { type: 'boolean', description: 'true iff a yesterday snapshot existed to diff against.' },
+              usdAmount: { type: 'number' },
+              eurAmount: { type: 'number' },
+              usdPercent: { type: 'number', description: '0 when unavailable or the previous total was 0.' },
+              eurPercent: { type: 'number' },
+            },
+            additionalProperties: false,
+          },
+          metrics: {
+            type: 'object',
+            required: ['connectedAgents', 'monthlyAgentSpendUsd', 'monthlyAgentSpendEur', 'successfulTransactions', 'activeAccounts'],
+            properties: {
+              connectedAgents: { type: 'integer', description: "Agents with status 'active' only." },
+              monthlyAgentSpendUsd: { type: 'number' },
+              monthlyAgentSpendEur: { type: 'number' },
+              successfulTransactions: { type: 'integer' },
+              activeAccounts: { type: 'integer', description: 'All linked Safes, regardless of activity.' },
+            },
+            additionalProperties: false,
+          },
+          actionableApprovals: { type: 'integer' },
+          pendingApprovals: { type: 'integer', description: 'Duplicate of actionableApprovals (same query), kept for compatibility.' },
+          onboardingProgress: {
+            type: 'object',
+            required: ['hasFirstAgentPayment'],
+            properties: { hasFirstAgentPayment: { type: 'boolean' } },
+            additionalProperties: false,
+          },
+          agents: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentPreview' }, description: 'At most 6.' },
+          transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' }, description: 'At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection.' },
         },
         additionalProperties: false,
       },

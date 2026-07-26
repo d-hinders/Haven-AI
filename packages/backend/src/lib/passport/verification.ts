@@ -30,7 +30,7 @@
 import * as repo from '../../infra/repositories/agent-passports.js'
 import type { VerificationRow } from '../../infra/repositories/agent-passports.js'
 import { AssuranceLevel } from './schema.js'
-import type { AnchorState, Standing } from './revocation.js'
+import { standingForStatus, anchorForPassport } from './revocation.js'
 import {
   RECEIPT_TTL_SECONDS,
   RECEIPT_VERSION,
@@ -55,28 +55,6 @@ export type PassportQuery = { address: string } | { attestationUid: string }
 export type VerificationResult =
   | { found: true; signed: SignedPassportReceipt }
   | { found: false; reason: 'no_passport' }
-
-/**
- * Standing, from the agent's status alone.
- *
- * Same allow-list as `passportStanding()` and for the same reason: only the
- * literal 'active' is active, so a status added by a later migration cannot
- * become a permission by default. Duplicated deliberately rather than shared
- * through a second query — the verifier reads one row, and this is the seam
- * where a merchant-facing answer is decided.
- */
-function standingOf(agentStatus: string): Standing {
-  if (agentStatus === 'revoked') return 'revoked'
-  if (agentStatus === 'active') return 'active'
-  return 'suspended'
-}
-
-function anchorOf(row: VerificationRow): AnchorState {
-  if (row.passport_status !== 'anchored') return 'not_anchored'
-  if (row.revocation_status === 'confirmed') return 'revoked_onchain'
-  if (row.revocation_status === 'pending') return 'revocation_pending'
-  return 'anchored'
-}
 
 /**
  * The enforced-controls summary — booleans only.
@@ -114,8 +92,11 @@ export async function buildReceipt(row: VerificationRow): Promise<SignedPassport
     agentEoa: row.agent_eoa,
     smartAccount: row.smart_account,
     assuranceLevel: AssuranceLevel.L0,
-    standing: standingOf(row.agent_status),
-    anchor: anchorOf(row),
+    // Shared with `passportStanding()`, not re-implemented: a copy would be
+    // free to drift, and the failure mode is the receipt a merchant holds
+    // disagreeing with Haven's own answer for the same agent.
+    standing: standingForStatus(row.agent_status),
+    anchor: anchorForPassport(row.passport_status, row.revocation_status),
     evidenceUid: row.attestation_uid,
     chainId: row.chain_id,
     controls: controlsOf(row),

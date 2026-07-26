@@ -182,7 +182,12 @@ setRevoker(revokeOnChain)
 // transactions, while this one signs public assertions and its address is
 // published for pinning. Unset means verification is off, and the endpoint
 // fails closed rather than serving an unsigned receipt.
-setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null)
+// Refuses at boot if it IS the relayer key — the static invariant test reads
+// source, so only a runtime check can catch that operator copy-paste.
+setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null, [
+  config.relayerPrivateKey,
+  ...SUPPORTED_CHAIN_IDS.map((id) => process.env[`RELAYER_PRIVATE_KEY_${id}`]),
+])
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })

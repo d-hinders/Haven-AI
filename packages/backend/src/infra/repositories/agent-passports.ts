@@ -183,17 +183,27 @@ export async function insertRequested(
  * lookup without it, and a receipt must report what was actually attested
  * rather than a fresh derivation that could silently disagree with the chain.
  *
+ * Takes the anchor facts as ONE object rather than a growing positional list:
+ * the previous shape put `addresses` between `txHash` and the trailing
+ * `db: Executor`, so the next caller needing a transaction client had to know
+ * a new slot had appeared in the middle. A named object cannot be mis-slotted.
+ *
  * The zero-address sentinel is an EAS ENCODING detail and is mapped to NULL
  * here — see migration 050. Storing it would collide every EOA-only agent on
  * one "address" in the verifier's lookup.
  */
 export async function markAnchored(
   agentId: string,
-  attestationUid: string,
-  txHash: string,
-  addresses: { agentEoa: string | null; smartAccount: string | null } = { agentEoa: null, smartAccount: null },
+  anchor: {
+    attestationUid: string
+    txHash: string
+    agentEoa: string | null
+    smartAccount: string | null
+  },
   db: Executor = pool,
 ): Promise<void> {
+  const { attestationUid, txHash } = anchor
+  const addresses = anchor
   await db.query(
     `UPDATE agent_passports
         SET status = 'anchored', attestation_uid = $2, tx_hash = $3,

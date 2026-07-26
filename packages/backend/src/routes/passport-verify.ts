@@ -16,7 +16,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { isAddress } from '@haven_ai/core'
-import { publicVerifyRateLimit } from '../middleware/rate-limit.js'
+import { publicIssuerRateLimit, publicVerifyRateLimit } from '../middleware/rate-limit.js'
 import {
   verifyPassport,
   isReceiptSigningConfigured,
@@ -35,7 +35,7 @@ export default async function passportVerifyRoutes(app: FastifyInstance): Promis
    * merchant has to extract from a receipt it has not yet verified — trusting
    * the issuer field of an unverified artifact is circular.
    */
-  app.get('/issuer', { config: publicVerifyRateLimit }, async (_request, reply) => {
+  app.get('/issuer', { config: publicIssuerRateLimit }, async (_request, reply) => {
     const issuer = receiptIssuerAddress()
     if (!issuer) {
       return reply.code(503).send({ error: 'Passport verification is not configured on this deployment' })

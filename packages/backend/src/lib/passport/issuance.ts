@@ -94,7 +94,9 @@ async function markAnchored(
   result: AnchorResult,
   claim: PassportClaim,
 ): Promise<void> {
-  await repo.markAnchored(agentId, result.attestationUid, result.txHash, {
+  await repo.markAnchored(agentId, {
+    attestationUid: result.attestationUid,
+    txHash: result.txHash,
     agentEoa: claim.agentEoa,
     smartAccount: claim.smartAccount,
   })

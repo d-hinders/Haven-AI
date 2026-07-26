@@ -46,6 +46,42 @@ export type Standing = 'active' | 'suspended' | 'revoked' | 'unknown'
 /** Progress of the on-chain anchor. Never the authority. */
 export type AnchorState = 'not_anchored' | 'anchored' | 'revocation_pending' | 'revoked_onchain'
 
+/**
+ * Agent status → standing. THE allow-list, and the only one.
+ *
+ * Exported and shared with the merchant-facing verifier (#974) rather than
+ * duplicated there. A copy would be free to drift the moment a migration adds
+ * an agent status — and the failure mode is the receipt Haven hands a merchant
+ * disagreeing with Haven's own answer for the same agent, which is the exact
+ * inconsistency #973 exists to eliminate, recreated one layer up.
+ *
+ * Allow-list, not deny-list: ONLY 'active' reads as active. A deny-list
+ * (`!== 'revoked' ? 'active' : …`) makes every present and future status a
+ * permission by default — it already read `paused` as active once.
+ */
+export function standingForStatus(agentStatus: string): Standing {
+  if (agentStatus === 'revoked') return 'revoked'
+  if (agentStatus === 'active') return 'active'
+  return 'suspended'
+}
+
+/**
+ * Passport row state → anchor progress. Shared with the verifier for the same
+ * reason as `standingForStatus`.
+ *
+ * Takes the two columns rather than a row type so both callers' differently
+ * shaped query results can use it.
+ */
+export function anchorForPassport(
+  passportStatus: string | null,
+  revocationStatus: string | null,
+): AnchorState {
+  if (passportStatus !== 'anchored') return 'not_anchored'
+  if (revocationStatus === 'confirmed') return 'revoked_onchain'
+  if (revocationStatus === 'pending') return 'revocation_pending'
+  return 'anchored'
+}
+
 export interface PassportStanding {
   agentId: string
   /** THE answer. Derived from the DB alone. */
@@ -82,27 +118,8 @@ export async function passportStanding(agentId: string): Promise<PassportStandin
 
   // The DB decides. Note this reads `agents.status`, NOT any passport column:
   // an agent revoked before its passport ever anchored is still revoked.
-  //
-  // Allow-list, not deny-list: ONLY 'active' reads as active. A deny-list
-  // (`!== 'revoked' ? 'active' : ...`) makes every present and future status a
-  // permission by default — it already read `paused` as active, and the next
-  // status added would inherit the same bug silently.
-  const standing: Standing =
-    row.agent_status === 'revoked'
-      ? 'revoked'
-      : row.agent_status === 'active'
-        ? 'active'
-        : 'suspended'
-
-  let anchor: AnchorState = 'not_anchored'
-  if (row.passport_status === 'anchored') {
-    anchor =
-      row.revocation_status === 'confirmed'
-        ? 'revoked_onchain'
-        : row.revocation_status === 'pending'
-          ? 'revocation_pending'
-          : 'anchored'
-  }
+  const standing = standingForStatus(row.agent_status)
+  const anchor = anchorForPassport(row.passport_status, row.revocation_status)
 
   return {
     agentId,

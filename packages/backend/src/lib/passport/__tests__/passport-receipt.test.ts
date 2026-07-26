@@ -81,6 +81,57 @@ describe('offline verification — the whole point of a signed receipt', () => {
     })
   })
 
+  it('REJECTS a tampered control summary — every NESTED field is signed too', async () => {
+    // Regression test for a real hole in the first implementation. The
+    // canonicalizer was `JSON.stringify(receipt, Object.keys(receipt).sort())`,
+    // whose array-replacer form is a recursive property ALLOW-LIST rather than
+    // a key ordering: `controls`'s keys are not top-level names, so it
+    // serialized as `{}` and was never signed. Anyone could flip an ungoverned
+    // agent to policyEnforcedOnchain: true and the documented offline check
+    // still passed — on the single field the receipt exists to assert.
+    const signed = await signReceipt(
+      receipt({ controls: { rail: 'allowance', policyEnforcedOnchain: false, treasuryBound: false } }),
+    )
+    const forged = {
+      ...signed,
+      receipt: {
+        ...signed.receipt,
+        controls: { rail: 'delegation', policyEnforcedOnchain: true, treasuryBound: true },
+      },
+    }
+    expect(canonicalize(forged.receipt)).not.toBe(canonicalize(signed.receipt))
+    expect(verifyReceipt(forged, SIGNER.address)).toEqual({
+      valid: false,
+      reason: 'not_signed_by_issuer',
+    })
+  })
+
+  it('canonicalizes NESTED keys too, so a merchant’s re-serialization still verifies', async () => {
+    // The other half of the same bug: sorting must be recursive, or a merchant
+    // whose JSON parser hands back `controls` in a different key order computes
+    // different bytes and rejects a valid receipt.
+    const signed = await signReceipt(receipt())
+    const reordered = {
+      ...signed.receipt,
+      controls: {
+        treasuryBound: signed.receipt.controls!.treasuryBound,
+        rail: signed.receipt.controls!.rail,
+        policyEnforcedOnchain: signed.receipt.controls!.policyEnforcedOnchain,
+      },
+    }
+    expect(canonicalize(reordered)).toBe(canonicalize(signed.receipt))
+    expect(verifyReceipt({ ...signed, receipt: reordered }, SIGNER.address).valid).toBe(true)
+  })
+
+  it('the canonical string actually CONTAINS the control fields', async () => {
+    // Belt and braces: the tamper test above would also pass if `controls` were
+    // dropped from BOTH sides. Assert the bytes really carry them.
+    const canonical = canonicalize(receipt())
+    expect(canonical).toContain('"policyEnforcedOnchain":true')
+    expect(canonical).toContain('"rail":"delegation"')
+    expect(canonical).not.toContain('"controls":{}')
+  })
+
   it('REJECTS an extended expiry — a merchant cannot widen its own freshness window', async () => {
     const signed = await signReceipt(receipt())
     const forged = {
@@ -135,7 +186,10 @@ describe('freshness is signed, not advisory', () => {
 
   it('rejects a receipt from a future payload version', async () => {
     const signed = await signReceipt(receipt())
-    const bumped = { ...signed, receipt: { ...signed.receipt, version: 'haven-passport-receipt/2' } }
+    // Deliberately not a literal next-version string: this test must keep
+    // testing "unknown version" after the real one is bumped, not silently
+    // start asserting that the CURRENT version is rejected.
+    const bumped = { ...signed, receipt: { ...signed.receipt, version: `${RECEIPT_VERSION}-unknown` } }
     expect(verifyReceipt(bumped, SIGNER.address)).toEqual({
       valid: false,
       reason: 'unsupported_version',
@@ -156,5 +210,29 @@ describe('fail-closed when signing is unconfigured', () => {
   it('treats a blank key as unconfigured, not as a key', async () => {
     setReceiptSigningKey('   ')
     expect(isReceiptSigningConfigured()).toBe(false)
+  })
+
+  it('REFUSES the relayer key — the static invariant test cannot see config', async () => {
+    // "Two signers, neither able to spend" is enforced by a non-custody test
+    // that reads SOURCE TEXT, so it is blind to an operator pasting the relayer
+    // key into PASSPORT_RECEIPT_SIGNING_KEY. That one copy-paste collapses the
+    // roles and publishes the gas key's address for merchants to pin, while
+    // every test stays green. It has to fail at boot instead.
+    expect(() => setReceiptSigningKey(OTHER.privateKey, [OTHER.privateKey])).toThrow(
+      /must not be the relayer key/,
+    )
+    expect(isReceiptSigningConfigured()).toBe(false)
+  })
+
+  it('ignores surrounding whitespace when comparing against the relayer key', async () => {
+    // A trailing newline from a copy-pasted secret must not defeat the check.
+    expect(() => setReceiptSigningKey(` ${OTHER.privateKey} `, [`${OTHER.privateKey}\n`])).toThrow(
+      /must not be the relayer key/,
+    )
+  })
+
+  it('accepts a distinct key alongside a configured relayer key', () => {
+    setReceiptSigningKey(SIGNER.privateKey, [OTHER.privateKey])
+    expect(receiptIssuerAddress()?.toLowerCase()).toBe(SIGNER.address.toLowerCase())
   })
 })

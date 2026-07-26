@@ -33,8 +33,22 @@ export const version = '050_agent_passport_addresses'
  *
  * Addresses are stored LOWERCASED so lookups need no checksum handling.
  *
- * Additive and non-destructive. Existing rows keep NULLs: a passport anchored
- * before this migration is still valid on-chain and still resolvable by UID.
+ * ## No backfill, deliberately
+ *
+ * Existing rows keep NULLs, and the lookup can never match a NULL — so a
+ * passport anchored before this migration is resolvable by UID but not by
+ * address. That is acceptable only because there are **no anchored rows**: the
+ * schema UID has not been registered on any deployed environment yet (#971's
+ * operator step), and issuance refuses fail-closed without it, so nothing has
+ * ever anchored.
+ *
+ * If that ever stops being true, note a backfill cannot be written in SQL: the
+ * Hybrid account address is derived off-chain from the delegate EOA, so it
+ * would have to be a script that re-derives per agent — and the honest thing
+ * for a pre-existing row would be to read the addresses back from the
+ * attestation rather than re-derive them.
+ *
+ * Additive and non-destructive.
  */
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`

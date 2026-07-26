@@ -62,8 +62,20 @@ import { AssuranceLevel } from './schema.js'
  */
 export const RECEIPT_TTL_SECONDS = 300
 
-/** Bumped if the signed payload's shape ever changes. Part of what is signed. */
-export const RECEIPT_VERSION = 'haven-passport-receipt/1'
+/**
+ * Bumped if the signed payload's shape or its serialization ever changes. Part
+ * of what is signed.
+ *
+ * `/2` fixes a real defect in `/1`: the canonicalizer used
+ * `JSON.stringify(receipt, Object.keys(receipt).sort())`, whose array-replacer
+ * form is a **recursive property allow-list**, not a key ordering. Nested keys
+ * are filtered against the same top-level list, so `controls` serialized as
+ * `{}` and was therefore never signed — two receipts differing only in
+ * `policyEnforcedOnchain` produced byte-identical signatures. `/1` was never
+ * released; the version is bumped anyway so any receipt minted against it can
+ * never verify.
+ */
+export const RECEIPT_VERSION = 'haven-passport-receipt/2'
 
 /**
  * The enforced controls, as a SUMMARY.
@@ -119,15 +131,41 @@ export interface SignedPassportReceipt {
 }
 
 /**
- * Deterministic serialization — sorted keys, no whitespace.
+ * Deterministic serialization — every key sorted, at every depth, no whitespace.
  *
  * The signature is over a STRING, so a verifier that re-serializes differently
  * gets a different digest and rejects a perfectly good receipt. Sorting the
  * keys makes the bytes reproducible from the parsed object alone, which is what
  * lets a merchant verify without keeping our exact wire ordering.
+ *
+ * ## Do not "simplify" this to `JSON.stringify(obj, Object.keys(obj).sort())`
+ *
+ * That was the first implementation and it was a security hole. The array form
+ * of `JSON.stringify`'s replacer is a **recursive property allow-list**, not a
+ * key ordering: nested objects have their keys filtered against the same
+ * top-level array. `controls`'s keys are not top-level names, so it serialized
+ * as `{}` — and the field the whole receipt is about (`policyEnforcedOnchain`)
+ * was excluded from the signed bytes entirely. Two receipts differing only in
+ * their control summary signed identically, so anyone could flip an ungoverned
+ * agent to `policyEnforcedOnchain: true` and the documented offline check
+ * would still pass.
+ *
+ * Rebuilding the object explicitly is the point: it is the only form where
+ * "what is signed" equals "what is in the object", which is the property a
+ * merchant is relying on.
  */
 export function canonicalize(receipt: PassportReceipt): string {
-  return JSON.stringify(receipt, Object.keys(receipt).sort())
+  return JSON.stringify(sortDeep(receipt))
+}
+
+/** Rebuild `value` with every object's keys in sorted order, recursively. */
+function sortDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortDeep)
+  if (value === null || typeof value !== 'object') return value
+  const source = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(source).sort()) out[key] = sortDeep(source[key])
+  return out
 }
 
 let signerKey: string | null = null
@@ -135,9 +173,33 @@ let signerKey: string | null = null
 /**
  * Configure the receipt signing key. Injectable so tests never need a real key
  * and so `index.ts` stays the only place that reads the environment.
+ *
+ * `forbiddenKeys` is a real backstop, not a formality. "Two signers, neither
+ * able to spend" is enforced statically by a non-custody invariant test — but
+ * that test reads source text, so it cannot see that an operator pasted the
+ * RELAYER key into `PASSPORT_RECEIPT_SIGNING_KEY`. That single copy-paste
+ * collapses the two roles back into one and puts a key that pays gas for
+ * user-authorised transactions into a public, permissionless signing role
+ * whose address Haven then PUBLISHES. It must fail at boot, loudly, rather
+ * than pass green tests.
  */
-export function setReceiptSigningKey(privateKey: string | null): void {
-  signerKey = privateKey && privateKey.trim() ? privateKey.trim() : null
+export function setReceiptSigningKey(
+  privateKey: string | null,
+  forbiddenKeys: ReadonlyArray<string | null | undefined> = [],
+): void {
+  const key = privateKey && privateKey.trim() ? privateKey.trim() : null
+  // Cleared BEFORE validating, so a rejected configuration can never leave an
+  // earlier signer active. At boot the throw is fatal anyway; this matters for
+  // any later re-configuration, where "the new key was refused" must not mean
+  // "the old one silently kept signing".
+  signerKey = null
+  if (key && forbiddenKeys.some((k) => k && k.trim() === key)) {
+    throw new Error(
+      'PASSPORT_RECEIPT_SIGNING_KEY must not be the relayer key: its address is published ' +
+        'for merchants to pin, and the relayer pays gas for user-authorised transactions.',
+    )
+  }
+  signerKey = key
 }
 
 export function isReceiptSigningConfigured(): boolean {

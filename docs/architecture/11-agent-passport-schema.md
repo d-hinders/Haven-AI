@@ -219,9 +219,23 @@ the receipt's own `issuer` field — authenticating an artifact against a value 
 carries is circular.
 
 Key ordering does not matter: the signature is over a canonical serialization
-(sorted keys, no whitespace), so a merchant that parses and re-serializes still
-verifies. That is deliberate — a digest that depended on our wire ordering would
-make every such merchant conclude Haven was forging receipts.
+(**every** key sorted, at every depth, no whitespace), so a merchant that parses
+and re-serializes still verifies. That is deliberate — a digest that depended on
+our wire ordering would make every such merchant conclude Haven was forging
+receipts.
+
+> **Sort recursively.** `JSON.stringify(receipt, Object.keys(receipt).sort())`
+> looks like the same thing and is not: the array form of the replacer is a
+> recursive property *allow-list*, so nested objects have their keys filtered
+> against the top-level names. `controls` collapses to `{}` and drops out of the
+> signature entirely. That was the first implementation, and it meant
+> `policyEnforcedOnchain` — the field the receipt is *about* — was unsigned and
+> freely forgeable while the documented check still passed. Rebuild the object
+> and sort at every depth.
+
+`version` is part of the signed payload, so a receipt is only ever interpreted
+under the rules it was minted with. It is at `haven-passport-receipt/2`; `/1`
+was never released.
 
 ### Freshness, and the gap caching would otherwise reopen
 
@@ -250,6 +264,22 @@ payload — and an API that claimed to tell them apart would be asserting
 something it cannot know. `expired` stays separate because it is the one
 distinction that changes what a merchant should do: re-fetch, rather than treat
 as an attack.
+
+### Rate limiting is per SUBJECT, not per caller
+
+The endpoint is unauthenticated and there is no `trustProxy`, so `request.ip`
+collapses to the proxy address for all external traffic — a per-caller limit
+would be one global bucket, and a single client sending 121 requests a minute
+could 429 passport verification for **every merchant at once**. Raising the
+ceiling makes the shared bucket bigger, not safer.
+
+So the limiter keys on the **queried address or UID** (120/min each). Merchants
+verifying different agents never collide, and an abusive caller can only exhaust
+the bucket for the one agent it is hammering. That is also the right shape for
+the real threat — hammering or enumerating a specific subject — rather than for
+"who is calling", which behind an untrusted proxy is unknowable. Making
+per-caller limits real needs `trustProxy`, which changes `request.ip` for every
+rate-limited route including the money path; that is a separate decision.
 
 ### Minimal disclosure
 

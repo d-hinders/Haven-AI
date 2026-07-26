@@ -27,6 +27,7 @@
  */
 
 import * as repo from '../../infra/repositories/agent-passports.js'
+import { redactVendorSecrets } from '../execution-rail.js'
 import { getEasDeployment, isPassportConfigured } from './schema.js'
 import { AssuranceLevel } from './schema.js'
 import { buildAddressBinding, encodeAddressBinding } from './binding.js'
@@ -81,8 +82,16 @@ async function markAnchored(agentId: string, result: AnchorResult): Promise<void
   await repo.markAnchored(agentId, result.attestationUid, result.txHash)
 }
 
+/**
+ * Record a failure, REDACTED.
+ *
+ * `last_error` holds a provider message, and a bundler/RPC URL routinely
+ * carries `?apikey=...`. Persisting it raw would write a vendor secret into the
+ * database and then surface it in any UI that shows why a passport failed —
+ * the exact leak `redactVendorSecrets` exists for on the execution rail.
+ */
 async function markFailed(agentId: string, error: string): Promise<void> {
-  await repo.markFailed(agentId, error)
+  await repo.markFailed(agentId, redactVendorSecrets(error))
 }
 
 /**

@@ -41,7 +41,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-07-25"
+last-verified: "2026-07-26"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

@@ -103,6 +103,22 @@ describe('the EAS write NEVER blocks agent creation', () => {
     // No unhandled rejection — that is the whole assertion.
   })
 
+  it('REDACTS vendor secrets before persisting the error', async () => {
+    // `last_error` is shown in the UI and stored in the DB; a bundler/RPC URL
+    // routinely carries ?apikey=... Persisting it raw would leak a vendor secret.
+    let recorded = ''
+    mockDb({
+      passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
+      onUpdate: (sql, p) => { if (/failed/.test(sql)) recorded = String(p[1]) },
+    })
+    setAnchor(async () => {
+      throw new Error('POST https://api.pimlico.io/v2/84532/rpc?apikey=sk_live_SECRET failed')
+    })
+    await issuePassport(AGENT, USER)
+    expect(recorded).not.toContain('sk_live_SECRET')
+    expect(recorded).toContain('apikey=REDACTED')
+  })
+
   it('degrades to a retryable failure when the schema is unregistered', async () => {
     delete process.env.AGENT_PASSPORT_SCHEMA_UID_84532
     let recorded = ''

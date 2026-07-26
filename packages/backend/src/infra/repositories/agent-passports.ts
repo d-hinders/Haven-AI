@@ -58,7 +58,10 @@ export interface PassportRow {
 export interface AgentPassportFacts {
   delegate_address: string | null
   chain_id: number | null
+  /** The TREASURY the agent spends from — not the agent's own smart account. */
   safe_address: string | null
+  account_type: string | null
+  execution_rail: string | null
 }
 
 export async function findByAgent(agentId: string, db: Executor = pool): Promise<PassportRow | null> {
@@ -81,13 +84,42 @@ export async function findAgentFacts(
   db: Executor = pool,
 ): Promise<AgentPassportFacts | null> {
   const { rows } = await db.query<AgentPassportFacts>(
-    `SELECT a.delegate_address, s.chain_id, s.safe_address
+    `SELECT a.delegate_address, s.chain_id, s.safe_address, s.account_type, s.execution_rail
        FROM agents a
        LEFT JOIN user_safes s ON s.id = a.safe_id
       WHERE a.id = $1 AND a.user_id = $2`,
     [agentId, userId],
   )
   return rows[0] ?? null
+}
+
+/**
+ * Atomically claim the right to anchor. Returns true for exactly ONE caller.
+ *
+ * `ON CONFLICT DO NOTHING` on insert prevents a second passport ROW, but not a
+ * second on-chain ATTESTATION — anchoring takes seconds (staticCall + attest +
+ * wait), and a plain read-then-branch lets two callers both observe 'pending'
+ * and both submit. The relayer would pay twice and we could track only one UID,
+ * leaving a real, revocable attestation permanently invisible to Haven.
+ *
+ * A claim older than the stale window is reclaimable so a crashed attempt
+ * recovers instead of wedging the passport forever.
+ */
+export async function claimForAnchoring(
+  agentId: string,
+  staleAfterSeconds = 600,
+  db: Executor = pool,
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE agent_passports
+        SET anchoring_started_at = NOW(), attempts = attempts + 1, updated_at = NOW()
+      WHERE agent_id = $1
+        AND status <> 'anchored'
+        AND (anchoring_started_at IS NULL
+             OR anchoring_started_at < NOW() - MAKE_INTERVAL(secs => $2))`,
+    [agentId, staleAfterSeconds],
+  )
+  return (rowCount ?? 0) > 0
 }
 
 /** The agent's bound chain, owner-scoped. Null row = not this user's agent. */
@@ -139,9 +171,12 @@ export async function markAnchored(
 
 export async function markFailed(agentId: string, error: string, db: Executor = pool): Promise<void> {
   // Truncated: a provider error can be enormous and this column is for humans.
+  // `attempts` is incremented by claimForAnchoring, not here — otherwise a
+  // pre-claim failure (no treasury, unregistered schema) would double-count.
+  // Clearing the claim makes the passport immediately retryable.
   await db.query(
     `UPDATE agent_passports
-        SET status = 'failed', attempts = attempts + 1,
+        SET status = 'failed', anchoring_started_at = NULL,
             last_error = $2, updated_at = NOW()
       WHERE agent_id = $1`,
     [agentId, error.slice(0, 500)],

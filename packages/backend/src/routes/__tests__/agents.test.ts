@@ -9,7 +9,25 @@ const { mockQuery } = vi.hoisted(() => ({
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),
+    // The create path opens a transaction client; route its queries to the same
+    // mock so BEGIN/INSERT/COMMIT/ROLLBACK are observable in mockQuery.calls.
+    connect: async () => ({
+      query: (...args: unknown[]) => mockQuery(...args),
+      release: () => {},
+    }),
   },
+}))
+
+// The passport module is mocked so the creation-path guarantee can be tested
+// directly: a passport problem must never fail, delay, or roll back the agent.
+const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
+  mockRequestPassport: vi.fn(),
+  mockIssueBestEffort: vi.fn(),
+}))
+vi.mock('../../lib/passport/index.js', () => ({
+  requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
+  issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
+  PASSPORT_CHAIN_IDS: new Set([84532]),
 }))
 
 vi.mock('../../middleware/auth.js', () => ({
@@ -32,6 +50,8 @@ const VALID_ALLOWANCE = {
 describe('agent routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
   })
 
   it('fetches one agent with allowances and null mcp_last_seen_at when never called', async () => {
@@ -385,5 +405,93 @@ describe('agent routes', () => {
     expect(mockQuery).toHaveBeenCalledTimes(1)
 
     await app.close()
+  })
+})
+
+/**
+ * The headline acceptance criterion of #972: creating an agent must succeed
+ * even when the passport path fails. Reviewer finding #4 — the code was correct
+ * on manual read but had ZERO regression protection, so nothing would catch a
+ * refactor that moved this before COMMIT or let the error escape.
+ */
+describe('agent creation — passport opt-in never breaks creation', () => {
+  // This block is a sibling of `describe('agent routes')`, so it needs its own
+  // reset — the other block's beforeEach does not reach here.
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
+  })
+
+  /** Mock the create path's queries: safe lookup, BEGIN, INSERT, safe info, COMMIT. */
+  function mockCreateFlow() {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (/SELECT id FROM user_safes/.test(sql)) return { rows: [{ id: 'safe-1' }] }
+      if (/INSERT INTO agents/.test(sql)) {
+        return { rows: [{ id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE, safe_id: 'safe-1', api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
+      }
+      if (/SELECT safe_address, name AS safe_name/.test(sql)) {
+        return { rows: [{ safe_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 84532 }] }
+      }
+      return { rows: [] }
+    })
+  }
+
+  const body = { name: 'A', delegate_address: VALID_DELEGATE, safe_id: 'safe-1', issue_passport: true }
+
+  it('returns 201 even when requestPassport THROWS', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+    mockRequestPassport.mockRejectedValue(new Error('passport table missing'))
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().id).toBe('agent-1')
+    // Never rolled back.
+    expect(mockQuery.mock.calls.some(([sql]) => /ROLLBACK/.test(String(sql)))).toBe(false)
+  })
+
+  it('returns 201 even when issuePassportBestEffort throws synchronously', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+    mockIssueBestEffort.mockImplementation(() => { throw new Error('boom') })
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(mockQuery.mock.calls.some(([sql]) => /ROLLBACK/.test(String(sql)))).toBe(false)
+  })
+
+  it('does not request a passport unless explicitly opted in', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+
+    const res = await app.inject({
+      method: 'POST', url: '/agents',
+      payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: 'safe-1' },
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(false)
+    expect(mockRequestPassport).not.toHaveBeenCalled()
+  })
+
+  it('skips the opt-in on an unsupported chain instead of creating a doomed row', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (/SELECT id FROM user_safes/.test(sql)) return { rows: [{ id: 'safe-1' }] }
+      if (/INSERT INTO agents/.test(sql)) return { rows: [{ id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE, safe_id: 'safe-1', api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
+      if (/SELECT safe_address, name AS safe_name/.test(sql)) {
+        return { rows: [{ safe_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 100 }] } // Gnosis — unsupported
+      }
+      return { rows: [] }
+    })
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(false)
+    expect(mockRequestPassport).not.toHaveBeenCalled()
   })
 })

@@ -11,7 +11,7 @@ import { getTokenBalance } from '../lib/allowance-module.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { requestPassport, issuePassportBestEffort } from '../lib/passport/index.js'
+import { requestPassport, issuePassportBestEffort, PASSPORT_CHAIN_IDS } from '../lib/passport/index.js'
 import { formatTokenValue } from '../lib/tokens.js'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -333,9 +333,18 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       // requestPassport records the intent, then the EAS write is fire-and-forget.
       // A slow, failing, or unfunded attestation degrades to "pending"/"failed"
       // on the passport row and never touches this response.
-      if (issue_passport === true && safeInfo.safe_chain_id != null) {
+      // Narrowed to a local so the chain id stays non-null for the call below;
+      // eligibility mirrors POST /agents/:id/passport so the two entry points
+      // agree rather than one silently creating a permanently-failed row.
+      const passportChainId =
+        issue_passport === true &&
+        safeInfo.safe_chain_id != null &&
+        PASSPORT_CHAIN_IDS.has(safeInfo.safe_chain_id)
+          ? safeInfo.safe_chain_id
+          : null
+      if (passportChainId != null) {
         try {
-          await requestPassport(agent.id, safeInfo.safe_chain_id)
+          await requestPassport(agent.id, passportChainId)
           issuePassportBestEffort(agent.id, sub)
         } catch (err) {
           request.log.warn({ err, agentId: agent.id }, 'passport request failed; agent created')
@@ -347,7 +356,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         ...safeInfo,
         api_key: apiKey,
         allowances: savedAllowances,
-        passport_requested: issue_passport === true && safeInfo.safe_chain_id != null,
+        passport_requested: passportChainId != null,
       })
     } catch (err) {
       await client.query('ROLLBACK')

@@ -28,6 +28,7 @@
 
 import * as repo from '../../infra/repositories/agent-passports.js'
 import { redactVendorSecrets } from '../execution-rail.js'
+import { computeHybridAccountAddress } from '../hybrid-provisioning.js'
 import { getEasDeployment, isPassportConfigured } from './schema.js'
 import { AssuranceLevel } from './schema.js'
 import { buildAddressBinding, encodeAddressBinding } from './binding.js'
@@ -119,10 +120,30 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
 
   let claim: PassportClaim
   try {
-    const binding = encodeAddressBinding(
-      buildAddressBinding({ delegateAddress: facts.delegate_address }),
-    )
     if (!facts.safe_address) throw new Error('agent has no bound treasury account')
+
+    // The agent's OWN smart account — the erc7710 delegator, derived from the
+    // delegate EOA. NOT `safe_address`, which is the treasury it spends from.
+    // Delegation-rail only; EOA-only agents legitimately have none.
+    //
+    // If this cannot be derived we FAIL (retryably) rather than issue a
+    // half-bound passport: #946 made settlement a per-payment choice, so a
+    // delegation-rail passport bound to the EOA alone would simply not verify
+    // for a merchant who settled via erc7710 — a silently wrong credential is
+    // worse than a missing one.
+    let smartAccountAddress: string | null = null
+    if (facts.execution_rail === 'delegation' || facts.account_type === 'delegator_hybrid') {
+      smartAccountAddress = await computeHybridAccountAddress(existing.chain_id, {
+        ownerAddress: facts.delegate_address as `0x${string}`,
+      })
+    }
+
+    const binding = encodeAddressBinding(
+      buildAddressBinding({
+        delegateAddress: facts.delegate_address,
+        smartAccountAddress,
+      }),
+    )
     const now = Math.floor(Date.now() / 1000)
     claim = {
       ...binding,
@@ -141,6 +162,10 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
     await markFailed(agentId, 'no anchor configured')
     return getPassport(agentId)
   }
+
+  // Win the right to anchor, atomically. A loser returns the current row
+  // untouched rather than submitting a second attest() — see claimForAnchoring.
+  if (!(await repo.claimForAnchoring(agentId))) return getPassport(agentId)
 
   try {
     getEasDeployment(chainId) // reject an unpinned chain before spending gas

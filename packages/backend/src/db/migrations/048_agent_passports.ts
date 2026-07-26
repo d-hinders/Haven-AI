@@ -36,6 +36,13 @@ export async function up(client: PoolClient): Promise<void> {
       attestation_uid TEXT,
       tx_hash TEXT,
       attempts INTEGER NOT NULL DEFAULT 0,
+      -- Atomic anchoring claim. Two callers can legitimately race (creation
+      -- opt-in vs the route vs the retry sweep); without a claim BOTH would see
+      -- 'pending', both submit attest(), and the relayer pays twice for two real
+      -- on-chain attestations of which we could only ever track one. Stale
+      -- claims expire so a crashed attempt is recoverable. Same discipline as
+      -- reporting's claimSync.
+      anchoring_started_at TIMESTAMPTZ,
       last_error TEXT,
       requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       anchored_at TIMESTAMPTZ,

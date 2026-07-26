@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('../../../db.js', () => ({ default: { query: vi.fn() } }))
+vi.mock('../../hybrid-provisioning.js', () => ({
+  computeHybridAccountAddress: vi.fn(async () => '0x2222222222222222222222222222222222222222'),
+}))
 
 const { default: pool } = (await import('../../../db.js')) as unknown as {
   default: { query: ReturnType<typeof vi.fn> }
@@ -38,11 +41,20 @@ function mockDb(opts: {
     if (/FROM agents a/.test(sql) && /LEFT JOIN user_safes/.test(sql)) {
       return { rows: opts.agent === undefined ? [{ delegate_address: EOA, chain_id: 84532, safe_address: TREASURY }] : opts.agent ? [opts.agent] : [] }
     }
+    if (/SET anchoring_started_at = NOW\(\)/.test(sql)) {
+      // Mirrors the real partial UPDATE: only one caller can win the claim.
+      if (!passport || passport.status === 'anchored' || passport.anchoring_started_at) {
+        return { rows: [], rowCount: 0 }
+      }
+      passport.anchoring_started_at = new Date()
+      passport.attempts = (passport.attempts as number) + 1
+      return { rows: [], rowCount: 1 }
+    }
     if (/UPDATE agent_passports/.test(sql)) {
       opts.onUpdate?.(sql, params)
       if (passport) {
         if (/status = 'anchored'/.test(sql)) Object.assign(passport, { status: 'anchored', attestation_uid: params[1], tx_hash: params[2] })
-        if (/status = 'failed'/.test(sql)) Object.assign(passport, { status: 'failed', last_error: params[1], attempts: (passport.attempts as number) + 1 })
+        if (/status = 'failed'/.test(sql)) Object.assign(passport, { status: 'failed', last_error: params[1], anchoring_started_at: null })
       }
       return { rows: [], rowCount: 1 }
     }
@@ -54,6 +66,13 @@ function mockDb(opts: {
 beforeEach(() => {
   vi.clearAllMocks()
   setAnchor(null)
+  // NOTE: this LITERAL key name is load-bearing beyond this test. Production
+  // builds it as `AGENT_PASSPORT_SCHEMA_UID_${chainId}` — a template literal the
+  // .env.example drift scanner cannot see — so this line is what keeps the key
+  // "read" as far as that check is concerned. If you refactor this env setup
+  // (e.g. into a helper), src/docs-drift/env-example-drift.test.ts will fail;
+  // the fix is to re-add the DOCUMENTED_BUT_UNREAD entry for
+  // AGENT_PASSPORT_SCHEMA_UID, not to delete the documented key.
   process.env.AGENT_PASSPORT_SCHEMA_UID_84532 = UID
 })
 
@@ -203,5 +222,72 @@ describe('retry sweep', () => {
   it('is a no-op when nothing is pending', async () => {
     mockDb({ passport: null, retryRows: [] })
     expect(await retryPendingPassports()).toEqual({ attempted: 0 })
+  })
+})
+
+
+describe('concurrency — the atomic anchoring claim (reviewer finding #2)', () => {
+  it('two concurrent issuances anchor EXACTLY ONCE', async () => {
+    // Without a claim both callers observe 'pending', both submit attest(), the
+    // relayer pays twice, and only one UID is ever recorded — leaving a real,
+    // revocable attestation permanently invisible to Haven.
+    mockDb({ passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 } })
+    let inflight = 0
+    const anchor = vi.fn(async () => {
+      inflight++
+      await new Promise((r) => setTimeout(r, 5))
+      return { attestationUid: UID, txHash: '0x9' }
+    })
+    setAnchor(anchor)
+    await Promise.all([issuePassport(AGENT, USER), issuePassport(AGENT, USER)])
+    expect(anchor).toHaveBeenCalledTimes(1)
+    expect(inflight).toBe(1)
+  })
+
+  it('a failed attempt releases the claim so a retry can proceed', async () => {
+    mockDb({ passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 } })
+    setAnchor(async () => { throw new Error('rpc down') })
+    expect((await issuePassport(AGENT, USER))?.status).toBe('failed')
+    // The retry must not be wedged by the previous claim.
+    const anchor = vi.fn(async () => ({ attestationUid: UID, txHash: '0xa' }))
+    setAnchor(anchor)
+    expect((await issuePassport(AGENT, USER))?.status).toBe('anchored')
+    expect(anchor).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('delegation-rail agents bind their smart account (reviewer finding #3)', () => {
+  it('binds the derived smart account, NOT the treasury', async () => {
+    mockDb({
+      passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
+      agent: {
+        delegate_address: EOA,
+        chain_id: 84532,
+        safe_address: TREASURY,
+        account_type: 'delegator_hybrid',
+        execution_rail: 'delegation',
+      },
+    })
+    const anchor = vi.fn(async () => ({ attestationUid: UID, txHash: '0x1' }))
+    setAnchor(anchor)
+    await issuePassport(AGENT, USER)
+    const [, claim] = anchor.mock.calls[0] as unknown as [number, Record<string, unknown>]
+    // Derived from the delegate EOA — the erc7710 delegator.
+    expect(claim.smartAccount).toBe('0x2222222222222222222222222222222222222222')
+    // The treasury is a DIFFERENT address and must not be reused as the account.
+    expect(claim.treasury).toBe(TREASURY)
+    expect(claim.smartAccount).not.toBe(claim.treasury)
+  })
+
+  it('an EOA-only agent still binds the absent sentinel', async () => {
+    mockDb({
+      passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
+      agent: { delegate_address: EOA, chain_id: 84532, safe_address: TREASURY, account_type: null, execution_rail: 'allowance_module' },
+    })
+    const anchor = vi.fn(async () => ({ attestationUid: UID, txHash: '0x1' }))
+    setAnchor(anchor)
+    await issuePassport(AGENT, USER)
+    const [, claim] = anchor.mock.calls[0] as unknown as [number, Record<string, unknown>]
+    expect(claim.smartAccount).toBe('0x0000000000000000000000000000000000000000')
   })
 })

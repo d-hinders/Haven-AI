@@ -48,6 +48,30 @@ export {
 // issuance state machine stays testable without ethers or a relayer.
 export { anchorOnChain, revokeOnChain, buildAttestCall, buildRevokeCall, encodeClaim } from './attestation.js'
 
+// The merchant-facing verifier (#974). Haven's DB is the authority here; the
+// attestation UID rides along as an evidence pointer, never as the decision.
+export {
+  verifyPassport,
+  buildReceipt,
+  type PassportQuery,
+  type VerificationResult,
+} from './verification.js'
+
+export {
+  RECEIPT_TTL_SECONDS,
+  RECEIPT_VERSION,
+  canonicalize,
+  setReceiptSigningKey,
+  isReceiptSigningConfigured,
+  receiptIssuerAddress,
+  signReceipt,
+  verifyReceipt,
+  type ControlSummary,
+  type PassportReceipt,
+  type SignedPassportReceipt,
+  type ReceiptVerification,
+} from './receipt.js'
+
 // Revocation + live standing (#973). `passportStanding` is THE answer to
 // "is this agent authorized right now?" — DB-authoritative, chain-eventual.
 export {

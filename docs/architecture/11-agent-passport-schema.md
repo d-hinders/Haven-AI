@@ -3,6 +3,8 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/lib/passport/**
+  - packages/backend/src/routes/agent-passports.ts
+  - packages/backend/src/routes/passport-verify.ts
   - packages/backend/scripts/register-passport-schema.ts
 last-verified: "2026-07-26"
 ---
@@ -176,6 +178,97 @@ Two properties make that safe to run repeatedly and from more than one place:
   concurrent attempts would burn gas and then fail on every backoff cycle
   forever instead of converging.
 
+## Verifying a passport (merchant-facing)
+
+Two public, unauthenticated endpoints. The caller is a merchant deciding
+whether to serve an agent; it has no Haven account and cannot be asked to get
+one.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /passport/issuer` | The address to pin, the payload version, and the receipt TTL |
+| `GET /passport/verify?address=0x…` or `?uid=0x…` | A **signed receipt**, or `{ found: false, reason: "no_passport" }` |
+
+Resolution works from **either** agent address — the delegate EOA a merchant
+sees on an EIP-3009 header, or the Hybrid account it sees as the delegator in
+erc7710 redemption. #971 binds both precisely because #946 made settlement a
+per-payment choice, so a merchant can verify from whichever address it holds.
+
+An agent with **no passport is a normal 200 answer**, not a 404. Issuance is
+opt-in, so most agents have none — and an error status is what makes an
+integration treat a lookup failure as a pass.
+
+### Why a signed receipt and not a boolean
+
+A bare `{ ok: true }` forces a live call to Haven for every merchant decision:
+an availability coupling (Haven down means merchants cannot gate) and a privacy
+one (Haven sees every merchant's traffic). The response is instead a
+self-contained artifact whose authenticity a merchant checks **offline**:
+
+```ts
+import { verifyMessage } from 'ethers' // or viem's verifyMessage
+
+const { receipt, signature } = await fetch(`${HAVEN}/passport/verify?address=${agent}`).then((r) => r.json())
+const canonical = JSON.stringify(receipt, Object.keys(receipt).sort())
+const ok = verifyMessage(canonical, signature).toLowerCase() === PINNED_ISSUER.toLowerCase()
+if (!ok || receipt.standing !== 'active' || receipt.expiresAt < Date.now() / 1000) return deny()
+```
+
+Pin `PINNED_ISSUER` once from `GET /passport/issuer`. Do **not** take it from
+the receipt's own `issuer` field — authenticating an artifact against a value it
+carries is circular.
+
+Key ordering does not matter: the signature is over a canonical serialization
+(sorted keys, no whitespace), so a merchant that parses and re-serializes still
+verifies. That is deliberate — a digest that depended on our wire ordering would
+make every such merchant conclude Haven was forging receipts.
+
+### Freshness, and the gap caching would otherwise reopen
+
+A cacheable receipt is **by definition potentially stale on replay**: the agent
+can be revoked a second after it was issued. Unbounded, that reintroduces
+exactly the "anchor says authorized, issuer says revoked" gap above — only with
+the merchant's cache playing the part of the lagging chain. Three things bound
+it, and all three are in the artifact rather than in advice:
+
+- **`expiresAt`, five minutes, and signed** — so a merchant cannot extend it and
+  an expired receipt is objectively expired rather than a matter of local policy.
+  The value is a deliberate choice: shorter and caching buys nothing over
+  calling us; much longer and a revocation could go unnoticed for most of a
+  payment session.
+- **`standingEpoch`, monotonic** — two receipts for the same agent are strictly
+  comparable, so a merchant can tell a newer one from an older one. `issuedAt`
+  alone cannot do this: clocks skew.
+- **Re-verify before anything irreversible.** Cached receipts are for routine
+  gating and rate-limiting. The endpoint always answers from current state;
+  caching is the merchant's choice, never ours.
+
+A verification failure reports **`not_signed_by_issuer`** rather than
+distinguishing "tampered" from "signed by someone else". Those are
+cryptographically indistinguishable — recovery yields *some* address for any
+payload — and an API that claimed to tell them apart would be asserting
+something it cannot know. `expired` stays separate because it is the one
+distinction that changes what a merchant should do: re-fetch, rather than treat
+as an attack.
+
+### Minimal disclosure
+
+The endpoint is unauthenticated, so the response shape *is* the protection. It
+carries standing, assurance level, the bound addresses (already public
+on-chain), and a boolean control summary — `rail`, `policyEnforcedOnchain`,
+`treasuryBound`. It carries **no** owner identity, budget amounts, balances,
+counterparties, or treasury address. A merchant needs to know an agent is
+governed, not how much its owner lets it spend.
+
+### Perimeter
+
+This answers a question about an **agent's governance status**. It verifies no
+payment, settles nothing, holds nothing, and takes no fee — none of the
+merchant-acquiring surface [`casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
+puts out of scope. Do not grow it into payment verification or receipts for
+settled merchant transactions; that is a different question with a different
+perimeter.
+
 ## Registration and configuration
 
 Registration is an **operator step** — an on-chain transaction needing a funded
@@ -206,6 +299,13 @@ verification run — never by copying the block.
 `PASSPORT_SCHEMA_REGISTRAR_KEY` is a throwaway testnet key for that one-off
 registration. **Never reuse `RELAYER_PRIVATE_KEY`**: registration is public and
 permissionless and has no business borrowing a key that moves value.
+
+`PASSPORT_RECEIPT_SIGNING_KEY` signs the verification receipts above and follows
+the same rule for the same reason — its address is *published* for merchants to
+pin, so it signs public assertions and must be dedicated. It is a **message
+signer only**: no provider, no transaction, and a non-custody invariant test
+enforces that rather than trusting the convention. Unset means verification is
+off and both endpoints return 503 rather than serving an unsigned receipt.
 
 ## Related
 

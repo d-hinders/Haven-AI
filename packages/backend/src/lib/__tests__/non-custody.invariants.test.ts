@@ -55,11 +55,30 @@ describe('non-custody invariants', () => {
     expect(migrations).toMatch(/api_key_hash/)
   })
 
-  // Invariant 3 — "no signer capable of spending": exactly one server-side
-  // signer (the relayer, which only pays gas).
-  it('instantiates exactly one server-side signer — the gas-only relayer', () => {
+  // Invariant 3 — "no signer capable of spending". Two server-side signers
+  // exist, and the list is exhaustive on purpose: adding a third is a
+  // non-custody decision, not an implementation detail.
+  //
+  //   lib/relayer.ts        — the gas-only relayer (pinned below).
+  //   lib/passport/receipt.ts — signs L0 verification receipts (#974). It is a
+  //     MESSAGE signer: no provider, no transaction, and its key is dedicated
+  //     (PASSPORT_RECEIPT_SIGNING_KEY, never the relayer's). The next test
+  //     enforces that confinement rather than taking this comment's word for it.
+  it('instantiates exactly two server-side signers — and no others', () => {
     const withSigner = productionFiles().filter((f) => /new Wallet\(/.test(readFileSync(f, 'utf8')))
-    expect(withSigner.map(rel)).toEqual(['lib/relayer.ts'])
+    expect(withSigner.map(rel).sort()).toEqual(['lib/passport/receipt.ts', 'lib/relayer.ts'])
+  })
+
+  it('keeps the receipt signer message-only — no provider, no transaction', () => {
+    // What makes a second signer acceptable: it can prove Haven said something,
+    // and it can do nothing else. A provider or a sendTransaction call here
+    // would turn a public assertion key into one that touches the chain — the
+    // exact reason it must not be the relayer key in the first place.
+    const receipt = readFileSync(join(SRC, 'lib', 'passport', 'receipt.ts'), 'utf8')
+    expect(receipt).toMatch(/signMessage/)
+    expect(receipt).not.toMatch(/sendTransaction|\.connect\(|getProvider|JsonRpcProvider/)
+    // And it is fed a dedicated key, never the relayer's.
+    expect(receipt).not.toMatch(/RELAYER_PRIVATE_KEY|relayerPrivateKeyForChain|getRelayer/)
   })
 
   it('keeps the relayer a gas-only signer (derived from the relayer gas key)', () => {

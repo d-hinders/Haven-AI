@@ -80,8 +80,24 @@ export async function requestPassport(agentId: string, chainId: number): Promise
   return repo.insertRequested(agentId, chainId, AssuranceLevel.L0)
 }
 
-async function markAnchored(agentId: string, result: AnchorResult): Promise<void> {
-  await repo.markAnchored(agentId, result.attestationUid, result.txHash)
+/**
+ * Record the anchor together with the addresses that were ATTESTED (#974).
+ *
+ * They come from the claim, not from a fresh lookup: the receipt the verifier
+ * hands a merchant must describe what is actually on-chain. A re-derived
+ * address could silently disagree with the attestation while looking
+ * authoritative — and the Hybrid account address has no reverse lookup, so
+ * without storing it a merchant holding only that address could never verify.
+ */
+async function markAnchored(
+  agentId: string,
+  result: AnchorResult,
+  claim: PassportClaim,
+): Promise<void> {
+  await repo.markAnchored(agentId, result.attestationUid, result.txHash, {
+    agentEoa: claim.agentEoa,
+    smartAccount: claim.smartAccount,
+  })
 }
 
 /**
@@ -171,7 +187,7 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
   try {
     getEasDeployment(chainId) // reject an unpinned chain before spending gas
     const result = await anchorImpl(chainId, claim)
-    await markAnchored(agentId, result)
+    await markAnchored(agentId, result, claim)
     // Close the anchor race (#973). Anchoring takes seconds, and the owner can
     // revoke the agent during them. The revoke hook is a no-op in that window —
     // its enqueue requires an ALREADY-anchored passport — so without this the

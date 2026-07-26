@@ -172,6 +172,30 @@ const QUERIES: SmokeQuery[] = [
            ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC`,
   },
   {
+    // The merchant-facing lookup. A schema mismatch here means verification
+    // returns "no passport" for a real agent — which a merchant reads as
+    // "unknown agent" and may act on.
+    name: 'passport: verifier resolves EITHER agent address (#974)',
+    sql: `SELECT a.id AS agent_id, a.status AS agent_status, a.updated_at AS standing_changed_at,
+                 p.status AS passport_status, p.attestation_uid,
+                 p.revocation_status, p.revocation_confirmed_at,
+                 p.agent_eoa, p.smart_account, p.chain_id,
+                 s.execution_rail, s.safe_address
+            FROM agent_passports p
+            JOIN agents a ON a.id = p.agent_id
+            LEFT JOIN user_safes s ON s.id = a.safe_id
+           WHERE p.agent_eoa = $1 OR p.smart_account = $1
+           LIMIT 1`,
+  },
+  {
+    name: 'passport: markAnchored records the attested addresses (#974)',
+    sql: `UPDATE agent_passports
+             SET status = 'anchored', attestation_uid = $2, tx_hash = $3,
+                 agent_eoa = $4, smart_account = $5,
+                 last_error = NULL, anchored_at = NOW(), updated_at = NOW()
+           WHERE agent_id = $1`,
+  },
+  {
     name: 'passport: claimForAnchoring — the double-attest guard (#972)',
     sql: `UPDATE agent_passports
              SET anchoring_started_at = NOW(), attempts = attempts + 1, updated_at = NOW()

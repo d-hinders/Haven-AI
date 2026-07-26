@@ -175,19 +175,42 @@ export async function insertRequested(
   return (rowCount ?? 0) > 0
 }
 
+/**
+ * Record the anchor, INCLUDING the addresses that were attested (#974).
+ *
+ * The addresses are stored, not re-derived later, for two reasons: the Hybrid
+ * account address is derived one-way from the EOA so there is no reverse
+ * lookup without it, and a receipt must report what was actually attested
+ * rather than a fresh derivation that could silently disagree with the chain.
+ *
+ * The zero-address sentinel is an EAS ENCODING detail and is mapped to NULL
+ * here — see migration 050. Storing it would collide every EOA-only agent on
+ * one "address" in the verifier's lookup.
+ */
 export async function markAnchored(
   agentId: string,
   attestationUid: string,
   txHash: string,
+  addresses: { agentEoa: string | null; smartAccount: string | null } = { agentEoa: null, smartAccount: null },
   db: Executor = pool,
 ): Promise<void> {
   await db.query(
     `UPDATE agent_passports
         SET status = 'anchored', attestation_uid = $2, tx_hash = $3,
+            agent_eoa = $4, smart_account = $5,
             last_error = NULL, anchored_at = NOW(), updated_at = NOW()
       WHERE agent_id = $1`,
-    [agentId, attestationUid, txHash],
+    [agentId, attestationUid, txHash, normalizeAddress(addresses.agentEoa), normalizeAddress(addresses.smartAccount)],
   )
+}
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+/** Lowercase, with the zero-address sentinel mapped to NULL. */
+function normalizeAddress(address: string | null | undefined): string | null {
+  if (!address) return null
+  const lower = address.toLowerCase()
+  return lower === ZERO_ADDRESS ? null : lower
 }
 
 export async function markFailed(agentId: string, error: string, db: Executor = pool): Promise<void> {
@@ -221,6 +244,81 @@ export async function listRetryable(
   return rows
 }
 
+
+// ── Verification lookups (#974) ─────────────────────────────────────
+//
+// Merchant-facing and therefore NOT owner-scoped — a merchant verifying an
+// agent is not its owner. The `SELECT` list is the disclosure boundary: it
+// carries no owner identity, no budgets, no balances, and no counterparties.
+
+export interface VerificationRow {
+  agent_id: string
+  agent_status: string
+  /** When the agent's standing last changed — the receipt's monotonic epoch. */
+  standing_changed_at: Date
+  passport_status: PassportStatus | null
+  attestation_uid: string | null
+  revocation_status: RevocationStatus | null
+  revocation_confirmed_at: Date | null
+  agent_eoa: string | null
+  smart_account: string | null
+  chain_id: number | null
+  execution_rail: string | null
+  /** Presence only — the verifier reports "treasury-bound", never the address. */
+  safe_address: string | null
+}
+
+const VERIFICATION_SELECT = `
+  SELECT a.id AS agent_id, a.status AS agent_status, a.updated_at AS standing_changed_at,
+         p.status AS passport_status, p.attestation_uid,
+         p.revocation_status, p.revocation_confirmed_at,
+         p.agent_eoa, p.smart_account, p.chain_id,
+         s.execution_rail, s.safe_address
+    FROM agent_passports p
+    JOIN agents a ON a.id = p.agent_id
+    LEFT JOIN user_safes s ON s.id = a.safe_id`
+
+/**
+ * Resolve a passport from EITHER agent address.
+ *
+ * A merchant sees a different address depending on how the payment settled —
+ * the delegate EOA on an EIP-3009 header, the Hybrid account in erc7710
+ * redemption (#946 made that a per-payment choice) — and must be able to
+ * verify from whichever one it holds.
+ *
+ * The zero address is refused BEFORE the query. Migration 050 already prevents
+ * storing it, but the sentinel is dangerous enough to be rejected at every
+ * layer that could ever handle it: a lookup by `0x0` resolving to any passport
+ * would hand a merchant somebody else's credential.
+ */
+export async function findByAgentAddress(
+  address: string,
+  db: Executor = pool,
+): Promise<VerificationRow | null> {
+  const normalized = normalizeAddress(address)
+  if (!normalized) return null
+  const { rows } = await db.query<VerificationRow>(
+    `${VERIFICATION_SELECT}
+      WHERE p.agent_eoa = $1 OR p.smart_account = $1
+      LIMIT 1`,
+    [normalized],
+  )
+  return rows[0] ?? null
+}
+
+/** Resolve a passport by its EAS attestation UID — the evidence pointer. */
+export async function findByAttestationUid(
+  attestationUid: string,
+  db: Executor = pool,
+): Promise<VerificationRow | null> {
+  const { rows } = await db.query<VerificationRow>(
+    `${VERIFICATION_SELECT}
+      WHERE p.attestation_uid = $1
+      LIMIT 1`,
+    [attestationUid],
+  )
+  return rows[0] ?? null
+}
 
 // ── Revocation (#973) ───────────────────────────────────────────────
 //

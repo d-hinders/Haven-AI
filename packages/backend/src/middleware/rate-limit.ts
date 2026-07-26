@@ -61,3 +61,22 @@ export const demoRateLimit = {
     timeWindow: '1 minute',
   },
 } as const
+
+/**
+ * Public passport verification (#974). Unauthenticated and therefore per-IP.
+ *
+ * Higher than the demo tier because the caller is a merchant gating live
+ * traffic, and a 429 there fails a real payment. It is still a ceiling rather
+ * than a budget: receipts carry a 5-minute signed TTL and are explicitly
+ * cacheable, so a correctly integrated merchant needs roughly one call per
+ * agent per TTL. Anything approaching this limit is re-fetching instead of
+ * caching, which is the merchant's bug to fix — but the endpoint reads one
+ * indexed row and signs, so a burst is cheap and this is deliberately not
+ * tight enough to break a busy integration.
+ */
+export const publicVerifyRateLimit = {
+  rateLimit: {
+    max: 120,
+    timeWindow: '1 minute',
+  },
+} as const

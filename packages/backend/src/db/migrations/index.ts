@@ -48,6 +48,7 @@ import * as singleSignerWaiver from './046_single_signer_waiver.js'
 import * as merchantReceipts from './047_merchant_receipts.js'
 import * as agentPassports from './048_agent_passports.js'
 import * as agentPassportRevocation from './049_agent_passport_revocation.js'
+import * as agentPassportAddresses from './050_agent_passport_addresses.js'
 
 export interface Migration {
   version: string
@@ -109,4 +110,5 @@ export const migrations: Migration[] = [
   merchantReceipts,
   agentPassports,
   agentPassportRevocation,
+  agentPassportAddresses,
 ]

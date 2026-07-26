@@ -46,4 +46,21 @@ export {
 
 // The real on-chain anchor. Imported here (not inside issuance.ts) so the
 // issuance state machine stays testable without ethers or a relayer.
-export { anchorOnChain, buildAttestCall, encodeClaim } from './attestation.js'
+export { anchorOnChain, revokeOnChain, buildAttestCall, buildRevokeCall, encodeClaim } from './attestation.js'
+
+// Revocation + live standing (#973). `passportStanding` is THE answer to
+// "is this agent authorized right now?" — DB-authoritative, chain-eventual.
+export {
+  passportStanding,
+  enqueuePassportRevocation,
+  revokePassportBestEffort,
+  reconcileRevocation,
+  reconcilePendingRevocations,
+  listStuckRevocations,
+  revocationBackoffSeconds,
+  setRevoker,
+  type Standing,
+  type AnchorState,
+  type PassportStanding,
+  type Revoker,
+} from './revocation.js'

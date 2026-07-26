@@ -95,6 +95,47 @@ with `smartAccount = 0x0`. Two rules follow, both enforced in
 This mirrors the delegation rail's posture on the zero address
 ([security model](../security/delegation-rail-security-model.md) §7).
 
+## Revocation — what merchants must check
+
+**Haven's verifier is authoritative. The chain is an anchor, not the authority.**
+This is the single most important thing for an integrator to get right.
+
+| | Authority | Latency |
+|---|---|---|
+| **Haven's verifier** (`standing`) | ✅ **Decides.** `agents.status = 'revoked'` IS the revocation | Immediate |
+| **The EAS attestation** | Anchor only — describes, never decides | Eventually consistent |
+
+> **Check the verifier, not only the chain.** An EAS revoke is a transaction: it
+> can lag, fail, or sit unmined. During that window the on-chain attestation
+> still reads as valid while Haven has already revoked the agent. A merchant
+> deciding on-chain alone would serve a revoked agent.
+
+The standing response makes the divergence visible rather than leaving it to be
+inferred — `chainLagging: true` means exactly "revoked here, chain hasn't caught
+up yet".
+
+| `standing` | Meaning |
+|---|---|
+| `active` | Authorized right now |
+| `revoked` | **Not** authorized — regardless of what the chain says |
+| `unknown` | No such agent. Never treat as authorized |
+
+`anchor` reports the chain's progress for transparency: `not_anchored`,
+`anchored`, `revocation_pending`, `revoked_onchain`.
+
+### Why a revoke cannot fail permanently
+
+A failed anchor **retries with backoff** (30s doubling to a 1h cap) until the DB
+and chain agree — owner decision 2026-07-24. There is deliberately **no terminal
+`failed` revocation state**: a revoked agent whose on-chain flag never flipped is
+precisely the divergence this design exists to prevent, so a struggling revoke
+stays `pending` and due rather than being dropped.
+
+A revocation left unreconciled past a threshold is an **operational incident**,
+not a silent state — surfaced by `listStuckRevocations()` for alarming. While it
+is stuck, the verifier still answers `revoked` correctly; the exposure is only to
+merchants who ignored the rule above and checked the chain alone.
+
 ## Registration and configuration
 
 Registration is an **operator step** — an on-chain transaction needing a funded

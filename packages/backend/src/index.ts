@@ -22,7 +22,7 @@ import agentRoutes from './routes/agents.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
 import agentPassportRoutes from './routes/agent-passports.js'
-import { setAnchor, anchorOnChain } from './lib/passport/index.js'
+import { setAnchor, anchorOnChain, setRevoker, revokeOnChain } from './lib/passport/index.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
@@ -163,8 +163,10 @@ app.get('/chains', async () => {
   return { deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS }
 })
 
-// L0 passport attestations are anchored by the gas-only relayer (#972).
+// L0 passport attestations are anchored AND revoked by the gas-only relayer
+// (#972 / #973). Both are governance metadata: EAS-only targets, zero value.
 setAnchor(anchorOnChain)
+setRevoker(revokeOnChain)
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })

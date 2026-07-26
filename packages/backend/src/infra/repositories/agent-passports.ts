@@ -41,6 +41,9 @@ export interface Executor {
 
 export type PassportStatus = 'pending' | 'anchored' | 'failed'
 
+/** Progress of the EAS ANCHOR only — never the authority on standing (#973). */
+export type RevocationStatus = 'none' | 'pending' | 'confirmed'
+
 export interface PassportRow {
   agent_id: string
   chain_id: number
@@ -52,6 +55,13 @@ export interface PassportRow {
   last_error: string | null
   requested_at: Date
   anchored_at: Date | null
+  revocation_status: RevocationStatus
+  revocation_requested_at: Date | null
+  revocation_confirmed_at: Date | null
+  revocation_tx_hash: string | null
+  revocation_attempts: number
+  revocation_last_error: string | null
+  revocation_next_attempt_at: Date | null
 }
 
 /** Facts the attestation claim is built from. Owner-scoped. */
@@ -67,7 +77,10 @@ export interface AgentPassportFacts {
 export async function findByAgent(agentId: string, db: Executor = pool): Promise<PassportRow | null> {
   const { rows } = await db.query<PassportRow>(
     `SELECT agent_id, chain_id, status, assurance_level, attestation_uid, tx_hash,
-            attempts, last_error, requested_at, anchored_at
+            attempts, last_error, requested_at, anchored_at,
+            revocation_status, revocation_requested_at, revocation_confirmed_at,
+            revocation_tx_hash, revocation_attempts, revocation_last_error,
+            revocation_next_attempt_at
        FROM agent_passports WHERE agent_id = $1`,
     [agentId],
   )
@@ -196,6 +209,151 @@ export async function listRetryable(
       ORDER BY p.requested_at ASC
       LIMIT $1`,
     [limit],
+  )
+  return rows
+}
+
+
+// ── Revocation (#973) ───────────────────────────────────────────────
+//
+// The DB is authoritative for standing; these functions track only how far the
+// on-chain ANCHOR has got. Nothing here may gate the answer to "is this agent
+// authorized right now?" — see `standingForAgent`.
+
+/**
+ * Agent standing, joined with anchor progress. The ONE query the verifier
+ * (#974) reads, so the authority relationship is expressed in a single place:
+ * `agent_status` decides, the passport columns merely describe the anchor.
+ *
+ * Deliberately NOT owner-scoped: a merchant verifying a passport is not the
+ * agent's owner. It is keyed by the agent's own id and returns no PII, no
+ * credentials, and no treasury detail — only what a verifier needs.
+ */
+export interface AgentStanding {
+  agent_id: string
+  agent_status: string
+  passport_status: PassportStatus | null
+  attestation_uid: string | null
+  revocation_status: RevocationStatus | null
+  revocation_confirmed_at: Date | null
+}
+
+export async function standingForAgent(
+  agentId: string,
+  db: Executor = pool,
+): Promise<AgentStanding | null> {
+  const { rows } = await db.query<AgentStanding>(
+    `SELECT a.id AS agent_id, a.status AS agent_status,
+            p.status AS passport_status, p.attestation_uid,
+            p.revocation_status, p.revocation_confirmed_at
+       FROM agents a
+       LEFT JOIN agent_passports p ON p.agent_id = a.id
+      WHERE a.id = $1`,
+    [agentId],
+  )
+  return rows[0] ?? null
+}
+
+/**
+ * Mark the anchor as needing revocation. Idempotent, and deliberately a no-op
+ * unless the passport is actually anchored — there is nothing on-chain to
+ * revoke otherwise, and inventing a pending revocation would make the
+ * reconciliation sweep chase a row forever.
+ */
+export async function enqueueRevocation(agentId: string, db: Executor = pool): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE agent_passports
+        SET revocation_status = 'pending',
+            revocation_requested_at = COALESCE(revocation_requested_at, NOW()),
+            revocation_next_attempt_at = NOW(),
+            updated_at = NOW()
+      WHERE agent_id = $1
+        AND status = 'anchored'
+        AND revocation_status = 'none'`,
+    [agentId],
+  )
+  return (rowCount ?? 0) > 0
+}
+
+export async function markRevocationConfirmed(
+  agentId: string,
+  txHash: string,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE agent_passports
+        SET revocation_status = 'confirmed', revocation_tx_hash = $2,
+            revocation_confirmed_at = NOW(), revocation_last_error = NULL,
+            revocation_next_attempt_at = NULL, updated_at = NOW()
+      WHERE agent_id = $1`,
+    [agentId, txHash],
+  )
+}
+
+/**
+ * Record a failed anchor attempt and schedule the next one.
+ *
+ * Stays `pending` — never `failed`. The owner decision is that revocation
+ * retries until the DB and chain agree, so there is no terminal failure state
+ * to get stuck in; a struggling revoke stays visible and due instead.
+ */
+export async function scheduleRevocationRetry(
+  agentId: string,
+  error: string,
+  backoffSeconds: number,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE agent_passports
+        SET revocation_attempts = revocation_attempts + 1,
+            revocation_last_error = $2,
+            revocation_next_attempt_at = NOW() + MAKE_INTERVAL(secs => $3),
+            updated_at = NOW()
+      WHERE agent_id = $1`,
+    [agentId, error.slice(0, 500), backoffSeconds],
+  )
+}
+
+/** Revocations due for another attempt. */
+export async function listRevocationsDue(
+  limit: number,
+  db: Executor = pool,
+): Promise<Array<{ agent_id: string; revocation_attempts: number }>> {
+  const { rows } = await db.query<{ agent_id: string; revocation_attempts: number }>(
+    `SELECT agent_id, revocation_attempts
+       FROM agent_passports
+      WHERE revocation_status = 'pending'
+        AND (revocation_next_attempt_at IS NULL OR revocation_next_attempt_at <= NOW())
+      ORDER BY revocation_requested_at ASC
+      LIMIT $1`,
+    [limit],
+  )
+  return rows
+}
+
+/**
+ * Revocations unreconciled past a threshold — the stuck-revoke alarm.
+ *
+ * A revoked agent whose on-chain flag never flipped is an operational incident,
+ * not a silent state. Merchants checking only the chain would still see it as
+ * valid, which is precisely the divergence #973 exists to prevent.
+ */
+export async function listStuckRevocations(
+  olderThanSeconds: number,
+  db: Executor = pool,
+): Promise<Array<{ agent_id: string; revocation_requested_at: Date; revocation_attempts: number; revocation_last_error: string | null }>> {
+  const { rows } = await db.query<{
+    agent_id: string
+    revocation_requested_at: Date
+    revocation_attempts: number
+    revocation_last_error: string | null
+  }>(
+    `SELECT agent_id, revocation_requested_at, revocation_attempts, revocation_last_error
+       FROM agent_passports
+      WHERE revocation_status = 'pending'
+        AND revocation_requested_at < NOW() - MAKE_INTERVAL(secs => $1)
+      ORDER BY revocation_requested_at ASC`,
+    [olderThanSeconds],
   )
   return rows
 }

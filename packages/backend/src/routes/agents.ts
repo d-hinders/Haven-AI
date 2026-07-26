@@ -11,7 +11,13 @@ import { getTokenBalance } from '../lib/allowance-module.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { requestPassport, issuePassportBestEffort, PASSPORT_CHAIN_IDS } from '../lib/passport/index.js'
+import {
+  requestPassport,
+  issuePassportBestEffort,
+  enqueuePassportRevocation,
+  revokePassportBestEffort,
+  PASSPORT_CHAIN_IDS,
+} from '../lib/passport/index.js'
 import { formatTokenValue } from '../lib/tokens.js'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -458,6 +464,16 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         return reply
           .code(404)
           .send({ error: 'Agent not found or cannot be revoked' })
+      }
+
+      // The UPDATE above IS the revocation — authoritative and already applied
+      // (#973). Flipping the on-chain anchor is a separate, eventually-consistent
+      // step: enqueued and fired best-effort so a slow or failing EAS revoke can
+      // never delay or fail the user's revoke. It retries until the two agree.
+      try {
+        if (await enqueuePassportRevocation(id)) revokePassportBestEffort(id)
+      } catch (err) {
+        request.log.warn({ err, agentId: id }, 'passport revocation enqueue failed; agent revoked')
       }
 
       return { success: true }

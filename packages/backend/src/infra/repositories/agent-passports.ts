@@ -267,8 +267,9 @@ export interface VerificationRow {
   /**
   * When the agent's RECORD last changed — the receipt's monotonic epoch.
   *
-  * Sourced from `agents.updated_at`, which bumps on ANY write to the row: a
-  * rename, a key rotation, a `last_seen` touch. It is deliberately NOT named
+  * Sourced from `agents.updated_at`, which moves only when a statement sets it
+  * explicitly — there is no trigger. A rename and a key rotation do; the
+  * `last_seen_at` touch in agentAuth does not. It is deliberately NOT named
   * `standing_changed_at` (#1015): that alias asserted a precision the column
   * does not carry, and propagated it through this type to every call site.
   * A change here does NOT imply the agent's standing changed.

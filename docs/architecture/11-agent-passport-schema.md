@@ -382,16 +382,28 @@ it, and all three are in the artifact rather than in advice:
   The value is a deliberate choice: shorter and caching buys nothing over
   calling us; much longer and a revocation could go unnoticed for most of a
   payment session.
-- **`standingEpoch`, monotonic** — two receipts for the same agent are strictly
-  comparable, so a merchant can tell a newer one from an older one. `issuedAt`
-  alone cannot do this: clocks skew. It provides **ordering, not causation**:
-  the value tracks the last change to the agent's *record* (`agents.updated_at`),
-  so it also moves on a rename or a key rotation. Do not build
-  "epoch changed ⇒ standing changed" logic on it ([#1015](https://github.com/d-hinders/Haven-AI/issues/1015)).
-  This errs safe — a revoke always bumps it, so a newer standing is never
-  missed; an unrelated bump only makes a receipt look fresher than necessary.
-  A dedicated `standing_changed_at` column would make the stronger reading true;
-  it is deliberately not built until an integrator needs it.
+- **`standingEpoch`, monotonic** — of two receipts for the same agent, the
+  higher epoch is the newer one. `issuedAt` cannot do this: clocks skew. It
+  provides **ordering only** ([#1015](https://github.com/d-hinders/Haven-AI/issues/1015)):
+
+  - It tracks the last change to the agent's *record* (`agents.updated_at`), so
+    it also moves on a rename or a key rotation. Do not build
+    "epoch changed ⇒ standing changed" logic on it.
+  - Every writer of `agents.status` also sets `updated_at` (pinned by a test),
+    so of two receipts the one reflecting a revoke always carries the higher
+    epoch. This does **not** let a merchant holding a single cached receipt
+    detect a revoke — `expiresAt` and re-verification bound that, not this.
+  - **Equal epoch does not mean equal receipt.** Anchor state (`anchor`,
+    `evidenceUid`) lives in `agent_passports` and does not bump
+    `agents.updated_at`, so a passport can become anchored with the epoch
+    unchanged.
+  - `0` means the row carried no timestamp. Two epoch-`0` receipts are mutually
+    incomparable — the guarantee degrades rather than lying.
+
+  A dedicated `standing_changed_at` column would make "standing changed" true.
+  Deliberately not built until an integrator needs it: it is a migration, and
+  changing what the field means is a signed-wire-format break
+  (`RECEIPT_VERSION` is inside the signature).
 - **Re-verify before anything irreversible.** Cached receipts are for routine
   gating and rate-limiting. The endpoint always answers from current state;
   caching is the merchant's choice, never ours.

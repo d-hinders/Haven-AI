@@ -287,22 +287,33 @@ describe('standingEpoch semantics (#1015)', () => {
     expect(res.json().receipt.standingEpoch).toBe(updated.getTime())
   })
 
-  it('moves when the record changes even though standing is unchanged', async () => {
-    // Same `agent_status` both times — only the row timestamp differs, as a
-    // rename or key rotation would produce. The epoch MUST still advance:
-    // ordering is the guarantee, not causation.
+  it('advances on a non-standing record change — ordering, not causation', async () => {
+    // Review caught the first version of this test asserting nothing: it pinned
+    // `agent_status: 'active'` on both rows, which is already the fixture
+    // default, so `standing` matched by construction and would have matched
+    // even if the field were dropped from the receipt entirely.
+    //
+    // So vary a field that genuinely reaches the receipt and is NOT standing —
+    // the agent's EOA, as a key rotation would — and assert `standing` against
+    // its real value rather than against itself.
     const app = await build()
     mockQuery.mockResolvedValueOnce({
-      rows: [row({ agent_status: 'active', record_updated_at: new Date('2026-07-21T09:00:00Z') })],
+      rows: [row({ agent_eoa: EOA, record_updated_at: new Date('2026-07-21T09:00:00Z') })],
     })
     const first = (await app.inject({ url: `/passport/verify?address=${EOA}` })).json()
 
+    const ROTATED = '0x3333333333333333333333333333333333333333'
     mockQuery.mockResolvedValueOnce({
-      rows: [row({ agent_status: 'active', record_updated_at: new Date('2026-07-21T10:00:00Z') })],
+      rows: [row({ agent_eoa: ROTATED, record_updated_at: new Date('2026-07-21T10:00:00Z') })],
     })
     const second = (await app.inject({ url: `/passport/verify?address=${EOA}` })).json()
 
-    expect(second.receipt.standing).toBe(first.receipt.standing)
+    // The record demonstrably changed...
+    expect(second.receipt.agentEoa).not.toBe(first.receipt.agentEoa)
+    // ...standing did not, asserted against the real value, not the other receipt...
+    expect(first.receipt.standing).toBe('active')
+    expect(second.receipt.standing).toBe('active')
+    // ...and the epoch advanced anyway. That is the whole point of #1015.
     expect(second.receipt.standingEpoch).toBeGreaterThan(first.receipt.standingEpoch)
   })
 

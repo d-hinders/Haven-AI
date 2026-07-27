@@ -23,9 +23,12 @@
  *    extend it and an expired receipt is objectively expired rather than a
  *    matter of local policy.
  * 2. **A monotonic `standingEpoch`.** Two receipts for the same agent are
- *    strictly comparable: the higher epoch reflects newer state. Without it a
- *    merchant replaying a cached receipt has no way to know a newer one exists
- *    — and clock skew makes `issuedAt` alone unreliable for that.
+ *    ordered by it: the higher epoch reflects a newer AGENT RECORD. Without it
+ *    a merchant comparing two receipts has no reliable way to tell which is
+ *    newer — clock skew makes `issuedAt` unusable for that. It gives ORDERING
+ *    only: a higher epoch does not mean standing changed, and an EQUAL epoch
+ *    does not mean an equal receipt, because anchor state moves without it
+ *    (#1015 — see the field's own doc).
  * 3. **Documented re-verification.** Cached receipts are for routine gating and
  *    rate-limiting. Re-verify before anything irreversible.
  *
@@ -116,8 +119,35 @@ export interface PassportReceipt {
   chainId: number | null
   controls: ControlSummary | null
   /**
-   * Monotonic marker of when this agent's standing last changed, in ms.
+   * Monotonic marker of the last change to this agent's RECORD, in ms.
    * Strictly comparable across receipts; `issuedAt` is not, because clocks skew.
+   *
+   * Do NOT read a change here as "standing changed" (#1015). It is sourced from
+   * `agents.updated_at`, which moves whenever a statement explicitly sets it —
+   * a rename or a key rotation do; an agent's `last_seen_at` touch does NOT.
+   * (There is no trigger on the column; the first version of this comment said
+   * "any write", which was itself false.) The name is historical; the guarantee
+   * is ORDERING, not causation.
+   *
+   * What merchants rely on holds and errs safe: **every writer of
+   * `agents.status` also sets `updated_at`** — audited, and pinned by
+   * `agent-status-epoch.test.ts` so the next writer cannot quietly break it.
+   * Given that, of two receipts the one reflecting a revoke always carries the
+   * higher epoch. It does NOT mean a merchant holding one cached receipt can
+   * detect a revoke — `expiresAt` and re-verification bound that, not this.
+   *
+   * NOT covered: anchor progress. `anchor`, `evidenceUid`, `agentEoa` and
+   * `smartAccount` come from `agent_passports`, which does not touch
+   * `agents.updated_at`, so a passport can go not_anchored → anchored with the
+   * epoch unchanged. Equal epoch does not mean equal receipt.
+   *
+   * `0` is the sentinel for a row with no timestamp. It sorts below every real
+   * epoch, so two epoch-0 receipts are mutually incomparable — the ordering
+   * guarantee degrades rather than lying.
+   *
+   * A dedicated `standing_changed_at` column would make the stronger reading
+   * true. Deliberately deferred (#1015): it is a migration, and no integrator
+   * has asked. Revisit when one does.
    */
   standingEpoch: number
   issuedAt: number

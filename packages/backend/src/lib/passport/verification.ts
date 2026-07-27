@@ -100,7 +100,7 @@ export async function buildReceipt(row: VerificationRow): Promise<SignedPassport
     evidenceUid: row.attestation_uid,
     chainId: row.chain_id,
     controls: controlsOf(row),
-    standingEpoch: row.standing_changed_at ? new Date(row.standing_changed_at).getTime() : 0,
+    standingEpoch: row.record_updated_at ? new Date(row.record_updated_at).getTime() : 0,
     issuedAt: now,
     expiresAt: now + RECEIPT_TTL_SECONDS,
   }

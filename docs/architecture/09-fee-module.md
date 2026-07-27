@@ -54,8 +54,8 @@ The proposed mechanisms—such as funding an x402 delegate with payment plus fee
 or using a multi-send for MPP—are design options, not current behavior.
 
 Any move from zero to non-zero fees changes money movement and must follow the
-current agentic workflow, CASP guardrails, explicit human review, and
-money-path merge gates.
+current agentic workflow, CASP guardrails, the `money.md` characterization-test
+bar, and explicit human review.
 
 See [x402 payment sequence](04-x402-payment-sequence.md) for the current funding
 mechanics and [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)

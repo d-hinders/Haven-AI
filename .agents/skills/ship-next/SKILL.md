@@ -29,7 +29,7 @@ of forcing the lowest number.
 Before selecting new work, find any open pull request linked with `Closes #<issue>`.
 
 - If it is waiting on CI or has a fixable failure, finish that pull request.
-- If it is waiting on a user decision, money-path approval, migration review, or UX decision, stop and report the blocker.
+- If it is waiting on a user decision, migration review, or UX decision, stop and report the blocker.
 - Start new work only when the selected source has no in-flight pull request.
 
 **Collision check — don't double-build parallel work.** The `Closes #<issue>`
@@ -134,12 +134,15 @@ money-sensitive without the issue being labeled. Union, never intersection.
 A comment-only diff in a listed file may be treated as non-money-path when the
 review confirms zero behavioral change — say so explicitly in the PR.
 
+Classification drives the **playbook and the testing bar**, not a merge pause. A money-path diff still loads `money.md`, still needs characterization tests before existing behavior changes, and still states its classification in the pull-request body.
+
 Route the merge:
 
-- **Non-money-path:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening. GitHub then updates the branch and merges when required checks go green; do not sit in a poll loop waiting.
-- **Frontend UI:** if review flags any UX, copy, or design-system concern, ask the user before enabling auto-merge.
-- **Money-path, not migration:** present the pull-request link, scope, checks, and reviewer verdict; require in-session user approval before enabling squash auto-merge.
-- **Migration:** leave the pull request for independent code-owner approval and merge.
+- **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
+- **Frontend UI:** if either review pass flags a UX, copy, or design-system concern, ask the user before enabling auto-merge.
+- **Everything else, money-path included:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening. GitHub then updates the branch and merges when required checks go green; do not sit in a poll loop waiting.
+
+> **Why money-path does not pause here (#1024).** The in-session approval applied only to pull requests opened through this skill — a hand-written money-path pull request merged on green CI alone. That made the canonical workflow more expensive than bypassing it while protecting nothing on the bypass path, and the approver was usually the author. What protects the money path is automatic and tool-independent: `CODEOWNERS` for irreversible schema changes, and the `qa-freshness` gate that refuses a `dev → main` promotion without a recent green money-flow QA run. See [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) → "Money-path safety model".
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
 

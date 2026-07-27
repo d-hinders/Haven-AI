@@ -17,8 +17,8 @@ last-verified: "2026-07-27"
 
 **In one line:** hand the loop a list of PRs — as **GitHub issues** (a labeled
 standalone task, or an epic's sub-issues) — and it implements, tests, reviews,
-opens, and auto-merges them, stopping for a human only on a money-path change, a
-real decision, or stuck CI.
+opens, and auto-merges them, stopping for a human only on a migration, a real
+decision, or stuck CI.
 
 > **The backlog is GitHub Issues, not a repo file.** Backlogs used to live in
 > `docs/backlogs/*.yml`, but with the `dev`/`main` split a committed status file
@@ -28,8 +28,8 @@ real decision, or stuck CI.
 
 Ship a defined set of PRs with minimal human input. You define the work; the
 loop implements, tests, reviews, opens, and (for safe PRs) merges each one —
-and only comes back to you for a real decision, a money-path approval, or stuck
-CI.
+and only comes back to you for a real decision, a blocking review finding, or
+stuck CI.
 
 Pieces:
 - **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default.
@@ -84,7 +84,7 @@ issue and stops.
 ```
 
 Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
-pings you only for a money-path approval, a real decision, or stuck CI.
+pings you only for a real decision, a blocking review finding, or stuck CI.
 
 
 ## Feeding work in
@@ -148,15 +148,38 @@ PR go through before handing it the whole queue.
 
 ## Money-path safety model (read this)
 
-The gate for most money-path changes is a **soft, in-session checkpoint**, not a
-hard GitHub rule. Two consequences to be aware of:
-- It's a **self-approval**: the person running the loop approves the change —
-  there's no independent second reviewer (except for migrations, see above).
-- It **only covers PRs made through the loop.** A money-path PR created *outside*
-  the loop (a hand-written PR, another agent) merges on green CI alone — there is
-  no human gate on it. This is the deliberate trade-off for low contributor
-  friction at this stage; widen `.github/CODEOWNERS` if you want a hard gate back
-  on more paths.
+Two gates, both **automatic** and both applying to every PR however it was
+opened ([#1024](https://github.com/d-hinders/Haven-AI/issues/1024)):
+
+1. **`.github/CODEOWNERS`** on `/packages/backend/src/db/migrations/` — an
+   irreversible schema change needs an approval from a collaborator **other than
+   the author** (GitHub's self-approval rule). This is the one hard human gate.
+2. **Money-flow QA freshness** (`dev-gate.yml` → the `qa-freshness` job) — a
+   `dev → main` promotion is refused unless a green `qa-dev` run exists inside
+   `QA_FRESHNESS_HOURS` (default 30h). Nothing reaches production without the
+   money-moving harness having passed against the current dev deploy. Escape
+   hatch: the `qa-override` label, which logs a `::warning::` naming the bypass.
+
+Verification therefore happens at **promotion time**, enforced by machine —
+not at merge time, enforced by a prompt.
+
+> **What changed and why.** `ship-next` used to pause a money-path PR for
+> in-session user approval. That gate applied *only to PRs opened through the
+> loop* — a hand-written money-path PR merged on green CI alone, as
+> `CODEOWNERS` recorded at the time. So the pause was friction that made the
+> canonical workflow **more expensive than not using it**, with nothing
+> compensating on the other path. It was also weak on its own terms: in
+> practice the approver was the PR author, which is precisely what GitHub
+> disallows in the one place independence is genuinely required.
+>
+> Removing it deliberately depends on `qa-freshness` being in `main`'s required
+> checks. If that check is ever dropped from the ruleset, this model has a hole
+> — re-add it, or widen `CODEOWNERS`.
+
+Money-path **classification is unchanged**: `ship-next` still routes such a diff
+to `money.md`, still requires characterization tests before changing existing
+behavior, and still surfaces the classification in the PR body. It just no
+longer blocks the merge on a human saying yes.
 
 ## Reviewing a migration PR (for code owners)
 

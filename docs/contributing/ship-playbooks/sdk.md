@@ -30,4 +30,4 @@ Run the package `typecheck` (`tsc --noEmit`) as the **final** gate step, after e
 
 ## 5. Merge
 
-`area:sdk` / `area:mcp` PRs are non-money and auto-merge on green CI + clean review — **unless** the change also touches a money-path file or release tooling (`scripts/release-bump.mjs`, `.github/workflows/publish.yml`), which the canonical skill's [Merge Gate](../../../.agents/skills/ship-next/SKILL.md#merge-gate) routes to in-session approval. Only database migrations are additionally hard-gated by `.github/CODEOWNERS`.
+`area:sdk` / `area:mcp` PRs auto-merge on green CI + clean review. A change that also touches a money-path file or release tooling (`scripts/release-bump.mjs`, `.github/workflows/publish.yml`) is classified `money-path` — which loads `money.md` and its characterization-test bar, but does not pause the merge (#1024). Only database migrations are hard-gated, by `.github/CODEOWNERS`.

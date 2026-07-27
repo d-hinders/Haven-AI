@@ -93,7 +93,7 @@ Good split examples:
 - Re-run the relevant local checks if the branch changed after review.
 - If the PR started stacked, re-open or retarget it so the final merge path is into `dev`.
 - Verify that merging this PR will trigger the expected deployment branch.
-- For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green. `money-path` PRs shipped through `ship-next` additionally require in-session user approval before merge (`ship-playbooks/money.md`); DB migrations are hard-gated by a code-owner review.
+- For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green. The `money-path` label selects the `ship-playbooks/money.md` bar (characterization tests first, CASP guardrails) but does not pause the merge (#1024); DB migrations are hard-gated by an independent code-owner review, and `dev → main` promotion is gated on a recent green money-flow QA run.
 - If the PR intentionally changes what `/design-system` renders, regenerate the visual-regression baselines via the *Update visual baselines* workflow_dispatch on the PR branch (never commit macOS-rendered baselines), and confirm the *Design visual regression* check is green on the head SHA before calling the PR shipped.
 
 ## Merge Readiness Report

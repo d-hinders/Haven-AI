@@ -1,13 +1,28 @@
 name: Docs quality
 
-# Phase 1 of the documentation-quality system (epic #642). The front-matter
-# validator and its unit tests fail the job; link/markdown/style checks are
-# continue-on-error (advisory). See docs/contributing/docs-quality-system.md.
+# Phase 1 of the documentation-quality system (epic #642).
+# See docs/contributing/docs-quality-system.md.
 #
 # #1023: `docs:check` + `docs:test` used to be a hard gate ONLY inside
 # /ship-next, which made the canonical workflow stricter than opening a PR by
 # hand — the standard's enforcement depended on the tool. They run for everyone
-# now, so add "Front-matter, links & style" to dev's required status checks.
+# now, so add "Docs front-matter & agent skills" to dev's required checks.
+#
+# ## Two jobs, because one of them is a REQUIRED check
+#
+# The blocking validators and the advisory network checks (lychee, markdownlint,
+# Vale) are separate jobs on purpose:
+#
+#   * `continue-on-error` protects against a step FAILING, not against the job
+#     TIMING OUT. Sharing a job meant a slow lychee run over ~130 external URLs
+#     could cancel the whole job — and a cancelled required check blocks
+#     auto-merge just as hard as a failing one, despite "only front-matter
+#     blocks" being the intent.
+#   * The required check's NAME is what a reviewer reads. "Front-matter, links
+#     & style" named three things while gating one.
+#
+# So `validate` is the required check (dependency-free, seconds, tight timeout)
+# and `advisory` carries the network steps and never gates anything.
 #
 # Deliberately NO `paths:` filter on `pull_request`: a required check that is
 # skipped never reports, and GitHub waits forever for a run that will not
@@ -34,10 +49,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  docs:
-    name: Front-matter, links & style
+  # ── BLOCKING. This is the required status check. ──
+  validate:
+    name: Docs front-matter & agent skills
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # Both steps are local and dependency-free; they finish in seconds. A tight
+    # bound means a hang fails fast and visibly instead of holding a PR.
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
@@ -46,8 +64,8 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
-      # The real gate: every doc has valid front-matter, every `covers` glob
-      # resolves, and portable agent skills plus client adapters stay aligned.
+      # Every doc has valid front-matter, every `covers` glob resolves, and
+      # portable agent skills plus client adapters stay aligned.
       # Dependency-free, so no `npm ci` is needed.
       - name: Validate docs and agent skills
         run: npm run docs:check
@@ -57,12 +75,18 @@ jobs:
         if: always()
         run: node --test scripts/docs/*.test.mjs
 
-      # ── Advisory checks below: report findings, never fail the build.
-      # `if: always()` so they still run when the validator step fails. ──
+  # ── ADVISORY. Reports findings; must never gate a merge. Do not add this job
+  # to the required-checks ruleset. ──
+  advisory:
+    name: Docs links & style (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Link check (lychee)
         id: lychee
-        if: always()
         continue-on-error: true
         uses: lycheeverse/lychee-action@v2
         with:

@@ -28,7 +28,7 @@
 //   node scripts/design-system-coupling.mjs --changed-diff=<file>   # a diff on disk
 //   node scripts/design-system-coupling.mjs --strict        # exit 1 on findings
 //   BASE_SHA=… HEAD_SHA=… node scripts/design-system-coupling.mjs   # CI
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -280,8 +280,26 @@ function main() {
   }
 }
 
+// Resolve symlinks, falling back to the raw path. The fallback matters: this
+// runs at module load, OUTSIDE the try/catch below, so a throw here would
+// crash the advisory run that promises exit 0.
+const resolved = (p) => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
 // Run as CLI only when invoked directly, not when imported by tests.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+//
+// Both sides are realpath-resolved before comparing. `import.meta.url` is
+// already resolved by the module loader but `process.argv[1]` is not, so a
+// path reaching this file through a symlink made the comparison false — main()
+// never ran, and the process exited 0 in SILENCE. Under --strict that is a
+// fail-OPEN: the gate passes a diff it never read. Not reachable from a runner
+// workspace, but a gate must not have that shape at all.
+if (process.argv[1] && resolved(fileURLToPath(import.meta.url)) === resolved(process.argv[1])) {
   try {
     main()
   } catch (err) {

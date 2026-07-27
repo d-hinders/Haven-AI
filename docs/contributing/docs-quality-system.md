@@ -115,7 +115,7 @@ The two validators are whole-repo and dependency-free, which is why the
 `pull_request` trigger carries **no `paths:` filter** — a required check must
 report on every PR or auto-merge deadlocks waiting for a run that never happens
 (the #933 lesson; see [`autonomous-pr-loop.md`](autonomous-pr-loop.md) §One-time
-setup). Add **Front-matter, links & style** to the "Haven automerge rules"
+setup). Add **Docs front-matter & agent skills** to the "Haven automerge rules"
 ruleset for the blocking column above to be true.
 
 Until [#1023](https://github.com/d-hinders/Haven-AI/issues/1023) these ran as a

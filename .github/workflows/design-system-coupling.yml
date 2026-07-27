@@ -62,6 +62,10 @@ jobs:
     # No repo guard here, unlike `coupling` above: this job posts nothing, so a
     # fork PR's read-only token cannot break it — and a gate that silently
     # skips on forks is not a gate.
+    #
+    # Consequence worth knowing: on a FORK PR the author gets the red check
+    # without the explaining comment, since `coupling` is guarded off there.
+    # The finding (symbol + file + the fix) is printed in this job's log.
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

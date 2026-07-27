@@ -260,7 +260,7 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 
 ### `haven-doc-reviewer`
 
-Use after implementation when the diff touches code that some doc's `covers:` front-matter maps to (the coupling gate flags these on the PR). It reports specific stale, missing, or broken doc claims so the captain can update them before merge. The agent's findings are read-only suggestions, but **running it and acting on `covers:`-mapped findings is a hard definition-of-done step in the loop, not optional** — the captain must update the implicated docs (or genuinely re-verify and bump `last-verified`) in the same PR before opening it. Advisory here means GitHub's coupling-gate comment does not by itself block auto-merge, not that the step can be skipped.
+Use after implementation when the diff touches code that some doc's `covers:` front-matter maps to (the coupling gate flags these on the PR). It reports specific stale, missing, or broken doc claims so the captain can update them before merge. The agent's findings are read-only suggestions, but **running it and acting on `covers:`-mapped findings is a hard definition-of-done step in the loop, not optional** — the captain must update the implicated docs (or genuinely re-verify and bump `last-verified`) in the same PR before opening it. Advisory here means the **docs↔code** coupling comment does not by itself block auto-merge (contract docs excepted), not that the step can be skipped. The *design-system* coupling gate is a different check and does block — see [`autonomous-pr-loop.md`](autonomous-pr-loop.md).
 
 Example:
 

@@ -19,7 +19,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-07-13"
+last-verified: "2026-07-27"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -276,6 +276,27 @@ Once the deterministic money-flow harness proved stable when run manually (#575)
 signal; the `dev → main` gate reads that signal instead of re-running the
 money-moving harness on every promotion PR (which would burn testnet funds and
 need the `QA_*` secrets in a PR-triggered workflow).
+
+**What the gate proves** ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)) —
+it is not just "a run happened recently":
+
+- the newest green `qa-dev` run on `dev` is inside `QA_FRESHNESS_HOURS`
+  (default 30h), **and** no money-path file changed between that run's commit
+  and the promotion head. Recency is not coverage: a run predating the
+  money-path commits never exercised them. The failure names the offending
+  files.
+- a **money-path `hotfix/* → main` blocks**. `qa-dev.yml` is a black-box
+  harness against a *deployed* backend, and a hotfix is deployed nowhere until
+  it merges — so a green run on any branch exercised different code. Clearing
+  it is an explicit human decision: `qa-override` **with a comment stating what
+  you verified**. A hotfix touching no money-path file passes.
+- everything unanswerable fails **closed**: no run, unparseable timestamp,
+  uncomputable diff, unknown source branch, or a `QA_FRESHNESS_HOURS` that is
+  not a positive number.
+
+Logic: [`scripts/ci/qa-freshness.mjs`](../../scripts/ci/qa-freshness.mjs), unit-tested.
+Known limit: the run's `headSha` is the branch tip when the run was *triggered*,
+which for the nightly cron may be ahead of what dev actually deployed.
 
 ### When the money-flow QA runs
 

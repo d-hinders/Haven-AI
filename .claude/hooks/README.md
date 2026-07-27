@@ -19,7 +19,8 @@ that shipped several issues — a false positive on a *compliant* PR, i.e. the
 nag-fatigue failure the guard exists to avoid.
 `session-notice.sh` states the shipping *default* at the top of a session
 (a default, not a mandate — [#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).
-`test-ship-next-guard.sh` is the self-test — 88 cases.
+`test-ship-next-guard.sh` is the self-test — 101 cases, including a mutation-verified
+set for the token-matching rules (see the commit for #1028).
 
 **Residual gap, deliberately noisy:** two consecutive *no-argument* invocations
 (`/ship-next` with no issue) share one wildcard token, so the second such PR

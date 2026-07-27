@@ -27,10 +27,17 @@
 #
 # ## Marker matching is per ISSUE (#1028, fixed)
 #
-# The marker used to be a single flag the guard consumed, which warned on the
-# 2nd PR of a session that shipped several issues under one skill invocation
-# (observed on PR #1027) — a false positive on a COMPLIANT pull request, i.e.
-# the muted-guard failure this header warns about, self-inflicted.
+# The marker used to be a single flag the guard consumed. That is fragile in a
+# session shipping several issues: the flag is a session-level fact being used
+# to answer a per-PR question, so whether the 2nd PR warns depends on incidental
+# ordering between the writer and the guard rather than on whether the workflow
+# was followed. A false positive there is a false positive on a COMPLIANT pull
+# request — the muted-guard failure this header warns about, self-inflicted.
+#
+# HONESTY NOTE: an earlier version of this comment said the failure was
+# "observed on PR #1027". It was not: the old writer re-created the marker on
+# each invocation, so that PR would have been silent. The defect is structural,
+# not something I watched happen, and review was right to press on it.
 #
 # It is now a list of tokens keyed to issue numbers; the guard reads
 # `Closes #N` off the pull request and clears that token. See
@@ -78,6 +85,10 @@
 # means the exec bit is irrelevant, so that is not an additional failure mode.
 
 set -u
+
+# Set by the Bash route to the ONE segment that creates the PR; empty means
+# the issue number could not be scoped and only a wildcard may silence.
+pr_body=""
 
 input=$(cat 2>/dev/null) || exit 0
 [ -n "$input" ] || exit 0
@@ -168,19 +179,37 @@ fire_unless_ship_next() {
   marker="${TMPDIR:-/tmp}/claude-ship-next-$safe"
   [ -f "$marker" ] || fire
 
-  # Which issue does this PR close? The MCP payload carries a body field; the
-  # Bash shapes carry it inline in the command. Fall back to the WHOLE raw
-  # payload so an unparseable-but-PR-shaped input still gets a chance to match
-  # — that path must not be more likely to warn than the parsed one.
-  body=$(printf '%s' "$input" | jq -r '.tool_input.body // ""' 2>/dev/null) || body=""
-  [ -n "$body" ] || body="$input"
-  issue=$(printf '%s' "$body" \
-    | grep -oiE '(clos(e|es|ed)|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' 2>/dev/null \
-    | head -1 | tr -cd '0-9') || issue=""
+  # Which issue does this PR close? The source is deliberately NARROW: the MCP
+  # payload's own `body` field, or (Bash route) only the segment that actually
+  # invokes the PR creation — set by the caller in $pr_body.
+  #
+  # It used to fall back to the WHOLE raw payload, which let a closing keyword
+  # anywhere in it match: `git commit -m "closes #1030" && gh pr create --body
+  # "Closes #999"` consumed the #1030 token and silenced a PR for #999. That
+  # broke the property the whole design rests on — silence must mean "ship-next
+  # shipped THIS pull request", not "some token exists".
+  #
+  # When the body cannot be identified, no numeric match is attempted at all and
+  # only a wildcard can silence. Guessing from unscoped text is what caused the
+  # bug; refusing to guess is the fix.
+  body="${pr_body:-}"
+  [ -n "$body" ] || body=$(printf '%s' "$input" | jq -r '.tool_input.body // ""' 2>/dev/null) || body=""
 
-  # Exact whole-line match, so token 103 never clears 1030.
-  if [ -n "$issue" ] && grep -Fxq "$issue" "$marker" 2>/dev/null; then
-    matched="$issue"
+  # Every closing reference in that body, in order. GitHub itself closes each of
+  # them, so any is a legitimate match — but the KEYWORD is required: a bare
+  # `#1030` ("as in #1030") must never consume a token.
+  issues=$(printf '%s' "$body" \
+    | grep -oiE '(clos(e|es|ed)|fix(|es|ed)|resolve(|s|d))[[:space:]]+#[0-9]+' 2>/dev/null \
+    | tr -cd '0-9\n') || issues=""
+
+  matched=""
+  for cand in $issues; do
+    # Exact whole-line match, so token 103 never clears 1030.
+    if grep -Fxq "$cand" "$marker" 2>/dev/null; then matched="$cand"; break; fi
+  done
+
+  if [ -n "$matched" ]; then
+    : # an exact issue token wins; the wildcard is saved for a PR that needs it
   elif grep -Fxq '*' "$marker" 2>/dev/null; then
     # The invocation named no issue up front (`/ship-next`, `label=…`,
     # `epic=#…`, a freeform task). One wildcard covers one pull request.
@@ -189,21 +218,29 @@ fire_unless_ship_next() {
     fire
   fi
 
-  # Clear exactly ONE occurrence of the matched token. awk over a temp file
-  # rather than sed -i, which is not portable, and never edit in place: on any
-  # failure the marker is left intact and the NEXT PR warns — the safe
-  # direction. A failure here must never leave a token that silences a PR it
-  # should not have.
-  tmp="$marker.$$"
+  # Clear exactly ONE occurrence of the matched token, via a temp file (sed -i
+  # is not portable).
+  #
+  # On ANY failure — missing awk, unwritable TMPDIR, failing mv, unreadable
+  # marker — DELETE THE WHOLE MARKER. An earlier version left it intact and a
+  # comment claimed that was "the safe direction". It is the opposite: a
+  # retained token is SILENCE, so a missing `awk` silenced every subsequent PR
+  # in the session. Review caught it by running the script without awk on PATH.
+  # Losing the other tokens costs a few spurious warnings; keeping them costs
+  # the guard.
+  # NOT "$marker.$$": that name matches the `claude-ship-next-*` glob, so a
+  # stray temp file both litters the marker namespace and is prunable/readable
+  # as if it were a marker. Keep scratch out of that namespace entirely.
+  tmp="${TMPDIR:-/tmp}/.claude-ship-next-scratch-$$"
   if awk -v t="$matched" 'BEGIN{done=0} {if(!done && $0==t){done=1; next} print}' \
        "$marker" > "$tmp" 2>/dev/null; then
     if [ -s "$tmp" ]; then
-      mv -f "$tmp" "$marker" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+      mv -f "$tmp" "$marker" 2>/dev/null || { rm -f "$tmp" "$marker" 2>/dev/null; }
     else
       rm -f "$tmp" "$marker" 2>/dev/null
     fi
   else
-    rm -f "$tmp" 2>/dev/null || true
+    rm -f "$tmp" "$marker" 2>/dev/null || true
   fi
   exit 0
 }
@@ -263,6 +300,10 @@ for seg in $segments; do
   #     assignments). A mention inside a message or comment never does.
   if printf '%s' "$seg" | grep -qE '^[[:space:]]*(sudo[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)' 2>/dev/null; then
     is_pr=1
+    # Only THIS segment may supply the issue number. A `git commit -m "closes
+    # #N"` earlier in the same chained command is a different segment and must
+    # not be read as what this PR closes.
+    pr_body="$seg"
     continue
   fi
 
@@ -279,6 +320,7 @@ for seg in $segments; do
   printf '%s' "$seg" | grep -qE -- '-X[[:space:]]*(PATCH|PUT|DELETE|GET)|--request[[:space:]]*(PATCH|PUT|DELETE|GET)|\.(patch|put|delete|get)\(' 2>/dev/null && continue
   if printf '%s' "$seg" | grep -qE -- '-X[[:space:]]*POST|--request[[:space:]]*POST|[[:space:]]-d([[:space:]]|$)|--data|(^|[[:space:]])http[[:space:]]+POST|requests\.post|\.post\(|[Mm]ethod[[:space:]]*[:=][^A-Za-z0-9]*POST' 2>/dev/null; then
     is_pr=1
+    pr_body="$seg"
   fi
 done
 unset IFS

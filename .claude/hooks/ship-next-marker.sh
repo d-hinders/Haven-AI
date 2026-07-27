@@ -20,12 +20,13 @@
 #
 # ## The marker is a LIST OF ISSUE TOKENS, not a single flag (#1028)
 #
-# It used to be an empty file that the guard CONSUMED. That gave per-PR
-# precision on the assumption "one invocation = one PR" — true of the Skill tool
-# call, false of a session that ships several issues by continuing to follow the
-# already-loaded skill instructions. The 2nd PR then warned despite the workflow
-# being followed exactly. Observed on PR #1027; that is the nag-fatigue failure
-# the guard's own header warns about, self-inflicted.
+# It used to be an empty file that the guard CONSUMED — a session-level fact
+# used to answer a per-PR question. Whether the 2nd PR of a session warned then
+# depended on incidental ordering between this writer and the guard, not on
+# whether the workflow was followed. (An earlier version of this comment claimed
+# the failure was "observed on PR #1027"; it was not — the old writer re-created
+# the marker each invocation. The defect is structural, and review was right to
+# press on the unsupported claim.)
 #
 # Now each invocation appends a TOKEN:
 #   * the issue number, when the invocation names one (`/ship-next 1030`);
@@ -82,14 +83,16 @@ esac
 
 [ "$driving" -eq 1 ] || exit 0
 
-# A BARE issue number is the only form that names an issue up front. `label=…`,
+# A BARE issue number — digits and nothing else — is the only form that names
+# an issue up front. The class below used to admit SPACES, so `/ship-next 10 30`
+# became token `1030` and would have silenced a real PR closing #1030. `label=…`,
 # `epic=#…` and a quoted freeform task all resolve to an issue the skill picks
 # later, so they get the wildcard. Digits-only on purpose: matching the `5` out
 # of `epic=#5` would clear a token for an unrelated issue.
 token='*'
 case "$raw" in
   '') token='*' ;;
-  *[!0-9\ ]*) token='*' ;;
+  *[!0-9]*) token='*' ;;
   *)
     n=$(printf '%s' "$raw" | tr -cd '0-9')
     [ -n "$n" ] && token="$n"

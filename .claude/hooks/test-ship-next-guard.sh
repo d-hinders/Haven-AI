@@ -49,6 +49,11 @@ WRITER="$(dirname "$0")/ship-next-marker.sh"
 # JSON string, making the payload invalid. The guard then takes its fail-noisy
 # unparseable path and never reaches the marker logic, so every marker test
 # would pass-or-fail for the wrong reason. Cost an hour once; don't reintroduce.
+# Bash payload for a NAMED session. b() hardcodes `testsess`, which silently
+# made marker assertions vacuous — the marker was under sess1, the payload
+# under testsess, so nothing could ever match.
+bs() { printf '{"session_id":"%s","tool_name":"Bash","tool_input":{"command":%s}}' "$1" "$(printf '%s' "$2" | jq -Rs .)"; }
+prbody() { printf '{"session_id":"%s","tool_name":"mcp__github__create_pull_request","tool_input":{"body":"%s"}}' "$1" "$2"; }
 pr() { if [ -n "${2:-}" ]; then printf '{"session_id":"%s","tool_name":"mcp__github__create_pull_request","tool_input":{"body":"does things. Closes #%s"}}' "$1" "$2"; else printf '{"session_id":"%s","tool_name":"mcp__github__create_pull_request","tool_input":{}}' "$1"; fi; }
 
 # --- must warn: these open a pull request --------------------------------
@@ -182,6 +187,77 @@ mkrm sess1
 mkrm sess1; mktok sess2 1030
 check "other session's token does not silence" fire "$(pr sess1 1030)"
 mkrm sess2
+
+# --- gaps review found by MUTATION: each of these left 88/88 green ---------
+# A safeguard with no test that fails when it is deleted is not covered, however
+# many cases surround it.
+
+# 1. The CLOSING KEYWORD is required. A bare `#N` reference must never consume a
+#    token — otherwise "as in #1030" in a PR body silences a PR for #1030.
+mktok sess1 1030
+check "bare '#1030' mention does NOT consume a token" fire "$(prbody sess1 'builds on #1030, see also #1030')"
+if mkhastok sess1 1030; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  a bare mention consumed the token\n'; fi
+mkrm sess1
+
+# 2. The issue must come from THIS PR's body, not anywhere in the payload. The
+#    Bash route chains commands: a `git commit -m "closes #N"` in one segment
+#    must not be read as what the `gh pr create` segment closes.
+mktok sess1 1030
+check "cross-segment: commit msg does not supply the issue" fire \
+  "$(bs sess1 'git commit -m "closes #1030" && gh pr create --title t --body "Closes #999"')"
+if mkhastok sess1 1030; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  a commit message consumed an unrelated token\n'; fi
+mkrm sess1
+
+# ...and the PR-creating segment itself DOES supply it.
+mktok sess1 999
+check "the gh pr create segment does supply the issue" silent \
+  "$(bs sess1 'git commit -m "wip" && gh pr create --title t --body "Closes #999"')"
+mkrm sess1
+
+# 3. Every failure of the clear operation must fail NOISY. With awk unavailable
+#    the guard used to keep the token and silence every later PR in the session.
+mktok sess1 '*' '*'
+BADAWK="${TMPDIR:-/tmp}/badawk-$$"; mkdir -p "$BADAWK"
+printf '#!/bin/sh\nexit 1\n' > "$BADAWK/awk"; chmod +x "$BADAWK/awk"
+# Real PATH kept, awk shadowed by a failing stub — otherwise `rm` disappears too
+# and the cleanup this test is checking cannot run for an unrelated reason.
+printf '%s' "$(pr sess1 500)" | PATH="$BADAWK:$PATH" sh "$GUARD" >/dev/null 2>&1
+# The PR that triggered the failure may go either way; what must NOT happen is
+# the marker surviving to silence everything after it.
+if mkhas sess1; then fail=$((fail+1)); printf '  FAIL  clear-failure left the marker intact (silences later PRs)\n'; else pass=$((pass+1)); fi
+check "after a clear-failure, the next PR warns" fire "$(pr sess1 501)"
+rm -rf "$BADAWK" 2>/dev/null
+mkrm sess1
+
+# 4. No scratch file may be left in the marker namespace — it would be readable
+#    and prunable as if it were a marker.
+mktok sess1 1030 1031
+printf '%s' "$(pr sess1 1030)" | sh "$GUARD" >/dev/null 2>&1
+if ls "$MARKER_DIR"/claude-ship-next-sess1.* >/dev/null 2>&1; then
+  fail=$((fail+1)); printf '  FAIL  scratch file left inside the claude-ship-next-* namespace\n'
+  rm -f "$MARKER_DIR"/claude-ship-next-sess1.*
+else pass=$((pass+1)); fi
+mkrm sess1
+
+# 5. Multiple closing references: GitHub closes them all, so any may match.
+mktok sess1 222
+check "second Closes in the body can match" silent "$(prbody sess1 'Closes #111 and Closes #222')"
+mkrm sess1
+
+# 6. Writer: an argument that is not a bare number must never become a token.
+for badarg in '10 30' '1030 extra' '1030 1031'; do
+  mkrm wsess
+  printf '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":%s}' \
+    "$(printf '/ship-next %s' "$badarg" | jq -Rs .)" | sh "$WRITER" 2>/dev/null
+  if mkhastok wsess '*'; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  expected wildcard for arg: %s\n' "$badarg"; fi
+done
+mkrm wsess
+
+# 7. A Skill payload with NO args field — the shape most likely in reality.
+printf '{"session_id":"wsess","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"ship-next"}}' | sh "$WRITER" 2>/dev/null
+if mkhastok wsess '*'; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  Skill payload without args did not write a wildcard\n'; fi
+mkrm wsess
+
 
 # --- the asymmetry: broken marker machinery must WARN, never silence ------
 check "missing session_id -> warns" fire '{"tool_name":"mcp__github__create_pull_request","tool_input":{}}'

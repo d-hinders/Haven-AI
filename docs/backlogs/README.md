@@ -45,10 +45,16 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
 - **Files** — the file(s) the change should own (best-effort).
 - **Surface** — which `area:*` / `money-path` label(s) apply, so `ship-next`
   loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).
-- **Money-path?** — whether it touches x402 / machine-payments / payment-coverage
-  / allowance / migrations. The label selects the `money.md` playbook and the
-  characterization-test bar; it does not pause the merge (#1024). Migrations
-  require independent code-owner review and merge through `.github/CODEOWNERS`.
+- **Money-path?** — whether it touches x402, machine-payments, payment-coverage,
+  allowances, the **delegation rail** or rail seam, the SDK signer, or
+  migrations. Don't work from this summary: the authoritative list is
+  [`.github/money-path-globs.json`](../../.github/money-path-globs.json), which
+  `labeler.yml` applies automatically and a test keeps in sync
+  ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)) — a prose copy is
+  how the delegation rail went unlabelled for months. The label selects the
+  `money.md` playbook and the characterization-test bar; it does not pause the
+  merge (#1024). Migrations require independent code-owner review and merge
+  through `.github/CODEOWNERS`.
 - **Characterization-first** — for a change to existing money-path behavior, pin
   the current behavior with a test before changing it.
 

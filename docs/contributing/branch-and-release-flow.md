@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-06-30"
+last-verified: "2026-07-27"
 ---
 
 # Branch & release flow
@@ -87,7 +87,7 @@ the epic when its last sub-issue lands on `dev`.
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| `dev-gate.yml` | PR into `main` | blocks anything but `dev`/`hotfix/*` |
+| `dev-gate.yml` | PR into `main` | `gate`: blocks anything but `dev`/`hotfix/*`. `qa-freshness`: blocks unless a green money-flow QA run covers the promoted money-path code; a money-path `hotfix/*` blocks outright ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)). Bypass: `qa-override`. |
 | `release.yml` | push to `main` | cuts the `prod-*` Release |
 | `promotion-digest.yml` | weekly + manual | upserts the pending-promotion issue |
 | `publish.yml` | push to `main` | publishes packages whose version isn't yet on npm |

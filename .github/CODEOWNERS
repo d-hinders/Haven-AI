@@ -19,11 +19,12 @@
 #   2. the `qa-freshness` job in .github/workflows/dev-gate.yml, which refuses a
 #      dev -> main promotion without a recent GREEN money-flow QA run on `dev`.
 #
-# Gate 2 is load-bearing but PARTIAL, and the limits are load-bearing too: it is
-# time-based rather than bound to the promoted SHA, it does not cover
-# `hotfix/* -> main`, and it only bites while listed in `main`'s required status
-# checks. See "Be precise about what gate 2 proves" in
-# docs/contributing/autonomous-pr-loop.md. If it is dropped from the ruleset,
+# Gate 2 is load-bearing. Since #1030 it verifies that the green run actually
+# COVERED the promoted money-path code (not merely that some recent run exists),
+# and it judges `hotfix/* -> main` on that branch's own evidence. It still only
+# bites while listed in `main`'s required status checks, and `qa-override`
+# remains a deliberate, logged bypass. See "Be precise about what gate 2 proves"
+# in docs/contributing/autonomous-pr-loop.md. If it is dropped from the ruleset,
 # restore it or widen the paths below.
 #
 # See docs/contributing/autonomous-pr-loop.md ("Money-path safety model").

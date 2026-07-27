@@ -184,6 +184,23 @@ jobs:
             echo "full=$full"
           } >> "$GITHUB_OUTPUT"
 
+  # Unconditional by design (#1030). These tests cover repo-level CI config —
+  # the money-path glob list and the money-flow QA freshness gate that replaced
+  # the in-session money-path approval pause (#1024). They must run on EVERY PR,
+  # not behind a surface filter: the whole failure being fixed is a money-path
+  # safeguard that nobody noticed was wrong. Dependency-free, ~1s, no npm ci.
+  ci_config_checks:
+    name: Repo CI config checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Money-path list + QA freshness gate
+        run: node --test scripts/ci/*.test.mjs
+
   sdk_checks:
     name: SDK checks
     needs: changes
@@ -631,7 +648,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks]
+    needs: [changes, sdk_checks, cli_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -642,6 +659,16 @@ jobs:
 
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "Change detection result: ${{ needs.changes.result }}"
+            exit 1
+          fi
+
+          # Checked BEFORE the docs-only early exit below: these cover the
+          # money-path glob list and the money-flow QA gate (#1030), which are
+          # repo config, not a code surface. A docs-only PR can absolutely break
+          # them — and short-circuiting past them is how a money-path safeguard
+          # goes unnoticed, which is the failure #1030 exists to close.
+          if [ "${{ needs.ci_config_checks.result }}" != "success" ]; then
+            echo "Repo CI config checks result: ${{ needs.ci_config_checks.result }}"
             exit 1
           fi
 

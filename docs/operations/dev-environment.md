@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-07-18"
+last-verified: "2026-07-27"
 ---
 
 # Dev environment
@@ -55,9 +55,16 @@ database, JWT secret, or relayer key.
 - Feature work flows `feature/* → dev → main`. The **`dev-gate`** workflow
   (`.github/workflows/dev-gate.yml`) only lets `dev` or `hotfix/*` merge into
   `main`, so the dev environment always reflects merged-and-green `dev`. It also
-  carries the **money-flow QA freshness gate** (#578): promotion PRs require a
-  recent green `qa-dev.yml` run on `dev` (bypass: `qa-override` label; advisory
-  until added to main's required status checks).
+  carries the **money-flow QA freshness gate** (#578, hardened in
+  [#1030](https://github.com/d-hinders/Haven-AI/issues/1030)): a promotion PR
+  needs a green `qa-dev.yml` run on `dev` that is both recent **and actually
+  covers the money-path code being promoted** — if a money-path file changed
+  after the newest green run, the gate fails and names it. A **money-path
+  `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
+  hotfix is deployed nowhere until it merges, so no automatic evidence about it
+  can exist. Bypass in both cases: the `qa-override` label, with a comment
+  stating what was verified. Both `gate` and `qa-freshness` are **required
+  status checks on `main`** as of 2026-07-27.
 
 ## Configuration
 

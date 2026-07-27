@@ -43,11 +43,12 @@ for how the environments are wired, see
       the in-session money-path pause, this is the **only** human look at
       money-path changes before prod — read it as such. Confirm nothing changes
       *who can move funds* or *auto-execute vs. queue* unintentionally.
-- [ ] **Check the money-flow QA run actually covers this diff.** The
-      `qa-freshness` gate proves *a* green `qa-dev` run exists on `dev` within
-      `QA_FRESHNESS_HOURS` — it does **not** bind that run to the commits being
-      promoted. If money-path commits landed on `dev` after the newest green
-      run, re-run *QA — money-flow (dev)* before promoting.
+- [ ] **Money-flow QA coverage is now checked automatically** ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)):
+      `qa-freshness` fails if any money-path file changed after the newest green
+      `qa-dev` run, naming the offending commits. You no longer have to verify
+      this by hand — if the gate is green, the run covered the money path. If it
+      fails, re-run *QA — money-flow (dev)* rather than reaching for
+      `qa-override`.
 - [ ] **Migrations:** list every migration included since the last promotion.
       Confirm each is **forward-only / safe on existing rows**, and that a
       **prod DB snapshot** exists before they run on deploy.

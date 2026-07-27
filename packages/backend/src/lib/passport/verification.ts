@@ -29,7 +29,7 @@
 
 import * as repo from '../../infra/repositories/agent-passports.js'
 import type { VerificationRow } from '../../infra/repositories/agent-passports.js'
-import { AssuranceLevel } from './schema.js'
+import { AssuranceLevel, ISSUABLE_ASSURANCE_LEVELS } from './schema.js'
 import { standingForStatus, anchorForPassport } from './revocation.js'
 import {
   RECEIPT_TTL_SECONDS,
@@ -54,7 +54,7 @@ export type PassportQuery = { address: string } | { attestationUid: string }
  */
 export type VerificationResult =
   | { found: true; signed: SignedPassportReceipt }
-  | { found: false; reason: 'no_passport' }
+  | { found: false; reason: 'no_passport' | 'unsupported_assurance_level' }
 
 /**
  * The enforced-controls summary — booleans only.
@@ -75,15 +75,68 @@ function controlsOf(row: VerificationRow): ControlSummary | null {
 }
 
 /**
+ * The passport's assurance level, READ from the row rather than assumed (#975).
+ *
+ * The verifier used to hardcode `AssuranceLevel.L0`. That was correct only
+ * because `agent_passport_level_issuable` pins the column to 0 — an invariant
+ * enforced in a different layer, for a value this function is the sole author
+ * of on the wire. The ladder exists so later tiers need no re-architecture; a
+ * verifier that hardcodes the field the ladder communicates would silently
+ * report L0 for an L1 passport the day the CHECK widens, which is precisely
+ * the "premature verified" failure the ladder's naming discipline guards.
+ *
+ * Returns null for a level this build cannot issue. Clamping to L0 was the
+ * tempting alternative and is worse: it UNDERSTATES a higher tier, and a
+ * merchant's screening logic branches on this field, so reporting a screened
+ * agent as merely governed is a wrong answer presented as a right one.
+ *
+ * "Fails closed" is deliberately NOT claimed for the system here — only for
+ * this function. Whether a merchant then denies is its own error handling,
+ * which this endpoint elsewhere assumes cannot be relied on. That is exactly
+ * why the caller turns this into a 200 `found: false` rather than an error
+ * status; see `verifyPassport`.
+ *
+ * EXPORTED for testing, and that is not incidental. While L0 is the only
+ * issuable level, "read the row" and "hardcode L0" produce identical output
+ * for every VALID input, so no behavioural test can tell them apart — reverting
+ * this function's use to a literal left the whole suite green. The unit tests
+ * below plus a source-level guard are what actually pin it; see
+ * passport-assurance.test.ts.
+ */
+export function assuranceLevelOf(row: VerificationRow): AssuranceLevel | null {
+  // Explicit per type rather than a bare `Number()`. Coercion kept finding new
+  // ways to DEFAULT: `Number(null)` is 0 and `Number('')` is 0, and 0 is
+  // issuable — so each attempt silently reported an absent level as L0, the
+  // exact failure this function exists to prevent. Both were caught by its own
+  // unit tests. A permissive cast is not a safe default here; naming the
+  // accepted shapes is.
+  //
+  // The string branch exists because `Set.has` is identity-based: if a driver
+  // ever returned int2 as a string, '0' would not match 0 and every lookup
+  // would refuse — a total outage from a type change, not a policy change.
+  const raw = row.assurance_level as unknown
+  let level: AssuranceLevel
+  if (typeof raw === 'number') level = raw as AssuranceLevel
+  else if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) level = Number(raw) as AssuranceLevel
+  else return null
+  return ISSUABLE_ASSURANCE_LEVELS.has(level) ? level : null
+}
+
+/**
  * Build the receipt for a resolved agent. Always reflects CURRENT standing —
  * a revocation shows up in a freshly fetched receipt immediately, whatever the
  * EAS anchor is doing.
+ *
+ * Returns null when the stored assurance level is one this build cannot issue,
+ * so the caller can answer `found: false` rather than error. See below.
  */
-export async function buildReceipt(row: VerificationRow): Promise<SignedPassportReceipt> {
+export async function buildReceipt(row: VerificationRow): Promise<SignedPassportReceipt | null> {
   const issuer = receiptIssuerAddress()
   if (!issuer) {
     throw new Error('passport receipt signing is not configured (PASSPORT_RECEIPT_SIGNING_KEY)')
   }
+  const assuranceLevel = assuranceLevelOf(row)
+  if (assuranceLevel === null) return null
   const now = Math.floor(Date.now() / 1000)
   const receipt: PassportReceipt = {
     version: RECEIPT_VERSION,
@@ -91,7 +144,7 @@ export async function buildReceipt(row: VerificationRow): Promise<SignedPassport
     agentId: row.agent_id,
     agentEoa: row.agent_eoa,
     smartAccount: row.smart_account,
-    assuranceLevel: AssuranceLevel.L0,
+    assuranceLevel,
     // Shared with `passportStanding()`, not re-implemented: a copy would be
     // free to drift, and the failure mode is the receipt a merchant holds
     // disagreeing with Haven's own answer for the same agent.
@@ -114,5 +167,20 @@ export async function verifyPassport(query: PassportQuery): Promise<Verification
       ? await repo.findByAgentAddress(query.address)
       : await repo.findByAttestationUid(query.attestationUid)
   if (!row) return { found: false, reason: 'no_passport' }
-  return { found: true, signed: await buildReceipt(row) }
+
+  const signed = await buildReceipt(row)
+  if (!signed) {
+    // Deliberately the SAME 200 `found: false` shape as `no_passport`, not an
+    // error status (#975). This endpoint states twice — in its route doc and in
+    // the architecture doc — that an error status is what makes an integration
+    // treat a lookup failure as a pass. A 500 here would have contradicted the
+    // file's own doctrine, and the documented merchant snippet destructures
+    // `receipt`/`signature` straight off the body, so it would THROW on a 500
+    // and whether that denies is the merchant's catch block. `found: false` is
+    // closed by construction: every integrator already handles it.
+    //
+    // Unreachable while `agent_passport_level_issuable` pins the column to 0.
+    return { found: false, reason: 'unsupported_assurance_level' }
+  }
+  return { found: true, signed }
 }

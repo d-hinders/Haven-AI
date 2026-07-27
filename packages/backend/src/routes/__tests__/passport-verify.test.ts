@@ -32,6 +32,7 @@ function row(overrides: Record<string, unknown> = {}) {
   return {
     agent_id: 'agt_1',
     agent_status: 'active',
+    assurance_level: 0,
     record_updated_at: new Date('2026-07-20T00:00:00Z'),
     passport_status: 'anchored',
     attestation_uid: UID,
@@ -323,5 +324,50 @@ describe('standingEpoch semantics (#1015)', () => {
     mockQuery.mockResolvedValueOnce({ rows: [row({ record_updated_at: null })] })
     const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
     expect(res.json().receipt.standingEpoch).toBe(0)
+  })
+})
+
+describe('assurance level is read, not assumed (#975)', () => {
+  // The verifier used to hardcode AssuranceLevel.L0. Correct only while the
+  // `agent_passport_level_issuable` CHECK pins the column to 0 — an invariant
+  // in a different layer, for a value the verifier is the sole author of on the
+  // wire. The ladder exists so later tiers need no re-architecture.
+
+  it('reports the level stored on the passport', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: 0 })] })
+    const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
+    expect(res.json().receipt.assuranceLevel).toBe(0)
+  })
+
+  it.each([
+    ['a reserved level (L1)', 1],
+    ['an unknown level', 99],
+    ['a missing column', undefined],
+  ])('answers found:false for %s — never an error status', async (_name, level) => {
+    // 200 `found: false`, the SAME shape as `no_passport`, deliberately.
+    // Review caught the first version returning 500: this endpoint states twice
+    // that an error status is what makes an integration treat a lookup failure
+    // as a pass, and the documented merchant snippet destructures `receipt` off
+    // the body — so a 500 would THROW there and whether that denies is the
+    // merchant's catch. `found: false` is closed by construction.
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: level })] })
+    const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().found).toBe(false)
+    expect(res.json().reason).toBe('unsupported_assurance_level')
+  })
+
+  it('never emits a receipt alongside the refusal', async () => {
+    // The failure that would matter: a body a merchant could half-parse.
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: 1 })] })
+    const body = (await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json()
+    expect(body.receipt).toBeUndefined()
+    expect(body.signature).toBeUndefined()
+  })
+
+  it('distinguishes the refusal from no_passport, so operators can tell them apart', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] })
+    const absent = (await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json()
+    expect(absent.reason).toBe('no_passport')
   })
 })

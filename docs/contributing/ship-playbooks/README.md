@@ -4,16 +4,26 @@ status: current
 covers:
   - .agents/skills/ship-next/SKILL.md
   - .github/labels.yml
-last-verified: "2026-07-12"
+last-verified: "2026-07-27"
 ---
 
 # Ship-next playbooks
 
-The canonical `ship-next` skill is the default way to ship anything defined as a GitHub issue. It
-**routes, it does not contain**: it classifies the issue's surface, then loads
+The canonical `ship-next` skill is the **default route** for shipping a GitHub
+issue — the fastest way through the standards, not a mandate ([#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).
+It **routes, it does not contain**: it classifies the issue's surface, then loads
 the matching *playbook* — a small file that links the standards, checks, and
 agents for that surface. Playbooks link the canonical docs; they never copy
 them (that would drift — see [`docs-quality-system.md`](../docs-quality-system.md)).
+
+> **Default, not mandate.** The mechanical standards are **CI required checks**
+> and apply to every pull request however it was opened — see the ruleset
+> inventory in [`autonomous-pr-loop.md`](../autonomous-pr-loop.md). What this
+> skill adds on top is judgement work no check performs: playbook routing, the
+> independent review passes, the `covers:` doc-reviewer step, and closeout
+> evidence. A contributor who prefers another workflow is free to use it and
+> **owns an equivalent review themselves** — say so in the pull request. There
+> is deliberately no check for whether the skill was used.
 
 Epic: [#651](https://github.com/d-hinders/Haven-AI/issues/651).
 

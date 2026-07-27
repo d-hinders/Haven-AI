@@ -1,17 +1,38 @@
 #!/bin/sh
 # PreToolUse guard: warn (never block) when a PR is opened outside /ship-next.
 #
-# Why this exists: CLAUDE.md already states that `ship-next` is the default way
-# to ship a GitHub issue — on its last line, in a 304-line file. That prose was
-# read and not followed, twice, and the cost was a PR reported as ready when its
-# merge gate had never been checked, and a doc snippet shipped to merchants with
-# a signature-verification bug in it. Prose is at its ceiling here; a hook fires
-# at the moment of the action regardless of how the session started.
+# Why this exists: CLAUDE.md named the workflow, at the bottom of a long file,
+# and that prose was read and not followed — twice. The cost was a PR reported
+# as ready when its merge gate had never been checked, and a doc snippet
+# shipped to merchants with a signature-verification bug in it. A hook fires at
+# the moment of the action regardless of how the session started.
 #
 # Non-blocking by owner decision (2026-07-26): it warns and lets the call
-# through. So the message carries the SUBSTANCE of the gates most often skipped,
-# not just a pointer — a nag that only says "you forgot" is worth nothing when
-# it can be walked past.
+# through. So the message carries the SUBSTANCE of what is skipped, not just a
+# pointer — a nag that only says "you forgot" is worth nothing when it can be
+# walked past.
+#
+# ## Scope shrank on purpose (#1023, #1024, #1025)
+#
+# It used to list four gates. Two of them are now CI required checks that apply
+# to every PR however it was opened (#1023), so repeating them here would be
+# noise — and a fifth claim, that money-path needs in-session approval, became
+# simply false (#1024). What is left is the judgement layer no check performs.
+#
+# The framing also changed (#1025): ship-next is the default ROUTE, not a
+# mandate. Opening a PR outside it is allowed; this warning states what you are
+# taking on, not that you did something wrong.
+#
+# ## Known gap — the marker is per-INVOCATION, not per-session
+#
+# ship-next-marker.sh writes the marker when the Skill tool fires, and the
+# guard CONSUMES it. A session that ships several issues by re-reading the
+# already-loaded skill instructions, without a fresh Skill tool call, gets no
+# new marker — so the 2nd PR warns even though the workflow was followed.
+# Observed on PR #1027. That is the exact false-positive class this marker was
+# built to remove, so it is a real defect, not a quirk. Not fixed here: the fix
+# is a design change (session-scoped marker refreshed per PR, or written on
+# issue selection rather than skill invocation), and this is personal tooling.
 #
 # ## Detection: segment first, then match at COMMAND POSITION
 #
@@ -60,35 +81,29 @@ cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null) || c
 fire() {
   MSG='⚠️  Opening a PR OUTSIDE /ship-next.
 
-Havens canonical shipping workflow is .agents/skills/ship-next/SKILL.md —
-CLAUDE.md: "ship-next is the default way to ship anything defined as a GitHub
-issue or sub-issue". Prefer stopping here and invoking /ship-next instead.
+Haven'"'"'s default shipping route is .agents/skills/ship-next/SKILL.md. Working
+differently is ALLOWED (#1025) — the mechanical standards are CI required
+checks either way. What you take on is the judgement layer no check performs:
 
-If opening this PR directly is deliberate, you now own these gates. They are
-listed because they are the ones actually skipped in practice, not for
-completeness:
-
-1. MERGE ROUTING — a diff touching db/migrations/ needs an INDEPENDENT
-   code-owner approval (.github/CODEOWNERS). The PR AUTHORs own approval does
-   NOT satisfy it; GitHubs self-approval rule means the author must not be the
-   approver. money-path (the label OR the file list in the skills Merge Gate,
-   union not intersection) needs in-session user approval. Only non-money-path
-   may auto-merge.
+1. INDEPENDENT REVIEW of the COMPLETE candidate diff vs origin/dev — including
+   any fixes written in response to an EARLIER review. Reviewed findings plus
+   unreviewed fixes is not a reviewed PR. For area:frontend, a rendered pass
+   too. Nothing in CI does this, and nothing will tell you it was skipped.
 
 2. DOC-REVIEWER — run: node scripts/docs/coupling-gate.mjs
    If the diff touches code that any docs `covers:` front-matter maps to,
-   reviewing those docs is a HARD definition-of-done step. Do not open the PR
-   with a covers:-mapped doc unreviewed. Editing the doc yourself is not the
+   review those docs. CI only BLOCKS on docs marked `contract: true`; the rest
+   are advisory, so this one is on you. Editing the doc yourself is not the
    same as reviewing it.
 
-3. INDEPENDENT REVIEW of the COMPLETE candidate diff vs origin/dev — including
-   any fixes written in response to an EARLIER review. Reviewed findings plus
-   unreviewed fixes is not a reviewed PR.
+3. MIGRATION MERGE ROUTING — a diff touching db/migrations/ needs an
+   INDEPENDENT code-owner approval (.github/CODEOWNERS). The PR AUTHOR'"'"'s own
+   approval does NOT satisfy it. (money-path no longer pauses the merge, #1024
+   — it selects money.md and its characterization-test bar.)
 
-4. ACCEPTANCE GATE — package tests + typecheck; and when the diff touches any
-   Markdown, anything under docs/ or scripts/docs/, or a root gravity file
-   (CLAUDE.md, README.md, AGENTS.md, ABOUT_HAVEN.md): npm run docs:check AND
-   npm run docs:test, as a hard gate.
+Not listed, because CI now enforces them for you (#1023): docs:check /
+docs:test, design-system coupling, visual regression, copy lint, contract
+docs. Those cannot be skipped by opening a PR by hand.
 
 This warning does not block. It is on you.'
 

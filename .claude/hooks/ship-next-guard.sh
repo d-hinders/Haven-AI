@@ -14,10 +14,12 @@
 #
 # ## Scope shrank on purpose (#1023, #1024, #1025)
 #
-# It used to list four gates. Two of them are now CI required checks that apply
-# to every PR however it was opened (#1023), so repeating them here would be
-# noise — and a fifth claim, that money-path needs in-session approval, became
-# simply false (#1024). What is left is the judgement layer no check performs.
+# It used to list four gates. The fourth — the ACCEPTANCE GATE (docs:check /
+# docs:test) — became a CI required check (#1023), so repeating it here is
+# noise; the other three survive as the judgement layer no check performs. A
+# clause inside the old first gate, that money-path needs in-session approval,
+# became simply false (#1024) and is gone. Contract-doc coupling is also a
+# required check now, but that gate is #646, not #1023.
 #
 # The framing also changed (#1025): ship-next is the default ROUTE, not a
 # mandate. Opening a PR outside it is allowed; this warning states what you are
@@ -30,9 +32,9 @@
 # already-loaded skill instructions, without a fresh Skill tool call, gets no
 # new marker — so the 2nd PR warns even though the workflow was followed.
 # Observed on PR #1027. That is the exact false-positive class this marker was
-# built to remove, so it is a real defect, not a quirk. Not fixed here: the fix
-# is a design change (session-scoped marker refreshed per PR, or written on
-# issue selection rather than skill invocation), and this is personal tooling.
+# built to remove, so it is a real defect, not a quirk. Tracked as #1028. Not
+# fixed here: the fix is a design change (marker keyed on session+issue, or
+# written on issue selection rather than skill invocation).
 #
 # ## Detection: segment first, then match at COMMAND POSITION
 #
@@ -96,14 +98,15 @@ checks either way. What you take on is the judgement layer no check performs:
    are advisory, so this one is on you. Editing the doc yourself is not the
    same as reviewing it.
 
-3. MIGRATION MERGE ROUTING — a diff touching db/migrations/ needs an
+3. MIGRATION MERGE ROUTING — a diff touching
+   /packages/backend/src/db/migrations/ needs an
    INDEPENDENT code-owner approval (.github/CODEOWNERS). The PR AUTHOR'"'"'s own
    approval does NOT satisfy it. (money-path no longer pauses the merge, #1024
    — it selects money.md and its characterization-test bar.)
 
-Not listed, because CI now enforces them for you (#1023): docs:check /
-docs:test, design-system coupling, visual regression, copy lint, contract
-docs. Those cannot be skipped by opening a PR by hand.
+Not listed, because CI enforces them for you: docs:check / docs:test and
+design-system coupling (#1023), visual regression (#897), copy lint (#902),
+contract docs (#646). Opening a PR by hand does not skip those.
 
 This warning does not block. It is on you.'
 

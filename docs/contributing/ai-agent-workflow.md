@@ -19,7 +19,7 @@ This repo uses one main session as the captain and a few narrow subagents as spe
 
 The captain is the main interactive session. It owns product judgment, git, shared files, final integration, and the branch or PR. Subagents are useful for isolated discovery, bounded implementation, and review.
 
-> **What is enforced vs. what this document adds ([#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).** The mechanical standards — tests, typecheck, docs front-matter, design-system coupling, visual regression, copy lint, contract docs, `CODEOWNERS` on migrations — are **CI required checks** on every pull request, whoever or whatever opened it. Nothing in this document is needed to make them apply, and no workflow choice can skip them.
+> **What is enforced vs. what this document adds ([#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).** The mechanical standards are **CI required checks**, and the migrations gate is a `CODEOWNERS` **review rule** — different mechanisms, same property: they apply to every pull request whoever or whatever opened it. Nothing in this document is needed to make them apply, and no workflow choice skips them. The authoritative list, with its fork and promotion caveats, is the ruleset inventory in [`autonomous-pr-loop.md`](autonomous-pr-loop.md).
 >
 > Everything below is the layer CI **cannot** check: judgement, review, and the traps a diff walks into. `ship-next` is the default route through it because it is the fastest one, not because it is required. Working differently is fine and stays possible — it means owning an equivalent review yourself, and saying so in the pull request. There is deliberately no check for which workflow was used: enforce outcomes, never tooling.
 

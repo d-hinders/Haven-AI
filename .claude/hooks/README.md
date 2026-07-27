@@ -6,11 +6,16 @@ These scripts are **committed**. The `settings.json` that would activate them is
 ## What they do
 
 `ship-next-guard.sh` warns — never blocks — when a pull request is opened
-outside Haven's `/ship-next` workflow, and injects the gates most often skipped
-(CODEOWNERS merge routing, the `covers:` doc-reviewer step, review of the
-complete diff, the acceptance gate). `ship-next-marker.sh` records that
-`/ship-next` is genuinely driving so the guard stays quiet on a compliant PR.
-`session-notice.sh` states the shipping rule at the top of a session.
+outside Haven's `/ship-next` route, and injects the three things CI does *not*
+cover: review of the complete diff, the `covers:` doc-reviewer step, and
+CODEOWNERS migration routing. It used to list a fourth (the acceptance gate),
+dropped once [#1023](https://github.com/d-hinders/Haven-AI/issues/1023) made
+that a CI required check. `ship-next-marker.sh` records that `/ship-next` is
+genuinely driving so the guard stays quiet on a compliant PR — **it has a known
+false-positive on a second PR in one session, see
+[#1028](https://github.com/d-hinders/Haven-AI/issues/1028)**.
+`session-notice.sh` states the shipping *default* at the top of a session
+(a default, not a mandate — [#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).
 `test-ship-next-guard.sh` is the self-test — 58 cases.
 
 Background: [#1016](https://github.com/d-hinders/Haven-AI/issues/1016),

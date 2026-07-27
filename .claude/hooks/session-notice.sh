@@ -18,7 +18,7 @@ find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'claude-ship-next-*' -mtime +0 -delete 
 jq -n '{
   hookSpecificOutput: {
     hookEventName: "SessionStart",
-    additionalContext: "Haven shipping rule: shipping a GitHub issue goes through /ship-next (.agents/skills/ship-next/SKILL.md) — it loads the right playbook, runs the acceptance gate and the doc-reviewer step, and routes the merge (a db/migrations/ diff needs an INDEPENDENT code-owner approval; the PR authors own approval does not count). A PreToolUse hook warns, but does not block, if a PR is opened outside it."
+    additionalContext: "Haven shipping: /ship-next (.agents/skills/ship-next/SKILL.md) is the DEFAULT ROUTE, not a mandate (#1025) — working differently is allowed. The mechanical standards are CI required checks either way. What the route adds is the layer no check performs: the independent review passes, the covers: doc-reviewer step, playbook routing, and closeout evidence — skip it and you own an equivalent review yourself. Merge routing still matters: a /packages/backend/src/db/migrations/ diff needs an INDEPENDENT code-owner approval, which the PR author cannot supply for their own PR. A PreToolUse hook warns, but does not block, when a PR is opened outside the route."
   }
 }' 2>/dev/null || exit 0
 

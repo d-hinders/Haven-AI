@@ -163,31 +163,37 @@ not at merge time, enforced by a prompt.
 
 ### Be precise about what gate 2 proves
 
-`qa-freshness` proves **a** green money-flow run existed on `dev` recently. It
-does **not** prove that run exercised the code being promoted. State it that way
-— an overstated net is worse than a known-partial one, because nobody
-compensates for a gap they believe is closed. The known limits:
+Since [#1030](https://github.com/d-hinders/Haven-AI/issues/1030), `qa-freshness`
+proves: **a green money-flow run covered the money-path code being promoted.**
+That is stronger than the original "some green run exists and is recent", and
+the wording matters — an overstated net is worse than a known-partial one,
+because nobody compensates for a gap they believe is closed.
 
-- **Time-based, not SHA-bound.** The job takes the newest green `qa-dev` run on
-  `dev` regardless of which commit it ran against. Money-path commits merged
-  *after* that run still promote inside the same window. This is why the
-  promotion checklist ([`promoting-dev-to-main.md`](../operations/promoting-dev-to-main.md))
-  carries an explicit step to confirm the run covers the diff.
-- **`hotfix/*` is not covered at all.** The `gate` job permits `hotfix/* → main`,
-  and `qa-freshness` only looks at runs on `dev` — code that by construction has
-  never been on `dev`. A money-path hotfix reaches production with no QA of
-  itself while the gate shows green.
-- **`qa-override` label** skips the check; the job still reports success, with a
-  `::warning::` as the only artifact.
+What it now checks (`scripts/ci/qa-freshness.mjs`, unit-tested):
+
+- the newest green `qa-dev` run exists and is inside `QA_FRESHNESS_HOURS`
+  (default 30h) — the original rule, unchanged;
+- **no money-path file changed between that run's commit and the promotion
+  head.** Recency is not coverage: a run that predates the money-path commits
+  never exercised them. Ordinary promotions carrying no money-path change stay
+  cheap;
+- **`hotfix/* → main` is judged on its own evidence.** A hotfix has never been
+  on `dev`, so a green `dev` run says nothing about it. A hotfix touching
+  money-path files needs a green run **on that branch**; one touching none
+  passes, because this gate does not apply to it.
+
+Every path that cannot be established fails **closed** — no run, unparseable
+timestamp, uncomputable diff, unknown branch. That direction is the whole point.
+
+Still not covered, **deliberately** — these are named, logged escape hatches,
+not holes:
+
+- **`qa-override` label** skips the check; the job reports success with a
+  `::warning::` naming the bypass.
 - **`QA_FRESHNESS_HOURS` is a repo variable**, editable without code review.
 - **Direct pushes and admin merges** never evaluate it — it triggers on
   `pull_request` to `main`.
-- **It only bites while listed in `main`'s required status checks.** The workflow
-  says so in its own comments.
-
-The first two are substantive gaps, not bypasses-by-design. Neither is a reason
-to restore the pause — the pause covered even less, since it never applied to
-hand-written PRs — but both should be closed on their own merits.
+- **It only bites while listed in `main`'s required status checks.**
 
 > **What changed and why.** `ship-next` used to pause a money-path PR for
 > in-session user approval. That gate applied *only to PRs opened through the

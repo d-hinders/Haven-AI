@@ -1,0 +1,41 @@
+{
+  "$comment": [
+    "SINGLE SOURCE OF TRUTH for the money-path file list (#1030).",
+    "",
+    "This list previously existed in three places that disagreed: the Merge Gate in",
+    ".agents/skills/ship-next/SKILL.md (authoritative prose), .github/labeler.yml",
+    "(which auto-applies the money-path label and was MISSING the delegation rail,",
+    "the rail seam, and the SDK signer), and prose in docs/. A money-path list that",
+    "is wrong in one copy is worse than no list: the label is what selects money.md",
+    "and its characterization-test bar, so a missing glob silently lowers the bar.",
+    "",
+    "Consumers:",
+    "  - scripts/ci/qa-freshness.mjs  — decides whether a promotion needs a fresh",
+    "    money-flow QA run (see .github/workflows/dev-gate.yml)",
+    "  - .github/labeler.yml          — auto-applies the `money-path` PR label",
+    "  - scripts/ci/money-path.test.mjs — asserts this file, labeler.yml, and the",
+    "    SKILL.md Merge Gate all agree. Editing one without the others fails CI.",
+    "",
+    "Adding a glob here is cheap and safe. Leaving one out is the failure mode.",
+    "Globs are repo-root-relative and match the SKILL.md Merge Gate exactly."
+  ],
+  "globs": [
+    "packages/backend/src/routes/x402.ts",
+    "packages/backend/src/routes/x402-resources.ts",
+    "packages/backend/src/routes/payments.ts",
+    "packages/backend/src/routes/machine-payments.ts",
+    "packages/backend/src/routes/agent-delegations.ts",
+    "packages/backend/src/lib/machine-payments.ts",
+    "packages/backend/src/lib/payment-coverage.ts",
+    "packages/backend/src/lib/allowance-module.ts",
+    "packages/backend/src/lib/execution-rail.ts",
+    "packages/backend/src/lib/delegation-*.ts",
+    "packages/backend/src/lib/hybrid-provisioning.ts",
+    "packages/backend/src/lib/hybrid-account-config.ts",
+    "packages/backend/src/middleware/agentAuth.ts",
+    "packages/backend/src/db/migrations/**",
+    "packages/sdk/src/signer.ts",
+    "scripts/release-bump.mjs",
+    ".github/workflows/publish.yml"
+  ]
+}

@@ -10,6 +10,11 @@
 
 set -u
 
+# Clear stale ship-next markers. They are session_id-keyed so they cannot leak
+# between sessions by construction, but a crashed session leaves the file
+# behind; prune anything older than a day so /tmp does not accumulate.
+find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'claude-ship-next-*' -mtime +0 -delete 2>/dev/null || true
+
 jq -n '{
   hookSpecificOutput: {
     hookEventName: "SessionStart",

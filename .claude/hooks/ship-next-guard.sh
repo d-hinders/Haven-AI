@@ -53,7 +53,7 @@ set -u
 input=$(cat 2>/dev/null) || exit 0
 [ -n "$input" ] || exit 0
 
-tool=$(printf '%s' "$input" | jq -r '.tool_name // ""' 2>/dev/null) || exit 0
+tool=$(printf '%s' "$input" | jq -r '.tool_name // ""' 2>/dev/null) || tool=""
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null) || cmd=""
 
 fire() {
@@ -101,7 +101,57 @@ This warning does not block. It is on you.'
   exit 0
 }
 
-[ "$tool" = "mcp__github__create_pull_request" ] && fire
+
+# Warning on a COMPLIANT pull request is not a cosmetic annoyance: it trains the
+# reader to ignore the guard, which is the muted-guard failure this file's own
+# header calls out. The marker is written by the harness (see
+# ship-next-marker.sh), never by the model remembering to.
+#
+# The check is deliberately asymmetric — it can only move toward SILENCE when a
+# marker is POSITIVELY PRESENT. No session id, unreadable tmpdir, malformed
+# payload, marker missing: every one falls through to the warning. A bug in
+# here cannot silence the guard, only make it noisier, because a silent guard
+# is indistinguishable from a working one.
+#
+# That claim was NOT true when first written: the top-level jq extraction did
+# `|| exit 0`, so an unparseable payload skipped this gate entirely. Review
+# caught it. The caller now routes a PR-shaped raw payload here even when jq
+# cannot parse it — the property is enforced, not just asserted in a comment.
+#
+# BOTH detection paths (the MCP tool and the Bash shapes) route through this.
+# An earlier draft had the MCP path call fire() directly and skip the marker
+# entirely — caught by the test, which is why the marker case is asserted for
+# the MCP payload specifically.
+fire_unless_ship_next() {
+  session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || fire
+  [ -n "$session" ] || fire
+  safe=$(printf '%s' "$session" | tr -c 'A-Za-z0-9_-' '_' 2>/dev/null) || fire
+  [ -n "$safe" ] || fire
+
+  marker="${TMPDIR:-/tmp}/claude-ship-next-$safe"
+  if [ -f "$marker" ]; then
+    # CONSUME it. ship-next ships exactly one issue per invocation, so a
+    # single-use marker gives per-PR precision: a second, hand-rolled PR later
+    # in the same session warns as it should.
+    rm -f "$marker" 2>/dev/null || true
+    exit 0
+  fi
+  fire
+}
+
+if [ -z "$tool" ]; then
+  # jq could not parse the payload (or there is no tool_name). Exiting silently
+  # here is a SILENCE PATH that bypasses the marker gate entirely — the one
+  # thing this guard must not have. So if the RAW text still looks like a PR
+  # creation, route it through the gate anyway. Anything else is genuinely
+  # unidentifiable and stays quiet, because warning on every unparseable
+  # payload would fire on unrelated commands and mute the guard by noise.
+  case "$input" in
+    *create_pull_request*|*"gh pr create"*) fire_unless_ship_next ;;
+  esac
+  exit 0
+fi
+[ "$tool" = "mcp__github__create_pull_request" ] && fire_unless_ship_next
 [ "$tool" = "Bash" ] || exit 0
 [ -n "$cmd" ] || exit 0
 
@@ -164,5 +214,6 @@ for seg in $segments; do
 done
 unset IFS
 
-[ "$is_pr" -eq 1 ] && fire
+[ "$is_pr" -eq 1 ] || exit 0
+fire_unless_ship_next
 exit 0

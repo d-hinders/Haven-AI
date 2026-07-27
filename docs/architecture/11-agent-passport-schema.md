@@ -288,7 +288,7 @@ one.
 | Endpoint | Returns |
 |---|---|
 | `GET /passport/issuer` | The address to pin, the payload version, and the receipt TTL |
-| `GET /passport/verify?address=0x…` or `?uid=0x…` | A **signed receipt**, or `{ found: false, reason: "no_passport" }` |
+| `GET /passport/verify?address=0x…` or `?uid=0x…` | A **signed receipt**, or `{ found: false, reason: "no_passport" \| "unsupported_assurance_level" }` |
 
 Resolution works from **either** agent address — the delegate EOA a merchant
 sees on an EIP-3009 header, or the Hybrid account it sees as the delegator in
@@ -298,6 +298,21 @@ per-payment choice, so a merchant can verify from whichever address it holds.
 An agent with **no passport is a normal 200 answer**, not a 404. Issuance is
 opt-in, so most agents have none — and an error status is what makes an
 integration treat a lookup failure as a pass.
+
+`unsupported_assurance_level` follows the same rule for the same reason
+([#975](https://github.com/d-hinders/Haven-AI/issues/975)): it means the
+passport carries a level this build cannot summarise, so Haven declines to
+answer rather than understate the tier. It is **not** an error status — the
+snippet above destructures `receipt` off the body, so a 5xx would throw there
+and whether that denies would be the merchant's `catch`. Handle it exactly like
+`no_passport`: deny. Unreachable while the `agent_passport_level_issuable`
+constraint pins the column to L0.
+
+> **Widening the ladder is an ordered deploy.** Once the CHECK relaxes and an
+> L1 row exists, any backend whose `ISSUABLE_ASSURANCE_LEVELS` predates the
+> widening answers `found: false` for that agent — including mid-rolling-deploy
+> and after a code rollback. Ship the code first, migrate second, and do not
+> roll the code back past the migration.
 
 ### The verifier speaks only about passports already public on-chain
 

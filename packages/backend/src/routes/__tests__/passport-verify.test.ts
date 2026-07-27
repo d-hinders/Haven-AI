@@ -339,27 +339,35 @@ describe('assurance level is read, not assumed (#975)', () => {
     expect(res.json().receipt.assuranceLevel).toBe(0)
   })
 
-  it('REFUSES a level this build cannot issue, rather than clamping to L0', async () => {
-    // The dangerous alternative is clamping: reporting a screened (L1) agent as
-    // merely governed (L0) is a wrong answer presented as a right one, and a
-    // merchant's screening logic branches on exactly this field. Unreachable
-    // while the CHECK holds; the point is that it stays unreachable by refusal
-    // and not by luck.
-    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: 1 })] })
+  it.each([
+    ['a reserved level (L1)', 1],
+    ['an unknown level', 99],
+    ['a missing column', undefined],
+  ])('answers found:false for %s — never an error status', async (_name, level) => {
+    // 200 `found: false`, the SAME shape as `no_passport`, deliberately.
+    // Review caught the first version returning 500: this endpoint states twice
+    // that an error status is what makes an integration treat a lookup failure
+    // as a pass, and the documented merchant snippet destructures `receipt` off
+    // the body — so a 500 would THROW there and whether that denies is the
+    // merchant's catch. `found: false` is closed by construction.
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: level })] })
     const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
-    expect(res.statusCode).toBe(500)
-    expect(JSON.stringify(res.json())).not.toContain('assuranceLevel')
+    expect(res.statusCode).toBe(200)
+    expect(res.json().found).toBe(false)
+    expect(res.json().reason).toBe('unsupported_assurance_level')
   })
 
-  it('refuses an unknown level too, not just a reserved one', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: 99 })] })
-    expect((await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).statusCode).toBe(500)
+  it('never emits a receipt alongside the refusal', async () => {
+    // The failure that would matter: a body a merchant could half-parse.
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: 1 })] })
+    const body = (await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json()
+    expect(body.receipt).toBeUndefined()
+    expect(body.signature).toBeUndefined()
   })
 
-  it('refuses a missing level rather than defaulting it', async () => {
-    // A row without the column — a query that forgot to select it — must not
-    // silently become L0. This is how the hardcoded version failed invisibly.
-    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: undefined })] })
-    expect((await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).statusCode).toBe(500)
+  it('distinguishes the refusal from no_passport, so operators can tell them apart', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] })
+    const absent = (await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).json()
+    expect(absent.reason).toBe('no_passport')
   })
 })

@@ -55,6 +55,29 @@ describe('assuranceLevelOf reads the stored level', () => {
     expect(assuranceLevelOf(rowWith(level))).toBeNull()
   })
 
+  it('refuses a string level rather than treating it as unissuable', () => {
+    // Set.has is identity-based: '0' would not match 0. Coercion guards a
+    // driver/type change turning every lookup into a refusal.
+    expect(assuranceLevelOf(rowWith('0'))).toBe(AssuranceLevel.L0)
+    expect(assuranceLevelOf(rowWith('1'))).toBeNull()
+  })
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['an empty string', ''],
+    ['whitespace', '  '],
+    ['a non-numeric string', 'L0'],
+    ['an object', {}],
+    ['a boolean', false],
+  ])('refuses %s rather than defaulting it to L0', (_name, raw) => {
+    // Every one of these coerces to 0 under a bare `Number()`, and 0 is
+    // issuable — so each is a way to silently report an ABSENT level as
+    // "governed by Haven". Two of them (null, '') actually shipped in earlier
+    // drafts of this function and were caught here.
+    expect(assuranceLevelOf(rowWith(raw))).toBeNull()
+  })
+
   it('does not clamp an unissuable level to L0', () => {
     // The tempting wrong fix. Clamping UNDERSTATES a higher tier, which sounds
     // conservative and is not: a merchant's screening logic branches on this
@@ -64,23 +87,49 @@ describe('assuranceLevelOf reads the stored level', () => {
   })
 })
 
-describe('the receipt does not hardcode an assurance level', () => {
-  // The regression guard for the mutation that behaviour cannot catch. If a
-  // future edit puts a literal back, this fails even though every other test
-  // still passes.
-  it('builds assuranceLevel from the row, not from a literal', () => {
+describe('the receipt is built from the row, not from a literal', () => {
+  // The regression guard for the mutation that behaviour cannot catch.
+  //
+  // The FIRST version of this guard sliced only the receipt object literal and
+  // asserted it did not match /assuranceLevel:\s*AssuranceLevel\./ — a purely
+  // NEGATIVE test, and review evaded it in one line by hoisting
+  // `const hardcoded = AssuranceLevel.L0` above the slice, and again by writing
+  // a bare `0`. Both left all 134 tests green. A negative assertion only ever
+  // excludes the spelling you thought of.
+  //
+  // So this asserts POSITIVELY over the whole function: the receipt must bind
+  // the field to the computed identifier, and that identifier must come from
+  // `assuranceLevelOf(row)`. Any hardcode — literal, hoisted const, bare
+  // number — fails one of the two.
+  const buildReceiptSource = () => {
     const src = readFileSync(VERIFICATION_SRC, 'utf8')
-    const receiptBlock = src.slice(
-      src.indexOf('const receipt: PassportReceipt = {'),
-      src.indexOf('issuedAt: now'),
-    )
-    expect(receiptBlock.length).toBeGreaterThan(100)
+    const start = src.indexOf('export async function buildReceipt')
+    const end = src.indexOf('export async function verifyPassport')
+    const body = src.slice(start, end)
+    // Guard the guard: if either anchor moves, this must fail loudly rather
+    // than assert over an empty string.
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(body.length).toBeGreaterThan(200)
+    return body
+  }
+
+  it('derives the level from the row via assuranceLevelOf', () => {
+    expect(buildReceiptSource()).toMatch(/const\s+assuranceLevel\s*=\s*assuranceLevelOf\(\s*row\s*\)/)
+  })
+
+  it('passes that computed value to the receipt, not a literal', () => {
+    const body = buildReceiptSource()
+    // Shorthand `assuranceLevel,` or explicit `assuranceLevel: assuranceLevel`.
+    expect(body).toMatch(/assuranceLevel(,|:\s*assuranceLevel\b)/)
+    // ...and nothing in the whole function may name an enum member or a bare
+    // number for this field. This is what the hoisted-const mutation evaded.
     expect(
-      receiptBlock,
-      'The receipt must carry the level READ from the passport row. Hardcoding ' +
-        'AssuranceLevel.Lx is correct only while the agent_passport_level_issuable ' +
-        'CHECK pins the column, and it silently misreports the day the ladder widens ' +
-        '(#975). Use assuranceLevelOf(row).',
-    ).not.toMatch(/assuranceLevel:\s*AssuranceLevel\./)
+      body,
+      'buildReceipt must not name an AssuranceLevel member. Hardcoding is correct only ' +
+        'while agent_passport_level_issuable pins the column, and silently misreports the ' +
+        'day the ladder widens (#975). Use assuranceLevelOf(row).',
+    ).not.toMatch(/AssuranceLevel\.L\d/)
+    expect(body).not.toMatch(/assuranceLevel:\s*\d/)
   })
 })

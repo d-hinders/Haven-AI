@@ -28,7 +28,7 @@
 
 - name: "money-path"
   color: "b60205"
-  description: "Payments, agent authority, allowances, or migrations — human merge gate"
+  description: "Payments, agent authority, allowances, or migrations — loads money.md (characterization tests + CASP)"
 
 - name: "promotion"
   color: "1d76db"

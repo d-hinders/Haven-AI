@@ -46,8 +46,8 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
 - **Surface** — which `area:*` / `money-path` label(s) apply, so `ship-next`
   loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).
 - **Money-path?** — whether it touches x402 / machine-payments / payment-coverage
-  / allowance / migrations. Money-path issues are implemented by the loop but
-  require in-session approval before auto-merge; migrations additionally
+  / allowance / migrations. The label selects the `money.md` playbook and the
+  characterization-test bar; it does not pause the merge (#1024). Migrations
   require independent code-owner review and merge through `.github/CODEOWNERS`.
 - **Characterization-first** — for a change to existing money-path behavior, pin
   the current behavior with a test before changing it.

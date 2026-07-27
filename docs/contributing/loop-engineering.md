@@ -145,8 +145,11 @@ A loop has a terminal state, and the harness encodes it:
   failure by weakening the assertion.** That is the classic reward-hack. The
   oracle is the contract; only humans change it.
 - **Financial surfaces:** run against a simulated/forked chain or a faithful
-  mock, never live funds. The loop produces *tests + a fix branch* — **no
-  auto-merge of money-moving code.** A human gates the merge.
+  mock, never live funds. The loop produces *tests + a fix branch* and **stops
+  there** — a test-generation campaign never merges its own money-path fix.
+  Note this is **this** loop's own rule, not a repo-wide gate: since
+  [#1024](https://github.com/d-hinders/Haven-AI/issues/1024) a money-path PR
+  does not pause for human approval on merge, so the restraint has to live here.
 - **Bound the campaign:** cap iterations and diff size so a stuck loop surfaces a
   "stuck, here's my diagnosis" report instead of a sprawling refactor.
 - **Classify the value honestly.** These allowance loops are *reliability /

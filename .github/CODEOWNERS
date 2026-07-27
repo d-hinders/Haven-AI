@@ -6,10 +6,25 @@
 #
 # All OTHER money-path changes (x402 / payments / machine-payments /
 # payment-coverage / allowance-module / agentAuth / release tooling) are NOT
-# hard-gated here. The autonomous PR loop gates them in-session: it pauses such
-# a PR and asks whoever is running the loop to approve before it merges. A
-# money-path PR created OUTSIDE the loop merges on green CI alone — that is the
-# accepted trade-off for low contributor friction at this stage.
+# hard-gated here, and as of #1024 they are not gated in-session either.
+#
+# The pause that used to exist applied ONLY to PRs opened through ship-next; a
+# hand-written money-path PR merged on green CI alone. That made the canonical
+# workflow more expensive than bypassing it while protecting nothing on the
+# bypass path — and the "approval" was usually the PR author's own, which is
+# exactly what GitHub disallows for the migrations gate above.
+#
+# What protects the money path now is automatic and tool-independent:
+#   1. this file, for irreversible schema changes;
+#   2. the `qa-freshness` job in .github/workflows/dev-gate.yml, which refuses a
+#      dev -> main promotion without a recent GREEN money-flow QA run on `dev`.
+#
+# Gate 2 is load-bearing but PARTIAL, and the limits are load-bearing too: it is
+# time-based rather than bound to the promoted SHA, it does not cover
+# `hotfix/* -> main`, and it only bites while listed in `main`'s required status
+# checks. See "Be precise about what gate 2 proves" in
+# docs/contributing/autonomous-pr-loop.md. If it is dropped from the ruleset,
+# restore it or widen the paths below.
 #
 # See docs/contributing/autonomous-pr-loop.md ("Money-path safety model").
 

@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-07-12"
+last-verified: "2026-07-27"
 ---
 
 # Money / agent-authority playbook
@@ -30,8 +30,15 @@ The change must not, and generated artifacts must not imply Haven can:
 - operate swaps / ramps / fiat / card / merchant settlement / yield / advice flows **without review**;
 - prevent users from accessing and **revoking** Safe permissions outside Haven.
 
-## 4. Merge gate (unchanged — human in the loop)
+## 4. Merge gate (automatic, not a prompt)
 
-Money-path PRs **never auto-merge silently** *through the loop.* The merge gate requires in-session user approval through the active client's supported interaction mechanism; a **migration** additionally needs an independent code-owner review in GitHub (`.github/CODEOWNERS`). This playbook does not relax that gate — it reaffirms it.
+A money-path pull request auto-merges on green CI and a clean independent review, exactly like any other — **except a migration**, which needs an independent code-owner approval in GitHub (`.github/CODEOWNERS`; the author's own approval does not count).
 
-Scope caveat: this is a **soft, in-session checkpoint the loop self-enforces** — it covers PRs opened through `ship-next`, not hand-written money-path PRs (those merge on green CI alone; only migrations are hard-gated by `.github/CODEOWNERS`). Widen `.github/CODEOWNERS` if you want a hard gate on more paths. See the "Money-path safety model" in [`autonomous-pr-loop.md`](../autonomous-pr-loop.md).
+What protects the money path is enforced by machine and applies to **every** pull request, however it was opened ([#1024](https://github.com/d-hinders/Haven-AI/issues/1024)):
+
+- `.github/CODEOWNERS` — irreversible schema changes;
+- the `qa-freshness` job in `dev-gate.yml` — a `dev → main` promotion is refused without a green money-flow QA run on `dev` inside `QA_FRESHNESS_HOURS` (default 30h). **Read the limits before relying on it:** the check is time-based, not bound to the promoted SHA, and does not cover `hotfix/* → main` at all. See "Be precise about what gate 2 proves" in [`autonomous-pr-loop.md`](../autonomous-pr-loop.md).
+
+The in-session pause this section used to describe covered only pull requests opened through `ship-next`; a hand-written money-path pull request merged on green CI alone. It was friction on the compliant path with no compensating protection on the other, and the approver was typically the author. Verification moved to promotion time, where it is automatic. See "Money-path safety model" in [`autonomous-pr-loop.md`](../autonomous-pr-loop.md).
+
+**This does not relax sections 1–3.** The characterization-test requirement, the CASP guardrails, and the "never do this" list above are unchanged — the bar for *writing* money-path code is the same; only the merge routing changed.

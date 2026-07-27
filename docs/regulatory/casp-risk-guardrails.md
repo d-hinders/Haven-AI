@@ -41,7 +41,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-07-26"
+last-verified: "2026-07-27"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -122,6 +122,18 @@ Haven backend
 > relays only; no leg is authorised by Haven policy alone. Recipient-pinned
 > budgets cannot fund the EOA and are therefore erc7710-only — the fallback
 > never weakens an on-chain pin.
+
+> **Current state (2026-07-27, #976):** the erc7710 settle response carries a
+> `passport` reference — `{ attestation_uid, chain_id, verify_url }` or `null`.
+> This is **outside the perimeter this document draws** and does not move it:
+> it verifies no payment, settles nothing, holds nothing, takes no fee, and
+> creates no merchant-acquiring relationship. The value is a pointer to an EAS
+> attestation that is **already public on-chain**, returned to the agent that
+> owns it, answering a governance question ("is this agent issued, governed and
+> revocable?") — never an identity or KYC claim, which is L2 and not issuable.
+> It is deliberately NOT placed in the `X-PAYMENT` payload, so it cannot alter
+> the authenticated payment context or any leg's authority. Absent (`null`) is
+> a normal answer and a lookup failure never affects the payment.
 
 > **Current state (2026-07-18, #956):** agents may report the MERCHANT's own
 > receipt after a settled payment (`POST /machine-payments/:id/merchant-receipt`,

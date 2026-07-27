@@ -21,7 +21,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-07-15"
+last-verified: "2026-07-27"
 ---
 
 # Haven — CLAUDE.md
@@ -301,4 +301,14 @@ The captain owns product judgment, shared files, gravity files, git hygiene, fin
 
 For shipping a **defined set of PRs** with minimal user input, use the canonical `ship-next` skill. In Claude Code, `/loop /ship-next` repeatedly invokes its thin slash-command adapter. The queue is **GitHub Issues** — standalone tasks labeled `code-quality`, or an epic's sub-issues via `epic=#<n>` (the old `docs/backlogs/*.yml` file tracks are retired; see `docs/backlogs/README.md`). It implements, tests, runs haven-reviewer, opens, and reviewer-gated auto-merges each PR — escalating to the user only on a blocking finding, a real decision, a migration merge, or stuck CI. You don't have to hand-write those issues: the canonical `new-task` skill captures a one-liner as a well-formed backlog issue, backlog-only by default; `ship-next "<description>"` does the same and ships it. Claude Code exposes these as `/new-task` and `/ship-next`.
 
-**`ship-next` is the default way to ship anything defined as a GitHub issue or sub-issue.** It classifies the issue's surface from its `area:*` / `money-path` labels and loads the matching **playbook** (`docs/contributing/ship-playbooks/`) so the right standards apply without a long prompt — UX + design system for `area:frontend`, CASP for `money-path`, runtime/release rules for `area:sdk`/`area:mcp`, and the docs-quality system for `area:docs`. It then runs the Captain Self-Check Preflight before review, keeps implicated docs accurate, and opens a PR filled from the template. The skill **routes, it does not contain**: it links canonical standards rather than copying them.
+### How shipping is governed (#1025)
+
+`ship-next` is the **default route** — the fastest way through the standards — not a mandate. Three tiers, and it matters which is which:
+
+1. **Enforced by GitHub, whatever opened the PR.** Required status checks (tests/typecheck/build, the docs and design-system gates, visual regression, copy lint) plus the `CODEOWNERS` review rule on `/packages/backend/src/db/migrations/`, and `gate` + `qa-freshness` on `dev → main` promotion. **The authoritative list is the ruleset inventory in [`docs/contributing/autonomous-pr-loop.md`](docs/contributing/autonomous-pr-loop.md)** — read it there and do not restate it here; a second copy drifts, which is the failure this whole section exists to remove. Two caveats it records and this summary would otherwise flatten: a few checks are repo-guarded off on **fork** PRs, and `qa-freshness` has documented bypasses (`qa-override`, `hotfix/*`, admin merge) — "required" is not the same as "unskippable".
+
+2. **What `ship-next` adds on top.** Playbook routing by `area:*` / `money-path` label (UX + design system for `area:frontend`, CASP for `money-path`, runtime/release rules for `area:sdk`/`area:mcp`, docs-quality for `area:docs`); the Captain Self-Check Preflight; the **independent review passes** — `haven-reviewer`, plus `haven-design-reviewer` on `area:frontend`; the `covers:` doc-reviewer step; a PR filled from the template; and closeout with acceptance-criteria evidence. This is judgement work. **CI does not do any of it**, and no check will tell you it was skipped.
+
+3. **Opting out is allowed.** A contributor or agent that prefers another workflow is free to use it — the tier-1 gates still apply, because they are on the PR rather than in anyone's tooling. What you take on is tier 2: skipping the route means owning an equivalent review yourself, not skipping review. Say so in the PR.
+
+The skill **routes, it does not contain**: it links canonical standards rather than copying them. Deliberately **not** built: any check that asks whether `ship-next` was used. Enforce outcomes, never tooling — a gate that can be satisfied by using the right tool rather than doing the right work measures the wrong thing.

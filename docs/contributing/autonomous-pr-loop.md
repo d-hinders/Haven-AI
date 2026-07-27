@@ -243,8 +243,17 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      checks**, **MCP checks**, **Connect checks**, **Signer checks** — and the
      blocking design-quality gates **Design visual regression** (#897),
      **Banned product-copy terms** (#902), **Design-system coupling (strict)**
-     (#1023) and **Docs front-matter & agent skills** (#1023). (Optionally also the
-     smoke checks **Install-path smoke** and **Frontend browser smoke**.)
+     (#1023), **Docs front-matter & agent skills** (#1023) and
+     **Contract-doc coupling** (#646). (Optionally also the smoke checks
+     **Install-path smoke** and **Frontend browser smoke**.)
+     Do **not** require **Docs links & style (advisory)** — it is the
+     deliberately non-gating half of `docs.yml` (#1023).
+
+     > **Fork caveat.** *Banned product-copy terms* and *Contract-doc coupling*
+     > carry `if: github.repository == 'd-hinders/Haven-AI'` and therefore
+     > **skip on fork PRs**. *Design-system coupling (strict)* deliberately does
+     > not — a gate that skips on forks is not a gate. Keep that asymmetry in
+     > mind before describing the set as universal.
      These are safe to require even though they're conditional: on a PR that
      doesn't touch a surface, that surface's check reports `skipped`, which GitHub
      counts as satisfied — so requiring all of them gates every surface the loop
@@ -270,9 +279,20 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      > which GitHub counts as satisfied. Either make the workflow
      > unconditional (fine for ~10s checks) or gate at the job level, never
      > at the workflow `paths:` level.
-   - **"Dev gate"** (targets `main` only) — enforces the **`gate`** check from
-     `.github/workflows/dev-gate.yml`, which only lets `dev` or `hotfix/*` merge
-     into `main`. This is why the loop targets `dev`, never `main`.
+   - **"Dev gate"** (targets `main` only) — enforces two checks from
+     `.github/workflows/dev-gate.yml`:
+     - **`gate`** — only lets `dev` or `hotfix/*` merge into `main`. This is why
+       the loop targets `dev`, never `main`.
+     - **`qa-freshness`** — refuses the promotion without a recent green
+       money-flow QA run on `dev`. Load-bearing since [#1024](https://github.com/d-hinders/Haven-AI/issues/1024)
+       removed the in-session money-path pause; see "Be precise about what gate 2
+       proves" above for what it does and does not cover. Note both job ids are
+       lower-case (`gate`, `qa-freshness`) because neither job sets a `name:` —
+       the workflow's own display name is not the check name.
+
+     Verified present in both rulesets on 2026-07-27 via
+     `GET /repos/d-hinders/Haven-AI/rules/branches/{main,dev}` — that endpoint is
+     the fastest way to re-check this list without admin UI access.
    - **Required approvals: 0** at the repo level — this is the hands-off lever.
      Your safety comes from CI + haven-reviewer + the loop's in-session money-path
      checkpoint, plus the code-owner gate below for migrations.

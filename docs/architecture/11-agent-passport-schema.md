@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-07-26"
+last-verified: "2026-07-27"
 ---
 
 # L0 Agent Passport — EAS schema
@@ -43,6 +43,12 @@ Haven's API. Note the graph is permanently public regardless: treasury → N
 agents → issued-by-Haven is visible to anyone reading the chain, even with
 policy detail API-gated. That is a conscious trade (epic §open questions), not
 an oversight.
+
+**Field minimization is the only bound on that graph.** It limits what each
+attestation says; it does not limit which agents appear in it. Every opted-in
+agent is anchored whether or not it ever transacts — see
+[anchoring happens at opt-in](#anchoring-happens-at-opt-in-and-that-is-a-revised-decision)
+for why that exposure was accepted.
 
 ## Fields
 
@@ -117,6 +123,49 @@ The EAS write is **async, best-effort and retryable** — recorded synchronously
 (the POST returns 202), anchored fire-and-forget. A failed, slow, or unfunded
 attestation can never fail or block agent creation; it degrades to a
 `pending`/`failed` passport row that the sweep below retries.
+
+### Anchoring happens at OPT-IN, and that is a revised decision
+
+**Owner decision 2026-07-27, superseding the earlier one on #970.** The epic
+originally recorded the opposite:
+
+> "Anchor on FIRST USE, not at agent creation — the biggest cheap privacy win.
+> Dormant agents leave no record, the enumerable set shrinks to already-active
+> agents (which leak a little via their txs anyway), and we skip gas on agents
+> that never transact."
+
+That was implemented in #1013 and then **deliberately not shipped**. Anchoring on
+first use means the anchor is released *by* the first payment, and since
+anchoring is itself a transaction, that payment almost always settles before its
+own attestation lands — so the first payment an agent ever makes is the one
+payment a merchant cannot verify. A credential that is absent exactly when it is
+first presented inverts the product: the passport exists to be checked at
+presentation time. The owner judged that cost higher than the privacy gain.
+
+**Anchoring therefore happens when the owner opts in**, as it has since #972.
+
+Two things follow, and both are stated here rather than left to be rediscovered
+— an unrecorded decision is precisely how this drifted the first time (#1013 was
+filed because the epic's decision and the code disagreed, and nothing said
+which one was current).
+
+**The residual exposure is real and accepted.** An opted-in agent that never
+transacts still carries a permanent on-chain attestation, so the enumerable set
+of Haven agents is *all opted-in agents*, not just active ones — and Haven pays
+gas for agents that never spend. Field minimization (above) bounds what each
+attestation says; nothing bounds which agents appear. The
+[one-pager](https://github.com/d-hinders/Haven-AI/issues/978) must state this
+plainly rather than imply the graph is limited to active agents.
+
+**Opt-in narrows the unverifiable window; it does not close it.** The write is
+fire-and-forget, so `POST /agents` returns 201 with the API key while the attest
+transaction is still mining. An agent created and used within seconds can still
+present before its anchor lands. An integrator that needs certainty must poll
+`GET /agents/:id/passport` for `status: 'anchored'` before handing the credential
+to something that will immediately transact — the endpoint reports
+`pending` vs `anchored` precisely so this is observable. Closing the window
+entirely would mean blocking agent creation on a confirmed transaction, which
+the "EAS write never blocks anything" rule above deliberately refuses.
 
 **Who signs and pays:** Haven signs the attestation as *issuer*, submitted by
 the **gas-only relayer**. That is governance metadata, not spend authority —

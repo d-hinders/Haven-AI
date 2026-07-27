@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-07-18"
+last-verified: "2026-07-27"
 ---
 
 # Documentation-quality system
@@ -101,19 +101,29 @@ It is dependency-free and runs as part of `npm run docs:check`.
 
 ### Phase 1 — deterministic checks (this PR)
 
-Run by `.github/workflows/docs.yml`, only when docs or the docs tooling change:
+Run by `.github/workflows/docs.yml` on **every** pull request:
 
 | Check | Tool | Blocking? |
 | --- | --- | --- |
-| Front-matter + `covers` resolution | `scripts/docs/validate-frontmatter.mjs` | Fails the job (advisory overall — see below) |
-| Agent-skill structure + adapter alignment | `scripts/docs/validate-agent-skills.mjs` | Fails the job (advisory overall — see below) |
+| Front-matter + `covers` resolution | `scripts/docs/validate-frontmatter.mjs` | **Blocking** |
+| Agent-skill structure + adapter alignment | `scripts/docs/validate-agent-skills.mjs` | **Blocking** |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**`) | Advisory |
 
-`docs.yml` is **not** a required status check, so even the front-matter step
-cannot block a merge yet — it only turns the Docs-quality check red. Vale is
-scoped to `docs/product/**` on purpose: engineering docs legitimately use
+The two validators are whole-repo and dependency-free, which is why the
+`pull_request` trigger carries **no `paths:` filter** — a required check must
+report on every PR or auto-merge deadlocks waiting for a run that never happens
+(the #933 lesson; see [`autonomous-pr-loop.md`](autonomous-pr-loop.md) §One-time
+setup). Add **Docs front-matter & agent skills** to the "Haven automerge rules"
+ruleset for the blocking column above to be true.
+
+Until [#1023](https://github.com/d-hinders/Haven-AI/issues/1023) these ran as a
+hard gate only inside `ship-next`, which made the canonical workflow stricter
+than opening a pull request by hand — a standard's enforcement should not depend
+on which tool opened the PR.
+
+Vale is scoped to `docs/product/**` on purpose: engineering docs legitimately use
 "Safe", "AllowanceModule", and "signer", so the terminology rule must not flood
 them.
 

@@ -77,9 +77,12 @@ Run checks proportionate to every changed surface:
 - full `npm run quality` for cross-package behavior;
 - browser verification or the required headless equivalent for UI changes.
 
-When the diff touches any Markdown file, anything under `docs/`, anything under `scripts/docs/`, or a root gravity file (`CLAUDE.md`, `README.md`, `AGENTS.md`, `ABOUT_HAVEN.md`), run `npm run docs:check` and `npm run docs:test` as a **hard gate**. Front-matter, agent-skill, coupling, and drift failures block the pull request exactly like a failing test or type check — never open or update a pull request while they are red. This is the loop's own gate; it does not depend on any GitHub required-check configuration.
+Run the **repository's own required checks** locally before pushing, for fast feedback:
 
-When the diff adds an exported component under `packages/frontend/src/components/ui/**` or `components/haven/**`, run `node packages/frontend/scripts/design-system-coupling.mjs --strict` as a **hard gate** (#898): a new primitive missing from `/design-system` (and not `// design-system-exempt`-marked) blocks the pull request exactly like a failing test. Add its showcase entry to `app/(authenticated)/design-system/page.tsx` first. In CI the same script runs advisory-only (a sticky comment) so human PRs are informed but not blocked.
+- `npm run docs:check` and `npm run docs:test` when the diff touches any Markdown file, anything under `docs/` or `scripts/docs/`, or a root gravity file (`CLAUDE.md`, `README.md`, `AGENTS.md`, `ABOUT_HAVEN.md`);
+- `npm run design:lint -w packages/frontend` and `node packages/frontend/scripts/design-system-coupling.mjs --strict` when the diff touches frontend surfaces or adds an exported component under `components/ui/**` or `components/haven/**`. Add the showcase entry to `app/(authenticated)/design-system/page.tsx`, or mark a genuinely internal export `// design-system-exempt: <reason>`.
+
+These are **CI required checks** (#1023), not gates this skill owns — every PR gets them however it was opened. Running them here only saves a round trip. Do not restate their rules in this file: the workflow comments and `docs/contributing/docs-quality-system.md` are the definition, and a second copy drifts.
 
 Fix failures before pushing. Never open or update a pull request with a known red local gate.
 

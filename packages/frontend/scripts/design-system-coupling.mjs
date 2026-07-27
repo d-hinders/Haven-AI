@@ -14,18 +14,21 @@
 // docs-coupling). A genuinely internal export opts out with a trailing
 // `// design-system-exempt: <reason>` on the export line.
 //
-// Two postures, one detector:
-//   - CI (advisory): writes a sticky-comment body to --out and appends
+// Two postures, one detector. Both run in CI on every PR (#1023) — the
+// `coupling` job explains, the `strict` job blocks:
+//   - default (explain): writes a sticky-comment body to --out and appends
 //     `has_findings=…` to $GITHUB_OUTPUT; ALWAYS exits 0 — it only informs.
-//   - ship-next (hard gate): run with --strict to exit 1 when findings exist,
-//     so the autonomous path cannot merge an undocumented primitive.
+//   - --strict (block): exits 1 when findings exist, and also when the diff is
+//     uncomputable — a gate must not pass on something it could not read.
+// Before #1023 --strict ran only under ship-next, which made the canonical
+// workflow stricter than opening a PR by hand.
 //
 // Usage:
 //   node scripts/design-system-coupling.mjs                 # diff origin/dev...HEAD
 //   node scripts/design-system-coupling.mjs --changed-diff=<file>   # a diff on disk
 //   node scripts/design-system-coupling.mjs --strict        # exit 1 on findings
 //   BASE_SHA=… HEAD_SHA=… node scripts/design-system-coupling.mjs   # CI
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -256,8 +259,8 @@ function main() {
       'mark the export line `// design-system-exempt: <reason>`.\n\n'
     for (const f of findings) body += `- \`${f.symbol}\` — \`${f.file}\`\n`
     body +=
-      `\n_Advisory here; a hard definition-of-done step under ship-next. ` +
-      `Reference page: \`${PAGE}\`._\n`
+      `\n_This comment explains the finding; the **Design-system coupling ` +
+      `(strict)** check blocks on it. Reference page: \`${PAGE}\`._\n`
     writeFileSync(outPath, body, 'utf8')
     console.error(`design-system coupling: ${findings.length} undocumented primitive(s).`)
     for (const f of findings) console.error(`  - ${f.symbol} (${f.file})`)
@@ -277,8 +280,26 @@ function main() {
   }
 }
 
+// Resolve symlinks, falling back to the raw path. The fallback matters: this
+// runs at module load, OUTSIDE the try/catch below, so a throw here would
+// crash the advisory run that promises exit 0.
+const resolved = (p) => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
 // Run as CLI only when invoked directly, not when imported by tests.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+//
+// Both sides are realpath-resolved before comparing. `import.meta.url` is
+// already resolved by the module loader but `process.argv[1]` is not, so a
+// path reaching this file through a symlink made the comparison false — main()
+// never ran, and the process exited 0 in SILENCE. Under --strict that is a
+// fail-OPEN: the gate passes a diff it never read. Not reachable from a runner
+// workspace, but a gate must not have that shape at all.
+if (process.argv[1] && resolved(fileURLToPath(import.meta.url)) === resolved(process.argv[1])) {
   try {
     main()
   } catch (err) {

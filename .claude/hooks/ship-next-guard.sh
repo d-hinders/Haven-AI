@@ -38,7 +38,8 @@
 #
 # ## Known residual gap — silent inertness outside the repo
 #
-# settings.json resolves this script via
+# The settings file that activates this script (personal, gitignored — see
+# README.md in this directory) resolves it via
 # `${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel || echo .)}`.
 # CLAUDE_PROJECT_DIR is NOT always set (verified unset in a real session), so
 # the git fallback is what carries the common cases: repo root and any

@@ -25,7 +25,9 @@
  * 2. **A monotonic `standingEpoch`.** Two receipts for the same agent are
  *    strictly comparable: the higher epoch reflects newer state. Without it a
  *    merchant replaying a cached receipt has no way to know a newer one exists
- *    — and clock skew makes `issuedAt` alone unreliable for that.
+ *    — and clock skew makes `issuedAt` alone unreliable for that. It gives
+ *    ORDERING, not causation: a higher epoch does not mean standing changed
+ *    (#1015 — see the field's own doc).
  * 3. **Documented re-verification.** Cached receipts are for routine gating and
  *    rate-limiting. Re-verify before anything irreversible.
  *
@@ -116,8 +118,18 @@ export interface PassportReceipt {
   chainId: number | null
   controls: ControlSummary | null
   /**
-   * Monotonic marker of when this agent's standing last changed, in ms.
+   * Monotonic marker of the last change to this agent's RECORD, in ms.
    * Strictly comparable across receipts; `issuedAt` is not, because clocks skew.
+   *
+   * Do NOT read a change here as "standing changed" (#1015). It is sourced from
+   * `agents.updated_at`, which bumps on any write to the row — a rename, a key
+   * rotation, a `last_seen` touch. The name is historical; the guarantee is
+   * ordering, not causation.
+   *
+   * The property merchants rely on still holds, and it errs safe: a revoke
+   * ALWAYS bumps the row, so a newer standing is never missed. An unrelated
+   * bump only makes a receipt look fresher than strictly necessary, which at
+   * worst makes a merchant prefer the newer receipt — correct anyway.
    */
   standingEpoch: number
   issuedAt: number

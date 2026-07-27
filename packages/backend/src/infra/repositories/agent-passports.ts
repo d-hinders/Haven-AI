@@ -264,8 +264,16 @@ export async function listRetryable(
 export interface VerificationRow {
   agent_id: string
   agent_status: string
-  /** When the agent's standing last changed — the receipt's monotonic epoch. */
-  standing_changed_at: Date
+  /**
+  * When the agent's RECORD last changed — the receipt's monotonic epoch.
+  *
+  * Sourced from `agents.updated_at`, which bumps on ANY write to the row: a
+  * rename, a key rotation, a `last_seen` touch. It is deliberately NOT named
+  * `standing_changed_at` (#1015): that alias asserted a precision the column
+  * does not carry, and propagated it through this type to every call site.
+  * A change here does NOT imply the agent's standing changed.
+  */
+  record_updated_at: Date
   passport_status: PassportStatus | null
   attestation_uid: string | null
   revocation_status: RevocationStatus | null
@@ -303,7 +311,7 @@ export interface VerificationRow {
  * exists to withhold.
  */
 const VERIFICATION_SELECT = `
-  SELECT a.id AS agent_id, a.status AS agent_status, a.updated_at AS standing_changed_at,
+  SELECT a.id AS agent_id, a.status AS agent_status, a.updated_at AS record_updated_at,
          p.status AS passport_status, p.attestation_uid,
          p.revocation_status, p.revocation_confirmed_at,
          p.agent_eoa, p.smart_account, p.chain_id,

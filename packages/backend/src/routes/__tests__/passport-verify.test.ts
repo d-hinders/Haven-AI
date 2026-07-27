@@ -32,7 +32,7 @@ function row(overrides: Record<string, unknown> = {}) {
   return {
     agent_id: 'agt_1',
     agent_status: 'active',
-    standing_changed_at: new Date('2026-07-20T00:00:00Z'),
+    record_updated_at: new Date('2026-07-20T00:00:00Z'),
     passport_status: 'anchored',
     attestation_uid: UID,
     revocation_status: 'none',
@@ -270,5 +270,47 @@ describe('GET /passport/issuer', () => {
   it('503s when verification is not configured', async () => {
     setReceiptSigningKey(null)
     expect((await (await build()).inject({ url: '/passport/issuer' })).statusCode).toBe(503)
+  })
+})
+
+describe('standingEpoch semantics (#1015)', () => {
+  // The field used to be documented as "when this agent's standing last
+  // changed". It is not: it is `agents.updated_at`, which bumps on ANY write.
+  // These pin the HONEST contract so the comment and the value cannot drift
+  // apart again — the whole of #1015 was a doc promising precision the data
+  // does not carry.
+
+  it('tracks the record timestamp, not a standing-change timestamp', async () => {
+    const updated = new Date('2026-07-21T09:30:00Z')
+    mockQuery.mockResolvedValueOnce({ rows: [row({ record_updated_at: updated })] })
+    const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
+    expect(res.json().receipt.standingEpoch).toBe(updated.getTime())
+  })
+
+  it('moves when the record changes even though standing is unchanged', async () => {
+    // Same `agent_status` both times — only the row timestamp differs, as a
+    // rename or key rotation would produce. The epoch MUST still advance:
+    // ordering is the guarantee, not causation.
+    const app = await build()
+    mockQuery.mockResolvedValueOnce({
+      rows: [row({ agent_status: 'active', record_updated_at: new Date('2026-07-21T09:00:00Z') })],
+    })
+    const first = (await app.inject({ url: `/passport/verify?address=${EOA}` })).json()
+
+    mockQuery.mockResolvedValueOnce({
+      rows: [row({ agent_status: 'active', record_updated_at: new Date('2026-07-21T10:00:00Z') })],
+    })
+    const second = (await app.inject({ url: `/passport/verify?address=${EOA}` })).json()
+
+    expect(second.receipt.standing).toBe(first.receipt.standing)
+    expect(second.receipt.standingEpoch).toBeGreaterThan(first.receipt.standingEpoch)
+  })
+
+  it('is 0 rather than NaN when the row carries no timestamp', async () => {
+    // A receipt is signed over this value; NaN would not survive JSON round-trip
+    // and would break comparison rather than merely being imprecise.
+    mockQuery.mockResolvedValueOnce({ rows: [row({ record_updated_at: null })] })
+    const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
+    expect(res.json().receipt.standingEpoch).toBe(0)
   })
 })

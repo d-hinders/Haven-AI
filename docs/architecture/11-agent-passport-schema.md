@@ -384,7 +384,14 @@ it, and all three are in the artifact rather than in advice:
   payment session.
 - **`standingEpoch`, monotonic** — two receipts for the same agent are strictly
   comparable, so a merchant can tell a newer one from an older one. `issuedAt`
-  alone cannot do this: clocks skew.
+  alone cannot do this: clocks skew. It provides **ordering, not causation**:
+  the value tracks the last change to the agent's *record* (`agents.updated_at`),
+  so it also moves on a rename or a key rotation. Do not build
+  "epoch changed ⇒ standing changed" logic on it ([#1015](https://github.com/d-hinders/Haven-AI/issues/1015)).
+  This errs safe — a revoke always bumps it, so a newer standing is never
+  missed; an unrelated bump only makes a receipt look fresher than necessary.
+  A dedicated `standing_changed_at` column would make the stronger reading true;
+  it is deliberately not built until an integrator needs it.
 - **Re-verify before anything irreversible.** Cached receipts are for routine
   gating and rate-limiting. The endpoint always answers from current state;
   caching is the merchant's choice, never ours.

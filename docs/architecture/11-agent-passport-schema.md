@@ -64,7 +64,7 @@ string policyUri,uint64 issuedAt,uint64 expiresAt
 | `agentEoa` | `agents.delegate_address`. **Required.** |
 | `smartAccount` | The Hybrid delegator. **Optional** — zero address when absent. |
 | `treasury` | The account the agent spends from — the "bound to" claim. |
-| `assuranceLevel` | `uint8` ladder: `0` = L0 (issuable). `1`/`2` reserved. |
+| `assuranceLevel` | `uint8` ladder: `0` = L0 (issuable). `1`/`2` reserved. The verifier **reads** this from the row and refuses to issue a receipt for any level it cannot issue, rather than clamping to L0 — understating a tier is a wrong answer presented as a right one ([#975](https://github.com/d-hinders/Haven-AI/issues/975)). |
 | `policyUri` | Pointer to the enforced controls; detail resolves via Haven's API. |
 | `issuedAt` / `expiresAt` | Unix seconds. Expiry is a claim, not enforcement. |
 

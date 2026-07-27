@@ -29,7 +29,7 @@
 
 import * as repo from '../../infra/repositories/agent-passports.js'
 import type { VerificationRow } from '../../infra/repositories/agent-passports.js'
-import { AssuranceLevel } from './schema.js'
+import { AssuranceLevel, ISSUABLE_ASSURANCE_LEVELS } from './schema.js'
 import { standingForStatus, anchorForPassport } from './revocation.js'
 import {
   RECEIPT_TTL_SECONDS,
@@ -75,6 +75,36 @@ function controlsOf(row: VerificationRow): ControlSummary | null {
 }
 
 /**
+ * The passport's assurance level, READ from the row rather than assumed (#975).
+ *
+ * The verifier used to hardcode `AssuranceLevel.L0`. That was correct only
+ * because `agent_passport_level_issuable` pins the column to 0 — an invariant
+ * enforced in a different layer, for a value this function is the sole author
+ * of on the wire. The ladder exists so later tiers need no re-architecture; a
+ * verifier that hardcodes the field the ladder communicates would silently
+ * report L0 for an L1 passport the day the CHECK widens, which is precisely
+ * the "premature verified" failure the ladder's naming discipline guards.
+ *
+ * Fails CLOSED on an unrecognised level. The alternative — clamping to L0 —
+ * would UNDERSTATE a higher tier, which sounds conservative and is not: a
+ * merchant's screening logic branches on this field, so silently reporting a
+ * screened agent as merely governed is a wrong answer presented as a right
+ * one. Refusing to answer is the honest failure. Returning null makes the
+ * caller decide, which it does by declining to issue a receipt at all.
+ *
+ * EXPORTED for testing, and that is not incidental. While L0 is the only
+ * issuable level, "read the row" and "hardcode L0" produce identical output
+ * for every VALID input, so no behavioural test can tell them apart — reverting
+ * this function's use to a literal left the whole suite green. The unit tests
+ * below plus a source-level guard are what actually pin it; see
+ * passport-assurance.test.ts.
+ */
+export function assuranceLevelOf(row: VerificationRow): AssuranceLevel | null {
+  const level = row.assurance_level as AssuranceLevel
+  return ISSUABLE_ASSURANCE_LEVELS.has(level) ? level : null
+}
+
+/**
  * Build the receipt for a resolved agent. Always reflects CURRENT standing —
  * a revocation shows up in a freshly fetched receipt immediately, whatever the
  * EAS anchor is doing.
@@ -84,6 +114,17 @@ export async function buildReceipt(row: VerificationRow): Promise<SignedPassport
   if (!issuer) {
     throw new Error('passport receipt signing is not configured (PASSPORT_RECEIPT_SIGNING_KEY)')
   }
+  const assuranceLevel = assuranceLevelOf(row)
+  if (assuranceLevel === null) {
+    // Unreachable while the CHECK holds. Throwing rather than clamping is the
+    // point: a level this code does not understand must not be summarised as
+    // one it does. The route turns this into a 500, which is the correct shape
+    // — it is our data being wrong, not the caller's request.
+    throw new Error(
+      `passport ${row.agent_id}: assurance level ${row.assurance_level} is not issuable — ` +
+        'refusing to issue a receipt rather than report a level this build does not understand',
+    )
+  }
   const now = Math.floor(Date.now() / 1000)
   const receipt: PassportReceipt = {
     version: RECEIPT_VERSION,
@@ -91,7 +132,7 @@ export async function buildReceipt(row: VerificationRow): Promise<SignedPassport
     agentId: row.agent_id,
     agentEoa: row.agent_eoa,
     smartAccount: row.smart_account,
-    assuranceLevel: AssuranceLevel.L0,
+    assuranceLevel,
     // Shared with `passportStanding()`, not re-implemented: a copy would be
     // free to drift, and the failure mode is the receipt a merchant holds
     // disagreeing with Haven's own answer for the same agent.

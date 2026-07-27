@@ -86,4 +86,17 @@ describe('the SQL alias matches the type it is read through (#1015)', () => {
     // come back by a copy-paste from an older branch.
     expect(sql).not.toMatch(/AS\s+standing_changed_at/i)
   })
+
+  // Same class of gap for the assurance ladder (#975). The verifier now READS
+  // `assurance_level` instead of hardcoding L0, and every route test mocks
+  // `db.query` — so dropping the column from the SELECT would leave the suite
+  // green while production refuses every receipt. That failure is loud (a 500,
+  // by design) rather than silent, but it would be discovered in production
+  // rather than here.
+  it.each([
+    ['FIND_BY_AGENT_ADDRESS_SQL', FIND_BY_AGENT_ADDRESS_SQL],
+    ['FIND_BY_ATTESTATION_UID_SQL', FIND_BY_ATTESTATION_UID_SQL],
+  ])('%s selects assurance_level, which the verifier reads', (_name, sql) => {
+    expect(sql).toMatch(/p\.assurance_level/i)
+  })
 })

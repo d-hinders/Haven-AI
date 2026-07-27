@@ -32,6 +32,7 @@ function row(overrides: Record<string, unknown> = {}) {
   return {
     agent_id: 'agt_1',
     agent_status: 'active',
+    assurance_level: 0,
     record_updated_at: new Date('2026-07-20T00:00:00Z'),
     passport_status: 'anchored',
     attestation_uid: UID,
@@ -323,5 +324,42 @@ describe('standingEpoch semantics (#1015)', () => {
     mockQuery.mockResolvedValueOnce({ rows: [row({ record_updated_at: null })] })
     const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
     expect(res.json().receipt.standingEpoch).toBe(0)
+  })
+})
+
+describe('assurance level is read, not assumed (#975)', () => {
+  // The verifier used to hardcode AssuranceLevel.L0. Correct only while the
+  // `agent_passport_level_issuable` CHECK pins the column to 0 — an invariant
+  // in a different layer, for a value the verifier is the sole author of on the
+  // wire. The ladder exists so later tiers need no re-architecture.
+
+  it('reports the level stored on the passport', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: 0 })] })
+    const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
+    expect(res.json().receipt.assuranceLevel).toBe(0)
+  })
+
+  it('REFUSES a level this build cannot issue, rather than clamping to L0', async () => {
+    // The dangerous alternative is clamping: reporting a screened (L1) agent as
+    // merely governed (L0) is a wrong answer presented as a right one, and a
+    // merchant's screening logic branches on exactly this field. Unreachable
+    // while the CHECK holds; the point is that it stays unreachable by refusal
+    // and not by luck.
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: 1 })] })
+    const res = await (await build()).inject({ url: `/passport/verify?address=${EOA}` })
+    expect(res.statusCode).toBe(500)
+    expect(JSON.stringify(res.json())).not.toContain('assuranceLevel')
+  })
+
+  it('refuses an unknown level too, not just a reserved one', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: 99 })] })
+    expect((await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).statusCode).toBe(500)
+  })
+
+  it('refuses a missing level rather than defaulting it', async () => {
+    // A row without the column — a query that forgot to select it — must not
+    // silently become L0. This is how the hardcoded version failed invisibly.
+    mockQuery.mockResolvedValueOnce({ rows: [row({ assurance_level: undefined })] })
+    expect((await (await build()).inject({ url: `/passport/verify?address=${EOA}` })).statusCode).toBe(500)
   })
 })

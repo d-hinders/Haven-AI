@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-07-13"
+last-verified: "2026-07-27"
 ---
 
 # Autonomous PR loop
@@ -36,7 +36,7 @@ Pieces:
 - **`ship-next`** ([canonical skill](../../.agents/skills/ship-next/SKILL.md)) — **execute**: does **one** PR end-to-end, then stops. `ship-next "<task>"` is `new-task` + ship in one go.
 - **Client adapters** — Claude Code exposes thin `/new-task` and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
 - **haven-reviewer** — the per-PR quality gate.
-- **Docs acceptance gate** — when a PR touches any Markdown file, anything under `docs/`, anything under `scripts/docs/`, or a root gravity file (`CLAUDE.md`, `README.md`, `AGENTS.md`, `ABOUT_HAVEN.md`), `ship-next` runs `npm run docs:check` and `npm run docs:test` as a **hard local gate** and refuses to open the PR if they fail — the same standing as tests and type checks. This is the loop's own gate, so an agent-authored docs PR with invalid front-matter or an unresolved `covers:` glob can no longer slip through to auto-merge regardless of whether the GitHub docs check is marked required.
+- **Docs acceptance gate** — `docs:check` and `docs:test` are **CI required checks** on every PR ([#1023](https://github.com/d-hinders/Haven-AI/issues/1023) — the *Front-matter, links & style* job), so a PR with invalid front-matter or an unresolved `covers:` glob cannot reach auto-merge no matter how it was opened. `ship-next` still runs them locally before pushing, but only to save a round trip — it is no longer the thing that enforces them. Same shape for **Design-system coupling (strict)**.
 - **haven-doc-reviewer** — per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). When the diff touches code that some doc's `covers:` front-matter maps to, running it is a **hard definition-of-done step in the loop**: `ship-next` must review those docs and, in the same PR, update the stale claims (or genuinely re-verify and bump `last-verified`) before opening the PR. This is a loop requirement enforced by the skill, independent of GitHub required-checks — GitHub's coupling-gate comment stays advisory and does not by itself block auto-merge.
 - **Surface playbooks** — `ship-next` classifies each issue's surface from its `area:*` / `money-path` labels and loads the matching playbook from `docs/contributing/ship-playbooks/` (UX + design system for frontend, CASP for money-path, etc.), so the right standards apply without a long prompt. See [`ship-playbooks/README.md`](ship-playbooks/README.md).
 - **`.github/CODEOWNERS`** — the migration carve-out for independent GitHub review and merge.
@@ -192,9 +192,10 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      **Detect changed surfaces** plus every per-surface quality check: **Backend
      checks**, **Frontend checks**, **SDK checks**, **CLI checks**, **MCP server
      checks**, **MCP checks**, **Connect checks**, **Signer checks** — and the
-     blocking design-quality gates **Design visual regression** (#897) and
-     **Banned product-copy terms** (#902). (Optionally also the smoke checks
-     **Install-path smoke** and **Frontend browser smoke**.)
+     blocking design-quality gates **Design visual regression** (#897),
+     **Banned product-copy terms** (#902), **Design-system coupling (strict)**
+     (#1023) and **Front-matter, links & style** (#1023). (Optionally also the
+     smoke checks **Install-path smoke** and **Frontend browser smoke**.)
      These are safe to require even though they're conditional: on a PR that
      doesn't touch a surface, that surface's check reports `skipped`, which GitHub
      counts as satisfied — so requiring all of them gates every surface the loop

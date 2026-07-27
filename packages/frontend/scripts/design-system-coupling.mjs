@@ -14,11 +14,14 @@
 // docs-coupling). A genuinely internal export opts out with a trailing
 // `// design-system-exempt: <reason>` on the export line.
 //
-// Two postures, one detector:
-//   - CI (advisory): writes a sticky-comment body to --out and appends
+// Two postures, one detector. Both run in CI on every PR (#1023) — the
+// `coupling` job explains, the `strict` job blocks:
+//   - default (explain): writes a sticky-comment body to --out and appends
 //     `has_findings=…` to $GITHUB_OUTPUT; ALWAYS exits 0 — it only informs.
-//   - ship-next (hard gate): run with --strict to exit 1 when findings exist,
-//     so the autonomous path cannot merge an undocumented primitive.
+//   - --strict (block): exits 1 when findings exist, and also when the diff is
+//     uncomputable — a gate must not pass on something it could not read.
+// Before #1023 --strict ran only under ship-next, which made the canonical
+// workflow stricter than opening a PR by hand.
 //
 // Usage:
 //   node scripts/design-system-coupling.mjs                 # diff origin/dev...HEAD
@@ -256,8 +259,8 @@ function main() {
       'mark the export line `// design-system-exempt: <reason>`.\n\n'
     for (const f of findings) body += `- \`${f.symbol}\` — \`${f.file}\`\n`
     body +=
-      `\n_Advisory here; a hard definition-of-done step under ship-next. ` +
-      `Reference page: \`${PAGE}\`._\n`
+      `\n_This comment explains the finding; the **Design-system coupling ` +
+      `(strict)** check blocks on it. Reference page: \`${PAGE}\`._\n`
     writeFileSync(outPath, body, 'utf8')
     console.error(`design-system coupling: ${findings.length} undocumented primitive(s).`)
     for (const f of findings) console.error(`  - ${f.symbol} (${f.file})`)

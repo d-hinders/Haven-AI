@@ -2,9 +2,23 @@ name: Design-system coupling gate
 
 # #898 (epic #904). On every PR, flags shared primitives added under
 # components/ui/** or components/haven/** whose symbol never appears on the
-# /design-system reference page. Advisory only — it posts a sticky comment and
-# never fails the build (the script exits 0 without --strict; ship-next runs it
-# with --strict as a hard definition-of-done step).
+# /design-system reference page.
+#
+# Two jobs, mirroring docs-coupling.yml: `coupling` posts the sticky comment
+# that EXPLAINS a finding (never fails), and `strict` is the gate that BLOCKS
+# on it. The split matters — the comment needs `pull-requests: write` and is
+# skipped on fork PRs where GITHUB_TOKEN is read-only, so the gate must not
+# depend on it.
+#
+# #1023: `--strict` used to run only inside /ship-next, so a primitive missing
+# from /design-system was blocked for anyone using the canonical workflow and
+# merged for anyone opening a PR by hand. Enforcing a standard should not
+# depend on which tool opened the pull request. Add "Design-system coupling
+# (strict)" to dev's required status checks.
+#
+# Escape hatch unchanged: mark a genuinely internal export
+# `// design-system-exempt: <reason>`.
+#
 # Plumbing lives in .github/actions/advisory-gate-comment (shared with
 # docs-coupling.yml). See docs/contributing/ship-playbooks/frontend.md §2.
 
@@ -42,3 +56,28 @@ jobs:
           script: packages/frontend/scripts/design-system-coupling.mjs
           header: design-system-coupling
           out-file: design-system-coupling-comment.md
+
+  strict:
+    name: Design-system coupling (strict)
+    # No repo guard here, unlike `coupling` above: this job posts nothing, so a
+    # fork PR's read-only token cannot break it — and a gate that silently
+    # skips on forks is not a gate.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # --strict exits 1 rather than pass on an uncomputable diff, so the
+          # merge base must actually be present.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Strict gate over new shared primitives
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node packages/frontend/scripts/design-system-coupling.mjs --strict --out=/dev/null

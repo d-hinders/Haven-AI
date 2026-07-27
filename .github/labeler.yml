@@ -31,12 +31,18 @@
           - "docs/**"
           - "**/*.md"
 
-# GENERATED-ADJACENT: this list must equal .github/money-path-globs.json,
-# which is the single source of truth (#1030). scripts/ci/money-path.test.mjs
-# fails CI if they diverge. It used to claim to mirror the SKILL.md Merge Gate
-# and silently did not — the delegation rail, the rail seam and the SDK signer
-# were all missing, so money-path PRs on those files never got the label and
-# never loaded money.md.
+# GENERATED-ADJACENT: this list must equal the UNION of `globs` and
+# `controlGlobs` in .github/money-path-globs.json, the single source of truth
+# (#1030). scripts/ci/money-path.test.mjs fails CI if they diverge.
+#
+# It used to claim to mirror the SKILL.md Merge Gate and silently did not --
+# the delegation rail, the rail seam and the SDK signer were all missing, so
+# money-path PRs on those files never got the label and never loaded money.md.
+#
+# `controlGlobs` are the money-path SAFEGUARD itself (the QA freshness gate and
+# its config). They are labelled here so a PR weakening the gate gets the
+# playbook and a human, but they are excluded from the freshness check itself --
+# re-running the money-flow harness proves nothing about a CI config change.
 "money-path":
   - changed-files:
       - any-glob-to-any-file:
@@ -46,10 +52,14 @@
           - "packages/backend/src/routes/machine-payments.ts"
           - "packages/backend/src/routes/agent-delegations.ts"
           - "packages/backend/src/lib/machine-payments.ts"
+          - "packages/backend/src/lib/machine-payment-lifecycle.ts"
+          - "packages/backend/src/lib/machine-payment-evidence.ts"
           - "packages/backend/src/lib/payment-coverage.ts"
           - "packages/backend/src/lib/allowance-module.ts"
+          - "packages/backend/src/lib/allowance-nonce-coordinator.ts"
           - "packages/backend/src/lib/execution-rail.ts"
           - "packages/backend/src/lib/delegation-*.ts"
+          - "packages/backend/src/lib/x402-delegation.ts"
           - "packages/backend/src/lib/hybrid-provisioning.ts"
           - "packages/backend/src/lib/hybrid-account-config.ts"
           - "packages/backend/src/middleware/agentAuth.ts"
@@ -57,3 +67,8 @@
           - "packages/sdk/src/signer.ts"
           - "scripts/release-bump.mjs"
           - ".github/workflows/publish.yml"
+          - "scripts/ci/qa-freshness.mjs"
+          - ".github/money-path-globs.json"
+          - ".github/workflows/dev-gate.yml"
+          - ".github/workflows/qa-dev.yml"
+          - ".github/CODEOWNERS"

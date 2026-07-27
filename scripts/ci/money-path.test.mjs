@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadMoneyPathGlobs } from './qa-freshness.mjs'
+import { loadMoneyPathGlobs, loadMoneyPathControlGlobs } from './qa-freshness.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
@@ -45,8 +45,10 @@ function labelerMoneyPathGlobs() {
 }
 
 describe('money-path list stays in one piece', () => {
-  test('labeler.yml matches .github/money-path-globs.json exactly', () => {
-    const canonical = loadMoneyPathGlobs()
+  test('labeler.yml matches the UNION of globs + controlGlobs', () => {
+    // labeler.yml labels BOTH lists: runtime money-path code, and the
+    // safeguard's own control surface. The freshness gate uses `globs` only.
+    const canonical = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
     const labeler = labelerMoneyPathGlobs()
     assert.ok(labeler.length > 0, 'read no globs out of labeler.yml — the block shape changed')
     assert.deepEqual(
@@ -91,6 +93,21 @@ describe('money-path list stays in one piece', () => {
         'Add them to the JSON and to labeler.yml — prose that the machinery does not ' +
         'know about is the exact drift #1030 closed.',
     )
+  })
+
+  test('the two lists are disjoint — a glob belongs to exactly one', () => {
+    const runtime = new Set(loadMoneyPathGlobs())
+    const overlap = loadMoneyPathControlGlobs().filter((g) => runtime.has(g))
+    assert.deepEqual(overlap, [], 'a glob in both lists would make the split meaningless')
+  })
+
+  test('the gate\'s own control surface is labelled money-path', () => {
+    // A PR that weakens the last automatic money-path safeguard must not slip
+    // through as an ordinary CI tweak.
+    const control = loadMoneyPathControlGlobs()
+    for (const f of ['scripts/ci/qa-freshness.mjs', '.github/workflows/dev-gate.yml']) {
+      assert.ok(control.includes(f), `${f} must be a money-path control file`)
+    }
   })
 
   test('the canonical file is well-formed and non-empty', () => {

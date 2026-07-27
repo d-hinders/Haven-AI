@@ -177,13 +177,31 @@ What it now checks (`scripts/ci/qa-freshness.mjs`, unit-tested):
   head.** Recency is not coverage: a run that predates the money-path commits
   never exercised them. Ordinary promotions carrying no money-path change stay
   cheap;
-- **`hotfix/* → main` is judged on its own evidence.** A hotfix has never been
-  on `dev`, so a green `dev` run says nothing about it. A hotfix touching
-  money-path files needs a green run **on that branch**; one touching none
-  passes, because this gate does not apply to it.
+- **A money-path `hotfix/* → main` BLOCKS.** It cannot be verified
+  automatically and the gate refuses to pretend otherwise: `qa-dev.yml` is a
+  black-box harness against a **deployed** backend, and a hotfix is deployed
+  nowhere until it merges — so a green run on *any* branch exercised different
+  code. Promoting one is an explicit human decision: `qa-override` **with a
+  comment stating what was verified**. The label emits a warning and is the
+  audit record. A hotfix touching no money-path file passes; this gate does not
+  apply to it.
+
+  > This replaced a weaker first attempt that accepted "a green run exists on
+  > the hotfix branch". Review caught that it would have been the same
+  > unverified pass in a new costume.
 
 Every path that cannot be established fails **closed** — no run, unparseable
-timestamp, uncomputable diff, unknown branch. That direction is the whole point.
+timestamp, uncomputable diff, unknown source branch, or a `QA_FRESHNESS_HOURS`
+repo variable that is not a positive number (which used to disable the staleness
+rule silently while printing a green check). That direction is the whole point.
+
+**Known limit, stated rather than papered over:** the gate binds to the QA
+run's `headSha` — the branch tip when the run was *triggered*, not necessarily
+the SHA deployed to dev. For the `repository_dispatch: dev-deployed` trigger
+they coincide; for the nightly cron, a lagging or failed dev deploy makes the
+run's `headSha` overstate what was actually exercised. Also, `git diff
+--name-only` reports only a rename's destination path, so renaming a money-path
+file *out* of the glob list reads as a non-money-path change.
 
 Still not covered, **deliberately** — these are named, logged escape hatches,
 not holes:

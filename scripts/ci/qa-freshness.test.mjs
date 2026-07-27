@@ -41,6 +41,8 @@ describe('characterization — behaviour of the inline-bash gate this replaced',
     assert.equal(r.ok, false)
     assert.equal(r.code, 'stale')
     assert.match(r.message, /31h old \(> 30h\)/)
+    // Operators grep this phrase; the refactor must not reword it.
+    assert.match(r.message, /add the 'qa-override' label/)
   })
 
   test('run inside the window → pass', () => {
@@ -92,29 +94,36 @@ describe('gap 1 — the run must have covered the promoted money-path code', () 
   })
 })
 
-describe('gap 2 — hotfix/* is judged on its own evidence, not dev\'s', () => {
+describe("gap 2 — a money-path hotfix cannot be verified, so it BLOCKS", () => {
   const hotfix = { ...base, sourceBranch: 'hotfix/urgent' }
 
-  test('money-path hotfix with no run of its own → fail', () => {
+  test('money-path hotfix blocks even with a fresh green run on dev', () => {
+    // The old gate passed exactly here. So did my first attempt at the fix,
+    // which accepted "a green run exists on the hotfix branch" — but qa-dev is
+    // a black-box harness against a DEPLOYED backend, and a hotfix is deployed
+    // nowhere until it merges. Accepting such a run would have been the same
+    // lie in a new costume.
     const r = evaluate({
       ...hotfix,
-      latestGreenRun: null,
+      latestGreenRun: run(1),
       changedMoneyPathFiles: ['packages/backend/src/lib/allowance-module.ts'],
     })
     assert.equal(r.ok, false)
-    assert.equal(r.code, 'hotfix_no_run')
-    assert.match(r.message, /evidence about different code/)
+    assert.equal(r.code, 'hotfix_money_path')
+    assert.match(r.message, /deployed nowhere until it merges/)
+    // The message must say how to proceed, or it just gets overridden blindly.
+    assert.match(r.message, /qa-override/)
+    assert.match(r.message, /allowance-module\.ts/)
   })
 
-  test('a green run on DEV does not rescue a money-path hotfix', () => {
-    // The old gate passed exactly here: fresh dev run + hotfix = green, while
-    // the hotfix code had never been tested. This is the dangerous case.
+  test('a run on the hotfix branch itself does NOT clear it', () => {
     const r = evaluate({
       ...hotfix,
-      latestGreenRun: null,
+      latestGreenRun: run(0.1, 'hotfix-sha'),
       changedMoneyPathFiles: ['packages/backend/src/middleware/agentAuth.ts'],
     })
     assert.equal(r.ok, false)
+    assert.equal(r.code, 'hotfix_money_path')
   })
 
   test('hotfix touching no money-path file → pass, gate does not apply', () => {
@@ -123,33 +132,38 @@ describe('gap 2 — hotfix/* is judged on its own evidence, not dev\'s', () => {
     assert.equal(r.code, 'hotfix_no_money_path')
   })
 
-  test('hotfix with its OWN fresh green run and no later money-path change → pass', () => {
-    assert.equal(evaluate({ ...hotfix, latestGreenRun: run(1), changedMoneyPathFiles: [] }).ok, true)
-  })
-
-  test('hotfix with its own run but STALE → still fails on staleness', () => {
-    // Must carry a money-path change, or the no-money-path early return fires
-    // first and the staleness rule is never reached. That ordering is correct
-    // (the gate does not apply at all to a non-money hotfix) but it makes the
-    // obvious version of this test pass for the wrong reason.
-    const r = evaluate({
-      ...hotfix,
-      latestGreenRun: run(99),
-      changedMoneyPathFiles: ['packages/backend/src/routes/payments.ts'],
-    })
-    assert.equal(r.code, 'stale')
-  })
-
-  test('a non-money hotfix passes even with a badly stale run — gate does not apply', () => {
-    const r = evaluate({ ...hotfix, latestGreenRun: run(999), changedMoneyPathFiles: [] })
+  test('a non-money hotfix passes even with no run at all', () => {
+    const r = evaluate({ ...hotfix, latestGreenRun: null, changedMoneyPathFiles: [] })
     assert.equal(r.ok, true)
-    assert.equal(r.code, 'hotfix_no_money_path')
   })
 
   test('hotfix with an uncomputable diff → fail closed', () => {
     const r = evaluate({ ...hotfix, latestGreenRun: null, changedMoneyPathFiles: null })
     assert.equal(r.ok, false)
     assert.equal(r.code, 'hotfix_diff_unknown')
+  })
+})
+
+describe('the gate refuses to run without a real bound or a known branch', () => {
+  test('non-numeric QA_FRESHNESS_HOURS → fail closed, not a silent NaN pass', () => {
+    // The repo variable is editable without code review. `ageH > NaN` is false,
+    // so this silently disabled the staleness rule while printing "within NaNh".
+    const r = evaluate({ ...base, latestGreenRun: run(1000), freshnessHours: Number('thirty') })
+    assert.equal(r.ok, false)
+    assert.equal(r.code, 'bad_freshness_hours')
+  })
+
+  test('zero or negative freshness → fail closed', () => {
+    assert.equal(evaluate({ ...base, freshnessHours: 0 }).code, 'bad_freshness_hours')
+    assert.equal(evaluate({ ...base, freshnessHours: -5 }).code, 'bad_freshness_hours')
+  })
+
+  test('unknown source branch → fail closed', () => {
+    // The docstring promised this; it was not true. `gate` restricts the branch,
+    // but this function must not depend on another job for its own correctness.
+    const r = evaluate({ ...base, sourceBranch: 'feature/x' })
+    assert.equal(r.ok, false)
+    assert.equal(r.code, 'unknown_branch')
   })
 })
 

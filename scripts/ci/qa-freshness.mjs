@@ -27,8 +27,31 @@
 //      was the more dangerous of the two: hotfixes are exactly when people move
 //      fast, and it was the branch with no coverage.
 //
-// Both are closed below. The gate now proves: "a green money-flow run covered
-// the money-path code being promoted."
+// Gap 1 is closed by binding to the SHA. Gap 2 CANNOT be closed automatically,
+// and saying so is the point:
+//
+//   qa-dev.yml is a BLACK-BOX harness against a DEPLOYED backend
+//   (QA_HAVEN_API_URL). Triggering it on `hotfix/x` runs the harness CODE from
+//   that branch against the DEV DEPLOYMENT -- which does not contain the
+//   hotfix. A hotfix is deployed nowhere until it merges to main. So "a green
+//   run exists on the hotfix branch" is NOT evidence about the hotfix, and a
+//   gate that accepted it would be the same lie in a new costume.
+//
+// So a money-path hotfix BLOCKS, and clearing it is an explicit, logged human
+// decision (`qa-override` with a stated reason) rather than a green check that
+// proves nothing. Refusing to fake the evidence is the honest option; an
+// overstated net is worse than a known-partial one, because nobody compensates
+// for a gap they believe is closed.
+//
+// The gate therefore proves: "for a dev promotion, a green money-flow run
+// covered the money-path code being promoted; for a money-path hotfix, a human
+// accepted the risk on the record."
+//
+// KNOWN LIMIT on the dev path, stated rather than papered over: the run's
+// `headSha` is the branch tip when the run was TRIGGERED, not necessarily the
+// SHA deployed to dev. For the `repository_dispatch: dev-deployed` trigger they
+// coincide; for the nightly cron a lagging or failed dev deploy makes the run's
+// headSha overstate what was exercised.
 //
 // ## What it still does NOT cover — by design, do not "fix" these
 //
@@ -52,12 +75,27 @@ import { execFileSync } from 'node:child_process'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const GLOBS_FILE = '.github/money-path-globs.json'
 
+/**
+ * Runtime money-path code — what the deployed QA harness can actually exercise.
+ * This is what the freshness gate reasons about.
+ */
 export function loadMoneyPathGlobs(root = ROOT) {
   const raw = JSON.parse(readFileSync(path.join(root, GLOBS_FILE), 'utf8'))
   if (!Array.isArray(raw.globs) || raw.globs.length === 0) {
     throw new Error(`${GLOBS_FILE}: "globs" must be a non-empty array`)
   }
   return raw.globs
+}
+
+/**
+ * The safeguard's own control surface. LABELLED money-path (a PR weakening the
+ * gate needs the playbook and a human), but deliberately NOT part of the
+ * freshness check: re-running the money-flow harness proves nothing about a CI
+ * config change, so requiring it would be friction with no evidence attached.
+ */
+export function loadMoneyPathControlGlobs(root = ROOT) {
+  const raw = JSON.parse(readFileSync(path.join(root, GLOBS_FILE), 'utf8'))
+  return Array.isArray(raw.controlGlobs) ? raw.controlGlobs : []
 }
 
 /**
@@ -69,7 +107,7 @@ export function loadMoneyPathGlobs(root = ROOT) {
  */
 export function matchesGlob(file, glob) {
   if (glob.endsWith('/**')) return file.startsWith(glob.slice(0, -2))
-  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
+  const escaped = glob.replace(/[.+^${}()|[\]\\?]/g, '\\$&').replace(/\*/g, '[^/]*')
   return new RegExp(`^${escaped}$`).test(file)
 }
 
@@ -106,19 +144,50 @@ export function evaluate({
 
   const isHotfix = sourceBranch.startsWith('hotfix/')
 
-  // --- Gap 2: hotfix/* -------------------------------------------------------
-  // A hotfix has never been on `dev`, so a green dev run says nothing about it.
-  // Only money-path hotfixes need their own run: gating every hotfix on a QA
-  // cycle would defeat the purpose of having a hotfix path at all, and a
-  // hotfix touching no money-path file is not what this gate protects.
+  // --- Source branch must be one we know how to reason about -----------------
+  // `gate` already restricts promotion to dev/hotfix, but this function must not
+  // depend on another job for its own correctness — and its docstring promises
+  // it fails closed on an unknown branch, so make that true rather than claim it.
+  if (sourceBranch !== 'dev' && !isHotfix) {
+    return {
+      ok: false,
+      code: 'unknown_branch',
+      message:
+        `Unrecognised promotion source branch '${sourceBranch}'. Only 'dev' and 'hotfix/*' ` +
+        `may merge to main (see the 'gate' job). Failing closed rather than guessing which ` +
+        `evidence applies.`,
+    }
+  }
+
+  // --- FRESHNESS_HOURS must be a real bound ----------------------------------
+  // QA_FRESHNESS_HOURS is a repo variable, editable without code review. A
+  // non-numeric value makes `ageH > NaN` false, silently disabling the staleness
+  // rule while the job prints a green checkmark. The old bash had the same hole
+  // but at least logged a shell error; a green "within NaNh" is strictly worse.
+  if (!Number.isFinite(freshnessHours) || freshnessHours <= 0) {
+    return {
+      ok: false,
+      code: 'bad_freshness_hours',
+      message:
+        `QA_FRESHNESS_HOURS is not a positive number (got '${freshnessHours}'). Refusing to ` +
+        `run with no staleness bound — an unbounded window is not a gate. Fix the repo variable.`,
+    }
+  }
+
+  // --- Gap 2: hotfix/* — cannot be verified, so it BLOCKS --------------------
+  // qa-dev.yml is a black-box harness against a DEPLOYED backend. A run
+  // triggered on a hotfix branch exercises the DEV deployment, which does not
+  // contain the hotfix — so no automatic evidence about a hotfix can exist. The
+  // gate refuses to manufacture some. A hotfix touching no money-path file is
+  // simply not what this gate protects, and passes.
   if (isHotfix) {
     if (changedMoneyPathFiles === null) {
       return {
         ok: false,
         code: 'hotfix_diff_unknown',
         message:
-          `Could not determine whether this hotfix touches money-path files. ` +
-          `Failing closed — a hotfix reaches production without ever being on 'dev'. ${RERUN}`,
+          `Could not determine whether this hotfix touches money-path files. Failing closed — ` +
+          `a hotfix reaches production without ever being on 'dev'. ${RERUN}`,
       }
     }
     if (changedMoneyPathFiles.length === 0) {
@@ -126,21 +195,21 @@ export function evaluate({
         ok: true,
         code: 'hotfix_no_money_path',
         message:
-          'Hotfix touches no money-path files — the dev-based money-flow gate does not apply.',
+          'Hotfix touches no money-path files — the money-flow gate does not apply to it.',
       }
     }
-    if (!latestGreenRun) {
-      return {
-        ok: false,
-        code: 'hotfix_no_run',
-        message:
-          `This hotfix touches money-path files (${changedMoneyPathFiles.join(', ')}) and has ` +
-          `NO green money-flow QA run of its own. A green run on 'dev' is evidence about ` +
-          `different code. Run the money-flow QA against this branch, or add 'qa-override' ` +
-          `with a stated reason.`,
-      }
+    return {
+      ok: false,
+      code: 'hotfix_money_path',
+      message:
+        `This hotfix changes money-path code:\n` +
+        changedMoneyPathFiles.map((f) => `  - ${f}`).join('\n') +
+        `\nIt CANNOT be verified automatically: the money-flow QA harness runs against a ` +
+        `DEPLOYED backend, and a hotfix is deployed nowhere until it merges to main — so a ` +
+        `green qa-dev run on any branch exercised different code. Promoting this is a human ` +
+        `decision: add the 'qa-override' label WITH a comment stating what you verified and ` +
+        `why the risk is acceptable. The label emits a warning and is the audit record.`,
     }
-    // fall through to the staleness check below, against the hotfix's own run
   }
 
   // --- Original behaviour: a green run must exist ----------------------------
@@ -171,7 +240,7 @@ export function evaluate({
       code: 'stale',
       message:
         `Latest green qa-dev run is ${ageH}h old (> ${freshnessHours}h). Re-run the ` +
-        `money-flow QA against the current dev deploy before promoting, or add 'qa-override'.`,
+        `money-flow QA against the current dev deploy before promoting, or add the 'qa-override' label.`,
     }
   }
 
@@ -258,6 +327,15 @@ function changedFilesSince(runSha, headSha) {
   }
 }
 
+function mergeBase(a, b) {
+  try {
+    return execFileSync('git', ['merge-base', a, b], { cwd: ROOT, encoding: 'utf8' }).trim()
+  } catch (err) {
+    console.error(`qa-freshness: could not find merge-base ${a}..${b}: ${err.message}`)
+    return null // -> changedFilesSince(null) -> null -> fails closed
+  }
+}
+
 function main() {
   const repo = process.env.GITHUB_REPOSITORY
   const sourceBranch = process.env.SOURCE_BRANCH || ''
@@ -270,22 +348,24 @@ function main() {
   }
 
   const globs = loadMoneyPathGlobs()
-  // A hotfix is judged against its OWN runs; `dev` against dev's.
-  const queryBranch = sourceBranch.startsWith('hotfix/') ? sourceBranch : 'dev'
+
+  // Always dev's runs: a hotfix has no valid evidence of its own (see the header),
+  // so there is nothing to look up on that branch.
   let latestGreenRun = null
   try {
-    latestGreenRun = latestGreenRunFor(repo, queryBranch)
+    latestGreenRun = latestGreenRunFor(repo, 'dev')
   } catch (err) {
     console.error(`::error::qa-freshness: could not query workflow runs: ${err.message}`)
     process.exit(1)
   }
 
-  // For a hotfix with no run of its own we still need the diff, to decide
-  // whether it touches the money path at all. Compare against `origin/main` —
-  // what the hotfix would change in production.
-  const base = sourceBranch.startsWith('hotfix/')
-    ? (latestGreenRun?.headSha ?? 'origin/main')
-    : latestGreenRun?.headSha
+  // For a hotfix the question is only "does it touch money-path code at all",
+  // asked against the MERGE BASE with main. A two-dot diff would blame the
+  // hotfix for every money-path change main gained since it branched, naming
+  // files it never touched — which trains operators to reach for qa-override on
+  // exactly the branch type with the weakest coverage.
+  const isHotfix = sourceBranch.startsWith('hotfix/')
+  const base = isHotfix ? mergeBase('origin/main', headSha) : latestGreenRun?.headSha
   const changed = changedFilesSince(base, headSha)
   const changedMoneyPathFiles = changed === null ? null : moneyPathFiles(changed, globs)
 

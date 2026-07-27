@@ -53,7 +53,7 @@ set -u
 input=$(cat 2>/dev/null) || exit 0
 [ -n "$input" ] || exit 0
 
-tool=$(printf '%s' "$input" | jq -r '.tool_name // ""' 2>/dev/null) || exit 0
+tool=$(printf '%s' "$input" | jq -r '.tool_name // ""' 2>/dev/null) || tool=""
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null) || cmd=""
 
 fire() {
@@ -113,6 +113,11 @@ This warning does not block. It is on you.'
 # here cannot silence the guard, only make it noisier, because a silent guard
 # is indistinguishable from a working one.
 #
+# That claim was NOT true when first written: the top-level jq extraction did
+# `|| exit 0`, so an unparseable payload skipped this gate entirely. Review
+# caught it. The caller now routes a PR-shaped raw payload here even when jq
+# cannot parse it — the property is enforced, not just asserted in a comment.
+#
 # BOTH detection paths (the MCP tool and the Bash shapes) route through this.
 # An earlier draft had the MCP path call fire() directly and skip the marker
 # entirely — caught by the test, which is why the marker case is asserted for
@@ -134,6 +139,18 @@ fire_unless_ship_next() {
   fire
 }
 
+if [ -z "$tool" ]; then
+  # jq could not parse the payload (or there is no tool_name). Exiting silently
+  # here is a SILENCE PATH that bypasses the marker gate entirely — the one
+  # thing this guard must not have. So if the RAW text still looks like a PR
+  # creation, route it through the gate anyway. Anything else is genuinely
+  # unidentifiable and stays quiet, because warning on every unparseable
+  # payload would fire on unrelated commands and mute the guard by noise.
+  case "$input" in
+    *create_pull_request*|*"gh pr create"*) fire_unless_ship_next ;;
+  esac
+  exit 0
+fi
 [ "$tool" = "mcp__github__create_pull_request" ] && fire_unless_ship_next
 [ "$tool" = "Bash" ] || exit 0
 [ -n "$cmd" ] || exit 0

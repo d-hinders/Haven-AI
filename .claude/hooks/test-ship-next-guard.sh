@@ -118,6 +118,18 @@ check "empty session_id -> warns" fire '{"session_id":"","tool_name":"mcp__githu
 # some other file that happens to exist.
 check "path-traversal session_id -> warns" fire "$(pr '../../etc/passwd')"
 
+
+# --- the last silence path: an unparseable payload that IS a PR creation --
+# Found by review, outside the scope it was asked to check. The top-level jq
+# extraction used to `|| exit 0`, bypassing the marker gate entirely — so the
+# documented "can never fail toward silence" property was not actually true.
+check "malformed payload naming create_pull_request" fire '{"session_id":"x","tool_name":BROKEN,"create_pull_request"'
+check "malformed payload containing gh pr create" fire '{"session_id":"x",BROKEN gh pr create'
+# ...but an unidentifiable payload must still stay quiet, or every unparseable
+# tool call becomes noise and the guard gets muted that way instead.
+check "malformed payload, nothing PR-shaped" silent 'not json at all'
+check "no tool_name, nothing PR-shaped" silent '{"session_id":"x"}'
+
 # --- the writer sets the marker from BOTH paths --------------------------
 mkrm wsess
 printf '{"session_id":"wsess","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"ship-next"}}' | sh "$WRITER" 2>/dev/null

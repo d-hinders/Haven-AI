@@ -26,6 +26,13 @@ set for the token-matching rules (see the commit for #1028).
 (`/ship-next` with no issue) share one wildcard token, so the second such PR
 warns. A spurious warning costs a moment; a spurious silence costs the guard.
 
+**One-time transition cost.** Markers written before #1028 are zero-byte files.
+The new guard treats an empty marker as *no tokens* and warns — correctly, since
+"the file exists" was exactly the permission-by-existence flaw being removed.
+A session already in flight when you pull this therefore gets one spurious
+warning; new sessions are unaffected, and `session-notice.sh` now prunes empty
+markers on startup. Observed on PR #1032, which is this change itself.
+
 Background: [#1016](https://github.com/d-hinders/Haven-AI/issues/1016),
 [#1018](https://github.com/d-hinders/Haven-AI/issues/1018),
 [#1020](https://github.com/d-hinders/Haven-AI/issues/1020).

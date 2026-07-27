@@ -47,11 +47,11 @@ docs/contributing/ship-playbooks/README.md. -->
 
 ## Money-path?
 
-<!-- The `money-path` Surface label above drives playbook routing; this section
-drives the MERGE GATE. Set both consistently. Check one. Non-migration
-money-path changes require in-session approval before auto-merge; migrations
-also require independent code-owner review and merge. Changes to existing
-money-path behavior must be characterization-tested first. -->
+<!-- The `money-path` Surface label above drives playbook routing and the
+testing bar. Set both consistently. Check one. Since #1024 a non-migration
+money-path change does NOT pause the merge; migrations still require
+independent code-owner review and merge. Changes to existing money-path
+behavior must be characterization-tested first. -->
 
-- [ ] No — docs / tests / non-money refactor (eligible for reviewer-gated auto-merge)
-- [ ] Yes — touches x402 / machine-payments / payment-coverage / allowance / migrations (in-session approval; migrations also require code-owner merge)
+- [ ] No — docs / tests / non-money refactor
+- [ ] Yes — touches x402 / machine-payments / payment-coverage / allowance / migrations (loads `money.md`; migrations also require code-owner merge)

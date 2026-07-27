@@ -142,7 +142,7 @@ Route the merge:
 - **Frontend UI:** if either review pass flags a UX, copy, or design-system concern, ask the user before enabling auto-merge.
 - **Everything else, money-path included:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening. GitHub then updates the branch and merges when required checks go green; do not sit in a poll loop waiting.
 
-> **Why money-path does not pause here (#1024).** The in-session approval applied only to pull requests opened through this skill — a hand-written money-path pull request merged on green CI alone. That made the canonical workflow more expensive than bypassing it while protecting nothing on the bypass path, and the approver was usually the author. What protects the money path is automatic and tool-independent: `CODEOWNERS` for irreversible schema changes, and the `qa-freshness` gate that refuses a `dev → main` promotion without a recent green money-flow QA run. See [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) → "Money-path safety model".
+> **Why money-path does not pause here (#1024).** The in-session approval applied only to pull requests opened through this skill — a hand-written money-path pull request merged on green CI alone. That made the canonical workflow more expensive than bypassing it while protecting nothing on the bypass path, and the approver was usually the author. What protects the money path is automatic and tool-independent: `CODEOWNERS` for irreversible schema changes, and the `qa-freshness` gate that refuses a `dev → main` promotion without a recent green money-flow QA run on `dev` (partial — time-based, not SHA-bound, and blind to `hotfix/*`). See [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) → "Money-path safety model".
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
 
@@ -152,8 +152,8 @@ Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm a
 
 Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
 
-- **Non-money-path:** `--auto` (above) means there is nothing to wait for — GitHub merges when green. Move on; you are re-invoked when the merge lands.
-- **When a wait is genuinely needed** (holding a money-path PR for approval, or confirming a specific run): use `gh pr checks <pr> --watch --fail-fast` (blocks until checks resolve, exits non-zero on failure) rather than a hand-rolled poll, or arm a Monitor if the client supports it.
+- **Auto-merged PRs:** `--auto` (above) means there is nothing to wait for — GitHub merges when green. Move on; you are re-invoked when the merge lands.
+- **When a wait is genuinely needed** (holding a UI PR on a review finding, or confirming a specific run): use `gh pr checks <pr> --watch --fail-fast` (blocks until checks resolve, exits non-zero on failure) rather than a hand-rolled poll, or arm a Monitor if the client supports it.
 - **BEHIND** resolves itself under `--auto` (GitHub updates the branch). Only run `gh pr update-branch` manually when not using `--auto` and the branch is genuinely behind.
 
 ## Closeout

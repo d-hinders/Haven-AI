@@ -39,10 +39,15 @@ for how the environments are wired, see
 
 ## Open and review the PR (base `main`, head `dev`)
 
-- [ ] Skim the **cumulative diff since the last promotion**. This is the real
-      second look at **money-path** changes that were approved in-session on `dev`
-      — confirm nothing changes *who can move funds* or *auto-execute vs. queue*
-      unintentionally.
+- [ ] Skim the **cumulative diff since the last promotion**. Since #1024 removed
+      the in-session money-path pause, this is the **only** human look at
+      money-path changes before prod — read it as such. Confirm nothing changes
+      *who can move funds* or *auto-execute vs. queue* unintentionally.
+- [ ] **Check the money-flow QA run actually covers this diff.** The
+      `qa-freshness` gate proves *a* green `qa-dev` run exists on `dev` within
+      `QA_FRESHNESS_HOURS` — it does **not** bind that run to the commits being
+      promoted. If money-path commits landed on `dev` after the newest green
+      run, re-run *QA — money-flow (dev)* before promoting.
 - [ ] **Migrations:** list every migration included since the last promotion.
       Confirm each is **forward-only / safe on existing rows**, and that a
       **prod DB snapshot** exists before they run on deploy.

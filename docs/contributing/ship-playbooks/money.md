@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-07-12"
+last-verified: "2026-07-27"
 ---
 
 # Money / agent-authority playbook
@@ -37,7 +37,7 @@ A money-path pull request auto-merges on green CI and a clean independent review
 What protects the money path is enforced by machine and applies to **every** pull request, however it was opened ([#1024](https://github.com/d-hinders/Haven-AI/issues/1024)):
 
 - `.github/CODEOWNERS` — irreversible schema changes;
-- the `qa-freshness` job in `dev-gate.yml` — a `dev → main` promotion is refused without a green money-flow QA run inside `QA_FRESHNESS_HOURS` (default 30h). Nothing reaches production unverified.
+- the `qa-freshness` job in `dev-gate.yml` — a `dev → main` promotion is refused without a green money-flow QA run on `dev` inside `QA_FRESHNESS_HOURS` (default 30h). **Read the limits before relying on it:** the check is time-based, not bound to the promoted SHA, and does not cover `hotfix/* → main` at all. See "Be precise about what gate 2 proves" in [`autonomous-pr-loop.md`](../autonomous-pr-loop.md).
 
 The in-session pause this section used to describe covered only pull requests opened through `ship-next`; a hand-written money-path pull request merged on green CI alone. It was friction on the compliant path with no compensating protection on the other, and the approver was typically the author. Verification moved to promotion time, where it is automatic. See "Money-path safety model" in [`autonomous-pr-loop.md`](../autonomous-pr-loop.md).
 

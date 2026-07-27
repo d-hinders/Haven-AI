@@ -17,11 +17,14 @@
 # What protects the money path now is automatic and tool-independent:
 #   1. this file, for irreversible schema changes;
 #   2. the `qa-freshness` job in .github/workflows/dev-gate.yml, which refuses a
-#      dev -> main promotion without a recent GREEN money-flow QA run.
+#      dev -> main promotion without a recent GREEN money-flow QA run on `dev`.
 #
-# That second one is load-bearing. It only bites while it is listed in `main`'s
-# required status checks — if it is ever removed from the ruleset, restore it
-# here or widen the paths below.
+# Gate 2 is load-bearing but PARTIAL, and the limits are load-bearing too: it is
+# time-based rather than bound to the promoted SHA, it does not cover
+# `hotfix/* -> main`, and it only bites while listed in `main`'s required status
+# checks. See "Be precise about what gate 2 proves" in
+# docs/contributing/autonomous-pr-loop.md. If it is dropped from the ruleset,
+# restore it or widen the paths below.
 #
 # See docs/contributing/autonomous-pr-loop.md ("Money-path safety model").
 

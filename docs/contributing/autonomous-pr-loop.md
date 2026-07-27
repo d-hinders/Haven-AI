@@ -127,7 +127,7 @@ PR go through before handing it the whole queue.
 
 ## Merge policy A (what this loop does)
 
-**Reviewer-gated auto-merge, with an in-session money-path checkpoint:**
+**Reviewer-gated auto-merge:**
 - A **non-money-path** PR (docs, tests, mechanical refactor, other code)
   auto-merges (squash) when **CI is green** *and* **haven-reviewer returned no
   blocking/should-fix findings**. For a **frontend (`area:frontend`)** PR there is
@@ -136,10 +136,10 @@ PR go through before handing it the whole queue.
   design-system issue (even a nit-level one), the loop **pauses for the user**
   even if CI is green — UX is a human call.
 - A **money-path** PR (x402 / payments / machine-payments / payment-coverage /
-  allowance-module / agentAuth / release tooling) does **not** auto-merge
-  silently — the loop **pauses and asks whoever is running it to approve**
-  in-session, then merges on approval. This is the human checkpoint for money
-  movement.
+  allowance-module / agentAuth / release tooling) auto-merges on the same terms
+  (#1024). The label still selects `money.md` and its characterization-test
+  bar; it no longer pauses the merge. See "Money-path safety model" below for
+  what replaced the pause, **and for what that replacement does not cover**.
 - A **DB-migration** PR (`db/migrations/`) additionally needs an **independent
   code-owner approval in GitHub** — it's the one class still hard-gated by
   `.github/CODEOWNERS` (migrations are irreversible in prod).
@@ -155,13 +155,39 @@ opened ([#1024](https://github.com/d-hinders/Haven-AI/issues/1024)):
    irreversible schema change needs an approval from a collaborator **other than
    the author** (GitHub's self-approval rule). This is the one hard human gate.
 2. **Money-flow QA freshness** (`dev-gate.yml` → the `qa-freshness` job) — a
-   `dev → main` promotion is refused unless a green `qa-dev` run exists inside
-   `QA_FRESHNESS_HOURS` (default 30h). Nothing reaches production without the
-   money-moving harness having passed against the current dev deploy. Escape
-   hatch: the `qa-override` label, which logs a `::warning::` naming the bypass.
+   `dev → main` promotion is refused unless a green `qa-dev` run exists on `dev`
+   inside `QA_FRESHNESS_HOURS` (default 30h).
 
 Verification therefore happens at **promotion time**, enforced by machine —
 not at merge time, enforced by a prompt.
+
+### Be precise about what gate 2 proves
+
+`qa-freshness` proves **a** green money-flow run existed on `dev` recently. It
+does **not** prove that run exercised the code being promoted. State it that way
+— an overstated net is worse than a known-partial one, because nobody
+compensates for a gap they believe is closed. The known limits:
+
+- **Time-based, not SHA-bound.** The job takes the newest green `qa-dev` run on
+  `dev` regardless of which commit it ran against. Money-path commits merged
+  *after* that run still promote inside the same window. This is why the
+  promotion checklist ([`promoting-dev-to-main.md`](../operations/promoting-dev-to-main.md))
+  carries an explicit step to confirm the run covers the diff.
+- **`hotfix/*` is not covered at all.** The `gate` job permits `hotfix/* → main`,
+  and `qa-freshness` only looks at runs on `dev` — code that by construction has
+  never been on `dev`. A money-path hotfix reaches production with no QA of
+  itself while the gate shows green.
+- **`qa-override` label** skips the check; the job still reports success, with a
+  `::warning::` as the only artifact.
+- **`QA_FRESHNESS_HOURS` is a repo variable**, editable without code review.
+- **Direct pushes and admin merges** never evaluate it — it triggers on
+  `pull_request` to `main`.
+- **It only bites while listed in `main`'s required status checks.** The workflow
+  says so in its own comments.
+
+The first two are substantive gaps, not bypasses-by-design. Neither is a reason
+to restore the pause — the pause covered even less, since it never applied to
+hand-written PRs — but both should be closed on their own merits.
 
 > **What changed and why.** `ship-next` used to pause a money-path PR for
 > in-session user approval. That gate applied *only to PRs opened through the
@@ -273,21 +299,22 @@ classes for human merge, or narrow it to let more auto-merge.
 - Deciding what to build — defining a well-scoped task or epic sub-issue — once. (Writing the issue text itself is automatable via `new-task`; deciding *which* work to queue is the human call.)
 - Answering when haven-reviewer flags something **blocking/ambiguous**, or a
   genuine product/architecture/security decision comes up.
-- **Approving money-path PRs in-session** when the loop pauses for them, and
-  **code-owner-reviewing migration PRs** in GitHub (the one hard gate).
+- **Code-owner-reviewing migration PRs** in GitHub (the one hard gate), and
+  **promoting `dev → main`**, which is where money-path verification now lands.
 - Unblocking CI the loop can't fix after a couple of attempts.
 
 ## Constraints to know
 
 - **Sequential.** Each item branches off `dev`, so the loop waits for the
   prior PR to merge before starting the next. Wall-clock ≈ sum of CI times.
-  A money-path PR awaiting your approval, or a migration awaiting code-owner
-  merge, **pauses** the loop (later items build on it). Approve or merge it, or
-  tell the loop to skip ahead, to resume.
+  A migration awaiting code-owner merge **pauses** the loop (later items build
+  on it). Merge it, or tell the loop to skip ahead, to resume.
 - **Session lifetime.** A self-paced loop lives only while the session is
   running. Webhooks wake it on CI *failures* and review comments, but **not** on
   CI *success* or the merge itself, so between PRs it polls PR state. For a long
   backlog, keep the session open (or schedule check-ins). It's hands-off on
   *input*, not on *session uptime*.
 - **Money paths are never guessed.** Characterization-first is mandatory for any
-  change to existing money-path behavior, and those PRs always route to you.
+  change to existing money-path behavior. Since #1024 that requirement is
+  backstopped by the reviewer pass rather than by a human seeing the PR before
+  merge — a real reduction in independence, accepted knowingly.

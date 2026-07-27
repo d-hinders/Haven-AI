@@ -43,7 +43,7 @@ and are synced to the repo by `.github/workflows/labels.yml`.
 | `money-path` | payments, agent authority, allowances, migrations | `money.md` |
 
 An issue may carry several surface labels; the skill loads each matching
-playbook. `money-path` always keeps the human merge gate.
+playbook. `money-path` selects `money.md` and its characterization-test bar; since #1024 it no longer pauses the merge — only migrations stay hard-gated.
 
 ## How a run uses these
 

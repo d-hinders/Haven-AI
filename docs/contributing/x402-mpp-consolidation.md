@@ -66,4 +66,4 @@ get HTTP 410 before any coverage decision (#834).
 The completed sequence added characterization tests, extracted approval and
 intent writers, introduced parameterized coverage, and extracted token
 resolution. Future changes follow [`ai-agent-workflow.md`](ai-agent-workflow.md)
-and its money-path review gate.
+and its money-path review bar.

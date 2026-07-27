@@ -36,11 +36,20 @@ check() { # name expected(fire|silent) payload
 }
 b() { printf '{"session_id":"testsess","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"; }
 MARKER_DIR="${TMPDIR:-/tmp}"
-mk() { : > "$MARKER_DIR/claude-ship-next-$1"; }          # set marker
 mkrm() { rm -f "$MARKER_DIR/claude-ship-next-$1"; }      # clear marker
 mkhas() { [ -f "$MARKER_DIR/claude-ship-next-$1" ]; }    # marker still there?
+# Write tokens, one per line: mktok sess1 1030 '*'
+mktok() { s=$1; shift; : > "$MARKER_DIR/claude-ship-next-$s"; for tk in "$@"; do printf '%s\n' "$tk" >> "$MARKER_DIR/claude-ship-next-$s"; done; }
+# Does the marker still hold this exact token?
+mkhastok() { grep -Fxq "$2" "$MARKER_DIR/claude-ship-next-$1" 2>/dev/null; }
+mkcount() { [ -f "$MARKER_DIR/claude-ship-next-$1" ] && grep -c . "$MARKER_DIR/claude-ship-next-$1" 2>/dev/null || echo 0; }
 WRITER="$(dirname "$0")/ship-next-marker.sh"
-pr() { printf '{"session_id":"%s","tool_name":"mcp__github__create_pull_request","tool_input":{}}' "$1"; }
+# A PR payload. $2 = issue it closes (optional).
+# NOTE: no \n in the body — printf would turn it into a REAL newline inside a
+# JSON string, making the payload invalid. The guard then takes its fail-noisy
+# unparseable path and never reaches the marker logic, so every marker test
+# would pass-or-fail for the wrong reason. Cost an hour once; don't reintroduce.
+pr() { if [ -n "${2:-}" ]; then printf '{"session_id":"%s","tool_name":"mcp__github__create_pull_request","tool_input":{"body":"does things. Closes #%s"}}' "$1" "$2"; else printf '{"session_id":"%s","tool_name":"mcp__github__create_pull_request","tool_input":{}}' "$1"; fi; }
 
 # --- must warn: these open a pull request --------------------------------
 check "mcp create_pull_request" fire '{"tool_name":"mcp__github__create_pull_request","tool_input":{"title":"x"}}'
@@ -97,18 +106,81 @@ check "missing tool_input" silent '{"tool_name":"Bash"}'
 check "empty command" silent "$(b '')"
 
 
-# --- #1018: silent when /ship-next is actually driving --------------------
+# --- #1018/#1028: silent when /ship-next is actually driving --------------
 mkrm sess1
-check "no marker -> warns (unchanged)" fire "$(pr sess1)"
+check "no marker -> warns (unchanged)" fire "$(pr sess1 1030)"
 
-mk sess1
-check "marker present -> SILENT (compliant PR)" silent "$(pr sess1)"
-if mkhas sess1; then fail=$((fail+1)); printf '  FAIL  marker was not CONSUMED\n'; else pass=$((pass+1)); fi
-check "marker consumed -> 2nd PR warns again" fire "$(pr sess1)"
+mktok sess1 1030
+check "matching issue token -> SILENT (compliant PR)" silent "$(pr sess1 1030)"
+if mkhastok sess1 1030; then fail=$((fail+1)); printf '  FAIL  token was not cleared\n'; else pass=$((pass+1)); fi
+check "token cleared -> same PR again warns" fire "$(pr sess1 1030)"
+
+# THE #1028 REGRESSION. Two issues shipped in one session: BOTH must be silent.
+# The old single-flag marker was consumed by the first, so the second warned on
+# a compliant PR — observed on PR #1027.
+mktok sess1 1023 1024
+check "#1028: 1st of two issues -> silent" silent "$(pr sess1 1023)"
+check "#1028: 2nd of two issues -> ALSO silent" silent "$(pr sess1 1024)"
+check "#1028: a third, unlisted issue -> warns" fire "$(pr sess1 9999)"
+mkrm sess1
+
+# A token for a DIFFERENT issue must not silence this PR — that would make the
+# guard silent for any PR once ship-next ran once, which is the whole hole.
+mktok sess1 1023
+check "non-matching issue token -> warns" fire "$(pr sess1 1024)"
+if mkhastok sess1 1023; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  a warning consumed an unrelated token\n'; fi
+mkrm sess1
+
+# Prefix collisions: 103 must not clear 1030, and vice versa.
+mktok sess1 1030
+check "token 1030 is not matched by issue 103" fire "$(pr sess1 103)"
+mkrm sess1
+mktok sess1 103
+check "token 103 is not matched by issue 1030" fire "$(pr sess1 1030)"
+mkrm sess1
+
+# Wildcard: an invocation that could not name an issue up front.
+mktok sess1 '*'
+check "wildcard token covers a PR with any issue" silent "$(pr sess1 777)"
+check "wildcard consumed -> next PR warns" fire "$(pr sess1 778)"
+mkrm sess1
+
+mktok sess1 '*'
+check "wildcard covers a PR with NO Closes line" silent "$(pr sess1)"
+mkrm sess1
+
+# An exact token is preferred over the wildcard, so the wildcard survives for
+# the PR that actually needs it.
+mktok sess1 1030 '*'
+check "exact token wins over wildcard" silent "$(pr sess1 1030)"
+if mkhastok sess1 '*'; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  wildcard was spent on a PR with an exact token\n'; fi
+check "wildcard still covers the next PR" silent "$(pr sess1 4242)"
+mkrm sess1
+
+# Only ONE occurrence is cleared per PR.
+mktok sess1 '*' '*'
+check "two wildcards: 1st PR silent" silent "$(pr sess1 1)"
+check "two wildcards: 2nd PR silent" silent "$(pr sess1 2)"
+check "two wildcards: 3rd PR warns" fire "$(pr sess1 3)"
+mkrm sess1
+
+# Other closing keywords GitHub honours.
+for kw in Closes closes Fixes fixed Resolves resolved; do
+  mktok sess1 555
+  body=$(printf '{"session_id":"sess1","tool_name":"mcp__github__create_pull_request","tool_input":{"body":"%s #555"}}' "$kw")
+  check "closing keyword '$kw' is recognised" silent "$body"
+  mkrm sess1
+done
+
+# An empty marker file holds no tokens — it must NOT silence anything. The old
+# design treated mere existence as permission.
+mktok sess1
+check "empty marker file does not silence" fire "$(pr sess1 1030)"
+mkrm sess1
 
 # Cross-session isolation: another session's marker must not silence this one.
-mkrm sess1; mk sess2
-check "other session's marker does not silence" fire "$(pr sess1)"
+mkrm sess1; mktok sess2 1030
+check "other session's token does not silence" fire "$(pr sess1 1030)"
 mkrm sess2
 
 # --- the asymmetry: broken marker machinery must WARN, never silence ------
@@ -132,12 +204,38 @@ check "no tool_name, nothing PR-shaped" silent '{"session_id":"x"}'
 
 # --- the writer sets the marker from BOTH paths --------------------------
 mkrm wsess
-printf '{"session_id":"wsess","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"ship-next"}}' | sh "$WRITER" 2>/dev/null
-if mkhas wsess; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  Skill-tool path did not set the marker\n'; fi
+printf '{"session_id":"wsess","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"ship-next","args":"1030"}}' | sh "$WRITER" 2>/dev/null
+if mkhastok wsess 1030; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  Skill-tool path did not record issue 1030\n'; fi
 mkrm wsess
 
 printf '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":"/ship-next 1018"}' | sh "$WRITER" 2>/dev/null
-if mkhas wsess; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  /ship-next prompt path did not set the marker\n'; fi
+if mkhastok wsess 1018; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  /ship-next prompt path did not record issue 1018\n'; fi
+mkrm wsess
+
+# No argument, or an argument that does not NAME an issue, gets the wildcard.
+for p in '/ship-next' '/ship-next label=code-quality' '/ship-next epic=#5' '/ship-next "add a copy button"'; do
+  mkrm wsess
+  printf '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":%s}' "$(printf '%s' "$p" | jq -Rs .)" | sh "$WRITER" 2>/dev/null
+  if mkhastok wsess '*'; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  expected wildcard for: %s\n' "$p"; fi
+done
+mkrm wsess
+
+# `epic=#5` must NOT record issue 5 — that would clear a token for an
+# unrelated issue and silence a PR it should have warned on.
+printf '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":"/ship-next epic=#5"}' | sh "$WRITER" 2>/dev/null
+if mkhastok wsess 5; then fail=$((fail+1)); printf '  FAIL  epic=#5 was recorded as issue 5\n'; else pass=$((pass+1)); fi
+mkrm wsess
+
+# Dedupe: the two events for ONE invocation must not add two tokens.
+printf '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":"/ship-next 1030"}' | sh "$WRITER" 2>/dev/null
+printf '{"session_id":"wsess","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"ship-next","args":"1030"}}' | sh "$WRITER" 2>/dev/null
+if [ "$(mkcount wsess)" = "1" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  double-fire wrote %s tokens, expected 1\n' "$(mkcount wsess)"; fi
+mkrm wsess
+
+# Two DIFFERENT issues accumulate — this is what fixes #1028.
+printf '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":"/ship-next 1023"}' | sh "$WRITER" 2>/dev/null
+printf '{"session_id":"wsess","hook_event_name":"UserPromptSubmit","prompt":"/ship-next 1024"}' | sh "$WRITER" 2>/dev/null
+if mkhastok wsess 1023 && mkhastok wsess 1024; then pass=$((pass+1)); else fail=$((fail+1)); printf '  FAIL  two invocations did not accumulate tokens\n'; fi
 mkrm wsess
 
 # --- the writer must NOT set it for anything else -------------------------

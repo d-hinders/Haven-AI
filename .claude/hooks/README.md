@@ -11,12 +11,19 @@ cover: review of the complete diff, the `covers:` doc-reviewer step, and
 CODEOWNERS migration routing. It used to list a fourth (the acceptance gate),
 dropped once [#1023](https://github.com/d-hinders/Haven-AI/issues/1023) made
 that a CI required check. `ship-next-marker.sh` records that `/ship-next` is
-genuinely driving so the guard stays quiet on a compliant PR — **it has a known
-false-positive on a second PR in one session, see
-[#1028](https://github.com/d-hinders/Haven-AI/issues/1028)**.
+genuinely driving so the guard stays quiet on a compliant PR. It writes one
+**token per issue** ([#1028](https://github.com/d-hinders/Haven-AI/issues/1028));
+the guard reads `Closes #N` off the pull request and clears that token. It used
+to be a single flag the guard consumed, which warned on the 2nd PR of a session
+that shipped several issues — a false positive on a *compliant* PR, i.e. the
+nag-fatigue failure the guard exists to avoid.
 `session-notice.sh` states the shipping *default* at the top of a session
 (a default, not a mandate — [#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).
-`test-ship-next-guard.sh` is the self-test — 58 cases.
+`test-ship-next-guard.sh` is the self-test — 88 cases.
+
+**Residual gap, deliberately noisy:** two consecutive *no-argument* invocations
+(`/ship-next` with no issue) share one wildcard token, so the second such PR
+warns. A spurious warning costs a moment; a spurious silence costs the guard.
 
 Background: [#1016](https://github.com/d-hinders/Haven-AI/issues/1016),
 [#1018](https://github.com/d-hinders/Haven-AI/issues/1018),

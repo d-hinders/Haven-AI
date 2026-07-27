@@ -25,16 +25,21 @@
 # mandate. Opening a PR outside it is allowed; this warning states what you are
 # taking on, not that you did something wrong.
 #
-# ## Known gap — the marker is per-INVOCATION, not per-session
+# ## Marker matching is per ISSUE (#1028, fixed)
 #
-# ship-next-marker.sh writes the marker when the Skill tool fires, and the
-# guard CONSUMES it. A session that ships several issues by re-reading the
-# already-loaded skill instructions, without a fresh Skill tool call, gets no
-# new marker — so the 2nd PR warns even though the workflow was followed.
-# Observed on PR #1027. That is the exact false-positive class this marker was
-# built to remove, so it is a real defect, not a quirk. Tracked as #1028. Not
-# fixed here: the fix is a design change (marker keyed on session+issue, or
-# written on issue selection rather than skill invocation).
+# The marker used to be a single flag the guard consumed, which warned on the
+# 2nd PR of a session that shipped several issues under one skill invocation
+# (observed on PR #1027) — a false positive on a COMPLIANT pull request, i.e.
+# the muted-guard failure this header warns about, self-inflicted.
+#
+# It is now a list of tokens keyed to issue numbers; the guard reads
+# `Closes #N` off the pull request and clears that token. See
+# fire_unless_ship_next below and ship-next-marker.sh.
+#
+# One residual gap, deliberately left on the noisy side: two consecutive
+# NO-ARGUMENT invocations (`/ship-next` with no issue) share a single `*`
+# token, so the second such PR warns. A spurious warning costs a moment; a
+# spurious silence costs the guard.
 #
 # ## Detection: segment first, then match at COMMAND POSITION
 #
@@ -141,6 +146,19 @@ This warning does not block. It is on you.'
 # An earlier draft had the MCP path call fire() directly and skip the marker
 # entirely — caught by the test, which is why the marker case is asserted for
 # the MCP payload specifically.
+#
+# ## Matching is now PER ISSUE (#1028)
+#
+# The marker is a list of tokens (see ship-next-marker.sh), not a single flag.
+# This reads `Closes #N` off the pull request and clears that token, falling
+# back to one `*` when the invocation could not name an issue up front.
+#
+# Consuming a single flag was the old design, and it warned on the 2nd PR of a
+# session that shipped several issues under one skill invocation — a false
+# positive on a COMPLIANT pull request, which is the muted-guard failure this
+# file's own header warns about. Per-issue tokens keep the property that
+# motivated consuming (a hand-rolled PR in a ship-next session still warns)
+# without that cost.
 fire_unless_ship_next() {
   session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || fire
   [ -n "$session" ] || fire
@@ -148,14 +166,46 @@ fire_unless_ship_next() {
   [ -n "$safe" ] || fire
 
   marker="${TMPDIR:-/tmp}/claude-ship-next-$safe"
-  if [ -f "$marker" ]; then
-    # CONSUME it. ship-next ships exactly one issue per invocation, so a
-    # single-use marker gives per-PR precision: a second, hand-rolled PR later
-    # in the same session warns as it should.
-    rm -f "$marker" 2>/dev/null || true
-    exit 0
+  [ -f "$marker" ] || fire
+
+  # Which issue does this PR close? The MCP payload carries a body field; the
+  # Bash shapes carry it inline in the command. Fall back to the WHOLE raw
+  # payload so an unparseable-but-PR-shaped input still gets a chance to match
+  # — that path must not be more likely to warn than the parsed one.
+  body=$(printf '%s' "$input" | jq -r '.tool_input.body // ""' 2>/dev/null) || body=""
+  [ -n "$body" ] || body="$input"
+  issue=$(printf '%s' "$body" \
+    | grep -oiE '(clos(e|es|ed)|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' 2>/dev/null \
+    | head -1 | tr -cd '0-9') || issue=""
+
+  # Exact whole-line match, so token 103 never clears 1030.
+  if [ -n "$issue" ] && grep -Fxq "$issue" "$marker" 2>/dev/null; then
+    matched="$issue"
+  elif grep -Fxq '*' "$marker" 2>/dev/null; then
+    # The invocation named no issue up front (`/ship-next`, `label=…`,
+    # `epic=#…`, a freeform task). One wildcard covers one pull request.
+    matched='*'
+  else
+    fire
   fi
-  fire
+
+  # Clear exactly ONE occurrence of the matched token. awk over a temp file
+  # rather than sed -i, which is not portable, and never edit in place: on any
+  # failure the marker is left intact and the NEXT PR warns — the safe
+  # direction. A failure here must never leave a token that silences a PR it
+  # should not have.
+  tmp="$marker.$$"
+  if awk -v t="$matched" 'BEGIN{done=0} {if(!done && $0==t){done=1; next} print}' \
+       "$marker" > "$tmp" 2>/dev/null; then
+    if [ -s "$tmp" ]; then
+      mv -f "$tmp" "$marker" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    else
+      rm -f "$tmp" "$marker" 2>/dev/null
+    fi
+  else
+    rm -f "$tmp" 2>/dev/null || true
+  fi
+  exit 0
 }
 
 if [ -z "$tool" ]; then

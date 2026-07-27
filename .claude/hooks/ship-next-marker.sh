@@ -16,19 +16,37 @@
 #     harness expanding the slash command WITHOUT a Skill tool call, which the
 #     first path alone would miss.
 #
-# Either one is sufficient; both firing is harmless (the marker is idempotent).
+# Either one is sufficient; both firing is harmless (see dedupe below).
 #
-# ## The marker is session-scoped and single-use
+# ## The marker is a LIST OF ISSUE TOKENS, not a single flag (#1028)
 #
-# Keyed on `session_id` from the hook payload, so it cannot leak between
-# sessions by construction. The PR guard CONSUMES it: ship-next ships exactly
-# one issue per invocation, so consuming gives per-PR precision — a second,
-# hand-rolled PR in the same session still warns.
+# It used to be an empty file that the guard CONSUMED. That gave per-PR
+# precision on the assumption "one invocation = one PR" — true of the Skill tool
+# call, false of a session that ships several issues by continuing to follow the
+# already-loaded skill instructions. The 2nd PR then warned despite the workflow
+# being followed exactly. Observed on PR #1027; that is the nag-fatigue failure
+# the guard's own header warns about, self-inflicted.
 #
-# Fails open (exit 0) like every hook here. Note the asymmetry that matters:
-# failing to WRITE the marker costs a spurious warning, which is merely
-# annoying. Failing to write it can never silence the guard — silence requires
-# the marker to be positively present. That direction is deliberate.
+# Now each invocation appends a TOKEN:
+#   * the issue number, when the invocation names one (`/ship-next 1030`);
+#   * `*` otherwise (`/ship-next`, `label=…`, `epic=#…`, a freeform task) —
+#     the issue is not knowable until the skill selects it.
+#
+# The guard reads `Closes #N` off the pull request and clears the matching
+# token, falling back to one `*`. So a hand-rolled PR in a ship-next session
+# still warns, which was the point of consuming in the first place.
+#
+# ## Dedupe, and the limitation it leaves
+#
+# A token is appended only if not already present. That makes the two events
+# above idempotent for one invocation. The cost: two consecutive NO-ARGUMENT
+# invocations share a single `*`, so the second PR warns. That is a real
+# residual gap, and it is deliberately on the NOISY side — a spurious warning
+# costs a moment's annoyance, a spurious silence costs the whole guard.
+#
+# Fails open (exit 0) like every hook here, and note the asymmetry that matters:
+# failing to WRITE a token can never silence the guard, because silence requires
+# a token to be positively present.
 
 set -u
 
@@ -38,6 +56,7 @@ input=$(cat 2>/dev/null) || exit 0
 event=$(printf '%s' "$input" | jq -r '.hook_event_name // ""' 2>/dev/null) || exit 0
 tool=$(printf '%s' "$input" | jq -r '.tool_name // ""' 2>/dev/null) || tool=""
 skill=$(printf '%s' "$input" | jq -r '.tool_input.skill // ""' 2>/dev/null) || skill=""
+args=$(printf '%s' "$input" | jq -r '.tool_input.args // ""' 2>/dev/null) || args=""
 prompt=$(printf '%s' "$input" | jq -r '.prompt // ""' 2>/dev/null) || prompt=""
 session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || exit 0
 
@@ -46,18 +65,46 @@ session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || exit 
 [ -n "$session" ] || exit 0
 
 driving=0
-[ "$tool" = "Skill" ] && [ "$skill" = "ship-next" ] && driving=1
+raw=""
+if [ "$tool" = "Skill" ] && [ "$skill" = "ship-next" ]; then
+  driving=1
+  raw="$args"
+fi
 case "$prompt" in
-  /ship-next|/ship-next[[:space:]]*) driving=1 ;;
+  /ship-next|/ship-next[[:space:]]*)
+    driving=1
+    # Everything after the command name, if anything.
+    raw=$(printf '%s' "$prompt" | sed -e 's|^/ship-next[[:space:]]*||' 2>/dev/null) || raw=""
+    ;;
 esac
-# Guard against an unexpected event shape writing a marker off a stray field.
+# Guard against an unexpected event shape writing a token off a stray field.
 [ "$event" = "PreToolUse" ] || [ "$event" = "UserPromptSubmit" ] || driving=0
 
 [ "$driving" -eq 1 ] || exit 0
 
+# A BARE issue number is the only form that names an issue up front. `label=…`,
+# `epic=#…` and a quoted freeform task all resolve to an issue the skill picks
+# later, so they get the wildcard. Digits-only on purpose: matching the `5` out
+# of `epic=#5` would clear a token for an unrelated issue.
+token='*'
+case "$raw" in
+  '') token='*' ;;
+  *[!0-9\ ]*) token='*' ;;
+  *)
+    n=$(printf '%s' "$raw" | tr -cd '0-9')
+    [ -n "$n" ] && token="$n"
+    ;;
+esac
+
 # Sanitize: session_id becomes part of a path.
 safe=$(printf '%s' "$session" | tr -c 'A-Za-z0-9_-' '_' 2>/dev/null) || exit 0
 [ -n "$safe" ] || exit 0
+marker="${TMPDIR:-/tmp}/claude-ship-next-$safe"
 
-: > "${TMPDIR:-/tmp}/claude-ship-next-$safe" 2>/dev/null || true
+# Append unless already present. `grep -Fx` is an exact WHOLE-LINE match, so
+# token 103 never collides with 1030.
+if [ -f "$marker" ] && grep -Fxq "$token" "$marker" 2>/dev/null; then
+  exit 0
+fi
+printf '%s\n' "$token" >> "$marker" 2>/dev/null || true
 exit 0

@@ -246,6 +246,55 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(invalid.statusCode).toBe(400)
   })
 
+  /** Drive a settle to completion with a valid prepared erc7710 state. */
+  async function settleOk(passportRows: Record<string, unknown>[] = []) {
+    const preparedState = JSON.stringify({
+      child: JSON.parse(JSON.stringify(buildBudgetDelegation({
+        agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+        delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+        budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+      }))),
+      budget: signedBudget,
+      delegateAccountAddress: DELEGATE_ACCT,
+      network: 'eip155:84532',
+    })
+    mockQuery.mockImplementation((sql: string) => {
+      if (/SELECT id, status, execution_rail/.test(String(sql))) {
+        return Promise.resolve({ rows: [{
+          id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
+          prepared_user_op: JSON.parse(preparedState), chain_id: 84532,
+          x402_resource_url: 'https://merchant.example/resource',
+        }] })
+      }
+      if (/FROM agent_passports/.test(String(sql))) return Promise.resolve({ rows: passportRows })
+      return Promise.resolve({ rows: [] })
+    })
+    return app.inject({
+      method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: '0x' + 'ef'.repeat(65) },
+    })
+  }
+
+  // ── CHARACTERIZATION (money.md §2), written BEFORE #976 attaches a passport
+  // reference to this response.
+  //
+  // The X-PAYMENT header is consumed by a MERCHANT FACILITATOR we do not
+  // control. An unexpected key inside `payload` is a rejection risk, and a
+  // rejection here is a failed payment — so the passport reference must ride
+  // Haven's OWN response body, never the header. This pins that boundary: if a
+  // later change widens the wire payload, it fails here rather than at a
+  // merchant.
+  it('CHARACTERIZATION: the X-PAYMENT payload carries exactly the erc7710 keys', async () => {
+    const res = await settleOk()
+    expect(res.statusCode).toBe(200)
+    const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
+    expect(Object.keys(decoded).sort()).toEqual(['network', 'payload', 'scheme', 'x402Version'])
+    expect(Object.keys(decoded.payload).sort()).toEqual([
+      'delegationManager', 'delegator', 'permissionContext',
+    ])
+  })
+
   it('settle assembles the X-PAYMENT header and flips to submitted; Haven submits nothing', async () => {
     const preparedState = JSON.stringify({
       child: JSON.parse(JSON.stringify(buildBudgetDelegation({
@@ -282,6 +331,93 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(decoded.payload.delegator.toLowerCase()).toBe(DELEGATE_ACCT.toLowerCase())
     // The intent flipped to submitted:
     expect(mockQuery.mock.calls.some((c) => /status = 'submitted'/.test(String(c[0])))).toBe(true)
+  })
+
+  // ── #976: present inline, verify authoritatively ─────────────────────────
+  describe('passport reference on settle (#976)', () => {
+    const UID = '0x' + 'ab'.repeat(32)
+
+    it('carries the reference when the agent has an ANCHORED passport', async () => {
+      const res = await settleOk([
+        { agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: UID },
+      ])
+      expect(res.statusCode).toBe(200)
+      expect(res.json().passport).toMatchObject({ attestation_uid: UID, chain_id: 84532 })
+      // The verify URL must point at the UID, not the address: the merchant
+      // holds the reference, so it verifies rather than discovers.
+      expect(res.json().passport.verify_url).toContain(`/passport/verify?uid=${UID}`)
+    })
+
+    // Each fixture below must fail for exactly ONE reason. The first version
+    // paired 'not anchored' with a null UID, so the STATUS check had no
+    // independent coverage — mutating it away left all 28 tests green. The
+    // isolated cases are `status !== anchored WITH a UID` and
+    // `status === anchored WITHOUT one`.
+    //
+    // Statuses are the real enum from migration 048 — 'pending' | 'anchored' |
+    // 'failed'. An earlier draft used 'requested'/'revoked', which cannot exist
+    // (revocation is tracked in `revocation_status`, a separate column), so
+    // those cases were asserting over states the database forbids.
+    it.each([
+      ['no passport row', []],
+      ['ISOLATED status: a UID present but still `pending`', [{ agent_id: 'agent-1', chain_id: 84532, status: 'pending', attestation_uid: '0x' + 'cd'.repeat(32) }]],
+      ['ISOLATED status: a UID present but `failed`', [{ agent_id: 'agent-1', chain_id: 84532, status: 'failed', attestation_uid: '0x' + 'cd'.repeat(32) }]],
+      ['ISOLATED uid: anchored with no UID', [{ agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: null }]],
+    ])('degrades to null for %s, and the payment still succeeds', async (_name, rows) => {
+      // "Absence is graceful" is the acceptance criterion, and it is also the
+      // failure mode: a non-anchored passport is deliberately indistinguishable
+      // from none, because a reference a merchant cannot verify produces a
+      // failed lookup that looks like a REVOKED agent.
+      const res = await settleOk(rows as Record<string, unknown>[])
+      expect(res.statusCode).toBe(200)
+      expect(res.json().passport).toBeNull()
+      expect(res.json().payment_header).toBeTruthy()
+    })
+
+    it('never lets a passport lookup failure break the payment', async () => {
+      // The payment is authorised and signed by the time we decorate it.
+      // A passport is not worth a 500 on a settled payment.
+      const preparedState = JSON.stringify({
+        child: JSON.parse(JSON.stringify(buildBudgetDelegation({
+          agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+          delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+          budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+        }))),
+        budget: signedBudget,
+        delegateAccountAddress: DELEGATE_ACCT,
+        network: 'eip155:84532',
+      })
+      mockQuery.mockImplementation((sql: string) => {
+        if (/SELECT id, status, execution_rail/.test(String(sql))) {
+          return Promise.resolve({ rows: [{
+            id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
+            prepared_user_op: JSON.parse(preparedState), chain_id: 84532,
+            x402_resource_url: 'https://merchant.example/resource',
+          }] })
+        }
+        if (/FROM agent_passports/.test(String(sql))) return Promise.reject(new Error('db down'))
+        return Promise.resolve({ rows: [] })
+      })
+      const res = await app.inject({
+        method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { signature: '0x' + 'ef'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().passport).toBeNull()
+      expect(res.json().payment_header).toBeTruthy()
+    })
+
+    it('keeps the reference OUT of the merchant-facing header', async () => {
+      // The boundary the characterization test above exists to protect: a
+      // facilitator we do not control parses that payload.
+      const res = await settleOk([
+        { agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: UID },
+      ])
+      const raw = Buffer.from(res.json().payment_header, 'base64').toString('utf8')
+      expect(raw).not.toContain(UID)
+      expect(raw).not.toContain('passport')
+    })
   })
 
   it('settle REFUSES a 3009-mode funding intent — /payments/:id/sign is its path (#946)', async () => {

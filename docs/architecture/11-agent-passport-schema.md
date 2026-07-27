@@ -469,6 +469,48 @@ puts out of scope. Do not grow it into payment verification or receipts for
 settled merchant transactions; that is a different question with a different
 perimeter.
 
+## Presenting a passport with an x402 payment
+
+The target is **present inline, verify authoritatively** ([#976](https://github.com/d-hinders/Haven-AI/issues/976)):
+the agent carries a compact reference — the attestation UID — with the payment,
+so a merchant **verifies rather than discovers**. Discovery means asking Haven
+whether an agent has a passport at all; verification means already holding the
+pointer and only confirming it.
+
+What is actually deliverable depends on the settlement scheme, and the
+narrowness is the point:
+
+| Scheme | Reference rides the payment? | Delivery |
+|---|---|---|
+| **erc7710** (direct settlement) | Best-effort | `POST /x402/:id/settle` returns `passport: { attestation_uid, chain_id, verify_url }`. The agent presents it however the channel allows. The merchant already sees the delegation during redemption, so this is a **bonus, not the mechanism**. |
+| **EIP-3009** ([#946](https://github.com/d-hinders/Haven-AI/issues/946) — the path with real merchant reach) | **No** | The merchant sees a **standard** header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the **only** delivery. |
+
+**The 3009 row is why the verifier endpoint is primary, not a fallback.** The
+scheme with actual merchant adoption cannot carry the reference at all.
+Describing inline delivery as *the* mechanism would present the rarer path as
+if it were the common one.
+
+### The reference never goes in the X-PAYMENT header
+
+x402 does not guarantee arbitrary-metadata passthrough. That header is parsed by
+a merchant **facilitator Haven does not control**, and an unrecognised key in
+the payload is a rejection risk — a failed payment traded for a nice-to-have. So
+the reference rides Haven's own response body and the agent decides what to do
+with it. A characterization test pins the header's exact key set against this
+temptation.
+
+### Absence is a normal answer
+
+`passport` is `null` whenever there is nothing verifiable: no passport, one
+still `requested`, or an anchored row without a UID. A non-anchored passport is
+deliberately **indistinguishable from none** — handing an agent a reference a
+merchant cannot resolve produces a failed lookup that looks like a *revoked*
+agent, which is worse than saying nothing.
+
+The lookup also never fails the payment. By the time the reference is attached
+the payment is authorised and signed; a passport is not worth a 500 on a settled
+payment.
+
 ## Registration and configuration
 
 Registration is an **operator step** — an on-chain transaction needing a funded

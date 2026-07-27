@@ -27,6 +27,7 @@ import {
   type PaymentIntentRow,
 } from '../lib/machine-payments.js'
 import { decideCoverage } from '../lib/payment-coverage.js'
+import { passportReferenceFor } from '../lib/passport/x402-delivery.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import {
   agentPaymentStatusHttpCode,
@@ -1513,6 +1514,13 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
            WHERE id = $2 AND agent_id = $3 AND status = 'pending_signature'`,
           [signature, id, agent.id],
         )
+        // #976: the agent's own passport reference, so it can PRESENT rather
+        // than have the merchant DISCOVER. Deliberately in Haven's response and
+        // NOT inside `payment_header` — that header is parsed by a merchant
+        // facilitator we do not control, and an unrecognised key is a rejection
+        // risk. Best-effort by design: null when there is no anchored passport,
+        // and never fatal — the payment is already signed.
+        const passport = await passportReferenceFor(agent.id, request)
         return reply.code(200).send({
           payment_id: id,
           status: 'submitted',
@@ -1520,6 +1528,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           // budget delegation (no funding leg).
           payment_header: header,
           resource_url: intent.x402_resource_url,
+          passport,
         })
       } catch (err) {
         return reply.code(502).send({

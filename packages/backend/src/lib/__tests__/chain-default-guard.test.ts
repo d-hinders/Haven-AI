@@ -39,14 +39,24 @@ const ALLOWED: Record<string, string> = {
 }
 
 /**
- * A chain id used as a DEFAULT. Two shapes, and only two:
+ * A chain id used as a DEFAULT. Three shapes:
  *
  *   - a nullish/or fallback — `?? 8453`, `|| 100`;
- *   - a destructuring default — `{ chain_id = 8453, … }` or `{ … = 8453 }`,
- *     recognised by the `,` or `}` that must follow it.
+ *   - a default binding — `{ chain_id = 8453, … }`, `{ … = 8453 }`, or a
+ *     parameter default `(chainId = 8453)`, recognised by the `,`, `}` or `)`
+ *     that must follow it;
+ *   - a **SQL** fallback — `COALESCE(us.chain_id, 8453)`.
  *
- * Everything else is deliberately out of scope, because the first draft of this
- * pattern matched more than it should and the self-test below caught it:
+ * The SQL shape was added after review: `middleware/agentAuth.ts` set
+ * `agent.chain_id` from a `COALESCE(..., 8453)` that `machine-payments.ts` then
+ * reads throughout, and an earlier version of this guard could not see it at
+ * all. It was the single most consequential chain default in the repo and this
+ * file claimed to have swept it. Parameter defaults were the same story — the
+ * shape rule required a trailing `,`/`}`, so `function f(chainId = 8453)` slid
+ * straight through the net the docstring said was closed.
+ *
+ * Deliberately out of scope, each because the first drafts matched more than
+ * they should and the self-test below caught it:
  *
  *   - **Comparisons** (`=== 8453`, `!== 100`) ask "is this Base", which is a
  *     different question. The lookbehind/lookahead exclude them.
@@ -56,7 +66,7 @@ const ALLOWED: Record<string, string> = {
  *     "default", which is worse than the literal it replaced.
  */
 const BARE_DEFAULT =
-  /(?:\?\?|\|\|)\s*(?:100|8453|84532)\b|(?<![=!<>])=(?!=)\s*(?:100|8453|84532)\s*[,}]/g
+  /(?:\?\?|\|\|)\s*(?:100|8453|84532)\b|(?<![=!<>])=(?!=)\s*(?:100|8453|84532)\s*[,})]|COALESCE\s*\([^)]*,\s*(?:100|8453|84532)\s*\)/gi
 
 /**
  * The match must sit on a line that mentions a chain.
@@ -68,14 +78,25 @@ const BARE_DEFAULT =
  * fallbacks "still default chain_id to 100" when none ever did. A guard that
  * reproduces the bug it was written to prevent is worse than none.
  *
- * **Known limit, stated rather than papered over:** a fallback with no `chain`
- * token on its line — `const c = x ?? 100` — is missed. Widening to catch it
- * would re-flag every rate limit, and an overstated net is worse than a
- * known-partial one, because nobody compensates for a gap they believe is
- * closed. The realistic reintroduction path is a route reading `chain_id`, and
- * that is covered.
+ * Matched as a WORD, so `blockchain` and `chained` do not count — a substring
+ * match would flag `opts.retries ?? 100 // blockchain retry count`, which is
+ * the mirror-image mistake to the rate-limit one.
+ *
+ * **Known limits, stated rather than papered over.** This net is partial, and
+ * the file previously claimed otherwise ("the realistic reintroduction path
+ * ... is covered") while missing two real shapes that review then found. What
+ * it still does not catch:
+ *
+ *   - a fallback with no `chain` word on its line — `const c = x ?? 100`.
+ *     Widening to catch it re-flags every rate limit.
+ *   - a chain id reached indirectly — assigned to an intermediate variable on
+ *     one line and defaulted on another.
+ *
+ * An overstated net is worse than a known-partial one, because nobody
+ * compensates for a gap they believe is closed. Read this list as the actual
+ * coverage, not as a formality.
  */
-const CHAIN_CONTEXT = /chain/i
+const CHAIN_CONTEXT = /\bchain(_?id)?\b/i
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -138,12 +159,22 @@ describe('chain defaults go through DEFAULT_CHAIN_ID (#990)', () => {
       'const chainId = req.query.chain || 100',
       'const { chain_id = 84532 } = req',
       'const { chain_id = 8453, owner } = req.body',
+      // Both found by review AFTER this file claimed its net was closed.
+      // Kept as the regression cases for exactly that overclaim.
+      'COALESCE(us.chain_id, 8453) as chain_id,',
+      'function resolveChain(chainId = 8453): number {',
+      'const resolve = (chainId = 8453) => getChain(chainId)',
     ]
     // The rate limits that the first version of this guard wrongly flagged, and
     // that #990's own premise misread as chain fallbacks. Regression case.
     const rateLimits = [
       'const maxPerHour = agentConfig.rows[0]?.max_x402_per_hour ?? 100',
       'const limit = row?.max_x402_per_hour ?? 100',
+      // The mirror-image false positive: a non-chain default on a line that
+      // merely contains the letters "chain". Word-boundary matching, not
+      // substring, is what keeps this out.
+      'const retries = opts.retries ?? 100 // blockchain retry count',
+      'const backoff = cfg.backoff ?? 100 // chained requests',
     ]
     // All of these mention a chain, so they isolate the SHAPE rule rather than
     // passing for lack of chain context — which is what makes them meaningful.

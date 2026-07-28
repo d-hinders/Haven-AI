@@ -1,11 +1,15 @@
 /**
  * `DEFAULT_CHAIN_ID` (#990) — the value, not just the wiring.
  *
- * This constant replaced a bare `8453` restated across ~8 backend call sites,
- * two of which are money-path files (`routes/x402-resources.ts`,
- * `routes/machine-payments.ts`). The refactor is only safe if the constant
- * equals the literal it replaced, so that is asserted directly rather than
- * inferred from the call sites compiling.
+ * This constant replaced a bare `8453` restated across ten backend sites —
+ * five route defaults, plus five SQL `COALESCE(..., 8453)` fallbacks that the
+ * first pass missed. One of those, `middleware/agentAuth.ts`, is money-path:
+ * it sets `agent.chain_id`, which `routes/machine-payments.ts` then reads
+ * throughout. (An earlier version of this comment said machine-payments.ts was
+ * itself edited. It was not — corrected rather than left as the next inherited
+ * false claim.) The refactor is only safe if the constant equals the literal it
+ * replaced, so that is asserted directly rather than inferred from the call
+ * sites compiling.
  *
  * The test also exists to make the constant HARDER to change than the literals
  * were, which is the point people usually get backwards about this kind of

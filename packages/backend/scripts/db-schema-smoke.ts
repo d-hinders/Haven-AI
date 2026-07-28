@@ -24,6 +24,7 @@
  */
 
 import { getPool } from '../src/db.js'
+import { AGENT_BY_API_KEY_SQL } from '../src/middleware/agentAuth.js'
 import { runMigrations } from '../src/db/migrate.js'
 import {
   CLAIM_REVOCATION_SQL,
@@ -43,6 +44,14 @@ interface SmokeQuery {
  * Keep each verbatim from its source so the check tracks the real query.
  */
 const QUERIES: SmokeQuery[] = [
+  {
+    // Every authenticated agent request runs this, and it is where
+    // `agent.chain_id` comes from — the value machine-payments.ts then uses for
+    // asset resolution, sweep-chain checks and inserts. IMPORTED, per this
+    // file's own rule, so the check tracks the real query rather than a copy.
+    name: 'auth: agent lookup by API key (chain_id fallback, #990)',
+    sql: AGENT_BY_API_KEY_SQL,
+  },
   {
     name: 'execution-rail: loadExecutionRailState (the #757 regression)',
     sql: `SELECT us.execution_rail, a.session_permission_id

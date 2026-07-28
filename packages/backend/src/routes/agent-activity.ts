@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getExplorerUrl } from '../lib/chains.js'
+import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { machinePaymentLifecycle } from '../lib/machine-payment-lifecycle.js'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               us.id AS safe_id,
               COALESCE(us.safe_address, pi.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(pi.chain_id, us.chain_id, 8453) AS chain_id,
+              COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
               pi.token_symbol,
               pi.token_address,
               pi.amount_raw,
@@ -153,7 +154,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               us.id AS safe_id,
               COALESCE(us.safe_address, ar.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(ar.chain_id, us.chain_id, 8453) as chain_id,
+              COALESCE(ar.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
               ar.token_symbol,
               ar.token_address,
               ar.amount_human,
@@ -392,7 +393,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               us.id AS safe_id,
               COALESCE(us.safe_address, pi.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(pi.chain_id, us.chain_id, 8453) AS chain_id,
+              COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
               pi.token_symbol,
               pi.token_address,
               pi.amount_raw,
@@ -437,7 +438,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               us.id AS safe_id,
               COALESCE(us.safe_address, ar.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(ar.chain_id, us.chain_id, 8453) as chain_id,
+              COALESCE(ar.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
               ar.token_symbol,
               ar.token_address,
               ar.amount_human,

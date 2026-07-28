@@ -18,16 +18,20 @@ import { overBudgetQueue } from './scenarios/over-budget-queue.js'
 import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js'
 import { x402Settle } from './scenarios/x402-settle.js'
 import { x402Sweep } from './scenarios/x402-sweep.js'
+import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 
-// Deterministic, no-LLM scenarios run in order — five money-flow invariants:
+// Deterministic, no-LLM scenarios run in order — six money-flow invariants:
 // within-budget settle, over-budget queue, x402 over-budget reject, x402 settle,
-// and delegate sweep recovery (#603/#684).
+// delegate sweep recovery (#603/#684), and the delegation-rail EIP-3009 bridge
+// (#946). The last one runs a SECOND, delegation-rail identity — the rail is a
+// property of the account, so the seeded legacy-rail agent cannot exercise it.
 const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetQueue,
   x402OverBudgetRejected,
   x402Settle,
   x402Sweep,
+  x402Delegation3009,
 ]
 
 async function main(): Promise<void> {

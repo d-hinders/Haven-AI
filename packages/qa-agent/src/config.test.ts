@@ -41,4 +41,41 @@ describe('loadQaConfig', () => {
       QaConfigError,
     )
   })
+
+  describe('delegation-rail credentials for the EIP-3009 bridge (#946)', () => {
+    it('are absent by default, so the scenario skips rather than fails', () => {
+      const config = loadQaConfig(fullEnv)
+      expect(config.delegationAgentApiKey).toBeUndefined()
+      expect(config.delegationDelegateKey).toBeUndefined()
+    })
+
+    it('are loaded when set', () => {
+      const config = loadQaConfig({
+        ...fullEnv,
+        QA_DELEGATION_AGENT_API_KEY: 'sk_agent_delegation',
+        QA_DELEGATION_DELEGATE_PRIVATE_KEY: '0xdef',
+      })
+      expect(config.delegationAgentApiKey).toBe('sk_agent_delegation')
+      expect(config.delegationDelegateKey).toBe('0xdef')
+    })
+
+    it('are OPTIONAL — a missing pair never fails the whole run', () => {
+      // Deliberate: these need a second seeded identity (a delegation-rail
+      // agent with an open budget) that an operator provisions. Making them
+      // required would break every existing dev run the moment this lands, for
+      // a scenario nobody could yet satisfy.
+      expect(() =>
+        loadQaConfig({ ...fullEnv, QA_DELEGATION_AGENT_API_KEY: 'sk_agent_delegation' }),
+      ).not.toThrow()
+    })
+
+    it('treats blank values as absent, so a half-set env skips instead of half-running', () => {
+      const config = loadQaConfig({
+        ...fullEnv,
+        QA_DELEGATION_AGENT_API_KEY: '  ',
+        QA_DELEGATION_DELEGATE_PRIVATE_KEY: '0xdef',
+      })
+      expect(config.delegationAgentApiKey).toBeUndefined()
+    })
+  })
 })

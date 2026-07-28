@@ -87,12 +87,17 @@ describe('the SQL alias matches the type it is read through (#1015)', () => {
     expect(sql).not.toMatch(/AS\s+standing_changed_at/i)
   })
 
-  // Same class of gap for the assurance ladder (#975). The verifier now READS
+  // Same class of gap for the assurance ladder (#975). The verifier READS
   // `assurance_level` instead of hardcoding L0, and every route test mocks
   // `db.query` — so dropping the column from the SELECT would leave the suite
-  // green while production refuses every receipt. That failure is loud (a 500,
-  // by design) rather than silent, but it would be discovered in production
-  // rather than here.
+  // green while production answered `found: false` for EVERY agent.
+  //
+  // That is a quiet failure, not a loud one: a 200 with `found: false` is the
+  // same shape as "this agent has no passport", so merchants would simply deny
+  // and nothing would page. An earlier version of this comment said "a 500, by
+  // design" — written before review moved the refusal off an error status, and
+  // left stale by that change. It argued the opposite of the truth, which makes
+  // this assertion MORE load-bearing than it claimed, not less.
   it.each([
     ['FIND_BY_AGENT_ADDRESS_SQL', FIND_BY_AGENT_ADDRESS_SQL],
     ['FIND_BY_ATTESTATION_UID_SQL', FIND_BY_ATTESTATION_UID_SQL],

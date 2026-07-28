@@ -32,6 +32,7 @@ export type { ApiSchema } from './api-schema.js'
 export {
   CHAIN_REGISTRY,
   REGISTRY_CHAIN_IDS,
+  DEFAULT_CHAIN_ID,
   getChainData,
   isRegisteredChain,
   resolveToken,

@@ -150,6 +150,34 @@ export const CHAIN_REGISTRY: Record<number, CoreChainConfig> = {
 
 export const REGISTRY_CHAIN_IDS = Object.keys(CHAIN_REGISTRY).map(Number)
 
+/**
+ * The chain a record lands on when a caller does not name one (#990).
+ *
+ * Base (8453), matching CLAUDE.md's "Base is the primary / default network" and
+ * the column defaults that migration `034_base_default_chain` already set. This
+ * constant does not *decide* the default — it names the one already in force so
+ * the value stops being restated as a bare literal in a dozen call sites.
+ *
+ * ## Changing this is a money-path change, not a config tweak
+ *
+ * Hoisting the literal is what makes it dangerous: before, moving the default
+ * meant editing every site and confronting each one; now a single edit here
+ * silently moves where new Safes, payment intents and approval requests land.
+ * `chains.test.ts` pins the value for exactly that reason — a change must break
+ * a test and be argued for, not merged as a one-character diff.
+ *
+ * Two things it deliberately does NOT do:
+ *
+ * - It does not touch existing rows. Migration 034 changed column defaults for
+ *   future inserts only; a Safe or payment already on Gnosis stays on Gnosis,
+ *   because rewriting a stored chain would repoint money at another network.
+ * - It does not govern chains a deployment will actually *serve*. That is
+ *   `HAVEN_DEPLOY_CHAIN_IDS` (#679), which is env-scoped — dev serves Base
+ *   Sepolia only. A default is what you get when you say nothing; the served
+ *   set is what you are allowed to ask for.
+ */
+export const DEFAULT_CHAIN_ID = 8453
+
 export function getChainData(chainId: number): CoreChainConfig {
   const chain = CHAIN_REGISTRY[chainId]
   if (!chain) {

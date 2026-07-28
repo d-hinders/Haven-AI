@@ -162,7 +162,7 @@ QA identities.
 
 ## Money-flow QA
 
-The deterministic harness runs six scenarios in order:
+The deterministic harness runs seven scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
@@ -171,7 +171,8 @@ The deterministic harness runs six scenarios in order:
 | `x402-over-budget-rejected` | An unaffordable x402 request is rejected before a signable intent |
 | `x402-settle` | A small x402 payment settles through the dev demo merchant |
 | `x402-sweep-recovery` | Verify-without-settle strands a small USDC balance; with the dev sweep floor at 0 (`SWEEP_MIN_USDC=0`) a gasless sweep returns it to the Safe |
-| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009`, the funding transfer going to the delegate EOA, and no residual at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` — see the seeding note above |
+| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 
 The harness exits non-zero if any non-skipped scenario fails. Its Markdown
 scenario table is an evidence starter, not a complete report: copy it into
@@ -228,11 +229,24 @@ Provision it the same way the 2026-07-18 live proof did:
    owner-signed, then activate it — the relayer deploys the treasury, sponsored.
 4. Fund the treasury with a little Base Sepolia USDC.
 
-The scenario asserts more than "the purchase worked": it reads the payment
-evidence back and requires `settlement_scheme = eip3009`, Haven's own transfer
-going to the **delegate EOA** rather than the merchant, and the merchant
-recorded separately from that funding address. A merchant round-trip alone would
-pass just as happily over erc7710, leaving the bridge uncovered.
+Both scenarios assert more than "the purchase worked". `x402-delegation-3009`
+reads the payment evidence back and requires `settlement_scheme = eip3009`,
+Haven's own transfer going to the **delegate EOA** rather than the merchant, the
+merchant recorded separately from that funding address, and the treasury balance
+actually falling. A merchant round-trip alone would pass just as happily over
+erc7710, leaving the bridge uncovered — and the address checks alone would pass
+for a funding hop that never metered the budget.
+
+`x402-delegation-3009-sweep` covers the other half, and needs two more settings
+on the dev stack: `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` on the
+demo-merchant, and `SWEEP_MIN_USDC=0` on the backend so a QA-sized stranding is
+above the sweep floor. Without them it SKIPS with a message naming the missing
+setting — a merchant that settles normally is an unmet precondition, not a sweep
+regression.
+
+Neither has run live yet. They are unit-covered and typechecked; their first
+real run is this seeding step, so treat an initial red as information about the
+setup as much as about the code.
 
 ### Run locally
 

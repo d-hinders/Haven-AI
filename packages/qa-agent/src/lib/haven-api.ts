@@ -139,6 +139,13 @@ export class HavenApi {
     return this.call('GET', `/machine-payments/receipts?limit=${limit}`)
   }
 
+  /** This agent's own identity, including the account holding the funds. */
+  getAgent(): Promise<
+    ApiResponse<{ id?: string; safe_address?: string; delegate_address?: string; chain_id?: number }>
+  > {
+    return this.call('GET', '/machine-payments/agent')
+  }
+
   /** Poll a payment to a terminal state (confirmed / failed / expired). */
   async pollUntilSettled(id: string, timeoutMs = 90_000, intervalMs = 3_000): Promise<PaymentStatus> {
     const deadline = Date.now() + timeoutMs

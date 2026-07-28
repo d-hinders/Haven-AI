@@ -20,9 +20,10 @@ const MERCHANT = '0x' + 'cc'.repeat(20)
 const MERCHANT_URL = 'https://demo-merchant.example'
 const MCP_URL = `${MERCHANT_URL}/mcp`
 
-const { mockFetch, mockListReceipts, mockBalanceOf } = vi.hoisted(() => ({
+const { mockFetch, mockListReceipts, mockGetAgent, mockBalanceOf } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockListReceipts: vi.fn(),
+  mockGetAgent: vi.fn(),
   mockBalanceOf: vi.fn(),
 }))
 
@@ -34,6 +35,7 @@ vi.mock('@haven_ai/sdk', () => ({
 vi.mock('../lib/haven-api.js', () => ({
   HavenApi: class {
     listReceipts = mockListReceipts
+    getAgent = mockGetAgent
   },
 }))
 vi.mock('ethers', async (importOriginal) => {
@@ -66,9 +68,11 @@ const okMerchantResponse = () => ({
   text: async () => JSON.stringify({ content: [{ text: 'VPN basic purchased' }] }),
 })
 
+const TREASURY = '0x' + 'a1'.repeat(20)
+
 const receipt = (over: Record<string, unknown> = {}) => ({
+  payment_id: 'pay_new',
   resource_url: MCP_URL,
-  created_at: new Date(Date.now() + 1000).toISOString(),
   challenge_payload: { settlement_scheme: 'eip3009' },
   settlement_address: DELEGATE,
   merchant_address: MERCHANT,
@@ -95,11 +99,30 @@ function ctx(over: Partial<ScenarioContext['cfg']> = {}): ScenarioContext {
   }
 }
 
+// The scenario reads receipts twice: once BEFORE the payment (the baseline of
+// ids that already exist) and then polling AFTER it. `settled` wires that
+// sequence: an empty baseline, then whatever rows the case wants to appear.
+function settled(rows: Record<string, unknown>[]) {
+  mockListReceipts.mockReset()
+  mockListReceipts.mockResolvedValueOnce({ ok: true, data: { receipts: [] } })
+  mockListReceipts.mockResolvedValue({ ok: true, data: { receipts: rows } })
+}
+
+// Treasury before → treasury after → delegate residual. The treasury must fall,
+// or the budget was never metered.
+function balances(before = 1_000_000n, after = 999_000n, residual = 0n) {
+  mockBalanceOf.mockReset()
+  mockBalanceOf.mockResolvedValueOnce(before)
+  mockBalanceOf.mockResolvedValueOnce(after)
+  mockBalanceOf.mockResolvedValue(residual)
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockFetch.mockResolvedValue(okMerchantResponse())
-  mockListReceipts.mockResolvedValue({ ok: true, data: { receipts: [receipt()] } })
-  mockBalanceOf.mockResolvedValue(0n)
+  mockGetAgent.mockResolvedValue({ ok: true, data: { safe_address: TREASURY } })
+  settled([receipt()])
+  balances()
 })
 
 describe('preconditions skip rather than fail', () => {
@@ -148,58 +171,43 @@ describe('the scheme discriminator — the reason this scenario is not vacuous',
     // The whole point. Without this the scenario reports green while the 3009
     // bridge — the path with the hot balance and the real merchant reach — has
     // no live coverage at all.
-    mockListReceipts.mockResolvedValue({
-      ok: true,
-      data: {
-        receipts: [
-          receipt({
-            challenge_payload: { settlement_scheme: 'erc7710' },
-            settlement_address: MERCHANT,
-          }),
-        ],
-      },
-    })
+    settled([
+      receipt({ challenge_payload: { settlement_scheme: 'erc7710' }, settlement_address: MERCHANT }),
+    ])
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/not "eip3009"/)
   })
 
   it('FAILS when the scheme was never recorded', async () => {
-    mockListReceipts.mockResolvedValue({
-      ok: true,
-      data: { receipts: [receipt({ challenge_payload: {} })] },
-    })
+    settled([receipt({ challenge_payload: {} })])
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/absent/)
   })
 
   it('FAILS when no evidence row appears — two legs that cannot be reconciled', async () => {
-    mockListReceipts.mockResolvedValue({ ok: true, data: { receipts: [] } })
+    settled([])
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/no evidence row/)
+    expect(r.detail).toMatch(/no NEW evidence row/)
   })
 
-  it('ignores a receipt from an EARLIER run rather than asserting against it', async () => {
-    // Matching "the newest row" would let a previous day's payment satisfy
-    // today's assertions. The row must post-date this scenario's start.
-    mockListReceipts.mockResolvedValue({
-      ok: true,
-      data: { receipts: [receipt({ created_at: new Date(Date.now() - 86_400_000).toISOString() })] },
-    })
+  it('ignores a receipt that already existed before this run', async () => {
+    // Matching "the newest row" would let a previous run's payment satisfy
+    // this run's assertions. Identity is by id-not-in-baseline, never by clock.
+    // The row already existed before the payment, so it is not this run's.
+    mockListReceipts.mockReset()
+    mockListReceipts.mockResolvedValue({ ok: true, data: { receipts: [receipt()] } })
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/no evidence row/)
+    expect(r.detail).toMatch(/no NEW evidence row/)
   })
 })
 
 describe('the two-leg shape', () => {
   it('FAILS when Haven funded something other than the delegate EOA', async () => {
-    mockListReceipts.mockResolvedValue({
-      ok: true,
-      data: { receipts: [receipt({ settlement_address: '0x' + 'ff'.repeat(20) })] },
-    })
+    settled([receipt({ settlement_address: '0x' + 'ff'.repeat(20) })])
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/not the delegate EOA/)
@@ -208,22 +216,49 @@ describe('the two-leg shape', () => {
   it('FAILS when the merchant is indistinguishable from the funding target', async () => {
     // The security model requires these recorded separately, so a funding hop
     // can never be read as a merchant payment.
-    mockListReceipts.mockResolvedValue({
-      ok: true,
-      data: { receipts: [receipt({ merchant_address: DELEGATE })] },
-    })
+    settled([receipt({ merchant_address: DELEGATE })])
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/indistinguishable from a merchant payment/)
   })
 
   it('compares addresses case-insensitively — checksum casing is not a failure', async () => {
-    mockListReceipts.mockResolvedValue({
-      ok: true,
-      data: { receipts: [receipt({ settlement_address: DELEGATE.toLowerCase() })] },
-    })
+    settled([receipt({ settlement_address: DELEGATE.toLowerCase() })])
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(true)
+  })
+})
+
+describe('the budget was actually metered', () => {
+  it('FAILS when the treasury did not move — a funding leg that spent no budget', async () => {
+    // #946's acceptance criteria name budget decrement explicitly, and none of
+    // the address checks would notice: they describe the SHAPE of the transfer,
+    // not that value left the account. Treasury USDC only moves through the
+    // caveat-enforced redemption.
+    balances(1_000_000n, 1_000_000n, 0n)
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/budget delegation was not metered/)
+  })
+
+  it('FAILS when the treasury somehow INCREASED', async () => {
+    balances(1_000_000n, 1_500_000n, 0n)
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/did not decrease/)
+  })
+
+  it('reports the treasury movement in the pass detail', async () => {
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/treasury 1\.0 → 0\.999/)
+  })
+
+  it('fails cleanly when the account address cannot be read', async () => {
+    mockGetAgent.mockResolvedValue({ ok: true, data: {} })
+    const r = await x402Delegation3009.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/could not read the agent's account address/)
   })
 })
 
@@ -238,14 +273,14 @@ describe('residuals', () => {
     // Owner decision 2026-07-18: stranding up to the 1 USDC sweep floor is
     // accepted, because sweeping it costs more gas than it recovers — but it
     // must stay VISIBLE rather than silently tolerated.
-    mockBalanceOf.mockResolvedValue(5_000n) // 0.005 USDC — the amount live QA saw
+    balances(1_000_000n, 999_000n, 5_000n) // 0.005 USDC — the amount live QA saw
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(true)
     expect(r.detail).toMatch(/0\.005 USDC sub-floor dust/)
   })
 
   it('FAILS at or above the sweep floor — that is stranding, not dust', async () => {
-    mockBalanceOf.mockResolvedValue(1_000_000n) // exactly 1 USDC
+    balances(2_000_000n, 1_999_000n, 1_000_000n) // exactly 1 USDC left on the EOA
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/stranding, not dust/)

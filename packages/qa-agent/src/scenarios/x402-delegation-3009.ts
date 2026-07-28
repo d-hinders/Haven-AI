@@ -36,17 +36,45 @@
  *     the merchant be recorded separately from the funding-transfer address, so
  *     a funding hop can never be read as a merchant payment.
  *
- * Together those are the "two legs, one intent" evidence row the review asked
- * for: a reader can tell funded-and-settled from funded-but-not-settled without
- * inferring it from balances.
+ * ## Three signals, not one — and the evidence row is only one of them
  *
- * ## Residuals
+ * An earlier version of this comment claimed the evidence row alone lets a
+ * reader tell funded-and-settled from funded-but-not-settled "without inferring
+ * it from balances", which the code immediately below it contradicted by
+ * reading a balance. The honest split:
  *
- * Exact-amount funding means a settled payment should leave the delegate EOA at
+ *   - **The evidence row** proves WHICH SCHEME funded this, and that the
+ *     funding target and the merchant were recorded as distinct addresses.
+ *   - **The merchant's HTTP status** proves whether it SETTLED. The evidence
+ *     row cannot: Haven never observes a merchant-side settlement tx on either
+ *     rail, since the facilitator settles outside Haven's view.
+ *   - **The two balance reads** prove the money actually moved — the treasury
+ *     went down by the amount, and nothing above the dust floor stayed on the
+ *     delegate EOA.
+ *
+ * All three are needed. Any one of them alone can be satisfied by a payment
+ * that did something other than what this scenario claims to cover.
+ *
+ * ## Balances
+ *
+ * The treasury must DECREASE by the paid amount — #946's acceptance criteria
+ * name budget decrement explicitly, and the address checks above would happily
+ * pass for a funding hop that never actually spent the delegation. This is the
+ * cheapest honest proxy: the caveat-enforced redemption is what moves treasury
+ * USDC, so a treasury that did not move means the budget was not metered.
+ *
+ * Exact-amount funding then means a settled payment leaves the delegate EOA at
  * zero. The accepted criterion is *no stranding above the 1 USDC sweep floor*
  * (owner decision, 2026-07-18) — sub-floor dust is deliberate, since sweeping it
  * costs more gas than it recovers, but it must stay visible. This reports the
  * residual either way rather than asserting a bare zero.
+ *
+ * ## What this scenario does NOT cover
+ *
+ * The verify-without-settle → sweep half of the bridge. That is
+ * `x402-delegation-3009-sweep`, a separate scenario — the two need different
+ * merchant products and assert different outcomes, and folding them together
+ * would produce a test that passes when either half works.
  */
 
 import { HavenClient } from '@haven_ai/sdk'
@@ -80,27 +108,41 @@ interface McpToolResult {
 const eq = (a?: string | null, b?: string | null): boolean =>
   !!a && !!b && a.toLowerCase() === b.toLowerCase()
 
+/** Receipt ids that already existed, so a later row can be identified as new. */
+export async function receiptBaseline(api: HavenApi): Promise<Set<string>> {
+  const { ok, data } = await api.listReceipts(25)
+  const ids = new Set<string>()
+  if (ok && data.receipts) {
+    for (const r of data.receipts) if (r.payment_id) ids.add(r.payment_id)
+  }
+  return ids
+}
+
 /**
  * Poll for the receipt of THIS payment.
  *
- * Matched on the resource URL and 3009 shape rather than "the newest row",
- * because the newest row for this agent could be a previous run's. A scenario
- * that asserts against the wrong payment is worse than one that fails.
+ * Identified as "a row for this resource whose id was not in the baseline",
+ * deliberately NOT by timestamp. An earlier version compared the row's
+ * server-generated `created_at` against the runner's own `Date.now()`, which
+ * makes the scenario depend on two clocks agreeing: a runner running a few
+ * seconds ahead of the backend would reject every genuinely-fresh row and
+ * report "no evidence row appeared", sending an operator to debug the bridge
+ * when the real fault is NTP. Set membership has no such failure mode.
+ *
+ * It must not be "the newest row" either — that would let a previous run's
+ * payment satisfy this run's assertions.
  */
 async function waitForReceipt(
   api: HavenApi,
   resourceUrl: string,
-  since: number,
+  baseline: Set<string>,
 ): Promise<MachinePaymentReceipt | null> {
   const deadline = Date.now() + TIMING.evidenceWaitMs
   for (;;) {
-    const { ok, data } = await api.listReceipts(10)
+    const { ok, data } = await api.listReceipts(25)
     if (ok && data.receipts) {
       const match = data.receipts.find(
-        (r) =>
-          r.resource_url === resourceUrl &&
-          r.created_at !== undefined &&
-          Date.parse(r.created_at) >= since,
+        (r) => r.resource_url === resourceUrl && !!r.payment_id && !baseline.has(r.payment_id),
       )
       if (match) return match
     }
@@ -142,7 +184,18 @@ export const x402Delegation3009: Scenario = {
     const fmt = (v: bigint) => ethers.formatUnits(v, 6)
 
     const mcpUrl = `${ctx.cfg.demoMerchantUrl}/mcp`
-    const startedAt = Date.now()
+    const usdc = new ethers.Contract(SEPOLIA_USDC, USDC_ABI, provider)
+
+    // Captured BEFORE the payment: the receipt ids that already exist, and the
+    // treasury balance the redemption must reduce. Both are baselines, so
+    // neither depends on the runner's clock agreeing with the backend's.
+    const baseline = await receiptBaseline(api)
+    const agentInfo = await api.getAgent()
+    const treasury = agentInfo.data.safe_address
+    if (!treasury) {
+      return fail('could not read the agent\'s account address from GET /machine-payments/agent')
+    }
+    const treasuryBefore = (await usdc.balanceOf(treasury)) as bigint
 
     // buy_vpn basic (0.001 USDC) — the settling product, same as x402-settle.
     // storage_50gb is the merchant's verify-without-settle product and belongs
@@ -174,11 +227,11 @@ export const x402Delegation3009: Scenario = {
     }
 
     // ── The payment succeeded. Now prove it was the 3009 bridge. ────────────
-    const receipt = await waitForReceipt(api, mcpUrl, startedAt)
+    const receipt = await waitForReceipt(api, mcpUrl, baseline)
     if (!receipt) {
       return fail(
-        `merchant accepted the payment but no evidence row appeared for ${mcpUrl} within ` +
-          `${TIMING.evidenceWaitMs / 1000}s — the two legs cannot be reconciled to one intent`,
+        `merchant accepted the payment but no NEW evidence row appeared for ${mcpUrl} within ` +
+          `${TIMING.evidenceWaitMs / 1000}s — the funding leg cannot be tied to this payment`,
       )
     }
 
@@ -207,8 +260,20 @@ export const x402Delegation3009: Scenario = {
       )
     }
 
+    // ── The budget was actually metered (#946 AC: "budget correctly decremented").
+    // The address checks above would pass just as happily for a funding hop that
+    // never spent the delegation. Treasury USDC only moves through the
+    // caveat-enforced redemption, so a treasury that did not move means the
+    // budget was not metered.
+    const treasuryAfter = (await usdc.balanceOf(treasury)) as bigint
+    if (treasuryAfter >= treasuryBefore) {
+      return fail(
+        `treasury ${treasury} did not decrease (${fmt(treasuryBefore)} → ${fmt(treasuryAfter)} USDC) — ` +
+          `the funding leg was recorded but the budget delegation was not metered`,
+      )
+    }
+
     // ── Residuals: exact-amount funding should leave nothing behind. ────────
-    const usdc = new ethers.Contract(SEPOLIA_USDC, USDC_ABI, provider)
     const residual = (await usdc.balanceOf(delegateAddress)) as bigint
     if (residual >= DUST_FLOOR_ATOMIC) {
       return fail(
@@ -220,7 +285,12 @@ export const x402Delegation3009: Scenario = {
     const dust = residual > 0n ? `, ${fmt(residual)} USDC sub-floor dust left by design` : ', 0 residual'
     return pass(
       `delegation-rail agent paid an EIP-3009 merchant via the funding bridge ` +
-        `(${receipt.amount_human ?? '?'} USDC, tx ${receipt.tx_hash ?? '?'}; funded ${delegateAddress}, ` +
+        // `tx_hash` is the FUNDING redemption's hash, always. Haven never records
+        // a merchant-side settlement tx on either rail — the facilitator settles
+        // outside its view — so labelling it plainly "tx" would invite the wrong
+        // reading.
+        `(${receipt.amount_human ?? '?'} USDC, funding tx ${receipt.tx_hash ?? '?'}; ` +
+        `treasury ${fmt(treasuryBefore)} → ${fmt(treasuryAfter)}, funded ${delegateAddress}, ` +
         `merchant ${receipt.merchant_address})${dust}`,
     )
   },

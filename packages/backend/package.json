@@ -27,18 +27,14 @@
     "ops:register-passport-schema": "tsx scripts/register-passport-schema.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.91.1",
     "@fastify/cors": "^10.0.0",
     "@fastify/jwt": "^10.1.0",
     "@fastify/rate-limit": "^11.1.0",
     "@haven_ai/core": "*",
     "@haven_ai/sdk": "*",
     "@metamask/smart-accounts-kit": "^1.6.0",
-    "@rhinestone/module-sdk": "^0.4.0",
-    "@safe-global/protocol-kit": "^5.1.0",
     "bcrypt": "^6.0.0",
     "dotenv": "^16.4.0",
-    "ethereum-cryptography": "^2.2.1",
     "ethers": "^6.13.0",
     "fastify": "^5.8.5",
     "permissionless": "^0.3.6",
@@ -46,6 +42,7 @@
     "viem": "^2.54.1"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.11.0",

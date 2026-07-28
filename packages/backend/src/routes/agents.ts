@@ -8,6 +8,7 @@ import {
   normalizeAgentAllowanceTokenAddress,
 } from '../lib/agent-allowance-validation.js'
 import { getTokenBalance } from '../lib/allowance-module.js'
+import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
@@ -204,7 +205,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(422).send({ error: 'Agent has no delegate address' })
     }
 
-    const chainId = agent.safe_chain_id ?? 8453
+    const chainId = agent.safe_chain_id ?? DEFAULT_CHAIN_ID
     if (!isSupportedChain(chainId)) {
       return reply.code(422).send({ error: `Unsupported chain: ${chainId}` })
     }

@@ -1,6 +1,31 @@
 import { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify'
 import { createHash } from 'crypto'
 import pool from '../db.js'
+import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
+
+/**
+ * The agent-authentication lookup.
+ *
+ * Exported so `scripts/db-schema-smoke.ts` can PREPARE the REAL query rather
+ * than a pasted copy — that script's own header warns a copy "drifts from
+ * production the first time someone edits the real one, which is the failure
+ * this script exists to catch, reproduced inside the check itself."
+ *
+ * `chain_id` falls back to the shared default when an agent has no linked
+ * `user_safes` row. This value is not cosmetic: it becomes `agent.chain_id`,
+ * which the machine-payment path uses for asset resolution, sweep-chain checks
+ * and inserts (#990).
+ */
+export const AGENT_BY_API_KEY_SQL = `
+  SELECT a.id, a.user_id, a.name, a.delegate_address,
+         a.status,
+         COALESCE(us.safe_address, u.safe_address) as safe_address,
+         COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
+         us.execution_rail, us.account_type
+  FROM agents a
+  JOIN users u ON a.user_id = u.id
+  LEFT JOIN user_safes us ON a.safe_id = us.id
+  WHERE a.api_key_hash = $1`
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -125,18 +150,7 @@ export async function agentAuthMiddleware(
     status: string
     execution_rail: string | null
     account_type: string | null
-  }>(
-    `SELECT a.id, a.user_id, a.name, a.delegate_address,
-            a.status,
-            COALESCE(us.safe_address, u.safe_address) as safe_address,
-            COALESCE(us.chain_id, 8453) as chain_id,
-            us.execution_rail, us.account_type
-     FROM agents a
-     JOIN users u ON a.user_id = u.id
-     LEFT JOIN user_safes us ON a.safe_id = us.id
-     WHERE a.api_key_hash = $1`,
-    [createHash('sha256').update(apiKey).digest('hex')],
-  )
+  }>(AGENT_BY_API_KEY_SQL, [createHash('sha256').update(apiKey).digest('hex')])
 
   if (result.rows.length === 0) {
     return reply.code(401).send({ error: 'Invalid or revoked API key' })

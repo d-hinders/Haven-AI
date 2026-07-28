@@ -3,7 +3,7 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getSafeDetails } from '../lib/safe-details.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
-import { ETH_ADDRESS_RE } from '@haven_ai/core'
+import { ETH_ADDRESS_RE, DEFAULT_CHAIN_ID } from '@haven_ai/core'
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 const OWNER_FETCH_CONCURRENCY = 4
@@ -160,7 +160,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
   // PUT /user/safe
   app.put<{ Body: SafeBody }>('/safe', async (request, reply) => {
-    const { safe_address, chain_id = 8453 } = request.body
+    const { safe_address, chain_id = DEFAULT_CHAIN_ID } = request.body
     const { sub } = request.user as { sub: string }
 
     if (!safe_address || !ETH_ADDRESS_RE.test(safe_address)) {

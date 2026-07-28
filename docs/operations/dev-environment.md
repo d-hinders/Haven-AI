@@ -118,12 +118,21 @@ variable change on the Railway demo-merchant service.
    startup by design** — on Railway that is a crash-loop until the second
    variable lands. Expect it if you set them one at a time.
 
-2. **The pinned DelegationManager must match the buyer side.** Use the
-   DelegationManager of the framework **version** used to sign the delegations,
-   taken from MetaMask's official deployments list — addresses are
-   version-specific, so do not copy one from a blog post. The payload's
-   `delegationManager` is attacker-supplied, so delegations naming any other
-   contract are rejected before simulation.
+2. **The pinned DelegationManager must match the buyer side — use Haven's own
+   pinned value.** For Base Sepolia that is
+   `0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3`
+   (`packages/backend/src/lib/delegation-contracts.ts`, extracted from
+   `@metamask/smart-accounts-kit` **1.6.0**). Haven's delegation-rail agents —
+   the accounts this feature exists to let pay this merchant — always sign
+   against that address.
+
+   Do **not** substitute whatever is currently top of MetaMask's published
+   deployments list: the address is **version-specific**, a kit upgrade can move
+   it, and a mismatch fails *every* real Haven-agent payment to this merchant
+   with `Payment delegationManager is not the delegation manager trusted by this
+   merchant`. The payload's `delegationManager` is attacker-supplied, so
+   delegations naming any other contract are rejected before simulation — which
+   is the intended behaviour, and also exactly what a wrong pin looks like.
 
 3. **No new keys.** The service's existing Sepolia-funded
    `SETTLEMENT_PRIVATE_KEY` account doubles as the **redeemer** that submits
@@ -138,20 +147,36 @@ variable change on the Railway demo-merchant service.
 Existing variables (`MERCHANT_ADDRESS`, `BASE_RPC_URL`, `MERCHANT_CHAIN_ID`,
 `MERCHANT_SKIP_SETTLE_PRODUCT`) need no changes.
 
-> **Interaction with QA (#946).** With the rail on the merchant advertises
-> **both** methods, and EIP-3009 stays **first** (`x402.ts`: *"The EIP-3009
-> option stays accepts[0]"*) — pinned by a test, not incidental
-> (`packages/demo-merchant-mcp/src/erc7710.test.ts`, *"advertises erc7710
-> alongside eip3009 when enabled, keeping eip3009 first"*). So the
-> `x402-delegation-3009*` scenarios keep exercising the bridge with the rail on.
+To turn the rail back **off**, unset `MERCHANT_X402_ERC7710` alone; the manager
+variable can stay. The flag is the only thing consulted when building the
+processor options, so the merchant reverts to advertising EIP-3009 only.
+
+To confirm it actually redeems end-to-end, the repo's one tool for this is the
+manual pilot buyer:
+`npm run pilot:x402-7710-buyer -w packages/qa-agent` (see its header for the
+`PILOT_*` env it needs). No automated scenario covers the erc7710 rail.
+
+> **Interaction with QA (#946) — it is safe, but not for the reason you might
+> expect.** Enabling this flag **cannot** move the `x402-delegation-3009*`
+> scenarios onto erc7710, because Haven's scheme selection never reads the
+> merchant's `accepts` array. `authorizeStandardX402` sends
+> `payTo = the agent's delegate EOA` + `merchantPayTo = the merchant`
+> unconditionally (`packages/sdk/src/client.ts`), and the backend dispatches on
+> that **payTo shape alone** (`routes/x402.ts`) — a point its own test pins with
+> *"the erc7710 selector was never consulted."*
 >
-> That ordering is doing real work: the SDK's `selectStandardPaymentOption`
-> takes the first entry matching scheme/network/asset/amount and **does not look
-> at `assetTransferMethod` at all**. Nothing downstream would notice the
-> difference — so if the merchant's `accepts` array is ever reordered, a
-> standard client silently selects erc7710 and signs the wrong scheme for it.
-> If you enable this flag and the scenarios start failing with
-> *"settlement_scheme was \"erc7710\", not \"eip3009\""*, look here first.
+> The merchant's ordering (EIP-3009 stays `accepts[0]`, pinned by
+> `packages/demo-merchant-mcp/src/erc7710.test.ts`) matters for a **generic**
+> x402 client that infers the scheme from the first entry — the SDK's
+> `selectStandardPaymentOption` takes the first match on
+> scheme/network/asset/amount and never inspects `assetTransferMethod`. If that
+> array were reordered, such a client would echo the erc7710-tagged option while
+> still signing a standard EIP-3009 authorization, and the merchant would reject
+> it cleanly with `Invalid erc7710 payment field: delegator must be an address`
+> — before any simulation or settlement. On the legacy two-leg path the
+> Safe→delegate funding leg has already executed by then, so the visible
+> consequence is a **stranded delegate balance** for the sweep to reclaim, not a
+> mis-signed payment.
 
 Reference: `packages/demo-merchant-mcp/README.md` § *Experimental: ERC-7710
 smart-account payments (testnet-only)*.

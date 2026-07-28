@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-07-27"
+last-verified: "2026-07-28"
 ---
 
 # Dev environment
@@ -30,7 +30,7 @@ how to configure it. For the branch workflow that feeds it, see
 | Frontend | **Vercel** (dev project) | per-PR preview deploys | **No permanent URL** — each PR gets a Vercel preview link that changes on every deployment. The Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend. |
-| Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. |
+| Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. EIP-3009 by default; the experimental ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
 | Postgres | **Railway** managed | — | A separate managed instance, isolated from prod. |
 
 Production is the same shape deploying from `main`. The two never share a
@@ -94,6 +94,61 @@ vars (client id/secret + redirect to the dev backend's
 `/accounting/fortnox/callback`) are set on the dev Railway backend, using a
 **separate dev Fortnox app** — never the prod credentials. The feed was
 live-proven against dev on 2026-07-16.
+
+### Enabling the ERC-7710 rail on the dev demo-merchant
+
+The dev demo-merchant advertises **EIP-3009 only** by default. The experimental
+ERC-7710 rail (#747, epic #452) lets a smart account pay the merchant *directly*
+from a signed delegation, with no funding leg — useful when exercising the
+delegation rail's erc7710 settlement rather than the #946 EIP-3009 bridge.
+
+**Code deploys automatically; variables do not.** PR #750's code is already live
+on the service, and [`.env.dev.example`](../../.env.dev.example) documents the
+service's variables rather than applying them. Turning the rail on is a manual
+variable change on the Railway demo-merchant service.
+
+1. **Set both variables together**, on the **dev** demo-merchant service only:
+
+   ```
+   MERCHANT_X402_ERC7710=1
+   MERCHANT_ERC7710_DELEGATION_MANAGER=0x…
+   ```
+
+   The flag without a valid manager address makes the service **exit at
+   startup by design** — on Railway that is a crash-loop until the second
+   variable lands. Expect it if you set them one at a time.
+
+2. **The pinned DelegationManager must match the buyer side.** Use the
+   DelegationManager of the framework **version** used to sign the delegations,
+   taken from MetaMask's official deployments list — addresses are
+   version-specific, so do not copy one from a blog post. The payload's
+   `delegationManager` is attacker-supplied, so delegations naming any other
+   contract are rejected before simulation.
+
+3. **No new keys.** The service's existing Sepolia-funded
+   `SETTLEMENT_PRIVATE_KEY` account doubles as the **redeemer** that submits
+   `redeemDelegations`. A delegation carrying a redeemer caveat must name that
+   address.
+
+4. **Testnet-only, structurally.** Startup refuses the flag on any chain other
+   than `MERCHANT_CHAIN_ID=84532`, so mainnet can never advertise erc7710. Do
+   **not** add these variables to the production merchant service — a mistaken
+   flag there fails loudly at startup rather than enabling the rail.
+
+Existing variables (`MERCHANT_ADDRESS`, `BASE_RPC_URL`, `MERCHANT_CHAIN_ID`,
+`MERCHANT_SKIP_SETTLE_PRODUCT`) need no changes.
+
+> **Interaction with QA (#946).** With the rail on the merchant advertises
+> **both** methods, and EIP-3009 stays **first** — that ordering is pinned by a
+> test (`packages/demo-merchant-mcp/src/erc7710.test.ts`, *"advertises erc7710
+> alongside eip3009 when enabled, keeping eip3009 first"*), not incidental. A
+> standard client takes the first option, so the `x402-delegation-3009*`
+> scenarios keep exercising the bridge with the rail on. Still: if you enable
+> this and those scenarios begin failing with *"settlement_scheme was
+> \"erc7710\", not \"eip3009\""*, this flag is the first thing to check.
+
+Reference: `packages/demo-merchant-mcp/README.md` § *Experimental: ERC-7710
+smart-account payments (testnet-only)*.
 
 ### The `DEV` badge
 

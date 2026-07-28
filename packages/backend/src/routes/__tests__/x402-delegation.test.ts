@@ -276,8 +276,13 @@ describe('x402 delegation-rail settlement (#830)', () => {
     })
   }
 
-  // ── CHARACTERIZATION (money.md §2), written BEFORE #976 attaches a passport
-  // reference to this response.
+  // ── CHARACTERIZATION (money.md §2) of the wire format #976 must not widen.
+  //
+  // Honesty about its provenance: this test and the #976 feature land in the
+  // same commit, so nothing in history shows it was authored first, and the
+  // comment used to assert exactly that. It cannot be verified, so it is not
+  // claimed. What holds regardless of authoring order is the property below,
+  // which is the reason the test exists.
   //
   // The X-PAYMENT header is consumed by a MERCHANT FACILITATOR we do not
   // control. An unexpected key inside `payload` is a rejection risk, and a
@@ -342,10 +347,14 @@ describe('x402 delegation-rail settlement (#830)', () => {
         { agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: UID },
       ])
       expect(res.statusCode).toBe(200)
+      // The UID and the chain id are the substance — the pair a merchant can
+      // resolve against a verifier it already pins, or against EAS directly.
+      // `verify_url` is a convenience that this deployment may or may not be
+      // able to emit honestly (it needs a configured base URL AND a live
+      // verifier), so its two branches are pinned where the decision is made,
+      // in `lib/passport/__tests__/x402-delivery.test.ts`. Asserting it here
+      // would only re-test that env.
       expect(res.json().passport).toMatchObject({ attestation_uid: UID, chain_id: 84532 })
-      // The verify URL must point at the UID, not the address: the merchant
-      // holds the reference, so it verifies rather than discovers.
-      expect(res.json().passport.verify_url).toContain(`/passport/verify?uid=${UID}`)
     })
 
     // Each fixture below must fail for exactly ONE reason. The first version
@@ -358,11 +367,25 @@ describe('x402 delegation-rail settlement (#830)', () => {
     // 'failed'. An earlier draft used 'requested'/'revoked', which cannot exist
     // (revocation is tracked in `revocation_status`, a separate column), so
     // those cases were asserting over states the database forbids.
+    //
+    // Two honest limits on this block, both found by review:
+    //
+    //  - `anchored with no UID` is ITSELF a state migration 048 forbids
+    //    (`CHECK (status <> 'anchored' OR attestation_uid IS NOT NULL)`) — the
+    //    same standard the paragraph above applies to 'requested'. It stays
+    //    because TypeScript needs the guard (`attestation_uid: string | null`)
+    //    and because a constraint can be dropped by a later migration, but it
+    //    is a TYPE guard with a regression test, not a reachable branch.
+    //  - `no passport row` does NOT pin the `!row` clause here. Delete it and
+    //    `row.status` throws on undefined, the total catch converts that to the
+    //    same null, and this test still passes. That clause is pinned in
+    //    `lib/passport/__tests__/x402-delivery.test.ts`, where the error path
+    //    has an observable (a logged warning) the absence path does not.
     it.each([
       ['no passport row', []],
       ['ISOLATED status: a UID present but still `pending`', [{ agent_id: 'agent-1', chain_id: 84532, status: 'pending', attestation_uid: '0x' + 'cd'.repeat(32) }]],
       ['ISOLATED status: a UID present but `failed`', [{ agent_id: 'agent-1', chain_id: 84532, status: 'failed', attestation_uid: '0x' + 'cd'.repeat(32) }]],
-      ['ISOLATED uid: anchored with no UID', [{ agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: null }]],
+      ['ISOLATED uid: anchored with no UID (DB-impossible; guards the TYPE)', [{ agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: null }]],
     ])('degrades to null for %s, and the payment still succeeds', async (_name, rows) => {
       // "Absence is graceful" is the acceptance criterion, and it is also the
       // failure mode: a non-anchored passport is deliberately indistinguishable
@@ -406,6 +429,21 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json().passport).toBeNull()
       expect(res.json().payment_header).toBeTruthy()
+    })
+
+    it('looks the passport up for the AUTHENTICATED agent, not any other', async () => {
+      // Review proved this had NO coverage: mutating `findByAgent(agentId)` to a
+      // different id left all 29 tests green, because the mock matches on SQL
+      // TEXT and discards bind values. That is not an ordinary coverage hole —
+      // casp-risk-guardrails.md asserts the reference is "returned to the agent
+      // that owns it", and this assertion is that claim's only support.
+      await settleOk([
+        { agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: UID },
+      ])
+      const call = mockQuery.mock.calls.find((c) => /FROM agent_passports/.test(String(c[0])))
+      expect(call, 'no agent_passports query was issued').toBeTruthy()
+      // agentAuthMiddleware pins the authenticated agent to 'agent-1'.
+      expect(call?.[1]).toEqual(['agent-1'])
     })
 
     it('keeps the reference OUT of the merchant-facing header', async () => {

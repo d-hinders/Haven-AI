@@ -469,6 +469,78 @@ puts out of scope. Do not grow it into payment verification or receipts for
 settled merchant transactions; that is a different question with a different
 perimeter.
 
+## Presenting a passport with an x402 payment
+
+The target is **present inline, verify authoritatively** ([#976](https://github.com/d-hinders/Haven-AI/issues/976)):
+the agent carries a compact reference — the attestation UID — with the payment,
+so a merchant **verifies rather than discovers**. Discovery means asking Haven
+whether an agent has a passport at all; verification means already holding the
+pointer and only confirming it.
+
+What is actually deliverable depends on the settlement scheme, and the
+narrowness is the point:
+
+| Scheme | Reference rides the payment? | Delivery |
+|---|---|---|
+| **erc7710** (direct settlement) | Best-effort | `POST /x402/:id/settle` returns `passport: { attestation_uid, chain_id }`, optionally with `verify_url`. The agent presents it however the channel allows. The merchant already sees the delegation during redemption, so this is a **bonus, not the mechanism**. |
+| **EIP-3009** ([#946](https://github.com/d-hinders/Haven-AI/issues/946) — the path with real merchant reach) | **No** | The merchant sees a **standard** header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the only delivery **Haven provides to the agent** — `GET /agents/:id/passport` is dashboard-auth, so an agent cannot fetch its own UID, though an owner can hand it over out of band. |
+
+**The 3009 row is why the verifier endpoint is primary, not a fallback.** The
+scheme with actual merchant adoption cannot carry the reference at all.
+Describing inline delivery as *the* mechanism would present the rarer path as
+if it were the common one.
+
+### The reference never goes in the X-PAYMENT header
+
+x402 does not guarantee arbitrary-metadata passthrough. That header is parsed by
+a merchant **facilitator Haven does not control**, and an unrecognised key in
+the payload is a rejection risk — a failed payment traded for a nice-to-have. So
+the reference rides Haven's own response body and the agent decides what to do
+with it. A characterization test pins the header's exact key set against this
+temptation.
+
+### `verify_url` is a convenience, not a root of trust
+
+The whole reference reaches a merchant **by way of the agent**: Haven returns it
+on the settle response, and the agent forwards it over whatever channel it
+likes. So every field is agent-controlled by construction — `verify_url`
+included. An agent can substitute a URL it operates and have that URL answer
+`{ found: true }` for anything. A merchant that resolves the supplied link is
+asking the subject to vouch for itself.
+
+**Merchants: take `attestation_uid` + `chain_id` and resolve them against a
+verifier you already know** — your own pinned Haven base URL, or EAS on that
+chain directly. Those two fields are safe to accept from an agent precisely
+because they are checkable against a source the agent does not control. The URL
+is not. Authority comes from the pinned issuer (`GET /passport/issuer`) and the
+receipt signature, never from where the link pointed.
+
+Haven emits `verify_url` only when it can be honest about it — a configured
+`HAVEN_API_URL` **and** a live verifier (`PASSPORT_RECEIPT_SIGNING_KEY`; that
+env var is independent of the schema UID, so a deployment can hold anchored
+passports while `/passport/verify` 503s). Neither condition met means the field
+is absent, not guessed: a link that always fails reads as a broken agent, while
+absence is a documented normal answer.
+
+### Absence is a normal answer
+
+`passport` is `null` whenever there is nothing verifiable: no passport row at
+all, or one whose status is `pending` or `failed`. Those are the only three
+cases — the status enum is `pending | anchored | failed`, and an anchored row
+without a UID cannot exist (`CHECK (status <> 'anchored' OR attestation_uid IS
+NOT NULL)`, migration 048). A non-anchored passport is deliberately
+**indistinguishable from none** — handing an agent a reference a merchant cannot
+resolve produces a failed lookup that looks like a *revoked* agent, which is
+worse than saying nothing.
+
+A lookup **error** also never fails the payment: the call is wrapped in a total
+`try/catch` that degrades to `null`. By the time the reference is attached the
+payment is authorised and signed, and a passport is not worth a 500 on a settled
+payment. That covers an error, not an unbounded *hang* — nothing here imposes a
+timeout. The hang case is handled structurally instead, by computing the
+reference **before** the `UPDATE … SET status = 'submitted'` so a slow query
+cannot sit in the window where `payment_header` is unrecoverable.
+
 ## Registration and configuration
 
 Registration is an **operator step** — an on-chain transaction needing a funded

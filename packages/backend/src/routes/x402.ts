@@ -27,6 +27,7 @@ import {
   type PaymentIntentRow,
 } from '../lib/machine-payments.js'
 import { decideCoverage } from '../lib/payment-coverage.js'
+import { passportReferenceFor } from '../lib/passport/x402-delivery.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import {
   agentPaymentStatusHttpCode,
@@ -1507,6 +1508,24 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         )
         const header = encodeXPaymentHeader(state.network, payload)
 
+        // #976: the agent's own passport reference, so it can PRESENT rather
+        // than have the merchant DISCOVER. Deliberately in Haven's response and
+        // NOT inside `payment_header` — that header is parsed by a merchant
+        // facilitator we do not control, and an unrecognised key is a rejection
+        // risk. Null when there is no anchored passport; a lookup ERROR is
+        // swallowed and yields null too.
+        //
+        // Computed BEFORE the UPDATE, and that ordering is the point (#976
+        // review). Between the UPDATE and this reply, `payment_header` is
+        // UNRECOVERABLE: it is emitted from this one place, and a retry hits
+        // the `status !== 'pending_signature'` guard above and 409s. There is
+        // no statement_timeout and no Fastify requestTimeout, so a wedged query
+        // in that window would strand a signed, submitted intent with no way to
+        // get its header. The reference needs nothing the UPDATE produces, so
+        // the window simply should not exist. A lookup error cannot fail the
+        // payment either way; a lookup HANG is what the ordering removes.
+        const passport = await passportReferenceFor(agent.id, { log: request.log })
+
         await pool.query(
           `UPDATE payment_intents
            SET status = 'submitted', signature = $1, signed_at = NOW(), submitted_at = NOW()
@@ -1520,6 +1539,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           // budget delegation (no funding leg).
           payment_header: header,
           resource_url: intent.x402_resource_url,
+          passport,
         })
       } catch (err) {
         return reply.code(502).send({

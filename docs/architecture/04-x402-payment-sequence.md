@@ -16,7 +16,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-07-26"
+last-verified: "2026-07-27"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -259,6 +259,19 @@ The flow is a two-call variant of `/x402/authorize`:
    — [`x402-delegation.ts`](../../packages/backend/src/lib/x402-delegation.ts)).
    The agent retries the merchant with that header, and the merchant settles the
    payment directly from the account through the DelegationManager.
+
+   The response also carries `passport` — `{ attestation_uid, chain_id }` (plus
+   an optional convenience `verify_url`) or `null`
+   ([#976](https://github.com/d-hinders/Haven-AI/issues/976)),
+   so the agent can PRESENT its passport rather than have the merchant discover
+   it. It is deliberately **outside** the `X-PAYMENT` payload: that payload is
+   parsed by a facilitator Haven does not control, and an unrecognised key is a
+   rejection risk. `null` whenever nothing is verifiable, and a lookup **error**
+   never fails the payment (it degrades to `null`; a lookup *hang* is a
+   different case, handled by ordering the lookup before the status `UPDATE`).
+   On the EIP-3009 path the reference cannot ride the
+   payment at all — see the delivery matrix in
+   [`11-agent-passport-schema.md`](11-agent-passport-schema.md).
 
 The intent moves to `submitted`; final settlement is observed through the
 merchant/receipt path. `POST /x402/:id/settle` is Base-only and, as of this

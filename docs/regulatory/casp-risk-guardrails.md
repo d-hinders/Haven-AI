@@ -41,7 +41,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-07-26"
+last-verified: "2026-07-27"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -122,6 +122,31 @@ Haven backend
 > relays only; no leg is authorised by Haven policy alone. Recipient-pinned
 > budgets cannot fund the EOA and are therefore erc7710-only — the fallback
 > never weakens an on-chain pin.
+
+> **Current state (2026-07-27, #976):** the erc7710 settle response carries a
+> `passport` reference — `{ attestation_uid, chain_id }`, plus an optional
+> convenience `verify_url` — or `null`. This is **outside the perimeter this
+> document draws** and does not move it: it verifies no payment, settles
+> nothing, holds nothing, takes no fee, and creates no merchant-acquiring
+> relationship. The reference is a pointer to an EAS attestation already public
+> on-chain, returned to the agent that owns it, answering a governance question
+> ("is this agent issued, governed and revocable?") — never an identity or KYC
+> claim, which is L2 and not issuable.
+>
+> Be precise about what "already public" covers, because it does not cover the
+> whole answer. `attestation_uid` and `chain_id` are public on-chain data. What
+> `verify_url` leads to is a **Haven-signed receipt** whose interesting content
+> is LIVE STANDING — whether the agent is currently revoked — which the anchor
+> cannot express and which is the actual product. The reference being harmless
+> therefore does not rest on "it's all public"; it rests on the receipt
+> asserting governance state and nothing about a payment, a person, or a
+> counterparty. Same discipline as the #956 note below, which is careful not to
+> let a true narrow claim stand in for a broader one.
+>
+> The reference is deliberately NOT placed in the `X-PAYMENT` payload, so it
+> cannot alter the authenticated payment context or any leg's authority. Absent
+> (`null`) is a normal answer, and a lookup **error** degrades to `null` rather
+> than affecting the payment.
 
 > **Current state (2026-07-18, #956):** agents may report the MERCHANT's own
 > receipt after a settled payment (`POST /machine-payments/:id/merchant-receipt`,

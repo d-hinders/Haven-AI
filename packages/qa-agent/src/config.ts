@@ -31,6 +31,27 @@ export interface QaConfig {
    * verification checklist) and its URL recorded.
    */
   demoMerchantUrl?: string
+  /**
+   * A DELEGATION-RAIL agent's API key, for the EIP-3009 bridge scenario (#946).
+   *
+   * Separate from `agentApiKey` because the rail is a property of the ACCOUNT,
+   * not the request: the seeded QA agent is a legacy AllowanceModule agent, and
+   * no header can make it exercise the delegation rail. The 3009 bridge is the
+   * delegation rail's path to EIP-3009-only merchants, so proving it needs a
+   * second, delegation-rail identity.
+   *
+   * That agent needs an **open (unpinned) budget delegation** — a
+   * recipient-pinned budget cannot fund the delegate EOA, and per the owner
+   * decision (2026-07-15) we do not weaken a pin for interop, so pinned agents
+   * are erc7710-only by design. Optional: absent, the scenario SKIPS.
+   */
+  delegationAgentApiKey?: string
+  /**
+   * The delegation-rail agent's delegate EOA private key. Signs both legs
+   * client-side (the funding UserOp and the EIP-3009 header) — Haven signs
+   * neither. Testnet-only throwaway, same discipline as `delegateKey`.
+   */
+  delegationDelegateKey?: string
 }
 
 /** Thrown when a required `QA_*` env var is missing, with a pointer to the doc. */
@@ -71,6 +92,8 @@ export function loadQaConfig(env: NodeJS.ProcessEnv = process.env): QaConfig {
     delegateKey: read(required.delegateKey),
     paymentTo: read(required.paymentTo),
     demoMerchantUrl: env.QA_DEMO_MERCHANT_URL?.trim()?.replace(/\/+$/, '') || undefined,
+    delegationAgentApiKey: env.QA_DELEGATION_AGENT_API_KEY?.trim() || undefined,
+    delegationDelegateKey: env.QA_DELEGATION_DELEGATE_PRIVATE_KEY?.trim() || undefined,
   }
 
   if (missing.length > 0) throw new QaConfigError(missing)

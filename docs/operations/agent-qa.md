@@ -19,7 +19,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-07-27"
+last-verified: "2026-07-28"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -162,7 +162,7 @@ QA identities.
 
 ## Money-flow QA
 
-The deterministic harness runs five scenarios in order:
+The deterministic harness runs seven scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
@@ -171,6 +171,8 @@ The deterministic harness runs five scenarios in order:
 | `x402-over-budget-rejected` | An unaffordable x402 request is rejected before a signable intent |
 | `x402-settle` | A small x402 payment settles through the dev demo merchant |
 | `x402-sweep-recovery` | Verify-without-settle strands a small USDC balance; with the dev sweep floor at 0 (`SWEEP_MIN_USDC=0`) a gasless sweep returns it to the Safe |
+| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 
 The harness exits non-zero if any non-skipped scenario fails. Its Markdown
 scenario table is an evidence starter, not a complete report: copy it into
@@ -195,11 +197,56 @@ QA_AGENT_API_KEY=<testnet QA agent API key>
 QA_DELEGATE_PRIVATE_KEY=<throwaway Base Sepolia delegate key>
 QA_PAYMENT_TO=<Base Sepolia recipient address>
 QA_DEMO_MERCHANT_URL=https://demo-merchant-dev-84e4.up.railway.app
+
+# Delegation-rail identity for the EIP-3009 bridge scenario (#946) — optional.
+QA_DELEGATION_AGENT_API_KEY=<testnet delegation-rail agent API key>
+QA_DELEGATION_DELEGATE_PRIVATE_KEY=<throwaway Base Sepolia delegate key>
 ```
 
 `QA_DEMO_MERCHANT_URL` is technically optional in the config loader, but it is
-required to exercise all five scenarios. A leading `#` comments out a variable;
-do not write `# QA_AGENT_API_KEY=...`.
+required to exercise the merchant scenarios. A leading `#` comments out a
+variable; do not write `# QA_AGENT_API_KEY=...`.
+
+#### Seeding the delegation-rail identity (`x402-delegation-3009`)
+
+The sixth scenario needs a **second agent**, because the execution rail is a
+property of the account: no header makes the seeded legacy AllowanceModule agent
+exercise the delegation rail. Without the two `QA_DELEGATION_*` values the
+scenario **skips** — it never fails the run for being unconfigured.
+
+That agent must have an **open (unpinned) budget delegation**. A
+recipient-pinned budget cannot fund the delegate EOA, and per the owner decision
+of 2026-07-15 we do not weaken a pin for interop — so pinned agents are
+erc7710-only by design, and pointing this scenario at one produces a legitimate
+failure, not a misconfiguration.
+
+Provision it the same way the 2026-07-18 live proof did:
+
+1. `POST /accounts/hybrid` — a counterfactual Hybrid treasury (zero tx).
+2. Create an agent against it with a client-generated delegate EOA; keep that
+   private key for `QA_DELEGATION_DELEGATE_PRIVATE_KEY`.
+3. Grant an **open** budget delegation (e.g. 2 USDC / 24h, recipient unpinned),
+   owner-signed, then activate it — the relayer deploys the treasury, sponsored.
+4. Fund the treasury with a little Base Sepolia USDC.
+
+Both scenarios assert more than "the purchase worked". `x402-delegation-3009`
+reads the payment evidence back and requires `settlement_scheme = eip3009`,
+Haven's own transfer going to the **delegate EOA** rather than the merchant, the
+merchant recorded separately from that funding address, and the treasury balance
+actually falling. A merchant round-trip alone would pass just as happily over
+erc7710, leaving the bridge uncovered — and the address checks alone would pass
+for a funding hop that never metered the budget.
+
+`x402-delegation-3009-sweep` covers the other half, and needs two more settings
+on the dev stack: `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` on the
+demo-merchant, and `SWEEP_MIN_USDC=0` on the backend so a QA-sized stranding is
+above the sweep floor. Without them it SKIPS with a message naming the missing
+setting — a merchant that settles normally is an unmet precondition, not a sweep
+regression.
+
+Neither has run live yet. They are unit-covered and typechecked; their first
+real run is this seeding step, so treat an initial red as information about the
+setup as much as about the code.
 
 ### Run locally
 
@@ -223,7 +270,14 @@ The repository needs these encrypted Actions secrets:
 - `QA_PAYMENT_TO`
 - `QA_DEMO_MERCHANT_URL`
 
-If the dotenv file contains exactly those five entries, upload them with:
+Optional, for the delegation-rail EIP-3009 bridge scenario (the run skips it
+when they are absent):
+
+- `QA_DELEGATION_AGENT_API_KEY`
+- `QA_DELEGATION_DELEGATE_PRIVATE_KEY`
+
+If the dotenv file contains exactly those five required entries, upload them
+with:
 
 ```bash
 gh secret set -f "/secure/path/qa-run.env" --repo d-hinders/Haven-AI

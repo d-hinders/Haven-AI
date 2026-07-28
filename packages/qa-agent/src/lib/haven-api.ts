@@ -62,8 +62,38 @@ export function signHash(privateKey: string, hash: string): string {
   return new ethers.SigningKey(privateKey).sign(hash).serialized
 }
 
+/** One `machine_payment_evidence` row as `GET /machine-payments/receipts` returns it. */
+export interface MachinePaymentReceipt {
+  payment_id?: string
+  rail?: string
+  tx_hash?: string
+  resource_url?: string
+  merchant_address?: string | null
+  /**
+   * The address Haven's own transfer went TO — which is the whole point on the
+   * x402 two-leg: it is the FUNDING target (the delegate EOA), not the
+   * merchant. The security model requires these be recorded separately
+   * precisely so a funding hop can never be mistaken for a merchant payment.
+   */
+  settlement_address?: string | null
+  payer_address?: string | null
+  amount_human?: string
+  /** The intent's `machine_metadata`, which carries `settlement_scheme` (#946). */
+  challenge_payload?: Record<string, unknown> | null
+  created_at?: string
+}
+
 export class HavenApi {
-  constructor(private readonly cfg: QaConfig) {}
+  /**
+   * @param apiKey overrides `cfg.agentApiKey`. The delegation-rail 3009
+   *   scenario (#946) drives a DIFFERENT agent than the seeded legacy-rail one,
+   *   because the execution rail is a property of the account and cannot be
+   *   selected per request.
+   */
+  constructor(
+    private readonly cfg: QaConfig,
+    private readonly apiKey: string = cfg.agentApiKey,
+  ) {}
 
   private async call<T>(
     method: 'GET' | 'POST',
@@ -74,7 +104,7 @@ export class HavenApi {
       method,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.cfg.agentApiKey}`,
+        Authorization: `Bearer ${this.apiKey}`,
       },
       body: body ? JSON.stringify(body) : undefined,
     })
@@ -102,6 +132,18 @@ export class HavenApi {
 
   authorizeX402(body: X402AuthorizeBody): Promise<ApiResponse<X402AuthorizeResult>> {
     return this.call('POST', '/x402/authorize', body as unknown as Record<string, unknown>)
+  }
+
+  /** Payment evidence for this agent, newest first. */
+  listReceipts(limit = 5): Promise<ApiResponse<{ receipts?: MachinePaymentReceipt[] }>> {
+    return this.call('GET', `/machine-payments/receipts?limit=${limit}`)
+  }
+
+  /** This agent's own identity, including the account holding the funds. */
+  getAgent(): Promise<
+    ApiResponse<{ id?: string; safe_address?: string; delegate_address?: string; chain_id?: number }>
+  > {
+    return this.call('GET', '/machine-payments/agent')
   }
 
   /** Poll a payment to a terminal state (confirmed / failed / expired). */

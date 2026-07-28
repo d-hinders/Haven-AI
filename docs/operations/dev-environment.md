@@ -139,13 +139,19 @@ Existing variables (`MERCHANT_ADDRESS`, `BASE_RPC_URL`, `MERCHANT_CHAIN_ID`,
 `MERCHANT_SKIP_SETTLE_PRODUCT`) need no changes.
 
 > **Interaction with QA (#946).** With the rail on the merchant advertises
-> **both** methods, and EIP-3009 stays **first** — that ordering is pinned by a
-> test (`packages/demo-merchant-mcp/src/erc7710.test.ts`, *"advertises erc7710
-> alongside eip3009 when enabled, keeping eip3009 first"*), not incidental. A
-> standard client takes the first option, so the `x402-delegation-3009*`
-> scenarios keep exercising the bridge with the rail on. Still: if you enable
-> this and those scenarios begin failing with *"settlement_scheme was
-> \"erc7710\", not \"eip3009\""*, this flag is the first thing to check.
+> **both** methods, and EIP-3009 stays **first** (`x402.ts`: *"The EIP-3009
+> option stays accepts[0]"*) — pinned by a test, not incidental
+> (`packages/demo-merchant-mcp/src/erc7710.test.ts`, *"advertises erc7710
+> alongside eip3009 when enabled, keeping eip3009 first"*). So the
+> `x402-delegation-3009*` scenarios keep exercising the bridge with the rail on.
+>
+> That ordering is doing real work: the SDK's `selectStandardPaymentOption`
+> takes the first entry matching scheme/network/asset/amount and **does not look
+> at `assetTransferMethod` at all**. Nothing downstream would notice the
+> difference — so if the merchant's `accepts` array is ever reordered, a
+> standard client silently selects erc7710 and signs the wrong scheme for it.
+> If you enable this flag and the scenarios start failing with
+> *"settlement_scheme was \"erc7710\", not \"eip3009\""*, look here first.
 
 Reference: `packages/demo-merchant-mcp/README.md` § *Experimental: ERC-7710
 smart-account payments (testnet-only)*.

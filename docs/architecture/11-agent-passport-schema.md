@@ -295,6 +295,18 @@ sees on an EIP-3009 header, or the Hybrid account it sees as the delegator in
 erc7710 redemption. #971 binds both precisely because #946 made settlement a
 per-payment choice, so a merchant can verify from whichever address it holds.
 
+**Duplicate bindings are refused at anchor time and resolved deterministically
+(#1042).** `delegate_address` is client-supplied and unique only per-user among
+non-revoked agents, so two anchored passports could otherwise reference the
+same EOA (revoke-and-recreate, or a different user claiming the address). Two
+defenses: the anchoring claim refuses while another agent's anchored,
+unrevoked passport binds the same EOA — checked under an EOA-keyed advisory
+lock so concurrent claims serialize — and the address lookup orders
+unrevoked-first, newest-first with a stable tie-break, so a stale revoked
+binding can never shadow the live credential. Re-binding a *revoked* holder's
+address is deliberately allowed: that is the legitimate revoke-and-recreate
+flow, and the old row loses deterministically.
+
 An agent with **no passport is a normal 200 answer**, not a 404. Issuance is
 opt-in, so most agents have none — and an error status is what makes an
 integration treat a lookup failure as a pass.

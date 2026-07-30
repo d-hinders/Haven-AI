@@ -184,7 +184,26 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
 
   // Win the right to anchor, atomically. A loser returns the current row
   // untouched rather than submitting a second attest() — see claimForAnchoring.
-  if (!(await repo.claimForAnchoring(agentId))) return getPassport(agentId)
+  // The claim also refuses while ANOTHER agent's anchored, unrevoked passport
+  // binds the same delegate EOA (#1042): `delegate_address` is client-supplied
+  // and only unique per-user among non-revoked agents, so without this a
+  // second anchor for the same EOA would let the verifier hand a merchant an
+  // arbitrary credential for that address.
+  if (!facts.delegate_address) {
+    // Binding requires the EOA (#971: EOA-required, smart-account-optional);
+    // a factless claim would also make the #1042 duplicate check vacuous.
+    await markFailed(agentId, 'agent has no delegate address to bind')
+    return getPassport(agentId)
+  }
+  const claimOutcome = await repo.claimForAnchoring(agentId, facts.delegate_address)
+  if (claimOutcome === 'eoa_already_bound') {
+    await markFailed(
+      agentId,
+      `delegate EOA ${facts.delegate_address} is already bound by another anchored passport (#1042)`,
+    )
+    return getPassport(agentId)
+  }
+  if (claimOutcome !== 'claimed') return getPassport(agentId)
 
   try {
     getEasDeployment(chainId) // reject an unpinned chain before spending gas

@@ -133,7 +133,17 @@ export async function passportReferenceFor(
   } = {},
 ): Promise<PassportReference | null> {
   try {
-    const row = await repo.findByAgent(agentId, opts.db)
+    // Bounded (#1042 review note): this runs on the erc7710 settle hot path
+    // while the child delegation's short expiry is ticking. A slow-but-alive
+    // passport table must degrade to `passport: null`, never burn the
+    // merchant's settlement window. 1500ms is generous for a PK lookup.
+    const row = await Promise.race([
+      repo.findByAgent(agentId, opts.db),
+      new Promise<never>((_, reject) => {
+        const t = setTimeout(() => reject(new Error('passport reference lookup timed out (1500ms)')), 1_500)
+        t.unref?.()
+      }),
+    ])
     if (!row || row.status !== 'anchored' || !row.attestation_uid) return null
     const verifyUrl = verifyUrlFor(row.attestation_uid)
     return {

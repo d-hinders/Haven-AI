@@ -118,21 +118,75 @@ export async function findAgentFacts(
  * A claim older than the stale window is reclaimable so a crashed attempt
  * recovers instead of wedging the passport forever.
  */
+
+/**
+ * Run `fn` inside a transaction. When the executor can hand out a dedicated
+ * connection (the `db.ts` pool wrapper), BEGIN/COMMIT run on that single
+ * client — issuing BEGIN through the pool would hit a different connection
+ * per statement. A caller that already holds a transaction client passes it
+ * straight through and `fn` runs inline on it.
+ */
+async function withTransaction<T>(
+  db: Executor,
+  fn: (tx: Executor) => Promise<T>,
+): Promise<T> {
+  const connectable = db as Executor & { connect?: () => Promise<{ query: Executor['query']; release: () => void }> }
+  if (typeof connectable.connect !== 'function') return fn(db)
+  const client = await connectable.connect()
+  try {
+    await client.query('BEGIN')
+    const result = await fn(client)
+    await client.query('COMMIT')
+    return result
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+export type ClaimOutcome = 'claimed' | 'not_claimed' | 'eoa_already_bound'
+
 export async function claimForAnchoring(
   agentId: string,
+  agentEoa: string,
   staleAfterSeconds = 600,
   db: Executor = pool,
-): Promise<boolean> {
-  const { rowCount } = await db.query(
-    `UPDATE agent_passports
-        SET anchoring_started_at = NOW(), attempts = attempts + 1, updated_at = NOW()
-      WHERE agent_id = $1
-        AND status <> 'anchored'
-        AND (anchoring_started_at IS NULL
-             OR anchoring_started_at < NOW() - MAKE_INTERVAL(secs => $2))`,
-    [agentId, staleAfterSeconds],
-  )
-  return (rowCount ?? 0) > 0
+): Promise<ClaimOutcome> {
+  // Serialize competing claims for the SAME EOA across different agents
+  // (#1042): the route path fires issuance directly while the sweep leader
+  // may process another row — without this xact-scoped advisory lock, two
+  // concurrent claims for different agents binding the same EOA would both
+  // pass the NOT EXISTS below and both anchor. The lock key is the lowercased
+  // EOA, so unrelated agents never contend. Runs inside ONE transaction so
+  // the lock spans check + claim and releases on commit/rollback.
+  const eoa = agentEoa.toLowerCase()
+  return withTransaction(db, async (tx) => {
+    await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`passport-eoa:${eoa}`])
+    const bound = await tx.query(
+      `SELECT 1
+         FROM agent_passports p2
+         JOIN agents a2 ON a2.id = p2.agent_id
+        WHERE p2.agent_id <> $1
+          AND p2.status = 'anchored'
+          AND a2.status <> 'revoked'
+          AND LOWER(p2.agent_eoa) = $2
+        LIMIT 1`,
+      [agentId, eoa],
+    )
+    if ((bound.rowCount ?? 0) > 0) return 'eoa_already_bound'
+    const { rowCount } = await tx.query(
+      `UPDATE agent_passports
+          SET anchoring_started_at = NOW(), attempts = attempts + 1, updated_at = NOW()
+        WHERE agent_id = $1
+          AND status <> 'anchored'
+          AND (anchoring_started_at IS NULL
+               OR anchoring_started_at < NOW() - MAKE_INTERVAL(secs => $2))`,
+      [agentId, staleAfterSeconds],
+    )
+    return (rowCount ?? 0) > 0 ? 'claimed' : 'not_claimed'
+  })
 }
 
 /**
@@ -345,6 +399,7 @@ const VERIFICATION_SELECT = `
  */
 export const FIND_BY_AGENT_ADDRESS_SQL = `${VERIFICATION_SELECT}
     AND (p.agent_eoa = $1 OR p.smart_account = $1)
+  ORDER BY (a.status <> 'revoked') DESC, p.updated_at DESC, p.agent_id
   LIMIT 1`
 
 export async function findByAgentAddress(

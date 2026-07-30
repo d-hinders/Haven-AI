@@ -188,7 +188,7 @@ describe('the retry sweep isolates rows', () => {
     const result = await retryPendingPassports()
 
     expect(seen).toEqual([AGENT, OTHER])
-    expect(result).toEqual({ attempted: 2, failed: 1 })
+    expect(result).toEqual({ attempted: 2, failed: 1, needingAttention: 0 })
   })
 })
 
@@ -285,12 +285,12 @@ describe('retry sweep', () => {
       retryRows: [{ agent_id: AGENT, user_id: USER }],
     })
     setAnchor(async () => ({ attestationUid: UID, txHash: '0x2' }))
-    expect(await retryPendingPassports()).toEqual({ attempted: 1, failed: 0 })
+    expect(await retryPendingPassports()).toEqual({ attempted: 1, failed: 0, needingAttention: 0 })
   })
 
   it('is a no-op when nothing is pending', async () => {
     mockDb({ passport: null, retryRows: [] })
-    expect(await retryPendingPassports()).toEqual({ attempted: 0, failed: 0 })
+    expect(await retryPendingPassports()).toEqual({ attempted: 0, failed: 0, needingAttention: 0 })
   })
 })
 

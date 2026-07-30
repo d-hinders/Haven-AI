@@ -57,7 +57,18 @@ export interface AnchorResult {
   attestationUid: string
   txHash: string
 }
-export type Anchor = (chainId: number, claim: PassportClaim) => Promise<AnchorResult>
+export type Anchor = (
+  chainId: number,
+  claim: PassportClaim,
+  onBroadcast?: (txHash: string) => Promise<void>,
+) => Promise<AnchorResult>
+
+export type AnchorRecovery = (chainId: number, txHash: string) => Promise<AnchorResult | null>
+
+let recoveryImpl: AnchorRecovery | null = null
+export function setAnchorRecovery(recovery: AnchorRecovery | null): void {
+  recoveryImpl = recovery
+}
 
 /** Default anchor — wired in `attestation.ts`; injectable for tests. */
 let anchorImpl: Anchor | null = null
@@ -126,6 +137,13 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
   const facts = await repo.findAgentFacts(agentId, userId)
   if (!facts) {
     await markFailed(agentId, 'agent not found for this user')
+    return getPassport(agentId)
+  }
+  if (facts.agent_status === 'revoked') {
+    // #1043 finding 3: anchoring for a revoked agent just to immediately queue
+    // its revocation is wasted gas and a transient live credential. The row
+    // stays failed; listRetryable excludes revoked agents so it stops churning.
+    await markFailed(agentId, 'agent is revoked — not anchoring')
     return getPassport(agentId)
   }
 
@@ -207,7 +225,20 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
 
   try {
     getEasDeployment(chainId) // reject an unpinned chain before spending gas
-    const result = await anchorImpl(chainId, claim)
+
+    // Recover-before-re-mint (#1043): a prior attempt that broadcast but lost
+    // its result (wait timeout, crash, failed anchored-write) left tx_hash set
+    // with no UID. Re-minting would create a second real attestation with the
+    // first permanently invisible to Haven — read the receipt instead. null =
+    // unknown/still-pending tx: fall through to a fresh anchor (a pending tx
+    // older than the claim window is presumed dropped).
+    let result: AnchorResult | null = null
+    if (existing.tx_hash && !existing.attestation_uid && recoveryImpl) {
+      result = await recoveryImpl(chainId, existing.tx_hash)
+    }
+    if (!result) {
+      result = await anchorImpl(chainId, claim, (txHash) => repo.recordBroadcast(agentId, txHash))
+    }
     await markAnchored(agentId, result, claim)
     // Close the anchor race (#973). Anchoring takes seconds, and the owner can
     // revoke the agent during them. The revoke hook is a no-op in that window —
@@ -246,10 +277,18 @@ export function issuePassportBestEffort(agentId: string, userId: string): void {
  * revocation half — so an unisolated failure here would take the safety-critical
  * half down with it.
  */
+/** Attempts past this need eyes — the backoff has hit its cap by then. */
+export const ISSUANCE_ATTENTION_ATTEMPTS = 10
+
 export async function retryPendingPassports(
   limit = 50,
-): Promise<{ attempted: number; failed: number }> {
+): Promise<{ attempted: number; failed: number; needingAttention: number }> {
   const rows = await repo.listRetryable(limit)
+  // A row past the attention threshold has been failing for hours (the
+  // backoff caps at 1h by then) — that is an operational signal, not routine
+  // churn. Counted and logged by the sweep so it alarms instead of retrying
+  // in silence forever (#1043); the retry itself still proceeds.
+  const needingAttention = rows.filter((r) => r.attempts >= ISSUANCE_ATTENTION_ATTEMPTS).length
   let failed = 0
   for (const row of rows) {
     try {
@@ -260,5 +299,5 @@ export async function retryPendingPassports(
       failed++
     }
   }
-  return { attempted: rows.length, failed }
+  return { attempted: rows.length, failed, needingAttention }
 }

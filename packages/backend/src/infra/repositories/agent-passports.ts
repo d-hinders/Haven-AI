@@ -338,7 +338,7 @@ const VERIFICATION_SELECT = `
  * redemption (#946 made that a per-payment choice) — and must be able to
  * verify from whichever one it holds.
  *
- * The zero address is refused BEFORE the query. Migration 050 already prevents
+ * The zero address is refused BEFORE the query. Migration 051 already prevents
  * storing it, but the sentinel is dangerous enough to be rejected at every
  * layer that could ever handle it: a lookup by `0x0` resolving to any passport
  * would hand a merchant somebody else's credential.

@@ -67,7 +67,7 @@ equally consistent with "the hooks never loaded", and that ambiguity is exactly
 how a broken guard survives.
 
 ```sh
-sh .claude/hooks/test-ship-next-guard.sh   # 58 passed, 0 failed
+sh .claude/hooks/test-ship-next-guard.sh   # 101 passed, 0 failed
 ```
 
 ## Promotion criteria

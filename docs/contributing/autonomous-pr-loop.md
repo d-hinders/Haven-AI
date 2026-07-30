@@ -226,6 +226,23 @@ not holes:
 > checks. If that check is ever dropped from the ruleset, this model has a hole
 > — re-add it, or widen `CODEOWNERS`.
 
+### The window this model does NOT close: merge → dev-deploy
+
+Every gate above sits in front of **prod**. An auto-merged money-path PR
+deploys to the **dev environment on merge** and executes real testnet payments
+there *before* any promotion gate evaluates anything — and the nightly
+`qa-dev` workflow checks out `dev` and runs the qa-agent harness **from that
+branch** with the QA payment secrets in env, so an auto-merged malicious
+change to qa-agent or the SDK runs with those secrets unseen by any human.
+The blast radius is bounded on purpose — the dev backend serves only Base
+Sepolia (`HAVEN_DEPLOY_CHAIN_IDS`), relayer keys are per-chain, and every
+credential in that environment is a testnet throwaway — but "bounded" is not
+"zero": the honest reading is that dev-deploy risk is **accepted**, not
+covered. Hardening options (pin the harness checkout to a reviewed ref, scope
+the QA secrets, restrict the `haven_api_url` dispatch input) are tracked in
+#1047; if the dev environment ever holds non-testnet value, that issue stops
+being optional.
+
 Money-path **classification is unchanged**: `ship-next` still routes such a diff
 to `money.md`, still requires characterization tests before changing existing
 behavior, and still surfaces the classification in the PR body. It just no

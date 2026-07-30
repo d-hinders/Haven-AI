@@ -72,6 +72,7 @@ export interface AgentPassportFacts {
   safe_address: string | null
   account_type: string | null
   execution_rail: string | null
+  agent_status: string
 }
 
 export async function findByAgent(agentId: string, db: Executor = pool): Promise<PassportRow | null> {
@@ -97,7 +98,8 @@ export async function findAgentFacts(
   db: Executor = pool,
 ): Promise<AgentPassportFacts | null> {
   const { rows } = await db.query<AgentPassportFacts>(
-    `SELECT a.delegate_address, s.chain_id, s.safe_address, s.account_type, s.execution_rail
+    `SELECT a.delegate_address, a.status AS agent_status,
+            s.chain_id, s.safe_address, s.account_type, s.execution_rail
        FROM agents a
        LEFT JOIN user_safes s ON s.id = a.safe_id
       WHERE a.id = $1 AND a.user_id = $2`,
@@ -292,20 +294,57 @@ export async function markFailed(agentId: string, error: string, db: Executor = 
 }
 
 /** Non-anchored passports with their owning user, oldest first — the retry sweep. */
+/**
+ * Non-anchored passports DUE for another attempt (#1043).
+ *
+ * Backoff mirrors the revocation side (30s doubling to a 1h cap) without a
+ * schema change: `updated_at` is bumped by every markFailed, so
+ * `updated_at + backoff(attempts)` IS the next-attempt time. The exponent is
+ * clamped before POWER so attempts cannot overflow the double. At the 1h cap
+ * a stuck row costs at most 24 no-op attempts/day — bounded relayer exposure,
+ * and every real attempt is still gas-free until `attest.staticCall` passes.
+ *
+ * Revoked agents are excluded (#1043 finding 3): anchoring a passport for a
+ * revoked agent just to immediately queue its revocation is wasted gas and a
+ * transient live credential. Their rows simply stop being due.
+ *
+ * `attempts` rides along so the sweep can alarm on rows past the attention
+ * threshold instead of letting them churn silently.
+ */
 export async function listRetryable(
   limit: number,
   db: Executor = pool,
-): Promise<Array<{ agent_id: string; user_id: string }>> {
-  const { rows } = await db.query<{ agent_id: string; user_id: string }>(
-    `SELECT p.agent_id, a.user_id
+): Promise<Array<{ agent_id: string; user_id: string; attempts: number }>> {
+  const { rows } = await db.query<{ agent_id: string; user_id: string; attempts: number }>(
+    `SELECT p.agent_id, a.user_id, p.attempts
        FROM agent_passports p
        JOIN agents a ON a.id = p.agent_id
       WHERE p.status <> 'anchored'
+        AND a.status <> 'revoked'
+        AND p.updated_at < NOW() - MAKE_INTERVAL(secs =>
+              LEAST(30 * POWER(2, LEAST(GREATEST(p.attempts, 0), 10)), 3600))
       ORDER BY p.requested_at ASC
       LIMIT $1`,
     [limit],
   )
   return rows
+}
+
+/**
+ * Persist the anchor tx hash the moment it is broadcast, BEFORE the wait
+ * (#1043 finding 2): if the wait or the anchored-write fails after broadcast,
+ * the retry recovers the attestation from this receipt instead of minting a
+ * second one on-chain.
+ */
+export async function recordBroadcast(
+  agentId: string,
+  txHash: string,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE agent_passports SET tx_hash = $2, updated_at = NOW() WHERE agent_id = $1`,
+    [agentId, txHash],
+  )
 }
 
 

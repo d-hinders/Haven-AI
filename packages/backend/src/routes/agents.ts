@@ -17,6 +17,7 @@ import {
   issuePassportBestEffort,
   enqueuePassportRevocation,
   revokePassportBestEffort,
+  isPassportConfigured,
   PASSPORT_CHAIN_IDS,
 } from '../lib/passport/index.js'
 import { formatTokenValue } from '../lib/tokens.js'
@@ -352,7 +353,20 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       if (passportChainId != null) {
         try {
           await requestPassport(agent.id, passportChainId)
-          issuePassportBestEffort(agent.id, sub)
+          // Parity with POST /agents/:id/passport (#1043): on a deployment
+          // where the schema UID is not registered, the :id route 503s. Agent
+          // creation must not fail for that — the intent is recorded above and
+          // the sweep anchors it once the operator registers — but firing a
+          // guaranteed-to-fail attempt here would only burn a retry and start
+          // the backoff clock early.
+          if (isPassportConfigured(passportChainId)) {
+            issuePassportBestEffort(agent.id, sub)
+          } else {
+            request.log.info(
+              { agentId: agent.id, chainId: passportChainId },
+              'passport requested but schema not registered — deferred to the sweep',
+            )
+          }
         } catch (err) {
           request.log.warn({ err, agentId: agent.id }, 'passport request failed; agent created')
         }

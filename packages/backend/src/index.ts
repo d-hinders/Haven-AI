@@ -24,7 +24,9 @@ import agentDelegationRoutes from './routes/agent-delegations.js'
 import agentPassportRoutes from './routes/agent-passports.js'
 import {
   setAnchor,
+  setAnchorRecovery,
   anchorOnChain,
+  recoverAnchorFromReceipt,
   setRevoker,
   revokeOnChain,
   setReceiptSigningKey,
@@ -176,6 +178,7 @@ app.get('/chains', async () => {
 // L0 passport attestations are anchored AND revoked by the gas-only relayer
 // (#972 / #973). Both are governance metadata: EAS-only targets, zero value.
 setAnchor(anchorOnChain)
+setAnchorRecovery(recoverAnchorFromReceipt)
 setRevoker(revokeOnChain)
 // Receipts the merchant-facing verifier hands out (#974) are signed with a
 // DEDICATED key, never the relayer's: the relayer pays gas for user-authorised
@@ -350,6 +353,12 @@ const start = async () => {
           await phase('issuance', async () => {
             const issuance = await retryPendingPassports()
             if (issuance.attempted) app.log.info(issuance, 'Passport issuance retries')
+            if (issuance.needingAttention) {
+              app.log.warn(
+                { needingAttention: issuance.needingAttention },
+                'Passport issuance rows past the attention threshold — investigate, the backoff is capped',
+              )
+            }
           })
           await phase('revocation', async () => {
             const revocations = await reconcilePendingRevocations()

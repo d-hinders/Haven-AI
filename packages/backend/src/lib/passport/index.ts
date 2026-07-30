@@ -37,6 +37,7 @@ export {
   issuePassportBestEffort,
   retryPendingPassports,
   setAnchor,
+  setAnchorRecovery,
   type PassportStatus,
   type PassportRow,
   type PassportClaim,
@@ -46,7 +47,7 @@ export {
 
 // The real on-chain anchor. Imported here (not inside issuance.ts) so the
 // issuance state machine stays testable without ethers or a relayer.
-export { anchorOnChain, revokeOnChain, buildAttestCall, buildRevokeCall, encodeClaim } from './attestation.js'
+export { anchorOnChain, revokeOnChain, recoverAnchorFromReceipt, buildAttestCall, buildRevokeCall, encodeClaim } from './attestation.js'
 
 // The merchant-facing verifier (#974). Haven's DB is the authority here; the
 // attestation UID rides along as an evidence pointer, never as the decision.

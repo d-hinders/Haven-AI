@@ -175,6 +175,23 @@ target and the zero value). Non-custody is unaffected; see the
 [delegation-rail security model](../security/delegation-rail-security-model.md)
 §2.
 
+### Retry discipline (#1043)
+
+Issuance retries mirror the revocation side: the due-list applies a capped
+exponential backoff (30s doubling to 1h, computed from `updated_at +
+backoff(attempts)` — no schema change) and **excludes revoked agents**, so a
+struggling row costs at most ~24 attempts/day and a revoked agent's pending
+row simply stops being due. Rows past the attention threshold (10 attempts —
+hours of failing) are counted and logged by the sweep as an operational
+alarm rather than churning silently.
+
+A broadcast whose result was lost is **recovered, never re-minted**: the tx
+hash is persisted the moment the transaction is broadcast (before the wait),
+and a retry reads the attestation UID back from that receipt. Re-minting
+would create a second live attestation with the first permanently invisible
+to Haven. The on-chain wait is bounded (120s) so it cannot outlive the
+anchoring claim's 600s stale window.
+
 ## Revocation — what merchants must check
 
 **Haven's verifier is authoritative. The chain is an anchor, not the authority.**

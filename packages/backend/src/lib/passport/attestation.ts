@@ -38,6 +38,9 @@ const SCHEMA_TYPES = [
 const EAS_ABI = [
   'function attest((bytes32 schema,(address recipient,uint64 expirationTime,bool revocable,bytes32 refUID,bytes data,uint256 value) data)) external payable returns (bytes32)',
   'function revoke((bytes32 schema,(bytes32 uid,uint256 value) data)) external payable',
+  // For receipt recovery (#1043): the UID of an attestation whose result was
+  // lost after broadcast is re-read from this event, never re-minted.
+  'event Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)',
 ]
 
 const ZERO_BYTES32 = '0x' + '00'.repeat(32)
@@ -88,6 +91,7 @@ export function buildAttestCall(chainId: number, claim: PassportClaim): { to: st
 export const anchorOnChain: Anchor = async (
   chainId: number,
   claim: PassportClaim,
+  onBroadcast?: (txHash: string) => Promise<void>,
 ): Promise<AnchorResult> => {
   const { eas } = getEasDeployment(chainId)
   const relayer = getRelayer(chainId)
@@ -110,11 +114,50 @@ export const anchorOnChain: Anchor = async (
   const attestationUid: string = await contract.attest.staticCall(request)
 
   const tx = await contract.attest(request)
-  const receipt = await tx.wait()
+  // Persist the hash BEFORE waiting (#1043): if the wait times out or the
+  // process dies here, the retry recovers this attestation from its receipt
+  // instead of minting a second one.
+  await onBroadcast?.(tx.hash)
+  // Bounded: the anchoring claim's stale window is 600s — an unbounded wait
+  // could outlive it and let another worker reclaim mid-flight. 120s < 600s.
+  const receipt = await tx.wait(1, 120_000)
   if (!receipt || receipt.status !== 1) {
     throw new Error(`passport attestation reverted (tx ${tx.hash})`)
   }
   return { attestationUid, txHash: tx.hash }
+}
+
+/**
+ * Recover a broadcast-but-unrecorded attestation from its receipt (#1043).
+ *
+ * Returns the result when the tx is mined and successful, null when the tx is
+ * unknown or still pending (caller decides whether to re-anchor), and THROWS
+ * on a mined-but-reverted tx so the caller records the failure message.
+ */
+export async function recoverAnchorFromReceipt(
+  chainId: number,
+  txHash: string,
+): Promise<AnchorResult | null> {
+  const { eas } = getEasDeployment(chainId)
+  const receipt = await getRelayer(chainId).provider?.getTransactionReceipt(txHash)
+  if (!receipt) return null
+  if (receipt.status !== 1) {
+    throw new Error(`prior passport attestation reverted (tx ${txHash})`)
+  }
+  const iface = new Interface(EAS_ABI)
+  for (const log of receipt.logs) {
+    if (log.address.toLowerCase() !== eas.toLowerCase()) continue
+    try {
+      const parsed = iface.parseLog({ topics: [...log.topics], data: log.data })
+      if (parsed?.name === 'Attested') {
+        return { attestationUid: parsed.args.uid as string, txHash }
+      }
+    } catch {
+      continue // not an EAS_ABI event — other logs in the same tx are fine
+    }
+  }
+  // Mined, successful, but no Attested event from EAS — not our attestation.
+  throw new Error(`tx ${txHash} succeeded but contains no EAS Attested event`)
 }
 
 

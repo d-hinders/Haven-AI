@@ -30,12 +30,26 @@
  * exit 0 = verified (and registered, with --send) · 1 = a pin or a call failed.
  */
 
+// Imported from `schema.js` DIRECTLY, not from the module's `index.js` barrel,
+// and that is deliberate — see the "runnable with nothing but an RPC URL" note
+// above. The barrel re-exports issuance/revocation/verification/x402-delivery,
+// which reach `db.js` → `config.ts`, whose `requireEnv('DATABASE_URL')` runs at
+// IMPORT time. Going through it made this probe die before its first line, so
+// the one property it was built to have — verify contract pins with no
+// database — was lost to an import path.
+//
+// This is a deliberate exception to module-boundaries rule 6 ("callers import
+// from the barrel, never a private file"). That rule is about application code,
+// where a barrel keeps the module's surface honest. An ops probe has the
+// opposite requirement: it must load as little as possible. `schema.ts` is
+// pure — its only import is `import type { Address } from 'viem'`, erased at
+// compile time — so this reaches no I/O.
 import {
   PASSPORT_SCHEMA,
   PASSPORT_SCHEMA_REVOCABLE,
   PASSPORT_CHAIN_IDS,
   getEasDeployment,
-} from '../src/lib/passport/index.js'
+} from '../src/lib/passport/schema.js'
 
 const SEND = process.argv.includes('--send')
 

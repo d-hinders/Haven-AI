@@ -67,7 +67,13 @@ describe('money-path list stays in one piece', () => {
     const gate = skill.slice(skill.indexOf('## Merge Gate'), skill.indexOf('Route the merge:'))
     assert.ok(gate.length > 200, 'could not locate the Merge Gate file list in SKILL.md')
 
-    const globs = loadMoneyPathGlobs()
+    // The Merge Gate prose describes CLASSIFICATION (which diffs are
+    // money-path), and classification is the UNION — controlGlobs are
+    // labelled money-path too, they just skip the QA-freshness re-run. A
+    // file named in the prose is "known to the machinery" if either list
+    // has it (#1045 moved release-bump/publish.yml to controlGlobs, which
+    // is where this distinction first bit).
+    const globs = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
     // Backticked tokens that look like source paths. The prose uses
     // backend-relative shorthand (`routes/x402.ts`, `db/migrations/`), so match
     // by suffix against the repo-root-relative canonical globs.
@@ -111,7 +117,13 @@ describe('money-path list stays in one piece', () => {
   })
 
   test('the canonical file is well-formed and non-empty', () => {
-    const globs = loadMoneyPathGlobs()
+    // The Merge Gate prose describes CLASSIFICATION (which diffs are
+    // money-path), and classification is the UNION — controlGlobs are
+    // labelled money-path too, they just skip the QA-freshness re-run. A
+    // file named in the prose is "known to the machinery" if either list
+    // has it (#1045 moved release-bump/publish.yml to controlGlobs, which
+    // is where this distinction first bit).
+    const globs = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
     assert.ok(globs.length >= 15, `expected the full money-path list, saw ${globs.length}`)
     for (const g of globs) {
       assert.ok(!g.startsWith('/'), `glob must be repo-root-relative, not absolute: ${g}`)

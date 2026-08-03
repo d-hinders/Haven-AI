@@ -123,6 +123,11 @@ label **or** the diff touches any of:
 - `lib/execution-rail.ts` (the rail seam);
 - `lib/delegation-*.ts`, `lib/hybrid-provisioning.ts`, `lib/hybrid-account-config.ts`, or `routes/agent-delegations.ts`
   (the delegation rail);
+- `lib/sweep.ts`, `lib/relayer.ts`, or `lib/mainnet-gate.ts` (funds recovery, gas
+  payment, and the mainnet authority floor — added by #1045; the review found them
+  missing while they literally move or gate money);
+- `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
+  (user-signed execution, the approval queue, account provisioning);
 - `packages/sdk/src/signer.ts` (signing schemes are spend authority);
 - `middleware/agentAuth.ts`;
 - `db/migrations/`;

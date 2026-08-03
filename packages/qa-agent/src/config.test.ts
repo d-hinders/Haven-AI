@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { loadQaConfig, QaConfigError } from './config.js'
 
 const fullEnv = {
-  QA_HAVEN_API_URL: 'https://dev-backend.up.railway.app/',
+  QA_HAVEN_API_URL: 'https://havenbackend-dev-8b95.up.railway.app/',
   QA_AGENT_API_KEY: 'sk_agent_test',
   QA_DELEGATE_PRIVATE_KEY: '0xabc',
   QA_PAYMENT_TO: '0xrecipient',
@@ -11,7 +11,7 @@ const fullEnv = {
 describe('loadQaConfig', () => {
   it('loads a valid config and strips the API URL trailing slash', () => {
     const config = loadQaConfig(fullEnv)
-    expect(config.apiUrl).toBe('https://dev-backend.up.railway.app')
+    expect(config.apiUrl).toBe('https://havenbackend-dev-8b95.up.railway.app')
     expect(config.agentApiKey).toBe('sk_agent_test')
     expect(config.delegateKey).toBe('0xabc')
     expect(config.paymentTo).toBe('0xrecipient')

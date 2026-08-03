@@ -13,7 +13,7 @@ export interface QaConfig {
   /**
    * Shared dev backend base URL. QA runs hit this **directly, server-to-server**
    * (Node → API) — not through the Vercel `/api` proxy, and not subject to CORS.
-   * e.g. `https://dev-backend.up.railway.app`.
+   * e.g. `https://havenbackend-dev-8b95.up.railway.app`.
    */
   apiUrl: string
   /** QA agent API key (identity, not spend authority): `sk_agent_*`. */

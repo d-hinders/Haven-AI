@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-07-28"
+last-verified: "2026-08-03"
 ---
 
 # Dev environment
@@ -43,10 +43,15 @@ database, JWT secret, or relayer key.
   project's Deployments list). ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).
-  ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
-  not use it; it caused real confusion (#585/#595).
+  Historical note: a stale duplicate `dev-backend.up.railway.app` once shadowed this and
+  caused real confusion (#585/#595). It was **deleted in 2026-08 (#1039)** — the dev project
+  now has exactly four services. Stale references to that hostname may survive in older
+  issues and in `packages/qa-agent` example/fixture strings; the service itself is gone.
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
 - Hosted MCP (Railway): `haven-ai-hosted-mcp-dev-<hash>.up.railway.app` — confirm the hash.
+
+⚠️ The demo-merchant and hosted MCP **sleep when idle** — expect a cold start on the first
+request. See [Serverless and cost control](#serverless-and-cost-control).
 
 ## Branch → deploy mapping
 
@@ -189,9 +194,59 @@ never mistaken for production. `NEXT_PUBLIC_*` is build-time inlined, so the dev
 Vercel deploy bakes the value in; **production leaves the var unset**, which
 renders nothing.
 
+## Serverless and cost control
+
+Railway bills **memory per minute on resident usage**, whether or not a service is
+doing anything — an idle Node process costs the same as a busy one. Memory is ~67×
+more expensive per GB than disk (~$10/GB-month vs ~$0.15), so standing memory, not
+storage, is what drives the bill. This became real in 2026-08 when the Hobby plan's
+included usage was exceeded (#1039).
+
+**Serverless (formerly "App Sleeping")** is enabled on these services — they sleep
+after ~10 minutes of inactivity and wake on the next request:
+
+| Service | Serverless | Why |
+|---|---|---|
+| dev demo-merchant | **on** | Request-driven only; no timers, no DB pool |
+| dev hosted MCP | **on** | Request-driven only; no timers, no DB pool |
+| prod demo-merchant | **on** | Not referenced by any deployed surface |
+
+Enable at *service → Settings → Deploy → Serverless*. Expect a **cold start on the
+first request** after idle — `qa-dev` and x402 demo flows wake the merchant over HTTP,
+so they still work, just slower on the first hit.
+
+### What must never sleep, and why
+
+**Never enable Serverless on the prod backend.** A slept container does not run timers,
+and `packages/backend/src/index.ts` runs four `setInterval` loops — catalog refresh,
+delegate-balance monitor, relayer-balance monitor (both hourly), and the passport sweep
+(every 5 min). Sleeping prod would silently stop the relayer- and delegate-balance
+monitoring that exists to catch a dry relayer *before* it surfaces as failing payments.
+That is a monitoring outage disguised as a cost saving.
+
+The **prod hosted MCP** is deliberately left always-on as well: it is the surface agents
+connect to, and a cold start there is user-facing latency on a customer's first call.
+
+### Why the dev backend does not sleep
+
+Railway detects inactivity from **outbound** packets, not inbound requests. The backend's
+passport sweep runs every 5 minutes and `runIfLeader` issues a `pg_try_advisory_lock`
+query on every tick regardless of leadership — guaranteed outbound traffic inside the
+10-minute window. **Enabling Serverless on the backend would therefore do nothing.**
+Gating those loops behind a dev-only flag was considered and rejected in #1039: sleeping
+the timer-free services was sufficient, and the 5-minute cadence exists for #973's
+revocation-reconciliation reasoning.
+
+Not a factor, and worth recording so nobody hunts for it: the pg pool is
+`idleTimeoutMillis: 30000` with no minimum (`packages/backend/src/db.ts`), so it drains
+to zero when idle. There is no pooler-keepalive problem here.
+
 ## Inspecting the dev environment
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
+- **Railway → any service → Metrics** — CPU / memory. With replicas, note whether the
+  chart is in **Sum** (all replicas combined) or **Replica** view; Sum is what reconciles
+  against the invoice.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
 - **Vercel → dev project** — frontend build logs and the **per-PR preview
   deployments** (no permanent dev frontend URL; open the preview link for the

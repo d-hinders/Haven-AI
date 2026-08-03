@@ -85,10 +85,21 @@ export function buildSettlementDelegation(req: X402SettlementRequest): BuiltSett
   const child = createDelegation({
     environment: env,
     from: req.delegateAccountAddress,
-    // Redeemable by whoever holds it within the caveats: the redeemer caveat
-    // (when the 402 names facilitators) is the constraint that matters; the
-    // grant dies in minutes and pays only payTo, only the exact amount.
-    to: (req.redeemers?.[0] ?? '0x0000000000000000000000000000000000000a11') as Address, // ANY_BENEFICIARY
+    // ANY_BENEFICIARY unconditionally — the redeemer CAVEAT does the
+    // constraining when `req.redeemers` is set. Pinning `to` to
+    // `redeemers[0]` (the previous code) contradicted a multi-entry caveat:
+    // the grant would silently fail for every facilitator but the first
+    // (#1053 review, finding 2).
+    //
+    // HONEST GUARANTEE (#1053 review, finding 1): no live path populates
+    // `req.redeemers` today — routes/x402.ts does not parse facilitator
+    // addresses out of the 402's `requirements.extra`, so every child
+    // delegation is currently a BEARER instrument within its bounds:
+    // exact amount, payee-pinned, ≤600s expiry. The ceiling of that
+    // exposure is "merchant gets paid without delivering", never fund
+    // loss. Wiring `extra` through is tracked as a follow-up; until then
+    // this comment is the guarantee, not the caveat.
+    to: '0x0000000000000000000000000000000000000a11' as Address, // ANY_BENEFICIARY
     parentDelegation: req.budgetDelegation,
     scope: {
       type: 'erc20TransferAmount',

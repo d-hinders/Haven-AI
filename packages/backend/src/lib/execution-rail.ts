@@ -122,5 +122,15 @@ export function deserializeUserOp(stored: unknown): unknown {
  * `details`. Every session-rail error surface must pass through this.
  */
 export function redactVendorSecrets(message: string): string {
-  return message.replace(/apikey=[^&\s"'\\)]+/gi, 'apikey=REDACTED')
+  return (
+    message
+      // Query-param credentials in any spelling: apikey=, api_key=, api-key=,
+      // key=, token= (#1053 review, finding 6 — the old regex caught only
+      // `apikey=`).
+      .replace(/\b(api[_-]?key|key|token|secret)=[^&\s"'\\)]+/gi, '$1=REDACTED')
+      // Basic-auth credentials embedded in a URL: https://user:pass@host
+      .replace(/(https?:\/\/)[^\s/@]+:[^\s@]+@/gi, '$1REDACTED@')
+      // Pimlico-style key-in-path segments: /rpc/<hex-ish token>
+      .replace(/(\/(?:rpc|v2)\/)[A-Za-z0-9_-]{16,}/g, '$1REDACTED')
+  )
 }

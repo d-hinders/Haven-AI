@@ -16,7 +16,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-07-28"
+last-verified: "2026-08-03"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -252,7 +252,16 @@ The flow is a two-call variant of `/x402/authorize`:
    EIP-712 `typed_data` the agent must sign — not an AllowanceModule funding hash,
    and it never queues an approval (over-budget/wrong-recipient reverts on-chain).
 2. The agent signs that typed data VERBATIM with its delegate key (the #829
-   lesson) and submits `{ signature }` to `POST /x402/:id/settle`.
+   lesson) and submits `{ signature }` to `POST /x402/:id/settle`. Settle
+   **recovers the signer** from the child delegation's EIP-712 payload and
+   compares it to the agent's `delegate_address` *before* the intent status
+   flips ([#1053](https://github.com/d-hinders/Haven-AI/issues/1053) review,
+   finding 3). A malformed signature or one from the wrong key is a `400` with
+   the intent left signable — the client re-signs the same `sign_data`; nothing
+   is burned. (Recovery lives in
+   [`lib/delegation-policy.ts`](../../packages/backend/src/lib/delegation-policy.ts)
+   as `recoverDelegationSigner`, not in the route: `routes/**` may not import
+   viem under the chain-SDK boundary rule.)
 3. Haven assembles the merchant-facing `X-PAYMENT` header using MetaMask x402's
    `erc7710` payload
    (`{ delegationManager, permissionContext, delegator }`
@@ -280,6 +289,31 @@ pending the epic docs sweep (#834). Operational detail (gas sponsorship, vendor
 dependencies): [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md);
 security model: [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
+### What the settlement child delegation actually constrains
+
+The child built by
+[`x402-delegation.ts`](../../packages/backend/src/lib/x402-delegation.ts) is
+issued to `ANY_BENEFICIARY` (`0x…0a11`) unconditionally. When the 402 names
+facilitator addresses, the **redeemer caveat** — not the `to` field — is what
+restricts who may redeem; pinning `to` to the first entry (the pre-#1061
+behaviour) silently contradicted a multi-entry caveat and would have failed for
+every facilitator but the first.
+
+Stated honestly: no live path populates the redeemer list today, because
+`routes/x402.ts` does not yet parse facilitator addresses out of the 402
+challenge's `requirements.extra`. **Every settlement child is therefore a bearer
+instrument** — whoever holds it can redeem it — within hard bounds that are the
+actual guarantee:
+
+- the **exact** payment amount (`erc20TransferAmount` scope),
+- **pinned to the merchant** `payTo`,
+- an expiry of **≤600 s**.
+
+The ceiling of that exposure is "the merchant gets paid without delivering",
+never loss of funds beyond the quoted amount. Wiring `requirements.extra`
+through so the redeemer caveat is populated in practice is tracked as
+[#1058](https://github.com/d-hinders/Haven-AI/issues/1058).
+
 ### Settlement-scheme reality and the EIP-3009 bridge
 
 Redeeming the `[child, budget]` chain requires **facilitator-side erc7710
@@ -304,8 +338,12 @@ An explicit `settlementScheme` field is validated against that shape on every
 rail, so a confused client fails loudly instead of silently getting the wrong
 flow. Native-token x402 is still rejected on this rail (no ERC20 transfer to
 pin or meter). The chosen scheme is recorded on the intent
-(`machine_metadata.settlement_scheme`) so 3009-mode usage is auditable and its
-eventual retirement measurable.
+(`machine_metadata.settlement_scheme`, alongside `network`) so 3009-mode usage
+is auditable and its eventual retirement measurable — as of #1061 the
+**erc7710 branch records it too**, so the accounting feed can tell the two
+schemes apart without parsing `prepared_user_op`. (`delegation_hash` still
+carries different semantics per scheme; giving it an honest column is
+[#1059](https://github.com/d-hinders/Haven-AI/issues/1059).)
 
 **How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
 the fund-holder must be an **EOA** that signs (USDC rejects EIP-1271 for it),
@@ -335,6 +373,13 @@ one-shot authorize+execute is refused (a signature over not-yet-prepared state
 can never be valid); and the per-agent hourly x402 cap now guards the delegation
 branch too — placed after the replay lookup (replays are never rate-limited) but
 before any sponsored prepare, making it sponsorship-cost protection as well.
+
+Further hardening with #1061: a non-numeric `maxTimeoutSeconds` is a `400` at
+the top of authorize rather than a `NaN` that clamps through into a `502`; and
+`delegationRailBundlerUrl()` asserts that a chain-scoped bundler URL names the
+chain being requested. `DELEGATION_RAIL_BUNDLER_URL` is a single value while two
+chains are enabled, so a mismatched env now fails at first use with a config
+error instead of quietly routing a payment at the wrong chain's bundler.
 
 ## Guardrails
 

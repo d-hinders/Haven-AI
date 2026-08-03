@@ -13,11 +13,27 @@ const { mockQuery, mockSelect, mockCompute, mockCreateIntent, mockPrepareFunding
   mockPrepareFunding: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
+
+// #1053 finding 3 gave /settle real signature verification, so the tests sign
+// for REAL: a fixed-key delegate account whose address the agent mock carries.
+// Dummy hex now (correctly) 400s — see the wrong-signer regression test.
+import { privateKeyToAccount } from 'viem/accounts'
+import { delegationSigningPayload } from '../../lib/delegation-policy.js'
+const DELEGATE_SIGNER = privateKeyToAccount(('0x' + '11'.repeat(32)) as `0x${string}`)
+async function signChild(child: unknown): Promise<`0x${string}`> {
+  const payload = delegationSigningPayload(child as never, 84532)
+  return DELEGATE_SIGNER.signTypedData({
+    domain: payload.domain,
+    types: payload.types,
+    primaryType: payload.primaryType,
+    message: payload.message as never,
+  })
+}
 vi.mock('../../middleware/agentAuth.js', () => ({
   agentAuthMiddleware: async (request: { agent?: unknown }) => {
     request.agent = {
       id: 'agent-1', user_id: 'user-1', name: 'A',
-      delegate_address: '0x' + 'bb'.repeat(20),
+      delegate_address: DELEGATE_SIGNER.address,
       safe_address: '0x' + 'aa'.repeat(20),
       chain_id: 84532, status: 'active',
       execution_rail: 'delegation', account_type: 'delegator_hybrid',
@@ -145,7 +161,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
   })
 
   // ── #946: EIP-3009 fallback (delegation-metered funding leg) ──────────────
-  const DELEGATE_EOA = '0x' + 'bb'.repeat(20) // = the mocked agent.delegate_address
+  const DELEGATE_EOA = DELEGATE_SIGNER.address // = the mocked agent.delegate_address
   const PREPARED = {
     delegationHash: `0x${'34'.repeat(32)}`,
     prepared: {
@@ -246,14 +262,68 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(invalid.statusCode).toBe(400)
   })
 
+  it('settle 400s a VALID signature from the WRONG key — and the intent survives (#1053 f3)', async () => {
+    // The review's exact scenario: any hex used to pass the shape check, the
+    // intent flipped to submitted, and the ledger recorded a payment that can
+    // never settle. Now the signer is recovered against the delegate key
+    // BEFORE anything becomes unrecoverable.
+    const wrongSigner = privateKeyToAccount(('0x' + '22'.repeat(32)) as `0x${string}`)
+    const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
+    const preparedState = JSON.stringify({
+      child: childFixture, budget: signedBudget,
+      delegateAccountAddress: DELEGATE_ACCT, network: 'eip155:84532',
+    })
+    const updates: string[] = []
+    mockQuery.mockImplementation((sql: string) => {
+      if (/SELECT id, status, execution_rail/.test(String(sql))) {
+        return Promise.resolve({ rows: [{
+          id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
+          prepared_user_op: JSON.parse(preparedState), chain_id: 84532,
+          x402_resource_url: 'https://merchant.example/resource',
+        }] })
+      }
+      if (/UPDATE payment_intents/.test(String(sql))) updates.push(String(sql))
+      return Promise.resolve({ rows: [] })
+    })
+    const payload = delegationSigningPayload(childFixture as never, 84532)
+    const wrongSig = await wrongSigner.signTypedData({
+      domain: payload.domain, types: payload.types,
+      primaryType: payload.primaryType, message: payload.message as never,
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: wrongSig },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/delegate key/)
+    // Nothing flipped: the intent is still signable with the RIGHT key.
+    expect(updates).toEqual([])
+
+    // Garbage hex ('0x0'-class) is also a 400, not a burned intent:
+    const garbage = await app.inject({
+      method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: '0x00' },
+    })
+    expect(garbage.statusCode).toBe(400)
+    expect(updates).toEqual([])
+  })
+
   /** Drive a settle to completion with a valid prepared erc7710 state. */
   async function settleOk(passportRows: Record<string, unknown>[] = []) {
-    const preparedState = JSON.stringify({
-      child: JSON.parse(JSON.stringify(buildBudgetDelegation({
+    const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
         agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
         delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
         budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
-      }))),
+      })))
+    const preparedState = JSON.stringify({
+      child: childFixture,
       budget: signedBudget,
       delegateAccountAddress: DELEGATE_ACCT,
       network: 'eip155:84532',
@@ -272,7 +342,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     return app.inject({
       method: 'POST', url: `/x402/${INTENT_ID}/settle`,
       headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { signature: '0x' + 'ef'.repeat(65) },
+      payload: { signature: await signChild(childFixture) },
     })
   }
 
@@ -301,12 +371,13 @@ describe('x402 delegation-rail settlement (#830)', () => {
   })
 
   it('settle assembles the X-PAYMENT header and flips to submitted; Haven submits nothing', async () => {
+    const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
     const preparedState = JSON.stringify({
-      child: JSON.parse(JSON.stringify(buildBudgetDelegation({
-        agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
-        delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
-        budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
-      }))),
+      child: childFixture,
       budget: signedBudget,
       delegateAccountAddress: DELEGATE_ACCT,
       network: 'eip155:84532',
@@ -325,7 +396,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     const res = await app.inject({
       method: 'POST', url: `/x402/${INTENT_ID}/settle`,
       headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { signature: '0x' + 'ef'.repeat(65) },
+      payload: { signature: await signChild(childFixture) },
     })
     expect(res.statusCode).toBe(200)
     const body = res.json()
@@ -400,12 +471,13 @@ describe('x402 delegation-rail settlement (#830)', () => {
     it('never lets a passport lookup failure break the payment', async () => {
       // The payment is authorised and signed by the time we decorate it.
       // A passport is not worth a 500 on a settled payment.
+      const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
+        agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+        delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+        budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+      })))
       const preparedState = JSON.stringify({
-        child: JSON.parse(JSON.stringify(buildBudgetDelegation({
-          agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
-          delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
-          budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
-        }))),
+        child: childFixture,
         budget: signedBudget,
         delegateAccountAddress: DELEGATE_ACCT,
         network: 'eip155:84532',
@@ -424,7 +496,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
       const res = await app.inject({
         method: 'POST', url: `/x402/${INTENT_ID}/settle`,
         headers: { authorization: 'Bearer sk_agent_test' },
-        payload: { signature: '0x' + 'ef'.repeat(65) },
+        payload: { signature: await signChild(childFixture) },
       })
       expect(res.statusCode).toBe(200)
       expect(res.json().passport).toBeNull()

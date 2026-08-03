@@ -36,7 +36,7 @@ import {
 import { redactVendorSecrets } from '../lib/execution-rail.js'
 import { selectDelegation, prepareDelegationPayment } from '../lib/delegation-authorization.js'
 import { userOpTypedData } from '../lib/delegation-rail.js'
-import { delegationSigningPayload } from '../lib/delegation-policy.js'
+import { delegationSigningPayload, recoverDelegationSigner } from '../lib/delegation-policy.js'
 import { computeHybridAccountAddress } from '../lib/hybrid-provisioning.js'
 import {
   buildSettlementDelegation,
@@ -298,6 +298,11 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       maxTimeoutSeconds,
       signature,
     } = request.body
+      if (maxTimeoutSeconds !== undefined && (typeof maxTimeoutSeconds !== 'number' || !Number.isFinite(maxTimeoutSeconds))) {
+        // #1053 review (minor): a non-numeric value used to NaN through the
+        // clamp and surface as a 502; it is a caller error and gets a 400.
+        return reply.code(400).send({ error: 'maxTimeoutSeconds must be a finite number' })
+      }
     let { payTo } = request.body
     let { merchantPayTo } = request.body
 
@@ -712,6 +717,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           asset: tokenAddress as `0x${string}`,
           amountAtomic: amountRaw,
           payTo: payTo.toLowerCase() as `0x${string}`,
+          // Reviewed (#1053 minor): validated numeric at the route top — a
+          // string here would NaN through the clamp into a 502.
           maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
         })
       } catch (err) {
@@ -736,7 +743,10 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         merchantAddress: (merchantPayTo ?? payTo).toLowerCase(),
         challengeId: null,
         idempotencyKey: idempotencyKey ?? null,
-        metadata: null,
+        // #1053 review, finding 5 (the quick half): record the scheme like the
+        // 3009 path does, so the accounting feed can tell schemes apart without
+        // parsing prepared_user_op. The hash-semantics column is the follow-up.
+        metadata: { network, settlement_scheme: 'erc7710' },
         executionRail: 'delegation',
         delegationHash: built.childHash,
         preparedUserOp: serializeUserOp({
@@ -1499,6 +1509,27 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
               `/payments/${intent.id}/sign. /settle is for erc7710 direct settlement only.`,
           })
         }
+        // #1053 review, finding 3: the shape check above accepts any hex —
+        // '0x0' included — and the flip below burns the intent (a retry 409s
+        // on the status guard). Unlike payments.ts, the child delegation's
+        // typed data IS fully known server-side, so recover the signer and
+        // refuse a signature that is not the delegate's BEFORE anything
+        // becomes unrecoverable. 400, not 502: the client signed wrong and
+        // can re-sign the same sign_data.
+        let signer: string
+        try {
+          signer = await recoverDelegationSigner(state.child, intent.chain_id, signature as `0x${string}`)
+        } catch {
+          return reply.code(400).send({
+            error: 'The signature is not a valid EIP-712 signature over sign_data.typed_data',
+          })
+        }
+        if (signer.toLowerCase() !== agent.delegate_address.toLowerCase()) {
+          return reply.code(400).send({
+            error: 'The signature was not produced by this agent\'s delegate key over sign_data.typed_data',
+          })
+        }
+
         const payload = assembleSettlementPayload(
           intent.chain_id,
           state.child,

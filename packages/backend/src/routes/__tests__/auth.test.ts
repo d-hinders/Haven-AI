@@ -270,3 +270,19 @@ describe('Auth routes', () => {
     })
   })
 })
+
+describe('safes payload carries the rail (#1069)', () => {
+  it('every user_safes SELECT in auth.ts includes account_type — the modal branches on it', async () => {
+    // The #1069 fix originally landed in /user's SELECT — but AuthContext
+    // reads /auth/me, so the Connect modal never saw account_type and
+    // delegation accounts still dead-ended at the wallet approval. Pin the
+    // field at the SOURCE the frontend actually consumes.
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
+    const selects = src.match(/SELECT[^`]*FROM user_safes/g) ?? []
+    expect(selects.length).toBeGreaterThan(0)
+    for (const sel of selects) {
+      expect(sel, `user_safes SELECT missing account_type: ${sel.slice(0, 80)}`).toContain('account_type')
+    }
+  })
+})

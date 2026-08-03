@@ -145,7 +145,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
 
     // Fetch user's Safes
     const safesResult = await pool.query(
-      `SELECT id, safe_address, chain_id, name, is_default, created_at
+      `SELECT id, safe_address, chain_id, name, is_default, created_at, account_type
        FROM user_safes WHERE user_id = $1 ORDER BY created_at ASC`,
       [user.id],
     )
@@ -179,7 +179,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
 
     // Fetch user's Safes
     const safesResult = await pool.query(
-      `SELECT id, safe_address, chain_id, name, is_default, created_at
+      `SELECT id, safe_address, chain_id, name, is_default, created_at, account_type
        FROM user_safes WHERE user_id = $1 ORDER BY created_at ASC`,
       [sub],
     )

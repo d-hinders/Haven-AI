@@ -12,7 +12,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs } from './qa-freshness.mjs'
+import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, completenessWarningFromJobs } from './qa-freshness.mjs'
 
 const HOUR = 3_600_000
 const NOW = Date.parse('2026-07-27T12:00:00Z')
@@ -237,5 +237,22 @@ describe('glob matching', () => {
     ]) {
       assert.equal(moneyPathFiles([f], globs).length, 1, `${f} must be money-path`)
     }
+  })
+})
+
+describe('completeness warning (#1044)', () => {
+  test('warns when the Coverage completeness step failed', () => {
+    const jobs = [{ steps: [
+      { name: 'Run money-flow QA (bounded flake-retry)', conclusion: 'success' },
+      { name: 'Coverage completeness', conclusion: 'failure' },
+    ] }]
+    assert.match(completenessWarningFromJobs(jobs) ?? '', /GREEN-WITH-SKIPS/)
+  })
+  test('silent on full coverage, missing step, or no jobs', () => {
+    assert.equal(completenessWarningFromJobs([{ steps: [
+      { name: 'Coverage completeness', conclusion: 'success' },
+    ] }]), null)
+    assert.equal(completenessWarningFromJobs([{ steps: [] }]), null)
+    assert.equal(completenessWarningFromJobs(undefined), null)
   })
 })

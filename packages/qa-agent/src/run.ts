@@ -77,11 +77,34 @@ async function main(): Promise<void> {
   }
 
   const failures = results.filter((r) => !r.result.pass && !r.result.skipped)
+  const skipped = results.filter((r) => r.result.skipped)
   printRunReport(cfg.apiUrl, results)
 
   if (failures.length > 0) {
     console.error(`\n✗ ${failures.length}/${results.length} scenario(s) failed`)
     process.exit(1)
+  }
+
+  // #1044: a skipped leg is UNEXERCISED coverage, and the promotion gate keys
+  // on this run's green. Say it loudly, in a machine-findable shape, instead of
+  // folding skips into "all passed" — that fold is how a permanently-skipping
+  // leg read as coverage for weeks.
+  if (skipped.length > 0) {
+    console.log(`\n⚠ green-with-skips: ${skipped.length} scenario(s) NEVER RAN:`)
+    for (const { scenario, result } of skipped) {
+      console.log(`  - ${scenario.name}: ${result.detail}`)
+    }
+    if (process.env.QA_REQUIRE_ALL_LEGS === '1') {
+      // Strict mode — flipped on once the operator has provisioned every
+      // leg's identity. From then on a skip is a failure, not a footnote.
+      console.error(`\n✗ QA_REQUIRE_ALL_LEGS=1: refusing to report green with unexercised legs`)
+      process.exit(1)
+    }
+    console.log(
+      `\n✓ all ${results.length - skipped.length} EXECUTED scenario(s) passed ` +
+        `(${skipped.length} skipped — coverage is partial, see #1044)`,
+    )
+    return
   }
   console.log(`\n✓ all ${results.length} scenario(s) passed`)
 }

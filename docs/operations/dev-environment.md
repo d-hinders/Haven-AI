@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-07-28"
+last-verified: "2026-07-27"
 ---
 
 # Dev environment
@@ -59,8 +59,13 @@ database, JWT secret, or relayer key.
   [#1030](https://github.com/d-hinders/Haven-AI/issues/1030)): a promotion PR
   needs a green `qa-dev.yml` run on `dev` that is both recent **and actually
   covers the money-path code being promoted** — if a money-path file changed
-  after the newest green run, the gate fails and names it. A **money-path
-  `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
+  after the newest green run, the gate fails and names it. Since
+  [#1044](https://github.com/d-hinders/Haven-AI/issues/1044) the gate also
+  distinguishes green from green-with-SKIPS: when the covering run skipped a
+  scenario leg (an unprovisioned optional identity), the promotion PR gets a
+  warning that the certified coverage is partial — visible, not blocking,
+  until the repo variable `QA_REQUIRE_ALL_LEGS=1` flips skips to failures.
+  A **money-path `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
   hotfix is deployed nowhere until it merges, so no automatic evidence about it
   can exist. Bypass in both cases: the `qa-override` label, with a comment
   stating what was verified. Both `gate` and `qa-freshness` are **required

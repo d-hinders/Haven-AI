@@ -58,12 +58,16 @@ jobs:
           # testnet RPC hiccup gets one more shot before the run is called red. Bump via a
           # repo variable if a chain is flaky; keep low — each attempt consumes test funds.
           QA_MAX_ATTEMPTS: ${{ vars.QA_MAX_ATTEMPTS || '2' }}
+          # #1044: once every leg's identity is provisioned, set the repo
+          # variable QA_REQUIRE_ALL_LEGS=1 -- from then on a skipped leg fails
+          # the run instead of reading as coverage.
+          QA_REQUIRE_ALL_LEGS: ${{ vars.QA_REQUIRE_ALL_LEGS || '' }}
         run: |
           set -o pipefail
           attempts="${QA_MAX_ATTEMPTS:-2}"
           for i in $(seq 1 "$attempts"); do
             echo "::group::money-flow attempt $i/$attempts"
-            if npm run qa:dev -w packages/qa-agent; then
+            if npm run qa:dev -w packages/qa-agent 2>&1 | tee qa-run.log; then
               echo "::endgroup::"
               echo "money-flow QA passed on attempt $i/$attempts"
               exit 0
@@ -74,6 +78,22 @@ jobs:
           done
           echo "::error::money-flow QA failed after $attempts attempt(s)"
           exit 1
+      # #1044: a green run that SKIPPED legs is partial coverage, and the
+      # dev->main promotion gate keys on this run's conclusion. This step turns
+      # the run.ts skip marker into a step-level failure that (a) annotates the
+      # run page and (b) is visible to qa-freshness via the jobs API -- while
+      # continue-on-error keeps the run green, because blocking promotion on an
+      # unprovisioned OPTIONAL leg would be the opposite over-claim.
+      - name: Coverage completeness
+        if: success()
+        continue-on-error: true
+        run: |
+          if grep -q "green-with-skips:" qa-run.log; then
+            echo "::warning::money-flow QA is green with SKIPPED legs -- coverage is partial (#1044):"
+            grep -A10 "green-with-skips:" qa-run.log | sed -n "2,11p"
+            exit 1
+          fi
+          echo "all legs executed -- full coverage"
       - name: File (or update) a failure issue
         if: failure()
         env:

@@ -278,6 +278,35 @@ export function evaluate({
   }
 }
 
+/**
+ * #1044: was the covering green run green-with-SKIPS? The qa-dev workflow's
+ * "Coverage completeness" step fails (under continue-on-error) when any
+ * scenario leg was skipped, so a green run's PARTIALITY is visible in its
+ * jobs. This inspects those step conclusions and returns a warning string,
+ * or null for full coverage.
+ *
+ * Deliberately a WARNING, not a failure: the skipping leg is optional until
+ * its identity is provisioned, and blocking promotion on an unprovisioned
+ * optional leg would over-claim in the opposite direction. The strict flip
+ * is QA_REQUIRE_ALL_LEGS=1 on the qa-dev side, which makes skips fail the
+ * run itself — at which point this code path never sees them.
+ */
+export function completenessWarningFromJobs(jobs) {
+  for (const job of jobs ?? []) {
+    for (const step of job.steps ?? []) {
+      if (step.name === 'Coverage completeness' && step.conclusion === 'failure') {
+        return (
+          'the covering QA run is GREEN-WITH-SKIPS: at least one money-flow leg never ran ' +
+          '(#1044). The freshness gate still passes — the skipped leg is optional until its ' +
+          'identity is provisioned — but the coverage this gate certifies is partial. ' +
+          'See the run\u2019s "Coverage completeness" step for which legs.'
+        )
+      }
+    }
+  }
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // CLI — the IO shell. Everything above is pure and tested.
 // ---------------------------------------------------------------------------
@@ -301,7 +330,7 @@ function latestGreenRunFor(repo, branch) {
     '--limit',
     '1',
     '--json',
-    'createdAt,headSha',
+    'createdAt,headSha,databaseId',
   ])
   const rows = JSON.parse(out || '[]')
   return rows.length ? rows[0] : null
@@ -354,6 +383,20 @@ function main() {
   let latestGreenRun = null
   try {
     latestGreenRun = latestGreenRunFor(repo, 'dev')
+    if (latestGreenRun?.databaseId) {
+      try {
+        const jobsOut = gh([
+          'api',
+          `repos/${repo}/actions/runs/${latestGreenRun.databaseId}/jobs`,
+          '--jq',
+          '{jobs: [.jobs[] | {steps: [.steps[] | {name, conclusion}]}]}',
+        ])
+        const warning = completenessWarningFromJobs(JSON.parse(jobsOut || '{}').jobs)
+        if (warning) console.log(`::warning::${warning}`)
+      } catch {
+        // Advisory only — a jobs-API hiccup must not fail the gate.
+      }
+    }
   } catch (err) {
     console.error(`::error::qa-freshness: could not query workflow runs: ${err.message}`)
     process.exit(1)

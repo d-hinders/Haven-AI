@@ -12,7 +12,15 @@ const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed } = vi.hoisted(
   mockTreasury: vi.fn(),
   mockEnsureDeployed: vi.fn(),
 }))
-vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
+vi.mock('../../db.js', () => ({
+  default: {
+    query: (...a: unknown[]) => mockQuery(...a),
+    // #1053 finding 4: activation is transactional now — the route takes a
+    // dedicated client. Same mockQuery underneath so assertions see BEGIN/
+    // COMMIT/ROLLBACK inline with the statements they bracket.
+    connect: async () => ({ query: (...a: unknown[]) => mockQuery(...a), release: () => {} }),
+  },
+}))
 vi.mock('../../middleware/auth.js', () => ({
   authMiddleware: async (request: { user?: unknown }) => {
     request.user = { sub: 'user-1' }

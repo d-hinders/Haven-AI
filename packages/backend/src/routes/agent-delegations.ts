@@ -517,19 +517,34 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       // Activate the new grant and mark any previously ACTIVE grant for the
       // same (token, recipient) slot as replaced — the on-chain kill of the
       // old one is the revoke flow (compose for immediate replacement).
-      await pool.query(
-        `UPDATE agent_delegations SET status = 'replaced', updated_at = NOW()
-         WHERE agent_id = $1 AND token_address = $2
-           AND recipient_address IS NOT DISTINCT FROM $3
-           AND status = 'active'`,
-        [request.params.id, pending.token_address, pending.recipient_address],
-      )
-      await pool.query(
-        `UPDATE agent_delegations
-         SET status = 'active', delegation_json = $1, updated_at = NOW()
-         WHERE id = $2`,
-        [JSON.stringify(signed), pending.id],
-      )
+      //
+      // ONE transaction (#1053 review, finding 4): as two separate queries, a
+      // failure between them left the slot with ZERO active grants — every
+      // payment 403s while the old grant is still perfectly valid on-chain.
+      // Atomically it's replace-and-activate or neither.
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        await client.query(
+          `UPDATE agent_delegations SET status = 'replaced', updated_at = NOW()
+           WHERE agent_id = $1 AND token_address = $2
+             AND recipient_address IS NOT DISTINCT FROM $3
+             AND status = 'active'`,
+          [request.params.id, pending.token_address, pending.recipient_address],
+        )
+        await client.query(
+          `UPDATE agent_delegations
+           SET status = 'active', delegation_json = $1, updated_at = NOW()
+           WHERE id = $2`,
+          [JSON.stringify(signed), pending.id],
+        )
+        await client.query('COMMIT')
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {})
+        throw err
+      } finally {
+        client.release()
+      }
       return { activated: true, delegation_hash: request.params.hash }
     },
   )

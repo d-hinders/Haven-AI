@@ -30,7 +30,7 @@
  */
 
 import { keccak256, toUtf8Bytes, Interface } from 'ethers'
-import { pad, type Address, type Hex } from 'viem'
+import { recoverTypedDataAddress, pad, type Address, type Hex } from 'viem'
 import {
   createDelegation,
   getSmartAccountsEnvironment,
@@ -240,6 +240,27 @@ export function delegationSigningPayload(
     primaryType: 'Delegation',
     message: delegation,
   }
+}
+
+/**
+ * Recover the EOA that signed a delegation's EIP-712 payload (#1053 review,
+ * finding 3). Lives here rather than in the route: `routes/**` may not import
+ * viem (the chain-sdk boundary rule), and signature semantics belong with the
+ * signing payload they verify.
+ */
+export async function recoverDelegationSigner(
+  delegation: Omit<Delegation, 'signature'>,
+  chainId: number,
+  signature: `0x${string}`,
+): Promise<string> {
+  const payload = delegationSigningPayload(delegation, chainId)
+  return recoverTypedDataAddress({
+    domain: payload.domain,
+    types: payload.types,
+    primaryType: payload.primaryType,
+    message: payload.message as never,
+    signature,
+  })
 }
 
 /** Revocation call for the treasury to execute: disableDelegation(delegation). */

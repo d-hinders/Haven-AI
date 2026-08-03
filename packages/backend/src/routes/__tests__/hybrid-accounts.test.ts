@@ -166,14 +166,31 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     expect(res.json().error).toMatch(/at least 2 enrolled signers/)
   })
 
-  it('two signers pass the mainnet floor (then hit contract availability, proving order)', async () => {
+  it('two signers pass the mainnet floor and provision on Base mainnet (#908 pins landed)', async () => {
     mockDb({})
     const res = await app.inject({
       method: 'POST', url: '/accounts/hybrid',
       payload: { chain_id: 8453, passkeys: [PASSKEY, BACKUP] },
     })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().error).toMatch(/not available on chain 8453/)
+    // Until 2026-07-27 this 400ed on contract availability — 8453 had no
+    // pins, which doubled as this test's proof that the signer floor runs
+    // FIRST. The pins landed with the #908 gate; a compliant request now
+    // provisions (counterfactual, no tx). The gate-order proof moved to the
+    // unpinned-mainnet test below.
+    expect(res.statusCode).toBe(201)
+  })
+
+  it('the signer floor runs BEFORE contract availability (order proof on an unpinned mainnet)', async () => {
+    mockDb({})
+    // Chain 10 (OP mainnet): value-bearing → the floor applies; unpinned →
+    // contract availability would 400. One signer must be refused by the
+    // FLOOR, not by availability — that error names the signer requirement.
+    const res = await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { chain_id: 10, passkeys: [PASSKEY] },
+    })
+    expect(res.statusCode).toBe(403) // the floor refuses with 403, availability with 400
+    expect(res.json().error).toMatch(/at least 2 signers|signer/i)
   })
 
   it('passkey + EOA owner counts as two signers', async () => {
@@ -182,7 +199,7 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
       method: 'POST', url: '/accounts/hybrid',
       payload: { chain_id: 8453, owner_address: OWNER, passkeys: [PASSKEY] },
     })
-    expect(res.statusCode).toBe(400) // past the floor, into contract availability
+    expect(res.statusCode).toBe(201) // past the floor; 8453 is pinned since #908
   })
 
   it('an explicit waiver passes the floor (and would be recorded on the row)', async () => {
@@ -195,9 +212,9 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
         single_signer_waiver: { acknowledged: true },
       },
     })
-    // Past the floor → contract availability (mainnet not in the registry yet).
-    expect(res.statusCode).toBe(400)
-    expect(res.json().error).toMatch(/not available on chain 8453/)
+    // Past the floor → provisioning succeeds (8453 pinned since #908). The
+    // waiver recording itself is pinned by the mainnet-gate unit tests.
+    expect(res.statusCode).toBe(201)
   })
 
   it('a non-true waiver value does NOT pass the floor', async () => {

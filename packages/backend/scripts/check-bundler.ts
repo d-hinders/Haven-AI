@@ -37,9 +37,20 @@ async function rpc(url: string, method: string, params: unknown[] = []): Promise
 }
 
 async function main(): Promise<void> {
-  // Default to the lowest enabled delegation-rail chain (Base Sepolia today);
-  // override for a specific chain with CHECK_BUNDLER_CHAIN_ID.
-  const chainId = Number(process.env.CHECK_BUNDLER_CHAIN_ID ?? [...DELEGATION_RAIL_CHAIN_IDS][0])
+  // With ONE enabled chain the probe picks it; with several (8453 + 84532
+  // since #908) an implicit default would silently probe the wrong one — the
+  // single DELEGATION_RAIL_BUNDLER_URL is per-environment, so a Sepolia
+  // credential answering a "chain 8453" probe would read as healthy while
+  // proving nothing. Require the operator to say which chain they mean.
+  const enabled = [...DELEGATION_RAIL_CHAIN_IDS]
+  const explicit = process.env.CHECK_BUNDLER_CHAIN_ID
+  if (!explicit && enabled.length > 1) {
+    console.error(
+      `multiple delegation-rail chains enabled (${enabled.join(', ')}) — set CHECK_BUNDLER_CHAIN_ID to the one this environment's DELEGATION_RAIL_BUNDLER_URL targets`,
+    )
+    process.exit(2)
+  }
+  const chainId = Number(explicit ?? enabled[0])
 
   let url: string
   try {

@@ -25,6 +25,8 @@ export interface UserSafe {
   name: string
   is_default: boolean
   created_at: string
+  /** 'delegator_hybrid' on the delegation rail; null/legacy = Safe rail (#1069). */
+  account_type?: string | null
 }
 
 export interface User {

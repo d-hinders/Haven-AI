@@ -105,7 +105,6 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1
-        AND a.status != 'pending_approval'
        ORDER BY a.created_at DESC`,
       [sub],
     )
@@ -158,7 +157,6 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1 AND a.id = $2
-        AND a.status != 'pending_approval'
        LIMIT 1`,
       [sub, id],
     )

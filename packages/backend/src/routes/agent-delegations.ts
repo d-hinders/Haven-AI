@@ -538,6 +538,16 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
            WHERE id = $2`,
           [JSON.stringify(signed), pending.id],
         )
+        // #1069: on the delegation rail the OWNER'S GRANT SIGNATURE is the
+        // approval — there is no AllowanceModule wallet-approval step to flip
+        // the agent, so a modal-created agent stayed 'pending_approval'
+        // forever. Activating the first budget activates the agent, inside
+        // the same transaction as the grant it rests on.
+        await client.query(
+          `UPDATE agents SET status = 'active', updated_at = NOW()
+           WHERE id = $1 AND status = 'pending_approval'`,
+          [request.params.id],
+        )
         await client.query('COMMIT')
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {})

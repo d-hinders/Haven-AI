@@ -24,18 +24,29 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+// The shared kernel is scanned too (#1046): DEFAULT_CHAIN_ID lives there, and
+// a bare fallback reintroduced NEXT TO the constant would be the most ironic
+// possible regression. Same walk, same rules.
+const CORE_SRC = path.resolve(SRC, '../../core/src')
 
 /**
  * Files allowed to carry a bare chain default, each for a stated reason.
  * Adding an entry is a decision; it should be argued for in review, which is
  * why the reason lives here rather than in a comment at the call site.
  */
-const ALLOWED: Record<string, string> = {
+const ALLOWED: Record<string, { reason: string; permits: RegExp }> = {
   // Base Sepolia, not Base. The delegation-rail onboarding is dark-launched and
   // provisions on testnet; aligning it to DEFAULT_CHAIN_ID would move new
   // hybrid accounts to MAINNET, which is a product decision tied to the #908
   // mainnet gate, not a consistency cleanup (owner call, 2026-07-28).
-  'routes/hybrid-accounts.ts': 'dark-launched delegation onboarding defaults to Base Sepolia',
+  //
+  // #1046: the entry is LINE-scoped via `permits` — it exempts exactly the
+  // sanctioned `?? 84532` fallback, so a future bare `?? 100` in the same
+  // file still flags. A file-wide pass was a silent hole.
+  'routes/hybrid-accounts.ts': {
+    reason: 'dark-launched delegation onboarding defaults to Base Sepolia',
+    permits: /(?:\?\?|\|\|)\s*84532\b/,
+  },
 }
 
 /**
@@ -45,7 +56,14 @@ const ALLOWED: Record<string, string> = {
  *   - a default binding — `{ chain_id = 8453, … }`, `{ … = 8453 }`, or a
  *     parameter default `(chainId = 8453)`, recognised by the `,`, `}` or `)`
  *     that must follow it;
- *   - a **SQL** fallback — `COALESCE(us.chain_id, 8453)`.
+ *   - a **SQL** fallback — `COALESCE(us.chain_id, 8453)`;
+ *   - a **ternary** fallback — `input.chain_id ? input.chain_id : 8453` (#1046);
+ *   - a **conditional assignment** — `if (!row.chain_id) row.chain_id = 8453`;
+ *   - a **quoted** fallback — `?? "8453"` (#1046: quotes hid the literal);
+ *   - a **trailing call/SQL argument** for the two UNAMBIGUOUS Base ids —
+ *     `toChain(x, 8453)`, `VALUES ($1, 84532)`. `100` is deliberately NOT
+ *     matched in this shape: a bare trailing 100 is overwhelmingly a count or
+ *     rate limit, and re-flagging those is this guard's founding mistake.
  *
  * The SQL shape was added after review: `middleware/agentAuth.ts` set
  * `agent.chain_id` from a `COALESCE(..., 8453)` that `machine-payments.ts` then
@@ -66,7 +84,8 @@ const ALLOWED: Record<string, string> = {
  *     "default", which is worse than the literal it replaced.
  */
 const BARE_DEFAULT =
-  /(?:\?\?|\|\|)\s*(?:100|8453|84532)\b|(?<![=!<>])=(?!=)\s*(?:100|8453|84532)\s*[,})]|COALESCE\s*\([^)]*,\s*(?:100|8453|84532)\s*\)/gi
+  // eslint-disable-next-line no-useless-escape
+  /(?:\?\?|\|\|)\s*['"]?(?:100|8453|84532)['"]?\b|(?<![=!<>])=(?!=)\s*(?:100|8453|84532)\s*[,})]|COALESCE\s*\([^)]*,\s*(?:100|8453|84532)\s*\)|\?(?!\.)[^:?\n]+:\s*(?:100|8453|84532)\b|if\s*\(\s*![^)]*\)\s*[\w.[\]]+\s*=\s*(?:100|8453|84532)\b|,\s*(?:8453|84532)\s*\)/gi
 
 /**
  * The match must sit on a line that mentions a chain.
@@ -91,6 +110,10 @@ const BARE_DEFAULT =
  *     Widening to catch it re-flags every rate limit.
  *   - a chain id reached indirectly — assigned to an intermediate variable on
  *     one line and defaulted on another.
+ *   - a trailing `100` as a call/SQL argument (`f(x, 100)`) — see the shape
+ *     list: unmatchable without re-flagging rate limits.
+ *   - anything outside the scanned trees (backend + core). qa-agent and
+ *     frontend remain unscanned; the SDK's `?? 8453` is disclosed in #990.
  *
  * An overstated net is worse than a known-partial one, because nobody
  * compensates for a gap they believe is closed. Read this list as the actual
@@ -120,14 +143,17 @@ describe('chain defaults go through DEFAULT_CHAIN_ID (#990)', () => {
     const offenders: string[] = []
     let scanned = 0
 
-    for (const file of sourceFiles(SRC)) {
+    for (const file of [...sourceFiles(SRC), ...sourceFiles(CORE_SRC)]) {
       scanned += 1
-      const rel = path.relative(SRC, file).split(path.sep).join('/')
-      if (ALLOWED[rel]) continue
+      const base = file.startsWith(CORE_SRC) ? CORE_SRC : SRC
+      const prefix = file.startsWith(CORE_SRC) ? 'core:' : ''
+      const rel = prefix + path.relative(base, file).split(path.sep).join('/')
+      const allowed = ALLOWED[rel]
       const text = readFileSync(file, 'utf8')
       const lines = text.split('\n')
       lines.forEach((lineText, i) => {
         if (!CHAIN_CONTEXT.test(lineText)) return
+        if (allowed?.permits.test(lineText)) return
         for (const m of lineText.matchAll(BARE_DEFAULT)) {
           offenders.push(`${rel}:${i + 1}  ${m[0].trim()}`)
         }
@@ -164,6 +190,13 @@ describe('chain defaults go through DEFAULT_CHAIN_ID (#990)', () => {
       'COALESCE(us.chain_id, 8453) as chain_id,',
       'function resolveChain(chainId = 8453): number {',
       'const resolve = (chainId = 8453) => getChain(chainId)',
+      // #1046: the five evasion shapes the adversarial review walked through
+      // the previous net. Each is a regression case for a real gap.
+      'const chainId = input.chain_id ? input.chain_id : 8453',
+      'if (!row.chain_id) row.chain_id = 8453',
+      "const chainId = Number(req.query.chain_id ?? '8453')",
+      'const chain = toChain(row.chain_id, 8453)',
+      'INSERT INTO user_safes (address, chain_id) VALUES ($1, 8453)',
     ]
     // The rate limits that the first version of this guard wrongly flagged, and
     // that #990's own premise misread as chain fallbacks. Regression case.
@@ -175,6 +208,10 @@ describe('chain defaults go through DEFAULT_CHAIN_ID (#990)', () => {
       // substring, is what keeps this out.
       'const retries = opts.retries ?? 100 // blockchain retry count',
       'const backoff = cfg.backoff ?? 100 // chained requests',
+      // #1046: trailing 100 stays unmatched by the call-arg shape ON PURPOSE —
+      // a chain-mentioning line with a timer/limit would otherwise re-flag.
+      'pollChain(fn, 100)',
+      'await retryChainCall(tx, 100)',
     ]
     // All of these mention a chain, so they isolate the SHAPE rule rather than
     // passing for lack of chain context — which is what makes them meaningful.
@@ -184,6 +221,11 @@ describe('chain defaults go through DEFAULT_CHAIN_ID (#990)', () => {
       'if (status.chain_id !== 8453) return null',
       // A named constant, not a fallback — see the pattern's docstring.
       'const CHAIN_ID = 8453',
+      // An explicit object-literal value is a choice, not a fallback; no `?`
+      // on the line means the ternary shape stays quiet.
+      'const cfg = { chainId: 8453 }',
+      // Optional chaining is not a ternary — the `.` exclusion keeps it out.
+      'const id = row?.chain_id',
     ]
     for (const s of bad) expect(flags(s), s).toBe(true)
     for (const s of good) expect(flags(s), s).toBe(false)
@@ -194,15 +236,15 @@ describe('chain defaults go through DEFAULT_CHAIN_ID (#990)', () => {
     // A stale allowlist entry is a silent hole: the file it named could be
     // deleted or fixed, and the entry would sit there permitting nothing while
     // implying something was reviewed.
-    for (const [rel, reason] of Object.entries(ALLOWED)) {
+    for (const [rel, { reason, permits }] of Object.entries(ALLOWED)) {
       const full = path.join(SRC, rel)
       expect(() => statSync(full), `${rel} is allowlisted but does not exist`).not.toThrow()
       const text = readFileSync(full, 'utf8')
-      const chainLines = text.split('\n').filter((l) => CHAIN_CONTEXT.test(l)).join('\n')
+      const permitted = text.split('\n').filter((l) => CHAIN_CONTEXT.test(l) && permits.test(l))
       expect(
-        chainLines.match(new RegExp(BARE_DEFAULT.source)),
-        `${rel} is allowlisted ("${reason}") but no longer has a bare default — remove the entry`,
-      ).toBeTruthy()
+        permitted.length,
+        `${rel} is allowlisted ("${reason}") but its permits pattern matches nothing — remove the entry`,
+      ).toBeGreaterThan(0)
     }
   })
 })

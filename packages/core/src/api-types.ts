@@ -1712,7 +1712,7 @@ export type components = {
                 id: string;
                 name: string;
                 /** @enum {string} */
-                status: "active" | "paused" | "revoked";
+                status: "active" | "paused" | "pending_approval" | "revoked";
             }[];
             tokens: {
                 /** @description '<chainId>:native' or '<chainId>:<lowercased address>'. */

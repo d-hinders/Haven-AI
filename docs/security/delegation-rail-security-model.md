@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-07-25"
+last-verified: "2026-08-03"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -64,6 +64,7 @@ dropped.
 | 7 | UserOps submitted with caller-provided signature only | Redemptions submitted with **client-signed** UserOp/tx only; the backend constructs and relays, never signs | CI (the #737 pattern, delegation flavor) |
 | 8 | Session-config modules signer-free | Delegation lifecycle modules (grant/replace/revoke construction, #827/#828) are **signer-free and relayer-free**: they build payloads and typed data, never sign | CI (module import/AST scan) |
 | 9 | Bundler credential read in exactly one place | Unchanged (one choke point; `redactVendorSecrets` on every error surface) | CI (existing) |
+| 9a | *(new, #1061)* **Redaction covers the shapes vendors actually use** | `redactVendorSecrets` catches `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth (`https://user:pass@host`), and key-in-path segments (`/rpc/<token>`, `/v2/<token>`) — not just the one `apikey=` spelling | Unit tests on the redactor |
 | 10 | Paymaster has no value-transfer surface | Unchanged — sponsorship pays gas only; proven in the spike (agent key held zero ETH and zero USDC) | CI + spike evidence |
 | 11 | *(new)* **No upgrade path from Haven code** | Haven's codebase contains no call site that can reach the account's UUPS upgrade function; upgrade authority = account signers only | CI (ABI/selector scan for `upgradeToAndCall` against DeleGator targets) |
 | 12 | *(new)* **Delegations are client-signed only** | No Haven code path calls `signDelegation`/EIP-712 delegation signing with a server-held key (pilot scripts with throwaway testnet keys excepted, path-scoped) | CI (import + call-site scan) |
@@ -217,6 +218,14 @@ moment a delegation becomes live spend authority. Properties:
 - **Testnets are untouched:** single-signer dev/QA accounts remain exactly as
   cheap as before — the floor is a mainnet launch criterion, not a general
   restriction.
+- **Activation is atomic** (#1061): retiring the previously ACTIVE grant for a
+  `(token, recipient)` slot and activating the new one run in **one
+  transaction**. As two independent statements, a failure between them left the
+  slot with zero active grants — every payment 403s while the old grant is still
+  perfectly valid on-chain, i.e. a self-inflicted outage with no on-chain cause.
+  It is now replace-and-activate or neither. This is availability hardening, not
+  a custody change: neither statement can create authority the owner did not
+  sign.
 
 Two honest limits of the mechanism (review-noted): the signer count is
 **DB-sourced** — an owner can change the signer set directly on-chain without
@@ -277,3 +286,27 @@ not-yet-prepared state can never be valid); and idempotent replays resume
 with the ORIGINAL reconstructed signing payload rather than re-running
 estimations — the stored intent, not a fresh prepare, is the source of truth
 for what the agent signs.
+
+### 8.1 The settlement child — verified signer, honest bearer semantics (#1061)
+
+Two properties of the erc7710 settlement leg, corrected in #1061:
+
+- **The settle signature is verified against the delegate key, not merely
+  shape-checked.** `POST /x402/:id/settle` recovers the signer from the child
+  delegation's EIP-712 typed data and refuses anything that is not the agent's
+  `delegate_address` — with a `400`, *before* the intent status flips, so the
+  intent stays signable and the client can re-sign the same payload. Previously
+  any hex (`0x0` included) passed the shape check and burned the intent, turning
+  a client-side signing bug into an unrecoverable payment. This is the
+  authentication/authorisation split enforced concretely: the bearer token
+  identifies the agent, the recovered delegate signature is what authorises.
+  Unlike `payments.ts`, the child's typed data is fully known server-side, so
+  the check is possible here.
+- **The child is a bearer instrument, and the doc says so.** It is issued to
+  `ANY_BENEFICIARY`; the redeemer *caveat* is the constraint that would narrow
+  it, and no live path populates it yet (`requirements.extra` is not parsed —
+  [#1058](https://github.com/d-hinders/Haven-AI/issues/1058)). The real
+  guarantee is therefore the caveat stack, not the recipient: exact amount,
+  payee-pinned, ≤600 s expiry. Worst case on a leaked child is "the merchant is
+  paid without delivering" for that one quoted amount — the leak-analysis table
+  in §3 is unchanged, since redeeming still cannot exceed those bounds.

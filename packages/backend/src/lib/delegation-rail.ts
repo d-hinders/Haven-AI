@@ -65,6 +65,16 @@ export function delegationRailBundlerUrl(chainId: number): string {
   if (!DELEGATION_RAIL_CHAIN_IDS.has(chainId)) {
     throw new Error(`delegation rail: chain ${chainId} is not enabled`)
   }
+  // #1053 review, finding 7: the env var is ONE URL while two chains are
+  // enabled, and a Pimlico URL is chain-scoped by its path. Assert the URL
+  // names the requested chain so a mismatched env fails at first use with a
+  // config error instead of routing a payment at the wrong chain's bundler.
+  if (/\/v2\/\d+\//.test(url) && !url.includes(`/v2/${chainId}/`)) {
+    throw new Error(
+      `DELEGATION_RAIL_BUNDLER_URL targets a different chain than ${chainId} — ` +
+        'the credential is chain-scoped; this deployment cannot serve this chain',
+    )
+  }
   return url
 }
 

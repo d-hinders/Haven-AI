@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-07-25"
+last-verified: "2026-07-27"
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -121,7 +121,11 @@ Probes:
 
 ## 4. Anti-lock-in: fork-and-pin policy + re-evaluation tripwires
 
-**Contracts:** pinned by address in `lib/delegation-contracts.ts` with audit
+**Contracts:** pinned by address in `lib/delegation-contracts.ts` — since
+2026-07-27 for BOTH Base Sepolia and Base mainnet (#908; the mainnet pin run
+bytecode-compared every contract against the Sepolia set and required the two
+chain-scoped immutables in DelegationManager/HybridDeleGatorImpl explained
+before pinning) — with audit
 provenance. Pins NEVER move on a package upgrade — adding a chain or a new
 manager version is a reviewed change with its own verification run.
 

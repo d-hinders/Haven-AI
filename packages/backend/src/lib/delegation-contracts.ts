@@ -38,11 +38,38 @@ export interface DelegationContracts {
 }
 
 /**
- * Per-chain registry. Base Sepolia only until the epic's DoD passes; Base
- * mainnet is added by the (separate) mainnet gate with its own verification
- * run — never by copying.
+ * Per-chain registry. Base mainnet added 2026-07-27 by the #908 gate with its
+ * own verification run (bytecode-compared, see the 8453 block) — the "never by
+ * copying" rule held: the run CAUGHT the chain-scoped immutables and required
+ * them explained before pinning.
  */
 const CONTRACTS: Record<number, DelegationContracts> = {
+  // Base mainnet (#908). Verified 2026-07-27 against two independent RPCs
+  // (mainnet.base.org + base-rpc.publicnode.com, both agreeing) with bytecode
+  // COMPARED to the Sepolia pins below — not just has-code:
+  // - 10 of 12 contracts are byte-identical to 84532.
+  // - delegationManager and hybridDeleGatorImpl differ in EXACTLY two
+  //   segments each: a 3-byte immutable holding the chain id (0x2105 vs
+  //   0x14a34) and the 32-byte cached EIP-712 domain separator that hashes
+  //   it. Same length, same version, chain-scoped immutables — the expected
+  //   shape, not a divergence. Anything beyond those segments would have
+  //   failed this pin.
+  8453: {
+    delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+    entryPoint: '0x0000000071727De22E5E9d8BAf0edAc6f37da032',
+    simpleFactory: '0x69Aa2f9fe1572F1B640E1bbc512f5c3a734fc77c',
+    hybridDeleGatorImpl: '0x48dBe696A4D990079e039489bA2053B36E8FFEC4',
+    enforcers: {
+      erc20PeriodTransfer: '0x474e3Ae7E169e940607cC624Da8A15Eb120139aB',
+      multiTokenPeriod: '0xFB2f1a9BD76d3701B730E5d69C3219D42D80eBb7',
+      allowedTargets: '0x7F20f61b1f09b08D970938F6fa563634d65c4EeB',
+      allowedCalldata: '0xc2b0d624c1c4319760C96503BA27C347F3260f55',
+      allowedMethods: '0x2c21fD0Cb9DC8445CB3fb0DC5E7Bb0Aca01842B5',
+      timestamp: '0x1046bb45C8d673d4ea75321280DB34899413c069',
+      limitedCalls: '0x04658B29F6b82ed55274221a06Fc97D318E25416',
+      erc20TransferAmount: '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc',
+    },
+  },
   84532: {
     delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
     entryPoint: '0x0000000071727De22E5E9d8BAf0edAc6f37da032',

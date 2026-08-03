@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-07-27"
+last-verified: "2026-08-03"
 ---
 
 # L0 Agent Passport — EAS schema
@@ -579,6 +579,20 @@ key, whose UID does not exist until it lands:
 npm run ops:register-passport-schema -w packages/backend            # dry run: verify pins
 npm run ops:register-passport-schema -w packages/backend -- --send  # register
 ```
+
+**It needs no database.** `RPC_URL_BASE_SEPOLIA` is optional (it defaults to
+`https://sepolia.base.org`), and `--send` additionally needs
+`PASSPORT_SCHEMA_REGISTRAR_KEY` — a **throwaway** testnet key, never the
+relayer, which since #908 holds real Base mainnet ETH. Nothing else is
+required: an operator runs this by hand, once, on a machine with no reason to
+have a Postgres URL.
+
+That property is easy to lose by accident and was lost once: pointing the
+script at `lib/passport/index.js` pulls in issuance/revocation/verification,
+which reach `config.ts`, whose `requireEnv('DATABASE_URL')` runs at import
+time — so the probe died before its first line. It imports from `schema.js`
+directly for that reason, and a guard test now spawns it with `DATABASE_URL`
+removed to keep it that way.
 
 The script is **fail-closed on the pins**. The EAS addresses in
 `lib/passport/schema.ts` are the standard OP-Stack predeploys Base inherits,

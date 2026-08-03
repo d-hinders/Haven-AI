@@ -19,7 +19,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-07-28"
+last-verified: "2026-07-27"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -174,7 +174,15 @@ The deterministic harness runs seven scenarios in order:
 | `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 
-The harness exits non-zero if any non-skipped scenario fails. Its Markdown
+The harness exits non-zero if any non-skipped scenario fails. **Skips are
+loud, not silent (#1044):** a green run with skipped legs prints a
+`green-with-skips:` block naming each unexercised leg, the qa-dev workflow's
+*Coverage completeness* step turns that into a run-page warning (visible to
+the promotion gate's `qa-freshness`, which annotates the promotion PR), and
+once every leg's identity is provisioned the repo variable
+`QA_REQUIRE_ALL_LEGS=1` flips skips from footnote to failure. Until that
+flip, read "green" as "every EXECUTED leg passed" — the completeness step
+says which legs never ran. Its Markdown
 scenario table is an evidence starter, not a complete report: copy it into
 [`_run-report-template.md`](../bug-reports/_run-report-template.md) and add run
 metadata, exact command and exit code, preflight, artifacts, public evidence,

@@ -15,7 +15,13 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }))
 
-import { PASSKEY_SCHEMA_VERSION, setStoredPasskeySigner } from '@/lib/signer'
+import {
+  PASSKEY_SCHEMA_VERSION,
+  credentialIdFromKeyId,
+  rememberPasskeyCredentialOnDevice,
+  setStoredHybridSigners,
+  setStoredPasskeySigner,
+} from '@/lib/signer'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 
 const SAFE_ADDRESS = '0x07058311f995c89F4DbE17Db61fa1A3CDe638975' as Address
@@ -119,5 +125,82 @@ describe('useSafeOperationGate', () => {
     )
 
     expect(result.current).toEqual({ kind: 'passkey_on_other_device' })
+  })
+
+  // ── Rail awareness (#1079): delegator_hybrid accounts ──────────────────
+
+  const HYBRID_ADDRESS = '0x9999888877776666555544443333222211110000' as Address
+  const HYBRID_KEY_ID = '0x0102030405060708'
+  const HYBRID_SAFE_ROW = {
+    id: 'safe-hybrid',
+    safe_address: HYBRID_ADDRESS,
+    chain_id: 84532,
+    name: 'Delegation account',
+    is_default: true,
+    created_at: '2026-07-01T00:00:00.000Z',
+    account_type: 'delegator_hybrid',
+  }
+  const HYBRID_SIGNERS = {
+    account_address: HYBRID_ADDRESS,
+    chain_id: 84532,
+    owner_address: null,
+    passkeys: [
+      { key_id: HYBRID_KEY_ID, x: `0x${'aa'.repeat(32)}` as const, y: `0x${'bb'.repeat(32)}` as const },
+    ],
+  }
+
+  function mockHybridAuth() {
+    mockUseAuth.mockReturnValue({ passkeys: [], user: { safes: [HYBRID_SAFE_ROW] } })
+  }
+
+  it('hybrid account: ready when the signer set is hydrated and the passkey is on this device', () => {
+    mockHybridAuth()
+    setStoredHybridSigners(HYBRID_SIGNERS)
+    rememberPasskeyCredentialOnDevice(credentialIdFromKeyId(HYBRID_KEY_ID))
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'ready' })
+  })
+
+  it('hybrid account: passkey_on_other_device when signers exist but none is on this device', () => {
+    mockHybridAuth()
+    setStoredHybridSigners(HYBRID_SIGNERS)
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'passkey_on_other_device' })
+  })
+
+  it('hybrid account: no_signer when no signer set is known — even with a wallet connected', () => {
+    mockHybridAuth()
+    // A globally connected EOA says nothing about who may sign for a Hybrid.
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+    )
+
+    expect(result.current).toEqual({ kind: 'no_signer' })
+  })
+
+  it('hybrid signer sets do not affect a DIFFERENT (legacy) safe address', () => {
+    mockHybridAuth()
+    setStoredHybridSigners(HYBRID_SIGNERS)
+    rememberPasskeyCredentialOnDevice(credentialIdFromKeyId(HYBRID_KEY_ID))
+    mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
+    mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
+
+    const { result } = renderHook(() =>
+      useSafeOperationGate({ safeAddress: SAFE_ADDRESS, chainId: 100 }),
+    )
+
+    // Legacy path untouched: connected wallet → ready.
+    expect(result.current).toEqual({ kind: 'ready' })
   })
 })

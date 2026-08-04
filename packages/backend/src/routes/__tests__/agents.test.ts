@@ -98,7 +98,11 @@ describe('agent routes', () => {
       allowances: [{ id: 'allowance-1', token_symbol: 'USDC' }],
       mcp_last_seen_at: null,
     })
-    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
+    // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
+    // setup used to leave the user with "Agents 0" and no route back to an
+    // agent that exists. The list/detail include them; the UI badges them
+    // 'Needs setup' and links to the page where the budget grant activates.
+    expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', 'agent-1'])
 
     await app.close()
@@ -135,7 +139,11 @@ describe('agent routes', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json().mcp_last_seen_at).toBe(lastSeenAt)
-    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
+    // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
+    // setup used to leave the user with "Agents 0" and no route back to an
+    // agent that exists. The list/detail include them; the UI badges them
+    // 'Needs setup' and links to the page where the budget grant activates.
+    expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
 
     await app.close()
   })
@@ -153,7 +161,11 @@ describe('agent routes', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ agents: [] })
-    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
+    // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
+    // setup used to leave the user with "Agents 0" and no route back to an
+    // agent that exists. The list/detail include them; the UI badges them
+    // 'Needs setup' and links to the page where the budget grant activates.
+    expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
 
     await app.close()
   })

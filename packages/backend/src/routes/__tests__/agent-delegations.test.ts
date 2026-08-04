@@ -334,6 +334,21 @@ describe('delegation lifecycle API (#828)', () => {
   })
 
   describe('POST /:id/delegations/:hash/activate — grant step 2', () => {
+    it('activating the first grant ALSO activates a pending_approval agent — the rail\'s approval (#1069)', async () => {
+      // On the delegation rail there is no wallet-approval step; the owner's
+      // grant signature IS the approval. Without this flip a modal-created
+      // agent stayed pending forever.
+      mockDb({})
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.json()).toMatchObject({ activated: true })
+      const flip = mockQuery.mock.calls.find((c) => /UPDATE agents SET status = 'active'/.test(String(c[0])))
+      expect(flip).toBeDefined()
+      expect(String(flip![0])).toMatch(/status = 'pending_approval'/)
+    })
+
     it('accepts a WebAuthn-length signature (ABI-encoded assertion, >65 bytes) (#887)', async () => {
       mockDb({
         owner: null,

@@ -12,6 +12,7 @@ import {
   type AllowanceSetup,
 } from '@/lib/allowance-module'
 import { api, getResolvedApiBaseUrl } from '@/lib/api'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -151,6 +152,7 @@ export default function ConnectAgent2Modal({
   useFocusTrap(panelRef, open)
 
   const { user, activeSafe } = useAuth()
+  const router = useRouter()
   const userSafes = user?.safes ?? []
 
   // Only wallets on a currently-supported chain can actually run a new agent
@@ -200,6 +202,12 @@ export default function ConnectAgent2Modal({
   const safeAddress = selectedSafe?.safe_address ?? propSafeAddress ?? ''
   const safeId = selectedSafe?.id ?? propSafeId ?? null
   const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
+  // #1069: the wallet-approval step is the LEGACY rail's mechanism. A
+  // delegation-rail account (Hybrid DeleGator, possibly passkey-only) has no
+  // AllowanceModule and may have no connectable EOA — its approval is the
+  // budget grant, signed on the agent page. Branch the final step on this.
+  const isDelegationAccount =
+    (selectedSafe?.account_type ?? activeSafe?.account_type) === 'delegator_hybrid'
   const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
   const walletNetworkName = getChainConfig(chainId).name
   const walletDisplayAddress = safeAddress || selectedSafe?.safe_address
@@ -890,7 +898,25 @@ export default function ConnectAgent2Modal({
               {((visibleStatus === 'connected_local' &&
                 (runtimeIsConfigured(setupStatus?.install_status) ||
                   setupStatus?.install_status?.error_code)) ||
-                visibleStatus === 'awaiting_wallet_approval') && (
+                visibleStatus === 'awaiting_wallet_approval') && isDelegationAccount && (
+                <SetupStatusState
+                  title="Set the agent's budget to activate it"
+                  body="Your agent is connected and its credentials are ready. On this account, you approve by granting a budget — one passkey or wallet signature on the agent's page. The agent cannot spend until a budget is active."
+                  tone="brand"
+                  primaryLabel="Set budget"
+                  onPrimary={() => {
+                    handleClose()
+                    // agent_id arrives with the register step's status payload;
+                    // fall back to the agents list if polling has not caught up.
+                    router.push(setupStatus?.agent_id ? `/agents/${setupStatus.agent_id}` : '/agents')
+                  }}
+                />
+              )}
+
+              {((visibleStatus === 'connected_local' &&
+                (runtimeIsConfigured(setupStatus?.install_status) ||
+                  setupStatus?.install_status?.error_code)) ||
+                visibleStatus === 'awaiting_wallet_approval') && !isDelegationAccount && (
                 <LocalConnectionReady
                   status={setupStatus}
                   fallbackSetup={setup}

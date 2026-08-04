@@ -66,6 +66,11 @@ const {
   mockManualSignMessage: vi.fn(),
 }))
 
+vi.mock('next/navigation', () => ({
+  // #1069: the modal routes delegation-rail users to the agent page for the
+  // budget grant; tests render without the app router, so mock it.
+  useRouter: () => ({ push: vi.fn() }),
+}))
 vi.mock('wagmi', () => ({
   usePublicClient: (args: unknown) => mockUsePublicClient(args),
   // Not connected by default — avoids wrong-chain detection in tests that
@@ -508,6 +513,30 @@ describe('ConnectAgent2Modal', () => {
     expect(screen.queryByText(/until that approval is completed/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve rules' })).toBeInTheDocument()
     expect(screen.queryByText(/active spending today/i)).not.toBeInTheDocument()
+  })
+
+  it('routes a DELEGATION account to the budget step — never the wallet approval (#1069)', async () => {
+    // A Hybrid DeleGator (possibly passkey-only) has no AllowanceModule and
+    // maybe no connectable EOA — the legacy approval step is a dead end. The
+    // final step must offer the budget grant instead.
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseAuth.mockReturnValue({
+      user: { safes: [{ ...SAFE, account_type: 'delegator_hybrid' }] },
+      activeSafe: { ...SAFE, account_type: 'delegator_hybrid' },
+    })
+    renderModal()
+    await fillAndCreateSetup()
+
+    expect(await screen.findByText("Set the agent's budget to activate it")).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+    // The legacy approval UI must be absent — that is the whole bug:
+    expect(screen.queryByRole('button', { name: 'Approve rules' })).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('still connecting to the wallet network')
   })
 
   it('uses non-wallet copy on the approval screen', async () => {

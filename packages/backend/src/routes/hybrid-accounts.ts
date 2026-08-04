@@ -19,6 +19,7 @@ import { isAddress as isValidAddress } from '@haven_ai/core'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
 import { isValueBearingChain, signerFloorError } from '../lib/mainnet-gate.js'
 import { computeHybridAccountAddress, type PasskeySigner } from '../lib/hybrid-provisioning.js'
+import { loadHybridOwnerConfig } from '../lib/hybrid-account-config.js'
 
 interface CreateHybridBody {
   chain_id?: number
@@ -158,4 +159,48 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       created_at: result.rows[0].created_at,
     })
   })
+
+  // ── GET /hybrid/:address/signers — the ACCOUNT's signer set (#1079) ───────
+  //
+  // The agent-scoped twin lives in agent-delegations.ts (#887); this one is
+  // needed twice over: to resolve a signer at LOGIN (before any agent
+  // exists), and to give account-level recovery a data source — a delegation
+  // account with zero agents previously had no path to its own signer set.
+  // Owner-scoped; public-key material only — nothing secret.
+  app.get<{ Params: { address: string }; Querystring: { chain_id?: string } }>(
+    '/hybrid/:address/signers',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const address = request.params.address
+      if (!isValidAddress(address)) {
+        return reply.code(400).send({ error: 'Invalid address' })
+      }
+      const chainId = Number(request.query.chain_id)
+      if (!Number.isFinite(chainId)) {
+        return reply.code(400).send({ error: 'chain_id is required' })
+      }
+      // Ownership: the account must be one of the user's own safes rows.
+      const owned = await pool.query(
+        `SELECT 1 FROM user_safes
+         WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3
+           AND account_type = 'delegator_hybrid'`,
+        [sub, address, chainId],
+      )
+      if (owned.rows.length === 0) {
+        return reply.code(404).send({ error: 'Account not found' })
+      }
+      const owner = await loadHybridOwnerConfig(sub, address, chainId)
+      if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+      return {
+        account_address: address,
+        chain_id: chainId,
+        owner_address: owner.config.ownerAddress ?? null,
+        passkeys: (owner.config.passkeys ?? []).map((p) => ({
+          key_id: p.keyId,
+          x: `0x${p.x.toString(16)}`,
+          y: `0x${p.y.toString(16)}`,
+        })),
+      }
+    },
+  )
 }

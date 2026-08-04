@@ -10,8 +10,16 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/frontend/src/app/globals.css
   - packages/frontend/tailwind.config.js
-  - packages/frontend/src/app/**
-  - packages/frontend/src/components/**
+  - packages/frontend/src/components/ui/**
+  - packages/frontend/src/components/haven/**
+  - packages/frontend/src/components/SendModal.tsx
+  - packages/frontend/src/components/ReceiveFundsModal.tsx
+  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ConnectAgent2Modal.tsx
+  - packages/frontend/src/components/EditAgentModal.tsx
+  - packages/frontend/src/components/DelegationBudgetCard.tsx
+  - packages/frontend/src/components/ApprovalQueue.tsx
+  - packages/frontend/src/components/OnchainActionGate.tsx
 last-verified: "2026-07-13"
 ---
 

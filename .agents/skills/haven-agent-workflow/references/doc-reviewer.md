@@ -9,7 +9,7 @@ Every doc under `docs/` and the root gravity files (`CLAUDE.md`, `AGENTS.md`, `R
 ## Method
 
 1. Get the diff and changed files from the captain, including the intended comparison range when relevant.
-2. Find the implicated docs: any doc whose `covers:` globs match a changed file. The coupling gate (`scripts/docs/coupling-gate.mjs`) computes the same set — you may run it (`node scripts/docs/coupling-gate.mjs --changed=<files>`) to list candidates, then read those docs.
+2. Find the implicated docs: any doc whose `covers:` globs match a changed file. The coupling gate computes the same set — run `npm run docs:coupling` (the strict, CI-equivalent form; it reads uncommitted work) or `node scripts/docs/coupling-gate.mjs --changed=<files>` for an explicit list, then read those docs. A ⚠️ `contract: true` finding is blocking; the rest are advisory.
 3. For each implicated doc, read it and the changed code, and check whether the diff makes any **specific claim** in the doc wrong, stale, or newly required. Look for:
    - **Now-wrong claims** — the doc states behavior/values/paths the diff changed (an endpoint's method, a default, a field name, a chain id, a flow step, a file path).
    - **Now-required additions** — the diff adds a capability/endpoint/env var/state the doc should mention but doesn't.

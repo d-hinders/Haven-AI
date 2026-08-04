@@ -18,8 +18,9 @@
  */
 
 import { createPublicClient, http, type Address, type Hex } from 'viem'
-import { base, baseSepolia, gnosis } from 'viem/chains'
+import { base, baseSepolia } from 'viem/chains'
 import { base64UrlEncode } from './passkey'
+import { credentialIdFromKeyId, hasPasskeyCredentialOnDevice } from './signer'
 
 export interface AccountSigners {
   account_address: string
@@ -37,11 +38,12 @@ export interface DelegationMessage {
   salt: string
 }
 
-const VIEM_CHAINS = { 8453: base, 84532: baseSepolia, 100: gnosis } as const
+// The delegation rail is pinned to Base / Base Sepolia (#821); Gnosis was
+// dead config here that could only mislead (#1079).
+const VIEM_CHAINS = { 8453: base, 84532: baseSepolia } as const
 const RPC_URLS: Record<number, string> = {
   8453: 'https://mainnet.base.org',
   84532: 'https://sepolia.base.org',
-  100: 'https://rpc.gnosischain.com',
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -70,7 +72,16 @@ async function buildAccount(signers: AccountSigners) {
 
   // key_id is the hex of the raw WebAuthn credential id (#885 storage);
   // navigator wants the base64url form for allowCredentials lookup.
-  const signWith = signers.passkeys[0]
+  //
+  // Sign with a passkey that is actually enrolled on THIS device (#1079): if
+  // the device holds the BACKUP rather than the first-enrolled key,
+  // `passkeys[0]` would build the wrong allowCredentials and signing fails —
+  // defeating the recovery flow. [0] stays as the fallback when no device
+  // marker matches (e.g. markers cleared): the ceremony can still succeed
+  // there because the authenticator does its own credential lookup.
+  const signWith =
+    signers.passkeys.find((p) => hasPasskeyCredentialOnDevice(credentialIdFromKeyId(p.key_id))) ??
+    signers.passkeys[0]
   const credential = {
     id: base64UrlEncode(hexToBytes(signWith.key_id)),
     publicKey: `0x04${signWith.x.slice(2).padStart(64, '0')}${signWith.y.slice(2).padStart(64, '0')}` as Hex,
